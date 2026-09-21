@@ -1,0 +1,21 @@
+# Binaries are downloaded by scripts/setup.ps1, not committed (42 MB+).
+bin/
+llamacpp-prism/
+
+# Runtime state
+*.log
+logs/
+.venv/
+__pycache__/
+*.pyc
+
+# The vector index is derived data -- rebuild with `index_code.py`.
+index/
+*.sqlite3
+*.db
+
+# Models live in textgen/user_data/models; far too large to track.
+*.gguf
+
+# Upstream reference, fetched by setup
+config.example.yaml
