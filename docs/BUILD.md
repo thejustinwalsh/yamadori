@@ -219,6 +219,28 @@ Two findings worth holding it to:
 
 ## Do NOT build
 
+**Exposing our tools through the built-in `web_search` field.** Investigated
+because a harness might reach for a server-declared capability in preference
+to MCP. It cannot: `web_search` exists only in `/v1/responses`, and every
+harness that points at a custom base URL speaks `/v1/chat/completions`,
+because that is what vLLM, llama.cpp and Ollama all implement. The field is
+not merely unused on that path, it is undefined there. It is also executed on
+OpenAI's own infrastructure with no interception point, no self-hosted server
+implements it, and repurposing it would mean fabricating URLs to satisfy a
+citation-rendering contract.
+
+The investigation was still worth it: LiteLLM (`websearch_interception`) and
+OpenRouter (`plugins` / `:online`) botharrived at the pattern this proxy
+already uses -- own a tool name, execute it server-side, never surface it to
+the client. Two independent convergences on the same design is the strongest
+evidence available that it is the right one.
+
+The lead worth keeping is `type: "mcp"` in the Responses API, where a request
+references a remote MCP server and the provider acts as the MCP client. That
+is a real convention with client uptake, and it points back at running the MCP
+surface alongside the proxy rather than choosing between them.
+
+
 **Laya as a correctness gate.** The base-rate arithmetic in item 3 kills it
 independent of any measurement, and our measurements agree (6/10 against a
 5/10 coin flip). Already cut.
