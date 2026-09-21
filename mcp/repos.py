@@ -121,6 +121,83 @@ def is_stale(root: str) -> bool:
     return bool(built and now and built != now)
 
 
+def changed_files(root: str) -> list[str]:
+    """Files that moved since the index was built, including uncommitted ones.
+
+    A whole-repo rebuild of a large project costs many minutes, so almost
+    nobody would run it often enough and the index would quietly rot. What
+    actually changes between two commits is usually a handful of files, and
+    re-indexing only those is seconds.
+    """
+    reg = _registry().get(slug(root), {})
+    built = reg.get("built_at_commit")
+    if not built:
+        return []
+    out: set[str] = set()
+    for args in (["diff", "--name-only", f"{built}..HEAD"],
+                 ["diff", "--name-only", "HEAD"],        # unstaged
+                 ["diff", "--name-only", "--cached"],    # staged
+                 ["ls-files", "--others", "--exclude-standard"]):  # untracked
+        try:
+            r = subprocess.run(["git", "-C", root] + args,
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode == 0:
+                out.update(x.strip() for x in r.stdout.splitlines() if x.strip())
+        except Exception:                                        # noqa: BLE001
+            pass
+    return sorted(out)
+
+
+def refresh(root: str) -> dict:
+    """Re-index only what changed. Cheap enough to run on every detection.
+
+    Chunks for a changed path are deleted before re-indexing it, so a file
+    that shrank does not leave orphaned chunks behind claiming line numbers
+    that no longer exist -- which reads to a caller as the index lying rather
+    than as the index being old.
+    """
+    changed = changed_files(root)
+    if not changed:
+        return {"changed": 0}
+    db = db_path(root)
+    if not os.path.exists(db):
+        return {"changed": len(changed), "note": "no index yet"}
+
+    rel = [c.replace("\\", "/") for c in changed]
+    con = sqlite3.connect(db)
+    try:
+        for tbl in ("chunks", "defs", "refs"):
+            try:
+                con.executemany(f"DELETE FROM {tbl} WHERE path = ?",
+                                [(p,) for p in rel])
+            except sqlite3.Error:
+                pass
+        con.commit()
+    finally:
+        con.close()
+
+    existing = [os.path.join(root, p) for p in rel
+                if os.path.isfile(os.path.join(root, p))]
+    if existing:
+        env = dict(os.environ)
+        env["CODE_INDEX_DB"] = db
+        env["INDEX_APPEND"] = "1"
+        script = os.path.join(HERE, "..", "scripts", "index_code.py")
+        try:
+            subprocess.run([sys.executable, script] + existing, env=env,
+                           capture_output=True, text=True, timeout=1800)
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    reg = _registry()
+    e = reg.setdefault(slug(root), {"root": root})
+    e["built_at_commit"] = head_commit(root)
+    e["refreshed_at"] = time.time()
+    e["chunks"] = chunk_count(root)
+    _save_registry(reg)
+    return {"changed": len(changed), "reindexed": len(existing)}
+
+
 def ensure(root: str, background: bool = True) -> dict:
     """Make sure `root` has an index. Never blocks.
 
@@ -131,12 +208,29 @@ def ensure(root: str, background: bool = True) -> dict:
     n = chunk_count(root)
     with _lock:
         building = root in _building
-        if n == 0 and not building and background:
-            _building[root] = time.time()
-            threading.Thread(target=_build, args=(root,), daemon=True).start()
-            building = True
+        if not building and background:
+            if n == 0:
+                _building[root] = time.time()
+                threading.Thread(target=_build, args=(root,),
+                                 daemon=True).start()
+                building = True
+            elif is_stale(root):
+                # Incremental, so this is seconds rather than a rebuild, and
+                # the current turn is still answered from the existing index.
+                _building[root] = time.time()
+                threading.Thread(target=_refresh_bg, args=(root,),
+                                 daemon=True).start()
+                building = True
     return {"root": root, "chunks": n, "building": building,
             "stale": is_stale(root) if n else False}
+
+
+def _refresh_bg(root: str) -> None:
+    try:
+        refresh(root)
+    finally:
+        with _lock:
+            _building.pop(root, None)
 
 
 def _build(root: str) -> None:

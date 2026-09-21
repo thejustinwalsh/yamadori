@@ -1,0 +1,285 @@
+#!/usr/bin/env python
+"""An OpenAI endpoint that brings its own tools.
+
+THE POINT
+
+A client adds one OpenAI-compatible model and gets the whole stack. It declares
+no tools, configures no MCP server, and never learns any of this exists. The
+proxy appends our tools to whatever the client sent, executes the ones that are
+ours, and returns only the final answer.
+
+    client --/v1/chat/completions--> [proxy] --> llama-swap --> model
+                                        |
+                                        +-- runs our tools itself, in a loop
+
+This is the only way to reach a client that will not configure MCP. The chat
+completions API gives a server no channel to initiate a tool call: the model
+can only call tools the CLIENT declared, and the CLIENT executes them. So the
+tools have to be injected into the request on the way past.
+
+WHAT IT ADDS, AND WHAT THAT COSTS
+
+  system prompt   a static capability block, appended after the client's own
+  tools           ours, merged with the client's, ours dropped on name conflict
+  repo awareness  worked out from the conversation, see detect.py
+  preamble        one line on the first turn of a session, so the user knows
+                  what they have without reading a README
+
+KV CACHE. The prompt prefix must stay byte-identical between turns or every
+turn pays a full prefill -- ~51s at 65k on this hardware. So the injected
+system block is STATIC: no repo name, no index counts, nothing that changes.
+Anything dynamic rides in tool results, which append at the end and leave the
+prefix intact.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import code_search as cs  # noqa: E402
+import detect  # noqa: E402
+import repos  # noqa: E402
+
+UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
+PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1233"))
+MAX_TOOL_HOPS = int(os.environ.get("YAMADORI_MAX_HOPS", "12"))
+PREAMBLE = os.environ.get("YAMADORI_PREAMBLE", "1") == "1"
+
+# Static by construction -- see the KV CACHE note above. It describes what
+# exists, never where we are.
+CAPABILITY_BLOCK = """
+
+---
+You have a local code-intelligence stack available as tools. It runs on this
+machine against an index of the repository in front of you: no network, no
+quota. A symbol lookup costs about 19 tokens; reading a file blind to find the
+same thing costs thousands. Calling them is close to free, and guessing is not.
+
+  The request names a symbol            -> find_definition_opt
+  You want what USES or CALLS it        -> find_references
+  The text appears verbatim somewhere   -> find_by_pattern
+  The code may use OTHER words          -> find_by_meaning
+  You have a path and a line range      -> read_file_range
+  You changed something                 -> run_check
+  Worth not rediscovering later         -> record_step
+  The conversation was just summarised  -> read_rings
+
+These read; they do not write. Your harness supplies whatever edits files and
+runs commands.
+
+A result you have not checked is a guess, however good the reasoning behind it.
+Never state what code does without having read it -- you can read it cheaply,
+so there is no excuse to infer."""
+
+
+def _post(path: str, payload: dict, timeout: int = 1800) -> dict:
+    req = urllib.request.Request(f"{UPSTREAM}{path}",
+                                 data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def our_tools() -> list[dict]:
+    return [{"type": "function",
+             "function": {"name": t["name"], "description": t["description"],
+                          "parameters": t["inputSchema"]}}
+            for t in cs.TOOLS]
+
+
+OUR_NAMES = {t["name"] for t in cs.TOOLS}
+
+
+def merge_tools(client_tools: list | None) -> tuple[list, set]:
+    """Client tools win every name collision.
+
+    If both sides offer `read_file` the model cannot tell them apart and picks
+    arbitrarily -- and the client's version is the one with side effects the
+    client knows how to handle. Ours is dropped, silently and deliberately.
+    """
+    client_tools = client_tools or []
+    taken = {t.get("function", {}).get("name") for t in client_tools}
+    mine = [t for t in our_tools() if t["function"]["name"] not in taken]
+    return client_tools + mine, {t["function"]["name"] for t in mine}
+
+
+def augment_messages(messages: list[dict]) -> list[dict]:
+    out = [dict(m) for m in messages]
+    for m in out:
+        if m.get("role") == "system" and isinstance(m.get("content"), str):
+            m["content"] = m["content"] + CAPABILITY_BLOCK
+            return out
+    # No system message: add one rather than prepending to the user's turn,
+    # which would put our text in their words.
+    return [{"role": "system", "content": CAPABILITY_BLOCK.strip()}] + out
+
+
+def is_first_turn(messages: list[dict]) -> bool:
+    return not any(m.get("role") == "assistant" for m in messages)
+
+
+def preamble_for(info: dict | None, checks: list[str]) -> str:
+    if not info:
+        return ("`yamadori` · no repository detected in this conversation · "
+                "code tools available, retrieval limited\n\n")
+    name = os.path.basename(info["root"])
+    if info["building"]:
+        state = "indexing now, search will be thin this turn"
+    elif info["chunks"]:
+        state = f"{info['chunks']:,} chunks indexed"
+        if info.get("stale"):
+            state += ", predates current commit"
+    else:
+        state = "not indexed"
+    bits = [f"`yamadori` · **{name}** · {state}"]
+    if checks:
+        bits.append("checks: " + ", ".join(checks))
+    return " · ".join(bits) + "\n\n"
+
+
+def available_checks(root: str) -> list[str]:
+    pkg = os.path.join(root, "package.json")
+    found = []
+    try:
+        with open(pkg, encoding="utf-8") as f:
+            scripts = (json.load(f).get("scripts") or {})
+        for want in ("lint", "test", "typecheck", "build"):
+            if want in scripts:
+                found.append(want)
+    except (OSError, json.JSONDecodeError):
+        pass
+    if os.path.exists(os.path.join(root, "Cargo.toml")):
+        found.append("cargo test")
+    return found
+
+
+def run_our_tool(name: str, args: dict, db: str | None) -> str:
+    prev = os.environ.get("CODE_INDEX_DB")
+    if db:
+        os.environ["CODE_INDEX_DB"] = db
+        cs.INDEX_DB = db
+    try:
+        resp = cs.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                          "params": {"name": name, "arguments": args}})
+        return resp["result"]["content"][0]["text"]
+    except Exception as e:                                       # noqa: BLE001
+        return f"{name} failed: {type(e).__name__}: {e}"
+    finally:
+        if db and prev:
+            os.environ["CODE_INDEX_DB"] = prev
+            cs.INDEX_DB = prev
+
+
+def complete(body: dict) -> dict:
+    messages = body.get("messages") or []
+    root, _ev = detect.detect_repo(messages)
+    info = repos.ensure(root) if root else None
+    db = repos.db_path(root) if root else None
+
+    tools, injected = merge_tools(body.get("tools"))
+    payload = dict(body)
+    payload["messages"] = augment_messages(messages)
+    payload["tools"] = tools
+    payload.pop("stream", None)
+
+    # The repo status is dynamic, so it rides in as a tool-shaped system note
+    # at the END of the message list, leaving the cached prefix untouched.
+    if info:
+        payload["messages"].append(
+            {"role": "system", "content": repos.status_line(info)})
+
+    convo = payload["messages"]
+    for _hop in range(MAX_TOOL_HOPS):
+        d = _post("/v1/chat/completions", payload)
+        msg = d["choices"][0]["message"]
+        calls = msg.get("tool_calls") or []
+        ours = [c for c in calls
+                if c.get("function", {}).get("name") in injected]
+        if not ours:
+            # Either a final answer, or calls belonging to the client. Either
+            # way it is the client's turn -- hand it back untouched.
+            return d
+        convo.append({"role": "assistant", "content": msg.get("content") or "",
+                      "tool_calls": calls})
+        for c in ours:
+            fn = c["function"]["name"]
+            try:
+                args = json.loads(c["function"]["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            convo.append({"role": "tool", "tool_call_id": c["id"],
+                          "content": run_our_tool(fn, args, db)[:6000]})
+        payload["messages"] = convo
+    return _post("/v1/chat/completions", payload)
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _send(self, code: int, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):                                            # noqa: N802
+        if self.path.rstrip("/") == "/v1/models":
+            try:
+                req = urllib.request.Request(f"{UPSTREAM}/v1/models")
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return self._send(200, json.load(r))
+            except Exception as e:                               # noqa: BLE001
+                return self._send(502, {"error": str(e)})
+        if self.path.rstrip("/") == "/health":
+            return self._send(200, {"ok": True, "repos": len(repos.known())})
+        self._send(404, {"error": "not found"})
+
+    def do_POST(self):                                           # noqa: N802
+        if self.path.rstrip("/") != "/v1/chat/completions":
+            return self._send(404, {"error": "not found"})
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}")
+        except (ValueError, json.JSONDecodeError) as e:
+            return self._send(400, {"error": f"bad request: {e}"})
+
+        t0 = time.time()
+        try:
+            d = complete(body)
+        except Exception as e:                                   # noqa: BLE001
+            return self._send(502, {"error": f"{type(e).__name__}: {e}"})
+
+        if PREAMBLE and is_first_turn(body.get("messages") or []):
+            root, _ = detect.detect_repo(body.get("messages") or [])
+            info = repos.ensure(root) if root else None
+            note = preamble_for(info, available_checks(root) if root else [])
+            try:
+                m = d["choices"][0]["message"]
+                m["content"] = note + (m.get("content") or "")
+            except (KeyError, IndexError, TypeError):
+                pass
+
+        print(f"{self.path} {time.time() - t0:.1f}s", flush=True)
+        self._send(200, d)
+
+    def log_message(self, *a):                                   # noqa: D102
+        pass
+
+
+def main() -> None:
+    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"yamadori proxy on :{PORT} -> {UPSTREAM}", flush=True)
+    print("point any OpenAI client here; it needs no tool configuration.",
+          flush=True)
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
