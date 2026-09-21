@@ -212,6 +212,50 @@ def run(payload: dict, n: int = 4, timeout: int = 900,
     }
 
 
+def _choice_averaged(state: str, instructions: str, criteria: dict,
+                     timeout: int = 30) -> dict | None:
+    """A choice, averaged over option orderings.
+
+    The model is NOT permutation invariant. Reported upstream at a 27-33%
+    semantic flip rate on two options, and reproduced here: asking which file
+    declares a type was stable, but "which loop visits every element once"
+    flipped its answer purely on option order at a margin of 0.441, well above
+    any gate worth setting.
+
+    Averaging the distributions over forward and reversed order cancels the
+    positional component. It also makes the MARGIN honest, which matters more:
+    measured, cases that flip average down to margins of 0.012-0.184 while a
+    genuinely decided case stays at 0.800. So a reordering-sensitive answer
+    stops being a confident answer and starts being an undecided one, which is
+    the correct outcome and what the margin gate is then able to catch.
+
+    Costs two calls instead of one, about 100ms at this model's latency.
+    """
+    import code_search as cs
+    keys = list(criteria)
+    if len(keys) < 2:
+        return None
+    orders = [tuple(keys), tuple(reversed(keys))]
+    acc = {k: 0.0 for k in keys}
+    for order in orders:
+        try:
+            d = cs._post_json(LAYA_URL_ + "/decide", {
+                "state": state[:2000],
+                "questions": {"pick": {
+                    "type": "choice", "instructions": instructions,
+                    "criteria": {k: criteria[k] for k in order}}}},
+                timeout=timeout)
+            probs = (d["answers"]["pick"].get("probabilities") or {})
+        except Exception:                                        # noqa: BLE001
+            return None
+        for k in keys:
+            acc[k] += float(probs.get(k, 0.0)) / len(orders)
+    ranked = sorted(acc.items(), key=lambda x: -x[1])
+    return {"choice": ranked[0][0],
+            "margin": round(ranked[0][1] - ranked[1][1], 3),
+            "probabilities": {k: round(v, 3) for k, v in acc.items()}}
+
+
 def break_tie(question: str, results: list[dict], timeout: int = 30) -> dict | None:
     """Ask the decision model to pick, as ONE choice whose options are the
     candidates.
@@ -219,17 +263,11 @@ def break_tie(question: str, results: list[dict], timeout: int = 30) -> dict | N
     This is the primitive it is actually good at. Scoring candidates
     independently does not work -- its scores are not comparable across
     different inputs -- and handing it a LIST of states does not batch, it
-    concatenates them and returns a single verdict for the blob, which looks
-    like an answer and is not.
-
-    Measured on a clear case, untuned: one call for four candidates at 240ms
-    against 316ms to score each, correct pick, and a 0.361 margin between the
-    top two.
+    concatenates them and returns a single verdict for the blob.
 
     Used only when consensus fails. When the variants agree, the agreement is
     free and better evidenced than any classifier.
     """
-    import code_search as cs
     good = [r for r in results if r.get("content")]
     if len(good) < 2:
         return None
@@ -239,28 +277,17 @@ def break_tie(question: str, results: list[dict], timeout: int = 30) -> dict | N
         label = chr(ord("a") + i)
         criteria[label] = (", ".join(sorted(paths)[:3]) or
                            r["content"][:120].replace("\n", " "))
-    try:
-        d = cs._post_json(LAYA_URL_ + "/decide", {
-            "state": question[:2000],
-            "questions": {"pick": {
-                "type": "choice",
-                "instructions": "Which answer best answers the question?",
-                "criteria": criteria}}}, timeout=timeout)
-        a = d["answers"]["pick"]
-    except Exception:                                            # noqa: BLE001
+    v = _choice_averaged(question, "Which answer best answers the question?",
+                         criteria, timeout)
+    # Below the floor the options did not separate once position bias is
+    # removed. Reporting a pick it did not really make is inventing a decision.
+    if not v or v["margin"] < 0.15:
         return None
-    ps = sorted((a.get("probabilities") or {}).values(), reverse=True)
-    margin = (ps[0] - ps[1]) if len(ps) > 1 else 0.0
-    # Below the floor it did not separate the options, and reporting a pick it
-    # could not make is inventing a decision. Independent evaluation found it
-    # "often confidently wrong", so the margin is the gate, not confidence.
-    if margin < 0.15:
-        return None
-    idx = ord(a["choice"]) - ord("a")
+    idx = ord(v["choice"]) - ord("a")
     if not 0 <= idx < len(good):
         return None
-    return {"winner": good[idx], "margin": round(margin, 3),
-            "ranking": a.get("probabilities")}
+    return {"winner": good[idx], "margin": v["margin"],
+            "ranking": v["probabilities"]}
 
 
 LAYA_URL_ = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
