@@ -82,7 +82,8 @@ def _root_of(path: str) -> str | None:
     return fallback
 
 
-def detect_repo(messages: list[dict]) -> tuple[str | None, dict]:
+def detect_repo(messages: list[dict], trusted_only: bool = False
+                ) -> tuple[str | None, dict]:
     """Return (repo_root, evidence). evidence is for logging, not for the model.
 
     Later messages count for more: a conversation can wander across repos, and
@@ -91,6 +92,12 @@ def detect_repo(messages: list[dict]) -> tuple[str | None, dict]:
     votes: Counter = Counter()
     n = len(messages) or 1
     for i, msg in enumerate(messages):
+        role = msg.get("role")
+        # The system prompt is written by the harness and the user types their
+        # own messages. A tool result is text that came OUT of a repository,
+        # so a repository can put a path there and choose what gets indexed.
+        if trusted_only and role not in ("system", "user"):
+            continue
         content = msg.get("content")
         if isinstance(content, list):      # multimodal content blocks
             content = " ".join(c.get("text", "") for c in content

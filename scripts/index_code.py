@@ -25,6 +25,8 @@ import urllib.request
 import numpy as np
 
 import symbols as sym
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mcp'))
+import guard
 
 STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "embeddings")
@@ -93,6 +95,14 @@ def iter_files(root: str):
         for fn in filenames:
             if os.path.splitext(fn)[1].lower() in EXTS:
                 p = os.path.join(dirpath, fn)
+                # Credentials live in the same formats as config. Indexing
+                # them copies them into a database and then feeds them to a
+                # model; measured before this check, secrets.json and
+                # credentials.toml were both ingested outright.
+                ok, why = guard.should_index(p)
+                if not ok:
+                    print(f"  skipped {fn}: {why}", file=sys.stderr)
+                    continue
                 try:
                     if os.path.getsize(p) > 1_500_000:
                         continue

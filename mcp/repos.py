@@ -33,6 +33,8 @@ import subprocess
 import sqlite3
 import sys
 import threading
+
+import guard
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -198,12 +200,19 @@ def refresh(root: str) -> dict:
     return {"changed": len(changed), "reindexed": len(existing)}
 
 
-def ensure(root: str, background: bool = True) -> dict:
+def ensure(root: str, background: bool = True,
+           from_trusted: bool = False) -> dict:
     """Make sure `root` has an index. Never blocks.
 
     Returns what the caller should tell the model: whether an index exists,
     how big it is, and whether one is being built right now.
     """
+    allowed, why = guard.may_establish(root, from_trusted)
+    if not allowed:
+        # Refusing is the whole point: a repository must not be able to name a
+        # directory and have it read.
+        return {"root": root, "chunks": 0, "building": False,
+                "stale": False, "blocked": why}
     note_seen(root)
     n = chunk_count(root)
     with _lock:
