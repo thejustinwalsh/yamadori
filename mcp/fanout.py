@@ -1,0 +1,209 @@
+#!/usr/bin/env python
+"""Answer a question several ways at once and keep what they agree on.
+
+WHY THIS IS AFFORDABLE
+
+Measured on this box, concurrent completions against one model instance:
+
+    N=1   5.5s   36.6 tok/s
+    N=2   8.8s   45.3 tok/s
+    N=4  14.9s   53.8 tok/s    <- best throughput
+    N=8  32.5s   49.2 tok/s    <- batch saturates
+
+Four answers cost 2.7x the wall clock of one, not 4x, because batching
+recovers memory bandwidth a single stream leaves idle. A metered model cannot
+do this at any price; a local one pays only in latency.
+
+WHY AGREEMENT AND NOT A SCORER
+
+The obvious design is to train something to pick the best answer. Published
+results say do not bother yet: on MATH500 at 16 generations, plain
+self-consistency scored 86.00 against 85.00 for best-of-N with an external
+reward model, and 82.80 for beam search. Majority voting beat the trained
+scorer. So consensus ships first and a learned selector is an upgrade, not a
+prerequisite.
+
+WHY DIVERSE VARIANTS AND NOT JUST TEMPERATURE
+
+Sampling the same prompt four times explores one region of the space. Asking
+four genuinely different ways -- with retrieval and without, terse and
+thorough -- produces disagreement that means something. When four different
+approaches land on the same file, that is evidence. When four samples of one
+prompt agree, that is mostly temperature being low.
+"""
+from __future__ import annotations
+
+import concurrent.futures as cf
+import json
+import os
+import re
+import urllib.request
+from collections import Counter
+
+UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
+
+# Each variant is a different way of approaching the same question, not a
+# different random seed. `nudge` is appended to the system message.
+VARIANTS = [
+    {"name": "direct", "temperature": 0.3, "nudge": ""},
+    {"name": "evidence", "temperature": 0.3,
+     "nudge": "\n\nGround every claim in a file you have actually read. "
+              "Name the path and line."},
+    {"name": "skeptical", "temperature": 0.7,
+     "nudge": "\n\nConsider the obvious answer, then check whether a second "
+              "place in the codebase is a better fit before committing."},
+    {"name": "terse", "temperature": 0.2,
+     "nudge": "\n\nAnswer in as few words as the question allows. No preamble."},
+]
+
+# What a consensus is taken OVER. Free prose cannot be voted on, but the
+# artefacts that matter in these answers can.
+_PATH = re.compile(r"[\w./\\-]+\.(?:ts|tsx|js|jsx|mjs|cjs|rs|c|h|cpp|hpp|py|go|zig|wgsl|glsl|lua|json|toml)")
+_SYMBOL = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{2,})`")
+
+
+def claims(text: str) -> tuple[set, set]:
+    """The checkable assertions in an answer: which files, which symbols."""
+    paths = {p.replace("\\", "/").lstrip("./") for p in _PATH.findall(text or "")}
+    syms = set(_SYMBOL.findall(text or ""))
+    return paths, syms
+
+
+# Seed concepts come from concept_seed, which draws a random direction in
+# embedding space and takes the nearest real word. A curated list was tried
+# first and is the author's taste in shuffled order -- the same narrow, lumpy
+# slice of concept space every time. Random directions in high dimensions are
+# near-orthogonal, so consecutive draws genuinely differ.
+import concept_seed  # noqa: E402
+
+
+def _one(payload: dict, variant: dict, timeout: int) -> dict:
+    body = json.loads(json.dumps(payload))     # deep copy
+    msgs = body.get("messages") or []
+    if variant["nudge"]:
+        for m in msgs:
+            if m.get("role") == "system" and isinstance(m.get("content"), str):
+                m["content"] += variant["nudge"]
+                break
+        else:
+            msgs.insert(0, {"role": "system", "content": variant["nudge"].strip()})
+    body["temperature"] = variant["temperature"]
+    body.pop("stream", None)
+    if variant.get("seed"):
+        # USER message, not system. The originating project tested both and
+        # found the model would ignore a system-message seed and fall back to
+        # its default approach; in the user turn it cannot.
+        for m in reversed(body["messages"]):
+            if m.get("role") == "user" and isinstance(m.get("content"), str):
+                m["content"] += concept_seed.phrase(variant["seed"])
+                break
+
+    # Each variant must run the WHOLE tool loop. Doing a single completion
+    # returns an empty answer and a pending tool call, which then scores zero
+    # on every path-based grader -- measured, 0/8, and it was this bug rather
+    # than anything about consensus.
+    d = _tool_loop(body, timeout)
+    msg = d["choices"][0]["message"]
+    return {"variant": variant["name"],
+            "content": msg.get("content") or "",
+            "raw": d}
+
+
+def _tool_loop(body: dict, timeout: int) -> dict:
+    """Same loop the proxy runs, so a variant sees the same tool results."""
+    import proxy as _p
+    injected = {t["function"]["name"] for t in (body.get("tools") or [])
+                if t.get("function", {}).get("name") in _p.OUR_NAMES}
+    convo = body["messages"]
+    for _ in range(_p.MAX_TOOL_HOPS):
+        req = urllib.request.Request(f"{UPSTREAM}/v1/chat/completions",
+                                     data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.load(r)
+        msg = d["choices"][0]["message"]
+        calls = [c for c in (msg.get("tool_calls") or [])
+                 if c.get("function", {}).get("name") in injected]
+        if not calls:
+            return d
+        convo.append({"role": "assistant", "content": msg.get("content") or "",
+                      "tool_calls": msg.get("tool_calls") or []})
+        for c in calls:
+            try:
+                args = json.loads(c["function"]["arguments"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            convo.append({"role": "tool", "tool_call_id": c["id"],
+                          "content": _p.run_our_tool(c["function"]["name"],
+                                                     args, None)[:6000]})
+        body["messages"] = convo
+    return d
+
+
+def run(payload: dict, n: int = 4, timeout: int = 900,
+        variants: list | None = None) -> dict:
+    """Run n variants concurrently and report what they agreed on."""
+    pool = variants if variants is not None else VARIANTS
+    use = pool[:max(1, min(n, len(pool)))]
+    with cf.ThreadPoolExecutor(max_workers=len(use)) as ex:
+        futs = [ex.submit(_one, payload, v, timeout) for v in use]
+        results = []
+        for f in futs:
+            try:
+                results.append(f.result())
+            except Exception as e:                               # noqa: BLE001
+                results.append({"variant": "?", "content": "",
+                                "error": f"{type(e).__name__}: {e}"})
+
+    good = [r for r in results if r.get("content")]
+    if not good:
+        return {"results": results, "agreement": None, "winner": None}
+
+    path_votes: Counter = Counter()
+    sym_votes: Counter = Counter()
+    for r in good:
+        p, s = claims(r["content"])
+        # One vote per answer per claim, so a variant repeating a path five
+        # times does not outvote three variants naming it once.
+        for x in p:
+            path_votes[x] += 1
+        for x in s:
+            sym_votes[x] += 1
+
+    top_path, top_n = (path_votes.most_common(1) or [(None, 0)])[0]
+    agreement = top_n / len(good) if good else 0.0
+
+    # The winning ANSWER is the one that best represents the consensus, not the
+    # first or the longest: the answer that names the most agreed-upon claims.
+    def score(r):
+        p, s = claims(r["content"])
+        return (sum(path_votes[x] for x in p) + sum(sym_votes[x] for x in s),
+                -len(r["content"]))
+    winner = max(good, key=score)
+
+    return {
+        "n": len(good),
+        "agreement": round(agreement, 2),
+        "consensus_path": top_path,
+        "path_votes": dict(path_votes.most_common(5)),
+        "winner": winner,
+        "results": results,
+    }
+
+
+def dissent_note(v: dict) -> str:
+    """What to tell the user when the variants did NOT agree.
+
+    Disagreement is information and hiding it is the failure mode that makes a
+    confident wrong answer indistinguishable from a confident right one.
+    """
+    if not v or v.get("agreement") is None:
+        return ""
+    if v["agreement"] >= 0.75:
+        return ""
+    alts = [p for p in (v.get("path_votes") or {}) if p != v.get("consensus_path")]
+    note = (f"\n\n> Answered {v['n']} ways; only {int(v['agreement'] * 100)}% "
+            f"agreed on the same file. Treat this as unsettled.")
+    if alts:
+        note += " Other candidates: " + ", ".join(alts[:3]) + "."
+    return note
