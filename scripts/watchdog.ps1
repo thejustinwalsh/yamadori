@@ -22,6 +22,7 @@
 [CmdletBinding()]
 param(
     [string]$Api = 'http://127.0.0.1:1234',
+    [string]$ToolsApi = 'http://127.0.0.1:1235',
     [string]$TaskName = 'llama-stack',
     [string[]]$Resident = @('bonsai', 'embeddings', 'reranker'),
     [int]$RestartCooldownMin = 10,
@@ -66,7 +67,16 @@ function Test-Healthy {
         }
     }
 
-    # 4. the primary can actually produce a token
+    # 4. code-intelligence HTTP API. Restarting the stack relaunches it,
+    # since start-stack.bat spawns it alongside llama-swap.
+    try {
+        $h = Invoke-RestMethod -Uri "$ToolsApi/health" -TimeoutSec 20
+        if (-not $h.ok) { return 'tools API unhealthy' }
+    } catch {
+        return "tools API not responding: $($_.Exception.Message)"
+    }
+
+    # 5. the primary can actually produce a token
     try {
         $body = @{
             model      = 'bonsai-agent'

@@ -1,0 +1,68 @@
+# Caddy in front of the whole stack: one hostname, no port numbers, real TLS.
+#
+#   https://ai.thejustinwalsh.me/v1/...      OpenAI API      -> llama-swap :1234
+#   https://ai.thejustinwalsh.me/ui/         dashboard       -> llama-swap :1234
+#   https://ai.thejustinwalsh.me/tools/...   code intel API  -> tools_api  :1235
+#
+# CERTIFICATES: ai.thejustinwalsh.me resolves to a ZeroTier address, so Let's
+# Encrypt cannot reach it over HTTP. The HTTP-01 and TLS-ALPN challenges are
+# therefore impossible. DNS-01 is the only option that works for a private
+# address, and it is why this needs the DNSimple provider: Caddy proves control
+# by writing a TXT record instead of serving a file.
+#
+# SECRET: the API token comes from the environment, never this file. See
+# caddy/env.example -- caddy/.env is gitignored.
+
+{
+	email justin@obsidian-cipher.systems
+
+	# Certificates are issued over DNS, so no ports need to be reachable from
+	# the public internet for ACME to succeed.
+	acme_dns dnsimple {env.DNSIMPLE_API_TOKEN}
+}
+
+ai.thejustinwalsh.me {
+	log {
+		output file logs/caddy-access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+
+	# ---- code-intelligence API -------------------------------------------
+	# handle_path strips the prefix, so /tools/search reaches the upstream as
+	# /search and tools_api.py needs no knowledge of the mount point.
+	handle_path /tools/* {
+		reverse_proxy 127.0.0.1:1235 {
+			# Index rebuilds and cold reranks can be slow.
+			transport http {
+				read_timeout 600s
+				write_timeout 600s
+			}
+		}
+	}
+
+	# ---- everything else: llama-swap (OpenAI API + dashboard) ------------
+	handle {
+		reverse_proxy 127.0.0.1:1234 {
+			# CRITICAL for streaming completions. Without flush_interval -1
+			# Caddy buffers the response and SSE tokens arrive in one lump at
+			# the end, which looks exactly like the model hanging.
+			flush_interval -1
+
+			# A long generation at 208k context can legitimately take many
+			# minutes. Default timeouts would cut it off mid-answer.
+			transport http {
+				read_timeout 1800s
+				write_timeout 1800s
+				dial_timeout 30s
+			}
+		}
+	}
+
+	# The whole thing is reachable only over ZeroTier, but these cost nothing.
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+	}
+}
