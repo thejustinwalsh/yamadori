@@ -188,6 +188,29 @@ def run_our_tool(name: str, args: dict, db: str | None) -> str:
             cs.INDEX_DB = prev
 
 
+def prepare(body: dict) -> dict:
+    """Resolve repo, tools and system block without calling the model.
+
+    Split out so an experiment can fan the SAME resolved request out several
+    ways; otherwise a comparison measures prompt differences rather than the
+    thing being tested.
+    """
+    messages = body.get("messages") or []
+    root, _ = detect.detect_repo(messages)
+    trusted_root, _ = detect.detect_repo(messages, trusted_only=True)
+    info = (repos.ensure(root, from_trusted=(root == trusted_root))
+            if root else None)
+    status = ""
+    if info and (info["building"] or not info["chunks"]):
+        status = repos.status_line(info)
+    tools, _injected = merge_tools(body.get("tools"))
+    out = dict(body)
+    out["messages"] = augment_messages(messages, status)
+    out["tools"] = tools
+    out.pop("stream", None)
+    return out
+
+
 def complete(body: dict) -> dict:
     messages = body.get("messages") or []
     root, _ev = detect.detect_repo(messages)
