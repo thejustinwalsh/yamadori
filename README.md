@@ -1,61 +1,79 @@
-# Yamadori
+<div align="center">
 
-## It won't hand you code that doesn't build.
+# 山採り · YAMADORI
 
-Runs on your hardware. Costs nothing per run. Knows your repo, not a public one.
+**Collected, not bought.**
 
-> **Status: not true yet.** The verification loop is being built now. Everything
-> below is either measured and cited, or labelled as unbuilt. Nothing in this
-> README claims to work that hasn't been tested — that is the point of the
-> project, not a disclaimer.
-
-Collected, not bought.
+</div>
 
 ---
 
-## What it actually is
+A *yamadori* is a tree taken off the mountain. Nobody grew it. Nobody potted
+it. The wind bent it, the rock starved it, lightning took a limb. Collectors
+prize it over nursery stock for exactly that reason: the damage is the
+provenance.
 
-A **verifier-driven sampling engine wrapped around a local model.** The model is
-a component; the engine is the product.
+Then someone spends thirty years deciding which branches live.
 
-A 27B does not beat a frontier model one-shot and this does not pretend it does.
-It beats one where the task has a **mechanical verifier** — `tsc` with
-`expectTypeOf`, `cargo test` across a WASM boundary, `naga` on a shader — because
-then "sample sixteen times and keep what passes" is available to a free local
-model and is not available to a metered one.
+This is that, for models. Open weights. Abliterated — the nursery-safe
+behaviours stripped out. Running on iron you own, shaped for your work, by
+you. Nobody can revoke it, meter it, or deprecate it out from under you.
 
-That is not a hunch. With a sound external verifier, published results move
-5% → 38%, 16% → 37%, 40% → 87%, and a 30B goes 32% → 87% on tool use. A model
-grading its *own* work made GPT-4 **worse** on two of three domains. The
-verifier has to be a compiler, never an opinion.
+## The bet
 
-Every run also labels its own training data: candidates that pass and fail are
-ground truth, free, produced as a by-product. That trains the selector that
-picks winners when several compile or none do.
+Big models are grown. Yours is **shaped**.
 
-## What got cut, and why that matters
+A frontier model answers once, because every answer is billed. Yours answers
+as many times as you want, because it costs nothing. Give it a compiler and
+that stops being a party trick:
 
-This repo is mostly a record of things that did not survive measurement:
+> **Sixteen tries and a compiler beats one try and a genius.**
 
-| cut | evidence |
+That is the whole thesis. Everything here serves it.
+
+## The craft
+
+Bonsai has a vocabulary for cutting things away, and it fits.
+
+| | |
 |---|---|
-| `judge` (a small classifier as a truth judge) | 6/10 against a 5/10 coin flip; systematic false positives on negated claims |
-| semantic search as the default retriever | BM25 beat it 92/120 vs 77/120 on private repos, McNemar p=0.0041 |
-| the cross-encoder reranker above top-2 | identical recall at the shipped cutoff, ~1s/query |
-| `apply_edit` | the harness already writes files; a second write path is a hazard |
+| **剪定 · sentei** | Pruning. Nine tools survive. `judge` was cut at 6/10 against a coin flip. |
+| **芽摘み · metsumi** | Bud-pinching. Sample many answers. Keep the one that compiles. |
+| **舎利 · shari** | Deadwood, bleached and kept. Every failed idea stays in the repo with its evidence. |
+| **根張り · nebari** | Root flare. Retrieval you can see: `taproot`, `branch`, `shoot`. |
+| **年輪 · rings** | Growth rings. A work log that outlives the context window. |
+| **床の間 · tokonoma** | The alcove. Where the tree gets displayed. |
 
-Every threshold and default here names the script that justifies it and the
-sample size it was measured at. Where a number is too small to carry a claim,
-it says so. Retrieval is a subsystem, and a shrinking one.
+## What it does
 
-## Honest status: this is NOT zero-config
+You point any OpenAI client at one URL. That is the whole setup.
 
-It runs unattended once it is up, and it is genuinely one line to point a
-client at. Getting to that line currently takes: building a llama.cpp fork from
-source, five model downloads, filling two paths in `config.yaml`, a separate
-venv for the decision model, and an index build. A bootstrap script is the next
-thing being built; until it lands, read `## Setup` below and expect an evening,
-not a minute.
+The stack works out which repository you are in. It indexes that repository
+while you use it. It reads the source of every package you import. It runs
+your tests. It remembers what it already did, so a long session does not redo
+its own work.
+
+The client never learns any of this. It thinks it added a model.
+
+## What it refuses to claim
+
+The tree is not finished. It will not be.
+
+Nothing here is asserted without a measurement, and the measurements have
+been unkind. BM25 beat the embedding index 92 to 77 and the embeddings got
+cut. The reranker earned nothing at the shipped cutoff. The decision model
+scored 0.507 against a 0.500 baseline and lost its tool. A fan-out experiment
+returned a clean null.
+
+**This repository is mostly a record of things that did not survive testing.**
+That is the point. Every number below names the script that produced it and
+the sample size it ran at. Where the sample is too small to carry a claim, it
+says so.
+
+The verification loop is still being built. Until it lands, the line at the
+top of this file is a promise, not a receipt.
+
+---
 
 ## Endpoints
 
