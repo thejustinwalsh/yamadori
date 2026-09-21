@@ -47,6 +47,19 @@ RERANK_DOC_CHARS = 1200
 DEFAULT_TOP_K = 5
 
 
+# Laya decision engine. Separate process AND separate venv: laya needs a newer
+# transformers than the rest of the stack, so it cannot share an interpreter.
+LAYA_URL = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
+
+
+def _post_json(url: str, payload: dict, timeout: int = 120) -> dict:
+    """POST to an absolute URL, for services that are not behind llama-swap."""
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
 def _post(path: str, payload: dict, timeout: int = 120) -> dict:
     req = urllib.request.Request(
         f"{STACK}{path}",
@@ -206,6 +219,69 @@ TOOLS = [
         },
     },
     {
+        "name": "judge",
+        "description": (
+            "Get a typed decision with a calibrated probability in ~25ms, from a small "
+            "classifier (Laya) rather than by reasoning. It does NOT explain and cannot "
+            "write -- it only decides. Use it to gate work you would otherwise think "
+            "through: is this diff an improvement, is this failure infrastructure or a "
+            "real regression, is this snippet relevant, is this worth benchmarking. "
+            "Omit options for a true/false judgement."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "state": {"type": "string",
+                          "description": "The text being judged: diff, log, test output, snippet."},
+                "question": {"type": "string",
+                             "description": "What to decide, phrased as an instruction."},
+                "options": {"type": "array", "items": {"type": "string"},
+                            "description": "Choices for a multiple-choice decision. "
+                                           "Omit for true/false."},
+            },
+            "required": ["state", "question"],
+        },
+    },
+    {
+        "name": "read_file",
+        "description": (
+            "Read exact lines from an indexed file. Use this immediately after "
+            "find_definition or search_code, which return a path and line range -- "
+            "do NOT search again for something you already have the location of. "
+            "Reads the real file on disk, not the index, so it reflects edits."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string",
+                         "description": "Path exactly as returned by the other tools."},
+                "start": {"type": "integer", "description": "First line (1-indexed). Default 1."},
+                "end": {"type": "integer", "description": "Last line. Default start+120."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "compact",
+        "description": (
+            "Compress long text -- a conversation, a log, a large file -- down to the "
+            "parts that matter, keeping identifiers, numbers, file paths and errors "
+            "verbatim. Use when context is filling up or before feeding a long "
+            "artefact into further reasoning. Returns prose, not the original."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "focus": {"type": "string",
+                          "description": "What to preserve detail about. Optional but "
+                                         "makes the result far more useful."},
+                "max_words": {"type": "integer", "description": "Target length. Default 300."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
         "name": "index_status",
         "description": "Report how many code chunks are indexed and which files are covered.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -274,6 +350,78 @@ def handle(req: dict) -> dict | None:
                         parts.append("OTHER REFERENCES:\n" + "\n".join(
                             f"  {p}:{ln}  {tx}" for _, _, p, ln, tx in other[:30]))
                     text = "\n\n".join(parts)
+
+            elif name == "judge":
+                opts = args.get("options") or []
+                if opts:
+                    # empty criterion strings are legal: the option label is the
+                    # description when no elaboration is given
+                    q = {"v": {"type": "choice", "instructions": args["question"],
+                               "criteria": {o: "" for o in opts}}}
+                else:
+                    q = {"v": {"type": "noul", "instructions": args["question"]}}
+                try:
+                    d = _post_json(LAYA_URL + "/decide",
+                                   {"state": args["state"], "questions": q})
+                    a = d["answers"]["v"]
+                    if "choice" in a:
+                        probs = sorted(a.get("probabilities", {}).items(), key=lambda x: -x[1])
+                        text = (f"{a['choice']}   (confidence {a.get('confidence')})\n"
+                                + "\n".join(f"  {k}: {v:.3f}" for k, v in probs))
+                    else:
+                        text = (f"probability true: {a.get('noul'):.3f}   "
+                                f"(confidence {a.get('confidence')})")
+                    text += f"\n[{d.get('elapsed_ms')} ms]"
+                except Exception as e:
+                    text = (f"judge unavailable ({type(e).__name__}: {e}). "
+                            "Is the laya service running on 1237?")
+
+            elif name == "read_file":
+                rel = args["path"].replace("\\", "/")
+                start = max(1, int(args.get("start", 1)))
+                end = int(args.get("end", start + 120))
+                con = _db()
+                roots = [r[0] for r in con.execute("SELECT path FROM roots").fetchall()]
+                con.close()
+                # Resolve against the roots that were actually indexed, and
+                # refuse anything that escapes them -- the path arrives from a
+                # model and must not be able to read arbitrary files.
+                target = None
+                for root in roots:
+                    cand = os.path.abspath(os.path.join(root, rel))
+                    if cand.startswith(os.path.abspath(root)) and os.path.isfile(cand):
+                        target = cand
+                        break
+                if target is None:
+                    text = (f"'{rel}' not found under any indexed root.\n"
+                            f"roots: {roots or '(none — run scripts/index_code.py)'}")
+                else:
+                    with open(target, encoding="utf-8", errors="replace") as fh:
+                        lines = fh.read().splitlines()
+                    end = min(end, len(lines))
+                    body = "\n".join(f"{i:>5}  {lines[i-1]}"
+                                     for i in range(start, end + 1))
+                    text = f"{rel}:{start}-{end}  ({len(lines)} lines total)\n```\n{body}\n```"
+
+            elif name == "compact":
+                focus = args.get("focus") or "anything an engineer would need to continue the work"
+                maxw = int(args.get("max_words", 300))
+                prompt = (
+                    f"Compress the following into at most {maxw} words.\n"
+                    f"Preserve verbatim: identifiers, file paths, line numbers, error "
+                    f"strings and measurements. Drop pleasantries and repetition.\n"
+                    f"Keep detail about: {focus}\n"
+                    f"Return only the compressed text.\n\n---\n{args['text']}"
+                )
+                try:
+                    d = _post("/v1/chat/completions", {
+                        "model": "bonsai-agent",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": max(256, maxw * 3),
+                    }, timeout=900)
+                    text = (d["choices"][0]["message"].get("content") or "").strip()
+                except Exception as e:
+                    text = f"compaction failed: {type(e).__name__}: {e}"
 
             elif name == "index_status":
                 chunks, mat = load_index()

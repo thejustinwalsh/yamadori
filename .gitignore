@@ -25,3 +25,4 @@ caddy/.env
 caddy/caddy.exe
 caddy/data/
 caddy/config/
+.venv-laya/

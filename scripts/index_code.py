@@ -158,9 +158,15 @@ def main() -> None:
     con.execute("""CREATE TABLE IF NOT EXISTS chunks(
         id INTEGER PRIMARY KEY, path TEXT, start INT, end INT, text TEXT, vec BLOB)""")
     sym.ensure_schema(con)
+    # Record which directories were indexed so read_file can resolve the
+    # relative paths that find_definition/search_code hand back.
+    con.execute("CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY)")
     con.execute("DELETE FROM chunks")          # full rebuild; incremental is future work
     con.execute("DELETE FROM defs")
     con.execute("DELETE FROM refs")
+    con.execute("DELETE FROM roots")
+    for r in roots:
+        con.execute("INSERT OR IGNORE INTO roots VALUES(?)", (os.path.abspath(r),))
     con.commit()
 
     pending: list[tuple[str, int, int, str]] = []
