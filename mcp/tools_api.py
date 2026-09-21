@@ -34,6 +34,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import code_search as cs          # noqa: E402
 import symbols as sym             # noqa: E402
 
+# MCP over HTTP.
+#
+# MCP's default transport is stdio: the client SPAWNS the server as a
+# subprocess. That only works when the client runs on this machine. Driving
+# the stack from a laptop or phone means the agent cannot reach the tools at
+# all -- and it fails silently, looking like the model ignoring them.
+#
+# code_search.handle() is already a pure JSON-RPC function, so exposing it
+# over HTTP costs one route and shares every code path with the stdio server.
+# No second implementation to drift.
+MCP_PATH = "/mcp"
+
 HOST = os.environ.get("TOOLS_API_HOST", "0.0.0.0")
 PORT = int(os.environ.get("TOOLS_API_PORT", "1235"))
 
@@ -212,6 +224,24 @@ class Handler(BaseHTTPRequestHandler):
             args = json.loads(raw or b"{}")
         except json.JSONDecodeError:
             return self._send(400, {"error": "body is not valid JSON"})
+
+        # MCP over HTTP: one JSON-RPC request in, one response out, handled by
+        # exactly the same code the stdio server uses. Notifications legally
+        # produce no response, so return 202 rather than an empty body.
+        if u.path == MCP_PATH:
+            try:
+                resp = cs.handle(args)
+            except Exception as e:                   # noqa: BLE001
+                return self._send(200, {"jsonrpc": "2.0", "id": args.get("id"),
+                                        "error": {"code": -32603,
+                                                  "message": f"{type(e).__name__}: {e}"}})
+            if resp is None:
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self._send(200, resp)
+
         self._dispatch(u.path, args)
 
     def log_message(self, fmt, *a):                  # quieter default logging
