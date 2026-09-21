@@ -46,6 +46,7 @@ import detect  # noqa: E402
 import repos  # noqa: E402
 import corpus  # noqa: E402
 import accounts  # noqa: E402
+import streaming  # noqa: E402
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1233"))
@@ -325,6 +326,9 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError) as e:
             return self._send(400, {"error": f"bad request: {e}"})
 
+        if body.get("stream"):
+            return self._stream(body)
+
         t0 = time.time()
         try:
             d = complete(body)
@@ -343,6 +347,102 @@ class Handler(BaseHTTPRequestHandler):
 
         print(f"{self.path} {time.time() - t0:.1f}s", flush=True)
         self._send(200, d)
+
+    def _stream(self, body: dict) -> None:
+        """Run the tool loop while streaming, so a long turn is never silent."""
+        cid = streaming.new_id()
+        model = body.get("model", "bonsai-agent")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        def emit(b: bytes) -> bool:
+            try:
+                self.wfile.write(b)
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return False   # client hung up; stop doing work for it
+
+        messages = body.get("messages") or []
+        root, _ = detect.detect_repo(messages)
+        trusted, _ = detect.detect_repo(messages, trusted_only=True)
+        info = repos.ensure(root, from_trusted=(root == trusted)) if root else None
+        db = repos.db_path(root) if root else None
+
+        if PREAMBLE and is_first_turn(messages):
+            note = preamble_for(info, available_checks(root) if root else [])
+            if not emit(streaming.text_chunk(cid, model, note)):
+                return
+
+        payload = prepare(body)
+        injected = {t["function"]["name"] for t in (payload.get("tools") or [])
+                    if t.get("function", {}).get("name") in OUR_NAMES}
+        turn = corpus.new_turn()
+        t_start = time.time()
+        corpus.log_turn(turn, root, messages,
+                        [t.get("function", {}).get("name")
+                         for t in (payload.get("tools") or [])],
+                        is_first_turn(messages))
+
+        convo = payload["messages"]
+        for hop in range(MAX_TOOL_HOPS):
+            # Tool hops are resolved non-streamed: the answer is only known to
+            # be final once the model stops asking for tools, and a token
+            # streamed from a hop that turns out to be a tool call would have
+            # to be retracted.
+            try:
+                d = _post("/v1/chat/completions", payload)
+            except Exception as e:                               # noqa: BLE001
+                emit(streaming.text_chunk(cid, model, f"\n[upstream error: {e}]"))
+                emit(streaming.DONE)
+                return
+            msg = d["choices"][0]["message"]
+            calls = [c for c in (msg.get("tool_calls") or [])
+                     if c.get("function", {}).get("name") in injected]
+            if not calls:
+                break
+            convo.append({"role": "assistant", "content": msg.get("content") or "",
+                          "tool_calls": msg.get("tool_calls") or []})
+            for c in calls:
+                fn = c["function"]["name"]
+                try:
+                    args = json.loads(c["function"]["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                if not emit(streaming.text_chunk(
+                        cid, model, f"`{streaming.describe_call(fn, args)}`\n")):
+                    return
+                corpus.log_tool_call(turn, root, fn, args, hop)
+                t0 = time.time()
+                out = run_our_tool(fn, args, db)
+                corpus.log_tool_result(turn, root, fn, out,
+                                       (time.time() - t0) * 1000)
+                convo.append({"role": "tool", "tool_call_id": c["id"],
+                              "content": out[:6000]})
+            payload["messages"] = convo
+
+        # No tools pending: this response is the answer, so stream it for real.
+        final = dict(payload)
+        answer = []
+        try:
+            for b in streaming.stream_upstream(UPSTREAM, final, cid, model):
+                try:
+                    j = json.loads(b[6:].decode())
+                    answer.append((j["choices"][0]["delta"] or {}).get("content") or "")
+                except Exception:                                # noqa: BLE001
+                    pass
+                if not emit(b):
+                    return
+        except Exception as e:                                   # noqa: BLE001
+            emit(streaming.text_chunk(cid, model, f"\n[stream error: {e}]"))
+
+        corpus.log_answer(turn, root, "".join(answer), MAX_TOOL_HOPS,
+                          (time.time() - t_start) * 1000)
+        emit(streaming.chunk(cid, model, {}, finish="stop"))
+        emit(streaming.DONE)
 
     def log_message(self, *a):                                   # noqa: D102
         pass
