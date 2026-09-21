@@ -422,8 +422,24 @@ def handle(req: dict) -> dict | None:
                     rows = con.execute("SELECT DISTINCT path FROM chunks").fetchall()
                     con.close()
                     hits, scanned = [], 0
+                    # Models pass real glob patterns ("*.js", "src/**/*.rs"),
+                    # not substrings. Substring matching silently returned
+                    # zero files for "*.js" and the agent could not tell the
+                    # difference between "no matches" and "bad filter".
+                    import fnmatch as _fn
+                    is_glob = any(c in globsub for c in "*?[")
+
+                    def _match(rel: str) -> bool:
+                        if not globsub:
+                            return True
+                        if is_glob:
+                            return (_fn.fnmatch(rel, globsub)
+                                    or _fn.fnmatch(os.path.basename(rel), globsub)
+                                    or _fn.fnmatch(rel, f"*{globsub.lstrip('*/')}"))
+                        return globsub in rel
+
                     for (rel,) in sorted(rows):
-                        if globsub and globsub not in rel:
+                        if not _match(rel):
                             continue
                         for root in roots:
                             p = os.path.abspath(os.path.join(root, rel))
@@ -464,8 +480,20 @@ def handle(req: dict) -> dict | None:
                         target = cand
                         break
                 if target is None:
-                    text = (f"'{rel}' not found under any indexed root.\n"
-                            f"roots: {roots or '(none — run scripts/index_code.py)'}")
+                    # A bare "not found" leaves the agent guessing again. Offer
+                    # indexed files with the same basename -- the usual cause is
+                    # a plausible but wrong directory, e.g. guessing
+                    # renderers/webgl/WebGLRenderer.js for renderers/WebGLRenderer.js
+                    base = os.path.basename(rel).lower()
+                    con = _db()
+                    near = [r[0] for r in con.execute("SELECT DISTINCT path FROM chunks").fetchall()
+                            if os.path.basename(r[0]).lower() == base][:8]
+                    con.close()
+                    text = f"'{rel}' not found under any indexed root."
+                    if near:
+                        text += "\nDid you mean:\n" + "\n".join(f"  {p}" for p in near)
+                    elif not roots:
+                        text += "\nNothing is indexed — run scripts/index_code.py first."
                 else:
                     with open(target, encoding="utf-8", errors="replace") as fh:
                         lines = fh.read().splitlines()
