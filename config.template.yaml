@@ -1,3 +1,9 @@
+# TEMPLATE. Copy to config.yaml and fill in the two paths in `macros`.
+# config.yaml is gitignored precisely so those paths -- which contain a
+# home directory -- never reach a public repository.
+#
+#   cp config.template.yaml config.yaml   # then edit macros.server/.models
+#
 # llama-swap: one OpenAI-compatible endpoint in front of every local model.
 #
 #   API   http://ai.thejustinwalsh.me:1234/v1     (agents point here)
@@ -29,8 +35,8 @@ macros:
   #     pr-ptq1-mmv   plain generation 3/5 degenerate, tool calls 0/10
   #     official      plain generation 5/5 clean,      tool calls 9/9
   # The speed was real; so was the corruption. Do not switch back.
-  server: "C:/Users/jwals/llamacpp-prism-official/build/bin/llama-server.exe"
-  models: "C:/Users/jwals/textgen/user_data/models"
+  server: "<ABSOLUTE PATH TO llama-server.exe FROM THE PrismML FORK>"
+  models: "<ABSOLUTE PATH TO THE DIRECTORY HOLDING YOUR .gguf FILES>"
 
   # Qwen's published thinking-mode sampler values for the Qwen3.5/3.8 family
   # that Bonsai derives from. Reasoning effort is deliberately NOT set here:
