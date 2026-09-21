@@ -14,7 +14,7 @@
 # caddy/env.example -- caddy/.env is gitignored.
 
 {
-	email justin@obsidian-cipher.systems
+	email contact.me@thejustinwalsh.com
 
 	# Certificates are issued over DNS, so no ports need to be reachable from
 	# the public internet for ACME to succeed.
