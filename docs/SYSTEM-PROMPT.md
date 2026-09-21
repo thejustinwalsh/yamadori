@@ -92,3 +92,31 @@ making a `find_definition` call mandatory before any edit.
 
 **Do not add more tools to fight a problem.** Selection accuracy degrades with
 tool count. Fix the routing rules instead.
+
+---
+
+## Laya: typed decisions and typesafe structure
+
+`mcp/schema_fill.py` turns a JSON Schema into Laya questions and assembles the
+answers back into a conforming object. `enum` becomes a choice, `boolean` a
+noul, a bounded integer a score, nested objects recurse. The output is valid by
+construction -- no grammar, no validate-and-retry, and no way to invent a field
+or an enum value, because nothing is being decoded.
+
+It cannot fill free-text fields. A plain `{"type":"string"}` has no option set;
+those are skipped and reported.
+
+**Use the confidence, not the label.** Measured on a real issue-triage schema:
+
+| field | value | confidence | correct |
+|---|---|---|---|
+| needs_gpu_repro | true | 0.869 | yes |
+| blocks_release | false | 0.788 | **no** |
+| effort_days | 4 | 0.192 | no |
+| category | memory_safety | 0.181 | **no** — it was a data race |
+| severity | high | 0.075 | unclear |
+
+The low-confidence answers were the wrong ones, which is the behaviour you
+want -- but `blocks_release` was wrong at 0.788, so a threshold alone is not
+enough. Treat Laya as a cheap first pass that flags what it cannot decide, and
+escalate anything that matters to the 27B regardless of score.
