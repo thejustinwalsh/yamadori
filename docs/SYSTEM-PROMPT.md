@@ -11,7 +11,8 @@ things, and each is doing a job here:
 |---|---|
 | **Trigger conditions, not descriptions** | Tool descriptions say *what* a tool does. Selection accuracy depends on the model knowing *when* to reach for it. Each rule below is phrased as a condition. |
 | **Few-shot selection examples** | Showing query → correct tool measurably improves selection with non-trivial tool sets. The routing table is exactly that. |
-| **Minimal tool set** | Accuracy falls as tool count grows. Seven tools, each distinct and non-overlapping. Resist adding an eighth. |
+| **Minimal tool set** | Accuracy falls as tool count grows. Eight tools, each distinct. Resist a ninth. |
+| **Cheapest tool that can answer** | Measured on one question: find_definition 19 tokens (correct), grep 78 (correct), search_code 182 (wrong). All three beat reading the file (~8,000). Order the rules so the cheap precise tools are tried first. |
 | **Explicit sub-task decomposition** | Prompts that require breaking a request into sub-tasks and choosing a tool per sub-task improve both accuracy and efficiency, and cut redundant calls. |
 | **Negative constraints** | "Never assert X without Y" constrains a failure mode more reliably than a positive instruction. |
 
@@ -81,9 +82,15 @@ TOOL ROUTING -- match the situation, not the wording:
     "rename this function"           -> find_references(symbol=..., calls_only=true)
     "is this dead code"              -> find_references(symbol=...)
 
-  You cannot name what you need      -> search_code
+  It appears verbatim somewhere      -> grep
+    "where is cache_type set"        -> grep(pattern="cache_type\s*=")
+    "find the TODO about resize"     -> grep(pattern="TODO.*resize")
+    "who imports wgpu"               -> grep(pattern="^use wgpu|import.*wgpu")
+
+  The code may use OTHER words       -> search_code
     "how does this handle retries"   -> search_code(query="retry backoff logic")
-    "where is config parsed"         -> search_code(query="parse configuration file")
+    (only after grep finds nothing -- it costs ~2.3x the tokens and is less
+     precise when a literal anchor exists)
 
   You have a path and line range     -> read_file
     after find_definition            -> read_file(path=..., start=..., end=...)

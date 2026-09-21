@@ -252,6 +252,28 @@ TOOLS = [
         },
     },
     {
+        "name": "grep",
+        "description": (
+            "Literal / regex search across the indexed files. FAST and EXACT. "
+            "Try this BEFORE search_code whenever the thing you want probably "
+            "appears verbatim somewhere -- a function name, an error string, a "
+            "config key, an import, a TODO. Most code questions have a literal "
+            "anchor and this finds it precisely; search_code is for when the "
+            "codebase uses different words than you would."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string",
+                            "description": "Regex. Case-insensitive by default."},
+                "glob": {"type": "string",
+                         "description": "Restrict to paths containing this substring, e.g. '.rs' or 'src/'."},
+                "max_results": {"type": "integer", "description": "Default 40."},
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
         "name": "read_file",
         "description": (
             "Read exact lines from an indexed file. Use this immediately after "
@@ -384,6 +406,46 @@ def handle(req: dict) -> dict | None:
                 except Exception as e:
                     text = (f"judge unavailable ({type(e).__name__}: {e}). "
                             "Is the laya service running on 1237?")
+
+            elif name == "grep":
+                import re as _re
+                pat = args["pattern"]
+                globsub = (args.get("glob") or "").replace("\\", "/")
+                limit = int(args.get("max_results", 40))
+                try:
+                    rx = _re.compile(pat, _re.IGNORECASE)
+                except _re.error as e:
+                    text = f"bad regex: {e}"
+                else:
+                    con = _db()
+                    roots = [r[0] for r in con.execute("SELECT path FROM roots").fetchall()]
+                    rows = con.execute("SELECT DISTINCT path FROM chunks").fetchall()
+                    con.close()
+                    hits, scanned = [], 0
+                    for (rel,) in sorted(rows):
+                        if globsub and globsub not in rel:
+                            continue
+                        for root in roots:
+                            p = os.path.abspath(os.path.join(root, rel))
+                            if not p.startswith(os.path.abspath(root)) or not os.path.isfile(p):
+                                continue
+                            scanned += 1
+                            try:
+                                with open(p, encoding="utf-8", errors="replace") as fh:
+                                    for n, line in enumerate(fh, 1):
+                                        if rx.search(line):
+                                            hits.append(f"{rel}:{n}: {line.rstrip()[:180]}")
+                                            if len(hits) >= limit:
+                                                break
+                            except OSError:
+                                pass
+                            break
+                        if len(hits) >= limit:
+                            break
+                    text = ("\n".join(hits) if hits
+                            else f"no matches for /{pat}/ in {scanned} files")
+                    if len(hits) >= limit:
+                        text += f"\n[truncated at {limit}]"
 
             elif name == "read_file":
                 rel = args["path"].replace("\\", "/")
