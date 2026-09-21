@@ -44,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import code_search as cs  # noqa: E402
 import detect  # noqa: E402
 import repos  # noqa: E402
+import corpus  # noqa: E402
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1233"))
@@ -108,15 +109,27 @@ def merge_tools(client_tools: list | None) -> tuple[list, set]:
     return client_tools + mine, {t["function"]["name"] for t in mine}
 
 
-def augment_messages(messages: list[dict]) -> list[dict]:
+def augment_messages(messages: list[dict], status: str = "") -> list[dict]:
+    """Append our block to the client's system message, or add one.
+
+    The status goes here too, not at the end of the conversation: this model's
+    chat template raises "System message must be at the beginning" outright, so
+    a trailing system message is a hard 500 rather than a stylistic choice.
+
+    Cache cost is avoided by saying nothing when there is nothing to act on.
+    A healthy index produces an empty status, so the prefix stays
+    byte-identical turn to turn; only the transient states -- missing, or
+    building -- add a line and cost one prefill.
+    """
+    block = CAPABILITY_BLOCK + ("\n\n" + status if status else "")
     out = [dict(m) for m in messages]
     for m in out:
         if m.get("role") == "system" and isinstance(m.get("content"), str):
-            m["content"] = m["content"] + CAPABILITY_BLOCK
+            m["content"] = m["content"] + block
             return out
     # No system message: add one rather than prepending to the user's turn,
     # which would put our text in their words.
-    return [{"role": "system", "content": CAPABILITY_BLOCK.strip()}] + out
+    return [{"role": "system", "content": block.strip()}] + out
 
 
 def is_first_turn(messages: list[dict]) -> bool:
@@ -181,20 +194,29 @@ def complete(body: dict) -> dict:
     info = repos.ensure(root) if root else None
     db = repos.db_path(root) if root else None
 
+    # Only actionable states are worth a line. A healthy index says nothing,
+    # which keeps the cached prefix stable.
+    status = ""
+    if info and (info["building"] or not info["chunks"]):
+        status = repos.status_line(info)
+
     tools, injected = merge_tools(body.get("tools"))
     payload = dict(body)
-    payload["messages"] = augment_messages(messages)
+    payload["messages"] = augment_messages(messages, status)
     payload["tools"] = tools
     payload.pop("stream", None)
 
-    # The repo status is dynamic, so it rides in as a tool-shaped system note
-    # at the END of the message list, leaving the cached prefix untouched.
-    if info:
-        payload["messages"].append(
-            {"role": "system", "content": repos.status_line(info)})
+    # Every turn is logged as raw events, never as scores. This is the corpus
+    # that later tunes the decision model; see corpus.py for why nothing is
+    # labelled online.
+    turn = corpus.new_turn()
+    t_start = time.time()
+    corpus.log_turn(turn, root, messages,
+                    [t.get("function", {}).get("name") for t in tools],
+                    is_first_turn(messages))
 
     convo = payload["messages"]
-    for _hop in range(MAX_TOOL_HOPS):
+    for hop in range(MAX_TOOL_HOPS):
         d = _post("/v1/chat/completions", payload)
         msg = d["choices"][0]["message"]
         calls = msg.get("tool_calls") or []
@@ -203,6 +225,14 @@ def complete(body: dict) -> dict:
         if not ours:
             # Either a final answer, or calls belonging to the client. Either
             # way it is the client's turn -- hand it back untouched.
+            # A thinking model may return an empty `content` with the text in
+            # `reasoning_content` when it runs out of budget mid-thought.
+            # Returning that as a blank answer looks like the model failed.
+            if not (msg.get("content") or "").strip() and msg.get("reasoning_content"):
+                msg["content"] = ("[truncated while reasoning; raise max_tokens]\n\n"
+                                  + msg["reasoning_content"])[:8000]
+            corpus.log_answer(turn, root, msg.get("content") or "", hop,
+                              (time.time() - t_start) * 1000)
             return d
         convo.append({"role": "assistant", "content": msg.get("content") or "",
                       "tool_calls": calls})
@@ -212,8 +242,13 @@ def complete(body: dict) -> dict:
                 args = json.loads(c["function"]["arguments"] or "{}")
             except json.JSONDecodeError:
                 args = {}
+            corpus.log_tool_call(turn, root, fn, args, hop)
+            t0 = time.time()
+            out = run_our_tool(fn, args, db)
+            corpus.log_tool_result(turn, root, fn, out,
+                                   (time.time() - t0) * 1000)
             convo.append({"role": "tool", "tool_call_id": c["id"],
-                          "content": run_our_tool(fn, args, db)[:6000]})
+                          "content": out[:6000]})
         payload["messages"] = convo
     return _post("/v1/chat/completions", payload)
 
@@ -238,7 +273,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:                               # noqa: BLE001
                 return self._send(502, {"error": str(e)})
         if self.path.rstrip("/") == "/health":
-            return self._send(200, {"ok": True, "repos": len(repos.known())})
+            return self._send(200, {"ok": True, "repos": len(repos.known()),
+                                    "corpus": corpus.stats()})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):                                           # noqa: N802
