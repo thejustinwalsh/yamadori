@@ -1,0 +1,227 @@
+# llama-swap: one OpenAI-compatible endpoint in front of every local model.
+#
+#   API   http://10.242.120.152:1234/v1     (agents point here)
+#   UI    http://10.242.120.152:1234/ui/    (control + live stats)
+#
+# GET /v1/models lists everything below, so a client discovers the stack itself.
+#
+# DEVICE NUMBERING. scripts/start-stack.bat pins CUDA_DEVICE_ORDER=PCI_BUS_ID so
+# device ids match nvidia-smi and stay stable across driver updates:
+#   CUDA0 = RTX 5060 Ti (Blackwell sm_120) -- 55.33 tok/s on ternary
+#   CUDA1 = RTX A4000   (Ampere sm_86)     -- 45.92 tok/s on ternary
+# Without that variable CUDA orders devices fastest-first, which reverses the
+# two cards and silently puts the primary model on the slower GPU.
+#
+# NOTHING IS SPLIT ACROSS BOTH CARDS. Measured: one card alone (55.33 tok/s)
+# beats both cards split (51.18 tok/s), because a pipeline split runs the two
+# halves sequentially with an activation handoff in between.
+
+healthCheckTimeout: 900
+logLevel: info
+startPort: 10001
+
+macros:
+  server: "C:/Users/jwals/llamacpp-prism/build/bin/llama-server.exe"
+  models: "C:/Users/jwals/textgen/user_data/models"
+
+  # Qwen's published thinking-mode sampler values for the Qwen3.5/3.8 family
+  # that Bonsai derives from. Reasoning effort is deliberately NOT set here:
+  # valid values are low/medium/xhigh only, and clients pass it per request.
+  sampling: >
+    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.05
+    --presence-penalty 0 --repeat-penalty 1.0
+
+models:
+  # =====================================================================
+  # PRIMARY -- the whole 5060 Ti, maximum context.
+  #
+  # Ternary weights are only 5.53 GiB, which is what makes this possible:
+  # measured non-KV footprint is ~6.8 GiB, leaving ~8 GiB for cache. At
+  # 34 KiB/token (q8, 16 of 64 layers cached) 208k costs ~6.9 GiB. 240k also
+  # LOADS, but leaves ~2% of the card free and dies when a long prefill
+  # allocates its compute buffer. Native cap is 262144; no rope scaling used.
+  #
+  # There is deliberately no second chat worker. A second instance only
+  # helps CONCURRENT requests; a single agent is sequential and never
+  # touches it. That VRAM buys context and retrieval quality instead.
+  # =====================================================================
+  "bonsai":
+    name: "Bonsai 2 27B ternary -- 208k (5060 Ti)"
+
+    # Two IDs, ONE process, no extra VRAM.
+    #   bonsai        -> thinking ON.  Deep reasoning, long-form answers.
+    #   bonsai-agent  -> thinking OFF. Use for ALL tool-calling / agent loops.
+    #
+    # Not a style preference. Measured with a tools array attached:
+    #   thinking on,  max_tokens 2000 -> 2000 tokens of <think>, NO tool call
+    #   reasoning_effort: low         -> 2000 tokens of <think>, NO tool call
+    #   enable_thinking: false        -> correct tool call in 29 tokens
+    # The model reasons past its token budget before emitting a call, so an
+    # agent pointed at plain "bonsai" appears to ignore its tools entirely.
+    aliases:
+      - "bonsai-agent"
+    filters:
+      setParamsByID:
+        "bonsai-agent":
+          chat_template_kwargs:
+            enable_thinking: false
+    cmd: |
+      ${server}
+      --port ${PORT}
+      -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf
+      -dev CUDA0
+      -ngl 999
+      -c 212992
+      --cache-type-k q8_0 --cache-type-v q8_0
+      -fa on
+      --cont-batching
+      -b 1024 -ub 512
+      --jinja
+      ${sampling}
+    ttl: 0
+
+  # =====================================================================
+  # VISION variant, ON DEMAND (ttl 900). Same weights plus the multimodal
+  # projector, so the stack can actually look at a flamegraph, a RenderDoc
+  # capture, a misrendered frame or a whiteboard photo.
+  # Separate process because mmproj would cost the primary ~0.6 GiB of
+  # cache, and context matters more there than images do.
+  # =====================================================================
+  "bonsai-vision":
+    name: "Bonsai 2 27B ternary + vision (A4000)"
+    cmd: |
+      ${server}
+      --port ${PORT}
+      -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf
+      --mmproj ${models}/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf
+      -dev CUDA1
+      -ngl 999
+      -c 16384
+      --cache-type-k q8_0 --cache-type-v q8_0
+      -fa on
+      -b 1024 -ub 512
+      --jinja
+      ${sampling}
+    ttl: 900
+
+  # =====================================================================
+  # RETRIEVAL. Both resident on the A4000; together under 5 GiB.
+  # =====================================================================
+
+  # Qwen3-Embedding is ASYMMETRIC: queries need an instruction prefix,
+  # documents must not have one. mcp/code_search.py applies it. Getting
+  # this wrong does not error -- it silently returns near-random hits.
+  # Pooling must be `last` for this model family.
+  "embeddings":
+    name: "Qwen3-Embedding-0.6B"
+    cmd: |
+      ${server}
+      --port ${PORT}
+      -m ${models}/Qwen3-Embedding-0.6B-Q8_0.gguf
+      -dev CUDA1
+      -ngl 999
+      -c 8192
+      --embeddings
+      --pooling last
+      -b 8192 -ub 2048
+    ttl: 0
+
+  # 4B, not the 0.6B we started with: this stage decides the final 5
+  # snippets the model actually reads, so precision here gates everything
+  # downstream. 16k context: a cross-encoder reads query+document
+  # together and N code chunks overflow a smaller window -- when that
+  # happens it returns 0.0000 for every document and silently destroys a
+  # perfectly good embedding ranking.
+  "reranker":
+    name: "Qwen3-Reranker-4B"
+    cmd: |
+      ${server}
+      --port ${PORT}
+      -m ${models}/Qwen3-Reranker-4B-Q8_0.gguf
+      -dev CUDA1
+      -ngl 999
+      -c 16384
+      --reranking
+      --pooling rank
+      -b 8192 -ub 2048
+    ttl: 0
+
+  # =====================================================================
+  # CRITIC -- on demand, not resident.
+  #
+  # DIFFERENT WEIGHTS on purpose. A model reviewing its own output shares
+  # the priors that produced the bug; a different model catches what the
+  # first structurally cannot. This is Qwen3.8-27B Q4_K_M -- same family
+  # (no prompt-format friction) but genuinely different weights.
+  #
+  # 15.4 GiB will not co-reside with the retrieval models, so it is NOT in
+  # the resident group: llama-swap loads it on request (~11s) and unloads
+  # it after 10 minutes idle. Ask for model "critic" to summon it.
+  # =====================================================================
+  # DISABLED -- does not fit. Measured demand on the 16 GiB A4000:
+  #     weights Q4_K_M      15.41 GiB
+  #   + q8 KV @32k           1.06
+  #   + compute buffer      ~2.0
+  #   + MTP draft context   ~1.2
+  #   = ~19.7 GiB
+  # It only ran earlier by splitting across BOTH cards (12.4 + 11.3 GiB),
+  # which is no longer possible now that the primary owns the 5060 Ti.
+  # To enable: use a ~12 GiB quant instead (Q3_K_XL / IQ4_XS of the same
+  # 27B), which leaves room for context and buffers on one card.
+  "critic-disabled":
+    name: "Qwen3.8-27B Q4 -- adversarial reviewer (DOES NOT FIT, see comment)"
+    cmd: |
+      ${server}
+      --port ${PORT}
+      -m ${models}/Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_M.gguf
+      -dev CUDA1
+      -ngl 999
+      -c 32768
+      --cache-type-k q8_0 --cache-type-v q8_0
+      -fa on
+      -b 1024 -ub 512
+      --jinja
+      ${sampling}
+    ttl: 600
+
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        # The primary lives alone on the 5060 Ti and must NEVER be evicted.
+        # persistent:true is what protects it: llama-swap groups know nothing
+        # about which GPU a model sits on, so without this an exclusive
+        # on-demand load tears down the chat model on the other card too.
+        "primary":
+          persistent: true
+          swap: false
+          exclusive: false
+          members:
+            - "bonsai"
+
+        # Retrieval shares the A4000. Deliberately NOT persistent so the
+        # on-demand group can reclaim its VRAM; these are small models and
+        # reload in a couple of seconds on the next search.
+        "retrieval":
+          swap: false
+          exclusive: false
+          members:
+            - "embeddings"
+            - "reranker"
+
+        # exclusive:true reclaims the A4000 from retrieval when one of these
+        # is requested. swap:true means critic and vision also take turns.
+        # The primary survives both because it is persistent.
+        "ondemand":
+          swap: true
+          exclusive: true
+          members:
+            - "bonsai-vision"
+
+hooks:
+  on_startup:
+    preload:
+      - "bonsai"
+      - "embeddings"
+      - "reranker"
