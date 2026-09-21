@@ -11,7 +11,7 @@ things, and each is doing a job here:
 |---|---|
 | **Trigger conditions, not descriptions** | Tool descriptions say *what* a tool does. Selection accuracy depends on the model knowing *when* to reach for it. Each rule below is phrased as a condition. |
 | **Few-shot selection examples** | Showing query → correct tool measurably improves selection with non-trivial tool sets. The routing table is exactly that. |
-| **Minimal tool set** | Accuracy falls as tool count grows. Five tools, each distinct. Resist adding more. |
+| **Minimal tool set** | Accuracy falls as tool count grows. Seven tools, each distinct and non-overlapping. Resist adding an eighth. |
 | **Explicit sub-task decomposition** | Prompts that require breaking a request into sub-tasks and choosing a tool per sub-task improve both accuracy and efficiency, and cut redundant calls. |
 | **Negative constraints** | "Never assert X without Y" constrains a failure mode more reliably than a positive instruction. |
 
@@ -54,6 +54,13 @@ TOOL ROUTING — match the situation, not the wording:
   You need a yes/no you will act on  -> judge
     "is this diff an improvement"    -> judge(state=<diff>, question=..., options=[...])
     "is this failure infra or real"  -> judge(state=<log>, question=...)
+
+  You have a path and line range     -> read_file
+    after find_definition            -> read_file(path=..., start=..., end=...)
+    NEVER search again for a location you already have.
+
+  Context is filling up              -> compact
+    long log or transcript           -> compact(text=..., focus="the failure")
 
   If retrieved snippets are not enough, refine the query and search again.
   Two focused searches beat one broad one.
