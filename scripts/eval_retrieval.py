@@ -144,6 +144,9 @@ def main() -> None:
 
     sem_hit = kw_hit = both = neither = sem_only = kw_only = 0
     sem_rr = kw_rr = 0.0
+    fus_hit = 0
+    fus_rr = 0.0
+    fus_only = kw_only_f = 0
 
     for i, (query, gold_path, _name) in enumerate(gold, 1):
         try:
@@ -153,6 +156,9 @@ def main() -> None:
             return
         sem = [h["path"] for h in hits]
         kw = keyword_rank(query, chunks, top_k)
+        # The shipped configuration: semantic + lexical fused, symbol hits
+        # tagged. This is the arm the pre-registered cut rule names.
+        fus = [h["path"] for h in cs.search_fused(query, top_k)][:top_k]
 
         s_ok = gold_path in sem
         k_ok = gold_path in kw
@@ -166,14 +172,20 @@ def main() -> None:
             sem_rr += 1 / (sem.index(gold_path) + 1)
         if k_ok:
             kw_rr += 1 / (kw.index(gold_path) + 1)
+        f_ok = gold_path in fus
+        fus_hit += f_ok
+        if f_ok:
+            fus_rr += 1 / (fus.index(gold_path) + 1)
+        fus_only += f_ok and not k_ok
+        kw_only_f += k_ok and not f_ok
         if i % 20 == 0:
             print(f"  ...{i}/{len(gold)}")
 
     n = len(gold)
     print("\n" + "=" * 64)
-    print(f"{'':<22}{'semantic':>10}{'keyword':>10}")
-    print(f"{'recall@' + str(top_k):<22}{sem_hit:>7}/{n}{kw_hit:>7}/{n}")
-    print(f"{'MRR':<22}{sem_rr / n:>10.3f}{kw_rr / n:>10.3f}")
+    print(f"{'':<22}{'semantic':>10}{'keyword':>10}{'fused':>10}")
+    print(f"{'recall@' + str(top_k):<22}{sem_hit:>7}/{n}{kw_hit:>7}/{n}{fus_hit:>7}/{n}")
+    print(f"{'MRR':<22}{sem_rr / n:>10.3f}{kw_rr / n:>10.3f}{fus_rr / n:>10.3f}")
     print("-" * 64)
     # McNemar's discordant pairs: the only cells that carry information about
     # which arm is better. Reporting 62% vs 55% hides that most tasks are ties.
@@ -191,6 +203,26 @@ def main() -> None:
               + ("   <- not significant" if p > 0.05 else "   <- significant"))
     else:
         print("  no discordant pairs: the arms are indistinguishable here")
+
+    print("\n" + "-" * 64)
+    print("FUSED vs KEYWORD -- the arm the cut rule names:")
+    print(f"  fused only    : {fus_only}")
+    print(f"  keyword only  : {kw_only_f}")
+    d2 = fus_only + kw_only_f
+    if d2:
+        k2 = min(fus_only, kw_only_f)
+        p2 = sum(math.comb(d2, i) for i in range(k2 + 1)) / (2 ** d2) * 2
+        p2 = min(p2, 1.0)
+        print(f"  exact McNemar p = {p2:.4f}")
+        if fus_only > kw_only_f and p2 < 0.05:
+            print("  -> fusion beats keyword. KEEP the embedding index.")
+        elif p2 < 0.05:
+            print("  -> keyword beats fusion. CUT RULE FIRES: drop embeddings,")
+            print("     keep BM25 + the symbol table, which need no GPU.")
+        else:
+            print("  -> indistinguishable. The index is not earning a GPU.")
+    else:
+        print("  no discordant pairs")
 
 
 if __name__ == "__main__":
