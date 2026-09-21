@@ -1,20 +1,59 @@
-# llama-stack
+# Yamadori
 
-A local, always-on inference stack for agentic SWE work. One OpenAI-compatible
-endpoint fronts a 27B ternary model at 208k context, a vision variant, an
-embedding model and a reranker — plus an MCP server that gives an agent
-codebase search, symbol lookup and call-site navigation.
+## Sixteen tries and a compiler beats one try and a genius.
 
-Built on two consumer GPUs (RTX 5060 Ti 16GB + RTX A4000 16GB). Everything runs
-on the machine; nothing leaves ZeroTier.
+A *yamadori* is a tree collected from the wild mountain rather than grown in a
+nursery. It is prized above nursery stock precisely because hardship shaped it.
+That is the bet here: open weights, abliterated, running on hardware you own,
+shaped for your work rather than for everyone's.
 
-```
-  Hermes ──chat────▶  :1234/v1   model=bonsai-agent
-  Hermes ──tools───▶  MCP code-search (stdio)
-                         ├─▶ :1234  model=embeddings
-                         ├─▶ sqlite vector + symbol index
-                         └─▶ :1234  model=reranker
-```
+Collected, not bought.
+
+---
+
+## What it actually is
+
+A **verifier-driven sampling engine wrapped around a local model.** The model is
+a component; the engine is the product.
+
+A 27B does not beat a frontier model one-shot and this does not pretend it does.
+It beats one where the task has a **mechanical verifier** — `tsc` with
+`expectTypeOf`, `cargo test` across a WASM boundary, `naga` on a shader — because
+then "sample sixteen times and keep what passes" is available to a free local
+model and is not available to a metered one.
+
+That is not a hunch. With a sound external verifier, published results move
+5% → 38%, 16% → 37%, 40% → 87%, and a 30B goes 32% → 87% on tool use. A model
+grading its *own* work made GPT-4 **worse** on two of three domains. The
+verifier has to be a compiler, never an opinion.
+
+Every run also labels its own training data: candidates that pass and fail are
+ground truth, free, produced as a by-product. That trains the selector that
+picks winners when several compile or none do.
+
+## What got cut, and why that matters
+
+This repo is mostly a record of things that did not survive measurement:
+
+| cut | evidence |
+|---|---|
+| `judge` (a small classifier as a truth judge) | 6/10 against a 5/10 coin flip; systematic false positives on negated claims |
+| semantic search as the default retriever | BM25 beat it 92/120 vs 77/120 on private repos, McNemar p=0.0041 |
+| the cross-encoder reranker above top-2 | identical recall at the shipped cutoff, ~1s/query |
+| `apply_edit` | the harness already writes files; a second write path is a hazard |
+
+Every threshold and default here names the script that justifies it and the
+sample size it was measured at. Where a number is too small to carry a claim,
+it says so. Retrieval is a subsystem, and a shrinking one.
+
+## Honest status: this is NOT zero-config
+
+It runs unattended once it is up, and it is genuinely one line to point a
+client at. Getting to that line currently takes: building a llama.cpp fork from
+source, five model downloads, filling two paths in `config.yaml`, a separate
+venv for the decision model, and an index build. A bootstrap script is the next
+thing being built; until it lands, read `## Setup` below and expect an evening,
+not a minute.
 
 ## Endpoints
 
