@@ -52,6 +52,12 @@ if defined DNSIMPLE_API_TOKEN (
   echo [%date% %time%] caddy skipped: no DNSIMPLE_API_TOKEN in caddy\.env >> "logs\caddy.log"
 )
 
+REM Laya decision engine (HTTP 1237 + WebSocket 1238). Runs in its own venv:
+REM laya requires a newer transformers than the rest of the stack.
+if exist ".venv-laya\Scripts\python.exe" (
+  start "" /B ".venv-laya\Scripts\python.exe" "%CD%\mcp\laya_service.py" >> "logs\laya.log" 2>&1
+)
+
 echo [%date% %time%] starting llama-swap >> "logs\stack.log"
 "%SWAP%" -config "%CFG%" -listen 0.0.0.0:1234 >> "logs\stack.log" 2>&1
 set EXITCODE=%errorlevel%

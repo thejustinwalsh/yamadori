@@ -23,6 +23,7 @@
 param(
     [string]$Api = 'http://127.0.0.1:1234',
     [string]$ToolsApi = 'http://127.0.0.1:1235',
+    [string]$LayaApi  = 'http://127.0.0.1:1237',
     [string]$TaskName = 'llama-stack',
     [string[]]$Resident = @('bonsai', 'embeddings', 'reranker'),
     [int]$RestartCooldownMin = 10,
@@ -76,7 +77,15 @@ function Test-Healthy {
         return "tools API not responding: $($_.Exception.Message)"
     }
 
-    # 5. the primary can actually produce a token
+    # 5. laya decision engine (own venv, own process)
+    try {
+        $l = Invoke-RestMethod -Uri "$LayaApi/health" -TimeoutSec 20
+        if (-not $l.ok) { return 'laya unhealthy' }
+    } catch {
+        return "laya not responding: $($_.Exception.Message)"
+    }
+
+    # 6. the primary can actually produce a token
     try {
         $body = @{
             model      = 'bonsai-agent'
