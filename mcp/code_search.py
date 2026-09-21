@@ -590,26 +590,52 @@ def handle(req: dict) -> dict | None:
         name, args = p.get("name"), p.get("arguments", {}) or {}
         try:
             if name == "find_by_meaning":
-                hits = search(args["query"], int(args.get("top_k", DEFAULT_TOP_K)))
+                # search_fused, not search. Plain search() is the pure-semantic
+                # arm the cut rule eliminated -- BM25 beat it 92/120 to 77/120
+                # on the gauntlet index -- and this tool was still calling it.
+                hits = search_fused(args["query"],
+                                    int(args.get("top_k", DEFAULT_TOP_K)))
                 if not hits:
-                    text = ("No results. The index may be empty -- run "
-                            "scripts/index_code.py against your repository first.")
+                    text = ("No results. Nothing is indexed for this repository "
+                            "yet, or the query matched nothing. Try "
+                            "find_by_pattern with a literal you expect, or "
+                            "describe_index to see what is covered.")
                 else:
-                    text = "\n\n".join(
-                        f"### {h['path']}:{h['start']}-{h['end']}  (score {h['score']})\n"
-                        f"```\n{h['text']}\n```" for h in hits)
-                    # Semantic search ALWAYS returns its nearest neighbours, so
-                    # a query with no match in the corpus comes back looking
-                    # exactly like a query with a good one -- real-looking
-                    # snippets at score 0.0. Say when the top hit is noise,
-                    # because nothing in the results themselves shows it.
-                    best = max(h["sim"] for h in hits)
-                    if best < WEAK_SIM:
-                        text = (f"NO MATCH: best cosine similarity {best}, below "
-                                f"{WEAK_SIM}. Nothing in the index is close to this "
-                                f"query. These are the nearest neighbours, not "
-                                f"answers. Rephrase in the vocabulary the code would "
-                                f"use, or grep for a literal you expect.\n\n" + text)
+                    # Results are GROUPED BY EVIDENCE, not returned as a flat
+                    # ranked list. A tier states a condition the caller can act
+                    # on; a score invites treating small differences as
+                    # meaningful when they are not. Naming the evidence is also
+                    # what lets the caller disagree with the ranking, which a
+                    # bare list does not.
+                    tiers = {"exact": [], "close": [], "alternative": []}
+                    for h in hits:
+                        tiers.setdefault(h.get("tier", "alternative"), []).append(h)
+                    label = {
+                        "exact": ("TAPROOT -- a declaration with this name is "
+                                  "here. Strongest evidence available."),
+                        "close": ("BRANCH -- both independent retrievers "
+                                  "surfaced this. Two different failure modes "
+                                  "had to agree."),
+                        "alternative": ("SHOOT -- one retriever only. "
+                                        "Unproven; read before relying on it."),
+                    }
+                    parts = []
+                    for tier in ("exact", "close", "alternative"):
+                        rows = tiers.get(tier) or []
+                        if not rows:
+                            continue
+                        parts.append(f"== {label[tier]}")
+                        for h in rows[:5]:
+                            why = ", ".join(h.get("found_by") or []) or "symbol table"
+                            decl = (f"  declares {h['declares']}"
+                                    if h.get("declares") else "")
+                            parts.append(
+                                f"### {h['path']}:{h['start']}-{h['end']}"
+                                f"   [{why}]{decl}")
+                            if h.get("text"):
+                                parts.append("```\n" + h["text"][:1400] + "\n```")
+                    text = "\n".join(parts)
+
             elif name == "find_definition_opt":
                 con = _db()
                 rows = sym.find_definition(con, args["symbol"])
