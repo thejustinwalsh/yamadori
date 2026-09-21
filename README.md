@@ -16,6 +16,11 @@ on the machine; nothing leaves ZeroTier.
                          └─▶ :1234  model=reranker
 ```
 
+> **Tool calling is currently unreliable on this stack.** See
+> [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md). Generation, long context,
+> retrieval and the code-intelligence API all work; agentic tool loops do not
+> yet. The previously working configuration is noted there.
+
 ## Endpoints
 
 | | |
@@ -136,6 +141,9 @@ scripts/
   install-autostart.ps1    registers autostart + watchdog
   watchdog.ps1       health check and self-heal
 docs/HERMES.md       wiring an agent to this stack
+docs/KNOWN-ISSUES.md open problems, with the measurements behind them
+mcp/tool_shim.py     tool-call translation shim (WIP, see known issues)
+mcp/tools_api.py     HTTP transport for the same tools
 ```
 
 ## Setup
