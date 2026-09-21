@@ -134,18 +134,26 @@ models:
       -b 8192 -ub 2048
     ttl: 0
 
-  # 4B, not the 0.6B we started with: this stage decides the final 5
-  # snippets the model actually reads, so precision here gates everything
-  # downstream. 16k context: a cross-encoder reads query+document
+  # 0.6B, NOT the 4B. Bigger is not better here -- it is broken.
+  # mradermacher's Qwen3-Reranker-4B GGUF returns inverted near-zero scores
+  # through llama.cpp's --reranking/--pooling rank path. Measured on
+  # "how do I parse a tool call":
+  #     "the weather in paris is mild"      1.3e-19   ranked FIRST
+  #     "def parse_tool_call(answer, ...)"  8.8e-24   ranked LAST
+  # The 0.6B scores the same case at 0.9992. The failure is silent:
+  # search_code falls back to embedding order and returns a plausible but
+  # wrong function, with no error anywhere.
+  #
+  # 16k context: a cross-encoder reads query+document
   # together and N code chunks overflow a smaller window -- when that
   # happens it returns 0.0000 for every document and silently destroys a
   # perfectly good embedding ranking.
   "reranker":
-    name: "Qwen3-Reranker-4B"
+    name: "Qwen3-Reranker-0.6B"
     cmd: |
       ${server}
       --port ${PORT}
-      -m ${models}/Qwen3-Reranker-4B-Q8_0.gguf
+      -m ${models}/Qwen3-Reranker-0.6B-Q8_0.gguf
       -dev CUDA1
       -ngl 999
       -c 16384
@@ -218,12 +226,14 @@ routing:
             - "embeddings"
             - "reranker"
 
-        # exclusive:true reclaims the A4000 from retrieval when one of these
-        # is requested. swap:true means critic and vision also take turns.
-        # The primary survives both because it is persistent.
+        # Vision needs ~8 GiB and retrieval occupies ~12 of the A4000's 16, so
+        # this can no longer displace it. Requesting bonsai-vision will fail
+        # rather than degrade search. To actually use vision, stop the stack
+        # and raise its priority deliberately -- an explicit trade, not a
+        # silent one.
         "ondemand":
           swap: true
-          exclusive: true
+          exclusive: false
           members:
             - "bonsai-vision"
 
