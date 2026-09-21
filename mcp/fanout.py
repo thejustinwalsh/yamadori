@@ -30,6 +30,27 @@ four genuinely different ways -- with retrieval and without, terse and
 thorough -- produces disagreement that means something. When four different
 approaches land on the same file, that is evidence. When four samples of one
 prompt agree, that is mostly temperature being low.
+
+MEASURED -- WHEN NOT TO USE THIS
+
+On eight file-location questions against koota, four-way consensus scored 7/8
+against 7/8 for a single answer, with ZERO discordant pairs, at 3.2x the wall
+clock. That is a null result on a task class where it could not have won:
+"where is X defined" has one right answer and retrieval either finds it or
+does not, so there is no quality variance for diversity to exploit and both
+arms sit at the ceiling.
+
+The cost is also higher than raw sampling suggested -- 3.2x rather than the
+2.7x measured for generation alone -- because each variant runs its own tool
+loop, so tool calls multiply too.
+
+So this is gated on the task having room for a better answer:
+
+  lookup, definition, reference, "where is"   -> N=1, always
+  design, approach, refactor, "how should I"  -> N=4
+
+Fanning out on a lookup is pure latency, which is now measured rather than
+assumed.
 """
 from __future__ import annotations
 
