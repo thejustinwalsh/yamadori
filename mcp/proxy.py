@@ -48,6 +48,7 @@ import corpus  # noqa: E402
 import accounts  # noqa: E402
 import streaming  # noqa: E402
 import packages  # noqa: E402
+import repeats  # noqa: E402
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1233"))
@@ -175,7 +176,8 @@ def available_checks(root: str) -> list[str]:
 
 
 def run_our_tool(name: str, args: dict, db: str | None,
-                 root: str | None = None) -> str:
+                 root: str | None = None,
+                 turn: "repeats.Turn | None" = None) -> str:
     prev = os.environ.get("CODE_INDEX_DB")
     if db:
         os.environ["CODE_INDEX_DB"] = db
@@ -201,7 +203,16 @@ def run_our_tool(name: str, args: dict, db: str | None,
         if probe:
             alt = packages.search(root, probe, name, args)
             if alt:
-                return text.rstrip() + "\n\n" + alt
+                text = text.rstrip() + "\n\n" + alt
+
+    # A repeat still runs. Refusing it would be a negation, and this model
+    # family reads negation as topic rather than constraint -- measured,
+    # describing what failed made the decision model pick retry at margin
+    # 0.288, while asking which action progresses answered correctly at 0.493.
+    # So the result carries what has NOT been tried instead.
+    if turn is not None:
+        turn.record(name, args, text)
+        text += turn.guidance(name, args, OUR_NAMES)
     return text
 
 
@@ -269,6 +280,7 @@ def complete(body: dict) -> dict:
                     [t.get("function", {}).get("name") for t in tools],
                     is_first_turn(messages))
 
+    tracker = repeats.Turn()
     convo = payload["messages"]
     for hop in range(MAX_TOOL_HOPS):
         d = _post("/v1/chat/completions", payload)
@@ -298,7 +310,7 @@ def complete(body: dict) -> dict:
                 args = {}
             corpus.log_tool_call(turn, root, fn, args, hop)
             t0 = time.time()
-            out = run_our_tool(fn, args, db, root)
+            out = run_our_tool(fn, args, db, root, tracker)
             corpus.log_tool_result(turn, root, fn, out,
                                    (time.time() - t0) * 1000)
             convo.append({"role": "tool", "tool_call_id": c["id"],
@@ -439,7 +451,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 corpus.log_tool_call(turn, root, fn, args, hop)
                 t0 = time.time()
-                out = run_our_tool(fn, args, db, root)
+                out = run_our_tool(fn, args, db, root, tracker)
                 corpus.log_tool_result(turn, root, fn, out,
                                        (time.time() - t0) * 1000)
                 convo.append({"role": "tool", "tool_call_id": c["id"],
