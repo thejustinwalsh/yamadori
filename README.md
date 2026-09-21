@@ -1,11 +1,13 @@
 # Yamadori
 
-## Sixteen tries and a compiler beats one try and a genius.
+## It won't hand you code that doesn't build.
 
-A *yamadori* is a tree collected from the wild mountain rather than grown in a
-nursery. It is prized above nursery stock precisely because hardship shaped it.
-That is the bet here: open weights, abliterated, running on hardware you own,
-shaped for your work rather than for everyone's.
+Runs on your hardware. Costs nothing per run. Knows your repo, not a public one.
+
+> **Status: not true yet.** The verification loop is being built now. Everything
+> below is either measured and cited, or labelled as unbuilt. Nothing in this
+> README claims to work that hasn't been tested — that is the point of the
+> project, not a disclaimer.
 
 Collected, not bought.
 
