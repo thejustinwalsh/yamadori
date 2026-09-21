@@ -200,8 +200,11 @@ decision engine." Zero-shot it is not that; fine-tuned it could be.
 
 ## 6. Retrieval — finish and stop
 
-Fusion is built and the bugs are fixed. Run `eval_retrieval.py` once on the
-gauntlet index, apply the cut rule, stop iterating.
+DONE. The cut rule fired on the gauntlet index: semantic recall@5 77/120
+against keyword 92/120 with McNemar p=0.0041, and fused 87/120 against
+keyword at p=0.2266 -- indistinguishable. Embeddings are off by default
+behind CODE_SEARCH_SEMANTIC=1, and warm query latency fell from 1284ms to
+729ms. BM25 plus the symbol tables are the shipped retrieval path.
 
 Two findings worth holding it to:
 - BM25 + cross-encoder is **+11% nDCG@10 over BM25 on 16 of 18 datasets** --
@@ -259,7 +262,8 @@ explained by **token truncation**, not by the constraint itself.
 3. Tool-use competence probe, including the partial-input baseline below.
 4. Best-of-N go/no-go: pass@1 vs pass@8 with `tsc`/`cargo` on 15 tasks.
 5. `rings`, measured against a forced compaction.
-6. `eval_retrieval.py` once; apply the cut rule.
+6. ~~`eval_retrieval.py` once; apply the cut rule.~~ DONE, rule fired,
+   embeddings cut.
 7. Typed decision API + calibration, scoped as above.
 8. Linear probe, one per task class, ~500 labels each.
 
