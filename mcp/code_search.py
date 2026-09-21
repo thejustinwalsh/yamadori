@@ -317,7 +317,36 @@ TOOLS = [
         "description": "Report how many code chunks are indexed and which files are covered.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "verify",
+        "description": (
+            "Run a project check and return its output. THIS IS THE POINT OF THE LOOP: "
+            "you are not done when the edit looks right, you are done when a check "
+            "passes. Run `lint` after any edit (seconds), and `test` when behaviour "
+            "changed (minutes). Call with no arguments to list what this project "
+            "offers. If a check fails, read the error, fix it with apply_edit, and "
+            "run it again."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "check": {"type": "string",
+                          "description": "Name of the check, e.g. 'lint' or 'test'. "
+                                         "Omit to list available checks."},
+            },
+        },
+    },
 ]
+
+# Only these may be run, and only as named here. The agent chooses a LABEL, never
+# a command line, so text arriving from a source file, a search result or a model
+# cannot reach a shell. Adding a project means adding a row, not widening this.
+VERIFY_CHECKS = {
+    "lint": ["npm", "run", "lint-core"],
+    "test": ["npm", "run", "test-unit"],
+    "build": ["npm", "run", "build"],
+}
+VERIFY_TIMEOUT = int(os.environ.get("VERIFY_TIMEOUT", "900"))
 
 
 def handle(req: dict) -> dict | None:
@@ -458,8 +487,22 @@ def handle(req: dict) -> dict | None:
                             break
                         if len(hits) >= limit:
                             break
-                    text = ("\n".join(hits) if hits
-                            else f"no matches for /{pat}/ in {scanned} files")
+                    # "in 0 files" is a dead end: the agent cannot tell a bad
+                    # glob from an unindexed directory, so it permutes the glob
+                    # forever (observed: 14 consecutive greps for docs/, which
+                    # is not indexed at all). Say what IS indexed instead.
+                    if hits:
+                        text = "\n".join(hits)
+                    elif scanned == 0 and globsub:
+                        tops = sorted({(r.split("/", 1)[0] if "/" in r else ".")
+                                       for (r,) in rows})
+                        text = (f"glob {globsub!r} matched 0 of {len(rows)} indexed files.\n"
+                                f"Indexed roots: {', '.join(roots) or '(none)'}\n"
+                                f"Top-level dirs: {', '.join(tops[:20])}\n"
+                                f"Nothing outside these roots is indexed. "
+                                f"Omit `glob` to search all {len(rows)} files.")
+                    else:
+                        text = f"no matches for /{pat}/ in {scanned} files"
                     if len(hits) >= limit:
                         text += f"\n[truncated at {limit}]"
 
@@ -529,6 +572,42 @@ def handle(req: dict) -> dict | None:
                         + "\n".join(f"  {f}" for f in files[:40]))
                 if len(files) > 40:
                     text += f"\n  ... and {len(files) - 40} more"
+
+            elif name == "verify":
+                import subprocess
+                check = (args.get("check") or "").strip().lower()
+                con = _db()
+                roots = [r[0] for r in con.execute("SELECT path FROM roots").fetchall()]
+                con.close()
+                # Checks run from the project root, which is the parent of the
+                # indexed src/ tree -- package.json lives there, not in src/.
+                cwd = os.path.dirname(roots[0].rstrip("\\/")) if roots else os.getcwd()
+                if not check:
+                    text = ("checks available (pass one as `check`):\n"
+                            + "\n".join(f"  {k:<8} {' '.join(v)}"
+                                        for k, v in VERIFY_CHECKS.items())
+                            + f"\nproject root: {cwd}")
+                elif check not in VERIFY_CHECKS:
+                    text = (f"unknown check {check!r}. Available: "
+                            f"{', '.join(VERIFY_CHECKS)}.")
+                else:
+                    cmd = VERIFY_CHECKS[check]
+                    try:
+                        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                                           timeout=VERIFY_TIMEOUT, shell=(os.name == "nt"),
+                                           encoding="utf-8", errors="replace")
+                        out = ((p.stdout or "") + (p.stderr or "")).strip()
+                        # Failures put the useful lines at the END; truncating the
+                        # head of a passing run costs nothing, truncating the tail
+                        # of a failing one throws away the error.
+                        if len(out) > 6000:
+                            out = out[:1500] + "\n...[trimmed]...\n" + out[-4000:]
+                        text = (f"{check}: {'PASSED' if p.returncode == 0 else 'FAILED'} "
+                                f"(exit {p.returncode})\n\n{out or '(no output)'}")
+                    except subprocess.TimeoutExpired:
+                        text = f"{check}: TIMED OUT after {VERIFY_TIMEOUT}s."
+                    except FileNotFoundError:
+                        text = f"{check}: cannot run {cmd[0]!r} -- not on PATH."
             else:
                 return {"jsonrpc": "2.0", "id": mid,
                         "error": {"code": -32601, "message": f"unknown tool {name}"}}
