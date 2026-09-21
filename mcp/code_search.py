@@ -46,6 +46,20 @@ CANDIDATES = 40
 RERANK_DOC_CHARS = 1200
 DEFAULT_TOP_K = 5
 
+# Reranking only pays when the list is short enough that ORDER decides what the
+# caller sees. Measured over 11 queries with a known correct file
+# (scripts/eval_rerank.py):
+#
+#   correct at #1     embed 1/11    rerank 3/11    <- rerank wins clearly
+#   correct in top-5  embed 7/11    rerank 7/11    <- identical, for ~1s
+#
+# mean rank was 5.36 either way: the cross-encoder is high-variance, promoting
+# the right file to #1 or burying it at #14, not shifting the list uniformly.
+# Once five snippets are in the caller's context they all get read, so paying a
+# second to reorder them buys nothing. Rerank when few results are asked for,
+# skip it when many are.
+RERANK_MAX_K = 2
+
 
 # Laya decision engine. Separate process AND separate venv: laya needs a newer
 # transformers than the rest of the stack, so it cannot share an interpreter.
@@ -143,30 +157,41 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
     docs = [f"{c.path}:{c.start}-{c.end}\n{c.text[:RERANK_DOC_CHARS]}" for c in cand]
 
     embed_order = [(i, float(sims[top[i]])) for i in range(min(top_k, len(cand)))]
-    try:
-        ranked = rerank(query, docs, min(top_k, len(docs)))
-        # Only ORDER matters from a reranker; the absolute scale does not.
-        #
-        # An earlier version rejected any result where every score was below
-        # 1e-6, on the assumption scores are probabilities. They are not always:
-        # this setup returns correctly-ordered scores around 1e-13, and that
-        # guard was silently discarding a good ranking in favour of raw
-        # embedding order -- which is exactly the degradation it existed to
-        # prevent.
-        #
-        # The real degenerate case is a reranker that cannot separate the
-        # documents at all, i.e. every score identical. Detect that instead.
-        scores = [s for _, s in ranked]
-        if not ranked or (len(set(scores)) == 1):
-            ranked = embed_order
-    except Exception:
+
+    if top_k > RERANK_MAX_K:
+        # Measured: no gain at this cutoff. Skip the GPU round trip.
         ranked = embed_order
+    else:
+        try:
+            ranked = rerank(query, docs, min(top_k, len(docs)))
+            # Only ORDER matters from a reranker; the absolute scale does not.
+            #
+            # An earlier version rejected any result where every score was below
+            # 1e-6, on the assumption scores are probabilities. They are not
+            # always: this setup returns correctly-ordered scores around 1e-13,
+            # and that guard was silently discarding a good ranking in favour of
+            # raw embedding order -- exactly the degradation it existed to
+            # prevent.
+            #
+            # The real degenerate case is a reranker that cannot separate the
+            # documents at all, i.e. every score identical. Detect that instead.
+            scores = [s for _, s in ranked]
+            if not ranked or (len(set(scores)) == 1):
+                ranked = embed_order
+        except Exception:
+            ranked = embed_order
 
     out = []
     for idx, score in ranked:
         c = cand[idx]
+        # Two different numbers, and only one of them means anything absolute.
+        # `score` is the cross-encoder's, useful for ORDER only -- it comes back
+        # around 1e-13 on correctly-ranked results. `sim` is cosine similarity
+        # against the query embedding, which IS calibrated, so it is the only
+        # one a threshold may be applied to.
         out.append(dict(path=c.path, start=c.start, end=c.end,
-                        score=round(float(score), 4), text=c.text))
+                        score=round(float(score), 4),
+                        sim=round(float(sims[top[idx]]), 4), text=c.text))
     return out
 
 
@@ -349,6 +374,50 @@ VERIFY_CHECKS = {
 VERIFY_TIMEOUT = int(os.environ.get("VERIFY_TIMEOUT", "900"))
 
 
+# Cosine below this is clear junk. Deliberately conservative: measured, the
+# worst genuine query scored 0.476 and the best nonsense 0.445, so a cutoff
+# placed between them would be fitted to a handful of samples and would
+# sometimes discard good results. This catches only the obvious case.
+#
+# Laya was tried for the ambiguous band -- "does this snippet answer this
+# query" -- across four phrasings, and separated nothing: the nonsense query
+# "quantum teapot recursion" scored 0.83-0.85, HIGHER than every genuine
+# query, on all four. It is a good classifier for decisions with named
+# options; snippet relevance is not one of them.
+WEAK_SIM = 0.40
+
+
+def _no_symbol(symbol: str, kind: str) -> str:
+    """Explain a symbol miss well enough that the next call is obvious.
+
+    A bare "not found" is indistinguishable from a typo, a casing difference,
+    a symbol that lives outside the indexed roots, and an empty index. The
+    caller cannot pick a next step without knowing which, so say which.
+    """
+    import difflib
+    con = _db()
+    try:
+        names = [r[0] for r in con.execute("SELECT DISTINCT name FROM defs").fetchall()]
+    except sqlite3.Error:
+        names = []
+    con.close()
+    if not names:
+        return (f"No {kind} for {symbol!r}: nothing is indexed. "
+                f"Run scripts/index_code.py against the repository first.")
+    near = difflib.get_close_matches(symbol, names, n=6, cutoff=0.6)
+    if not near:
+        low = symbol.lower()
+        near = [n for n in names if low in n.lower()][:6]
+    out = f"No {kind} for {symbol!r} among {len(names)} indexed symbols."
+    if near:
+        out += "\nClosest indexed names:\n" + "\n".join(f"  {n}" for n in near)
+    else:
+        out += ("\nNo similar name is indexed either, so this symbol is probably "
+                "defined outside the indexed roots, or comes from a dependency. "
+                "grep for it as a literal to find usages.")
+    return out
+
+
 def handle(req: dict) -> dict | None:
     mid, method = req.get("id"), req.get("method")
 
@@ -381,12 +450,24 @@ def handle(req: dict) -> dict | None:
                     text = "\n\n".join(
                         f"### {h['path']}:{h['start']}-{h['end']}  (score {h['score']})\n"
                         f"```\n{h['text']}\n```" for h in hits)
+                    # Semantic search ALWAYS returns its nearest neighbours, so
+                    # a query with no match in the corpus comes back looking
+                    # exactly like a query with a good one -- real-looking
+                    # snippets at score 0.0. Say when the top hit is noise,
+                    # because nothing in the results themselves shows it.
+                    best = max(h["sim"] for h in hits)
+                    if best < WEAK_SIM:
+                        text = (f"NO MATCH: best cosine similarity {best}, below "
+                                f"{WEAK_SIM}. Nothing in the index is close to this "
+                                f"query. These are the nearest neighbours, not "
+                                f"answers. Rephrase in the vocabulary the code would "
+                                f"use, or grep for a literal you expect.\n\n" + text)
             elif name == "find_definition":
                 con = _db()
                 rows = sym.find_definition(con, args["symbol"])
                 con.close()
                 if not rows:
-                    text = f"No definition found for '{args['symbol']}'."
+                    text = _no_symbol(args["symbol"], "definition")
                 else:
                     text = "\n".join(
                         f"{k:<10} {n}  ->  {p}:{st}-{en}\n    {ln}"
@@ -398,7 +479,20 @@ def handle(req: dict) -> dict | None:
                                            bool(args.get("calls_only", False)))
                 con.close()
                 if not rows:
-                    text = f"No references found for '{args['symbol']}'."
+                    # "No references" means two completely different things and
+                    # the caller has to know which: a symbol that IS defined and
+                    # has no callers is dead code -- a real answer -- while a
+                    # symbol that is not indexed is a failed lookup.
+                    con = _db()
+                    defined = sym.find_definition(con, args["symbol"])
+                    con.close()
+                    if defined:
+                        where = ", ".join(f"{p}:{st}" for _, _, p, st, _, _ in defined[:3])
+                        text = (f"'{args['symbol']}' is defined ({where}) but nothing "
+                                f"references it in the index. Either it is dead code, "
+                                f"or its callers live outside the indexed roots.")
+                    else:
+                        text = _no_symbol(args["symbol"], "references")
                 else:
                     calls = [r for r in rows if r[1] == "call"]
                     other = [r for r in rows if r[1] != "call"]

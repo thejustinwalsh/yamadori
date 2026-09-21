@@ -125,10 +125,8 @@ TOOL ROUTING -- match the situation, not the wording:
   If retrieved snippets are not enough, refine the query and search again.
   Two focused searches beat one broad one.
 
-  The index covers specific roots and nothing else. A tool that finds nothing
-  tells you what it DOES cover -- read that and adapt. Never retry the same
-  call with its arguments permuted; if a filter matched zero files, the filter
-  is not the problem, your assumption about the layout is.
+  When a tool comes back empty it tells you what it does cover. That is the
+  answer to your next question -- use it.
 
 HARD RULES
 
