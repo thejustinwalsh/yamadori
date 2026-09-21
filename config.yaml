@@ -21,7 +21,15 @@ logLevel: info
 startPort: 10001
 
 macros:
-  server: "C:/Users/jwals/llamacpp-prism/build/bin/llama-server.exe"
+  # OFFICIAL PrismML fork, release prism-b10709-9a9394a.
+  #
+  # NOT sudoingX/llama.cpp branch pr-ptq1-mmv. That branch is ~20% faster on
+  # decode (55.33 vs 46.06 tok/s) and NUMERICALLY BROKEN: generation collapses
+  # into runs of '/' mid-sentence. Measured on identical prompts:
+  #     pr-ptq1-mmv   plain generation 3/5 degenerate, tool calls 0/10
+  #     official      plain generation 5/5 clean,      tool calls 9/9
+  # The speed was real; so was the corruption. Do not switch back.
+  server: "C:/Users/jwals/llamacpp-prism-official/build/bin/llama-server.exe"
   models: "C:/Users/jwals/textgen/user_data/models"
 
   # Qwen's published thinking-mode sampler values for the Qwen3.5/3.8 family

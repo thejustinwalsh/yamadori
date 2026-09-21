@@ -16,11 +16,6 @@ on the machine; nothing leaves ZeroTier.
                          └─▶ :1234  model=reranker
 ```
 
-> **Tool calling is currently unreliable on this stack.** See
-> [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md). Generation, long context,
-> retrieval and the code-intelligence API all work; agentic tool loops do not
-> yet. The previously working configuration is noted there.
-
 ## Endpoints
 
 | | |
@@ -110,9 +105,9 @@ Measured on this hardware, ternary PTQ1_0 with the custom `pr-ptq1-mmv` kernel:
 
 | config | prefill | decode |
 |---|---|---|
-| 5060 Ti alone | 490.8 t/s | **55.33 t/s** |
-| A4000 alone | 413.1 t/s | 45.92 t/s |
-| both GPUs, split | 446.7 t/s | 51.18 t/s |
+| 5060 Ti alone | 490.5 t/s | **46.06 t/s** |
+| A4000 alone | ~413 t/s | ~38 t/s (est.) |
+| both GPUs, split | ~447 t/s | slower than one card |
 
 **One card beats two cards split.** A pipeline split runs the halves
 sequentially with an activation handoff, so it costs ~8%. Nothing in this stack
@@ -124,7 +119,7 @@ For reference, the journey to get here (same model family, same machine):
 |---|---|
 | exl3 4.0bpw, split | 11.1 t/s |
 | GGUF Q4_K_M + MTP, split | 24.9 t/s |
-| ternary PTQ1_0, single card | **~55 t/s** |
+| ternary PTQ1_0, single card | **~46 t/s** |
 
 ## Layout
 
@@ -142,7 +137,7 @@ scripts/
   watchdog.ps1       health check and self-heal
 docs/HERMES.md       wiring an agent to this stack
 docs/KNOWN-ISSUES.md open problems, with the measurements behind them
-mcp/tool_shim.py     tool-call translation shim (WIP, see known issues)
+mcp/tool_shim.py     UNUSED. Kept as a record; see known issues
 mcp/tools_api.py     HTTP transport for the same tools
 ```
 
@@ -172,9 +167,14 @@ and silently puts the primary model on the slower GPU. `config.yaml` assumes
 `textgen/installer_files/cudabuild`. Without that directory on `PATH`,
 `ggml-cuda.dll` fails to load and the server exits silently with status 0.
 
-**Stock llama.cpp cannot load these weights.** `PTQ1_0` is a PrismML quant
-type; stock builds reject it. The binaries come from a local build of
-`sudoingX/llama.cpp` branch `pr-ptq1-mmv`.
+**Build from the OFFICIAL fork only.** `PTQ1_0` is a PrismML quant type and
+stock llama.cpp rejects it, but picking the wrong fork is worse than picking
+none: `sudoingX/llama.cpp` branch `pr-ptq1-mmv` carries a faster PTQ1_0 decode
+kernel that is numerically broken. It is ~20% quicker (55.33 vs 46.06 tok/s)
+and collapses generation into runs of `/`, taking tool calling from 9/9 to
+0/10. Use `PrismML-Eng/llama.cpp` branch `prism`, release
+`prism-b10709-9a9394a`. Full comparison in
+[docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
 
 **Embeddings are asymmetric.** Qwen3-Embedding needs an instruction prefix on
 *queries* and none on documents. Getting it wrong does not error — it silently
