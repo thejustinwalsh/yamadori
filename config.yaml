@@ -1,7 +1,7 @@
 # llama-swap: one OpenAI-compatible endpoint in front of every local model.
 #
-#   API   http://10.242.120.152:1234/v1     (agents point here)
-#   UI    http://10.242.120.152:1234/ui/    (control + live stats)
+#   API   http://ai.thejustinwalsh.me:1234/v1     (agents point here)
+#   UI    http://ai.thejustinwalsh.me:1234/ui/    (control + live stats)
 #
 # GET /v1/models lists everything below, so a client discovers the stack itself.
 #

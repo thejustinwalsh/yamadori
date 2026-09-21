@@ -6,7 +6,7 @@ independent — the agent talks OpenAI to one and MCP to the other.
 ## 1. Chat endpoint
 
 ```
-base URL : http://10.242.120.152:1234/v1
+base URL : http://ai.thejustinwalsh.me:1234/v1
 API key  : none (any dummy string if the client insists)
 model    : bonsai-agent
 ```
@@ -74,6 +74,22 @@ tree-sitter based across 17 languages including Rust, C++, Zig, TypeScript/TSX
 and WGSL/GLSL/HLSL, falling back to a regex heuristic for anything without a
 grammar.
 
+## 2b. HTTP API (for your own code, not the agent)
+
+Same tools, no JSON-RPC:
+
+```
+http://ai.thejustinwalsh.me:1235
+  POST /search      {"query": "...", "top_k": 5}
+  POST /definition  {"symbol": "..."}
+  POST /references  {"symbol": "...", "calls_only": true}
+  GET  /status
+  GET  /openapi.json
+```
+
+GET forms work too: `/definition?symbol=foo`. Use this from build scripts,
+editors and CI; use MCP from agents.
+
 ## 3. System prompt
 
 The stack does not inject one. Put this in your agent, adapted:
@@ -107,10 +123,10 @@ changes which tool gets picked.
 
 ```powershell
 # models present
-curl http://10.242.120.152:1234/v1/models
+curl http://ai.thejustinwalsh.me:1234/v1/models
 
 # tool calling actually fires
-curl http://10.242.120.152:1234/v1/chat/completions -H "Content-Type: application/json" -d '{
+curl http://ai.thejustinwalsh.me:1234/v1/chat/completions -H "Content-Type: application/json" -d '{
   "model":"bonsai-agent",
   "messages":[{"role":"user","content":"Where is parse_tool_call defined?"}],
   "tools":[{"type":"function","function":{
@@ -128,7 +144,7 @@ Expect `finish_reason: tool_calls` within ~30 completion tokens. If you get
 
 | | |
 |---|---|
-| Dashboard | `http://10.242.120.152:1234/ui/` — load/unload, live token stats, request inspector |
+| Dashboard | `http://ai.thejustinwalsh.me:1234/ui/` — load/unload, live token stats, request inspector |
 | Stack log | `logs/stack.log` |
 | Watchdog log | `logs/watchdog.log` |
 | Manual restart | `Start-ScheduledTask -TaskName llama-stack` |

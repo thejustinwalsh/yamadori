@@ -19,3 +19,9 @@ index/
 
 # Upstream reference, fetched by setup
 config.example.yaml
+
+# Secrets -- never commit
+caddy/.env
+caddy/caddy.exe
+caddy/data/
+caddy/config/

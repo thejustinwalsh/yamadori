@@ -20,8 +20,58 @@ on the machine; nothing leaves ZeroTier.
 
 | | |
 |---|---|
-| OpenAI API | `http://10.242.120.152:1234/v1` |
-| Control / stats UI | `http://10.242.120.152:1234/ui/` |
+| OpenAI API | `https://ai.thejustinwalsh.me/v1` (via Caddy) |
+| Control / stats UI | `https://ai.thejustinwalsh.me/ui/` |
+| Code-intelligence API | `https://ai.thejustinwalsh.me/tools` |
+| OpenAPI spec | `https://ai.thejustinwalsh.me/tools/openapi.json` |
+
+Direct ports still work if Caddy is not running: `:1234` for the API and
+dashboard, `:1235` for the tools API.
+
+`ai.thejustinwalsh.me` is public DNS pointing at the ZeroTier address, so the
+endpoints keep working if ZeroTier reassigns the IP.
+
+## TLS
+
+Caddy terminates TLS on 443 so nothing needs a port number. The certificate is
+a real Let's Encrypt cert obtained via **DNS-01**, which is the only challenge
+that can work here: `ai.thejustinwalsh.me` resolves to a ZeroTier address, so
+Let's Encrypt cannot reach it over HTTP for an HTTP-01 or TLS-ALPN challenge.
+DNS-01 proves control by writing a TXT record instead.
+
+Setup is one secret:
+
+```powershell
+copy caddy\env.example caddy\.env
+# paste a DNSimple ACCOUNT token with zone write access, then restart
+Start-ScheduledTask -TaskName llama-stack
+```
+
+`caddy/.env` is gitignored. The launcher starts Caddy only when the token is
+present, so the stack still runs on raw ports without it.
+
+## Two transports for the same tools
+
+MCP is for agents; the HTTP API is for your own software. Identical logic
+behind both — `mcp/code_search.py` and `mcp/tools_api.py` import the same
+module, so they cannot drift.
+
+```bash
+# your code, no JSON-RPC needed
+curl "http://ai.thejustinwalsh.me:1235/definition?symbol=parse_tool_call"
+
+curl http://ai.thejustinwalsh.me:1235/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"how are tool calls parsed","top_k":5}'
+```
+
+| route | use when |
+|---|---|
+| `POST /definition` | you know the identifier — sqlite lookup, no GPU |
+| `POST /references` | before changing a signature or deleting code |
+| `POST /search` | you cannot name it — embeddings + rerank |
+| `GET /status` | index coverage |
+| `GET /openapi.json` | self-discovery for tooling |
 
 ## Models
 

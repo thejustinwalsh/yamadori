@@ -7,7 +7,7 @@ browser flow. Two commands:
 gh auth login -h github.com
 
 # PRIVATE is the right default -- config.yaml contains your ZeroTier IP
-# (10.242.120.152) and local filesystem paths.
+# (ai.thejustinwalsh.me) and local filesystem paths.
 gh repo create llama-stack --private --source=. --remote=origin --push
 ```
 
