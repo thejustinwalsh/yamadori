@@ -30,6 +30,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 import symbols as sym
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fusion
 
 STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 INDEX_DB = os.environ.get("CODE_INDEX_DB",
@@ -143,6 +145,100 @@ def load_index() -> tuple[list[Chunk], np.ndarray | None]:
     chunks = [Chunk(r[0], r[1], r[2], r[3]) for r in rows]
     mat = np.vstack([np.frombuffer(r[4], dtype=np.float32) for r in rows])
     return chunks, mat
+
+
+_LEX: "fusion.Lexical | None" = None
+_LEX_SIG: tuple = ()
+
+
+def _lexical(chunks: list[Chunk]) -> "fusion.Lexical":
+    """Build the BM25 side once per index, not once per query."""
+    global _LEX, _LEX_SIG
+    sig = (len(chunks), chunks[0].path if chunks else "", INDEX_DB)
+    if _LEX is None or _LEX_SIG != sig:
+        _LEX = fusion.Lexical([(c.path, c.text) for c in chunks])
+        _LEX_SIG = sig
+    return _LEX
+
+
+def search_fused(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
+    """Three independent retrievers, fused, with agreement as the confidence.
+
+    Their failure modes differ -- embeddings miss on vocabulary mismatch,
+    lexical misses when the query words are everywhere, symbol lookup misses
+    anything that is not a declaration -- so a file all three surface is
+    supported by three different kinds of evidence. That is a far better
+    confidence signal than a cosine score which, measured on this corpus,
+    separates genuine from nonsense queries by only 0.03.
+    """
+    chunks, mat = load_index()
+    if mat is None:
+        return []
+
+    wide = max(top_k * 3, 10)
+    rankings: dict[str, list[str]] = {}
+
+    # 1. semantic
+    sem = search(query, wide)
+    rankings["semantic"] = [h["path"] for h in sem]
+    sim_by_path = {h["path"]: h["sim"] for h in sem}
+    text_by_path = {h["path"]: (h["start"], h["end"], h["text"]) for h in sem}
+
+    # 2. lexical
+    try:
+        lex = _lexical(chunks)
+        idxs = lex.search(query, wide)
+        seen, lex_paths = set(), []
+        for i in idxs:
+            p = chunks[i].path
+            if p not in seen:
+                seen.add(p)
+                lex_paths.append(p)
+                text_by_path.setdefault(p, (chunks[i].start, chunks[i].end, chunks[i].text))
+        rankings["lexical"] = lex_paths
+    except Exception:                                            # noqa: BLE001
+        pass
+
+    # 3. symbol table -- NOT a ranker. It answers a yes/no question ("is there
+    # a declaration named this here"), so it is collected as a tag and never
+    # enters the fusion. Its rows arrive in table order, and letting that order
+    # act as a rank made both the RRF contribution and the confidence tier
+    # depend on SQLite's insertion order.
+    symbol_hits: set[str] = set()
+    symbol_name: dict[str, str] = {}
+    try:
+        con = _db()
+        words = set(fusion.content_words(query))
+        if words:
+            for name, path, start, end in con.execute(
+                    "SELECT name, path, start, end FROM defs").fetchall():
+                parts = set(fusion.content_words(name))
+                if parts and parts <= words:
+                    symbol_hits.add(path)
+                    symbol_name.setdefault(path, name)
+                    text_by_path.setdefault(path, (start, end, ""))
+        con.close()
+    except Exception:                                            # noqa: BLE001
+        pass
+
+    rows = fusion.fuse(rankings)
+    out = []
+    for r in rows[:max(top_k * 2, 8)]:
+        start, end, text = text_by_path.get(r["path"], (0, 0, ""))
+        is_sym = r["path"] in symbol_hits
+        out.append({**r, "tier": fusion.tier(r, symbol_hit=is_sym),
+                    "declares": symbol_name.get(r["path"]),
+                    "sim": sim_by_path.get(r["path"]),
+                    "start": start, "end": end, "text": text})
+    # A declaration match is the strongest evidence available and may sit
+    # outside both rankers' top-N, so surface it even when they missed it.
+    known = {r["path"] for r in out}
+    for p in sorted(symbol_hits - known)[:2]:
+        start, end, text = text_by_path.get(p, (0, 0, ""))
+        out.insert(0, {"path": p, "score": 0.0, "found_by": [], "best_rank": 0,
+                       "tier": "exact", "declares": symbol_name.get(p),
+                       "sim": None, "start": start, "end": end, "text": text})
+    return out
 
 
 def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
