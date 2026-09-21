@@ -39,10 +39,11 @@ EFFORT = os.environ.get("AGENT_EFFORT")   # low | medium | xhigh
 # failure and is not one.
 MAX_TOK = int(os.environ.get("AGENT_MAX_TOKENS", "3000"))
 
-SYSTEM = """You ship with a code-intelligence stack. It is not something your
-harness had to provide and not something you should hesitate to spend: it runs
-on this machine, against an index of this codebase, over a warm GPU. No
-network, no rate limit, no quota. Calling it is close to free; guessing is not.
+SYSTEM = """You ship with a code-intelligence stack. It runs on this machine,
+against an index of this codebase, over a warm GPU: no network, no rate limit,
+no quota. Spend it freely. A symbol lookup costs ~19 tokens; reading the file
+blind to find the same thing costs ~8,000. Calling these is close to free.
+Guessing is the expensive option.
 
 WHAT YOU HAVE, and what each is best at
 
