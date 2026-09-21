@@ -145,10 +145,19 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
     embed_order = [(i, float(sims[top[i]])) for i in range(min(top_k, len(cand)))]
     try:
         ranked = rerank(query, docs, min(top_k, len(docs)))
-        # Degenerate output (all zeros / empty) means the reranker could not
-        # judge these documents. Embedding order is a far better answer than
-        # an arbitrary permutation, so prefer it.
-        if not ranked or all(s <= 1e-6 for _, s in ranked):
+        # Only ORDER matters from a reranker; the absolute scale does not.
+        #
+        # An earlier version rejected any result where every score was below
+        # 1e-6, on the assumption scores are probabilities. They are not always:
+        # this setup returns correctly-ordered scores around 1e-13, and that
+        # guard was silently discarding a good ranking in favour of raw
+        # embedding order -- which is exactly the degradation it existed to
+        # prevent.
+        #
+        # The real degenerate case is a reranker that cannot separate the
+        # documents at all, i.e. every score identical. Detect that instead.
+        scores = [s for _, s in ranked]
+        if not ranked or (len(set(scores)) == 1):
             ranked = embed_order
     except Exception:
         ranked = embed_order
