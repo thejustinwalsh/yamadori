@@ -73,6 +73,26 @@ models:
         "bonsai-agent":
           chat_template_kwargs:
             enable_thinking: false
+          # Tool selection is a CLASSIFICATION, not prose, so the stack's
+          # thinking-mode default of 1.0 is the wrong sampler for it.
+          #
+          # HONEST EVIDENCE. Scoring only the first tool call over 9 labelled
+          # requests x 3 reps, run twice:
+          #     run 1   t=1.0 7.7   t=0.3 8.7   t=0.0 8.0
+          #     run 2   t=1.0 8.7   t=0.3 8.3   t=0.0 8.0
+          # The t=1.0 row moved a full point between runs on identical inputs.
+          # That sample is too small to claim an accuracy win, and an earlier
+          # version of this comment did exactly that.
+          #
+          # What IS reproducible across every run is token cost: 903-956 at
+          # t=0.3 versus 1086-1175 at t=1.0, roughly 15% fewer for the same
+          # work. That, plus lower temperature being the right shape for
+          # picking one of eight labels, is why this is set.
+          #
+          # Greedy (0.0) is NOT the answer -- it scored no better and the
+          # model card warns greedy decoding degrades this family.
+          # Clients can still override per request.
+          temperature?: 0.3
     cmd: |
       ${server}
       --port ${PORT}
