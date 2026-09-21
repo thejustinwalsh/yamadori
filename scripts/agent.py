@@ -18,12 +18,26 @@ import sys
 import time
 import urllib.request
 
+# Windows consoles default to cp1252, which raises UnicodeEncodeError on the
+# arrows and box characters models routinely emit -- crashing the harness
+# AFTER a correct answer was produced. Errors are replaced rather than raised.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mcp"))
 import code_search as cs  # noqa: E402
 
 API = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 MODEL = os.environ.get("AGENT_MODEL", "bonsai-agent")
 MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "12"))
+EFFORT = os.environ.get("AGENT_EFFORT")   # low | medium | xhigh
+# A final answer that cites files and shows a diff does not fit in 1500 tokens.
+# Too low a cap truncates the answer mid-sentence, which reads like a model
+# failure and is not one.
+MAX_TOK = int(os.environ.get("AGENT_MAX_TOKENS", "3000"))
 
 SYSTEM = """You are a principal engineer working in an unfamiliar codebase.
 
@@ -36,14 +50,36 @@ and say in one short line why that tool and not another.
   The code may use OTHER words       -> search_code  (last resort, costs most)
   You have a path and line range     -> read_file
   A yes/no you will act on           -> judge
+  You have changed anything          -> verify
+
+These are assistance tools: local, fast and free. Your harness supplies the
+tools that edit files and run commands; use those for the change itself, and
+these for everything you need to know before and after it.
+
+THE LOOP. Nobody gets an edit right first try, and you are not expected to.
+What is expected is that you close the loop:
+
+    read -> edit -> verify -> read the failure -> edit -> verify
+
+A change that has not been checked is a guess, however good the reasoning
+behind it. Run the project's linter after every edit -- it costs seconds. Run
+its tests once the edits are complete. `verify` will run them for you and, with
+no argument, list what this project offers; if your harness gives you a better
+way to run them, use that instead. Either way, run them.
+
+A failing check is the loop working. Read the error, fix it, run it again.
+Prefer three small checked edits to one large unchecked one.
 
 HARD RULES
 - Never state what code does without having read it.
 - Never invent an API. If a tool returns nothing useful, try a different one.
 - Follow the conventions already in the file you are editing.
+- Never claim something works because it looks right. A check decides, not you.
+- Do not stop at a proposed diff. Apply it, then check it.
 
-When you have read enough, produce the actual edit as a diff or a complete
-replacement function. Do not describe what you would do -- do it."""
+Finish by saying which checks you ran and what they returned. If you could not
+get a check to pass, say so plainly and show the remaining error -- an honest
+failing result is worth more than a confident unverified one."""
 
 
 def tools_spec():
@@ -56,8 +92,11 @@ def tools_spec():
 
 
 def call_model(messages, tools):
-    body = json.dumps({"model": MODEL, "messages": messages,
-                       "tools": tools, "max_tokens": 1500}).encode()
+    payload = {"model": MODEL, "messages": messages,
+               "tools": tools, "max_tokens": MAX_TOK}
+    if EFFORT:
+        payload["reasoning_effort"] = EFFORT
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(f"{API}/v1/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})
     t0 = time.time()
