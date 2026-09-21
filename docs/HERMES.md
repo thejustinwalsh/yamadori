@@ -6,10 +6,19 @@ independent — the agent talks OpenAI to one and MCP to the other.
 ## 1. Chat endpoint
 
 ```
-base URL : http://ai.thejustinwalsh.me:1234/v1
-API key  : none (any dummy string if the client insists)
+base URL : http://10.242.120.152:1234/v1     (ZeroTier address)
+API key  : required -- see .keys/ on the server
 model    : bonsai-agent
 ```
+
+Port 1234 is now the PROXY, not llama-swap. llama-swap moved to
+127.0.0.1:11434 and is no longer reachable from the network, because it has no
+authentication of its own and exposing it bypassed everything: no key, no
+tools, no account isolation, no logging. Nothing downstream had to change --
+1234 is the port every client was already pointed at.
+
+The key is required. A request without one returns 401. Keys are minted with
+`python mcp/accounts.py create <label>` and only their hash is stored.
 
 Use **`bonsai-agent`**, not `bonsai`, for anything with tools. See the table in
 the README: with thinking enabled the model burns its entire token budget
