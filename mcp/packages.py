@@ -9,12 +9,18 @@ every question with library internals and the user's own code stops winning
 anything. Dependencies are consulted only when the repository itself came back
 empty.
 
-WHY IT IS LABELLED LOUDLY
+WHY IT SAYS WHERE IT CAME FROM
 
-An answer drawn from `three@0.185.1` and an answer drawn from the user's own
-file look identical once they are both just text with a path. Reading library
-internals as if they were project code is a specific and expensive confusion,
-so every result says which package and which version it came from.
+This is a projection from a bundled dependency's source back into the answer,
+and saying so is useful rather than cautionary. A caller who knows a result
+came from `three@0.185.1` can act on it -- check the installed version, read
+more of that file, cite it. A caller who does not know has to guess whether a
+path belongs to their project.
+
+Earlier wording framed this as a warning ("NOT this repository's own code").
+That is negation, which this stack has measured to be read as topic rather
+than as a constraint, and it undersells a capability: reading the source of
+what you depend on is the point, not a hazard.
 
 VERSION IS PART OF THE IDENTITY. An index of three@0.186 answering a question
 about three@0.180 is worse than no index, because it is confidently wrong
@@ -74,8 +80,8 @@ def search(root: str, query: str, tool: str, args: dict) -> str | None:
                 continue
             if _is_empty(text):
                 continue
-            out.append(f"== from dependency {name}@{version}, NOT this "
-                       f"repository's own code ==\n{text[:2500]}")
+            out.append(f"== projected from {name}@{version} source ==\n"
+                       f"{text[:2500]}")
             if out:
                 break      # one good source is enough; more is noise
     finally:
