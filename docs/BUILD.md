@@ -5,7 +5,31 @@ it. Items at the bottom are things to **not** build, with the reason.
 
 ---
 
-## 1. Speculative decoding — the speed lever
+## 0. Parallel sampling and speculative decoding CONFLICT
+
+Measured on this box, concurrent completions against the one model instance:
+
+    N=1   5.5s   36.6 tok/s
+    N=2   8.8s   45.3 tok/s
+    N=4  14.9s   53.8 tok/s    <- best throughput
+    N=8  32.5s   49.2 tok/s    <- batch saturates, regresses
+
+Four candidates cost 2.7x the wall clock of one, not 4x, because batching
+recovers memory bandwidth that a single stream leaves idle.
+
+That is the same idle bandwidth speculative decoding exploits, and the
+published numbers show it collapsing as batch size grows -- 1.96x at batch 1
+falling to 0.7x at batch 48, and stock EAGLE in vLLM going 1.3x at batch 2 to
+0.7x at batch 48. **They cannot both win.**
+
+Given best-of-N also produces something speculative decoding does not -- a set
+of candidates to select from, and the labelled data that trains the selector --
+parallel sampling is the better use of the same headroom. Speculative decoding
+drops to a measurement worth doing for the SINGLE-sample path (interactive
+chat, where N=1 and latency is what the user feels), not for the verified-edit
+path.
+
+## 1. Speculative decoding -- the speed lever (now scoped to N=1 only)
 
 **Problem it solves:** a complex task taking days. Speed is the binding
 constraint; cache economics are not, because the cache costs us nothing.
