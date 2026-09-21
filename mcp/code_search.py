@@ -46,18 +46,25 @@ CANDIDATES = 40
 RERANK_DOC_CHARS = 1200
 DEFAULT_TOP_K = 5
 
-# Reranking only pays when the list is short enough that ORDER decides what the
-# caller sees. Measured over 11 queries with a known correct file
-# (scripts/eval_rerank.py):
+# Reranking is skipped above this k. This is a LATENCY decision, not an
+# accuracy one -- be careful not to restate it as the latter.
 #
-#   correct at #1     embed 1/11    rerank 3/11    <- rerank wins clearly
-#   correct in top-5  embed 7/11    rerank 7/11    <- identical, for ~1s
+# scripts/eval_rerank.py, 11 queries with a known correct file:
 #
-# mean rank was 5.36 either way: the cross-encoder is high-variance, promoting
-# the right file to #1 or burying it at #14, not shifting the list uniformly.
-# Once five snippets are in the caller's context they all get read, so paying a
-# second to reorder them buys nothing. Rerank when few results are asked for,
-# skip it when many are.
+#   correct at #1     embed 1/11    rerank 3/11    Fisher exact p ~= 0.6: NOT
+#                                                  a result. Do not cite it.
+#   correct in top-5  embed 7/11    rerank 7/11    identical, for ~1s/query
+#   mean rank         5.36          5.36
+#
+# What the numbers do support: the reranker permutes within the top 5 and does
+# not change which files reach the caller at the shipped cutoff. Since all five
+# snippets land in context and get read, paying a second to reorder them buys
+# nothing measurable. Skipping it takes search_code from ~1100ms to 96ms.
+#
+# Two caveats that keep this provisional: the corpus was three.js, which is in
+# every training set, and 11 queries is far too few to detect anything but a
+# huge effect. Re-run against an uncontaminated index before drawing a
+# conclusion about accuracy in either direction.
 RERANK_MAX_K = 2
 
 
@@ -200,6 +207,49 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
 # so the stack has no extra pip dependency beyond numpy.
 # --------------------------------------------------------------------------
 
+# `judge` is implemented below and reachable over the Laya HTTP/WS service, but
+# it is deliberately NOT in TOOLS: it is not calibrated enough to put in front
+# of a model. scripts/eval_judge.py, on unambiguous yes/no engineering
+# questions, scored 6/10 against a 5/10 coin flip, and the errors were
+# systematic rather than noisy -- three of four misses were false positives on
+# the NEGATIVE cases, all landing at 0.67-0.69:
+#
+#   printf(ptr) then free(ptr)   "uses memory after free"   want F, got 0.69
+#   f(): number { return 42 }    "return type is wrong"     want F, got 0.68
+#   borrow-legal Rust            "violates borrow rules"    want F, got 0.67
+#
+# It is scoring what the passage is ABOUT, not whether the proposition holds --
+# the same failure that made it rate the nonsense query "quantum teapot
+# recursion" above every genuine one. A judge a model trusts and that is wrong
+# turns an open question into a confident wrong answer, which is worse than
+# having no judge. Re-expose it only when eval_judge.py passes.
+TOOLS_DISABLED_JUDGE = """
+{
+        "name": "judge",
+        "description": (
+            "Get a typed decision with a calibrated probability in ~25ms, from a small "
+            "classifier (Laya) rather than by reasoning. It does NOT explain and cannot "
+            "write -- it only decides. Use it to gate work you would otherwise think "
+            "through: is this diff an improvement, is this failure infrastructure or a "
+            "real regression, is this snippet relevant, is this worth benchmarking. "
+            "Omit options for a true/false judgement."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "state": {"type": "string",
+                          "description": "The text being judged: diff, log, test output, snippet."},
+                "question": {"type": "string",
+                             "description": "What to decide, phrased as an instruction."},
+                "options": {"type": "array", "items": {"type": "string"},
+                            "description": "Choices for a multiple-choice decision. "
+                                           "Omit for true/false."},
+            },
+            "required": ["state", "question"],
+        },
+    },
+"""
+
 TOOLS = [
     {
         "name": "search_code",
@@ -250,30 +300,6 @@ TOOLS = [
                 "calls_only": {"type": "boolean", "default": False},
             },
             "required": ["symbol"],
-        },
-    },
-    {
-        "name": "judge",
-        "description": (
-            "Get a typed decision with a calibrated probability in ~25ms, from a small "
-            "classifier (Laya) rather than by reasoning. It does NOT explain and cannot "
-            "write -- it only decides. Use it to gate work you would otherwise think "
-            "through: is this diff an improvement, is this failure infrastructure or a "
-            "real regression, is this snippet relevant, is this worth benchmarking. "
-            "Omit options for a true/false judgement."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "state": {"type": "string",
-                          "description": "The text being judged: diff, log, test output, snippet."},
-                "question": {"type": "string",
-                             "description": "What to decide, phrased as an instruction."},
-                "options": {"type": "array", "items": {"type": "string"},
-                            "description": "Choices for a multiple-choice decision. "
-                                           "Omit for true/false."},
-            },
-            "required": ["state", "question"],
         },
     },
     {
