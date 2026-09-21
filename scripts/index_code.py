@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import sys
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -135,14 +136,38 @@ def chunk_file(path: str) -> list[tuple[int, int, str]]:
     return out
 
 
+# The embedding server runs at -c 8192; anything longer is rejected with a
+# bare HTTP 400 that aborts the whole indexing run. Generated headers and
+# large type-declaration files exceed it routinely, so cap here rather than
+# discovering it 2000 files in. The full text is still what gets stored and
+# returned -- only the vector is computed from the head of the chunk.
+EMBED_MAX_CHARS = 12000
+EMBED_DIM = 1024          # Qwen3-Embedding-0.6B
+
+
 def embed_batch(texts: list[str]) -> np.ndarray:
+    texts = [t[:EMBED_MAX_CHARS] for t in texts]
     req = urllib.request.Request(
         f"{STACK}/v1/embeddings",
         data=json.dumps({"model": EMBED_MODEL, "input": texts}).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=300) as r:
-        d = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            d = json.load(r)
+    except urllib.error.HTTPError as e:
+        # One oversized or malformed chunk must not cost the whole run. Fall
+        # back to one-at-a-time so the bad chunk is isolated and skipped.
+        if len(texts) == 1:
+            raise
+        rows = []
+        for t in texts:
+            try:
+                rows.append(embed_batch([t])[0])
+            except Exception:                              # noqa: BLE001
+                print(f"  skipped a chunk ({len(t)} chars): {e}", file=sys.stderr)
+                rows.append(np.zeros(EMBED_DIM, dtype=np.float32))
+        return np.vstack(rows)
     v = np.array([row["embedding"] for row in d["data"]], dtype=np.float32)
     return v / np.clip(np.linalg.norm(v, axis=1, keepdims=True), 1e-9, None)
 
