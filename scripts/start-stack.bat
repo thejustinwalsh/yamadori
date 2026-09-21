@@ -59,7 +59,19 @@ if exist ".venv-laya\Scripts\python.exe" (
 )
 
 echo [%date% %time%] starting llama-swap >> "logs\stack.log"
-"%SWAP%" -config "%CFG%" -listen 0.0.0.0:1234 >> "logs\stack.log" 2>&1
+REM llama-swap binds to LOOPBACK ONLY. It has no authentication of its own, so
+REM exposing it is a complete bypass of the proxy: no API key, no tools, no
+REM account isolation, no logging. Verified before this change -- a direct
+REM request to :1234 with no key returned 200.
+REM
+REM The proxy takes 1234 instead, which is the port every client is already
+REM pointed at, so nothing downstream has to be reconfigured to gain auth.
+start "" /B "%SWAP%" -config "%CFG%" -listen 127.0.0.1:11434 >> "logs\stack.log" 2>&1
+
+REM Front door: authenticates, injects tools, detects the repo, logs the corpus.
+set "LLAMA_STACK_URL=http://127.0.0.1:11434"
+set "YAMADORI_PROXY_PORT=1234"
+"%PY%" "%CD%\mcp\proxy.py" >> "logs\proxy.log" 2>&1
 set EXITCODE=%errorlevel%
 echo [%date% %time%] llama-swap exited with %EXITCODE% >> "logs\stack.log"
 exit /b %EXITCODE%

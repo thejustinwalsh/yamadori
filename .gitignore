@@ -30,3 +30,7 @@ caddy/config/
 # Live config carries machine-specific paths; config.template.yaml is the
 # committed one.
 config.yaml
+
+# Account registry and keys -- never commit
+index/accounts/
+.keys
