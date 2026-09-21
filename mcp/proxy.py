@@ -191,7 +191,14 @@ def run_our_tool(name: str, args: dict, db: str | None) -> str:
 def complete(body: dict) -> dict:
     messages = body.get("messages") or []
     root, _ev = detect.detect_repo(messages)
-    info = repos.ensure(root) if root else None
+    # A NEW repository may only be established from harness- or user-supplied
+    # text. Establishing one from a tool result would let any repository name
+    # a directory and have its contents read and summarised back.
+    trusted_root, _ = detect.detect_repo(messages, trusted_only=True)
+    info = (repos.ensure(root, from_trusted=(root == trusted_root))
+            if root else None)
+    if info and info.get("blocked"):
+        print(f"  refused new root {root}: {info['blocked']}", flush=True)
     db = repos.db_path(root) if root else None
 
     # Only actionable states are worth a line. A healthy index says nothing,
