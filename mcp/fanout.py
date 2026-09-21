@@ -212,6 +212,60 @@ def run(payload: dict, n: int = 4, timeout: int = 900,
     }
 
 
+def break_tie(question: str, results: list[dict], timeout: int = 30) -> dict | None:
+    """Ask the decision model to pick, as ONE choice whose options are the
+    candidates.
+
+    This is the primitive it is actually good at. Scoring candidates
+    independently does not work -- its scores are not comparable across
+    different inputs -- and handing it a LIST of states does not batch, it
+    concatenates them and returns a single verdict for the blob, which looks
+    like an answer and is not.
+
+    Measured on a clear case, untuned: one call for four candidates at 240ms
+    against 316ms to score each, correct pick, and a 0.361 margin between the
+    top two.
+
+    Used only when consensus fails. When the variants agree, the agreement is
+    free and better evidenced than any classifier.
+    """
+    import code_search as cs
+    good = [r for r in results if r.get("content")]
+    if len(good) < 2:
+        return None
+    criteria = {}
+    for i, r in enumerate(good):
+        paths, _ = claims(r["content"])
+        label = chr(ord("a") + i)
+        criteria[label] = (", ".join(sorted(paths)[:3]) or
+                           r["content"][:120].replace("\n", " "))
+    try:
+        d = cs._post_json(LAYA_URL_ + "/decide", {
+            "state": question[:2000],
+            "questions": {"pick": {
+                "type": "choice",
+                "instructions": "Which answer best answers the question?",
+                "criteria": criteria}}}, timeout=timeout)
+        a = d["answers"]["pick"]
+    except Exception:                                            # noqa: BLE001
+        return None
+    ps = sorted((a.get("probabilities") or {}).values(), reverse=True)
+    margin = (ps[0] - ps[1]) if len(ps) > 1 else 0.0
+    # Below the floor it did not separate the options, and reporting a pick it
+    # could not make is inventing a decision. Independent evaluation found it
+    # "often confidently wrong", so the margin is the gate, not confidence.
+    if margin < 0.15:
+        return None
+    idx = ord(a["choice"]) - ord("a")
+    if not 0 <= idx < len(good):
+        return None
+    return {"winner": good[idx], "margin": round(margin, 3),
+            "ranking": a.get("probabilities")}
+
+
+LAYA_URL_ = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
+
+
 def dissent_note(v: dict) -> str:
     """What to tell the user when the variants did NOT agree.
 
