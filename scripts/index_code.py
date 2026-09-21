@@ -161,7 +161,16 @@ EMBED_MAX_CHARS = 12000
 EMBED_DIM = 1024          # Qwen3-Embedding-0.6B
 
 
+# Semantic search is off by default -- BM25 beat it on the gauntlet index and
+# the cut rule fired -- so the vectors are dead weight for most indexes. With
+# embeddings skipped, indexing is tree-sitter plus sqlite and needs no GPU at
+# all, which is what makes indexing every dependency of every repo affordable.
+NO_EMBED = os.environ.get("INDEX_NO_EMBED") == "1"
+
+
 def embed_batch(texts: list[str]) -> np.ndarray:
+    if NO_EMBED:
+        return np.zeros((len(texts), EMBED_DIM), dtype=np.float32)
     texts = [t[:EMBED_MAX_CHARS] for t in texts]
     req = urllib.request.Request(
         f"{STACK}/v1/embeddings",
