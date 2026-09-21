@@ -47,6 +47,7 @@ import repos  # noqa: E402
 import corpus  # noqa: E402
 import accounts  # noqa: E402
 import streaming  # noqa: E402
+import packages  # noqa: E402
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1233"))
@@ -173,7 +174,8 @@ def available_checks(root: str) -> list[str]:
     return found
 
 
-def run_our_tool(name: str, args: dict, db: str | None) -> str:
+def run_our_tool(name: str, args: dict, db: str | None,
+                 root: str | None = None) -> str:
     prev = os.environ.get("CODE_INDEX_DB")
     if db:
         os.environ["CODE_INDEX_DB"] = db
@@ -181,13 +183,26 @@ def run_our_tool(name: str, args: dict, db: str | None) -> str:
     try:
         resp = cs.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                           "params": {"name": name, "arguments": args}})
-        return resp["result"]["content"][0]["text"]
+        text = resp["result"]["content"][0]["text"]
     except Exception as e:                                       # noqa: BLE001
         return f"{name} failed: {type(e).__name__}: {e}"
     finally:
         if db and prev:
             os.environ["CODE_INDEX_DB"] = prev
             cs.INDEX_DB = prev
+
+    # The repository had no answer. Its dependencies might -- and until now
+    # they were indexed and unreachable. Tried only on a miss, because
+    # `three` alone is 15,021 chunks against koota's 1,351 and merging them
+    # would bury the user's own code under library internals.
+    if root and packages._is_empty(text):
+        probe = (args.get("query") or args.get("symbol")
+                 or args.get("pattern") or "")
+        if probe:
+            alt = packages.search(root, probe, name, args)
+            if alt:
+                return text.rstrip() + "\n\n" + alt
+    return text
 
 
 def prepare(body: dict) -> dict:
@@ -222,6 +237,13 @@ def complete(body: dict) -> dict:
     trusted_root, _ = detect.detect_repo(messages, trusted_only=True)
     info = (repos.ensure(root, from_trusted=(root == trusted_root))
             if root else None)
+    if info and not info.get("blocked") and root:
+        # Dependency indexes are shared across every repo on the same version
+        # and need no GPU, so most of this is already done for most users.
+        try:
+            packages.ensure_for(root)
+        except Exception:                                        # noqa: BLE001
+            pass
     if info and info.get("blocked"):
         print(f"  refused new root {root}: {info['blocked']}", flush=True)
     db = repos.db_path(root) if root else None
@@ -276,7 +298,7 @@ def complete(body: dict) -> dict:
                 args = {}
             corpus.log_tool_call(turn, root, fn, args, hop)
             t0 = time.time()
-            out = run_our_tool(fn, args, db)
+            out = run_our_tool(fn, args, db, root)
             corpus.log_tool_result(turn, root, fn, out,
                                    (time.time() - t0) * 1000)
             convo.append({"role": "tool", "tool_call_id": c["id"],
@@ -417,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 corpus.log_tool_call(turn, root, fn, args, hop)
                 t0 = time.time()
-                out = run_our_tool(fn, args, db)
+                out = run_our_tool(fn, args, db, root)
                 corpus.log_tool_result(turn, root, fn, out,
                                        (time.time() - t0) * 1000)
                 convo.append({"role": "tool", "tool_call_id": c["id"],
