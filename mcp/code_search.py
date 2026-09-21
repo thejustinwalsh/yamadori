@@ -178,11 +178,24 @@ def search_fused(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
     wide = max(top_k * 3, 10)
     rankings: dict[str, list[str]] = {}
 
-    # 1. semantic
-    sem = search(query, wide)
-    rankings["semantic"] = [h["path"] for h in sem]
-    sim_by_path = {h["path"]: h["sim"] for h in sem}
-    text_by_path = {h["path"]: (h["start"], h["end"], h["text"]) for h in sem}
+    # 1. semantic -- OFF BY DEFAULT. Measured on the gauntlet index (60k chunks
+    # across four private repos, 120 gold queries), embeddings lost to BM25
+    # over the same chunks: recall@5 77/120 vs 92/120, McNemar p=0.0041. Fusing
+    # them did not rescue it: 87/120, and fused vs keyword was 3 wins to 8,
+    # p=0.2266 -- indistinguishable. The pre-registered rule was "cut unless
+    # fusion beats BM25 significantly", so it is cut.
+    #
+    # Caveat kept deliberately: the gold queries are derived from symbol names,
+    # which flatters lexical matching, and the hand-written conceptual set that
+    # would favour embeddings has not been run yet. Set CODE_SEARCH_SEMANTIC=1
+    # to re-enable and re-measure.
+    sim_by_path: dict[str, float] = {}
+    text_by_path: dict[str, tuple] = {}
+    if os.environ.get("CODE_SEARCH_SEMANTIC", "0") == "1":
+        sem = search(query, wide)
+        rankings["semantic"] = [h["path"] for h in sem]
+        sim_by_path = {h["path"]: h["sim"] for h in sem}
+        text_by_path = {h["path"]: (h["start"], h["end"], h["text"]) for h in sem}
 
     # 2. lexical
     try:
