@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import symbols as sym
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fusion
+import rings
 
 STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 INDEX_DB = os.environ.get("CODE_INDEX_DB",
@@ -516,6 +517,10 @@ VERIFY_CHECKS = {
 }
 VERIFY_TIMEOUT = int(os.environ.get("VERIFY_TIMEOUT", "900"))
 
+# The work log is its own module but shares this tool surface, so a
+# client gets it without a second MCP server to configure.
+TOOLS = TOOLS + rings.TOOLS
+
 
 # Cosine below this is clear junk. Deliberately conservative: measured, the
 # worst genuine query scored 0.476 and the best nonsense 0.445, so a cutoff
@@ -846,8 +851,10 @@ def handle(req: dict) -> dict | None:
                     except FileNotFoundError:
                         text = f"{check}: cannot run {cmd[0]!r} -- not on PATH."
             else:
-                return {"jsonrpc": "2.0", "id": mid,
-                        "error": {"code": -32601, "message": f"unknown tool {name}"}}
+                text = rings.handle(name, args)
+                if text is None:
+                    return {"jsonrpc": "2.0", "id": mid,
+                            "error": {"code": -32601, "message": f"unknown tool {name}"}}
             return ok({"content": [{"type": "text", "text": text}]})
         except Exception as e:
             return ok({"content": [{"type": "text",
