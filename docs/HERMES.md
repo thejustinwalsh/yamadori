@@ -23,24 +23,66 @@ aborts generation.
 
 Some clients want the URL without `/v1`. If you get 404s, drop it.
 
-## 2. MCP server
+## 2. MCP server — pick the transport that matches where Hermes runs
 
-stdio transport. Config shape used by most MCP clients:
+This is the thing that silently breaks remote setups. MCP's default transport
+is **stdio**: the `"command"` field is a CLI the client *spawns as a local
+subprocess*. It cannot cross machines. If Hermes runs on your laptop and the
+stack is on the GPU box, a stdio config produces no error — the tools simply
+never appear, which looks exactly like the model ignoring them.
+
+### A. Hermes runs ON the GPU box -> stdio
 
 ```json
 {
   "mcpServers": {
     "code-search": {
-      "command": "C:\\Users\\jwals\\textgen\\installer_files\\env\\python.exe",
-      "args": ["C:\\Users\\jwals\\llama-stack\\mcp\\code_search.py"],
+      "command": "C:\Users\jwals\textgen\installer_files\env\python.exe",
+      "args": ["C:\Users\jwals\llama-stack\mcp\code_search.py"],
       "env": {
         "LLAMA_STACK_URL": "http://127.0.0.1:1234",
-        "CODE_INDEX_DB": "C:\\Users\\jwals\\llama-stack\\index\\code.sqlite3"
+        "LAYA_URL": "http://127.0.0.1:1237",
+        "CODE_INDEX_DB": "C:\Users\jwals\llama-stack\index\code.sqlite3"
       }
     }
   }
 }
 ```
+
+### B. Hermes runs ANYWHERE ELSE -> MCP over HTTP
+
+Same server, same tools, same code path — reachable over ZeroTier:
+
+```
+POST http://ai.thejustinwalsh.me:1235/mcp
+```
+
+It speaks plain MCP JSON-RPC: one request in, one response out.
+
+```bash
+curl http://ai.thejustinwalsh.me:1235/mcp -H "Content-Type: application/json"   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+For a client that wants a config block:
+
+```json
+{
+  "mcpServers": {
+    "code-search": {
+      "type": "http",
+      "url": "http://ai.thejustinwalsh.me:1235/mcp"
+    }
+  }
+}
+```
+
+Exact key names vary between clients (`type`/`transport`, `url`/`endpoint`) —
+check yours. If it only supports stdio, run a thin local relay that forwards
+stdin to that URL; the protocol is identical on both sides.
+
+**Which do you want?** stdio is lower latency and needs no open port. HTTP is
+the only option when the agent is not on the GPU box. Both serve the same
+seven tools from one implementation, so there is nothing to keep in sync.
 
 ### Tools it exposes
 

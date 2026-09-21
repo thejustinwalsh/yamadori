@@ -37,6 +37,10 @@ the code is a consequence of it.
 Work in sub-tasks. For each one, pick the single most appropriate tool before
 acting. Do not call a tool whose answer you already have.
 
+Before every tool call, state in one short line why that tool and not another.
+If you cannot justify it in one line, you have picked the wrong tool or you
+already have the answer.
+
 TOOL ROUTING — match the situation, not the wording:
 
   You know the identifier            -> find_definition
