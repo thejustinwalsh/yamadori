@@ -348,7 +348,7 @@ TOOLS_DISABLED_JUDGE = """
 
 TOOLS = [
     {
-        "name": "search_code",
+        "name": "find_by_meaning",
         "description": (
             "Search the indexed codebase for snippets relevant to a natural-language "
             "query. Returns file path, line range and source text, best match first. "
@@ -368,7 +368,7 @@ TOOLS = [
         },
     },
     {
-        "name": "find_definition",
+        "name": "find_definition_opt",
         "description": (
             "Find where a symbol is DEFINED. Exact name match, instant, no embeddings. "
             "Use this whenever you know the identifier -- a function, struct, class, "
@@ -385,8 +385,16 @@ TOOLS = [
     {
         "name": "find_references",
         "description": (
-            "Find where a symbol is USED -- call sites and mentions. Use before "
-            "changing a signature or deleting code, to see what depends on it. "
+            "Answer 'what depends on this?'. Returns every place a symbol is "
+            "USED -- call sites, imports, mentions -- which is the opposite of "
+            "find_definition_opt, which returns the ONE place it is declared.\n"
+            "Reach for this when the request says: what uses X, what calls X, "
+            "what breaks if I rename or delete X, is X dead code, which files "
+            "import X, what depends on X.\n"
+            "A request about renaming, removing, or the blast radius of a "
+            "change is this tool, not a definition lookup and not a text "
+            "search: it also reports a symbol that IS declared but has no "
+            "users, which is the answer to 'is this dead code'.\n"
             "Set calls_only to list only actual invocations."
         ),
         "inputSchema": {
@@ -399,7 +407,7 @@ TOOLS = [
         },
     },
     {
-        "name": "grep",
+        "name": "find_by_pattern",
         "description": (
             "Literal / regex search across the indexed files. FAST and EXACT. "
             "Try this BEFORE search_code whenever the thing you want probably "
@@ -421,7 +429,7 @@ TOOLS = [
         },
     },
     {
-        "name": "read_file",
+        "name": "read_file_range",
         "description": (
             "Read exact lines from an indexed file. Use this immediately after "
             "find_definition or search_code, which return a path and line range -- "
@@ -440,7 +448,7 @@ TOOLS = [
         },
     },
     {
-        "name": "compact",
+        "name": "summarize_text",
         "description": (
             "Compress long text -- a conversation, a log, a large file -- down to the "
             "parts that matter, keeping identifiers, numbers, file paths and errors "
@@ -460,12 +468,12 @@ TOOLS = [
         },
     },
     {
-        "name": "index_status",
+        "name": "describe_index",
         "description": "Report how many code chunks are indexed and which files are covered.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "verify",
+        "name": "run_check",
         "description": (
             "Run a project check and return its output. THIS IS THE POINT OF THE LOOP: "
             "you are not done when the edit looks right, you are done when a check "
@@ -563,7 +571,7 @@ def handle(req: dict) -> dict | None:
         p = req.get("params", {})
         name, args = p.get("name"), p.get("arguments", {}) or {}
         try:
-            if name == "search_code":
+            if name == "find_by_meaning":
                 hits = search(args["query"], int(args.get("top_k", DEFAULT_TOP_K)))
                 if not hits:
                     text = ("No results. The index may be empty -- run "
@@ -584,7 +592,7 @@ def handle(req: dict) -> dict | None:
                                 f"query. These are the nearest neighbours, not "
                                 f"answers. Rephrase in the vocabulary the code would "
                                 f"use, or grep for a literal you expect.\n\n" + text)
-            elif name == "find_definition":
+            elif name == "find_definition_opt":
                 con = _db()
                 rows = sym.find_definition(con, args["symbol"])
                 con.close()
@@ -652,7 +660,7 @@ def handle(req: dict) -> dict | None:
                     text = (f"judge unavailable ({type(e).__name__}: {e}). "
                             "Is the laya service running on 1237?")
 
-            elif name == "grep":
+            elif name == "find_by_pattern":
                 import re as _re
                 pat = args["pattern"]
                 globsub = (args.get("glob") or "").replace("\\", "/")
@@ -722,7 +730,7 @@ def handle(req: dict) -> dict | None:
                     if len(hits) >= limit:
                         text += f"\n[truncated at {limit}]"
 
-            elif name == "read_file":
+            elif name == "read_file_range":
                 rel = args["path"].replace("\\", "/")
                 start = max(1, int(args.get("start", 1)))
                 end = int(args.get("end", start + 120))
@@ -761,7 +769,7 @@ def handle(req: dict) -> dict | None:
                                      for i in range(start, end + 1))
                     text = f"{rel}:{start}-{end}  ({len(lines)} lines total)\n```\n{body}\n```"
 
-            elif name == "compact":
+            elif name == "summarize_text":
                 focus = args.get("focus") or "anything an engineer would need to continue the work"
                 maxw = int(args.get("max_words", 300))
                 prompt = (
@@ -781,7 +789,7 @@ def handle(req: dict) -> dict | None:
                 except Exception as e:
                     text = f"compaction failed: {type(e).__name__}: {e}"
 
-            elif name == "index_status":
+            elif name == "describe_index":
                 chunks, mat = load_index()
                 files = sorted({c.path for c in chunks})
                 text = (f"{len(chunks)} chunks across {len(files)} files.\n"
@@ -789,7 +797,7 @@ def handle(req: dict) -> dict | None:
                 if len(files) > 40:
                     text += f"\n  ... and {len(files) - 40} more"
 
-            elif name == "verify":
+            elif name == "run_check":
                 import subprocess
                 check = (args.get("check") or "").strip().lower()
                 con = _db()

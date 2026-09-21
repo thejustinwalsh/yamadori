@@ -37,29 +37,29 @@ TEMP = float(os.environ.get("EVAL_TEMP", "0.3"))
 # One defensible first tool each. Ambiguous phrasings are excluded on purpose:
 # this measures whether the prompt steers, not whether the model reads minds.
 TASKS = [
-    ("Where is LineDashedMaterial defined?",                      "find_definition"),
-    ("Show me the Material class.",                               "find_definition"),
-    ("Open the definition of WebGLPrograms.",                     "find_definition"),
+    ("Where is LineDashedMaterial defined?",                      "find_definition_opt"),
+    ("Show me the Material class.",                               "find_definition_opt"),
+    ("Open the definition of WebGLPrograms.",                     "find_definition_opt"),
     ("What uses materialLineDashOffset?",                         "find_references"),
     ("I want to rename gapSize -- what depends on it?",           "find_references"),
     ("Is refreshUniformsDash dead code?",                         "find_references"),
-    ("Find every TODO comment in the renderers.",                 "grep"),
-    ("Where is the uniform totalSize assigned?",                  "grep"),
-    ("Which files import WebGLState?",                            "grep"),
-    ("Show me lines 40 to 60 of materials/LineDashedMaterial.js", "read_file"),
-    ("Open src/materials/Material.js around line 900.",           "read_file"),
-    ("How does this library decide when to recompile a shader?",  "search_code"),
-    ("How is dashing actually implemented end to end?",           "search_code"),
-    ("What is actually in the index?",                            "index_status"),
+    ("Find every TODO comment in the renderers.",                 "find_by_pattern"),
+    ("Where is the uniform totalSize assigned?",                  "find_by_pattern"),
+    ("Which files import WebGLState?",                            "find_by_pattern"),
+    ("Show me lines 40 to 60 of materials/LineDashedMaterial.js", "read_file_range"),
+    ("Open src/materials/Material.js around line 900.",           "read_file_range"),
+    ("How does this library decide when to recompile a shader?",  "find_by_meaning"),
+    ("How is dashing actually implemented end to end?",           "find_by_meaning"),
+    ("What is actually in the index?",                            "describe_index"),
 ]
 
-ROUTER = """  The request names a symbol            -> find_definition
+ROUTER = """  The request names a symbol            -> find_definition_opt
   You want what USES or CALLS it        -> find_references
-  The text appears verbatim somewhere   -> grep
-  The code may use OTHER words          -> search_code
-  You have a path and a line range      -> read_file
-  You changed something                 -> verify
-  A search came back empty              -> index_status"""
+  The text appears verbatim somewhere   -> find_by_pattern
+  The code may use OTHER words          -> find_by_meaning
+  You have a path and a line range      -> read_file_range
+  You changed something                 -> run_check
+  A search came back empty              -> describe_index"""
 
 # --- A: prose, no routing table, no prohibitions ------------------------------
 PROSE = """You are a principal engineer working in an unfamiliar codebase. You
@@ -101,10 +101,10 @@ ROUTER_COSTED = """You are a principal engineer working in an unfamiliar codebas
 
 Match the situation to the tool. Measured cost per answer:
 
-  find_definition    19 tok   exact, instant    the request names a symbol
-  grep               78 tok   exact, fast       it appears verbatim
-  read_file           -       exact             you have a path
-  search_code       182 tok   two GPU models    the code may use other words
+  find_definition_opt  19 tok  exact, instant   the request names a symbol
+  find_by_pattern      78 tok  exact, fast      it appears verbatim
+  read_file_range       -      exact            you have a path
+  find_by_meaning     182 tok  two GPU models   the code may use other words
 
 """ + ROUTER
 
@@ -115,6 +115,9 @@ VARIANTS = {
     "D router+6never":    ROUTER_MANY_NEVER,
     "E router+costs":     ROUTER_COSTED,
 }
+_only = os.environ.get("EVAL_ONLY")
+if _only:
+    VARIANTS = {k: v for k, v in VARIANTS.items() if k.startswith(_only)}
 
 
 def tools_spec():
