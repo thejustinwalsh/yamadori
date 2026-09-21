@@ -65,41 +65,27 @@ def content_words(q: str) -> list[str]:
 
 
 # ---------------------------------------------------------------- keyword arm
-def keyword_rank(query: str, docs: list[tuple[str, str]], top_k: int) -> list[str]:
-    """BM25-ish scoring of the query's content words over chunk text.
+# Uses the same BM25 the stack ships, built ONCE over the corpus. Rebuilding
+# document frequencies per query is O(queries x chunks) and does not finish on
+# a 60k-chunk index.
+import fusion  # noqa: E402
 
-    Deliberately a fair fight: same chunks, same top_k, no embedding model.
-    This stands in for what a model with grep can reach on its own.
-    """
-    terms = content_words(query)
-    if not terms:
-        return []
-    n = len(docs)
-    df = Counter()
-    toks = []
-    for _, text in docs:
-        t = Counter(content_words(text))
-        toks.append(t)
-        for term in set(terms):
-            if t.get(term):
-                df[term] += 1
-    avg = sum(sum(t.values()) for t in toks) / max(n, 1)
-    k1, b = 1.5, 0.75
-    scored = []
-    for i, (path, _) in enumerate(docs):
-        t = toks[i]
-        dl = sum(t.values()) or 1
-        s = 0.0
-        for term in terms:
-            f = t.get(term, 0)
-            if not f:
-                continue
-            idf = math.log(1 + (n - df[term] + 0.5) / (df[term] + 0.5))
-            s += idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * dl / avg))
-        if s > 0:
-            scored.append((s, path))
-    scored.sort(key=lambda x: -x[0])
-    return [p for _, p in scored[:top_k]]
+_LEX = None
+
+
+def keyword_rank(query: str, docs: list[tuple[str, str]], top_k: int) -> list[str]:
+    global _LEX
+    if _LEX is None:
+        _LEX = fusion.Lexical(docs)
+    out, seen = [], set()
+    for i in _LEX.search(query, top_k * 4):
+        p = docs[i][0]
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+        if len(out) >= top_k:
+            break
+    return out
 
 
 # ------------------------------------------------------------------ gold sets
