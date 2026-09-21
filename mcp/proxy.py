@@ -45,6 +45,7 @@ import code_search as cs  # noqa: E402
 import detect  # noqa: E402
 import repos  # noqa: E402
 import corpus  # noqa: E402
+import accounts  # noqa: E402
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1233"))
@@ -310,6 +311,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):                                           # noqa: N802
         if self.path.rstrip("/") != "/v1/chat/completions":
             return self._send(404, {"error": "not found"})
+
+        # The API key a client already sends is the account. Nothing extra to
+        # configure: every OpenAI client has the field and already fills it.
+        account, why = accounts.identify(self.headers.get("Authorization"))
+        if account is None:
+            return self._send(401, {"error": {
+                "message": f"{why}. Set an API key in your client.",
+                "type": "invalid_request_error", "code": "invalid_api_key"}})
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"{}")
