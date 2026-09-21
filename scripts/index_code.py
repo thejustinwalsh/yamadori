@@ -82,6 +82,12 @@ DEF_RE = re.compile(
 
 
 def iter_files(root: str):
+    # A single file is a legitimate "root": incremental refresh names the files
+    # that changed rather than re-walking a tree of thousands.
+    if os.path.isfile(root):
+        if os.path.splitext(root)[1].lower() in EXTS:
+            yield root
+        return
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
         for fn in filenames:
@@ -186,12 +192,17 @@ def main() -> None:
     # Record which directories were indexed so read_file can resolve the
     # relative paths that find_definition/search_code hand back.
     con.execute("CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY)")
-    con.execute("DELETE FROM chunks")          # full rebuild; incremental is future work
-    con.execute("DELETE FROM defs")
-    con.execute("DELETE FROM refs")
-    con.execute("DELETE FROM roots")
-    for r in roots:
-        con.execute("INSERT OR IGNORE INTO roots VALUES(?)", (os.path.abspath(r),))
+    # INDEX_APPEND is how repos.refresh() re-indexes just the files that
+    # changed. It has already deleted the rows for those paths, so wiping here
+    # would throw away the entire index to add three files back.
+    append = os.environ.get("INDEX_APPEND") == "1"
+    if not append:
+        con.execute("DELETE FROM chunks")
+        con.execute("DELETE FROM defs")
+        con.execute("DELETE FROM refs")
+        con.execute("DELETE FROM roots")
+        for r in roots:
+            con.execute("INSERT OR IGNORE INTO roots VALUES(?)", (os.path.abspath(r),))
     con.commit()
 
     pending: list[tuple[str, int, int, str]] = []
@@ -211,10 +222,22 @@ def main() -> None:
         pending.clear()
         print(f"  indexed {total} chunks", end="\r", flush=True)
 
+    # With INDEX_APPEND the argv entries are files, so relative paths have to
+    # be computed against the indexed root recorded in the database.
+    stored_roots = [r[0] for r in con.execute("SELECT path FROM roots").fetchall()]
+
+    def rel_to_root(path: str, fallback: str) -> str:
+        ap = os.path.abspath(path)
+        for sr in stored_roots:
+            if ap.lower().startswith(os.path.abspath(sr).lower() + os.sep):
+                return os.path.relpath(ap, sr).replace("\\", "/")
+        return os.path.relpath(ap, fallback).replace("\\", "/")
+
     for root in roots:
         print(f"scanning {root}")
+        base = root if os.path.isdir(root) else os.path.dirname(root)
         for path in iter_files(root):
-            rel = os.path.relpath(path, root).replace("\\", "/")
+            rel = rel_to_root(path, base)
 
             # Symbol/call-site index: exact-match navigation, no GPU needed.
             # Built alongside the vector index so one pass over the tree does both.
