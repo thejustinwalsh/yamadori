@@ -55,31 +55,45 @@ PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1233"))
 MAX_TOOL_HOPS = int(os.environ.get("YAMADORI_MAX_HOPS", "12"))
 PREAMBLE = os.environ.get("YAMADORI_PREAMBLE", "1") == "1"
 
+# A thinking model spends tokens reasoning BEFORE it writes anything. If the
+# budget runs out first, the reply is empty content with finish_reason
+# "length" -- which looks to a caller exactly like the model failing.
+#
+# Measured: at max_tokens=300 this model returns 0 characters of content after
+# ~1000 characters of reasoning, with a short instruction AND a long one. At
+# 1200 both return a complete answer. The reasoning grows with instruction
+# complexity (994 vs 3572 characters for the same task), so the floor has to
+# cover the reasoning, not just the answer.
+#
+# Clients commonly default to 256 or 512, so without this floor the stack
+# looks broken to anyone who does not know to raise it.
+MIN_BUDGET = int(os.environ.get("YAMADORI_MIN_BUDGET", "1500"))
+
 # Static by construction -- see the KV CACHE note above. It describes what
 # exists, never where we are.
 CAPABILITY_BLOCK = """
 
 ---
-You have a local code-intelligence stack available as tools. It runs on this
-machine against an index of the repository in front of you: no network, no
-quota. A symbol lookup costs about 19 tokens; reading a file blind to find the
-same thing costs thousands. Calling them is close to free, and guessing is not.
+You have a code-intelligence stack on this machine. It runs against an index
+of the repository in front of you. It needs no network and has no quota.
+
+A symbol lookup costs about 19 tokens. Reading a file to find the same thing
+costs thousands. Call the tools. Guessing costs more.
 
   The request names a symbol            -> find_definition_opt
   You want what USES or CALLS it        -> find_references
-  The text appears verbatim somewhere   -> find_by_pattern
-  The code may use OTHER words          -> find_by_meaning
+  The text appears exactly somewhere    -> find_by_pattern
+  The code uses other words             -> find_by_meaning
   You have a path and a line range      -> read_file_range
   You changed something                 -> run_check
-  Worth not rediscovering later         -> record_step
-  The conversation was just summarised  -> read_rings
+  You learned something worth keeping   -> record_step
+  The conversation was summarised       -> read_rings
 
-These read; they do not write. Your harness supplies whatever edits files and
-runs commands.
+These tools read. They do not write. Your harness supplies the tools that
+edit files and run commands.
 
-A result you have not checked is a guess, however good the reasoning behind it.
-Never state what code does without having read it -- you can read it cheaply,
-so there is no excuse to infer."""
+A result you did not check is a guess. Say which of your statements you
+checked. Read the code before you describe it. Reading is cheap."""
 
 
 def _post(path: str, payload: dict, timeout: int = 1800) -> dict:
@@ -233,6 +247,7 @@ def prepare(body: dict) -> dict:
         status = repos.status_line(info)
     tools, _injected = merge_tools(body.get("tools"))
     out = dict(body)
+    out["max_tokens"] = max(int(out.get("max_tokens") or 0), MIN_BUDGET)
     out["messages"] = augment_messages(messages, status)
     out["tools"] = tools
     out.pop("stream", None)
@@ -267,6 +282,7 @@ def complete(body: dict) -> dict:
 
     tools, injected = merge_tools(body.get("tools"))
     payload = dict(body)
+    payload["max_tokens"] = max(int(payload.get("max_tokens") or 0), MIN_BUDGET)
     payload["messages"] = augment_messages(messages, status)
     payload["tools"] = tools
     payload.pop("stream", None)
