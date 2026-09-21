@@ -130,6 +130,11 @@ arms that survive:
 anything runs. This project has a track record of overclaiming from n=1 and the
 antidote is not more n, it is committing to the decision rule in advance.
 
+SUPERSEDED: the ~50 figure below was the statistical ideal and was cut to
+15-20 later in the same review, on the grounds that each hidden-test task
+costs about an hour to author and only a large effect would change what gets
+reached for anyway. The reasoning is kept because the tradeoff is real.
+
 Target ~50 paired tasks for a 20-point effect. Under 30 detects only effects so
 large we would not need statistics.
 
@@ -230,6 +235,9 @@ winnable classes are under a third of it, narrow the goal again or stop.
    not move the pass rate, the tool will not either.
 4. Fix fusion (done: dedupe, symbol-as-tag, stable tier semantics), run
    `eval_retrieval.py` **once**, apply the cut rule, stop iterating.
+   DONE. It fired: semantic 77/120 against keyword 92/120, McNemar p=0.0041;
+   fused 87/120 against keyword, p=0.2266, indistinguishable. Embeddings are
+   off by default and warm latency fell from 1284ms to 729ms.
 5. Hermes + pre-registered gauntlet, **15-20 tasks** in the classes that
    survived 2 and 3 -- not 50. Each hidden-test task is ~an hour to author, and
    only large effects change what gets reached for anyway.
