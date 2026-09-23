@@ -1,0 +1,16 @@
+{
+  "id": "tg22",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), start your module with these exports, exactly as written:\n\n```ts\nexport const Particle = d.struct({ pos: d.vec3f, vel: d.vec3f }).$name('Particle');\nexport const speed = tgpu.fn([Particle], d.f32)`(p: Particle) -> f32 { return length(p.vel); }`.$name('speed');\nexport const physicsStep = tgpu.fn([Particle, d.f32], Particle)`(p: Particle, dt: f32) -> Particle {\n  var q = p;\n  q.pos += q.vel * dt * speed(p);\n  return q;\n}`.$uses({ speed }).$name('physicsStep');\nexport const renderColor = tgpu.fn([Particle], d.vec4f)`(p: Particle) -> vec4f {\n  return vec4f(vec3f(speed(p)), 1.0);\n}`.$uses({ speed }).$name('renderColor');\n```\n\nThen export `function buildChunks(): [string, string]`. It generates WGSL in two separate `tgpu.resolve` calls -- the first for `physicsStep`, the second for `renderColor` -- whose outputs are later concatenated (first + second) into one shader module. The second chunk must not re-declare anything the first chunk already declared (`Particle`, `speed`), and it must refer to them by the same identifiers the first chunk used, so the concatenation declares every struct and function exactly once. Every call to `buildChunks()` must return the same, complete pair of chunks (calls must not affect each other). Use typegpu's own resolution state for this rather than post-processing the generated text. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg22/test.ts", "runtime": true, "webgpu": true, "entry": ["Particle", "speed", "physicsStep", "renderColor", "buildChunks"]},
+  "reference": "tasks/tg22/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "api": {
+    "tgpu['~unstable'].namespace(options?)": "tgpuUnstable.d.ts, core/resolve/namespace.d.ts, core/resolve/namespace.js",
+    "tgpu.resolve(items, { names: Namespace })": "core/resolve/tgpuResolve.d.ts (TgpuResolveOptions.names)",
+    "Namespace type": "index.d.ts (type export), core/resolve/namespace.d.ts"
+  },
+  "notes": "Probed: with a shared namespace the second resolve omits Particle and speed and still calls them by the same names; resolving the same item a third time in that namespace yields ''. `namespace` is not a key of the 0.12.5 default export (only tgpu['~unstable'].namespace) -- wrong_compile. The test cannot detect text post-processing that happens to produce identical output, so that clause is advisory; alt_ shows a text-free variant."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "rs02",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library for the `wasm32-unknown-unknown` target (no wasm-bindgen) that exports a C-ABI function `sum_i32` taking a pointer to the first element of a caller-owned array of `i32` and its length in elements, and returning the sum as an `i64` (no overflow for any length). Exact signature: `#[no_mangle] pub unsafe extern \"C\" fn sum_i32(ptr: *const i32, len: usize) -> i64`. A null pointer or zero length returns 0. The caller keeps ownership of the array. Answer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs02/grader.mjs", "wasm_support": true, "entry": ["sum_i32"]},
+  "reference": "tasks/rs02/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

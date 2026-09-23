@@ -1,0 +1,11 @@
+{
+  "id": "rs23",
+  "domain": "rust_wasm",
+  "prompt": "Using wasm-bindgen 0.2.128 (the build runs `wasm-bindgen --target nodejs`), expose a Rust type to JavaScript as a class `Accumulator` with this JavaScript API:\n\n- `new Accumulator(initial: number)` -- constructible with `new`; the running total starts at `initial` and the count at 0.\n- `add(x: number): void` -- adds `x` to the total and increments the count.\n- `reset(): void` -- total back to 0 and count back to 0.\n- `total` and `count` -- READ-ONLY properties (accessed as `acc.total`, not `acc.total()`); `count` is an integer.\n- the usual `free()` that wasm-bindgen generates, after which the object must not be usable.\n\nThe generated `.d.ts` must declare the constructor as `constructor(initial: number);` and the two properties as `readonly total: number;` and `readonly count: number;`. Answer with a single ```rust code block containing the library code.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs23/grader.mjs", "bindgen": true, "entry": ["Accumulator"]},
+  "reference": "tasks/rs23/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": "wasm-bindgen 0.2.128 declares getters as `readonly name: T;` and emits `[Symbol.dispose](): void;` next to `free(): void;` (checked against the CLI output on this toolchain)."
+}

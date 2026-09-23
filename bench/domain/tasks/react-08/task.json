@@ -1,0 +1,11 @@
+{
+  "id": "react-08",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as `function useInterval(callback: () => void, delayMs: number | null): void`.\n\nIt calls `callback` repeatedly on an interval.\n\nBehaviour:\n- While `delayMs` is a number, `callback` is called every `delayMs` milliseconds, counted from when the interval started (the first call is `delayMs` after mount, not immediately).\n- Each tick calls the `callback` passed on the most recent render, so it always sees current props and state.\n- Re-rendering with a new `callback` function (for example an inline arrow created on every render) must not restart or delay the interval.\n- Changing `delayMs` restarts the interval: the next call comes `delayMs` (the new value) after the change.\n- `delayMs === null` pauses: no timer is running and `callback` is not called until `delayMs` becomes a number again, which starts a fresh interval.\n- No timer may be left pending after the component using it unmounts.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-08/test.tsx", "entry": ["useInterval"]},
+  "reference": "tasks/react-08/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

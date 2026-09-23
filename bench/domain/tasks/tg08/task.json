@@ -1,0 +1,15 @@
+{
+  "id": "tg08",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import * as d from 'typegpu/data'`), export this exact schema:\n\n```ts\nexport const Instance = d.struct({ transform: d.mat4x4f, color: d.vec3f, id: d.u32, velocity: d.vec3f });\nexport const Instances = d.arrayOf(Instance, 64);\n```\n\nand export `function greenChannelRange(index: number): { offset: number; contiguous: number }`. For element `index` of a buffer laid out as `Instances` (standard WGSL storage layout, as typegpu computes it), `offset` is the byte offset of that instance's `color.y` component from the start of the buffer, and `contiguous` is how many bytes, starting at that offset, can be written in one go before reaching the first padding byte of the layout. Derive both from the schema with typegpu's layout helpers rather than hand-computed constants. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg08/test.ts", "runtime": true, "webgpu": true, "entry": ["Instance", "Instances", "greenChannelRange"]},
+  "reference": "tasks/tg08/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "api": {
+    "d.memoryLayoutOf(schema, accessor) -> { offset, contiguous }": "data/offsetUtils.d.ts, data/offsetUtils.js",
+    "d.sizeOf": "data/sizeOf.d.ts"
+  },
+  "notes": "Instance is 96 bytes (92 + 4 trailing padding). color.y is at 68 within an element; from there color.y, color.z, id and velocity run unbroken to 92, so contiguous = 24. Values read from typegpu 0.12.5 in probe_tg and checked by hand."
+}

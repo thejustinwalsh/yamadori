@@ -39,6 +39,8 @@ import threading
 import time
 import uuid
 
+import repeats
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS_DB = os.environ.get("YAMADORI_CORPUS_DB",
                            os.path.join(HERE, "..", "index", "corpus.sqlite3"))
@@ -101,8 +103,17 @@ def log_turn(turn: str, repo: str | None, messages: list[dict],
                 c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
             last_user = (c or "")[:2000]
             break
+    # The system prompt is where a harness states where it is. Recording its
+    # head makes a detection failure diagnosable instead of a mystery -- the
+    # first real Hermes run returned repo=None and there was no way to see why.
+    system_head = ""
+    for m in messages:
+        if m.get("role") == "system" and isinstance(m.get("content"), str):
+            system_head = m["content"][:1200]
+            break
     log(turn, "turn", repo, payload={
         "request": last_user,
+        "system_head": system_head,
         "tools_offered": sorted(tools_offered),
         "n_messages": len(messages),
         "first_turn": first_turn,
@@ -112,6 +123,52 @@ def log_turn(turn: str, repo: str | None, messages: list[dict],
 def log_tool_call(turn: str, repo: str | None, name: str, args: dict,
                   hop: int) -> None:
     log(turn, "tool_call", repo, name, {"args": args, "hop": hop})
+
+
+_STRATA = (("== TAPROOT", "taproot"), ("== BRANCH", "branch"),
+            ("== SHOOT", "shoot"))
+
+
+def result_strata(result: str) -> dict | None:
+    """Hits per result tier in a find_by_meaning answer, or None if it has no
+    tiers. TAPROOT: a declaration with the name is here. BRANCH: both
+    retrievers agree. SHOOT: one retriever only (code_search.py)."""
+    counts = {"taproot": 0, "branch": 0, "shoot": 0}
+    cur = None
+    seen = False
+    for line in (result or "").splitlines():
+        for head, key in _STRATA:
+            if line.startswith(head):
+                cur, seen = key, True
+                break
+        else:
+            if cur and line.startswith("### "):
+                counts[cur] += 1
+    return counts if seen else None
+
+
+def strata_totals(since_seconds: float = 86400) -> dict:
+    """Result-tier totals over recent searches, for the dashboard."""
+    since = time.time() - since_seconds
+    out = {"taproot": 0, "branch": 0, "shoot": 0, "searches": 0,
+           "window_seconds": since_seconds}
+    try:
+        con = _db()
+        rows = con.execute(
+            "SELECT payload FROM events WHERE kind='tool_result' AND ts >= ? "
+            "AND payload LIKE '%\"strata\"%'", (since,)).fetchall()
+        con.close()
+    except Exception:                                            # noqa: BLE001
+        return out
+    for (payload,) in rows:
+        try:
+            s = json.loads(payload).get("strata") or {}
+        except ValueError:
+            continue
+        out["searches"] += 1
+        for k in ("taproot", "branch", "shoot"):
+            out[k] += int(s.get(k) or 0)
+    return out
 
 
 def log_tool_result(turn: str, repo: str | None, name: str, result: str,
@@ -128,10 +185,35 @@ def log_tool_result(turn: str, repo: str | None, name: str, result: str,
             paths.append(line.split(":")[0].strip()[:200])
         if len(paths) >= 12:
             break
+    extra = {}
+    strata = result_strata(result)
+    if strata:
+        # Counts only, so safe for a bound repository too. They feed the
+        # dashboard's TIER STRATA panel (vitals.strata()), which had no
+        # source and filled its space with prose instead.
+        extra["strata"] = strata
+    if repo is None:
+        # No repository bound: the result came from PUBLIC package indexes or
+        # our own tools, never a user's source, so it is kept in full (capped
+        # like the result the model saw). Without it a looping session could
+        # not be read back: the typegpu loop of 2026-09-22 showed only
+        # "4165 chars" per result and the repair had to be inferred.
+        extra["text"] = result[:6000]
     log(turn, "tool_result", repo, name, {
+        **extra,
         "chars": len(result), "ms": round(ms, 1),
         "paths": paths,
-        "empty": "no matches" in result[:80] or "not found" in result[:80],
+        # ONE definition of empty, imported rather than restated.
+        #
+        # This used to test "no matches"/"not found" in the first 80 chars,
+        # a narrower rule than the one repeats.py applies. find_by_meaning
+        # says "No results.", which matches neither -- so a request that
+        # searched twelve times and found nothing was logged twelve times as
+        # `empty: false`. This corpus is the training data for the decision
+        # model, and it was being taught that those searches succeeded.
+        #
+        # Two copies of a predicate drift apart. There is now one.
+        "empty": repeats._empty(result),
     })
 
 

@@ -1,0 +1,11 @@
+{
+  "id": "react-25",
+  "domain": "react",
+  "prompt": "Write a small toast-notification system for React 19 in TypeScript (strict mode). Export exactly these two:\n\n```ts\nfunction ToastProvider(props: { children: React.ReactNode; duration?: number }): React.ReactElement\nfunction useToast(): { show: (message: string) => number; dismiss: (id: number) => void }\n```\n\n`useToast` is called by components rendered inside a `ToastProvider`.\n\nBehaviour:\n- `ToastProvider` renders its `children` and, next to them, the toasts currently shown.\n- `show(message)` adds a toast and returns a numeric id that is different from every id returned before. `dismiss(id)` removes that toast at once; an id that is not currently shown is ignored.\n- Each toast is an element with role `status` that contains the message text and a button with accessible name \"Dismiss\"; clicking that button removes the toast at once. The toasts are the only elements with role `status`, and they appear in the order they were shown (oldest first).\n- Each toast disappears by itself `duration` milliseconds after it was shown (default `duration`: 3000). Every toast has its own deadline: showing a new toast does not postpone or bring forward the others.\n- At most 3 toasts are shown. Showing a 4th removes the oldest one immediately.\n- Whenever no toast is shown, no timer may be pending, whether the toasts were dismissed, dropped as the oldest, or expired; and no timer may be pending after the provider unmounts.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-25/test.tsx", "entry": ["ToastProvider", "useToast"]},
+  "reference": "tasks/react-25/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "component"
+}

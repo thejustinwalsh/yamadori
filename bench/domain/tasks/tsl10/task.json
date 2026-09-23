@@ -1,0 +1,49 @@
+{
+  "id": "tsl10",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer + TSL. This r184 module writes view-space normals into an MRT attachment and reads them back:\n\n```js\nimport { pass, mrt, output, normalView, directionToColor, colorToDirection, sample } from 'three/tsl';\n\nexport function createNormalPass( scene, camera ) {\n\n\tconst scenePass = pass( scene, camera );\n\tscenePass.setMRT( mrt( { output, normal: directionToColor( normalView ) } ) );\n\n\tconst sceneNormal = sample( ( uvNode ) => colorToDirection( scenePass.getTextureNode( 'normal' ).sample( uvNode ) ) );\n\n\treturn { scenePass, sceneNormal };\n\n}\n```\n\nIn r185 both normal-packing helpers it uses only survive as deprecated shims. Port it to r185 with named imports from 'three/tsl', keeping the export and the return shape `{ scenePass, sceneNormal }`. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "createNormalPass"
+    ],
+    "require": [
+      {
+        "name": "packNormalToRGB",
+        "as": "call"
+      },
+      {
+        "name": "packNormalToRGB",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "unpackRGBToNormal",
+        "as": "call"
+      },
+      {
+        "name": "unpackRGBToNormal",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "mrt",
+        "as": "call"
+      },
+      {
+        "name": "pass",
+        "as": "call"
+      }
+    ],
+    "forbid": [
+      "directionToColor",
+      "colorToDirection"
+    ]
+  },
+  "reference": "tasks/tsl10/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": "directionToColor -> packNormalToRGB and colorToDirection -> unpackRGBToNormal, @deprecated r185: r185 src/nodes/utils/Packing.js:39-45 and :54-60; new names at Packing.js:13 and :23. r175 src/nodes/utils/Packing.js:11,21 define the old names.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

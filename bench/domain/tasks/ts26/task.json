@@ -1,0 +1,20 @@
+{
+  "id": "ts26",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) with a typed, immutable HTTP request builder. Export:\n\n- `type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'`\n- `type RequestSpec = { url: string; method: Method; headers: Record<string, string>; body?: string }`\n- `request()` -- returns an empty builder.\n\nA builder has chainable methods, each returning a NEW builder (earlier builders are never modified, so one partially built builder can be branched into several requests):\n\n- `url(url: string)` and `method(m: Method)` -- each may be called at most once, in either order;\n- `header(name: string, value: string)` -- any number of times; a later value for the same name replaces the earlier one;\n- `body(body: string)` -- only after `method(...)` has been called with a method other than `'GET'`; may be called again to replace the body;\n- `build(): RequestSpec` -- returns a fresh object with the url, method, a copy of the headers, and `body` only if `body()` was called (otherwise no `body` key at all).\n\nThese rules must be enforced at COMPILE time: calling `build()` before both `url` and `method` have been set, setting `url` or `method` twice, calling `body()` before `method()` or after `method('GET')`, or passing an unknown method are type errors. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts26/test.ts",
+    "runtime": true,
+    "entry": [
+      "request",
+      "Method",
+      "RequestSpec"
+    ]
+  },
+  "reference": "tasks/ts26/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "notes": "wrong_test is the natural phantom-type-parameter class whose state parameter is never used by a member: it is structurally invisible, so none of the compile-time rules hold. alt_this_params shows the same design fixed with a `declare` phantom field."
+}

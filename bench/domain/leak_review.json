@@ -1,0 +1,22 @@
+{
+  "tc-04179-flip|c88118d4cfee": {
+    "verdict": "idiom",
+    "why": "shares only the key-remapping filter `[K in keyof T as ...]`; Flip swaps keys and values, which the recipe does not show"
+  },
+  "tc-02595-pickbytype|c88118d4cfee": {
+    "verdict": "leak",
+    "why": "the recipe is the answer with Function substituted for U; task excluded"
+  },
+  "tc-02852-omitbytype|c88118d4cfee": {
+    "verdict": "leak",
+    "why": "the inverse of the recipe's filter is the answer; task excluded"
+  },
+  "tc-00005-readonly-keys|183da695b13d": {
+    "verdict": "leak",
+    "why": "the strict Equal<X,Y> trick is the core of the reference; task excluded"
+  },
+  "tc-00223-isany|2e11e8c17660": {
+    "verdict": "leak",
+    "why": "IsAny<T> = 0 extends (1 & T) is the whole answer; task excluded"
+  }
+}

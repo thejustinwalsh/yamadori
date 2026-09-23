@@ -1,0 +1,31 @@
+{
+  "id": "tsl08",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. Write a JavaScript module, with named imports from 'three/tsl', that exports `const angle`: the horizontal texture coordinate `uv().x` (0..1) mapped to an angle in radians covering one full turn (0..2π) by multiplying it with TSL's predefined constant node for 2π. Use that constant under its current r185 name, not a deprecated alias, and not a numeric literal or `PI` times two. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "angle"
+    ],
+    "require": [
+      {
+        "name": "TWO_PI",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "uv",
+        "as": "call"
+      }
+    ],
+    "forbid": [
+      "PI2"
+    ]
+  },
+  "reference": "tasks/tsl08/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "PI2 -> TWO_PI, @deprecated r181: r185 src/nodes/math/MathNode.js:426-429 (`export const PI2 = float( Math.PI * 2 ); // @deprecated r181`, 'Please use the non-deprecated version TWO_PI'); r185 src/nodes/math/MathNode.js:437 `export const TWO_PI`. r165 examples/jsm/nodes/math/MathNode.js:269 `PI2`.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

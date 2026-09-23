@@ -1,0 +1,215 @@
+{
+  "at": 1790126734,
+  "gpus": [
+    {
+      "index": 0,
+      "name": "NVIDIA GeForce RTX 5060 Ti",
+      "used_mib": 13868,
+      "total_mib": 16311,
+      "free_mib": 2443,
+      "pct": 85,
+      "tight": false,
+      "util": 95
+    },
+    {
+      "index": 1,
+      "name": "NVIDIA RTX A4000",
+      "used_mib": 6699,
+      "total_mib": 16376,
+      "free_mib": 9677,
+      "pct": 41,
+      "tight": false,
+      "util": 0
+    }
+  ],
+  "processes": [
+    {
+      "pid": 4236,
+      "ppid": 16024,
+      "what": "Qwen3-Embedding-0.6B-Q8_0.gguf",
+      "port": "10004",
+      "started": "/Date(1790126609144"
+    },
+    {
+      "pid": 21556,
+      "ppid": 16024,
+      "what": "Qwen3-Reranker-0.6B-Q8_0.gguf",
+      "port": "10005",
+      "started": "/Date(1790126610415"
+    },
+    {
+      "pid": 4248,
+      "ppid": 16024,
+      "what": "Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf",
+      "port": "10001",
+      "started": "/Date(1790126604871"
+    },
+    {
+      "pid": 8536,
+      "ppid": 23768,
+      "what": "dash_mock.py",
+      "port": "",
+      "started": "/Date(1790125129289"
+    },
+    {
+      "pid": 9996,
+      "ppid": 8556,
+      "what": "dash_mock.py",
+      "port": "",
+      "started": "/Date(1790126062439"
+    },
+    {
+      "pid": 9612,
+      "ppid": 15972,
+      "what": "laya_service.py",
+      "port": "",
+      "started": "/Date(1790126604598"
+    },
+    {
+      "pid": 7644,
+      "ppid": 9612,
+      "what": "laya_service.py",
+      "port": "",
+      "started": "/Date(1790126604606"
+    },
+    {
+      "pid": 16024,
+      "ppid": 15972,
+      "what": "llama-swap.exe",
+      "port": "11434",
+      "started": "/Date(1790126604638"
+    },
+    {
+      "pid": 8140,
+      "ppid": 9388,
+      "what": "run_tests.py",
+      "port": "",
+      "started": "/Date(1790126673210"
+    },
+    {
+      "pid": 25496,
+      "ppid": 15972,
+      "what": "server.py",
+      "port": "",
+      "started": "/Date(1790126604642"
+    },
+    {
+      "pid": 5724,
+      "ppid": 8140,
+      "what": "test_grade.py",
+      "port": "",
+      "started": "/Date(1790126673255"
+    },
+    {
+      "pid": 10128,
+      "ppid": 12960,
+      "what": "test_grade.py",
+      "port": "",
+      "started": "/Date(1790126719967"
+    },
+    {
+      "pid": 3232,
+      "ppid": 3008,
+      "what": "test_grade_react.py",
+      "port": "",
+      "started": "/Date(1790126732512"
+    },
+    {
+      "pid": 6408,
+      "ppid": 10232,
+      "what": "test_grade_tc.py",
+      "port": "",
+      "started": "/Date(1790126733949"
+    },
+    {
+      "pid": 14308,
+      "ppid": 17332,
+      "what": "test_live_stack.py",
+      "port": "",
+      "started": "/Date(1790126656638"
+    },
+    {
+      "pid": 4692,
+      "ppid": 15972,
+      "what": "tools_api.py",
+      "port": "",
+      "started": "/Date(1790126604569"
+    },
+    {
+      "pid": 3284,
+      "ppid": 15972,
+      "what": "worker.py",
+      "port": "",
+      "started": "/Date(1790126604614"
+    }
+  ],
+  "listeners": [
+    {
+      "port": 1234,
+      "role": "proxy",
+      "addr": "0.0.0.0:1234",
+      "pid": "25496",
+      "conflict": false
+    },
+    {
+      "port": 1237,
+      "role": "laya",
+      "addr": "0.0.0.0:1237",
+      "pid": "7644",
+      "conflict": false
+    },
+    {
+      "port": 10001,
+      "role": "bonsai",
+      "addr": "127.0.0.1:10001",
+      "pid": "4248",
+      "conflict": false
+    },
+    {
+      "port": 11434,
+      "role": "llama-swap",
+      "addr": "127.0.0.1:11434",
+      "pid": "16024",
+      "conflict": false
+    }
+  ],
+  "duplicates": [],
+  "endpoints": [
+    {
+      "name": "llama-swap",
+      "ok": true,
+      "code": 200,
+      "ms": 26
+    },
+    {
+      "name": "laya",
+      "ok": true,
+      "code": 200,
+      "ms": 2
+    }
+  ],
+  "context": {
+    "pool": 147456,
+    "main": 73728,
+    "helper": 36864,
+    "helpers": 2,
+    "reserve": 0,
+    "gib": 6.19
+  },
+  "seed": {
+    "word": "inicialmente",
+    "u32": 11202631,
+    "hex": "0x00AAF047",
+    "at": 1790117889.3770542,
+    "where": "fanout",
+    "token_id": 216949
+  },
+  "strata": {
+    "taproot": 0,
+    "branch": 0,
+    "shoot": 0,
+    "searches": 0,
+    "window_seconds": 86400
+  },
+  "warnings": []
+}

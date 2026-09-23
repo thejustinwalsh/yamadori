@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>YAMADORI // NEBARI — Vector Memory Topology</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&amp;family=Syne:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-error": "#690005",
+            "on-secondary-container": "#ffe6e8",
+            "on-primary-fixed-variant": "#005228",
+            "tertiary-fixed-dim": "#00dbe9",
+            "on-error-container": "#ffdad6",
+            "on-secondary-fixed-variant": "#910030",
+            "surface-container-lowest": "#0a0e17",
+            "on-tertiary-container": "#006d74",
+            "surface-container": "#1c2029",
+            "primary-fixed": "#60ff99",
+            "outline-variant": "#3b4b3d",
+            "surface-container-low": "#181c25",
+            "surface-dim": "#0f131c",
+            "inverse-primary": "#006d37",
+            "inverse-on-surface": "#2c303a",
+            "surface-variant": "#31353f",
+            "surface-bright": "#353943",
+            "primary-container": "#00ff88",
+            "on-tertiary-fixed-variant": "#004f54",
+            "tertiary-fixed": "#7df4ff",
+            "on-primary-fixed": "#00210c",
+            "on-surface": "#dfe2ef",
+            "tertiary-container": "#5cf2ff",
+            "primary": "#f1ffef",
+            "secondary-container": "#d4004b",
+            "outline": "#849585",
+            "error-container": "#93000a",
+            "on-secondary-fixed": "#400011",
+            "on-primary-container": "#007139",
+            "secondary": "#ffb2ba",
+            "surface": "#0f131c",
+            "primary-fixed-dim": "#00e479",
+            "error": "#ffb4ab",
+            "surface-tint": "#00e479",
+            "surface-container-highest": "#31353f",
+            "secondary-fixed": "#ffd9dc",
+            "surface-container-high": "#262a34",
+            "on-surface-variant": "#b9cbb9",
+            "on-tertiary-fixed": "#002022",
+            "secondary-fixed-dim": "#ffb2ba",
+            "on-background": "#dfe2ef",
+            "on-tertiary": "#00363a",
+            "on-primary": "#003919",
+            "tertiary": "#eefeff",
+            "inverse-surface": "#dfe2ef",
+            "background": "#0f131c",
+            "on-secondary": "#670020"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "space-xl": "2rem",
+            "margin": "1rem",
+            "space-lg": "1.25rem",
+            "space-xs": "0.25rem",
+            "space-md": "0.75rem",
+            "space-sm": "0.5rem",
+            "gutter": "0.75rem"
+          },
+          "fontFamily": {
+            "headline-lg": ["Syne"],
+            "body-lg": ["JetBrains Mono"],
+            "label-xs": ["JetBrains Mono"],
+            "title-md": ["JetBrains Mono"],
+            "body-sm": ["JetBrains Mono"],
+            "headline-xl": ["Syne"],
+            "label-md": ["JetBrains Mono"],
+            "headline-xl-mobile": ["Syne"],
+            "headline-sm": ["Syne"]
+          },
+          "fontSize": {
+            "headline-lg": ["26px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+            "body-lg": ["14px", { "lineHeight": "22px", "letterSpacing": "-0.01em", "fontWeight": "400" }],
+            "label-xs": ["9px", { "lineHeight": "12px", "letterSpacing": "0.12em", "fontWeight": "700" }],
+            "title-md": ["15px", { "lineHeight": "20px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+            "body-sm": ["12px", { "lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400" }],
+            "headline-xl": ["36px", { "lineHeight": "42px", "letterSpacing": "-0.04em", "fontWeight": "800" }],
+            "label-md": ["11px", { "lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "500" }],
+            "headline-xl-mobile": ["28px", { "lineHeight": "34px", "letterSpacing": "-0.03em", "fontWeight": "800" }],
+            "headline-sm": ["18px", { "lineHeight": "24px", "letterSpacing": "0em", "fontWeight": "700" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal;
+      font-style: normal;
+      font-size: 20px;
+      line-height: 1;
+      display: inline-block;
+      text-transform: none;
+      letter-spacing: normal;
+      word-wrap: normal;
+      white-space: nowrap;
+      direction: ltr;
+      -webkit-font-smoothing: antialiased;
+      vertical-align: middle;
+    }
+    .laser-border-emerald {
+      border-left: 2px solid #00ff88;
+      box-shadow: -2px 0 10px rgba(0, 255, 136, 0.22);
+    }
+    .laser-border-cyan {
+      border-left: 2px solid #00dbe9;
+      box-shadow: -2px 0 10px rgba(0, 219, 233, 0.22);
+    }
+    .laser-border-crimson {
+      border-left: 2px solid #d4004b;
+      box-shadow: -2px 0 10px rgba(212, 0, 75, 0.25);
+    }
+    .matrix-bg {
+      background-image: radial-gradient(rgba(0, 255, 136, 0.08) 1px, transparent 0);
+      background-size: 14px 14px;
+    }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    .animate-telemetry {
+      animation: pulse-subtle 2.2s infinite ease-in-out;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body-sm antialiased selection:bg-primary-container selection:text-surface-container-lowest min-h-screen pb-24">
+<!-- TOP APP BAR -->
+<header class="sticky top-0 z-40 bg-surface-container-lowest shadow-md">
+<div class="flex justify-between items-center w-full px-margin py-space-xs max-w-7xl mx-auto">
+<div class="flex items-center space-x-space-sm">
+<span class="material-symbols-outlined text-primary-container" data-icon="terminal">terminal</span>
+<div>
+<span class="font-headline-sm text-headline-sm font-bold tracking-wider text-primary">YAMADORI // CORE-0</span>
+<p class="font-label-xs text-label-xs text-on-surface-variant flex items-center gap-1">
+<span>NODE-09</span>
+<span class="text-outline">·</span>
+<span>DIRECT-STORAGE NVMe</span>
+<span class="text-outline">·</span>
+<span class="text-tertiary-fixed-dim">PCIe 5.0</span>
+</p>
+</div>
+</div>
+<div class="flex items-center space-x-space-xs">
+<span class="px-space-xs py-0.5 rounded-DEFAULT bg-surface-container-high border border-outline-variant/35 font-label-xs text-label-xs text-primary-container font-bold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container animate-telemetry"></span>
+          ABL: 99.4%
+        </span>
+</div>
+</div>
+</header>
+<!-- MAIN VIEWPORT CANVAS -->
+<main class="w-full max-w-md mx-auto px-margin pt-space-md space-y-space-md">
+<!-- HERO & BANNER -->
+<section class="bg-surface-container-low border border-outline-variant/35 p-space-md rounded-DEFAULT matrix-bg relative overflow-hidden">
+<div class="absolute -top-12 -right-12 w-32 h-32 bg-primary-container/10 rounded-full blur-2xl pointer-events-none"></div>
+<div class="flex justify-between items-start mb-space-sm">
+<div>
+<div class="flex items-center space-x-space-xs">
+<span class="font-label-xs text-label-xs text-primary-container tracking-widest font-bold">根張り · TOPOLOGY ENGINE</span>
+<span class="px-1 bg-surface-container-highest font-label-xs text-label-xs text-tertiary-fixed-dim border border-outline-variant/35">HNSW-LOCKED</span>
+</div>
+<h1 class="font-headline-xl-mobile text-headline-xl-mobile font-headline-xl text-primary font-extrabold tracking-tight mt-0.5">
+            NEBARI DEPTH
+          </h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Visible Retrieval Architecture // Vector Roots</p>
+</div>
+<div class="text-right">
+<span class="font-label-xs text-label-xs text-on-surface-variant">TOPOLOGY STATE</span>
+<div class="text-primary-container font-title-md text-title-md font-bold flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-primary-container" data-icon="account_tree" style="font-size:16px;">account_tree</span>
+            OPTIMAL
+          </div>
+</div>
+</div>
+<!-- KEY METRICS 4-CELL GRID -->
+<div class="grid grid-cols-2 gap-space-xs pt-space-xs">
+<div class="bg-surface-container-lowest/80 p-space-xs border border-outline-variant/35">
+<span class="font-label-xs text-label-xs text-on-surface-variant block">TOTAL EMBEDDINGS</span>
+<span class="font-title-md text-title-md text-primary font-bold tracking-tight">8,412,990</span>
+<span class="font-label-xs text-label-xs text-primary-container block mt-0.5">INT8 SQ · 100% PERSIST</span>
+</div>
+<div class="bg-surface-container-lowest/80 p-space-xs border border-outline-variant/35">
+<span class="font-label-xs text-label-xs text-on-surface-variant block">GLOBAL RECALL @ 10</span>
+<span class="font-title-md text-title-md text-tertiary-fixed-dim font-bold tracking-tight">99.82%</span>
+<span class="font-label-xs text-label-xs text-outline block mt-0.5">GROUND TRUTH TESTED</span>
+</div>
+<div class="bg-surface-container-lowest/80 p-space-xs border border-outline-variant/35">
+<span class="font-label-xs text-label-xs text-on-surface-variant block">L2 VRAM HIT RATE</span>
+<span class="font-title-md text-title-md text-primary-container font-bold tracking-tight">99.1%</span>
+<span class="font-label-xs text-label-xs text-primary block mt-0.5">HOT SUB-GRAPH SYNC</span>
+</div>
+<div class="bg-surface-container-lowest/80 p-space-xs border border-outline-variant/35">
+<span class="font-label-xs text-label-xs text-on-surface-variant block">RETRIEVAL LATENCY</span>
+<div class="flex items-baseline space-x-space-xs">
+<span class="font-title-md text-title-md text-primary font-bold">1.1<span class="text-label-xs font-normal text-on-surface-variant">ms</span></span>
+<span class="font-label-xs text-label-xs text-secondary-container font-bold">P99: 4.8ms</span>
+</div>
+<span class="font-label-xs text-label-xs text-outline block mt-0.5">DIRECT-IO ZERO-COPY</span>
+</div>
+</div>
+</section>
+<!-- LIVE RETRIEVAL FLOW / SHARI-NEBARI VECTOR BUS -->
+<section class="bg-surface-container-low border border-outline-variant/35 p-space-md rounded-DEFAULT">
+<div class="flex justify-between items-center mb-space-xs">
+<span class="font-label-xs text-label-xs text-tertiary-fixed-dim tracking-wider font-bold flex items-center gap-1">
+<span class="material-symbols-outlined" data-icon="polyline" style="font-size:14px;">polyline</span>
+          RETRIEVAL DISPATCH ROUTER
+        </span>
+<span class="font-label-xs text-label-xs text-on-surface-variant font-mono">FLOW: ZERO-BUS</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm border border-outline-variant/35 font-body-sm text-body-sm text-on-surface-variant space-y-1">
+<div class="flex items-center justify-between text-label-xs font-label-xs border-b border-outline-variant/20 pb-1">
+<span class="text-tertiary-container flex items-center gap-1">
+<span class="material-symbols-outlined" data-icon="arrow_forward" style="font-size:12px;">arrow_forward</span>
+            QUERY VEC: [0.129, -0.844, ... +4094]
+          </span>
+<span class="text-primary-container">MATCH: 0.941</span>
+</div>
+<!-- Interactive Root Pipeline Trace -->
+<div class="py-1 font-label-xs text-label-xs space-y-1">
+<div class="flex items-center text-outline">
+<span class="text-primary-container mr-1">├─►</span> [01] SHOOT: Ephemeral Ring (Hit miss: 0.42 &lt; 0.82)
+          </div>
+<div class="flex items-center text-tertiary-fixed-dim">
+<span class="text-primary-container mr-1">├─►</span> [02] BRANCH: VRAM HNSW Hop M=64 (Cosine: 0.941)
+          </div>
+<div class="flex items-center text-on-surface-variant pl-4 border-l border-outline-variant/40 my-0.5">
+<span>↳ Target Node: 0x8F94D2 (Rank #1 / cluster_id: 118)</span>
+</div>
+<div class="flex items-center text-primary-container">
+<span class="text-primary-container mr-1">└─►</span> [03] INJECT: Layer 24 Attn Head 3 // Residual Splice OK
+          </div>
+</div>
+</div>
+<div class="mt-space-xs flex items-center justify-between font-label-xs text-label-xs text-outline px-1">
+<span>HOP COUNT: 4 NODES</span>
+<span class="text-primary-container">ZERO PIPELINE STALL</span>
+<span>LATENCY: 0.18ms</span>
+</div>
+</section>
+<!-- THE THREE-TIER NEBARI DEPTH VISUALIZER -->
+<div class="space-y-space-sm">
+<div class="flex items-center justify-between px-1">
+<h2 class="font-headline-sm text-headline-sm text-primary tracking-wide flex items-center gap-1.5">
+<span class="material-symbols-outlined text-primary-container" data-icon="filter_vintage" style="font-size:18px;">filter_vintage</span>
+          NEBARI THREE-TIER STRATA
+        </h2>
+<span class="font-label-xs text-label-xs text-outline">CHOKKAN HIERARCHY</span>
+</div>
+<!-- TIER 3: 細根 · SHOOT // EPHEMERAL RING BUFFER -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md rounded-DEFAULT laser-border-cyan relative">
+<div class="flex justify-between items-start">
+<div>
+<div class="flex items-center gap-1.5">
+<span class="px-1 bg-tertiary-fixed-dim/20 text-tertiary-fixed-dim font-label-xs text-label-xs border border-tertiary-fixed-dim/30">TIER-3</span>
+<span class="font-title-md text-title-md text-primary font-bold">細根 · SHOOT // EPHEMERAL RING</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+              Zero-copy dynamic session context &amp; fast scratchpad. Pruned per epoch.
+            </p>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-outline-variant/35 text-primary-container">
+            ACTIVE
+          </span>
+</div>
+<!-- Metric strip -->
+<div class="grid grid-cols-3 gap-space-xs my-space-sm bg-surface-container-lowest p-space-xs border border-outline-variant/20">
+<div>
+<span class="font-label-xs text-label-xs text-outline block">INGEST RATE</span>
+<span class="font-title-md text-title-md text-tertiary-fixed-dim font-bold">16.4 MB/s</span>
+</div>
+<div>
+<span class="font-label-xs text-label-xs text-outline block">ACTIVE TOKENS</span>
+<span class="font-title-md text-title-md text-primary font-bold">4,096</span>
+</div>
+<div>
+<span class="font-label-xs text-label-xs text-outline block">TTL EXPIRY</span>
+<span class="font-title-md text-title-md text-secondary-container font-bold">14m 22s</span>
+</div>
+</div>
+<!-- Live Ring Gauge -->
+<div class="space-y-1">
+<div class="flex justify-between font-label-xs text-label-xs">
+<span class="text-on-surface-variant">RING CAPACITY (4,096 / 8,192 SLOTS)</span>
+<span class="text-tertiary-fixed-dim font-bold">50.0% FILL</span>
+</div>
+<div class="w-full bg-surface-container-lowest h-2 flex gap-0.5 p-0.5 border border-outline-variant/35">
+<div class="h-full bg-tertiary-fixed-dim w-1/2"></div>
+<div class="h-full bg-outline-variant/30 w-1/2"></div>
+</div>
+<div class="flex justify-between items-center text-label-xs font-label-xs text-outline pt-0.5">
+<span>EPOCH PRUNE CYCLE: 80s REMAINING</span>
+<span class="text-secondary cursor-pointer hover:underline">[PURGE RING]</span>
+</div>
+</div>
+</div>
+<!-- TIER 2: 側根 · BRANCH // HOT VRAM SUB-GRAPH -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md rounded-DEFAULT laser-border-emerald relative">
+<div class="flex justify-between items-start">
+<div>
+<div class="flex items-center gap-1.5">
+<span class="px-1 bg-primary-container/20 text-primary-container font-label-xs text-label-xs border border-primary-container/30">TIER-2</span>
+<span class="font-title-md text-title-md text-primary font-bold">側根 · BRANCH // HOT VRAM SUB-GRAPH</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+              HNSW graph clustered in GPU VRAM (4x RTX 4090 pool). Working attention index.
+            </p>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-outline-variant/35 text-primary-container font-bold">
+            99.1% HIT
+          </span>
+</div>
+<!-- Metric strip -->
+<div class="grid grid-cols-4 gap-space-xs my-space-sm bg-surface-container-lowest p-space-xs border border-outline-variant/20 text-center">
+<div>
+<span class="font-label-xs text-label-xs text-outline block">HOT CACHE</span>
+<span class="font-title-md text-title-md text-primary font-bold">512K</span>
+</div>
+<div>
+<span class="font-label-xs text-label-xs text-outline block">VRAM ALLOC</span>
+<span class="font-title-md text-title-md text-primary-container font-bold">14.2 GB</span>
+</div>
+<div>
+<span class="font-label-xs text-label-xs text-outline block">M-FACTOR</span>
+<span class="font-title-md text-title-md text-primary font-bold">64</span>
+</div>
+<div>
+<span class="font-label-xs text-label-xs text-outline block">efSEARCH</span>
+<span class="font-title-md text-title-md text-tertiary-fixed-dim font-bold">128</span>
+</div>
+</div>
+<!-- Interactive Cosine Threshold Slider Simulator -->
+<div class="space-y-1.5 bg-surface-container-lowest/60 p-space-xs border border-outline-variant/25">
+<div class="flex justify-between items-center font-label-xs text-label-xs">
+<span class="text-on-surface-variant">COSINE SIMILARITY GATE THRESHOLD</span>
+<span class="text-primary-container font-bold">&gt; 0.820 CUTOFF</span>
+</div>
+<div class="relative w-full flex items-center h-4">
+<div class="w-full h-1 bg-surface-container-highest rounded-none">
+<div class="h-1 bg-primary-container" style="width: 82%;"></div>
+</div>
+<div class="absolute w-2.5 h-4 bg-primary-container border border-surface-container-lowest" style="left: calc(82% - 5px);"></div>
+</div>
+<div class="flex justify-between font-label-xs text-label-xs text-outline">
+<span>0.00 (NOISY / EXPLORE)</span>
+<span class="text-primary-container">CURRENT: STRICT CLUSTER</span>
+<span>1.00 (EXACT)</span>
+</div>
+</div>
+</div>
+<!-- TIER 1: 主根 · TAPROOT // COLD PERMANENT VAULT -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md rounded-DEFAULT border-l-2 border-outline relative">
+<div class="flex justify-between items-start">
+<div>
+<div class="flex items-center gap-1.5">
+<span class="px-1 bg-surface-container-highest text-outline font-label-xs text-label-xs border border-outline-variant/35">TIER-1</span>
+<span class="font-title-md text-title-md text-primary font-bold">主根 · TAPROOT // COLD VAULT</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+              Direct NVMe PCIe 5.0 memory-mapped vector store. Immutable core embeddings.
+            </p>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-outline-variant/35 text-outline">
+            IMMUTABLE
+          </span>
+</div>
+<!-- Metric strip -->
+<div class="grid grid-cols-3 gap-space-xs my-space-sm bg-surface-container-lowest p-space-xs border border-outline-variant/20">
+<div>
+<span class="font-label-xs text-label-xs text-outline block">NVMe DIRECT-IO</span>
+<span class="font-title-md text-title-md text-primary font-bold">64.2 GB</span>
+</div>
+<div>
+<span class="font-label-xs text-label-xs text-outline block">QUANTIZATION</span>
+<span class="font-title-md text-title-md text-tertiary-fixed-dim font-bold">INT8 SQ</span>
+</div>
+<div>
+<span class="font-label-xs text-label-xs text-outline block">PCIe LATENCY</span>
+<span class="font-title-md text-title-md text-primary font-bold">3.2 ms</span>
+</div>
+</div>
+<!-- Shard breakdown matrix -->
+<div class="space-y-1">
+<div class="flex justify-between font-label-xs text-label-xs">
+<span class="text-on-surface-variant">SECTOR SHARDING (SHARDS 00 - 07)</span>
+<span class="text-primary-container font-mono">11.8 GB/s SUSTAINED</span>
+</div>
+<div class="grid grid-cols-8 gap-1 h-3">
+<div class="bg-primary-container/80 h-full border border-primary-container/40" title="Shard 00"></div>
+<div class="bg-primary-container/80 h-full border border-primary-container/40" title="Shard 01"></div>
+<div class="bg-primary-container/80 h-full border border-primary-container/40" title="Shard 02"></div>
+<div class="bg-primary-container/80 h-full border border-primary-container/40" title="Shard 03"></div>
+<div class="bg-primary-container/80 h-full border border-primary-container/40" title="Shard 04"></div>
+<div class="bg-primary-container/80 h-full border border-primary-container/40" title="Shard 05"></div>
+<div class="bg-primary-container/80 h-full border border-primary-container/40" title="Shard 06"></div>
+<div class="bg-tertiary-fixed-dim/80 h-full border border-tertiary-fixed-dim/40" title="Shard 07 Sync"></div>
+</div>
+<div class="flex justify-between font-label-xs text-label-xs text-outline pt-0.5">
+<span>SHARDS 00-06: MAPPED</span>
+<span class="text-tertiary-fixed-dim">SHARD 07: WAL_CHECKPOINT</span>
+</div>
+</div>
+</div>
+</div>
+<!-- OPERATIONAL CONTROL ACTIONS -->
+<section class="space-y-space-xs pt-space-xs">
+<div class="flex items-center justify-between px-1">
+<span class="font-label-xs text-label-xs text-on-surface-variant tracking-wider font-bold">SURGICAL OPERATIONAL TRIGGERS</span>
+<span class="font-label-xs text-label-xs text-outline font-mono">CMD-BUS // ROOT</span>
+</div>
+<div class="grid grid-cols-1 gap-space-xs">
+<!-- Button 1: Re-index -->
+<button class="w-full bg-surface-container-lowest hover:bg-surface-container active:scale-[0.98] border border-primary-container text-primary-container font-title-md text-title-md py-space-sm px-space-md flex items-center justify-between transition-all duration-150">
+<div class="flex items-center space-x-space-sm">
+<span class="material-symbols-outlined" data-icon="refresh">refresh</span>
+<span class="font-bold tracking-tight">[RE-INDEX TAPROOT CLUSTERS]</span>
+</div>
+<span class="font-label-xs text-label-xs px-1 border border-primary-container/40">NVMe-SYNC</span>
+</button>
+<!-- Button 2: Flush shoot -->
+<button class="w-full bg-surface-container-lowest hover:bg-surface-container active:scale-[0.98] border border-secondary-container text-secondary font-title-md text-title-md py-space-sm px-space-md flex items-center justify-between transition-all duration-150">
+<div class="flex items-center space-x-space-sm">
+<span class="material-symbols-outlined text-secondary-container" data-icon="delete_sweep">delete_sweep</span>
+<span class="font-bold tracking-tight text-secondary">[FLUSH SHOOT RING BUFFER]</span>
+</div>
+<span class="font-label-xs text-label-xs px-1 border border-secondary-container/40 text-secondary">[ ! ] EPHEMERAL</span>
+</button>
+<!-- Button 3: Latency Profile -->
+<button class="w-full bg-surface-container-low hover:bg-surface-container active:scale-[0.98] border border-outline-variant/35 text-on-surface font-title-md text-title-md py-space-sm px-space-md flex items-center justify-between transition-all duration-150">
+<div class="flex items-center space-x-space-sm">
+<span class="material-symbols-outlined text-tertiary-fixed-dim" data-icon="speed">speed</span>
+<span class="font-medium tracking-tight">[PROFILE HNSW LATENCY]</span>
+</div>
+<span class="font-label-xs text-label-xs text-outline">10K CYCLES</span>
+</button>
+</div>
+<!-- SOVEREIGN SYSTEM GUARANTEE BADGE -->
+<div class="mt-space-sm p-space-sm bg-surface-container-lowest border border-outline-variant/35 flex items-start space-x-space-sm">
+<span class="material-symbols-outlined text-primary-container mt-0.5" data-icon="verified_user">verified_user</span>
+<div>
+<span class="font-label-xs text-label-xs text-primary-container font-bold tracking-widest block">SOVEREIGN VECTOR VAULT</span>
+<p class="font-body-sm text-body-sm text-outline mt-0.5">
+            Zero telemetry leakage. 100% self-hosted on local hardware. No remote embedding APIs or telemetry telemetry pingback.
+          </p>
+</div>
+</div>
+</section>
+</main>
+<!-- BOTTOM NAVIGATION BAR (Shared Components Exact Blueprint) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-margin py-space-xs bg-surface-container-lowest shadow-lg">
+<!-- PRUNE -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-space-sm py-space-xs hover:bg-surface-container hover:text-on-surface transition-colors duration-150 active:scale-[0.97]" href="#">
+<span class="material-symbols-outlined" data-icon="content_cut">content_cut</span>
+<span class="font-label-xs text-label-xs mt-1">PRUNE</span>
+</a>
+<!-- ROOTS (ACTIVE DESTINATION) -->
+<a class="flex flex-col items-center justify-center text-primary-container border-t-2 border-primary-container bg-surface-container-low px-space-sm py-space-xs active:scale-[0.97]" href="#">
+<span class="material-symbols-outlined text-primary-container" data-icon="account_tree">account_tree</span>
+<span class="font-label-xs text-label-xs mt-1 font-bold">ROOTS</span>
+</a>
+<!-- DEADWOOD -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-space-sm py-space-xs hover:bg-surface-container hover:text-on-surface transition-colors duration-150 active:scale-[0.97]" href="#">
+<span class="material-symbols-outlined" data-icon="skull">skull</span>
+<span class="font-label-xs text-label-xs mt-1">DEADWOOD</span>
+</a>
+<!-- DEPLOY -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant px-space-sm py-space-xs hover:bg-surface-container hover:text-on-surface transition-colors duration-150 active:scale-[0.97]" href="#">
+<span class="material-symbols-outlined" data-icon="view_in_ar">view_in_ar</span>
+<span class="font-label-xs text-label-xs mt-1">DEPLOY</span>
+</a>
+</nav>
+</body></html>

@@ -1,0 +1,11 @@
+{
+  "id": "react-23",
+  "domain": "react",
+  "prompt": "Write a sortable, filterable, paginated table in TypeScript (strict mode) for React 19 and export it as\n\n```ts\nexport function DataTable(props: {\n  rows: readonly { id: number; name: string; age: number }[];\n  pageSize: number;\n}): React.ReactElement\n```\n\nMarkup:\n- A text `<input>` labelled `Filter`.\n- A `<table>` whose header row has exactly two column headers (`<th>`), `Name` then `Age`. Each header contains a `<button>` named `Name` / `Age` respectively. Each header cell has an `aria-sort` attribute (see below).\n- One body row (`<tr>` with two `<td>`) per row on the current page: the name, then the age as a plain number (e.g. `42`). No other rows besides the header row.\n- Buttons named `Previous` and `Next`, and the text `Page X of Y`, where X is the current page (from 1) and Y is the number of pages of the filtered rows, at least 1 (so an empty result shows `Page 1 of 1`).\n\nBehaviour:\n- Initially rows appear in the order given, unsorted, on page 1, and both headers have `aria-sort=\"none\"`.\n- Clicking a column's button sorts by that column: ascending the first time, and each further click on the same column toggles between descending and ascending. Clicking the other column sorts by it ascending. The sorted column's header has `aria-sort=\"ascending\"` or `aria-sort=\"descending\"`; the other header has `aria-sort=\"none\"`. Names compare with `localeCompare`, ages numerically; ties keep their original relative order.\n- Typing in Filter keeps only the rows whose name contains the text, case-insensitively, and always returns to page 1. Sorting and filtering apply before pagination.\n- Next goes to the following page and Previous to the one before. Previous is `disabled` on page 1 and Next is `disabled` on the last page.\n- Whether sorting keeps the current page or returns to page 1 is up to you.\n- Never mutate `rows` or any row in it (it may be frozen).\n\nYou may import only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-23/test.tsx", "entry": ["DataTable"]},
+  "reference": "tasks/react-23/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "category": "component"
+}

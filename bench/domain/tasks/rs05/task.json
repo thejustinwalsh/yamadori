@@ -1,0 +1,11 @@
+{
+  "id": "rs05",
+  "domain": "rust_wasm",
+  "prompt": "A C API works in plain `double` metres:\n\n```c\ndouble meters_add(double a, double b);\ndouble meters_scale(double m, double k);\n```\n\nI want to implement it in Rust with a type-safe unit wrapper. Define a tuple-struct newtype `pub struct Meters(pub f64);` (derive `Debug, Clone, Copy, PartialEq`) that is guaranteed to have the same size, alignment AND function-call ABI as a bare `f64`, so it can appear directly in `extern \"C\"` signatures while C keeps declaring plain `double`. Then export exactly:\n\n- `#[no_mangle] pub extern \"C\" fn meters_add(a: Meters, b: Meters) -> Meters` (the sum)\n- `#[no_mangle] pub extern \"C\" fn meters_scale(m: Meters, k: f64) -> Meters` (the product)\n\nAnswer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs05/grader.rs", "entry": ["Meters", "meters_add", "meters_scale"]},
+  "reference": "tasks/rs05/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "notes": "The improper_ctypes_definitions probe in the grader is what catches a newtype with no repr. A #[repr(C)] newtype is also FFI-safe to the lint; it is NOT ABI-identical to f64 on Windows x64 (an 8-byte struct travels in an integer register) and the f64-declared calls catch that there, but on SysV x86-64 the two ABIs coincide and a repr(C) answer would pass. Verified on x86_64-pc-windows-msvc only."
+}

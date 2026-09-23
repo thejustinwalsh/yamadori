@@ -1,171 +1,269 @@
 #!/usr/bin/env python
-"""A random concept, drawn from the embedding space rather than from a list.
+"""A random concept, drawn from the MODEL'S OWN embedding space.
 
 After ClancyDennis/concept-seed. The mechanism is:
 
     os.urandom -> gaussian vector -> normalise to the unit sphere
-               -> nearest real word by cosine similarity
+               -> nearest whole-word token by cosine similarity
 
-Why that beats picking from a curated word list: in high dimensions two random
-unit vectors are almost always near-orthogonal, so consecutive draws land in
-genuinely different regions of concept space. A hand-written list is the
-author's taste in a shuffled order, which is the same bias every time and
-covers a tiny, lumpy part of the space.
+The space is the 27B's input embedding matrix, `token_embd.weight`, and the
+candidates are every whole-word token in its own vocabulary -- 40,678 of
+248,320 on Ternary-Bonsai-2-27B. Both are extracted once, offline, by
+`scripts/extract_token_embd.py` into `index/token_embd.npz`, which refuses to
+write unless known words land near related words (a wrong decode is noise and
+noise has random neighbours).
 
-INJECTION POINT MATTERS. The original reports testing both and finding that in
-the system message "the model sometimes ignored it and fell back to its default
-template", while in the user message "it couldn't". The first version here put
-it in the system message, which is exactly the documented failure.
+WHY A RANDOM DIRECTION AND NOT A LIST. In high dimensions two random unit
+vectors are almost always near-orthogonal, so consecutive draws land in
+genuinely different regions of concept space. A curated list is the author's
+taste in a shuffled order: the same bias every time, covering a tiny, lumpy
+part of the space. The previous version of this file claimed the first and
+shipped the second -- on Windows it had no dictionary and fell back to 161
+hard-coded nouns, embedded with the RETRIEVAL model rather than this one.
 
-EVIDENCE. The source reports qualitative results -- ten identical jokes becoming
-ten different ones, three runs of a story converging versus diverging -- and
-states plainly that it has no quantitative diversity metrics and no significance
-testing. So this is a promising mechanism, not an established result, and it
-gets measured here before it ships: see scripts/eval_fanout.py.
+SPREAD WITHIN ONE FAN-OUT. `draw(n)` does not take n independent directions;
+it takes n exactly ORTHOGONAL ones (QR of a gaussian matrix, a Haar-random
+orthonormal frame), so the n samples of one fan-out start as far apart as the
+space allows, and a repeated word is redrawn.
 
-The vocabulary is built from the embedding model's own tokenizer output rather
-than shipping GloVe, so there is no extra download and the concepts live in the
-same space the retriever already uses.
+Measured on the extracted matrix, 20,000 independent draws: 15,767 distinct
+words, none drawn more than 5 times. Hubness -- a few words capturing most
+nearest-neighbour queries, the usual failure of this construction in high
+dimensions -- is not a problem here, and centring the matrix changed nothing.
+
+DISTANCE FROM THE PROMPT is the point: the seed exists to pull the model
+somewhere in its own space it would not otherwise go. Measured on three coding
+prompts (100 fan-outs of 3 each), uniform draws land at the MEDIAN similarity
+to the prompt -- the 51st percentile, cosine ~0.02 against ~0.20 for the
+prompt's own nearest words -- unrelated, but not far, and one occasionally
+drifts toward the prompt's neighbourhood (max 0.148). `away_from=<prompt
+text>` keeps only words in the less-similar half of the vocabulary relative to
+the prompt's centroid (the mean embedding of its words that are whole-word
+tokens), redrawing the rest. Whether far beats merely unrelated is not yet
+measured.
+
+INJECTION POINT MATTERS. The original reports that in the system message "the
+model sometimes ignored it and fell back to its default template", while in
+the user message "it couldn't". `phrase()` is for the USER message.
+
+THE NUMBER. Every word also has a u32, `encode(word)`: 32-bit FNV-1a over its
+UTF-8 bytes. It is what the dashboard shows beside the word and what the
+bonsai's PRNG is seeded with (design/BONSAI-VIZ.md), so the same word grows
+the same limb on every machine. FNV-1a is chosen because it is six lines in
+JavaScript and has no platform-dependent behaviour.
+
+THE LAST WORD USED. `phrase()` records the word it was called with in
+`index/concept_seed_last.json`, which `vitals.snapshot()` reads. Recording
+happens at the injection point, because a word that was drawn but never put in
+a prompt was not used.
+
+DIFFERENCES FROM THE ORIGINAL (github.com/ClancyDennis/concept-seed, read
+2026-09-22). Same pipeline; these are the departures, and why:
+
+  space        Original: GloVe, 100-d, ~33K words (top 50K by frequency, in
+               the system dictionary, no stopwords), or OpenAI
+               text-embedding-3-small over 100K DBpedia concepts. Here: the
+               served model's own input embeddings, 5120-d, so the direction
+               is in the space the model itself reads.
+  vocabulary   No dictionary filter exists on this machine, so candidates are
+               whole-word BPE tokens. Token id roughly tracks merge order:
+               ids below ~150K are mostly English, above are mostly other
+               languages. Some candidates are word FRAGMENTS a dictionary
+               would have removed ("fundra", "depos", "irrig").
+  spread       Original: independent draws, no distance constraint. Here: an
+               orthogonal frame per fan-out, plus `away_from`.
+  template     Same as the original: "Inspiration word: X", in the user
+               message, no hedge.
+  per turn     Original also tests a fresh seed per turn, and draft with one
+               seed then revise with another. Here: one seed per fan-out
+               sample.
+
+EVIDENCE. The source reports qualitative results and states plainly that it
+has no quantitative diversity metrics. So this is a promising mechanism, not
+an established result; see scripts/eval_fanout.py before it ships.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
-import sqlite3
 import sys
 import threading
+import time
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.environ.get("CONCEPT_SEED_DB",
-                       os.path.join(HERE, "..", "index", "concepts.sqlite3"))
-
-# Concrete, picturable nouns work better as inspiration than abstract or
-# functional words: "harbour" opens a direction, "however" does not.
-_WORD_OK = re.compile(r"^[a-z]{4,12}$")
-
-_STOP = set("""about above after again against because before being below between
-both during each further having here into itself more most once only other over
-same some such than that their them then there these they this those through
-under until very were what when where which while whom your yours ourselves
-themselves everything something anything nothing someone anyone everyone""".split())
+MATRIX = os.environ.get("CONCEPT_SEED_MATRIX",
+                        os.path.join(HERE, "..", "index", "token_embd.npz"))
+LAST = os.environ.get("CONCEPT_SEED_LAST",
+                      os.path.join(HERE, "..", "index", "concept_seed_last.json"))
 
 _lock = threading.Lock()
+_record_lock = threading.Lock()
 _words: list[str] | None = None
+_ids: np.ndarray | None = None
 _mat: np.ndarray | None = None
 
 
-def _vocab_source() -> list[str]:
-    """Words to embed. Prefers a system dictionary, falls back to a builtin."""
-    for p in ("/usr/share/dict/words", "/usr/dict/words"):
-        try:
-            with open(p, encoding="utf-8", errors="ignore") as f:
-                ws = [w.strip().lower() for w in f]
-            ws = [w for w in ws if _WORD_OK.match(w) and w not in _STOP]
-            if len(ws) > 2000:
-                return sorted(set(ws))
-        except OSError:
-            pass
-    # Fallback: concrete nouns across unrelated domains. Smaller than ideal,
-    # and the reason a real dictionary is preferred -- coverage is the whole
-    # point of drawing from the space rather than from a list.
-    return sorted(set("""anchor amber anvil arbor ardor ashes aurora basalt
-    beacon bellows birch bison blade bloom bramble brine bronze burrow cactus
-    cairn canopy canyon cedar chalk cinder cistern clover cobalt comet copper
-    coral crater crystal cypress delta dune ember ember fathom fennel fern
-    ferry fjord flint forge fossil fresco frost gable galley garnet geyser
-    glacier granite grotto gully gypsum harbor harvest hearth heron hollow
-    ingot inlet iris ivory jetty juniper kelp kiln lantern lattice lichen
-    loam lotus lumber magma mangrove marble marsh meadow meridian mica mimosa
-    moraine mortar moss nectar nettle nomad oasis obelisk obsidian orchard
-    ospreys otter pagoda pampas papyrus pasture peat pebble pelican pewter
-    pigment pillar pinion plume pollen pumice quarry quartz quill ravine reef
-    resin ridge rivet rubble saffron sandbar sapling sextant shale sienna
-    silt slate sluice spindle spire spruce stalk steppe stone summit tallow
-    talon tannin tapestry teak thicket thistle thorn tidal timber tinder
-    topaz torrent tundra turbine twine umber vellum verdigris vessel vine
-    walnut warren willow windmill zephyr zircon""".split()))
+class NotExtracted(RuntimeError):
+    """The model's embedding matrix has not been extracted on this machine."""
 
 
-def _embed(texts: list[str]) -> np.ndarray:
-    import code_search as cs
-    out = []
-    for i in range(0, len(texts), 256):
-        out.append(cs.embed(texts[i:i + 256]))
-    return np.vstack(out)
-
-
-def _build_cache() -> tuple[list[str], np.ndarray]:
-    words = _vocab_source()
-    vecs = _embed(words)
-    os.makedirs(os.path.dirname(os.path.abspath(CACHE)), exist_ok=True)
-    con = sqlite3.connect(CACHE)
-    con.execute("CREATE TABLE IF NOT EXISTS concepts(word TEXT PRIMARY KEY, vec BLOB)")
-    con.executemany("INSERT OR REPLACE INTO concepts VALUES(?,?)",
-                    [(w, vecs[i].astype(np.float32).tobytes())
-                     for i, w in enumerate(words)])
-    con.commit()
-    con.close()
-    return words, vecs
-
-
-def _load() -> tuple[list[str], np.ndarray]:
-    global _words, _mat
+def _load() -> tuple[list[str], np.ndarray, np.ndarray]:
+    global _words, _ids, _mat
     with _lock:
-        if _words is not None and _mat is not None:
-            return _words, _mat
-        try:
-            con = sqlite3.connect(CACHE)
-            rows = con.execute("SELECT word, vec FROM concepts").fetchall()
-            con.close()
-        except sqlite3.Error:
-            rows = []
-        if rows:
-            _words = [r[0] for r in rows]
-            _mat = np.vstack([np.frombuffer(r[1], dtype=np.float32) for r in rows])
-        else:
-            _words, _mat = _build_cache()
-        return _words, _mat
+        if _mat is None:
+            if not os.path.exists(MATRIX):
+                raise NotExtracted(
+                    f"{MATRIX} does not exist | retryable: no | remedy "
+                    "(operator): run scripts/extract_token_embd.py once")
+            z = np.load(MATRIX)
+            _words = [str(w) for w in z["words"]]
+            _ids = z["word_ids"]
+            # fp16 on disk; fp32 for the product so argmax is not decided by
+            # half-precision rounding.
+            _mat = z["word_mat"].astype(np.float32)
+        return _words, _ids, _mat
 
 
-def draw(n: int = 1, rng: np.random.Generator | None = None) -> list[str]:
-    """n concepts, each the nearest word to an independent random direction.
+def available() -> bool:
+    return _mat is not None or os.path.exists(MATRIX)
 
-    Randomness comes from os.urandom rather than a seeded PRNG so that two
-    processes started in the same second do not draw the same concept.
+
+def encode(word: str) -> int:
+    """32-bit FNV-1a of the UTF-8 bytes. Mirrored in the dashboard."""
+    h = 0x811C9DC5
+    for b in word.encode("utf-8"):
+        h ^= b
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def _centroid(text: str) -> np.ndarray | None:
+    """The mean model embedding of the text's words that are whole-word
+    tokens, unit length. None if none of its words are in the vocabulary."""
+    words, _, mat = _load()
+    index = _index()
+    hit = [index[w] for w in re.findall(r"[a-z]{4,14}", (text or "").lower())
+           if w in index]
+    if not hit:
+        return None
+    c = mat[hit].mean(axis=0)
+    norm = float(np.linalg.norm(c))
+    return c / norm if norm else None
+
+
+_word_index: dict[str, int] | None = None
+
+
+def _index() -> dict[str, int]:
+    global _word_index
+    if _word_index is None:
+        words, _, _ = _load()
+        _word_index = {w: i for i, w in enumerate(words)}
+    return _word_index
+
+
+def draw_seeds(n: int = 1, rng: np.random.Generator | None = None,
+               away_from: str | None = None) -> list[dict]:
+    """n distinct concepts from n mutually orthogonal random directions.
+
+    Each is {word, token_id, u32, hex}, plus `prompt_cos` when `away_from` is
+    given. Randomness comes from os.urandom unless an rng is passed, so two
+    processes started in the same second do not draw the same concepts.
     """
-    words, mat = _load()
+    words, ids, mat = _load()
+    cen = _centroid(away_from) if away_from else None
+    sims = mat @ cen if cen is not None else None
+    ceiling = float(np.median(sims)) if sims is not None else None
     if rng is None:
         rng = np.random.default_rng(int.from_bytes(os.urandom(8), "little"))
-    out: list[str] = []
-    seen: set[str] = set()
-    for _ in range(n * 4):
-        if len(out) >= n:
+    dim = mat.shape[1]
+    out: list[dict] = []
+    seen: set[int] = set()
+    for _ in range(32):         # redraw on a repeat, or a word too near
+        need = n - len(out)
+        if need <= 0:
             break
-        v = rng.standard_normal(mat.shape[1]).astype(np.float32)
-        v /= np.linalg.norm(v) or 1.0
-        w = words[int(np.argmax(mat @ v))]
-        if w not in seen:
-            seen.add(w)
-            out.append(w)
+        # QR of a gaussian matrix gives an orthonormal frame; the sign fix
+        # makes it uniformly (Haar) distributed rather than biased.
+        g = rng.standard_normal((dim, need))
+        q, r = np.linalg.qr(g)
+        q *= np.sign(np.diag(r))
+        picks = np.argmax(mat @ q.astype(np.float32), axis=0)
+        for k in picks.tolist():
+            if k in seen or len(out) >= n:
+                continue
+            if ceiling is not None and sims[k] > ceiling:
+                continue
+            seen.add(k)
+            u = encode(words[k])
+            s = {"word": words[k], "token_id": int(ids[k]),
+                 "u32": u, "hex": f"0x{u:08X}"}
+            if sims is not None:
+                s["prompt_cos"] = round(float(sims[k]), 4)
+            out.append(s)
     return out
 
 
-def phrase(concept: str) -> str:
-    """Appended to the USER message, not the system message.
+def draw(n: int = 1, rng: np.random.Generator | None = None,
+         away_from: str | None = None) -> list[str]:
+    """n distinct concept words. See `draw_seeds` for the numbers."""
+    return [s["word"] for s in draw_seeds(n, rng, away_from)]
 
-    The original found the system message unreliable: the model would ignore
-    the seed and fall back to its default approach. In the user turn it cannot.
+
+def record(word: str, where: str = "") -> dict:
+    """Note that `word` was just put in a prompt. Never raises."""
+    entry = {"word": word, "u32": encode(word),
+             "hex": f"0x{encode(word):08X}", "at": time.time(),
+             "where": where}
+    try:
+        _, ids, _ = _load()
+        entry["token_id"] = int(ids[_index()[word]])
+    except Exception:                                            # noqa: BLE001
+        entry["token_id"] = None
+    # A fan-out records one seed per sample FROM PARALLEL THREADS. With one
+    # shared ".tmp" name, two writes interleaved and left `{...}}` on disk --
+    # invalid JSON, so last() returned None and the dashboard showed "no seed"
+    # for good. Found by the live stack suite, 2026-09-22. A lock orders the
+    # writers and a per-writer temp name makes each replace atomic.
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(LAST)), exist_ok=True)
+        tmp = f"{LAST}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with _record_lock:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(entry, f)
+            os.replace(tmp, LAST)
+    except OSError:
+        pass
+    return entry
+
+
+def last() -> dict | None:
+    """The most recently used seed, or None if none ever was."""
+    try:
+        with open(LAST, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def phrase(concept: str, where: str = "fanout") -> str:
+    """The seed as the original states it, for the USER message. Records use.
+
+    No hedge. An earlier version told the model not to let the seed change
+    its answer, which asked it to ignore the one thing the seed is for. The
+    original found the system message unreliable -- the model fell back to its
+    default approach -- and the user turn not, so this goes in the user turn.
     """
-    return (f"\n\n(Unrelated seed concept, to vary your approach only: "
-            f"'{concept}'. Do not mention it and do not let it change the "
-            f"answer -- only the route you take to it.)")
+    record(concept, where)
+    return f"\n\nInspiration word: {concept}"
 
 
 if __name__ == "__main__":
-    print("  drawing 12 concepts from the embedding space:")
-    for w in draw(12):
-        print("   ", w)
+    print("  drawing 12 concepts from the model's embedding space:")
+    for s in draw_seeds(12):
+        print(f"    {s['word']:<16} token {s['token_id']:>6}  {s['hex']}")

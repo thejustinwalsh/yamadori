@@ -1,0 +1,23 @@
+{
+  "id": "ts13",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) implementing a small Result type. Export exactly:\n\n- `type Result<T, E> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E }`\n- `ok(value)` returning `Result<T, never>` and `err(error)` returning `Result<never, E>` -- plain objects of exactly the shapes above.\n- `map(r, f)` -- `Result<T, E>` and `(value: T) => U` to `Result<U, E>`; `f` is not called for an error.\n- `andThen(r, f)` -- `Result<T, E>` and `(value: T) => Result<U, F>` to `Result<U, E | F>`.\n- `tryCatch(f)` -- calls `f: () => T`; returns `Result<T, Error>`. A thrown `Error` (or subclass) is returned as-is; any other thrown value `x` is wrapped as `new Error(String(x))`.\n- `all(results)` -- takes an array literal of Results and returns `ok` of a tuple of their values if all are ok, otherwise the FIRST error (by position). Its type must be precise per position without the caller writing `as const`: with `a: Result<number, 'a'>` and `b: Result<string, 'b'>`, `all([a, b])` is typed `Result<[number, string], 'a' | 'b'>` (a mutable tuple), and `all([])` is `Result<[], never>`.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts13/test.ts",
+    "runtime": true,
+    "entry": [
+      "Result",
+      "ok",
+      "err",
+      "map",
+      "andThen",
+      "tryCatch",
+      "all"
+    ]
+  },
+  "reference": "tasks/ts13/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

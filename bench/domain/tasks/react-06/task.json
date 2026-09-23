@@ -1,0 +1,11 @@
+{
+  "id": "react-06",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as `function useMediaQuery(query: string, serverFallback?: boolean): boolean`.\n\nIt returns whether the CSS media query `query` currently matches, using `window.matchMedia`.\n\nBehaviour:\n- On the client, the very first render already returns `matchMedia(query).matches` (no initial `false` followed by a correction).\n- It updates when the `MediaQueryList` for `query` fires a `change` event.\n- When `query` changes, the render with the new query returns the new query's `matches`, the listener on the old query's list is removed, and a listener on the new one is added.\n- After the component using it unmounts, no listener remains.\n- During server rendering with `renderToString` from `react-dom/server`, where `window` and `matchMedia` do not exist, it returns `serverFallback` (default `false`).\n- Hydrating that server HTML on the client with `hydrateRoot` from `react-dom/client` must not cause a hydration mismatch: the hydration render returns `serverFallback` as the server did, and the hook then updates to the real `matches` value.\n\nUse only `react` (and `react-dom` if you need it). Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-06/test.tsx", "entry": ["useMediaQuery"]},
+  "reference": "tasks/react-06/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

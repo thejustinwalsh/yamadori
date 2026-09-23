@@ -1,0 +1,18 @@
+{
+  "id": "tg02",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), write a TypeScript module that exports `LightUniform`, a WGSL struct schema with exactly these four fields, in this order: `color: vec3f`; `intensity: f32`, which must occupy 16 bytes of the struct (declare the member's size explicitly with a WGSL attribute rather than adding padding fields); `direction: vec3f`; `castsShadow: u32`, which must start on a 16-byte boundary (declare the member's alignment explicitly with a WGSL attribute). Do not add any other fields. Also export `const lightUniformSize: number`, the struct's byte size computed with typegpu's own helper rather than hard-coded. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg02/test.ts", "runtime": true, "webgpu": true, "entry": ["LightUniform", "lightUniformSize"]},
+  "reference": "tasks/tg02/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "api": {
+    "d.size(size, data)": "data/attributes.d.ts, data/attributes.js",
+    "d.align(alignment, data)": "data/attributes.d.ts, data/attributes.js",
+    "d.sizeOf / d.alignmentOf": "data/index.d.ts, data/sizeOf.js, data/alignmentOf.js",
+    "d.memoryLayoutOf(schema, accessor)": "data/offsetUtils.d.ts, data/offsetUtils.js",
+    "tgpu.resolve([items])": "core/resolve/tgpuResolve.d.ts, core/resolve/tgpuResolve.js"
+  },
+  "notes": "Layout: color@0 (12B), intensity@12 sized 16 -> 28, direction aligned 16 @32, castsShadow aligned 16 @48, struct align 16 -> 64 bytes."
+}

@@ -1,0 +1,63 @@
+// Wrong: accept entries are compared for equality only, so "image/*" matches nothing.
+import { useState } from 'react';
+import type { ChangeEvent, DragEvent } from 'react';
+
+export function FileDropzone({
+  accept,
+  maxSizeBytes,
+  onFiles,
+}: {
+  accept: string[];
+  maxSizeBytes: number;
+  onFiles: (files: File[]) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const handle = (list: ArrayLike<File>) => {
+    const ok: File[] = [];
+    const bad: string[] = [];
+    for (const f of Array.from(list)) {
+      if (!accept.includes(f.type)) bad.push(`${f.name}: unsupported type`);
+      else if (f.size > maxSizeBytes) bad.push(`${f.name}: too large`);
+      else ok.push(f);
+    }
+    setErrors(bad);
+    if (ok.length > 0) onFiles(ok);
+  };
+
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragging(true);
+  };
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragging(false);
+    handle(e.dataTransfer.files);
+  };
+  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) handle(e.target.files);
+  };
+
+  return (
+    <div>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Upload files"
+        onDragEnter={() => setDragging(true)}
+        onDragOver={onDragOver}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+      >
+        {dragging ? 'Drop files here' : 'Drag files or choose them'}
+      </div>
+      <input type="file" multiple aria-label="Choose files" hidden onChange={onChange} />
+      {errors.map((msg, i) => (
+        <p key={i} role="alert">
+          {msg}
+        </p>
+      ))}
+    </div>
+  );
+}

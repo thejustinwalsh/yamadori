@@ -1,0 +1,36 @@
+{
+  "id": "tsl18",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer. This r181 helper configures the renderer's internal output buffers as 32-bit float and creates a render target whose texture type matches whatever the renderer uses:\n\n```js\nimport { WebGPURenderer, RenderTarget, FloatType } from 'three/webgpu';\n\nexport function createRendererAndTarget( canvas, width, height ) {\n\n\tconst renderer = new WebGPURenderer( { canvas, colorBufferType: FloatType } );\n\tconst target = new RenderTarget( width, height, { type: renderer.getColorBufferType() } );\n\n\treturn { renderer, target };\n\n}\n```\n\nPort it to r185 with named imports, same export and return shape `{ renderer, target }`. Make sure the renderer really gets float output buffers in r185 and that the target's type is still read back from the renderer (not hard-coded). Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "createRendererAndTarget"
+    ],
+    "require": [
+      {
+        "name": "outputBufferType",
+        "as": "property"
+      },
+      {
+        "name": "getOutputBufferType",
+        "as": "call"
+      },
+      {
+        "name": "WebGPURenderer",
+        "as": "import",
+        "from": "three/webgpu"
+      }
+    ],
+    "forbid": [
+      "colorBufferType",
+      "getColorBufferType"
+    ]
+  },
+  "reference": "tasks/tsl18/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "version_marker": "getColorBufferType() -> getOutputBufferType(), @deprecated r182: r185 src/renderers/common/Renderer.js:1208-1213; getOutputBufferType at :1199. The constructor option colorBufferType -> outputBufferType was renamed with NO shim: r175 src/renderers/common/Renderer.js:87 `colorBufferType = HalfFloatType`; r185 Renderer.js:104 `outputBufferType = HalfFloatType` and no occurrence of colorBufferType anywhere in r185 src/, so the old option is silently ignored.",
+  "notes": "Hard because only the getter warns; the constructor option is dropped silently. wrong_test ports the getter and keeps the silent option. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

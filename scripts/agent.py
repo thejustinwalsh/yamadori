@@ -29,6 +29,7 @@ for _s in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mcp"))
 import code_search as cs  # noqa: E402
+import repeats  # noqa: E402
 
 API = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
 MODEL = os.environ.get("AGENT_MODEL", "bonsai-agent")
@@ -106,7 +107,7 @@ def call_model(messages, tools):
     req = urllib.request.Request(f"{API}/v1/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})
     t0 = time.time()
-    with urllib.request.urlopen(req, timeout=1800) as r:
+    with urllib.request.urlopen(req, timeout=3600) as r:
         d = json.load(r)
     return d, time.time() - t0
 
@@ -161,7 +162,7 @@ def main():
             out = run_tool(fn, args)
             print(f"[{step}] {fn:<16} {brief:<92} -> {len(out):>6} chars  ({el:.1f}s)")
             messages.append({"role": "tool", "tool_call_id": tc["id"],
-                             "content": out[:6000]})
+                             "content": repeats.cap_tool_result(out, fn, args)})
     else:
         print(f"\n(hit max steps {MAX_STEPS})")
 

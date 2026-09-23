@@ -1,0 +1,11 @@
+{
+  "id": "react-10",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) that keeps a value together with its undo/redo history. Export it as\n\n```ts\nfunction useUndoRedo<T>(initial: T): {\n  state: T;\n  set: (next: T) => void;\n  undo: () => void;\n  redo: () => void;\n  canUndo: boolean;\n  canRedo: boolean;\n  reset: (next: T) => void;\n}\n```\n\nBehaviour:\n- `state` starts as `initial`, with nothing to undo or redo.\n- `set(next)` makes `next` the current state and records the previous state so it can be undone. It also discards everything that could be redone.\n- If `next` is equal to the current state by `Object.is`, `set(next)` does nothing at all: no history entry is added and the redo history is kept. Values are compared only by `Object.is`, so a different object with the same contents counts as a change.\n- `undo()` goes back one step and makes the undone state available to `redo()`; `redo()` goes forward one step. Each can be repeated through the whole history. Calling `undo()` with nothing to undo, or `redo()` with nothing to redo, does nothing.\n- `canUndo` / `canRedo` are `true` exactly when `undo()` / `redo()` would change the state.\n- `reset(next)` makes `next` the current state and clears both the undo and the redo history.\n\nEach of these functions is called at most once per event handler, and `T` is never a function type.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-10/test.tsx", "entry": ["useUndoRedo"]},
+  "reference": "tasks/react-10/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

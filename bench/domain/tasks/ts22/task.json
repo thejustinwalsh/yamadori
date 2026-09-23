@@ -1,0 +1,27 @@
+{
+  "id": "ts22",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode, Node 24, no third-party libraries) for validating untrusted JSON with composable, statically typed parsers. Export:\n\n- `class ParseError extends Error` with a `path: (string | number)[]` property locating the failing value from the root (object keys and array indices, e.g. `['roles', 1]` or `['address', 'city']`; `[]` for the root itself).\n- `type Parser<T>` -- anything with a `parse(input: unknown): T` method that returns the validated value or throws a `ParseError`.\n- `type Infer<P>` -- the output type of a parser.\n- Factories: `string()`, `number()` (finite numbers only -- `NaN` and `Infinity` are rejected), `boolean()`, `literal(...values)` (accepts only the given primitive values and is typed as their literal union, e.g. `literal('a', 'b')` is a `Parser<'a' | 'b'>`), `array(item)`, `optional(inner)` (accepts `undefined` or whatever `inner` accepts) and `object(shape)`, where `shape` maps keys to parsers.\n- `object(shape)` rejects anything that is not a non-null, non-array object; validates each key in `shape`; drops keys not in `shape`; and leaves an absent optional key absent in the output. Its output type has a required property for each ordinary parser and an OPTIONAL property (`key?: T | undefined`) for each `optional(...)` parser, so `Infer<typeof object({ id: number(), email: optional(string()) })>` is equivalent to `{ id: number; email?: string | undefined }`.\n- `fetchJson(url: string, parser)` -- fetches `url` with the global `fetch`, rejects with a plain `Error` whose message contains the status code when the response status is not 2xx, and otherwise resolves to `parser.parse(<the JSON body>)`, typed as `Promise` of the parser's output.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts22/test.ts",
+    "runtime": true,
+    "entry": [
+      "ParseError",
+      "Parser",
+      "Infer",
+      "string",
+      "number",
+      "boolean",
+      "literal",
+      "array",
+      "optional",
+      "object",
+      "fetchJson"
+    ]
+  },
+  "reference": "tasks/ts22/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

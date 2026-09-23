@@ -1,0 +1,11 @@
+{
+  "id": "rs25",
+  "domain": "rust_wasm",
+  "prompt": "Using wasm-bindgen 0.2.128 (the build runs `wasm-bindgen --target nodejs`), write a Rust function exported to JavaScript as `summarize` that takes a `Float64Array` and returns a PLAIN JavaScript object `{ count, min, max, mean }` -- all four numbers, as own enumerable data properties of an ordinary object whose prototype is `Object.prototype` (so `JSON.stringify` and `Object.keys` see them), not an instance of an exported class. For an empty array it returns `null`. The Rust function name is `summarize` too, and the generated declaration must take the argument as `Float64Array`.\n\nConstraint: the crate depends on `wasm-bindgen` only -- `js-sys`, `web-sys`, `serde`, `serde-wasm-bindgen` and `gloo` are NOT available, and no JavaScript files may be added. Answer with a single ```rust code block containing the library code.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs25/grader.mjs", "bindgen": true, "entry": ["summarize"]},
+  "reference": "tasks/rs25/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "notes": "Solvable without js-sys by importing JS globals through a #[wasm_bindgen] extern block (Reflect.set / Object, or JSON.parse). Both routes are covered: reference.rs and alt_json_parse.rs."
+}

@@ -1,0 +1,17 @@
+{
+  "id": "ts09",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports a function `partial(fn, ...head)` for left partial application. It returns a new function that, when called with the remaining arguments, calls `fn(...head, ...remaining)` and returns its result; each call is independent. It must be fully typed with no `any` in the result: given `const fmt = (n: number, unit: string, upper: boolean): string => ...`, `partial(fmt, 3)` has type `(unit: string, upper: boolean) => string` (so `Parameters<typeof p>` is `[unit: string, upper: boolean]`), `partial(fmt, 3, 'px')` takes `(upper: boolean)`, `partial(fmt, 1, 'x', true)` takes no arguments, and `partial(fmt)` takes all three. Passing a pre-supplied argument of the wrong type or too many pre-supplied arguments is a compile error, and so is calling the result with the wrong remaining arguments. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts09/test.ts",
+    "runtime": true,
+    "entry": [
+      "partial"
+    ]
+  },
+  "reference": "tasks/ts09/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

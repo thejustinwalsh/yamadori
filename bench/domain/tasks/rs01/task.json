@@ -1,0 +1,10 @@
+{
+  "id": "rs01",
+  "domain": "rust_wasm",
+  "prompt": "In Rust, define a struct `PacketHeader` that a C library will read directly from memory. Its fields, in this order, are `tag: u8`, `len: u32`, `flags: u16`, all `pub`. The layout must match the equivalent C struct `struct PacketHeader { uint8_t tag; uint32_t len; uint16_t flags; };` exactly (same size, alignment and field offsets on every target). Also export `#[no_mangle] pub extern \"C\" fn packet_header_size() -> usize` returning its size in bytes. Answer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs01/grader.rs", "entry": ["PacketHeader", "packet_header_size"]},
+  "reference": "tasks/rs01/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

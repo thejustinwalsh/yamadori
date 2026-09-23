@@ -1,0 +1,17 @@
+{
+  "id": "tg13",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export these schemas exactly as written:\n\n```ts\nexport const Particle = d.struct({ pos: d.vec3f, vel: d.vec3f }).$name('Particle');\nexport const SimParams = d.struct({ dt: d.f32, count: d.u32 }).$name('SimParams');\n```\n\nplus: (1) `simLayout` -- a bind group layout with entries `params` (uniform `SimParams`, binding 0) and `particles` (writable storage buffer holding a runtime-sized array of `Particle`, binding 1); (2) `integrate` -- a compute shader entry point with workgroup size 64 whose only input is the global invocation id builtin, implemented as a WGSL string (not a JS function), with WGSL name `integrate`. For `i = global_invocation_id.x` it returns early when `i >= params.count` and otherwise does `particles[i].pos += particles[i].vel * params.dt`, reading both resources through `simLayout`. `tgpu.resolve([integrate])` must produce the complete shader (structs, both bindings and the entry point) in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg13/test.ts", "runtime": true, "webgpu": true, "entry": ["Particle", "SimParams", "simLayout", "integrate"]},
+  "reference": "tasks/tg13/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu.computeFn({ in, workgroupSize })`body`": "core/function/tgpuComputeFn.d.ts, core/function/tgpuComputeFn.js, core/function/fnCore.js (string impl: body only, builtins referenced by key or via `in.`)",
+    "d.builtin.globalInvocationId": "builtin.d.ts",
+    "tgpu.bindGroupLayout + $uses({ layout }) with layout.$.key chains": "tgpuBindGroupLayout.js, core/resolve/externals.js",
+    "TgpuComputeFn": "core/function/tgpuComputeFn.d.ts"
+  },
+  "notes": "wrong_compile uses the pre-0.4 `.does(...)` shell API, absent from 0.12.5 (grep of all .d.ts/.js). wrong_test_2 reads `simLayout.$.params` eagerly at module scope, which throws outside resolution in 0.12.5."
+}

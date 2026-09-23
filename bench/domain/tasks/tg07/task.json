@@ -1,0 +1,17 @@
+{
+  "id": "tg07",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export `PackedVertex`: a schema for one record of a vertex buffer that is tightly packed -- no WGSL alignment padding anywhere, so one record is exactly 24 bytes. Its attributes, in this order, use these WebGPU vertex formats: `position` = three 32-bit floats (`float32x3`), `normal` = four signed-normalized 8-bit integers (`snorm8x4`), `uv` = two unsigned-normalized 16-bit integers (`unorm16x2`), `color` = four unsigned-normalized 8-bit integers (`unorm8x4`). On the JS side the attributes must read back as float vectors (`position` a vec3f, `normal` and `color` vec4f, `uv` a vec2f). Also export `const packedVertexStride: number`, the record size computed with typegpu's size helper. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg07/test.ts", "runtime": true, "webgpu": true, "entry": ["PackedVertex", "packedVertexStride"]},
+  "reference": "tasks/tg07/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "api": {
+    "d.unstruct(props)": "data/unstruct.d.ts, data/unstruct.js",
+    "d.float32x3 / d.snorm8x4 / d.unorm16x2 / d.unorm8x4": "data/vertexFormatData.d.ts, data/vertexFormatData.js",
+    "tgpu.vertexLayout(fn, stepMode?) .attrib[k].format/.offset, .stride": "core/vertexLayout/vertexLayout.d.ts, core/vertexLayout/vertexLayout.js",
+    "d.disarrayOf": "data/disarray.d.ts",
+    "writeToArrayBuffer (named export of 'typegpu')": "data/dataIO.d.ts, index.d.ts"
+  }
+}

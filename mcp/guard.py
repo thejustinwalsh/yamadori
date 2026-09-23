@@ -16,11 +16,18 @@ TWO SEPARATE PROBLEMS, BOTH REAL
    proxy index that directory. Prompt injection into arbitrary local file
    read, with the contents then summarised back to whoever asked.
 
-The second is the serious one, and it cannot be fixed by pattern matching. It
-needs a trust boundary: a NEW root may only be established from content the
-harness itself supplied, never from content a repository supplied. Once a root
-is approved it stays approved, so the cost is one decision per repository
-rather than per turn -- which is what keeps this compatible with zero-config.
+The second is the serious one, and it cannot be fixed by pattern matching.
+The first fix drew the line between tool results (repository-controlled) and
+the system/user messages (called "trusted"), and approved a root on its first
+trusted mention. That line was in the wrong place: every message in a request
+is written by whoever holds a key, so any caller could name any directory on
+this server and read it back through the tools.
+
+CLOSED 2026-09-22. Nothing in a request selects or approves a directory:
+proxy.resolve_repo returns no root, and may_establish approves only what the
+operator approved on this machine (`python mcp/guard.py approve PATH`). The
+caller's own source reaches the model through the caller's harness tools; the
+server serves what it holds.
 """
 from __future__ import annotations
 
@@ -33,20 +40,31 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STORE = os.environ.get("YAMADORI_INDEX_DIR", os.path.join(HERE, "..", "index", "repos"))
 CONSENT = os.path.join(STORE, "approved_roots.json")
 
-# Open mode exists because the first question anyone asks is "why is it asking
-# me things when you said zero config". It is off by default because the
-# answer to that question is "because a repository asked me to read your ssh
-# directory".
-OPEN = os.environ.get("YAMADORI_TRUST_ALL_ROOTS") == "1"
+# There is no open mode. YAMADORI_TRUST_ALL_ROOTS=1 used to approve every
+# root; removed 2026-09-22 with request-declared roots, because a switch that
+# approves any directory is one environment variable away from the hole that
+# was closed. Roots are approved by the operator only (`approve` below).
 
 # Names that are credentials regardless of extension. Matched on the basename,
-# case-insensitively, so `Secrets.json` and `.env.production` are both caught.
+# case-insensitively, so `.env.production` and `server.pem` are both caught.
 SECRET_NAMES = re.compile(
     r"(^\.env($|\.)|^\.npmrc$|^\.netrc$|^\.pgpass$|^id_(rsa|ecdsa|ed25519)$|"
-    r"secret|credential|password|passwd|\.pem$|\.pfx$|\.p12$|\.key$|"
-    r"\.keystore$|\.jks$|token|apikey|api[_-]key|"
+    r"\.pem$|\.pfx$|\.p12$|\.key$|\.keystore$|\.jks$|"
     r"^terraform\.tfstate|^\.htpasswd$|service[_-]account.*\.json$)",
     re.I)
+
+# Words that mark a credential only in a DATA or CONFIG file's name:
+# `secrets.json` and `credentials.toml` were the measured incidents. The same
+# words in source file names are ordinary code -- `tokenizer.ts`,
+# `password-reset.tsx`, `useApiKey.ts` -- and matching them there silently
+# dropped real source from the index, a retrieval bug that is very hard to
+# trace back to here. Source files are covered by the content check instead,
+# which looks for actual key formats in every file.
+SECRET_WORDS = re.compile(
+    r"(secret|credential|password|passwd|token|apikey|api[_-]key)", re.I)
+DATA_EXTS = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
+             ".env", ".txt", ".properties", ".xml", ".csv", ".ps1", ".sh",
+             ".bat", ".cmd", ""}
 
 # A file that is not named like a secret but contains one. Deliberately narrow:
 # a false positive silently drops a real source file from the index, which is
@@ -64,7 +82,11 @@ MAX_SNIFF = 65536
 
 
 def is_secret_path(path: str) -> bool:
-    return bool(SECRET_NAMES.search(os.path.basename(path)))
+    base = os.path.basename(path)
+    if SECRET_NAMES.search(base):
+        return True
+    return (os.path.splitext(base)[1].lower() in DATA_EXTS
+            and bool(SECRET_WORDS.search(base)))
 
 
 def has_secret_content(path: str) -> bool:
@@ -76,13 +98,16 @@ def has_secret_content(path: str) -> bool:
 
 
 def should_index(path: str) -> tuple[bool, str]:
-    """Called per file. Returns (allowed, reason-if-not)."""
+    """Called per file. Returns (allowed, reason-if-not).
+
+    The content check runs on EVERY file, source included: a key pasted into
+    `config.ts` is as much a leak as one in `config.json`, and the patterns
+    are narrow key formats, not words.
+    """
     if is_secret_path(path):
         return False, "name looks like a credential"
-    if os.path.splitext(path)[1].lower() in {".json", ".yaml", ".yml", ".toml",
-                                             ".ps1", ".sh", ".md", ".txt", ".env"}:
-        if has_secret_content(path):
-            return False, "contains a credential-shaped value"
+    if has_secret_content(path):
+        return False, "contains a credential-shaped value"
     return True, ""
 
 
@@ -104,8 +129,6 @@ def _save(d: dict) -> None:
 
 
 def is_approved(root: str) -> bool:
-    if OPEN:
-        return True
     return os.path.abspath(root).lower() in {k.lower() for k in _load()}
 
 
@@ -139,13 +162,12 @@ def may_establish(root: str, from_trusted: bool) -> tuple[bool, str]:
     """
     if is_approved(root):
         return True, ""
-    if not from_trusted:
-        return False, ("new repository, and the path for it came from file "
-                       "content rather than from the harness")
-    # Trusted first sight: approve once and remember, so this costs one
-    # decision per repository and never recurs.
-    approve(root, how="harness-declared cwd")
-    return True, ""
+    # NO APPROVAL FROM A REQUEST. "Trusted" used to mean the path appeared in
+    # the system or user message -- both written by any key holder -- and
+    # first sight approved it forever. Only the operator approves a root, on
+    # this machine, with `python mcp/guard.py approve PATH`.
+    return False, ("not an operator-approved root; a request cannot approve "
+                   "a directory on this server")
 
 
 if __name__ == "__main__":

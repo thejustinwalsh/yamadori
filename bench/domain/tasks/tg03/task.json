@@ -1,0 +1,17 @@
+{
+  "id": "tg03",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export `GAUSS_WEIGHTS`: a WGSL module-scope *constant* (a `const` declaration in the generated shader, not a variable or a buffer) holding the five `f32` blur weights `0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216`, typed as a fixed-size array of 5 f32. Resolving it on its own with `tgpu.resolve([GAUSS_WEIGHTS])` must emit a declaration whose WGSL identifier is exactly `GAUSS_WEIGHTS`, and this must hold in plain Node without the `unplugin-typegpu` build plugin (so do not rely on automatic naming). Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg03/test.ts", "runtime": true, "webgpu": true, "entry": ["GAUSS_WEIGHTS"]},
+  "reference": "tasks/tg03/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "api": {
+    "tgpu.const(dataType, value)": "core/constant/tgpuConstant.d.ts, core/constant/tgpuConstant.js (default export key 'const' in index.d.ts)",
+    "TgpuConst<T>": "core/constant/tgpuConstant.d.ts, re-exported as a type from index.d.ts",
+    ".$name(label)": "shared/meta.d.ts (TgpuNamable)",
+    "tgpu.fn(args, ret)`wgsl` + $uses": "core/function/tgpuFn.d.ts, core/function/tgpuFn.js"
+  },
+  "notes": "wrong_compile: tgpu.constant does not exist on the 0.12.5 default export (only `const`, plus the deprecated tgpu['~unstable'].const alias)."
+}

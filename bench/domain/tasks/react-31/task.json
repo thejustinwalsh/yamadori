@@ -1,0 +1,11 @@
+{
+  "id": "react-31",
+  "domain": "react",
+  "prompt": "Write a React 19 component in TypeScript (strict mode) and export it as `SubscribeForm`:\n\n    export function SubscribeForm({ subscribe }: { subscribe: (email: string) => Promise<void> })\n\nIt must be built with React 19's `useActionState`, with the action passed to a `<form action={...}>` (not an `onSubmit` handler).\n\nContract:\n- A text input labelled \"Email\" and a submit button. Submitting the form (clicking the button or pressing Enter in the input) calls `subscribe` once with the input's current text.\n- While that call is pending, the button is disabled and its text is \"Subscribing…\" (with the single character `…`, U+2026). Otherwise it is enabled and its text is \"Subscribe\".\n- If `subscribe` rejects with an `Error`, show an element with role `alert` whose text is exactly that error's `message`, and no role `status` element. The input must still contain the email that was submitted, so the user can press Subscribe again to retry.\n- If `subscribe` resolves, show an element with role `status` whose text is exactly `Subscribed <email>` (e.g. `Subscribed ada@example.com`), remove any error alert, and leave the input empty, ready for another address. A later successful submission replaces the status text with the new address.\n\nUse only `react` and `react-dom`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-31/test.tsx", "entry": ["SubscribeForm"]},
+  "reference": "tasks/react-31/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

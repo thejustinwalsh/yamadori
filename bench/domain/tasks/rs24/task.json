@@ -1,0 +1,10 @@
+{
+  "id": "rs24",
+  "domain": "rust_wasm",
+  "prompt": "Using wasm-bindgen 0.2 (the build runs `wasm-bindgen --target nodejs`; only the `wasm-bindgen` crate is available, no `js-sys`), write a Rust function exported to JavaScript as `parseHexColor` (the Rust function is `parse_hex_color`). It takes a string and returns a `Uint8Array` `[r, g, b]`. Accepted forms, case-insensitive: `#rrggbb` and the short form `#rgb`, where each short digit is doubled (`#abc` means `#aabbcc`). Anything else -- missing `#`, wrong length, non-hex digits -- must make the call THROW a genuine JavaScript `Error` (so `err instanceof Error` is true and `err.message` is a string), whose message contains the offending input string verbatim. The generated TypeScript declaration must be `parseHexColor(s: string): Uint8Array` (a parameter name of your choice). Answer with a single ```rust code block containing the library code.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs24/grader.mjs", "bindgen": true, "entry": ["parse_hex_color"]},
+  "reference": "tasks/rs24/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

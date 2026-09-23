@@ -1,0 +1,10 @@
+{
+  "id": "rs06",
+  "domain": "rust_wasm",
+  "prompt": "A C library hands Rust pointers to records laid out by this header:\n\n```c\nstruct Header { uint8_t kind; uint32_t id; uint8_t sub; };\nstruct Record { struct Header header; uint16_t values[3]; uint64_t checksum; };\nuint64_t record_sum(const struct Record *r);\n```\n\nWrite the Rust side:\n\n- `pub struct Header { pub kind: u8, pub id: u32, pub sub: u8 }` and `pub struct Record { pub header: Header, pub values: [u16; 3], pub checksum: u64 }`, both deriving `Debug, Clone, Copy`, with layouts (size, alignment, every field offset, including the nested struct's) identical to the C structs above on every target.\n- `#[no_mangle] pub unsafe extern \"C\" fn record_sum(r: *const Record) -> u64` returning `kind + id + sub + values[0] + values[1] + values[2]` (each widened to `u64`; `checksum` is not included). A null `r` returns 0.\n\nAnswer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs06/grader.rs", "entry": ["Header", "Record", "record_sum"]},
+  "reference": "tasks/rs06/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

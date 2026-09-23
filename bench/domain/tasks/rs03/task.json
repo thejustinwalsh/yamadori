@@ -1,0 +1,10 @@
+{
+  "id": "rs03",
+  "domain": "rust_wasm",
+  "prompt": "Using wasm-bindgen 0.2, write a Rust function exported to JavaScript as `normalize` that takes a `Float32Array` of any length and returns a new `Float32Array` scaled to unit Euclidean length; a zero vector is returned unchanged. The Rust signature must be `pub fn normalize(v: &[f32]) -> Vec<f32>` annotated with `#[wasm_bindgen]`, so the generated TypeScript declaration is `normalize(v: Float32Array): Float32Array`. Answer with a single ```rust code block containing the library code.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs03/grader.mjs", "bindgen": true, "entry": ["normalize"]},
+  "reference": "tasks/rs03/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

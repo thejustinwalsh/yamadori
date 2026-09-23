@@ -1,0 +1,10 @@
+{
+  "id": "rs14",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library for `wasm32-unknown-unknown` (no wasm-bindgen). JavaScript encodes a string with `TextEncoder`, copies the bytes into linear memory and calls:\n\n`#[no_mangle] pub unsafe extern \"C\" fn count_chars(ptr: *const u8, len: usize) -> i32`\n\nIt returns the number of Unicode scalar values (Rust `char`s) in the `len` bytes at `ptr`, or -1 if those bytes are not valid UTF-8. `ptr` may be 0 (null) when `len` is 0, which returns 0. The caller keeps ownership of the bytes. Answer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs14/grader.mjs", "wasm_support": true, "entry": ["count_chars"]},
+  "reference": "tasks/rs14/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

@@ -1,0 +1,36 @@
+{
+  "id": "tsl06",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer + TSL. Write a JavaScript module exporting `function createPipeline( renderer, scene, camera )`. It must create and return the 'three/webgpu' object that renders a TSL node graph to the canvas in place of `renderer.render()` (the object you give an `outputNode` and then call `.render()` on every frame), with its output node set to `pass( scene, camera )` from 'three/tsl'. Use the class name r185 documents for this, not a deprecated alias, and named imports from 'three/webgpu' and 'three/tsl'. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "createPipeline"
+    ],
+    "require": [
+      {
+        "name": "RenderPipeline",
+        "as": "import",
+        "from": "three/webgpu"
+      },
+      {
+        "name": "pass",
+        "as": "call"
+      },
+      {
+        "name": "pass",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": [
+      "PostProcessing"
+    ]
+  },
+  "reference": "tasks/tsl06/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "PostProcessing -> RenderPipeline, @deprecated r183: r185 src/renderers/common/PostProcessing.js:5,20 (a subclass shim that warns '\"PostProcessing\" has been renamed to \"RenderPipeline\"'); r185 src/renderers/common/RenderPipeline.js:22 `class RenderPipeline`.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

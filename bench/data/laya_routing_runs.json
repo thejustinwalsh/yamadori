@@ -1,0 +1,2981 @@
+{
+ "n_orders": 2,
+ "items": [
+  {
+   "question": "Why does our ParticleField component render black in three r185 when it worked fine in r180?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "src/scene/ParticleField.tsx",
+     "ParticleField"
+    ],
+    "code_block": false,
+    "words": 16,
+    "context_words": 13,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.22050000000000003,
+     "probabilities": {
+      "investigate": 0.48455000000000004,
+      "answer_directly": 0.2514,
+      "clarify": 0.26405
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "investigate",
+     "margin": 0.03344999999999998,
+     "probabilities": {
+      "investigate": 0.3578,
+      "answer_directly": 0.31784999999999997,
+      "clarify": 0.32435
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.19425000000000003,
+     "probabilities": {
+      "investigate": 0.49965000000000004,
+      "answer_directly": 0.19490000000000002,
+      "clarify": 0.3054
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What does mcp/hemisphere.py do with a trace handle once MAX_TRACES is exceeded?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "mcp/hemisphere.py",
+     "MAX_TRACES"
+    ],
+    "code_block": false,
+    "words": 12,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.15645000000000003,
+     "probabilities": {
+      "investigate": 0.24019999999999997,
+      "answer_directly": 0.4581,
+      "clarify": 0.30165
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.05575000000000008,
+     "probabilities": {
+      "investigate": 0.31484999999999996,
+      "answer_directly": 0.37060000000000004,
+      "clarify": 0.3145
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.012249999999999983,
+     "probabilities": {
+      "investigate": 0.3156,
+      "answer_directly": 0.3483,
+      "clarify": 0.33605
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Where in our codebase do we set the WGSL workgroup size for the fluid sim, and what value is it?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 20,
+    "context_words": 7,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.047750000000000015,
+     "probabilities": {
+      "investigate": 0.366,
+      "answer_directly": 0.31825,
+      "clarify": 0.31575
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.04454999999999998,
+     "probabilities": {
+      "investigate": 0.31455,
+      "answer_directly": 0.365,
+      "clarify": 0.32045
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.14875000000000005,
+     "probabilities": {
+      "investigate": 0.48910000000000003,
+      "answer_directly": 0.1706,
+      "clarify": 0.34035
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Which of our R3F components still use the WebGLRenderer path instead of WebGPURenderer?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "backend"
+    ],
+    "libraries": [
+     "s"
+    ],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 14,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.024249999999999994,
+     "probabilities": {
+      "investigate": 0.33799999999999997,
+      "answer_directly": 0.36224999999999996,
+      "clarify": 0.29969999999999997
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.02939999999999998,
+     "probabilities": {
+      "investigate": 0.3195,
+      "answer_directly": 0.32555,
+      "clarify": 0.35495
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.04690000000000005,
+     "probabilities": {
+      "investigate": 0.36634999999999995,
+      "answer_directly": 0.22039999999999998,
+      "clarify": 0.41325
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is the actual resolved type of RootState['gl'] in the @react-three/fiber version we have pinned?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "package.json",
+     "RootState"
+    ],
+    "code_block": false,
+    "words": 15,
+    "context_words": 4,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.1134,
+     "probabilities": {
+      "investigate": 0.2996,
+      "answer_directly": 0.413,
+      "clarify": 0.2874
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.003599999999999992,
+     "probabilities": {
+      "investigate": 0.3111,
+      "answer_directly": 0.34625,
+      "clarify": 0.34265
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.02705000000000002,
+     "probabilities": {
+      "investigate": 0.3834,
+      "answer_directly": 0.35635,
+      "clarify": 0.2602
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Our TypeGPU bind group in src/gpu/layout.ts throws 'incompatible binding at index 2'. What's mismatched?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "backend",
+     "gpu"
+    ],
+    "libraries": [
+     "typegpu"
+    ],
+    "symbols": [
+     "src/gpu/layout.ts"
+    ],
+    "code_block": true,
+    "words": 14,
+    "context_words": 28,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.06585000000000002,
+     "probabilities": {
+      "investigate": 0.3911,
+      "answer_directly": 0.32525,
+      "clarify": 0.28365
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "investigate",
+     "margin": 0.02949999999999997,
+     "probabilities": {
+      "investigate": 0.3698,
+      "answer_directly": 0.28995,
+      "clarify": 0.34030000000000005
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.2989,
+     "probabilities": {
+      "investigate": 0.5535,
+      "answer_directly": 0.19190000000000002,
+      "clarify": 0.2546
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Find every place we call useFrame with a priority argument and tell me which priorities we use.",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 17,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.20445000000000002,
+     "probabilities": {
+      "investigate": 0.24845,
+      "answer_directly": 0.478,
+      "clarify": 0.27354999999999996
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.06574999999999998,
+     "probabilities": {
+      "investigate": 0.2998,
+      "answer_directly": 0.383,
+      "clarify": 0.31725000000000003
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.04404999999999998,
+     "probabilities": {
+      "investigate": 0.41159999999999997,
+      "answer_directly": 0.36755,
+      "clarify": 0.22085
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "cargo build fails in crates/renderer with E0277 after we bumped wgpu. Which trait bound broke?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "Cargo.toml"
+    ],
+    "code_block": false,
+    "words": 15,
+    "context_words": 9,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.15149999999999997,
+     "probabilities": {
+      "investigate": 0.4533,
+      "answer_directly": 0.3018,
+      "clarify": 0.2449
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.020799999999999985,
+     "probabilities": {
+      "investigate": 0.3179,
+      "answer_directly": 0.35145,
+      "clarify": 0.33065
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.2641000000000001,
+     "probabilities": {
+      "investigate": 0.5224500000000001,
+      "answer_directly": 0.21915,
+      "clarify": 0.25834999999999997
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What does the admission guard do when the token budget is already exhausted - reject, queue, or downgrade?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "mcp/admission.py"
+    ],
+    "code_block": false,
+    "words": 18,
+    "context_words": 7,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.41165,
+     "probabilities": {
+      "investigate": 0.623,
+      "answer_directly": 0.16565,
+      "clarify": 0.21134999999999998
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.005650000000000044,
+     "probabilities": {
+      "investigate": 0.2963,
+      "answer_directly": 0.35465,
+      "clarify": 0.349
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.07245000000000001,
+     "probabilities": {
+      "investigate": 0.43545,
+      "answer_directly": 0.20155,
+      "clarify": 0.363
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Which files define the TSL node materials we use, and what uniforms does each expose?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.049399999999999944,
+     "probabilities": {
+      "investigate": 0.38375,
+      "answer_directly": 0.28190000000000004,
+      "clarify": 0.33435000000000004
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08054999999999995,
+     "probabilities": {
+      "investigate": 0.2933,
+      "answer_directly": 0.39365,
+      "clarify": 0.31310000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.09015000000000001,
+     "probabilities": {
+      "investigate": 0.40025,
+      "answer_directly": 0.3101,
+      "clarify": 0.28969999999999996
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Our Spring<T> generic in types/animation.ts started inferring unknown after the TS 5.6 bump. Which conditional branch is failing?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "motion"
+    ],
+    "libraries": [],
+    "symbols": [
+     "types/animation.ts"
+    ],
+    "code_block": true,
+    "words": 18,
+    "context_words": 26,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.2535,
+     "probabilities": {
+      "investigate": 0.24935000000000002,
+      "answer_directly": 0.50285,
+      "clarify": 0.24774999999999997
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.01585000000000003,
+     "probabilities": {
+      "investigate": 0.33485,
+      "answer_directly": 0.3507,
+      "clarify": 0.31445
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.18224999999999997,
+     "probabilities": {
+      "investigate": 0.4569,
+      "answer_directly": 0.27465,
+      "clarify": 0.26839999999999997
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Trace where a /decide request enters laya_service and what serialises access to the GPU.",
+   "label": "investigate",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "laya_service"
+    ],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.062450000000000006,
+     "probabilities": {
+      "investigate": 0.3941,
+      "answer_directly": 0.2742,
+      "clarify": 0.33165
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.09960000000000002,
+     "probabilities": {
+      "investigate": 0.26639999999999997,
+      "answer_directly": 0.4166,
+      "clarify": 0.317
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.13785000000000003,
+     "probabilities": {
+      "investigate": 0.47255,
+      "answer_directly": 0.19274999999999998,
+      "clarify": 0.3347
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "In our shader water.wgsl, what does the uTime uniform get bound to on the JS side?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "water.wgsl"
+    ],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.05209999999999998,
+     "probabilities": {
+      "investigate": 0.3241,
+      "answer_directly": 0.3762,
+      "clarify": 0.29974999999999996
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08165,
+     "probabilities": {
+      "investigate": 0.27855,
+      "answer_directly": 0.40155,
+      "clarify": 0.3199
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.04039999999999999,
+     "probabilities": {
+      "investigate": 0.34285,
+      "answer_directly": 0.27385000000000004,
+      "clarify": 0.38325
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What version of three is pinned in our package.json, and does that release include the TSL fog node fix?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "package.json"
+    ],
+    "code_block": false,
+    "words": 19,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.13480000000000003,
+     "probabilities": {
+      "investigate": 0.1613,
+      "answer_directly": 0.48675,
+      "clarify": 0.35195
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.030750000000000055,
+     "probabilities": {
+      "investigate": 0.2934,
+      "answer_directly": 0.33795,
+      "clarify": 0.3687
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.015050000000000008,
+     "probabilities": {
+      "investigate": 0.21715,
+      "answer_directly": 0.3839,
+      "clarify": 0.39895
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Which of our Rust modules still use unsafe blocks, and what is each one for?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.018000000000000016,
+     "probabilities": {
+      "investigate": 0.3578,
+      "answer_directly": 0.3024,
+      "clarify": 0.3398
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08054999999999995,
+     "probabilities": {
+      "investigate": 0.2933,
+      "answer_directly": 0.39365,
+      "clarify": 0.31310000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.08340000000000003,
+     "probabilities": {
+      "investigate": 0.31715,
+      "answer_directly": 0.40055,
+      "clarify": 0.2823
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "The drei Environment component makes our scene washed out but only in the deployed build. What differs between our dev and prod three config?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 24,
+    "context_words": 4,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.1583,
+     "probabilities": {
+      "investigate": 0.46285,
+      "answer_directly": 0.30455,
+      "clarify": 0.2326
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.03545000000000009,
+     "probabilities": {
+      "investigate": 0.32299999999999995,
+      "answer_directly": 0.35845000000000005,
+      "clarify": 0.31855
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.39970000000000006,
+     "probabilities": {
+      "investigate": 0.6167,
+      "answer_directly": 0.1663,
+      "clarify": 0.217
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Why does our useMemo'd BufferGeometry get disposed twice on hot reload?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "src/scene/Mesh.tsx",
+     "BufferGeometry"
+    ],
+    "code_block": false,
+    "words": 11,
+    "context_words": 6,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.3879,
+     "probabilities": {
+      "investigate": 0.61065,
+      "answer_directly": 0.1666,
+      "clarify": 0.22275
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "investigate",
+     "margin": 0.04305000000000003,
+     "probabilities": {
+      "investigate": 0.3658,
+      "answer_directly": 0.32275,
+      "clarify": 0.3115
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.5156999999999999,
+     "probabilities": {
+      "investigate": 0.7112499999999999,
+      "answer_directly": 0.0932,
+      "clarify": 0.19555
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What columns does the chunks table in our code index actually have?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "backend"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 12,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.23070000000000002,
+     "probabilities": {
+      "investigate": 0.18080000000000002,
+      "answer_directly": 0.52495,
+      "clarify": 0.29425
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.032799999999999996,
+     "probabilities": {
+      "investigate": 0.31795,
+      "answer_directly": 0.3574,
+      "clarify": 0.3246
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.14694999999999997,
+     "probabilities": {
+      "investigate": 0.44589999999999996,
+      "answer_directly": 0.29895,
+      "clarify": 0.25515
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is the difference between Fn and the older tslFn in three.js TSL?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "three.js"
+    ],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.06545000000000001,
+     "probabilities": {
+      "investigate": 0.31795,
+      "answer_directly": 0.3834,
+      "clarify": 0.2986
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.06289999999999996,
+     "probabilities": {
+      "investigate": 0.27654999999999996,
+      "answer_directly": 0.39315,
+      "clarify": 0.33025000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.031700000000000006,
+     "probabilities": {
+      "investigate": 0.3323,
+      "answer_directly": 0.30369999999999997,
+      "clarify": 0.364
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "In WGSL, is textureSample allowed inside non-uniform control flow?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 9,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.05950000000000005,
+     "probabilities": {
+      "investigate": 0.29595000000000005,
+      "answer_directly": 0.38175000000000003,
+      "clarify": 0.32225
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.0776,
+     "probabilities": {
+      "investigate": 0.29995,
+      "answer_directly": 0.38885000000000003,
+      "clarify": 0.31125
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.06740000000000002,
+     "probabilities": {
+      "investigate": 0.22305000000000003,
+      "answer_directly": 0.4222,
+      "clarify": 0.3548
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What does the second argument to useFrame do in react-three-fiber?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.16535,
+     "probabilities": {
+      "investigate": 0.2592,
+      "answer_directly": 0.28775,
+      "clarify": 0.4531
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.10075,
+     "probabilities": {
+      "investigate": 0.2947,
+      "answer_directly": 0.40305,
+      "clarify": 0.3023
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.03394999999999998,
+     "probabilities": {
+      "investigate": 0.23945,
+      "answer_directly": 0.3633,
+      "clarify": 0.39725
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is the difference between &str and String in Rust, and when do I want each?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.14420000000000005,
+     "probabilities": {
+      "investigate": 0.23975,
+      "answer_directly": 0.45225000000000004,
+      "clarify": 0.30805
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.06905,
+     "probabilities": {
+      "investigate": 0.29755,
+      "answer_directly": 0.38575,
+      "clarify": 0.3167
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.012899999999999967,
+     "probabilities": {
+      "investigate": 0.29405000000000003,
+      "answer_directly": 0.3594,
+      "clarify": 0.34650000000000003
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "How do TypeScript conditional types distribute over union types, and how do I stop that?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.11359999999999998,
+     "probabilities": {
+      "investigate": 0.2298,
+      "answer_directly": 0.4419,
+      "clarify": 0.32830000000000004
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08054999999999995,
+     "probabilities": {
+      "investigate": 0.2933,
+      "answer_directly": 0.39365,
+      "clarify": 0.31310000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.02429999999999999,
+     "probabilities": {
+      "investigate": 0.2685,
+      "answer_directly": 0.3536,
+      "clarify": 0.3779
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is a workgroup in WGSL and how does workgroup_size relate to the dispatch count?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "workgroup_size"
+    ],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.1078,
+     "probabilities": {
+      "investigate": 0.1759,
+      "answer_directly": 0.46595,
+      "clarify": 0.35814999999999997
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.14134999999999998,
+     "probabilities": {
+      "investigate": 0.2541,
+      "answer_directly": 0.44365,
+      "clarify": 0.3023
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.040449999999999986,
+     "probabilities": {
+      "investigate": 0.21760000000000002,
+      "answer_directly": 0.37095,
+      "clarify": 0.4114
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What does the satisfies operator do in TypeScript, and how is it different from as?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.03049999999999997,
+     "probabilities": {
+      "investigate": 0.27785,
+      "answer_directly": 0.37634999999999996,
+      "clarify": 0.34585
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08054999999999995,
+     "probabilities": {
+      "investigate": 0.2933,
+      "answer_directly": 0.39365,
+      "clarify": 0.31310000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.08625000000000005,
+     "probabilities": {
+      "investigate": 0.39675000000000005,
+      "answer_directly": 0.2928,
+      "clarify": 0.3105
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Why can't Rust pass ?Sized types by value?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 8,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.1392,
+     "probabilities": {
+      "investigate": 0.26234999999999997,
+      "answer_directly": 0.43845,
+      "clarify": 0.29925
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08179999999999998,
+     "probabilities": {
+      "investigate": 0.3,
+      "answer_directly": 0.3909,
+      "clarify": 0.30910000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.06240000000000001,
+     "probabilities": {
+      "investigate": 0.405,
+      "answer_directly": 0.3426,
+      "clarify": 0.25234999999999996
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is the difference between the storage and uniform address spaces in WGSL?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.2288,
+     "probabilities": {
+      "investigate": 0.1645,
+      "answer_directly": 0.53215,
+      "clarify": 0.30335
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.07894999999999996,
+     "probabilities": {
+      "investigate": 0.29225,
+      "answer_directly": 0.39335,
+      "clarify": 0.3144
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.19905,
+     "probabilities": {
+      "investigate": 0.21155000000000002,
+      "answer_directly": 0.49375,
+      "clarify": 0.2947
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "How does TypeGPU's bindGroupLayout differ from raw WebGPU createBindGroupLayout?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 9,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.016400000000000026,
+     "probabilities": {
+      "investigate": 0.3462,
+      "answer_directly": 0.3298,
+      "clarify": 0.32404999999999995
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.0776,
+     "probabilities": {
+      "investigate": 0.29995,
+      "answer_directly": 0.38885000000000003,
+      "clarify": 0.31125
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.23860000000000003,
+     "probabilities": {
+      "investigate": 0.50565,
+      "answer_directly": 0.22735,
+      "clarify": 0.26705
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is the default dpr for an R3F Canvas if I don't set it?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.25784999999999997,
+     "probabilities": {
+      "investigate": 0.213,
+      "answer_directly": 0.5224,
+      "clarify": 0.26455
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.07940000000000003,
+     "probabilities": {
+      "investigate": 0.29805000000000004,
+      "answer_directly": 0.39070000000000005,
+      "clarify": 0.3113
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.13639999999999997,
+     "probabilities": {
+      "investigate": 0.21635,
+      "answer_directly": 0.46004999999999996,
+      "clarify": 0.32365
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What do the in and out variance annotations on a TypeScript type parameter do?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.08930000000000005,
+     "probabilities": {
+      "investigate": 0.26280000000000003,
+      "answer_directly": 0.32394999999999996,
+      "clarify": 0.41325
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.07940000000000003,
+     "probabilities": {
+      "investigate": 0.29805000000000004,
+      "answer_directly": 0.39070000000000005,
+      "clarify": 0.3113
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.08324999999999999,
+     "probabilities": {
+      "investigate": 0.27349999999999997,
+      "answer_directly": 0.40485,
+      "clarify": 0.3216
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What does Box<dyn Error> mean and when should a function return it instead of a concrete error type?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 18,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.13669999999999993,
+     "probabilities": {
+      "investigate": 0.17654999999999998,
+      "answer_directly": 0.48009999999999997,
+      "clarify": 0.34340000000000004
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.06004999999999999,
+     "probabilities": {
+      "investigate": 0.30310000000000004,
+      "answer_directly": 0.3785,
+      "clarify": 0.31845
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.08660000000000001,
+     "probabilities": {
+      "investigate": 0.21205,
+      "answer_directly": 0.3507,
+      "clarify": 0.4373
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "In three.js, what is the practical difference between a Group and a plain Object3D?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "three.js"
+    ],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.24029999999999996,
+     "probabilities": {
+      "investigate": 0.25725,
+      "answer_directly": 0.49754999999999994,
+      "clarify": 0.24515
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.05730000000000002,
+     "probabilities": {
+      "investigate": 0.28445,
+      "answer_directly": 0.38645,
+      "clarify": 0.32915
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.012349999999999972,
+     "probabilities": {
+      "investigate": 0.26385000000000003,
+      "answer_directly": 0.3619,
+      "clarify": 0.37424999999999997
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What does the @builtin(position) attribute mean in a WGSL vertex shader, and how does it differ in a fragment shader?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 20,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.027200000000000002,
+     "probabilities": {
+      "investigate": 0.2948,
+      "answer_directly": 0.33899999999999997,
+      "clarify": 0.36619999999999997
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08954999999999996,
+     "probabilities": {
+      "investigate": 0.29575,
+      "answer_directly": 0.3969,
+      "clarify": 0.30735
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.03444999999999998,
+     "probabilities": {
+      "investigate": 0.37615,
+      "answer_directly": 0.28215,
+      "clarify": 0.3417
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is the time complexity of inserting into a JavaScript Map, and is it different from a plain object?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "algorithms"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 19,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.1331,
+     "probabilities": {
+      "investigate": 0.27449999999999997,
+      "answer_directly": 0.4293,
+      "clarify": 0.2962
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.014999999999999958,
+     "probabilities": {
+      "investigate": 0.3225,
+      "answer_directly": 0.34625,
+      "clarify": 0.33125000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.056999999999999995,
+     "probabilities": {
+      "investigate": 0.2763,
+      "answer_directly": 0.39035,
+      "clarify": 0.33335
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What does #[derive(Clone)] actually generate in Rust, and why does it add a T: Clone bound?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.04644999999999999,
+     "probabilities": {
+      "investigate": 0.3219,
+      "answer_directly": 0.36835,
+      "clarify": 0.30974999999999997
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.06905,
+     "probabilities": {
+      "investigate": 0.29755,
+      "answer_directly": 0.38575,
+      "clarify": 0.3167
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.16945,
+     "probabilities": {
+      "investigate": 0.4603,
+      "answer_directly": 0.24885,
+      "clarify": 0.29085
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Why does instancing help draw-call-bound scenes but not fill-rate-bound ones?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.10189999999999999,
+     "probabilities": {
+      "investigate": 0.2365,
+      "answer_directly": 0.4327,
+      "clarify": 0.3308
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.10075,
+     "probabilities": {
+      "investigate": 0.2947,
+      "answer_directly": 0.40305,
+      "clarify": 0.3023
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.1321,
+     "probabilities": {
+      "investigate": 0.2449,
+      "answer_directly": 0.4436,
+      "clarify": 0.3115
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What is the difference between a TypeScript interface and a type alias for object shapes?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.14949999999999997,
+     "probabilities": {
+      "investigate": 0.20179999999999998,
+      "answer_directly": 0.47385,
+      "clarify": 0.32435
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08054999999999995,
+     "probabilities": {
+      "investigate": 0.2933,
+      "answer_directly": 0.39365,
+      "clarify": 0.31310000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.023550000000000015,
+     "probabilities": {
+      "investigate": 0.25215,
+      "answer_directly": 0.3857,
+      "clarify": 0.36214999999999997
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "It's broken.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 2,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.2107500000000001,
+     "probabilities": {
+      "investigate": 0.11939999999999999,
+      "answer_directly": 0.5457000000000001,
+      "clarify": 0.33494999999999997
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.09799999999999998,
+     "probabilities": {
+      "investigate": 0.29190000000000005,
+      "answer_directly": 0.40305,
+      "clarify": 0.30505000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.027549999999999963,
+     "probabilities": {
+      "investigate": 0.17015,
+      "answer_directly": 0.42869999999999997,
+      "clarify": 0.40115
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Can you make it faster?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 5,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.2278,
+     "probabilities": {
+      "investigate": 0.1416,
+      "answer_directly": 0.54315,
+      "clarify": 0.31535
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.10609999999999997,
+     "probabilities": {
+      "investigate": 0.29555,
+      "answer_directly": 0.40525,
+      "clarify": 0.29915
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.3121499999999999,
+     "probabilities": {
+      "investigate": 0.11165,
+      "answer_directly": 0.60025,
+      "clarify": 0.2881
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Why doesn't this work?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 4,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.2491,
+     "probabilities": {
+      "investigate": 0.1416,
+      "answer_directly": 0.55375,
+      "clarify": 0.30465
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.09994999999999998,
+     "probabilities": {
+      "investigate": 0.29925,
+      "answer_directly": 0.40035,
+      "clarify": 0.3004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.23694999999999994,
+     "probabilities": {
+      "investigate": 0.26940000000000003,
+      "answer_directly": 0.50635,
+      "clarify": 0.22425
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Should I use the other approach instead?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [
+     "approach"
+    ],
+    "symbols": [],
+    "code_block": false,
+    "words": 7,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.14925000000000005,
+     "probabilities": {
+      "investigate": 0.13405,
+      "answer_directly": 0.5076,
+      "clarify": 0.35835
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08614999999999995,
+     "probabilities": {
+      "investigate": 0.28735,
+      "answer_directly": 0.3994,
+      "clarify": 0.31325000000000003
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.21040000000000014,
+     "probabilities": {
+      "investigate": 0.1518,
+      "answer_directly": 0.5293000000000001,
+      "clarify": 0.31889999999999996
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Fix the shader.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.19835000000000003,
+     "probabilities": {
+      "investigate": 0.1157,
+      "answer_directly": 0.5413,
+      "clarify": 0.34295
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.10744999999999999,
+     "probabilities": {
+      "investigate": 0.2989,
+      "answer_directly": 0.40635,
+      "clarify": 0.29475
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.07115000000000005,
+     "probabilities": {
+      "investigate": 0.1849,
+      "answer_directly": 0.372,
+      "clarify": 0.44315000000000004
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "It renders wrong on mobile.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 5,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.18630000000000002,
+     "probabilities": {
+      "investigate": 0.16025,
+      "answer_directly": 0.513,
+      "clarify": 0.3267
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.10609999999999997,
+     "probabilities": {
+      "investigate": 0.29555,
+      "answer_directly": 0.40525,
+      "clarify": 0.29915
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.047850000000000004,
+     "probabilities": {
+      "investigate": 0.16754999999999998,
+      "answer_directly": 0.3923,
+      "clarify": 0.44015
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Update the types.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.0963,
+     "probabilities": {
+      "investigate": 0.11745,
+      "answer_directly": 0.4894,
+      "clarify": 0.3931
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.10744999999999999,
+     "probabilities": {
+      "investigate": 0.2989,
+      "answer_directly": 0.40635,
+      "clarify": 0.29475
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.3075,
+     "probabilities": {
+      "investigate": 0.1595,
+      "answer_directly": 0.26649999999999996,
+      "clarify": 0.574
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Which one is better?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 4,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.13280000000000003,
+     "probabilities": {
+      "investigate": 0.1355,
+      "answer_directly": 0.49865000000000004,
+      "clarify": 0.36585
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.09994999999999998,
+     "probabilities": {
+      "investigate": 0.29925,
+      "answer_directly": 0.40035,
+      "clarify": 0.3004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.3188,
+     "probabilities": {
+      "investigate": 0.095,
+      "answer_directly": 0.6119,
+      "clarify": 0.2931
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Add the thing we talked about.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 6,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.023050000000000015,
+     "probabilities": {
+      "investigate": 0.16995,
+      "answer_directly": 0.40349999999999997,
+      "clarify": 0.42655
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.09149999999999997,
+     "probabilities": {
+      "investigate": 0.29995,
+      "answer_directly": 0.39575,
+      "clarify": 0.30425
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.19955,
+     "probabilities": {
+      "investigate": 0.2056,
+      "answer_directly": 0.2974,
+      "clarify": 0.49695
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Does this look right to you?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 6,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.46309999999999996,
+     "probabilities": {
+      "investigate": 0.08075,
+      "answer_directly": 0.6911499999999999,
+      "clarify": 0.22805
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.09149999999999997,
+     "probabilities": {
+      "investigate": 0.29995,
+      "answer_directly": 0.39575,
+      "clarify": 0.30425
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.28495000000000004,
+     "probabilities": {
+      "investigate": 0.0797,
+      "answer_directly": 0.60265,
+      "clarify": 0.3177
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Can you check it before I push?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 7,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.36965000000000003,
+     "probabilities": {
+      "investigate": 0.09784999999999999,
+      "answer_directly": 0.6359,
+      "clarify": 0.26625
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.0877,
+     "probabilities": {
+      "investigate": 0.2964,
+      "answer_directly": 0.39565,
+      "clarify": 0.30795
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.3611500000000001,
+     "probabilities": {
+      "investigate": 0.1491,
+      "answer_directly": 0.6060000000000001,
+      "clarify": 0.24485
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Is this the right pattern here?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 6,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.19389999999999996,
+     "probabilities": {
+      "investigate": 0.145,
+      "answer_directly": 0.33055,
+      "clarify": 0.52445
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.09149999999999997,
+     "probabilities": {
+      "investigate": 0.29995,
+      "answer_directly": 0.39575,
+      "clarify": 0.30425
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.05275000000000002,
+     "probabilities": {
+      "investigate": 0.11910000000000001,
+      "answer_directly": 0.4668,
+      "clarify": 0.41405
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Does the retry helper back off exponentially or linearly?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 9,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.3117,
+     "probabilities": {
+      "investigate": 0.19019999999999998,
+      "answer_directly": 0.56075,
+      "clarify": 0.24905
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.0776,
+     "probabilities": {
+      "investigate": 0.29995,
+      "answer_directly": 0.38885000000000003,
+      "clarify": 0.31125
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.24,
+     "probabilities": {
+      "investigate": 0.20934999999999998,
+      "answer_directly": 0.5153,
+      "clarify": 0.2753
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "How many hops does the investigation loop get before the tools are withdrawn?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.09365000000000001,
+     "probabilities": {
+      "investigate": 0.20875,
+      "answer_directly": 0.3488,
+      "clarify": 0.44245
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.07894999999999996,
+     "probabilities": {
+      "investigate": 0.29225,
+      "answer_directly": 0.39335,
+      "clarify": 0.3144
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.18844999999999995,
+     "probabilities": {
+      "investigate": 0.30525,
+      "answer_directly": 0.49369999999999997,
+      "clarify": 0.20105
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Is the budget checked before or after the model call?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.02895000000000003,
+     "probabilities": {
+      "investigate": 0.1743,
+      "answer_directly": 0.42735,
+      "clarify": 0.3984
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.10075,
+     "probabilities": {
+      "investigate": 0.2947,
+      "answer_directly": 0.40305,
+      "clarify": 0.3023
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.19910000000000005,
+     "probabilities": {
+      "investigate": 0.16770000000000002,
+      "answer_directly": 0.5157,
+      "clarify": 0.3166
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Which tone mapping does the production renderer use?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 8,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.06555000000000005,
+     "probabilities": {
+      "investigate": 0.17525,
+      "answer_directly": 0.3796,
+      "clarify": 0.44515000000000005
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.08179999999999998,
+     "probabilities": {
+      "investigate": 0.3,
+      "answer_directly": 0.3909,
+      "clarify": 0.30910000000000004
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.45665,
+     "probabilities": {
+      "investigate": 0.11535,
+      "answer_directly": 0.67065,
+      "clarify": 0.214
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "What chunk size was used when the index was built?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "backend"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.08424999999999999,
+     "probabilities": {
+      "investigate": 0.2312,
+      "answer_directly": 0.42655,
+      "clarify": 0.3423
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.04949999999999999,
+     "probabilities": {
+      "investigate": 0.31579999999999997,
+      "answer_directly": 0.36685,
+      "clarify": 0.31735
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.01969999999999994,
+     "probabilities": {
+      "investigate": 0.35355000000000003,
+      "answer_directly": 0.37324999999999997,
+      "clarify": 0.2732
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "In a file called shader.wgsl, would var<storage, read_write> be legal at module scope?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "shader.wgsl",
+     "read_write"
+    ],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.21534999999999999,
+     "probabilities": {
+      "investigate": 0.22315000000000002,
+      "answer_directly": 0.4961,
+      "clarify": 0.28075
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.02809999999999996,
+     "probabilities": {
+      "investigate": 0.3251,
+      "answer_directly": 0.35319999999999996,
+      "clarify": 0.3217
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.006749999999999978,
+     "probabilities": {
+      "investigate": 0.34140000000000004,
+      "answer_directly": 0.34815,
+      "clarify": 0.31035
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "If src/main.rs has fn main() -> Result<(), Box<dyn Error>>, what does the ? operator do to the error there?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "systems"
+    ],
+    "libraries": [],
+    "symbols": [
+     "src/main.rs",
+     "main()",
+     "File::open"
+    ],
+    "code_block": true,
+    "words": 19,
+    "context_words": 15,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "investigate",
+     "margin": 0.026599999999999957,
+     "probabilities": {
+      "investigate": 0.36519999999999997,
+      "answer_directly": 0.3386,
+      "clarify": 0.2962
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "investigate",
+     "margin": 0.03584999999999999,
+     "probabilities": {
+      "investigate": 0.371,
+      "answer_directly": 0.29390000000000005,
+      "clarify": 0.33515
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "investigate",
+     "margin": 0.08034999999999998,
+     "probabilities": {
+      "investigate": 0.39455,
+      "answer_directly": 0.31420000000000003,
+      "clarify": 0.2913
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Our team is on TypeScript 5.6 - what did satisfies do differently before 4.9?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.10410000000000003,
+     "probabilities": {
+      "investigate": 0.23120000000000002,
+      "answer_directly": 0.43645,
+      "clarify": 0.33235
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.07940000000000003,
+     "probabilities": {
+      "investigate": 0.29805000000000004,
+      "answer_directly": 0.39070000000000005,
+      "clarify": 0.3113
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.013149999999999995,
+     "probabilities": {
+      "investigate": 0.2484,
+      "answer_directly": 0.38234999999999997,
+      "clarify": 0.3692
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Given a component named ParticleField.tsx, does React run the effect cleanup before or after the next effect?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "ParticleField.tsx",
+     "ParticleField"
+    ],
+    "code_block": false,
+    "words": 17,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.12390000000000001,
+     "probabilities": {
+      "investigate": 0.2389,
+      "answer_directly": 0.4425,
+      "clarify": 0.3186
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.014550000000000007,
+     "probabilities": {
+      "investigate": 0.30375,
+      "answer_directly": 0.35535,
+      "clarify": 0.3408
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.012200000000000044,
+     "probabilities": {
+      "investigate": 0.2692,
+      "answer_directly": 0.3715,
+      "clarify": 0.35929999999999995
+     },
+     "orders_used": 2
+    }
+   }
+  },
+  {
+   "question": "Is ParticleField.tsx okay?",
+   "label": "clarify",
+   "hard": true,
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "ParticleField.tsx",
+     "ParticleField"
+    ],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   },
+   "variants": {
+    "prose": {
+     "choice": "answer_directly",
+     "margin": 0.03655000000000003,
+     "probabilities": {
+      "investigate": 0.21505,
+      "answer_directly": 0.41075,
+      "clarify": 0.3742
+     },
+     "orders_used": 2
+    },
+    "structured": {
+     "choice": "answer_directly",
+     "margin": 0.03750000000000003,
+     "probabilities": {
+      "investigate": 0.3105,
+      "answer_directly": 0.36350000000000005,
+      "clarify": 0.326
+     },
+     "orders_used": 2
+    },
+    "hybrid": {
+     "choice": "answer_directly",
+     "margin": 0.04635,
+     "probabilities": {
+      "investigate": 0.11305,
+      "answer_directly": 0.46665,
+      "clarify": 0.4203
+     },
+     "orders_used": 2
+    }
+   }
+  }
+ ],
+ "elapsed_s": 10.1
+}

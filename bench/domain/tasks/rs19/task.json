@@ -1,0 +1,10 @@
+{
+  "id": "rs19",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library for `wasm32-unknown-unknown` (no wasm-bindgen). JavaScript reads the result struct directly out of linear memory with a `DataView`, using the C layout of:\n\n```c\nstruct Stats { uint32_t count; double min; double max; double mean; };\n```\n\nDefine `pub struct Stats { pub count: u32, pub min: f64, pub max: f64, pub mean: f64 }` with exactly that C layout, and export:\n\n- `#[no_mangle] pub extern \"C\" fn stats_size() -> usize` returning the struct's size in bytes;\n- `#[no_mangle] pub unsafe extern \"C\" fn stats_compute(values: *const f64, len: usize, out: *mut Stats) -> i32`, which fills `*out` for the `len` doubles at `values` (`count` = len, the minimum, the maximum, and the arithmetic mean) and returns 0. It returns -1 if `out` is null or if `values` is null while `len > 0`, and 1 if `len` is 0; in both cases `*out` is left untouched. You may assume no NaNs.\n\n`out` is 8-byte aligned. Answer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs19/grader.mjs", "wasm_support": true, "entry": ["Stats", "stats_size", "stats_compute"]},
+  "reference": "tasks/rs19/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

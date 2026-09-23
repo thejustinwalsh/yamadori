@@ -1,0 +1,42 @@
+{
+  "id": "tsl15",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer + TSL. Write a JavaScript module exporting `function createMirrorFloor()` that returns `{ reflection, material }`. `reflection` is a TSL planar reflector node (from 'three/tsl') whose reflection is rendered at half the canvas resolution — configure that when creating it, through its parameters object, using the parameter name r185 documents (not a deprecated alias). Rotate `reflection.target` by -π/2 about X so the mirror faces up. `material` is a `MeshStandardNodeMaterial` (from 'three/webgpu') whose `colorNode` is `reflection`. Named imports only. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "createMirrorFloor"
+    ],
+    "require": [
+      {
+        "name": "reflector",
+        "as": "call"
+      },
+      {
+        "name": "reflector",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "resolutionScale",
+        "as": "property"
+      },
+      {
+        "name": "MeshStandardNodeMaterial",
+        "as": "import",
+        "from": "three/webgpu"
+      },
+      {
+        "name": "colorNode",
+        "as": "property"
+      }
+    ],
+    "forbid": []
+  },
+  "reference": "tasks/tsl15/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": "reflector({ resolution }) -> reflector({ resolutionScale }), @deprecated r180: r185 src/nodes/utils/ReflectorNode.js:254 (warnOnce 'The \"resolution\" parameter has been renamed to \"resolutionScale\"') and :590-604 (property shim); documented at ReflectorNode.js:64. r175 src/nodes/utils/ReflectorNode.js:200 `resolution = 1`.",
+  "notes": "`resolution` is not forbidden (common word). The old option fails through the missing `resolutionScale` property requirement. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

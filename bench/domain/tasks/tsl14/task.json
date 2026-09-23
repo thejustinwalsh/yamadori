@@ -1,0 +1,26 @@
+{
+  "id": "tsl14",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This r172 function (adapted from three.js's tiled-lights example) pushes nodes onto the current TSL stack with a method that r185 deprecates and warns on every call:\n\n```js\nimport { Fn, Loop, If, Break, int } from 'three/tsl';\n\nexport function emitTileLoop( builder, lightCount, getTile, shadeLight ) {\n\n\tconst lightingModel = builder.context.reflectedLight;\n\n\t// force declaration order, before the loop\n\tlightingModel.directDiffuse.append();\n\tlightingModel.directSpecular.append();\n\n\tFn( () => {\n\n\t\tLoop( lightCount, ( { i } ) => {\n\n\t\t\tconst lightIndex = getTile( i );\n\n\t\t\tIf( lightIndex.equal( int( 0 ) ), () => {\n\n\t\t\t\tBreak();\n\n\t\t\t} );\n\n\t\t\tshadeLight( lightIndex.sub( 1 ) ).append();\n\n\t\t} );\n\n\t} )().append();\n\n}\n```\n\nPort it to r185 with named imports from 'three/tsl': same export and signature, and keep the method-chaining style — each of the four nodes is still pushed with a chained method call, using the r185 method for it. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "emitTileLoop"
+    ],
+    "require": [
+      {
+        "name": "toStack",
+        "as": "call"
+      }
+    ],
+    "forbid": [
+      "append"
+    ]
+  },
+  "reference": "tasks/tsl14/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": ".append() -> .toStack() (function form append() -> Stack()), @deprecated r176: r185 src/nodes/tsl/TSLCore.js:1278-1292 (warn '.append() has been renamed to .toStack().'); r185 TSLCore.js:1205 `export function Stack`, :1213 addMethodChaining('toStack', Stack). r172 examples/jsm/tsl/lighting/TiledLightsNode.js:210-238 used .append().",
+  "notes": "The prompt pins the method-chaining style because the grader's requirements are conjunctive: a function-form `Stack( node )` answer is valid r185 but is outside the spec. `append` is forbidden; the module has no DOM code, so it has no legitimate use. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

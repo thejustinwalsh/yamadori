@@ -1,0 +1,48 @@
+{
+  "id": "tsl05",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer + TSL. This r170 module sets scene fog:\n\n```js\nimport { rangeFog, densityFog, color } from 'three/tsl';\n\nexport function useRangeFog( scene ) {\n\n\tscene.fogNode = rangeFog( color( 0x8899aa ), 10, 80 );\n\n}\n\nexport function useDensityFog( scene ) {\n\n\tscene.fogNode = densityFog( color( 0x8899aa ), 0.03 );\n\n}\n```\n\nBoth fog helpers it calls were replaced after r170. Port it to r185 using named imports from 'three/tsl', keeping both exported functions and their behaviour: linear fog from distance 10 to 80, and exponential-squared fog of density 0.03, both in colour 0x8899aa, assigned to `scene.fogNode`. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "useRangeFog",
+      "useDensityFog"
+    ],
+    "require": [
+      {
+        "name": "fog",
+        "as": "call"
+      },
+      {
+        "name": "fog",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "rangeFogFactor",
+        "as": "call"
+      },
+      {
+        "name": "rangeFogFactor",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "densityFogFactor",
+        "as": "call"
+      },
+      {
+        "name": "densityFogFactor",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": []
+  },
+  "reference": "tasks/tsl05/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": "rangeFog(color, near, far) -> fog(color, rangeFogFactor(near, far)); densityFog(color, d) -> fog(color, densityFogFactor(d)). Deprecated r171: r170 src/nodes/fog/FogRangeNode.js:36 `export const rangeFog`, FogExp2Node.js:35 `densityFog`; r175 src/nodes/fog/Fog.js:92,108 `// @deprecated, r171`. r185 defines neither (src/nodes/fog/Fog.js:40 rangeFogFactor, :57 densityFogFactor, :93 fog), but src/Three.TSL.js:458/:161 still re-export `TSL.rangeFog` / `TSL.densityFog`, which are undefined.",
+  "notes": "rangeFog/densityFog are NOT forbidden: r185's three/tsl still lists them (stale re-exports of undefined values) with no deprecation marker, so test_grade.py would rightly reject the forbid. The old code therefore imports cleanly and fails at test through the missing fog/…FogFactor requirements; at runtime it would be a TypeError. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

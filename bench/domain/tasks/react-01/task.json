@@ -1,0 +1,11 @@
+{
+  "id": "react-01",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as `function useDebounce<T>(value: T, delayMs: number): T`.\n\nBehaviour:\n- On the first render it returns `value` immediately.\n- After that it returns the most recent `value` only once that value has stayed unchanged for `delayMs` milliseconds. Every change of `value` restarts the wait, and so does a change of `delayMs`.\n- No timer may be left pending after the component using it unmounts.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-01/test.tsx", "entry": ["useDebounce"]},
+  "reference": "tasks/react-01/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "hook"
+}

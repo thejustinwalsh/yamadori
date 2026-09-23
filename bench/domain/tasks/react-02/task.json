@@ -1,0 +1,11 @@
+{
+  "id": "react-02",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as `function useThrottle<T>(value: T, intervalMs: number): T`.\n\nIt returns a throttled copy of `value`: the returned value changes at most once per `intervalMs` milliseconds, but the latest `value` is never lost.\n\nBehaviour:\n- On the first render it returns `value` immediately. That first render counts as an emitted update at that moment.\n- When `value` changes and at least `intervalMs` milliseconds have passed since the last emitted update, the new value is returned immediately (that is a new emitted update).\n- When `value` changes sooner than that, the hook schedules one trailing update at exactly (time of the last emitted update + `intervalMs`). The trailing update emits whatever `value` is most recent at that moment; further changes before it fires neither postpone it nor create additional updates. Intermediate values that were superseded before the trailing update fires are never returned.\n- Under continuously changing input the returned value therefore still updates once every `intervalMs` (this is throttling, not debouncing).\n- No timer may be left pending after the component using it unmounts.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-02/test.tsx", "entry": ["useThrottle"]},
+  "reference": "tasks/react-02/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

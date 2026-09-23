@@ -1,0 +1,68 @@
+{
+  "id": "tsl20",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer compute + TSL. This r165 compute set-up no longer builds:\n\n```js\nimport { tslFn, storageObject, instanceIndex, loop, cond, remainder, timerDelta, float, int } from 'three/nodes';\n\nexport function createDriftCompute( buffer, count ) {\n\n\tconst particles = storageObject( buffer, 'vec4', count );\n\n\treturn tslFn( () => {\n\n\t\tconst p = particles.element( instanceIndex );\n\t\tconst push = float( 0 ).toVar();\n\n\t\tloop( { start: 0, end: 4 }, ( { i } ) => {\n\n\t\t\tpush.addAssign( float( remainder( int( instanceIndex ).add( i ), int( 3 ) ) ) );\n\n\t\t} );\n\n\t\tp.y.assign( cond( p.y.greaterThan( 1 ), float( 0 ), p.y.add( push.mul( timerDelta() ) ) ) );\n\n\t} )().compute( count );\n\n}\n```\n\nPort it to r185 with named imports from 'three/tsl' only. Keep `export function createDriftCompute( buffer, count )` returning the compute node; keep `buffer` (a StorageInstancedBufferAttribute) as the storage source, and keep the old storage helper's extra behaviour of flagging the buffer for PBO (pixel-buffer object) access in the WebGL fallback. Keep the loop a TSL loop, keep the integer remainder, and keep the conditional an expression that selects between two values (not an If block); use the frame delta time node for the time step. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "createDriftCompute"
+    ],
+    "require": [
+      {
+        "name": "Fn",
+        "as": "call"
+      },
+      {
+        "name": "Fn",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "storage",
+        "as": "call"
+      },
+      {
+        "name": "storage",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "setPBO",
+        "as": "call"
+      },
+      {
+        "name": "Loop",
+        "as": "call"
+      },
+      {
+        "name": "Loop",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "select",
+        "as": "call"
+      },
+      {
+        "name": "mod",
+        "as": "call"
+      },
+      {
+        "name": "deltaTime",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": [
+      "tslFn",
+      "storageObject",
+      "timerDelta"
+    ]
+  },
+  "reference": "tasks/tsl20/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "version_marker": "tslFn -> Fn, loop -> Loop, cond -> select, remainder -> mod (all @deprecated r168; r175 src/nodes/tsl/TSLCore.js:674, utils/LoopNode.js:318, math/ConditionalNode.js:240, math/OperatorNode.js:715); timerDelta -> deltaTime (@deprecated r170, r175 src/nodes/utils/Timer.js:68); storageObject(...) -> storage(...).setPBO( true ) (@deprecated r171, r175 src/nodes/accessors/StorageBufferNode.js:384, message 'Use \"storage().setPBO( true )\" instead'). All six old names absent from r185's exports; r185: Fn TSLCore.js:1124, Loop utils/LoopNode.js:331, select math/ConditionalNode.js:243, mod math/OperatorNode.js:490, deltaTime utils/Timer.js:18, storage accessors/StorageBufferNode.js:405, setPBO StorageBufferNode.js:229. r165 names from examples/jsm/nodes/Nodes.js.",
+  "notes": "`loop`, `cond` and `remainder` are not forbidden (plausible local variable names); r185 does not export them, so importing them fails at compile, and the Loop/select/mod requirements catch chained leftovers. Not caught: calling `deltaTime()` as a function (a runtime TypeError in r185). CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

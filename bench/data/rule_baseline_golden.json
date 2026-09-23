@@ -1,0 +1,1661 @@
+{
+ "captured": "2026-09-22, from bench/laya_calibration.py:rule_baseline before it moved to mcp/selection.py",
+ "n": 89,
+ "items": [
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Why does our ParticleField component render black in three r185 when it worked fine in r180?",
+   "context": "We're on @react-three/fiber 9.1.0 and three 0.185.0. src/scene/ParticleField.tsx builds a TSL node material.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu",
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "src/scene/ParticleField.tsx",
+     "ParticleField"
+    ],
+    "code_block": false,
+    "words": 16,
+    "context_words": 13,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What does mcp/hemisphere.py do with a trace handle once MAX_TRACES is exceeded?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "mcp/hemisphere.py",
+     "MAX_TRACES"
+    ],
+    "code_block": false,
+    "words": 12,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Where in our codebase do we set the WGSL workgroup size for the fluid sim, and what value is it?",
+   "context": "The compute pass lives somewhere under src/gpu/.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 20,
+    "context_words": 7,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Which of our R3F components still use the WebGLRenderer path instead of WebGPURenderer?",
+   "context": "We started a migration two weeks ago and I lost track of what's left.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "backend"
+    ],
+    "libraries": [
+     "s"
+    ],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 14,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is the actual resolved type of RootState['gl'] in the @react-three/fiber version we have pinned?",
+   "context": "package.json pins \"@react-three/fiber\": \"9.1.0\".",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "package.json",
+     "RootState"
+    ],
+    "code_block": false,
+    "words": 15,
+    "context_words": 4,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Our TypeGPU bind group in src/gpu/layout.ts throws 'incompatible binding at index 2'. What's mismatched?",
+   "context": "```ts\nimport tgpu from 'typegpu';\nimport * as d from 'typegpu/data';\nconst layout = tgpu.bindGroupLayout({ params: { uniform: Params }, field: { storage: d.arrayOf(d.f32, 0) } });\n```",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "backend",
+     "gpu"
+    ],
+    "libraries": [
+     "typegpu"
+    ],
+    "symbols": [
+     "src/gpu/layout.ts"
+    ],
+    "code_block": true,
+    "words": 14,
+    "context_words": 28,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Find every place we call useFrame with a priority argument and tell me which priorities we use.",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 17,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "cargo build fails in crates/renderer with E0277 after we bumped wgpu. Which trait bound broke?",
+   "context": "Rust 1.83, wgpu went 22 -> 23 in Cargo.toml.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "Cargo.toml"
+    ],
+    "code_block": false,
+    "words": 15,
+    "context_words": 9,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What does the admission guard do when the token budget is already exhausted - reject, queue, or downgrade?",
+   "context": "I'm looking at mcp/admission.py but it's long.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "mcp/admission.py"
+    ],
+    "code_block": false,
+    "words": 18,
+    "context_words": 7,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Which files define the TSL node materials we use, and what uniforms does each expose?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Our Spring<T> generic in types/animation.ts started inferring unknown after the TS 5.6 bump. Which conditional branch is failing?",
+   "context": "```ts\nexport type Spring<T> = T extends { from: infer F; to: infer G } ? (F extends G ? F : never) : never;\n```",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "motion"
+    ],
+    "libraries": [],
+    "symbols": [
+     "types/animation.ts"
+    ],
+    "code_block": true,
+    "words": 18,
+    "context_words": 26,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Trace where a /decide request enters laya_service and what serialises access to the GPU.",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "laya_service"
+    ],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "In our shader water.wgsl, what does the uTime uniform get bound to on the JS side?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "water.wgsl"
+    ],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What version of three is pinned in our package.json, and does that release include the TSL fog node fix?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "package.json"
+    ],
+    "code_block": false,
+    "words": 19,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Which of our Rust modules still use unsafe blocks, and what is each one for?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "The drei Environment component makes our scene washed out but only in the deployed build. What differs between our dev and prod three config?",
+   "context": "Vite 6, @react-three/drei 9.x.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 24,
+    "context_words": 4,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Why does our useMemo'd BufferGeometry get disposed twice on hot reload?",
+   "context": "src/scene/Mesh.tsx uses a custom useGeometry hook.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu",
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "src/scene/Mesh.tsx",
+     "BufferGeometry"
+    ],
+    "code_block": false,
+    "words": 11,
+    "context_words": 6,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What columns does the chunks table in our code index actually have?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "backend"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 12,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is the difference between Fn and the older tslFn in three.js TSL?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "three.js"
+    ],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "In WGSL, is textureSample allowed inside non-uniform control flow?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 9,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What does the second argument to useFrame do in react-three-fiber?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is the difference between &str and String in Rust, and when do I want each?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "How do TypeScript conditional types distribute over union types, and how do I stop that?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is a workgroup in WGSL and how does workgroup_size relate to the dispatch count?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "workgroup_size"
+    ],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What does the satisfies operator do in TypeScript, and how is it different from as?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Why can't Rust pass ?Sized types by value?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 8,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is the difference between the storage and uniform address spaces in WGSL?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "How does TypeGPU's bindGroupLayout differ from raw WebGPU createBindGroupLayout?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 9,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is the default dpr for an R3F Canvas if I don't set it?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What do the in and out variance annotations on a TypeScript type parameter do?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What does Box<dyn Error> mean and when should a function return it instead of a concrete error type?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 18,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "In three.js, what is the practical difference between a Group and a plain Object3D?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "three.js"
+    ],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What does the @builtin(position) attribute mean in a WGSL vertex shader, and how does it differ in a fragment shader?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 20,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is the time complexity of inserting into a JavaScript Map, and is it different from a plain object?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "algorithms"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 19,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What does #[derive(Clone)] actually generate in Rust, and why does it add a T: Clone bound?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Why does instancing help draw-call-bound scenes but not fill-rate-bound ones?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What is the difference between a TypeScript interface and a type alias for object shapes?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "It's broken.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 2,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Can you make it faster?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 5,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Why doesn't this work?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 4,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Should I use the other approach instead?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [
+     "approach"
+    ],
+    "symbols": [],
+    "code_block": false,
+    "words": 7,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Fix the shader.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "It renders wrong on mobile.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 5,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Update the types.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Which one is better?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 4,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Add the thing we talked about.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 6,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Does this look right to you?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 6,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Can you check it before I push?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 7,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Is this the right pattern here?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 6,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Does the retry helper back off exponentially or linearly?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 9,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "How many hops does the investigation loop get before the tools are withdrawn?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Is the budget checked before or after the model call?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Which tone mapping does the production renderer use?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 8,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "What chunk size was used when the index was built?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "backend"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "In a file called shader.wgsl, would var<storage, read_write> be legal at module scope?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "shader.wgsl",
+     "read_write"
+    ],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "If src/main.rs has fn main() -> Result<(), Box<dyn Error>>, what does the ? operator do to the error there?",
+   "context": "```rust\nfn main() -> Result<(), Box<dyn Error>> { let f = File::open(\"a\")?; Ok(()) }\n```",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "systems"
+    ],
+    "libraries": [],
+    "symbols": [
+     "src/main.rs",
+     "main()",
+     "File::open"
+    ],
+    "code_block": true,
+    "words": 19,
+    "context_words": 15,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Our team is on TypeScript 5.6 - what did satisfies do differently before 4.9?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Given a component named ParticleField.tsx, does React run the effect cleanup before or after the next effect?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "ParticleField.tsx",
+     "ParticleField"
+    ],
+    "code_block": false,
+    "words": 17,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels.jsonl",
+   "question": "Is ParticleField.tsx okay?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component",
+     "web-frontend"
+    ],
+    "libraries": [],
+    "symbols": [
+     "ParticleField.tsx",
+     "ParticleField"
+    ],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Which retry policy does our proxy apply when the upstream returns a 503, and how many attempts does it make?",
+   "context": "Something under mcp/ handles upstream failures.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 20,
+    "context_words": 6,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What tokenizer does our laya checkpoint ship with, and where is it loaded from?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "List the endpoints the laya service exposes and which of them accept POST.",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Our WGSL fluid compute pass writes garbage on the first frame only. What is uninitialised in our dispatch setup?",
+   "context": "src/gpu/ holds the compute pass and its dispatch.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 19,
+    "context_words": 8,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Which TypeScript strictness flags are actually enabled in our tsconfig, and is exactOptionalPropertyTypes on?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Where do we construct the TypeGPU root, and is it reused across components or created per mount?",
+   "context": "The GPU code lives under src/gpu/.",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 17,
+    "context_words": 6,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "In our Rust renderer, which struct owns the wgpu Device and how is it shared with the render passes?",
+   "context": "crates/renderer/",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 19,
+    "context_words": 1,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What does our start-stack script launch, in what order, and on which ports?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Which of our shaders still use the deprecated textureLoad overload with three arguments?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What is the default max_len our laya config uses for the input sequence?",
+   "context": "",
+   "rule": "investigate",
+   "signals": {
+    "domains": [
+     "ui-component"
+    ],
+    "libraries": [],
+    "symbols": [
+     "max_len"
+    ],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "How do I pass a storage buffer to a WGSL compute shader in general - what does the binding declaration look like?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 22,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What is the difference between Rc and Arc in Rust, and when do I need Arc?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "In react-three-fiber, what does the invalidate function do and when do I need it?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 14,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What does the TypeScript infer keyword do inside a conditional type?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 11,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Why does a WGSL struct in the uniform address space need 16-byte alignment on its members?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What is the difference between HTTP long polling and a WebSocket for a low-latency request stream?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "WebSocket"
+    ],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "In three.js TSL, what does uniform() return and how does it differ from a plain JS value in a node graph?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "algorithms",
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [
+     "three.js",
+     "uniform()"
+    ],
+    "code_block": false,
+    "words": 21,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What does SQLite's WAL mode change about concurrent readers and writers?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 11,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "How does Python's asyncio.Queue maxsize provide backpressure to a producer?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 10,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What is the difference between a bind group and a bind group layout in WebGPU?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 15,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Why does Rust's Drop trait not run for a value that has been moved into std::mem::forget?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [
+     "std::mem"
+    ],
+    "code_block": false,
+    "words": 16,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "What does a 502 from a reverse proxy usually indicate about the upstream?",
+   "context": "",
+   "rule": "answer_directly",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 13,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Make the renderer better.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [
+     "gpu"
+    ],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 4,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "This is still slow after the change.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 7,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Can you clean this up?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 5,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "It crashes sometimes.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Do the same thing for the other one.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 8,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Should we switch?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 3,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Why is the output different now?",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 6,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  },
+  {
+   "file": "laya_routing_labels_ext.jsonl",
+   "question": "Handle the edge case too.",
+   "context": "",
+   "rule": "clarify",
+   "signals": {
+    "domains": [],
+    "libraries": [],
+    "symbols": [],
+    "code_block": false,
+    "words": 5,
+    "context_words": 0,
+    "index_chunks": 7742,
+    "index_files": 754,
+    "index_exists": true
+   }
+  }
+ ]
+}

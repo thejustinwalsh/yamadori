@@ -1,0 +1,11 @@
+{
+  "id": "react-35",
+  "domain": "react",
+  "prompt": "Write a reusable React 19 error boundary in TypeScript (strict mode) and export it as `ErrorBoundary`, a class component (React only supports error boundaries as classes) with these props:\n\n    interface ErrorBoundaryProps {\n      fallback: (error: Error, reset: () => void) => React.ReactNode;\n      onError?: (error: Error, info: React.ErrorInfo) => void;\n      resetKeys?: readonly unknown[];\n      children: React.ReactNode;\n    }\n\nContract:\n- With no error it renders `children`.\n- When a descendant throws while rendering, it renders `fallback(error, reset)` in place of `children`, where `error` is the thrown value.\n- `onError`, if given, is called exactly once for each error caught, with the error and the `ErrorInfo` React supplies for it (its `componentStack` names the component that threw).\n- Calling `reset()` clears the error and renders `children` again. If they throw again, that is a new caught error: the fallback comes back and `onError` is called again.\n- `resetKeys`: while the fallback is showing, a re-render whose `resetKeys` differs from the previous one resets automatically, exactly as `reset()` would. Two arrays differ if their lengths differ or any element at the same index differs under `Object.is`; a new array with the same elements is NOT a change.\n- While no error is showing, a change of `resetKeys` does nothing: `children` are neither reset nor remounted, and keep their state.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-35/test.tsx", "entry": ["ErrorBoundary"]},
+  "reference": "tasks/react-35/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

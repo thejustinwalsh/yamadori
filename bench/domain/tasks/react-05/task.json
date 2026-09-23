@@ -1,0 +1,11 @@
+{
+  "id": "react-05",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as\n`function useInView<T extends Element = Element>(options?: IntersectionObserverInit): { ref: (node: T | null) => void; inView: boolean }`.\n\nIt reports whether an element is visible, using `IntersectionObserver`. The caller attaches `ref` to an element: `<div ref={ref}>`.\n\nBehaviour:\n- `inView` starts as `false`.\n- The element `ref` is attached to is observed by an `IntersectionObserver` constructed with `options` (pass them to the constructor). This must also work when the element mounts later than the component calling the hook (for example it is rendered conditionally and appears after a click).\n- `inView` follows the `isIntersecting` of the latest entry delivered for the element.\n- When `ref` is moved to a different element, the old element is no longer observed and the new one is. When the element is removed, it is no longer observed.\n- After the component using the hook unmounts, nothing is observed any more.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-05/test.tsx", "entry": ["useInView"]},
+  "reference": "tasks/react-05/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

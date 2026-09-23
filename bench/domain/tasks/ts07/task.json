@@ -1,0 +1,20 @@
+{
+  "id": "ts07",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports:\n\n- `type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'`\n- `type RouteDef = { path: `/${string}`; method: Method; tags?: readonly string[] }`\n- `defineRoutes(routes)` -- takes an object mapping route names to `RouteDef`s and returns the same object unchanged at runtime. Its static type must keep every literal the caller wrote, WITHOUT the caller writing `as const`: for `const r = defineRoutes({ home: { path: '/', method: 'GET', tags: ['public', 'cached'] } })`, `typeof r.home.path` is `'/'`, `typeof r.home.method` is `'GET'`, `typeof r.home.tags` is `readonly ['public', 'cached']`, and `keyof typeof r` is exactly the route names. A path without a leading `/`, an unknown method or a non-string tag is a compile error at the call.\n- `pathOf(routes, name)` -- returns `routes[name].path`, statically typed as that route's literal path type (e.g. `pathOf(r, 'home')` has type `'/'`); a name that is not a key of `routes` is a compile error.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts07/test.ts",
+    "runtime": true,
+    "entry": [
+      "defineRoutes",
+      "pathOf",
+      "Method",
+      "RouteDef"
+    ]
+  },
+  "reference": "tasks/ts07/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "rs15",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library for `wasm32-unknown-unknown` (no wasm-bindgen) whose JavaScript host manages buffers through the module's own allocator. Export exactly these unmangled C-ABI functions:\n\n- `alloc(len: usize) -> *mut u8`: allocate `len` bytes (any `len`, including 0) that JavaScript may write into.\n- `dealloc(ptr: *mut u8, len: usize)`: release a buffer. It is called with every pointer returned by `alloc(len)` (with that same `len`) and every pointer returned by `to_upper` (with the length `to_upper` reported).\n- `to_upper(ptr: *const u8, len: usize, out_len: *mut usize) -> *mut u8`: `ptr`/`len` is UTF-8 text that JavaScript wrote into a buffer from `alloc`; the caller keeps ownership of it. Returns a NEW buffer holding the full Unicode uppercase of the text (as `str::to_uppercase` defines it, so the length can change) and writes its length in bytes to `*out_len`. The caller later releases it with `dealloc(returned_ptr, *out_len)`. If the input is not valid UTF-8, return null and write 0 to `*out_len`.\n\nEvery byte allocated must be released by the matching `dealloc` call, with no leaks under any input. Answer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs15/grader.mjs", "wasm_support": true, "entry": ["alloc", "dealloc", "to_upper"]},
+  "reference": "tasks/rs15/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

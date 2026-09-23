@@ -1,0 +1,11 @@
+{
+  "id": "react-11",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) that reports presses outside an element. Export it as\n\n```ts\nfunction useClickOutside<T extends HTMLElement>(\n  ref: React.RefObject<T | null>,\n  handler: (event: MouseEvent | TouchEvent) => void,\n): void\n```\n\n(`RefObject` is the type exported by `react`.)\n\nBehaviour:\n- While the component is mounted, every `mousedown` or `touchstart` event anywhere in the document whose target is outside `ref.current` calls `handler` once with that event.\n- Events whose target is `ref.current` itself or any element inside it do not call `handler`.\n- Other event types, such as `click`, do not call `handler`.\n- `ref.current` is read when each event happens, because the element may mount, unmount or change after the hook first runs. While `ref.current` is `null`, no event calls `handler`.\n- Every event goes to the `handler` from the most recent render.\n- After the component unmounts, events no longer reach `handler`.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-11/test.tsx", "entry": ["useClickOutside"]},
+  "reference": "tasks/react-11/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "hook"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "react-30",
+  "domain": "react",
+  "prompt": "Write a small todo list for React 19 in TypeScript (strict mode) and export it as\n\n```ts\nfunction TodoApp(): React.ReactElement\n```\n\nIt takes no props and keeps its own state.\n\nAdding:\n- A text input with accessible label \"New todo\" and a button \"Add\". Clicking \"Add\", or pressing Enter in the input, adds a todo whose text is the input's value with surrounding whitespace trimmed, at the end of the list, and empties the input. If the trimmed text is empty, nothing is added.\n\nThe list:\n- Each todo is a list item (role `listitem`, e.g. an `<li>` in a `<ul>`) containing a checkbox whose accessible name is exactly the todo's text (e.g. wrapped in a `<label>`) and a button with accessible name `Delete <text>` (e.g. \"Delete Buy milk\"). New todos start unchecked.\n- Checking a todo's checkbox marks it completed; unchecking marks it active again. \"Delete <text>\" removes that todo. Whatever is added or deleted, every checkbox must keep showing the state of its own todo.\n\nFiltering:\n- Three buttons \"All\", \"Active\" and \"Completed\". The selected one has `aria-pressed=\"true\"`, the other two `aria-pressed=\"false\"`. \"All\" is selected at first.\n- \"All\" lists every todo, \"Active\" only the unchecked ones, \"Completed\" only the checked ones, always in the order they were added. A todo whose state changes while a filter is selected appears or disappears accordingly.\n\nCounter:\n- An element whose text is exactly `N items left`, where N is the number of active (unchecked) todos across the whole list regardless of the filter -- except that it reads `1 item left` when N is 1. With no active todos it reads `0 items left`.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-30/test.tsx", "entry": ["TodoApp"]},
+  "reference": "tasks/react-30/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "component"
+}

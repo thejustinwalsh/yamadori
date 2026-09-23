@@ -1,0 +1,48 @@
+{
+  "name": "yamadori-dash",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Yamadori dashboard: React view layer over the existing /dash/api JSON routes, plus the procedural bonsai.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "node build/gen-tokens.mjs && tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "tokens": "node build/gen-tokens.mjs"
+  },
+  "dependencies": {
+    "@react-three/drei": "11.0.0-alpha.7",
+    "@react-three/fiber": "10.0.0-alpha.5",
+    "@stylexjs/stylex": "0.19.1",
+    "postprocessing": "6.39.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "three": "0.186.0",
+    "wouter": "3.11.0"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@babel/plugin-syntax-jsx": "7.29.7",
+    "@babel/plugin-syntax-typescript": "7.29.7",
+    "@babel/preset-typescript": "7.29.7",
+    "@stylexjs/babel-plugin": "0.19.1",
+    "@stylexjs/postcss-plugin": "0.19.1",
+    "@types/babel__core": "7.20.5",
+    "@types/node": "24.13.6",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@types/three": "0.186.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "babel-plugin-react-compiler": "1.0.0",
+    "happy-dom": "20.14.5",
+    "postcss": "8.5.28",
+    "typescript": "5.9.3",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
+  }
+}

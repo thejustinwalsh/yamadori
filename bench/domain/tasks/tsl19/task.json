@@ -1,0 +1,55 @@
+{
+  "id": "tsl19",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer + TSL. This r180 set-up still runs in r185 but logs three deprecation warnings (the post-processing class, the pass's resolution setter, and the async per-frame render call):\n\n```js\nimport { WebGPURenderer, PostProcessing } from 'three/webgpu';\nimport { pass } from 'three/tsl';\n\nexport async function setupPost( canvas, scene, camera ) {\n\n\tconst renderer = new WebGPURenderer( { canvas } );\n\n\tconst scenePass = pass( scene, camera );\n\tscenePass.setResolution( 0.5 );\n\n\tconst post = new PostProcessing( renderer );\n\tpost.outputNode = scenePass;\n\n\trenderer.setAnimationLoop( async () => {\n\n\t\tawait post.renderAsync();\n\n\t} );\n\n\treturn { renderer, post, scenePass };\n\n}\n```\n\nPort it to r185 with no deprecated API: named imports from 'three/webgpu' and 'three/tsl'; same export `async function setupPost( canvas, scene, camera )`; render the scene pass at half resolution through the post-processing object every frame from `renderer.setAnimationLoop`; initialise the renderer explicitly (awaited) before the loop starts, as r185 asks; return `{ renderer, post, scenePass }`. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "setupPost"
+    ],
+    "require": [
+      {
+        "name": "RenderPipeline",
+        "as": "import",
+        "from": "three/webgpu"
+      },
+      {
+        "name": "WebGPURenderer",
+        "as": "import",
+        "from": "three/webgpu"
+      },
+      {
+        "name": "pass",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "setResolutionScale",
+        "as": "call"
+      },
+      {
+        "name": "init",
+        "as": "call"
+      },
+      {
+        "name": "render",
+        "as": "call"
+      },
+      {
+        "name": "setAnimationLoop",
+        "as": "call"
+      }
+    ],
+    "forbid": [
+      "PostProcessing",
+      "setResolution",
+      "renderAsync"
+    ]
+  },
+  "reference": "tasks/tsl19/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "version_marker": "PostProcessing -> RenderPipeline (@deprecated r183, r185 src/renderers/common/PostProcessing.js:5,20); PassNode.setResolution -> setResolutionScale (@deprecated r181, r185 src/nodes/display/PassNode.js:488-494, new at :463); renderAsync() -> render() after `await renderer.init()` (@deprecated r181, r185 src/renderers/common/RenderPipeline.js:240-245, Renderer.js:1073-1080). r175 src/nodes/display/PassNode.js:348 setResolution, renderers/common/PostProcessing.js:160 renderAsync, neither deprecated there.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

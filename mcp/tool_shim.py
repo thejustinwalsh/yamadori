@@ -130,7 +130,7 @@ def parse_tool_calls(text: str) -> tuple[list, str]:
     return calls, content
 
 
-def post_upstream(path: str, payload: dict, timeout: int = 1800) -> dict:
+def post_upstream(path: str, payload: dict, timeout: int = 3600) -> dict:
     req = urllib.request.Request(f"{UPSTREAM}{path}", data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -147,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get(h):
                 req.add_header(h, self.headers[h])
         try:
-            with urllib.request.urlopen(req, timeout=1800) as up:
+            with urllib.request.urlopen(req, timeout=3600) as up:
                 self.send_response(up.status)
                 for k, v in up.headers.items():
                     if k.lower() in ("transfer-encoding", "connection", "content-length"):

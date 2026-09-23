@@ -1,0 +1,10 @@
+{
+  "id": "rs09",
+  "domain": "rust_wasm",
+  "prompt": "I need two Rust functions callable from C that hand an owned string to the C side and take it back:\n\n```c\nchar *greeting_new(const char *name);   /* caller must pass the result to greeting_free */\nvoid greeting_free(char *s);\n```\n\n- `#[no_mangle] pub unsafe extern \"C\" fn greeting_new(name: *const c_char) -> *mut c_char` reads the NUL-terminated UTF-8 string `name` and returns a newly allocated NUL-terminated string `Hello, <name>!`. It returns null if `name` is null or is not valid UTF-8. The caller owns the result.\n- `#[no_mangle] pub unsafe extern \"C\" fn greeting_free(s: *mut c_char)` releases a string returned by `greeting_new`, all of it. Null is a no-op.\n\n`c_char` is `std::ffi::c_char` (or `std::os::raw::c_char`). The C side never calls `free()` on these strings; all allocation and release happen in Rust. Answer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs09/grader.rs", "entry": ["greeting_new", "greeting_free"]},
+  "reference": "tasks/rs09/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

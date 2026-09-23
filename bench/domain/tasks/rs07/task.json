@@ -1,0 +1,10 @@
+{
+  "id": "rs07",
+  "domain": "rust_wasm",
+  "prompt": "Port this C tagged value to Rust so both sides can share memory:\n\n```c\nenum { VAL_INT = 1, VAL_FLOAT = 2, VAL_BYTES = 3 };\nunion Payload { int64_t i; double f; uint8_t bytes[8]; };\nstruct Value { uint32_t tag; union Payload payload; };\nint32_t value_to_f64(const struct Value *v, double *out);\n```\n\nRequirements:\n\n- `pub const VAL_INT: u32 = 1;`, `pub const VAL_FLOAT: u32 = 2;`, `pub const VAL_BYTES: u32 = 3;`\n- `pub union Payload { pub i: i64, pub f: f64, pub bytes: [u8; 8] }` and `pub struct Value { pub tag: u32, pub payload: Payload }`, both deriving `Clone, Copy`, with exactly the C layout.\n- `#[no_mangle] pub unsafe extern \"C\" fn value_to_f64(v: *const Value, out: *mut f64) -> i32`: returns -1 if `v` or `out` is null; for `VAL_INT` writes the integer converted to `f64` (numeric conversion, e.g. 3 -> 3.0) and returns 0; for `VAL_FLOAT` writes the float and returns 0; for `VAL_BYTES` returns -2; for any other tag returns -3. On every error `*out` is left untouched.\n\nAnswer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs07/grader.rs", "entry": ["Payload", "Value", "value_to_f64"]},
+  "reference": "tasks/rs07/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

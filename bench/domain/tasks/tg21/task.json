@@ -1,0 +1,18 @@
+{
+  "id": "tg21",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export `mainVertex` and `mainFragment`: a TypeGPU vertex entry function and fragment entry function, each implemented as a WGSL string containing only the body `{ ... }` (typegpu generates the header; refer to inputs as `in.<name>` and build the vertex result with the `Out(...)` constructor), with WGSL names `mainVertex` and `mainFragment`. Vertex inputs: `position: vec2f` from vertex attribute location 0 and `cellId: u32` from vertex attribute location 1. Vertex outputs, in this order: `pos` (the clip-space position builtin), `uv: vec2f` (perspective-correct interpolation), `cell: u32` (an integer varying, so it must use flat interpolation to be valid WGSL). The vertex body returns `Out(vec4f(in.position, 0.0, 1.0), in.position * 0.5 + 0.5, in.cellId)`. Fragment inputs: `uv` and `cell`, declared so that they link with the vertex outputs in one render pipeline (same locations, same interpolation). Fragment output: a single `vec4f` colour at location 0, `vec4f(in.uv, f32(in.cell % 2u), 1.0)`. `tgpu.resolve` must succeed for each entry point in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg21/test.ts", "runtime": true, "webgpu": true, "entry": ["mainVertex", "mainFragment"]},
+  "reference": "tasks/tg21/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "api": {
+    "tgpu.vertexFn({ in, out })`body`": "core/function/tgpuVertexFn.d.ts, core/function/tgpuVertexFn.js (sets external `Out`)",
+    "tgpu.fragmentFn({ in, out })`body`": "core/function/tgpuFragmentFn.d.ts, core/function/tgpuFragmentFn.js",
+    "d.builtin.position": "builtin.d.ts",
+    "d.location(n, T) / d.interpolate('flat', T)": "data/attributes.d.ts, data/attributes.js",
+    "TgpuVertexFn / TgpuFragmentFn": "index.d.ts type exports"
+  },
+  "notes": "Probed: typegpu does NOT add @interpolate(flat) to integer varyings by itself (wrong_test emits invalid WGSL). Non-builtin fragment inputs are gathered into an `in: <name>_Input` struct and must be referenced as `in.x`; vertex inputs become positional params (`in.x` is rewritten). The prompt fixes the `in.` convention for that reason. Vertex outputs get auto locations in declaration order unless given explicitly; the test only checks that both sides agree. wrong_compile uses the positional (inputs, outputs) vertexFn signature of older typegpu."
+}

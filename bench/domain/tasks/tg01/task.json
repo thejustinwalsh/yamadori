@@ -1,0 +1,10 @@
+{
+  "id": "tg01",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), write a TypeScript module that exports: (1) `Particle`, a WGSL struct schema with fields `position: vec3f`, `velocity: vec3f`, `mass: f32`, in that order; (2) `type ParticleValue`, the JS-side type of one Particle value, derived from the schema with typegpu's type-level inference helper (not written by hand); (3) `const particleByteSize: number`, the struct's size in bytes under WGSL layout rules, computed with typegpu's own helper rather than hard-coded. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg01/test.ts", "runtime": true, "webgpu": true, "entry": ["Particle", "ParticleValue", "particleByteSize"]},
+  "reference": "tasks/tg01/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy"
+}

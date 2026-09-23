@@ -1,0 +1,17 @@
+{
+  "id": "tg11",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), start your module with these two tone-mapping functions, exported exactly as written:\n\n```ts\nexport const reinhard = tgpu.fn([d.vec3f], d.vec3f)`(c: vec3f) -> vec3f { return c / (c + vec3f(1.0)); }`.$name('reinhard');\nexport const clampTonemap = tgpu.fn([d.vec3f], d.vec3f)`(c: vec3f) -> vec3f { return clamp(c, vec3f(0.0), vec3f(1.0)); }`.$name('clampTonemap');\n```\n\nThen export: (1) `tonemapSlot` -- a typegpu placeholder for 'which tone-mapping function to call', with NO default, whose value is chosen at shader-generation time; (2) `shade` -- a TypeGPU function with signature `(color: vec3f) -> vec4f`, implemented as a WGSL string, whose WGSL name is `shade` and which returns `vec4f(<tonemap>(color), 1.0)` where `<tonemap>` is whatever function fills `tonemapSlot`; (3) `shadeReinhard` and `shadeClamp` -- variants of `shade` with the slot filled by `reinhard` and `clampTonemap` respectively. Resolving `shade` without filling the slot must fail. Everything must work in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg11/test.ts", "runtime": true, "webgpu": true, "entry": ["reinhard", "clampTonemap", "tonemapSlot", "shade", "shadeReinhard", "shadeClamp"]},
+  "reference": "tasks/tg11/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu.slot<T>(defaultValue?)": "core/slot/slot.d.ts, core/slot/slot.js, core/slot/slotTypes.d.ts",
+    "fn.$uses({ name: slot })": "core/function/tgpuFn.d.ts, core/function/tgpuFn.js",
+    "fn.with(slot, value)": "core/root/rootTypes.d.ts (Withable), core/function/tgpuFn.js",
+    "TgpuFn<(...args) => R>": "core/function/tgpuFn.d.ts"
+  },
+  "notes": "Probed: interpolating a slot into the template (`${slot}(c)`) stringifies it as `slot:<unnamed>` -- it must be wired through $uses. That is wrong_test_2."
+}

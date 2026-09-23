@@ -1,0 +1,22 @@
+{
+  "id": "ts28",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode, Node 24, `lib` set to `esnext`) that exports `class AsyncQueue<T>`, an unbounded producer/consumer queue that is consumed with `for await`. Members:\n\n- `push(item: T): void` -- adds an item; throws an `Error` if the queue has been closed.\n- `close(): void` -- no more items will be pushed. Items already pushed are still delivered; once they are consumed, iteration ends.\n- `size` -- a read-only count of items pushed but not yet consumed.\n- `[Symbol.asyncIterator]()` -- returns an async iterator whose `next()` resolves with the next item in FIFO order, waiting while the queue is empty and open, and resolves `{ done: true }` once the queue is closed and drained (including for consumers already waiting when `close()` is called). If `next()` is called several times without awaiting, the calls resolve with successive items in call order.\n\nIterating must give elements of type `T` (e.g. `for await (const s of new AsyncQueue<string>())` types `s` as `string`). Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts28/test.ts",
+    "runtime": true,
+    "entry": [
+      "AsyncQueue"
+    ],
+    "compilerOptions": {
+      "lib": [
+        "esnext"
+      ]
+    }
+  },
+  "reference": "tasks/ts28/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

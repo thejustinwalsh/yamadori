@@ -1,0 +1,16 @@
+{
+  "id": "tg05",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export three module-scope shader variables for a compute shader: (1) `tile`: an array of 256 `f32` shared by all invocations of one workgroup (zero-initialised by WebGPU, no initial value); (2) `seed`: a `u32` private to each invocation, initialised to `1`; (3) `jitter`: a `vec2f` private to each invocation, initialised to `(0.5, 1.0)`. Each must resolve with `tgpu.resolve([...])` to a WGSL variable declaration whose identifier is exactly the export's name (`tile`, `seed`, `jitter`), in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg05/test.ts", "runtime": true, "webgpu": true, "entry": ["tile", "seed", "jitter"]},
+  "reference": "tasks/tg05/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "api": {
+    "tgpu.workgroupVar(dataType)": "core/variable/tgpuVariable.d.ts, core/variable/tgpuVariable.js",
+    "tgpu.privateVar(dataType, initialValue?)": "core/variable/tgpuVariable.d.ts, core/variable/tgpuVariable.js",
+    "TgpuVar<Scope, T>": "core/variable/tgpuVariable.d.ts (type re-exported from index.d.ts)",
+    ".$name": "shared/meta.d.ts"
+  }
+}

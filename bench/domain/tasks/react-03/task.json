@@ -1,0 +1,11 @@
+{
+  "id": "react-03",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as `function usePrevious<T>(value: T): T | undefined`.\n\nIt returns the value `value` had before it last changed.\n\nBehaviour:\n- \"Changed\" means the new `value` is not `Object.is`-equal to the one on the render before.\n- Until `value` changes for the first time, the hook returns `undefined`.\n- After a change it returns the value from just before that change, and keeps returning it until `value` changes again. A re-render caused by anything else (other props, parent state) while `value` stays the same must not change what it returns.\n- Example: values over successive renders `a, a, b, b, c, a` return `undefined, undefined, a, a, b, c`.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-03/test.tsx", "entry": ["usePrevious"]},
+  "reference": "tasks/react-03/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "hook"
+}

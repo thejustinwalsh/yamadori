@@ -1,0 +1,17 @@
+{
+  "id": "tg18",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export two TypeGPU functions implemented as WGSL strings (write any WGSL types in the string with the short aliases such as `vec3f`, not `vec3<f32>`): (1) `accumulate`, WGSL name `accumulate`, which takes a pointer to a function-scope `vec3f` named `acc`, a `vec3f` named `sample` and an `f32` named `weight`, returns nothing, and does `*acc += sample * weight;` through the pointer; (2) `bumpCounter`, WGSL name `bumpCounter`, which takes a pointer to a module-private `u32` named `counter`, returns nothing, and does `*counter += 1u;`. The typegpu signatures (the schemas passed to `tgpu.fn`) must declare the pointer parameters with the matching address space so `tgpu.resolve` accepts the WGSL headers. Everything must work in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg18/test.ts", "runtime": true, "webgpu": true, "entry": ["accumulate", "bumpCounter"]},
+  "reference": "tasks/tg18/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "d.ptrFn(schema) -> Ptr<'function', T, 'read-write'>": "data/ptr.d.ts, data/ptr.js",
+    "d.ptrPrivate(schema) -> Ptr<'private', T, 'read-write'>": "data/ptr.d.ts, data/ptr.js",
+    "d.Ptr / d.Void": "data/wgslTypes.d.ts (re-exported in data/index.d.ts)",
+    "tgpu.fn(args[, ret])`wgsl` header check": "core/function/tgpuFn.d.ts, core/function/fnCore.js (checkAndReturnType)"
+  },
+  "notes": "Probed: resolving throws `Type mismatch between TGPU shell and WGSL code string` when the shell says vec3f but the header says ptr<function, vec3f>, or when address spaces differ. It also compares type text, so `vec3<f32>` in the header is rejected; the prompt says to use short aliases for that reason. `d.ptr` does not exist in 0.12.5."
+}

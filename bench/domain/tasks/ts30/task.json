@@ -1,0 +1,19 @@
+{
+  "id": "ts30",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that converts snake_case API responses to camelCase, both at runtime and in the types. Keys consist of lowercase letters and digits separated by single underscores (no leading, trailing or doubled underscores). Export:\n\n- `type CamelCase<S extends string>` -- removes each underscore and upper-cases the character after it: `'user_id'` -> `'userId'`, `'street_line_1'` -> `'streetLine1'`, `'a_b_c'` -> `'aBC'`; a key with no underscore is unchanged.\n- `type CamelCaseKeys<T>` -- `T` with every object key converted by `CamelCase`, recursively: through nested objects, through array element types (an array stays an array, e.g. `{ order_id: string }[]` becomes `{ orderId: string }[]`), and through unions such as `{ zip_code: string } | null`. Primitives are unchanged, values are never renamed, and optional properties stay optional.\n- `camelizeKeys<T>(value: T): CamelCaseKeys<T>` -- the runtime conversion for JSON-like data (plain objects, arrays, primitives and `null`), returning new objects and arrays without modifying the input.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts30/test.ts",
+    "runtime": true,
+    "entry": [
+      "CamelCase",
+      "CamelCaseKeys",
+      "camelizeKeys"
+    ]
+  },
+  "reference": "tasks/ts30/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

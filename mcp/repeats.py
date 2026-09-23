@@ -75,6 +75,24 @@ class Turn:
     def repeat_count(self, name: str, args: dict) -> int:
         return self.seen.get(normalise(name, args), 0)
 
+    def cached_empty(self, name: str, args: dict) -> bool:
+        """Have we already run this exact call and got nothing?
+
+        NOT a refusal. The call still returns a result and the model still
+        decides what to do -- this only says the SEARCH need not be executed
+        again, because a deterministic query over an unchanged index cannot
+        return something different the second time.
+
+        MEASURED, from the corpus: one request issued the identical pair of
+        searches twelve times over 842 seconds against an index that contained
+        nothing relevant. Each round trip cost about 47 seconds to re-derive an
+        answer we already had. Re-running them bought nothing; it only meant
+        the model spent a quarter of an hour to reach the same dead end.
+
+        The guidance still goes back, which is the part the model acts on.
+        """
+        return normalise(name, args) in self.empty
+
     def guidance(self, name: str, args: dict, all_tools: set[str]) -> str:
         """What to append when a call repeats something already exhausted.
 
@@ -116,3 +134,70 @@ def _empty(text: str) -> bool:
             or "no definition" in head or "no references" in head
             or "matched 0 of" in head or "no results" in head
             or "has no index" in head)
+
+
+# THE TOOL-RESULT BREAKER.
+#
+# Every tool loop in the stack cut results with a bare `out[:6000]`: four
+# places, no marker (docs/CONSTRAINTS.md item 12). read_file_range returns 120
+# lines by default, which at ~50 chars plus a 7-char gutter can pass 6000, so
+# the model received a range whose header promised lines the body did not
+# contain -- and nothing told it so. Measured rare, 3 of 651 corpus results.
+#
+# 6000 stays, as a BREAKER: it bounds what one result can add to a context
+# that holds a GPU lane. What changes is that tripping it is stated, with the
+# size of what was withheld and the one call that fetches the rest -- a
+# failure return carries the next step (AGENTS.md).
+RESULT_CAP = 6000
+
+_RANGE_HEAD = re.compile(r"^(?P<path>\S.*?):(?P<start>\d+)-(?P<end>\d+)\s+"
+                         r"\((?P<total>\d+) lines total\)")
+_GUTTER = re.compile(r"^\s*(\d+)  ", re.M)
+
+
+def cap_tool_result(text: str, name: str = "", args: dict | None = None,
+                    limit: int = RESULT_CAP) -> str:
+    """`text` if it fits, else its first `limit` chars plus a marker.
+
+    The cut is made at the last line break before `limit`, so no line arrives
+    half-written, and the marker says where to get the rest: for
+    read_file_range the exact start/end of the lines not shown, for anything
+    else how to narrow the request.
+    """
+    text = text or ""
+    n = len(text)
+    if n <= limit:
+        return text
+    kept = text[:limit]
+    nl = kept.rfind("\n")
+    if nl > limit // 2:
+        kept = kept[:nl]
+    step = _next_step(kept, text, name, args if isinstance(args, dict) else {})
+    return (kept.rstrip() + f"\n\n[truncated at {limit} of {n} chars; "
+            f"{step}]")
+
+
+def _next_step(kept: str, full: str, name: str, args: dict) -> str:
+    """The concrete call that fetches what the cut withheld."""
+    head = _RANGE_HEAD.match(full)
+    if name == "read_file_range" or head:
+        shown = [int(x) for x in _GUTTER.findall(kept)]
+        if head and shown:
+            path = args.get("path") or head.group("path")
+            last = shown[-1]
+            end = int(head.group("end"))
+            if last < end:
+                return (f"lines {int(head.group('start'))}-{last} are shown; "
+                        f"request lines {last + 1}-{end} with read_file_range "
+                        f"(path={json.dumps(path)}, start={last + 1}, "
+                        f"end={end})")
+        return ("request a smaller range with read_file_range (start/end) "
+                "to see the rest")
+    if name == "find_by_pattern":
+        return ("the matches after this point were not shown; narrow the "
+                "pattern or add a glob, or lower max_results")
+    if name == "find_by_meaning":
+        return ("the results after this point were not shown; lower top_k "
+                "or read one of the paths above with read_file_range")
+    return ("the rest was not shown; narrow the request, or read one of the "
+            "paths above with read_file_range")

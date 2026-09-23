@@ -1,0 +1,20 @@
+{
+  "id": "ts21",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) with type-level string splitting and joining. Export:\n\n- `type Split<S extends string, D extends string>` -- when `S` and `D` are both string literal types, the tuple of pieces that `S.split(D)` produces at runtime, exactly (including empty pieces, and `Split<'', ','>` is `['']`); `D` may be more than one character and is never empty. When either `S` or `D` is the wide `string` type, it is `string[]`.\n- `type Join<T extends readonly string[], D extends string>` -- when `T` is a tuple of string literals and `D` is a literal, the literal that `T.join(D)` produces (`Join<[], '-'>` is `''`). When `T` is a non-tuple array such as `string[]`, or `D` is the wide `string` type, it is `string`.\n- `split(s, delimiter)` -- returns `s.split(delimiter)` typed as `Split` of the argument types (`split('x.y', '.')` is typed `['x', 'y']`).\n- `join(parts, delimiter)` -- returns `parts.join(delimiter)` typed as `Join`. An array literal argument must be typed as a tuple of literals without the caller writing `as const`: `join(['a', 'b'], '/')` is typed `'a/b'`.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts21/test.ts",
+    "runtime": true,
+    "entry": [
+      "Split",
+      "Join",
+      "split",
+      "join"
+    ]
+  },
+  "reference": "tasks/ts21/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

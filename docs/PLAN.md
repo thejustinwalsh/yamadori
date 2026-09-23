@@ -48,7 +48,7 @@ only if it is measured against exact search rather than against nothing.
 | finding | status |
 |---|---|
 | Reranking: 3/11 vs 1/11 at rank 1 | **p≈0.6, not a result.** Kept only as a latency decision |
-| Reranking at top-5: 7/11 vs 7/11 | identical; rerank skipped above k=2, 1100ms → 96ms |
+| Reranking at top-5: 7/11 vs 7/11 | identical; rerank skipped above k=2. **~1100ms → 96ms** — one `search_code` call, warm, embeddings ON, three.js index, the only change being whether the cross-encoder scores the 40-candidate pool. Not the same measurement as the 1284→729ms below |
 | `judge` (Laya as truth-judge): 6/10 vs 5/10 coin flip | **cut from the tool surface** |
 | Laya as relevance scorer | **failed**: nonsense query scored higher than every real one |
 | Cosine separation, good vs junk queries | 0.476 vs 0.445 — too narrow to threshold |
@@ -237,7 +237,11 @@ winnable classes are under a third of it, narrow the goal again or stop.
    `eval_retrieval.py` **once**, apply the cut rule, stop iterating.
    DONE. It fired: semantic 77/120 against keyword 92/120, McNemar p=0.0041;
    fused 87/120 against keyword, p=0.2266, indistinguishable. Embeddings are
-   off by default and warm latency fell from 1284ms to 729ms.
+   off by default and warm latency fell from **1284ms to 729ms — one
+   `search_fused` call, warm, `top_k=5`, the change being
+   `CODE_SEARCH_SEMANTIC=1` → `0`, i.e. dropping the embedding round trip.
+   A different change from the 1100→96ms rerank figure above; the two do not
+   compose.**
 5. Hermes + pre-registered gauntlet, **15-20 tasks** in the classes that
    survived 2 and 3 -- not 50. Each hidden-test task is ~an hour to author, and
    only large effects change what gets reached for anyway.
@@ -278,8 +282,40 @@ surroundings.
 - `search_code` is cut unless **fused** retrieval beats BM25 by a significant
   margin on discordant pairs. Losing to grep means it is costing a GPU and a
   stale index to do what ripgrep does free.
-- The reranker is cut entirely unless it beats embeddings on the
-  uncontaminated index.
+- The reranker: **not cut, not trusted, not used.** RESOLVED 2026-09-22.
+
+  > **This supersedes the unresolved-conflict note that stood here.** The
+  > conflict was between this document's cut criterion and `docs/PROTOCOL.md`
+  > rule 9, "do not delete what you have not measured". It is resolved by
+  > `docs/FINDINGS.md` #20: the reranker is **corrupt as deployed**. Its scores
+  > depend on what else is in the same request — the same 89 documents score
+  > 15–16/89 batched against 68/89 scored one at a time, and a case documented
+  > at 0.9992 returns 6.93e-08 under batching.
+  >
+  > So every reranker number in this repo is **void**, including the ones that
+  > argued for the cut (n=356, hit@1 13.5% vs embeddings' 74.2%) and the ones
+  > that argued against it. You cannot cut on void data and you cannot keep on
+  > it either. Both documents are satisfied: nothing is deleted, and nothing
+  > unmeasured is trusted.
+  >
+  > **Standing decision, per the operator: nothing is cut until the composed
+  > systems are built, working and benchmarked.** The reranker stays loaded and
+  > gated at `RERANK_MAX_K = 2`, and `mcp/hints.py` deliberately does not call
+  > it.
+  >
+  > **What unblocks a real decision,** in order:
+  > 1. Fix the batching so a document's score does not depend on its
+  >    neighbours — score one pair per request, or prove the batched path
+  >    equals the single path on a held-out set.
+  > 2. Re-run the paired comparison on **conceptual, natural-language** queries
+  >    with independent gold paths, not bare symbol names. Symbol names are the
+  >    shape a cross-encoder is worst at and the symbol table already answers at
+  >    100% in 0.5 ms, so losing there says close to nothing.
+  >    `scripts/eval_retrieval.py:GOLD_EXTRA` is declared and never read; that
+  >    is where they belong.
+  > 3. McNemar on discordant pairs, at an n stated in advance.
+  >
+  > See `docs/ROADMAP.md` §1.2 and §1.3, and `docs/FINDINGS.md` #20.
 - `compact` is cut unless it measurably saves tokens without losing task
   accuracy.
 - Any tool not measurably better than its generic equivalent gets removed. Tool

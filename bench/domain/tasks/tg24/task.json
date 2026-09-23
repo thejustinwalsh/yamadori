@@ -1,0 +1,19 @@
+{
+  "id": "tg24",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu, { type TgpuRoot } from 'typegpu'`, `import * as d from 'typegpu/data'`), write a GPU histogram. Export: (1) `histLayout` -- a bind group layout with entries `values` (binding 0: a storage buffer holding a runtime-sized array of `f32`, read-only in shaders) and `bins` (binding 1: a storage buffer holding a runtime-sized array of atomic `u32` counters, writable); (2) `histogram` -- a compute entry point implemented as a WGSL string, WGSL name `histogram`, workgroup size 128, whose only input is the global invocation id builtin; for `i = global_invocation_id.x` it returns when `i >= arrayLength(&values)`, otherwise computes `bin = min(u32(values[i] * 16.0), 15u)` and does `atomicAdd(&bins[bin], 1u)`, reading both resources through `histLayout`; (3) `function runHistogram(root: TgpuRoot, values: number[]): void` -- creates a storage buffer containing `values`, a storage buffer of 16 atomic `u32` bins, a bind group for `histLayout` from them, and a compute pipeline for `histogram`, then dispatches it once with that bind group, using exactly as many workgroups as needed to cover every value (one invocation per value). Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg24/test.ts", "runtime": true, "webgpu": true, "entry": ["histLayout", "histogram", "runHistogram"]},
+  "reference": "tasks/tg24/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "api": {
+    "root.createComputePipeline({ compute })": "core/root/rootTypes.d.ts:135, core/root/init.js",
+    "pipeline.with(bindGroup) / .with(layout, bindGroup) / .dispatchWorkgroups(x, y?, z?)": "core/pipeline/computePipeline.d.ts, core/pipeline/computePipeline.js:133",
+    "root.createBindGroup(layout, entries)": "core/root/rootTypes.d.ts:415, tgpuBindGroupLayout.d.ts (LayoutEntryToInput)",
+    "root.createBuffer(schema, initial).$usage('storage'), root.createReadonly/createMutable, buffer.write": "core/root/rootTypes.d.ts, core/buffer/buffer.js",
+    "tgpu.computeFn / tgpu.bindGroupLayout / d.atomic": "core/function/tgpuComputeFn.d.ts, tgpuBindGroupLayout.d.ts, data/atomic.d.ts",
+    "tgpu.initFromDevice({ device })": "core/root/init.d.ts"
+  },
+  "notes": "No GPU in node: the test drives the answer against a recording stub GPUDevice (tgpu.initFromDevice) and asserts on the WebGPU calls typegpu makes -- createShaderModule code, createBindGroupLayout entries, createBindGroup buffers (size, usage, uploaded bytes via mappedAtCreation or queue.writeBuffer), setBindGroup, dispatchWorkgroups args, queue.submit. Probed end to end in probe_tg/p24.mjs. wrong_compile: root['~unstable'].withCompute(...).createPipeline() -- no `withCompute` anywhere in the 0.12.5 package (grep over all .js/.d.ts)."
+}

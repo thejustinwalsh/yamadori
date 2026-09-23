@@ -1,0 +1,32 @@
+{
+  "id": "tsl16",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), WebGPURenderer + TSL. This r184 module colours fat lines through a property that r185 deprecates:\n\n```js\nimport { Color } from 'three';\nimport { Line2NodeMaterial } from 'three/webgpu';\nimport { uniform } from 'three/tsl';\n\nexport const lineTint = uniform( new Color( 0x44aaff ) );\n\nexport function createFatLineMaterial() {\n\n\tconst material = new Line2NodeMaterial( { linewidth: 4, worldUnits: false } );\n\tmaterial.lineColorNode = lineTint;\n\n\treturn material;\n\n}\n```\n\nPort it to r185 with named imports, same exports, setting the line colour through the property r185 wants. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "lineTint",
+      "createFatLineMaterial"
+    ],
+    "require": [
+      {
+        "name": "colorNode",
+        "as": "property"
+      },
+      {
+        "name": "Line2NodeMaterial",
+        "as": "import",
+        "from": "three/webgpu"
+      }
+    ],
+    "forbid": [
+      "lineColorNode"
+    ]
+  },
+  "reference": "tasks/tsl16/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "Line2NodeMaterial.lineColorNode -> colorNode, @deprecated r185: r185 src/materials/nodes/Line2NodeMaterial.js:536-547 (warnOnce '\"lineColorNode\" has been deprecated. Use \"colorNode\" instead.'). r175 src/materials/nodes/Line2NodeMaterial.js:83 `this.lineColorNode = null`.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

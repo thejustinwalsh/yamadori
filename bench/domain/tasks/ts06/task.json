@@ -1,0 +1,24 @@
+{
+  "id": "ts06",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports `type Order = { id: string; status: 'pending' | 'paid' | 'shipped'; total: number }` and two functions. Both accept any `Iterable<Order>` -- which may be a one-shot generator that can only be iterated once -- and must not modify the orders.\n\n- `groupByStatus(orders: Iterable<Order>): Map<Order['status'], Order[]>` -- the orders grouped by `status`. Map keys appear in the order each status is first seen; each group keeps the orders (the original objects) in input order; a status with no orders is not a key.\n- `totalsByStatus(orders: Iterable<Order>): Partial<Record<Order['status'], number>>` -- the sum of `total` per status. A status with no orders must not be present as a property at all.\n\nThe runtime is Node 24 and the `lib` setting is `esnext`. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts06/test.ts",
+    "runtime": true,
+    "entry": [
+      "groupByStatus",
+      "totalsByStatus",
+      "Order"
+    ],
+    "compilerOptions": {
+      "lib": [
+        "esnext"
+      ]
+    }
+  },
+  "reference": "tasks/ts06/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

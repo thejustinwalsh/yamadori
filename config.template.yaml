@@ -7,7 +7,7 @@
 # llama-swap: one OpenAI-compatible endpoint in front of every local model.
 #
 #   API   http://ai.thejustinwalsh.me:1234/v1     (agents point here)
-#   UI    http://ai.thejustinwalsh.me:1234/ui/    (control + live stats)
+#   UI    http://ai.thejustinwalsh.me:1234/dash   (React dashboard; Python pages at /dash/classic)
 #
 # GET /v1/models lists everything below, so a client discovers the stack itself.
 #
@@ -50,16 +50,27 @@ models:
   # PRIMARY -- the whole 5060 Ti, maximum context.
   #
   # Ternary weights are only 5.53 GiB, which is what makes this possible:
-  # measured non-KV footprint is ~6.8 GiB, leaving ~8 GiB for cache. At
-  # 34 KiB/token (q8, 16 of 64 layers cached) 208k costs ~6.9 GiB. 240k also
+  # measured non-KV footprint is ~6.8 GiB, leaving ~8 GiB for cache. 240k
   # LOADS, but leaves ~2% of the card free and dies when a long prefill
   # allocates its compute buffer. Native cap is 262144; no rope scaling used.
+  #
+  # THE SHIPPED NUMBER IS 147456. It is set exactly once, at `-c` below, and
+  # every other figure in this file and in the docs is either history or a
+  # rejected candidate. Two KV cost models appear in this repo and they do not
+  # agree -- 34 KiB/token (q8, 16 of 64 layers cached) against the 44
+  # KiB/token mcp/budget.py measured and uses for its own arithmetic. The
+  # budget module's figure is the one anything downstream reads. Do not size a
+  # new context off either without re-measuring.
   #
   # There is deliberately no second chat worker. A second instance only
   # helps CONCURRENT requests; a single agent is sequential and never
   # touches it. That VRAM buys context and retrieval quality instead.
   # =====================================================================
   "bonsai":
+    # NOTE: this display label says 128k and `-c` below says 147456. The label
+    # is stale, not the flag. Left alone here because it is the string
+    # llama-swap and the dashboard show to clients, so correcting it is a
+    # visible change rather than a comment; do it deliberately.
     name: "Bonsai 2 27B ternary -- 128k (5060 Ti)"
 
     # ONE model, thinking ON, good defaults applied to every request.
@@ -120,12 +131,50 @@ models:
       -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf
       -dev CUDA0
       -ngl 999
-      # 128k, down from 208k. The advertised 262144 is not the usable
-      # figure: effective recall degrades well before an advertised limit,
-      # and ternary quantisation degrades faster in long context than a
-      # higher-precision model does. The freed KV cache is worth more as
-      # headroom than as context nobody reaches.
-      -c 131072
+      # THE POOL CAME DOWN IN STAGES AND THE STAGES ARE KEPT, BUT ONLY THE
+      # LAST ONE SHIPS: 262144 advertised -> 208k -> 196608 (backed out) ->
+      # 147456. Anything in this block that names a different number is a
+      # rejected candidate, not the setting. Earlier revisions of this
+      # template said "131072" and the label above says "128k", and neither
+      # was ever the value of `-c` on the live stack.
+      #
+      # This line now matches the live config.yaml. Keep it that way: every
+      # measurement in docs/ was taken at 147456, and mcp/budget.py derives
+      # its main/helper/reserve split from whatever the server reports, so a
+      # smaller pool here silently shrinks every budget downstream.
+      #
+      # The advertised 262144 is not the usable figure: effective recall
+      # degrades well before an advertised limit, and ternary quantisation
+      # degrades faster in long context than a higher-precision model does.
+      # The freed KV cache is worth more as headroom than as context nobody
+      # reaches.
+      #
+      # 196608 was tried and backed out. It fits on paper -- ~8.25 GiB of KV
+      # at 44 KiB/token plus 5.95 GB of weights inside 16.3 GB -- and it
+      # leaves no room for the spikes that actually kill a run: prompt
+      # processing on a long problem needs scratch beyond the stored KV, and
+      # `arc193_a` failed on all three benchmark arms while 193-second
+      # generations succeeded elsewhere. That is the signature of a memory
+      # spike, not a timeout.
+      #
+      # 147456 keeps roughly 3.5 GB of headroom on CUDA0, which is what
+      # absorbs them. Warm-measured: 12,122 MiB used, 3,931 free. Budgets in
+      # mcp/budget.py follow the pool automatically, so this line is the only
+      # place the number lives.
+      #
+      # RAISED 2026-09-22 on the operator's call: keep ~2.0-2.4 GB free on
+      # CUDA0 rather than ~3.5. The "3 GB floor" was never measured -- the
+      # arc193_a runs it rested on show no OOM (docs/CONSTRAINTS.md 1c). The
+      # real reason for headroom is that CUDA0 is also the Windows display
+      # GPU: desktop apps take VRAM, and the driver spills to system RAM
+      # (silent slowdown) rather than failing. 172032 stays only if a
+      # worst-case stress test (main share filled + two deep-thinking
+      # contexts) keeps >= 2.0 GB free at peak with throughput intact;
+      # otherwise step back to 163840. MEASURED: 172032 idled at 14,178 MiB
+      # (2,133 free) and a worst-case load adds ~194 MiB (baseline stress,
+      # three full shares at once) -> ~1.94 GB free at peak, under the floor.
+      # So 163840: split main 81,920, helpers 2x40,960.
+      -c 163840
       --cache-type-k q8_0 --cache-type-v q8_0
       -fa on
       --cont-batching
@@ -140,11 +189,17 @@ models:
       # a 256 token cap leaves most answers empty" -- and llama.cpp discussion
       # 20931 records the same for the Qwen3 thinking family generally.
       #
-      # This is what makes xhigh safe. The effort level changes how much the
-      # model WANTS to think; the budget decides how much it MAY. With the
-      # proxy flooring max_tokens at 1500, there is always room left for an
-      # answer after a 1000-token thought.
-      --reasoning-budget 1000
+      # REVISED 2026-09-22 (docs/CONSTRAINTS.md 1, section 3). 1000 was below
+      # the model's natural thinking length on ordinary prompts (682-2,826
+      # tokens, 5 of 7 runs over 1000), so it cut thought off mid-way, and
+      # once the rest of the deliberation spilled into the answer and hit
+      # finish=length with no answer. 32768 is a RUNAWAY BREAKER (~11x the
+      # longest natural completion), and the message makes a forced close end
+      # cleanly (2 of 2 runs with it, n=2). The proxy sends the same values per
+      # request (tiers.budget); this default covers anything that talks to the
+      # server directly, so a benchmark and a client see the same model.
+      --reasoning-budget 32768
+      --reasoning-budget-message "Thinking budget reached. I will stop deliberating and write the final answer now."
 
       # Qwen3-family uses DeepSeek-style <think> delimiters. Stated explicitly
       # rather than left to auto-detect, which is silently gated on --jinja.

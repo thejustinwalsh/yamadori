@@ -1,0 +1,10 @@
+{
+  "id": "rs13",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library for `wasm32-unknown-unknown` (no wasm-bindgen; JavaScript calls the raw exports and writes bytes into linear memory itself) that exports the 64-bit FNV-1a hash as an unmangled C-ABI function named `fnv1a64`. It takes two arguments, a pointer to the first byte and the length in bytes (both pointer-sized, i.e. 32-bit on wasm32), and returns the full 64-bit hash, which JavaScript receives as a BigInt.\n\nFNV-1a 64: start from the offset basis `0xcbf29ce484222325`; for each byte, XOR it into the hash, then multiply by the prime `0x100000001b3` modulo 2^64. `ptr` may be 0 (null) when `len` is 0, and the result is then the offset basis. The caller keeps ownership of the bytes. Answer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs13/grader.mjs", "wasm_support": true, "entry": ["fnv1a64"]},
+  "reference": "tasks/rs13/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

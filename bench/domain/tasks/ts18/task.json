@@ -1,0 +1,18 @@
+{
+  "id": "ts18",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports a method decorator `memoize` for the standard ECMAScript decorators that TypeScript supports by default (the project does NOT enable `experimentalDecorators`). It is applied as `@memoize` to class methods that take exactly one argument:\n\n```ts\nclass Calc {\n  constructor(readonly factor: number) {}\n  @memoize times(x: number): number { return x * this.factor; }\n}\n```\n\nBehaviour: the first call with a given argument runs the method (with the correct `this`) and caches the result; later calls with the same argument return the cached result without running it. Arguments are compared the way `Map` keys are (object identity; `NaN` equals `NaN`; `undefined` is a valid key). Each instance has its own cache -- two instances never share results. The decorated method keeps its parameter and return types. Applying `@memoize` to a method with two or more parameters must be a compile error. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts18/test.ts",
+    "runtime": true,
+    "entry": [
+      "memoize"
+    ]
+  },
+  "reference": "tasks/ts18/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "notes": "Standard (TC39) decorators, emitted by tsc 7.0.2 for target es2023 without experimentalDecorators (verified). A legacy (target, key, descriptor) decorator fails at stage test, because the error is reported at the @memoize use site in test.ts."
+}

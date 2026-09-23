@@ -203,8 +203,19 @@ decision engine." Zero-shot it is not that; fine-tuned it could be.
 DONE. The cut rule fired on the gauntlet index: semantic recall@5 77/120
 against keyword 92/120 with McNemar p=0.0041, and fused 87/120 against
 keyword at p=0.2266 -- indistinguishable. Embeddings are off by default
-behind CODE_SEARCH_SEMANTIC=1, and warm query latency fell from 1284ms to
-729ms. BM25 plus the symbol tables are the shipped retrieval path.
+(`CODE_SEARCH_SEMANTIC=0`; set it to `1` to re-enable), and warm query latency
+fell from **1284ms to
+729ms**. BM25 plus the symbol tables are the shipped retrieval path.
+
+**What that latency figure is, stated where it is quoted.** One `search_fused`
+call, warm (index and model already loaded), `top_k=5`, on the gauntlet index.
+The only thing that changed between the two numbers is
+`CODE_SEARCH_SEMANTIC=1` -> `0`, i.e. whether the embedding round trip to the
+0.6B happens at all. It is **not** the same measurement as the reranker's
+~1100ms -> 96ms quoted in `mcp/code_search.py` and `docs/PLAN.md`: that one
+holds embeddings ON and varies whether the cross-encoder runs, at `top_k=5`
+against `RERANK_MAX_K`. Two different changes on two different components; the
+savings do not add up and neither figure may be quoted for the other.
 
 Two findings worth holding it to:
 - BM25 + cross-encoder is **+11% nDCG@10 over BM25 on 16 of 18 datasets** --

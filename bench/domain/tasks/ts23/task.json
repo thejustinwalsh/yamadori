@@ -1,0 +1,17 @@
+{
+  "id": "ts23",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode, Node 24) that exports `snapshot<T>(value: T): T`, which returns a deep copy of an application state value so later mutations of either side never affect the other. It must handle nested plain objects and arrays, `Date`, `RegExp` (source and flags), `Map` and `Set` (keys and values copied deeply), typed arrays such as `Uint8Array`, cyclic references (a cycle in the input becomes the same cycle within the copy), and shared references (an object reachable twice in the input is copied once and reachable twice in the copy). Primitives are returned as-is. If the value contains a function, `snapshot` must throw. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts23/test.ts",
+    "runtime": true,
+    "entry": [
+      "snapshot"
+    ]
+  },
+  "reference": "tasks/ts23/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

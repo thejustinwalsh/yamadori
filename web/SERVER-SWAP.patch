@@ -1,0 +1,521 @@
+Serve the React dashboard (web/dist) under /dash, keep /dash/api first, move the
+Python pages to /dash/classic*, and prove the committed bundle matches its source.
+
+Apply from the repo root:   git apply web/SERVER-SWAP.patch
+Then run:                   python mcp/test_dash_static.py      (26 checks)
+Then restart the proxy (mcp/server.py). Modes: default react when web/dist/index.html
+exists; YAMADORI_DASH_UI=python restores the old pages exactly; --dev or
+YAMADORI_DASH_DEV=1 serves a pointer to Vite on :5173 and never the bundle.
+
+Prepared by the Track B session against mcp/server.py as it was at 18:04 on
+2026-09-22. Not applied, not run against a live proxy -- verified in-process with
+starlette.testclient only.
+
+--- a/mcp/server.py
++++ b/mcp/server.py
+@@ -55,6 +55,7 @@
+ import catalog  # noqa: E402
+ import dash_data  # noqa: E402
+ import dash_results  # noqa: E402
++import dash_static  # noqa: E402
+ import dash_vitals  # noqa: E402
+ import dashboard  # noqa: E402
+ import proxy  # noqa: E402
+@@ -64,6 +65,14 @@
+ HOST = os.environ.get("YAMADORI_PROXY_HOST", "0.0.0.0")
+ PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1234"))
+ 
++# Which dashboard serves /dash: the committed React build (web/dist), the
++# Python pages, or a pointer to Vite in dev. See mcp/dash_static.py. When
++# React owns /dash the Python pages move to /dash/classic*, where the two
++# write flows React does not have yet (recipe review, dataset submission)
++# stay reachable.
++DASH_UI = dash_static.ui_mode()
++_PY = "" if DASH_UI == "python" else "/classic"
++
+ 
+ @app.exception_handler(StarletteHTTPException)
+ async def openai_shaped_errors(request: Request, exc: StarletteHTTPException):
+@@ -90,7 +99,8 @@
+     return JSONResponse({
+         "service": "yamadori",
+         "endpoints": ["/v1/models", "/v1/chat/completions", "/health", "/dash",
+-                      "/dash/data", "/dash/vitals", "/dash/results"],
++                      f"/dash{_PY}/data", f"/dash{_PY}/vitals", f"/dash{_PY}/results"],
++        "dashboard": DASH_UI,
+         "note": "OpenAI-compatible. Point any client here; it needs no tool "
+                 "configuration.",
+     })
+@@ -139,14 +149,14 @@
+     return JSONResponse(catalog.public_list())
+ 
+ 
+-@app.get("/dash")
++@app.get(f"/dash{_PY}")
+ async def dash_page() -> Response:
+     # The shell is public; it holds no data and a browser cannot set an
+     # Authorization header on a page load. Everything under /dash/api is gated.
+     return Response(content=dashboard.PAGE, media_type="text/html; charset=utf-8")
+ 
+ 
+-@app.get("/dash/data")
++@app.get(f"/dash{_PY}/data")
+ async def dash_data_page() -> Response:
+     # Same deal as /dash: the shell is public and carries no data of its own.
+     # Every dataset, job count and recipe row on it arrives from the gated
+@@ -155,7 +165,7 @@
+     return Response(content=payload, status_code=code, media_type=ctype)
+ 
+ 
+-@app.get("/dash/vitals")
++@app.get(f"/dash{_PY}/vitals")
+ async def dash_vitals_page() -> Response:
+     # Same deal as /dash: the shell is public and carries no telemetry, the
+     # JSON behind it is gated. Declared before the /dash/api catch-all only
+@@ -164,7 +174,7 @@
+     return Response(content=payload, status_code=code, media_type=ctype)
+ 
+ 
+-@app.get("/dash/results")
++@app.get(f"/dash{_PY}/results")
+ async def dash_results_page() -> Response:
+     # Same deal again: the shell is public and holds no measurement, and every
+     # number on it arrives from the gated /dash/api/results.
+@@ -216,6 +226,13 @@
+     return Response(content=payload, status_code=code, media_type=ctype)
+ 
+ 
++# The React dashboard. Registered AFTER both /dash/api routes above: Starlette
++# matches in registration order and the SPA fallback is a catch-all, so it
++# must come last or it would answer API calls with index.html.
++DASH_BUILD = (dash_static.mount(app, DASH_UI) if DASH_UI != "python"
++              else {"ok": True, "problems": [], "note": "Python pages"})
++
++
+ @app.post("/v1/chat/completions")
+ async def chat(request: Request) -> Response:
+     account, why = accounts.identify(request.headers.get("authorization"))
+@@ -312,6 +329,12 @@
+     import uvicorn
+     print(f"yamadori on {HOST}:{PORT} -> {proxy.UPSTREAM}", flush=True)
+     print("  uvicorn/h11, real keep-alive, HEAD, graceful drain", flush=True)
++    print(f"  dashboard: {DASH_UI}"
++          + (f" ({DASH_BUILD['note']})" if DASH_BUILD.get("note") else ""), flush=True)
++    for problem in DASH_BUILD.get("problems", []):
++        # Loud, not fatal: a stale bundle still serves, and
++        # mcp/test_dash_static.py is what fails.
++        print(f"  WARNING dashboard bundle is STALE: {problem}", flush=True)
+     uvicorn.run(app, host=HOST, port=PORT, log_level="warning",
+                 # A generation runs for minutes. The default 5s keep-alive
+                 # would drop idle sockets between problems, which is the exact
+--- /dev/null
++++ b/mcp/dash_static.py
+@@ -0,0 +1,191 @@
++#!/usr/bin/env python
++"""Serve the React dashboard (web/dist) under /dash, and prove it is current.
++
++WHY THE BUNDLE IS COMMITTED
++
++Node is a contributor dependency, never a runtime one (design/STACK.md). The
++built bundle is committed and served as static files, so someone self-hosting
++this runs Python exactly as before and never meets npm.
++
++WHY IT CARRIES A HASH OF ITS SOURCE
++
++Committed build output goes stale silently: a .tsx is edited, nobody
++rebuilds, and the repo ships a dashboard that is not what its source says.
++Nothing errors. `web/build/buildinfo.ts` writes `web/dist/.buildinfo` -- the
++sha256 of every source file that fed the build -- and `check_buildinfo()`
++recomputes them here, in Python, in milliseconds, with no Node. A stale bundle
++is logged loudly at startup and FAILS `mcp/test_dash_static.py`.
++
++The hash is over the bytes with CRLF normalised to LF, exactly as the Node
++writer does it, or a Windows checkout with autocrlf would report every file
++stale -- and a check that cries wolf gets ignored.
++
++THREE MODES, ONE DECISION (`ui_mode()`)
++
++  react   dist/index.html exists: /dash/* is the SPA, /dash/api/* stays the
++          JSON API, and the Python pages move to /dash/classic*. They still
++          own the two write flows the React build does not have yet: recipe
++          review (/dash/classic) and dataset submission (/dash/classic/data).
++  python  YAMADORI_DASH_UI=python, or no bundle: exactly the old behaviour.
++  dev     --dev or YAMADORI_DASH_DEV=1: dist is NOT mounted, and /dash says
++          where Vite is. The browser talks to Vite on :5173 and Vite proxies
++          /dash/api to here -- never the reverse, because relaying HMR's
++          websocket through Starlette degrades to silent full reloads.
++"""
++from __future__ import annotations
++
++import hashlib
++import json
++import os
++import sys
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++DIST = os.path.normpath(os.environ.get("YAMADORI_DASH_DIST")
++                        or os.path.join(HERE, "..", "web", "dist"))
++VITE_URL = os.environ.get("YAMADORI_DASH_VITE", "http://localhost:5173/dash/")
++
++# web/src files that never feed the bundle, so their absence from .buildinfo
++# is expected rather than suspicious.
++_NOT_BUNDLED = (".test.ts", ".test.tsx")
++
++
++def hash_file(path: str) -> str:
++    with open(path, "rb") as f:
++        data = f.read()
++    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
++
++
++def aggregate(files: dict[str, str]) -> str:
++    h = hashlib.sha256()
++    for k in sorted(files):
++        h.update(f"{k}\0{files[k]}\n".encode("utf-8"))
++    return h.hexdigest()
++
++
++def check_buildinfo(dist: str = DIST) -> dict:
++    """Does the bundle in `dist` match the source beside it?
++
++    Returns {"ok", "problems", "checked", "unlisted"}. `problems` are
++    failures, each naming a file and what is wrong with it. `unlisted` are
++    source files the build did not read: not a failure (an unimported file
++    cannot change the bundle), but listed so a forgotten import is visible.
++    """
++    root = os.path.dirname(os.path.abspath(dist))
++    info_path = os.path.join(dist, ".buildinfo")
++    out: dict = {"ok": False, "problems": [], "checked": 0, "unlisted": []}
++    if not os.path.exists(os.path.join(dist, "index.html")):
++        out["problems"].append(f"{dist} has no index.html: nothing is built")
++        return out
++    try:
++        with open(info_path, encoding="utf-8") as f:
++            info = json.load(f)
++    except (OSError, ValueError) as e:
++        out["problems"].append(f"{info_path} unreadable ({type(e).__name__}: {e}); "
++                               "rebuild with `npm run build` in web/")
++        return out
++    for key, want in (("version", 1), ("algorithm", "sha256"),
++                      ("normalization", "crlf-to-lf")):
++        if info.get(key) != want:
++            out["problems"].append(f".buildinfo {key} is {info.get(key)!r}, "
++                                   f"this checker understands {want!r}")
++    files = info.get("files") or {}
++    if not files:
++        out["problems"].append(".buildinfo lists no source files")
++    if aggregate(files) != info.get("aggregate"):
++        out["problems"].append(".buildinfo aggregate does not match its own "
++                               "file list: the file was edited by hand")
++    for rel, want in sorted(files.items()):
++        path = os.path.join(root, *rel.split("/"))
++        if not os.path.exists(path):
++            out["problems"].append(f"{rel} fed the build and no longer exists")
++            continue
++        out["checked"] += 1
++        if hash_file(path) != want:
++            out["problems"].append(f"{rel} changed since the bundle was built")
++    src = os.path.join(root, "src")
++    if os.path.isdir(src):
++        for dirpath, dirnames, names in os.walk(src):
++            dirnames[:] = [d for d in dirnames if d != "__fixtures__"]
++            for name in names:
++                if not name.endswith((".ts", ".tsx", ".css")) or name.endswith(_NOT_BUNDLED):
++                    continue
++                rel = os.path.relpath(os.path.join(dirpath, name), root).replace("\\", "/")
++                if rel not in files:
++                    out["unlisted"].append(rel)
++    out["ok"] = not out["problems"]
++    return out
++
++
++def ui_mode(argv: list[str] | None = None) -> str:
++    argv = sys.argv if argv is None else argv
++    forced = os.environ.get("YAMADORI_DASH_UI", "").strip().lower()
++    if forced in ("react", "python"):
++        return forced
++    if "--dev" in argv or os.environ.get("YAMADORI_DASH_DEV") == "1":
++        return "dev"
++    return "react" if os.path.exists(os.path.join(DIST, "index.html")) else "python"
++
++
++def mount(app, mode: str, dist: str = DIST) -> dict:
++    """Register the SPA on `app`. Call AFTER the /dash/api routes: Starlette
++    matches in registration order, and the catch-all must not swallow the API.
++    Returns the buildinfo check (or a note, in dev) for the caller to log."""
++    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
++    from starlette.staticfiles import StaticFiles
++
++    if mode == "dev":
++        page = ("<!doctype html><meta charset=utf-8><title>Yamadori (dev)</title>"
++                "<body style='background:#0a0e17;color:#dfe2ef;font:14px monospace;"
++                "padding:2rem'><p>Dashboard dev mode: the React build is not served "
++                f"here.</p><p>Open <a style='color:#5cf2ff' href='{VITE_URL}'>{VITE_URL}</a>"
++                " (Vite, with HMR). It proxies /dash/api to this server.</p>")
++
++        @app.get("/dash", include_in_schema=False)
++        @app.get("/dash/{rest:path}", include_in_schema=False)
++        async def dash_dev(rest: str = "") -> HTMLResponse:
++            return HTMLResponse(page, headers={"Cache-Control": "no-store"})
++
++        return {"ok": True, "problems": [], "note": f"dev mode, UI at {VITE_URL}"}
++
++    check = check_buildinfo(dist)
++    index = os.path.join(dist, "index.html")
++    stale = "ok" if check["ok"] else "stale"
++
++    class ImmutableAssets(StaticFiles):
++        # File names are content-hashed by Vite, so a name never changes
++        # meaning: cache forever.
++        async def get_response(self, path, scope):
++            resp = await super().get_response(path, scope)
++            if resp.status_code == 200:
++                resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
++            return resp
++
++    app.mount("/dash/assets", ImmutableAssets(directory=os.path.join(dist, "assets")),
++              name="dash-assets")
++
++    @app.get("/dash", include_in_schema=False)
++    @app.get("/dash/{rest:path}", include_in_schema=False)
++    async def dash_spa(rest: str = ""):
++        if rest == "api" or rest.startswith("api/"):
++            # Unreachable when mount() is called after the API routes; kept so
++            # a misordered registration fails as a 404, never as HTML.
++            return JSONResponse(status_code=404, content={"error": "not found"})
++        # index.html is never cached: it is the one file whose name does not
++        # change when the build does.
++        return FileResponse(index, media_type="text/html",
++                            headers={"Cache-Control": "no-cache",
++                                     "X-Yamadori-Dash-Build": stale})
++
++    return check
++
++
++if __name__ == "__main__":
++    c = check_buildinfo()
++    print(f"  {DIST}")
++    print(f"  {c['checked']} source files checked, "
++          f"{'bundle is CURRENT' if c['ok'] else 'bundle is STALE'}")
++    for p in c["problems"]:
++        print(f"    FAIL  {p}")
++    for u in c["unlisted"]:
++        print(f"    note  {u} did not feed the build")
++    sys.exit(0 if c["ok"] else 1)
+--- /dev/null
++++ b/mcp/test_dash_static.py
+@@ -0,0 +1,214 @@
++#!/usr/bin/env python
++"""The committed dashboard bundle, asserted. No Node, no GPU, no server.
++
++WHAT THIS IS GATING
++
++`web/dist` is committed so the stack runs without Node. The failure that
++invites is a bundle that no longer matches its source: someone edits a .tsx,
++does not rebuild, commits, and the dashboard silently is not what the code
++says. `web/dist/.buildinfo` records a sha256 of every source file that fed the
++build; this recomputes them in Python and fails if any differs.
++
++It also asserts the serving shape `dash_static.mount()` gives the SPA:
++
++  - /dash/api/* still reaches the API, never index.html
++  - a missing /dash/assets/*.js is a 404, never index.html (an HTML body
++    served for a JS chunk fails as a MIME error nobody can read)
++  - unknown client routes under /dash get index.html, uncached
++  - hashed assets are cached immutable
++  - dev mode never serves the bundle, and says where Vite is
++
++and that the checker itself notices what it exists to notice: an edited file,
++a deleted file, a hand-edited .buildinfo -- and does NOT fire on a CRLF-only
++difference, which would make it cry wolf on every Windows checkout.
++"""
++from __future__ import annotations
++
++import json
++import os
++import shutil
++import sys
++import tempfile
++import traceback
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++sys.path.insert(0, HERE)
++
++import dash_static  # noqa: E402
++
++_results: list[tuple[bool, str, str]] = []
++
++
++def check(ok: bool, name: str, detail: str = "") -> None:
++    _results.append((bool(ok), name, detail))
++
++
++def _mini_root() -> str:
++    """A throwaway web/ with two sources, a dist, and a .buildinfo written by
++    the same rules the Node writer uses."""
++    root = tempfile.mkdtemp(prefix="yamadori_test_dash_")
++    os.makedirs(os.path.join(root, "src"))
++    os.makedirs(os.path.join(root, "dist", "assets"))
++    files = {"src/App.tsx": b"export const a = 1;\n", "package.json": b"{}\n"}
++    for rel, body in files.items():
++        with open(os.path.join(root, *rel.split("/")), "wb") as f:
++            f.write(body)
++    with open(os.path.join(root, "dist", "index.html"), "w") as f:
++        f.write("<!doctype html><div id=root></div>")
++    with open(os.path.join(root, "dist", "assets", "index-abc123.js"), "w") as f:
++        f.write("console.log(1)")
++    hashes = {rel: dash_static.hash_file(os.path.join(root, *rel.split("/"))) for rel in files}
++    info = {"version": 1, "algorithm": "sha256", "normalization": "crlf-to-lf", "root": "web",
++            "files": hashes, "aggregate": dash_static.aggregate(hashes)}
++    with open(os.path.join(root, "dist", ".buildinfo"), "w") as f:
++        json.dump(info, f)
++    return root
++
++
++def test_the_committed_bundle_matches_its_source():
++    c = dash_static.check_buildinfo()
++    check(c["ok"], "web/dist matches web/src (rebuild with `npm run build` in web/ if not)",
++          "; ".join(c["problems"][:5]))
++    check(c["checked"] >= 20, f"it actually hashed the sources ({c['checked']} files)",
++          "a check over zero files is not a check")
++    info = json.load(open(os.path.join(dash_static.DIST, ".buildinfo"), encoding="utf-8"))
++    check("src/App.tsx" in info["files"], ".buildinfo lists the app entry, i.e. came from the module graph")
++    check("package-lock.json" in info["files"], ".buildinfo covers the lockfile, so a dependency bump is a source change")
++    check(not any(k.endswith((".test.ts", ".test.tsx")) for k in info["files"]),
++          "test files are not recorded as build inputs")
++
++
++def test_the_checker_notices_what_it_exists_to_notice():
++    root = _mini_root()
++    dist = os.path.join(root, "dist")
++    try:
++        check(dash_static.check_buildinfo(dist)["ok"], "a freshly written .buildinfo passes")
++
++        app = os.path.join(root, "src", "App.tsx")
++        with open(app, "wb") as f:
++            f.write(b"export const a = 1;\r\n")
++        check(dash_static.check_buildinfo(dist)["ok"], "a CRLF-only difference is NOT reported stale")
++
++        with open(app, "wb") as f:
++            f.write(b"export const a = 2;\n")
++        c = dash_static.check_buildinfo(dist)
++        check(not c["ok"] and any("src/App.tsx changed" in p for p in c["problems"]),
++              "an edited source file is reported by name", str(c["problems"]))
++
++        os.remove(app)
++        c = dash_static.check_buildinfo(dist)
++        check(not c["ok"] and any("no longer exists" in p for p in c["problems"]),
++              "a deleted source file is reported", str(c["problems"]))
++
++        root2 = _mini_root()
++        info_path = os.path.join(root2, "dist", ".buildinfo")
++        info = json.load(open(info_path))
++        info["files"]["src/App.tsx"] = "0" * 64
++        json.dump(info, open(info_path, "w"))
++        c = dash_static.check_buildinfo(os.path.join(root2, "dist"))
++        check(any("edited by hand" in p for p in c["problems"]),
++              "a hand-edited .buildinfo fails its own aggregate", str(c["problems"]))
++        shutil.rmtree(root2, ignore_errors=True)
++
++        with open(os.path.join(root, "src", "Orphan.tsx"), "w") as f:
++            f.write("export {}")
++        c = dash_static.check_buildinfo(dist)
++        check("src/Orphan.tsx" in c["unlisted"], "a source file the build never read is listed, not failed")
++
++        os.remove(os.path.join(dist, ".buildinfo"))
++        check(not dash_static.check_buildinfo(dist)["ok"], "a bundle with no .buildinfo fails")
++    finally:
++        shutil.rmtree(root, ignore_errors=True)
++
++
++def test_the_spa_is_mounted_after_the_api_and_never_shadows_it():
++    from fastapi import FastAPI
++    from fastapi.responses import JSONResponse
++    from starlette.testclient import TestClient
++
++    root = _mini_root()
++    try:
++        app = FastAPI()
++
++        @app.get("/dash/api/{rest:path}")
++        async def api(rest: str):
++            return JSONResponse({"api": rest})
++
++        c = dash_static.mount(app, "react", os.path.join(root, "dist"))
++        check(c["ok"], "mount() returns the buildinfo check")
++        client = TestClient(app)
++
++        r = client.get("/dash/api/vitals")
++        check(r.status_code == 200 and r.json() == {"api": "vitals"}, "/dash/api/* still reaches the API")
++
++        for path in ("/dash", "/dash/", "/dash/data/some-id", "/dash/results"):
++            r = client.get(path)
++            check(r.status_code == 200 and "text/html" in r.headers["content-type"]
++                  and "id=root" in r.text, f"{path} serves index.html", f"{r.status_code}")
++        check(client.get("/dash/nebari").headers.get("cache-control") == "no-cache",
++              "index.html is served no-cache")
++
++        r = client.get("/dash/assets/index-abc123.js")
++        check(r.status_code == 200 and "immutable" in r.headers.get("cache-control", ""),
++              "hashed assets are served and cached immutable")
++        r = client.get("/dash/assets/missing-chunk.js")
++        check(r.status_code == 404 and "id=root" not in r.text,
++              "a missing asset is a 404, never index.html", f"{r.status_code}")
++        check(client.get("/dash/.buildinfo").status_code == 200
++              and "id=root" in client.get("/dash/.buildinfo").text,
++              "dist/.buildinfo itself is not served (the SPA route answers instead)")
++    finally:
++        shutil.rmtree(root, ignore_errors=True)
++
++
++def test_dev_mode_never_serves_the_bundle():
++    from fastapi import FastAPI
++    from starlette.testclient import TestClient
++
++    app = FastAPI()
++    dash_static.mount(app, "dev")
++    r = TestClient(app).get("/dash/")
++    check(r.status_code == 200 and dash_static.VITE_URL in r.text and "id=root" not in r.text,
++          "dev mode points at Vite and serves no bundle")
++
++
++def test_mode_selection():
++    old = {k: os.environ.pop(k, None) for k in ("YAMADORI_DASH_UI", "YAMADORI_DASH_DEV")}
++    try:
++        check(dash_static.ui_mode(["server.py", "--dev"]) == "dev", "--dev selects dev mode")
++        os.environ["YAMADORI_DASH_UI"] = "python"
++        check(dash_static.ui_mode(["server.py", "--dev"]) == "python", "YAMADORI_DASH_UI=python always wins")
++        os.environ.pop("YAMADORI_DASH_UI")
++        check(dash_static.ui_mode(["server.py"]) == "react", "a built bundle selects react by default")
++    finally:
++        for k, v in old.items():
++            if v is not None:
++                os.environ[k] = v
++
++
++def main() -> int:
++    for fn in (test_the_committed_bundle_matches_its_source,
++               test_the_checker_notices_what_it_exists_to_notice,
++               test_the_spa_is_mounted_after_the_api_and_never_shadows_it,
++               test_dev_mode_never_serves_the_bundle,
++               test_mode_selection):
++        print(f"\n--- {fn.__name__} ---")
++        n0 = len(_results)
++        try:
++            fn()
++        except Exception:                                        # noqa: BLE001
++            check(False, f"{fn.__name__} itself raised",
++                  traceback.format_exc().strip().split("\n")[-1])
++        for ok, name, detail in _results[n0:]:
++            print(("  pass  " if ok else "  FAIL  ") + name
++                  + (f"   <- {detail}" if not ok and detail else ""))
++    passed = sum(1 for ok, _, _ in _results if ok)
++    total = len(_results)
++    print(f"\n{'=' * 70}\n  {passed}/{total} checks passed")
++    if passed < total:
++        print("  If only the first check failed: web/dist is stale. Rebuild it.")
++    return 0 if passed == total else 1
++
++
++if __name__ == "__main__":
++    sys.exit(main())

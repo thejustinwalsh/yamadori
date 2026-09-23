@@ -1,0 +1,10 @@
+{
+  "id": "ts01",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports `function chunk<T>(items: readonly T[], size: number): T[][]`. It splits `items` into consecutive chunks of length `size`, the last chunk holding whatever remains; an empty input gives `[]`. If `size` is not a positive integer it must throw a `RangeError`. It must accept readonly arrays and must not mutate its input. Answer with a single ```ts code block containing only the module.",
+  "grader": {"kind": "ts", "test": "tasks/ts01/test.ts", "runtime": true, "entry": ["chunk"]},
+  "reference": "tasks/ts01/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

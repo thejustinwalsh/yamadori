@@ -1,0 +1,17 @@
+{
+  "id": "ts24",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode, Node 24) that exports a variadic `zip(...iterables)`. It returns an object that is both an iterator and an iterable (usable with `for...of`, spread and `.next()`), yielding tuples that combine one element from each input, in order.\n\n- It is lazy: nothing is read before iteration starts, it pulls at most one element per input per row, and it works with infinite inputs.\n- It stops as soon as any input is exhausted. At that point, and also when the consumer stops early (e.g. `break` out of a `for...of`), it closes every input that is not yet exhausted by calling its iterator's `return()`, so that generators' `finally` blocks run.\n- `zip()` with no arguments yields nothing.\n- Typing: the element type is a tuple with one position per argument, each the element type of that iterable, with no `any` -- `zip([1, 2], ['a', 'b'], new Set([true]))` yields `[number, string, boolean]`, `zip(new Map<string, number>(), 'xy')` yields `[[string, number], string]`. Passing a non-iterable is a compile error.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts24/test.ts",
+    "runtime": true,
+    "entry": [
+      "zip"
+    ]
+  },
+  "reference": "tasks/ts24/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "react-15",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) that holds a set of values as immutable state. Export it as\n\n```ts\nfunction useSet<T>(initial?: Iterable<T>): {\n  values: ReadonlySet<T>;\n  add: (v: T) => void;\n  remove: (v: T) => void;\n  toggle: (v: T) => void;\n  has: (v: T) => boolean;\n  clear: () => void;\n}\n```\n\nBehaviour:\n- `values` starts with the items of `initial` (empty when it is omitted). The hook never modifies the object passed as `initial`.\n- `add(v)` adds `v`, `remove(v)` removes `v`, `toggle(v)` adds `v` if it is absent and removes it if it is present, and `clear()` removes everything. The component re-renders with the new contents.\n- `has(v)` tells whether `v` is in the `values` of the render it was returned from.\n- Every change produces a new `Set` object. A `Set` that was returned as `values` earlier is never modified afterwards, so a component that kept it (for example as a prop) still sees the old contents.\n- A call that would change nothing (adding a value that is present, removing one that is absent, clearing an empty set) keeps the very same `values` object.\n- Several calls in the same event handler all take effect, e.g. `add(a)` followed by `add(b)` adds both.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-15/test.tsx", "entry": ["useSet"]},
+  "reference": "tasks/react-15/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "hook"
+}

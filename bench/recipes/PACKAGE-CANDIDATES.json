@@ -1,0 +1,462 @@
+{
+  "compiled": "2026-09-22",
+  "held_sources_now": {
+    "three": [
+      "0.185.1"
+    ],
+    "typegpu": [
+      "0.12.5"
+    ]
+  },
+  "held_as_repo_not_package": [
+    "koota (index/repos/koota-6955afb4.sqlite3)",
+    "glyph (index/repos/glyph-87c4e674.sqlite3)"
+  ],
+  "method": "Versions and licences come from the npm registry (/-/package/<name>/dist-tags, then /<name>/<version>). Each tarball was downloaded to scratch and walked with deps.fetch's filter (SOURCE_EXTS, <=2 MB) and then index_code.iter_files' filter (SKIP_DIRS includes dist and build, <=1.5 MB). bytes_index_code_walks_by_default is what a plain `index_code.py <src>` would read. est_chunks is a range scaled from the two held indexes (1,180 to 2,895 chunks per MB) and is an estimate, not a measurement. For every package, the registry dist.tarball equals the URL deps.fetch builds.",
+  "how_the_repo_indexes_a_package": {
+    "automatic": "packages.ensure_for(root) is called from proxy.complete() for every request that resolves a repo root. It takes deps.plan(root): packages that are BOTH imported >=2 times in the repo's .ts/.js AND pinned in its lockfile, up to 25. For each one without an index it calls deps.fetch(name, version), which unpacks the npm tarball to index/packages/_src/<slug>@<ver>, then runs scripts/index_code.py <src> in a background thread with CODE_INDEX_DB=deps.db_path(name, version) and INDEX_NO_EMBED=1. There is no CLI that takes a package name. `python mcp/deps.py <repo>` and `python mcp/packages.py <repo>` only PRINT the plan.",
+    "no_embed_means": "INDEX_NO_EMBED=1 makes embed_batch return zero vectors WITHOUT counting them as dead, so check_alive passes. The result serves the symbol table and BM25 (enough for held_sources(), which counts chunks > 0) but has no embedding arm for find_by_meaning. The two held indexes were NOT built that way: 200/200 sampled vectors in each are non-zero, i.e. rebuilt with embeddings.",
+    "operator_command_git_bash": [
+      "cd C:/Users/jwals/llama-stack; PY=C:/Users/jwals/textgen/installer_files/env/python.exe; N=@react-three/drei; V=10.7.8",
+      "SRC=$($PY -c \"import sys;sys.path.insert(0,'mcp');import deps;print(deps.fetch('$N','$V'))\")",
+      "DB=$($PY -c \"import sys;sys.path.insert(0,'mcp');import deps;print(deps.db_path('$N','$V'))\")",
+      "# with embeddings (needs the embedding server at LLAMA_STACK_URL, default http://127.0.0.1:11434, model 'embeddings'; refuses to write if >2% of vectors are dead):",
+      "CODE_INDEX_DB=\"$DB\" $PY scripts/index_code.py \"$SRC\" [\"$SRC/<extra_root>\" ...]",
+      "# or exactly what ensure_for does (no GPU, zero vectors):",
+      "CODE_INDEX_DB=\"$DB\" INDEX_NO_EMBED=1 $PY scripts/index_code.py \"$SRC\" [\"$SRC/<extra_root>\" ...]"
+    ],
+    "extra_roots": "index_code.py accepts several roots, and a root may be a directory or a single file. The walk prunes SKIP_DIRS (dist, build, ...) only BELOW a root, so naming dist/... explicitly is the way to index a dist-only package without editing code. Packages listed without extra_roots index correctly by default.",
+    "picked_up_by": "domains.held_sources() (cached on the store's name/mtime/size listing, no restart) and packages.catalogue()/indexed_versions(). The file is index/packages/<slug>@<version>.sqlite3, slug = name without '@', '/' -> '__'."
+  },
+  "defect_found": "packages.ensure_for runs index_code.py on the tarball root, and index_code.SKIP_DIRS contains 'dist' and 'build'. Any dist-only package therefore auto-indexes as little more than its README, yet held_sources() counts it as held because chunks > 0 (PROTOCOL rule 1 shape: present, not working). Measured: @react-three/fiber@10.0.0-alpha.5 walks 9,372 of 4,683,801 fetched bytes, @webgpu/types 4,815 of 122,628, postprocessing 8,384 of 2,526,387, wgpu-matrix 13,595 of 631,299. fiber@9.8.0 walks 453,917 bytes, mostly a vendored react-reconciler. Not fixed here (read-only task).",
+  "domains_gap": "domains.PACKAGE_DOMAINS has no entry for @react-three/postprocessing, postprocessing, wgpu-matrix, @types/three, @typegpu/three, @typegpu/noise, type-fest or three-mesh-bvh, and HELD_ALIASES only knows three, typegpu, fiber, drei and koota. Held packages are still matched by bare name in domains._named.",
+  "packages": [
+    {
+      "name": "@react-three/fiber",
+      "version": "9.8.0",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@react-three/fiber/9.8.0 (license field)",
+      "why": "Current stable R3F. Every r3f.jsonl recipe cites its API, but the server holds none of its source.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "react-three__fiber@9.8.0.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 2359234,
+        "tarball_files": 38,
+        "bytes_kept_by_deps_fetch": 2356871,
+        "bytes_index_code_walks_by_default": 453917,
+        "top_dirs_bytes": {
+          "dist": 1847706,
+          "react-reconciler": 422168,
+          "native": 55248,
+          "(root)": 31749
+        },
+        "est_chunks_default": "536-1314"
+      },
+      "default_index_is_useful": false,
+      "extra_roots": [
+        "dist/declarations",
+        "dist/events-803f4abc.esm.js"
+      ],
+      "notes": "The tarball is dist-only. The default walk indexes 454 KB, of which 377 KB is a VENDORED react-reconciler, so a default index answers R3F questions out of React internals. Pass the esm bundle and declarations as extra roots and skip the cjs/prod duplicates."
+    },
+    {
+      "name": "@react-three/fiber",
+      "version": "10.0.0-alpha.5",
+      "dist_tag": "alpha",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@react-three/fiber/10.0.0-alpha.5 (license field)",
+      "why": "The v10 line that r3f.jsonl's v10 recipes (CHANGELOG-ALPHA, frame-loop, webgpu/*) describe. It is the version-sensitive one.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "react-three__fiber@10.0.0-alpha.5.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 5688307,
+        "tarball_files": 18,
+        "bytes_kept_by_deps_fetch": 4683801,
+        "bytes_index_code_walks_by_default": 9372,
+        "top_dirs_bytes": {
+          "dist": 4674429,
+          "(root)": 9372
+        },
+        "est_chunks_default": "11-27"
+      },
+      "default_index_is_useful": false,
+      "extra_roots": [
+        "dist/index.mjs",
+        "dist/index.d.ts",
+        "dist/webgpu/index.mjs",
+        "dist/webgpu/index.d.ts"
+      ],
+      "notes": "Only 10 source files, all under dist/, so the default walk keeps just the README (9 KB). Each bundle ships cjs/mjs/legacy triplicates, so index the .mjs and .d.ts only. A better alternative is the v10 branch of github.com/pmndrs/react-three-fiber (packages/fiber/src) as a repo index, the way koota is held."
+    },
+    {
+      "name": "@react-three/drei",
+      "version": "10.7.8",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@react-three/drei/10.7.8 (license field)",
+      "why": "The drei release paired with fiber 9. r3f.jsonl has about 25 drei recipes and no source behind them.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "react-three__drei@10.7.8.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 1750973,
+        "tarball_files": 483,
+        "bytes_kept_by_deps_fetch": 1748086,
+        "bytes_index_code_walks_by_default": 1748086,
+        "top_dirs_bytes": {
+          "core": 827380,
+          "web": 419007,
+          "(root)": 409774,
+          "materials": 65465,
+          "native": 21070,
+          "helpers": 5390
+        },
+        "est_chunks_default": "2063-5061"
+      },
+      "default_index_is_useful": true,
+      "notes": "Layout is fine: core/ and web/ sit at the package root, so all 1.75 MB is walked."
+    },
+    {
+      "name": "@react-three/drei",
+      "version": "11.0.0-alpha.7",
+      "dist_tag": "alpha",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@react-three/drei/11.0.0-alpha.7 (license field)",
+      "why": "The drei release paired with fiber v10 (webgpu/ and legacy/ entry points). r3f.jsonl cites MIGRATION_V10_TO_V11.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "react-three__drei@11.0.0-alpha.7.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 3488931,
+        "tarball_files": 26,
+        "bytes_kept_by_deps_fetch": 2960852,
+        "bytes_index_code_walks_by_default": 2960852,
+        "top_dirs_bytes": {
+          "(root)": 612875,
+          "legacy": 597004,
+          "webgpu": 592990,
+          "native": 528455,
+          "core": 423664
+        },
+        "est_chunks_default": "3494-8572"
+      },
+      "default_index_is_useful": true,
+      "notes": "Layout is fine (all 2.96 MB walked). legacy/, webgpu/ and native/ are parallel builds, so expect near-duplicate chunks."
+    },
+    {
+      "name": "@types/three",
+      "version": "0.186.0",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@types/three/0.186.0 (license field)",
+      "why": "The .d.ts surface of three, including TSL node typings. It answers typing questions that three's JS source cannot, and sits squarely in both the TS-types and three domains.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "types__three@0.186.0.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 1930073,
+        "tarball_files": 1073,
+        "bytes_kept_by_deps_fetch": 1927191,
+        "bytes_index_code_walks_by_default": 1926997,
+        "top_dirs_bytes": {
+          "src": 1492203,
+          "examples": 433639,
+          "(root)": 1155,
+          "build": 194
+        },
+        "est_chunks_default": "2274-5579"
+      },
+      "default_index_is_useful": true,
+      "notes": "Pair it with three@0.186.0. Its dist-tags map ts5.6-ts6.0 to 0.186.0."
+    },
+    {
+      "name": "three",
+      "version": "0.186.0",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/three/0.186.0 (license field)",
+      "why": "The held index is 0.185.1. Versions are identities here (deps.py), so a 0.186 user gets a flagged near-miss until this exists.",
+      "priority": "medium",
+      "held_now": {
+        "0.185.1": "three@0.185.1.sqlite3"
+      },
+      "db_file": "three@0.186.0.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 20443175,
+        "tarball_files": 1263,
+        "bytes_kept_by_deps_fetch": 14870844,
+        "bytes_index_code_walks_by_default": 12712474,
+        "top_dirs_bytes": {
+          "examples": 8062357,
+          "src": 4647148,
+          "build": 2158370,
+          "(root)": 2969
+        },
+        "est_chunks_default": "15001-36803"
+      },
+      "default_index_is_useful": true,
+      "notes": "deps.fetch drops build/three.webgpu.js and three.webgpu.nodes.js (>2 MB) and index_code skips build/. Only src/ and examples/ are indexed, which is the intended outcome. Expect about 15k chunks, like 0.185.1."
+    },
+    {
+      "name": "typegpu",
+      "version": "0.12.5",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/typegpu/0.12.5 (license field)",
+      "why": "Already held, and still the latest release. No action needed.",
+      "priority": "none",
+      "held_now": {
+        "0.12.5": "typegpu@0.12.5.sqlite3"
+      },
+      "db_file": "typegpu@0.12.5.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 1290189,
+        "tarball_files": 362,
+        "bytes_kept_by_deps_fetch": 1287661,
+        "bytes_index_code_walks_by_default": 1287661,
+        "top_dirs_bytes": {
+          "core": 426386,
+          "data": 322849,
+          "std": 167803,
+          "tgsl": 155210,
+          "(root)": 147663,
+          "shared": 37972
+        },
+        "est_chunks_default": "1519-3728"
+      },
+      "default_index_is_useful": true
+    },
+    {
+      "name": "@typegpu/three",
+      "version": "0.12.1",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@typegpu/three/0.12.1 (license field)",
+      "why": "The TypeGPU-to-TSL bridge (pairs with the typegpu_three recipe candidate). Small.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "typegpu__three@0.12.1.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 84859,
+        "tarball_files": 8,
+        "bytes_kept_by_deps_fetch": 60266,
+        "bytes_index_code_walks_by_default": 60266,
+        "top_dirs_bytes": {
+          "(root)": 60266
+        },
+        "est_chunks_default": "71-174"
+      },
+      "default_index_is_useful": true
+    },
+    {
+      "name": "@react-three/postprocessing",
+      "version": "3.1.2",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@react-three/postprocessing/3.1.2 (license field)",
+      "why": "The R3F post-processing wrapper (EffectComposer, effect components). It ships src/, so it indexes cleanly.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "react-three__postprocessing@3.1.2.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 429255,
+        "tarball_files": 112,
+        "bytes_kept_by_deps_fetch": 391111,
+        "bytes_index_code_walks_by_default": 279449,
+        "top_dirs_bytes": {
+          "src": 275380,
+          "dist": 111662,
+          "(root)": 4069
+        },
+        "est_chunks_default": "330-809"
+      },
+      "default_index_is_useful": true,
+      "notes": "Of 391 KB fetched, 279 KB is walked (src/ + root). dist/ duplicates are skipped."
+    },
+    {
+      "name": "postprocessing",
+      "version": "6.39.5",
+      "dist_tag": "latest",
+      "licence": "Zlib",
+      "licence_source": "https://registry.npmjs.org/postprocessing/6.39.5 (license field)",
+      "why": "The effect library under @react-three/postprocessing. The EffectPass/Effect/BlendFunction API lives here.",
+      "priority": "medium",
+      "held_now": null,
+      "db_file": "postprocessing@6.39.5.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 2773683,
+        "tarball_files": 9,
+        "bytes_kept_by_deps_fetch": 2526387,
+        "bytes_index_code_walks_by_default": 8384,
+        "top_dirs_bytes": {
+          "build": 2518003,
+          "(root)": 8384
+        },
+        "est_chunks_default": "10-24"
+      },
+      "default_index_is_useful": false,
+      "extra_roots": [
+        "build/index.js",
+        "build/types/index.d.ts"
+      ],
+      "notes": "Licence is Zlib, which is permissive. build/-only tarball: the default walk keeps 8 KB (README + LICENSE). Skip index.cjs, postprocessing.js and the .min duplicates."
+    },
+    {
+      "name": "wgpu-matrix",
+      "version": "3.4.2",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/wgpu-matrix/3.4.2 (license field)",
+      "why": "The WebGPU math library that the TypeGPU docs integrate with (integration/working-with-wgpu-matrix). Column-major layout conventions differ from gl-matrix.",
+      "priority": "medium",
+      "held_now": null,
+      "db_file": "wgpu-matrix@3.4.2.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 1919913,
+        "tarball_files": 26,
+        "bytes_kept_by_deps_fetch": 631299,
+        "bytes_index_code_walks_by_default": 13595,
+        "top_dirs_bytes": {
+          "dist": 617704,
+          "(root)": 13595
+        },
+        "est_chunks_default": "16-39"
+      },
+      "default_index_is_useful": false,
+      "extra_roots": [
+        "dist/3.x/wgpu-matrix.module.js",
+        "dist/3.x/wgpu-matrix.d.ts"
+      ],
+      "notes": "dist-only. The default walk keeps the README (13.6 KB)."
+    },
+    {
+      "name": "@webgpu/types",
+      "version": "0.1.74",
+      "dist_tag": "latest",
+      "licence": "BSD-3-Clause",
+      "licence_source": "https://registry.npmjs.org/@webgpu/types/0.1.74 (license field)",
+      "why": "The canonical WebGPU IDL typings (GPUDevice, GPUBindGroupLayoutEntry, ...). They are the ground truth for the raw-WebGPU recipes in web_gpu.jsonl.",
+      "priority": "high",
+      "held_now": null,
+      "db_file": "webgpu__types@0.1.74.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 124868,
+        "tarball_files": 4,
+        "bytes_kept_by_deps_fetch": 122628,
+        "bytes_index_code_walks_by_default": 4815,
+        "top_dirs_bytes": {
+          "dist": 117813,
+          "(root)": 4815
+        },
+        "est_chunks_default": "6-14"
+      },
+      "default_index_is_useful": false,
+      "extra_roots": [
+        "dist/index.d.ts"
+      ],
+      "notes": "Licence is BSD-3-Clause. The package is one 118 KB .d.ts under dist/, so the default walk keeps only the README (4.8 KB)."
+    },
+    {
+      "name": "koota",
+      "version": "0.6.6",
+      "dist_tag": "latest",
+      "licence": "ISC",
+      "licence_source": "https://registry.npmjs.org/koota/0.6.6 (license field)",
+      "why": "Already searchable as a REPO index (index/repos/koota-6955afb4.sqlite3, which served 116/356 retrieval rows). A package index would add version identity and make held_sources() report it.",
+      "priority": "low",
+      "held_now": null,
+      "db_file": "koota@0.6.6.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 500824,
+        "tarball_files": 18,
+        "bytes_kept_by_deps_fetch": 467056,
+        "bytes_index_code_walks_by_default": 134299,
+        "top_dirs_bytes": {
+          "dist": 332757,
+          "react": 93720,
+          "(root)": 40579
+        },
+        "est_chunks_default": "158-389"
+      },
+      "default_index_is_useful": false,
+      "extra_roots": [
+        "dist/index.d.ts"
+      ],
+      "notes": "Licence is ISC. dist/ holds hashed chunk files (chunk-*.js, types-*.d.ts), so the extra roots must be re-read from the fetched tree per version. The repo index is the better source."
+    },
+    {
+      "name": "type-fest",
+      "version": "5.10.0",
+      "dist_tag": "latest",
+      "licence": "(MIT OR CC0-1.0)",
+      "licence_source": "https://registry.npmjs.org/type-fest/5.10.0 (license field)",
+      "why": "The reference implementation of advanced TS type patterns (Tagged, DistributedOmit, ...). typescript_types.jsonl already cites its source files.",
+      "priority": "medium",
+      "held_now": null,
+      "db_file": "type-fest@5.10.0.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 580732,
+        "tarball_files": 222,
+        "bytes_kept_by_deps_fetch": 570803,
+        "bytes_index_code_walks_by_default": 570803,
+        "top_dirs_bytes": {
+          "source": 494369,
+          "(root)": 76434
+        },
+        "est_chunks_default": "674-1652"
+      },
+      "default_index_is_useful": true,
+      "notes": "The licence is the SPDX expression (MIT OR CC0-1.0). source/*.d.ts is walked in full."
+    },
+    {
+      "name": "three-mesh-bvh",
+      "version": "0.9.15",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/three-mesh-bvh/0.9.15 (license field)",
+      "why": "The BVH raycast acceleration behind drei's <Bvh>, and a common R3F performance fix.",
+      "priority": "low",
+      "held_now": null,
+      "db_file": "three-mesh-bvh@0.9.15.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 2330373,
+        "tarball_files": 104,
+        "bytes_kept_by_deps_fetch": 1081131,
+        "bytes_index_code_walks_by_default": 463604,
+        "top_dirs_bytes": {
+          "build": 591344,
+          "src": 475930,
+          "(root)": 13857
+        },
+        "est_chunks_default": "547-1342"
+      },
+      "default_index_is_useful": true,
+      "notes": "src/ (476 KB, the real source) is walked in full. The skipped build/ is only bundled duplicates, so the default index is complete."
+    },
+    {
+      "name": "@typegpu/noise",
+      "version": "0.12.0",
+      "dist_tag": "latest",
+      "licence": "MIT",
+      "licence_source": "https://registry.npmjs.org/@typegpu/noise/0.12.0 (license field)",
+      "why": "Noise/PRNG helpers for TypeGPU. Optional.",
+      "priority": "low",
+      "held_now": null,
+      "db_file": "typegpu__noise@0.12.0.sqlite3",
+      "size_estimate": {
+        "unpacked_bytes": 201066,
+        "tarball_files": 8,
+        "bytes_kept_by_deps_fetch": 161209,
+        "bytes_index_code_walks_by_default": 161209,
+        "top_dirs_bytes": {
+          "(root)": 161209
+        },
+        "est_chunks_default": "190-467"
+      },
+      "default_index_is_useful": true
+    }
+  ]
+}

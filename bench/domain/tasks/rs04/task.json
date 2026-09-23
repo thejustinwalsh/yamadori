@@ -1,0 +1,10 @@
+{
+  "id": "rs04",
+  "domain": "rust_wasm",
+  "prompt": "A C library declares this in its header:\n\n```c\ntypedef enum { LOG_TRACE = 0, LOG_DEBUG = 10, LOG_INFO = 20, LOG_WARN = 30, LOG_ERROR = 40 } log_level_t;\nint32_t log_level_from_raw(uint32_t raw, log_level_t *out);\n```\n\nThe library is built with `log_level_t` stored as a 32-bit unsigned integer on every target. Write the Rust side:\n\n- a fieldless enum `pub enum LogLevel` with variants `Trace`, `Debug`, `Info`, `Warn`, `Error` carrying exactly those discriminant values, laid out as a `u32` on every target (so `LogLevel::Warn as u32 == 30` and it is 4 bytes). Derive `Debug, Clone, Copy, PartialEq, Eq`.\n- `#[no_mangle] pub unsafe extern \"C\" fn log_level_from_raw(raw: u32, out: *mut LogLevel) -> i32`: if `out` is null return -2; if `raw` is not one of the five values return -1 and leave `*out` untouched; otherwise write the matching variant to `*out` and return 0. Never produce a `LogLevel` from an unchecked integer.\n\nAnswer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs04/grader.rs", "entry": ["LogLevel", "log_level_from_raw"]},
+  "reference": "tasks/rs04/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "react-29",
+  "domain": "react",
+  "prompt": "Write a one-time-code input for React 19 in TypeScript (strict mode) and export it as\n\n```ts\nfunction OtpInput(props: { length: number; onComplete: (code: string) => void }): React.ReactElement\n```\n\nMarkup:\n- `length` text inputs (role `textbox`), in order, labelled \"Digit 1 of N\", \"Digit 2 of N\", ... where N is `length` (for example via `aria-label`). Each has `inputMode=\"numeric\"` and holds at most one digit. All start empty.\n\nBehaviour:\n- Typing a digit into an empty box puts it there and moves focus to the next box (on the last box, focus stays).\n- Typing anything that is not a digit 0-9 changes nothing: the box keeps its content and focus stays.\n- Backspace in a box that holds a digit clears that box; focus stays.\n- Backspace in an empty box moves focus to the previous box and clears that previous box. In the first box it does nothing.\n- Pasting text into any box writes the digits of the pasted text, one per box, into that box and the following ones, replacing what they held. Non-digit characters in the pasted text are skipped, and digits beyond the last box are dropped. Focus then moves to the box after the last one written, or stays on the last box if the last box was written.\n- Whenever a change leaves every box filled, `onComplete` is called once with the full code (the digits in box order, as one string). A paste that fills several boxes counts as one change. If the code is later changed and every box is filled again, `onComplete` is called again with the new code.\n- The component moves focus only as described above; in particular, clicking or focusing a box leaves focus on that box.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-29/test.tsx", "entry": ["OtpInput"]},
+  "reference": "tasks/react-29/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "component"
+}

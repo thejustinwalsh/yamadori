@@ -1,0 +1,15 @@
+{
+  "id": "tg15",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export: (1) `hitCount` -- a module-scope shader variable of type `u32`, private to each invocation, initial value 0; (2) `function recordHits(samples: number[], threshold: number): void` -- GPU-style code that increments `hitCount` once for every sample strictly greater than `threshold`, by reading and writing the variable's in-shader value (not a JS-side copy); (3) `function countHitsOnCpu(samples: number[], threshold: number): number` -- runs `recordHits` inside typegpu's CPU simulation of GPU execution (where module variables are accessible) and returns the final value of `hitCount` from that simulation. Each call to `countHitsOnCpu` must start from a count of 0. This must run in plain Node (no GPU, no build plugin). Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg15/test.ts", "runtime": true, "webgpu": true, "entry": ["hitCount", "recordHits", "countHitsOnCpu"]},
+  "reference": "tasks/tg15/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu['~unstable'].simulate(callback) -> { value, buffers, privateVars, workgroupVars }": "tgpuUnstable.d.ts, core/simulate/tgpuSimulate.d.ts, core/simulate/tgpuSimulate.js",
+    "tgpu.privateVar(schema, initial) and var.$ (throws outside simulate/codegen)": "core/variable/tgpuVariable.d.ts, core/variable/tgpuVariable.js"
+  },
+  "notes": "The simulate JSDoc says `tgpu.simulate`, but 0.12.5's default export has no `simulate` key -- it is only on tgpu['~unstable'] (index.d.ts, tgpuUnstable.d.ts). That is wrong_compile. Probed: simulate does NOT apply the schema zero-value when privateVar has no initial value (reads undefined -> NaN after +=); the prompt asks for an explicit initial 0 and the test resets hitCount.$ = 0 itself, so answers are not penalised for that library behaviour."
+}

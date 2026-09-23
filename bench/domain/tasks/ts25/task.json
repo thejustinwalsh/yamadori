@@ -1,0 +1,18 @@
+{
+  "id": "ts25",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports:\n\n- `type DeepReadonly<T>` -- a deeply immutable view of `T`: primitives and functions are unchanged; arrays become readonly arrays and tuples readonly tuples (elements converted recursively); `Map<K, V>` becomes `ReadonlyMap<DeepReadonly<K>, DeepReadonly<V>>`; `Set<U>` becomes `ReadonlySet<DeepReadonly<U>>`; any other object type gets every property `readonly` (optional properties stay optional), recursively.\n- `deepFreeze<T>(value: T): DeepReadonly<T>` -- freezes `value` and every object reachable from it (own property values, array elements, and the keys, values and members of Maps and Sets), then returns the same reference typed as `DeepReadonly<T>`. It must terminate on cyclic structures. Primitives are returned unchanged.\n\nFor example, with `DeepReadonly<{ tags: string[]; owners: Map<string, { email: string }> }>`, `tags.push(...)`, `owners.set(...)` and assigning to `owners.get(k)!.email` are all compile errors. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts25/test.ts",
+    "runtime": true,
+    "entry": [
+      "DeepReadonly",
+      "deepFreeze"
+    ]
+  },
+  "reference": "tasks/ts25/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "tg14",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export `hexToRgb`, which converts a packed `0xRRGGBB` integer into a `d.v3f` with each channel scaled to [0, 1] (channel / 255). It is meant to be called from inside TypeGPU shader functions with constant arguments, e.g. `const albedo = hexToRgb(0xff8000);`, but must NOT be translated to WGSL: typegpu has to run it on the CPU while generating the shader and inline the resulting vector as a constant. Wrap it with the typegpu helper that marks a function this way. It must also be callable from ordinary JS code and return the `d.v3f`. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg14/test.ts", "runtime": true, "webgpu": true, "entry": ["hexToRgb"]},
+  "reference": "tasks/tg14/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu.comptime(fn)": "core/function/comptime.d.ts, core/function/comptime.js (sets [$internal] = { isComptime: true })",
+    "TgpuComptime<T>": "core/function/comptime.d.ts, type re-exported from index.d.ts",
+    "$internal symbol description 'typegpu:0.12.5:$internal'": "shared/symbols.js"
+  }
+}

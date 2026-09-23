@@ -1,0 +1,24 @@
+{
+  "id": "tsl12",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This r178 module (the pattern three.js's own CSM shadow node used) names two uniforms with a method that r185 deprecates:\n\n```js\nimport { uniform, reference, renderGroup } from 'three/tsl';\n\nexport function createCascadeUniforms( owner ) {\n\n\tconst cascades = reference( '_cascades', 'vec2', owner ).setGroup( renderGroup ).label( 'cascades' );\n\tconst shadowFar = uniform( 'float' ).setGroup( renderGroup ).label( 'shadowFar' );\n\n\treturn { cascades, shadowFar };\n\n}\n```\n\nPort it to r185 with named imports from 'three/tsl': same export and return shape, keep the fluent method chains, and give each node its name with the r185 naming method. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "createCascadeUniforms"
+    ],
+    "require": [
+      {
+        "name": "setName",
+        "as": "call"
+      }
+    ],
+    "forbid": []
+  },
+  "reference": "tasks/tsl12/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": ".label( name ) -> .setName( name ), @deprecated r179: r185 src/nodes/accessors/ReferenceNode.js:236-242 and src/nodes/core/UniformNode.js:76-82 (warn '\"label()\" has been deprecated. Use \"setName()\" instead.'); setName at ReferenceNode.js:225 and UniformNode.js:65. r175 examples/jsm/csm/CSMShadowNode.js:380,382 use .label().",
+  "notes": "`label` is deliberately not forbidden (a common word; the brief's example), so a partial port that renames only one of the two call sites passes. The grader checks that the r185 method is used, not that every call site was ported. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "tsl07",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This r168 module uses a size node that r185 deprecates:\n\n```js\nimport { viewportResolution, vec2 } from 'three/tsl';\n\nexport const aspect = viewportResolution.x.div( viewportResolution.y );\nexport const texelSize = vec2( 1 ).div( viewportResolution );\n```\n\nPort it to the r185 node that gives the same value: the size of the whole render target in physical pixels (not the size of the current viewport rectangle). Use named imports from 'three/tsl' and keep both exports. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "aspect",
+      "texelSize"
+    ],
+    "require": [
+      {
+        "name": "screenSize",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": [
+      "viewportResolution"
+    ]
+  },
+  "reference": "tasks/tsl07/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "viewportResolution -> screenSize, @deprecated r169: r185 src/nodes/display/ScreenNode.js:284-288 (a shim that warns 'Use \"screenSize\" instead' and returns screenSize); r185 src/nodes/display/ScreenNode.js:237 `export const screenSize`. r165 examples/jsm/nodes/display/ViewportNode.js:129 `viewportResolution`.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

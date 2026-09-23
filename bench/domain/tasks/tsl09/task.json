@@ -1,0 +1,36 @@
+{
+  "id": "tsl09",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. Write a JavaScript module, with named imports from 'three/tsl', that exports `const encodedNormal`: the world-space shading normal `normalWorld` remapped from the [-1, 1] range into the [0, 1] colour range, for writing into a render target. Use the dedicated TSL helper for packing a unit normal into RGB under its r185 name (not a deprecated alias), not a hand-written `.mul( 0.5 ).add( 0.5 )`. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "encodedNormal"
+    ],
+    "require": [
+      {
+        "name": "packNormalToRGB",
+        "as": "call"
+      },
+      {
+        "name": "packNormalToRGB",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "normalWorld",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": [
+      "directionToColor"
+    ]
+  },
+  "reference": "tasks/tsl09/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "directionToColor -> packNormalToRGB, @deprecated r185: r185 src/nodes/utils/Packing.js:39-45 (warnOnce '\"directionToColor()\" has been renamed to \"packNormalToRGB()\"'); r185 src/nodes/utils/Packing.js:13 `export const packNormalToRGB`. r175 src/nodes/utils/Packing.js:11 `export const directionToColor`.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

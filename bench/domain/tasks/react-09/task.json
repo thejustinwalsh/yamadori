@@ -1,0 +1,11 @@
+{
+  "id": "react-09",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as\n\n```ts\nfunction useEventListener<K extends keyof WindowEventMap>(\n  type: K,\n  handler: (event: WindowEventMap[K]) => void,\n  target?: EventTarget | null,\n): void\n```\n\nIt attaches a listener for `type` while the component is mounted.\n\nBehaviour:\n- When `target` is omitted (`undefined`) the listener goes on `window`. When `target` is `null`, no listener is attached anywhere. Otherwise it goes on `target`.\n- Every event is passed to the `handler` from the most recent render, never to an older one.\n- A re-render that changes only the identity of `handler` must not remove and re-add the listener: exactly one `addEventListener` call is made for a given `type` and `target`, however often `handler` changes.\n- When `type` or `target` changes, the listener is removed from the old target and added to the new one.\n- After the component unmounts, events no longer reach `handler`.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-09/test.tsx", "entry": ["useEventListener"]},
+  "reference": "tasks/react-09/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

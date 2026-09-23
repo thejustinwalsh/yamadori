@@ -1,0 +1,11 @@
+{
+  "id": "react-16",
+  "domain": "react",
+  "prompt": "Write an accessible tabs component in TypeScript (strict mode) for React 19 and export it as\n\n```ts\nexport function Tabs(props: {\n  tabs: { id: string; label: string; content: React.ReactNode }[];\n  defaultTabId?: string;\n}): React.ReactElement\n```\n\nMarkup and ARIA:\n- An element with `role=\"tablist\"` contains one `<button>` per tab with `role=\"tab\"`, whose accessible name is the tab's `label`, in the order given.\n- The selected tab has `aria-selected=\"true\"` and `tabIndex={0}`; every other tab has `aria-selected=\"false\"` and `tabIndex={-1}` (roving tabindex), so pressing Tab from before the component lands on the selected tab.\n- Exactly one element with `role=\"tabpanel\"` is visible at a time: it shows the selected tab's `content`. Panels of unselected tabs are either not rendered at all or carry the `hidden` attribute.\n- Every tab has an `id` and an `aria-controls` equal to the `id` of its panel; the visible panel has `aria-labelledby` equal to the selected tab's `id`.\n- These DOM ids must be unique in the document even when several `Tabs` with the same tab ids are rendered at once.\n\nBehaviour:\n- Initially the tab whose `id` equals `defaultTabId` is selected; without `defaultTabId`, the first tab.\n- Clicking a tab selects it.\n- While a tab has focus: ArrowRight selects AND focuses the next tab, wrapping from the last to the first; ArrowLeft selects and focuses the previous tab, wrapping from the first to the last; Home selects and focuses the first tab; End the last.\n\nYou may import only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-16/test.tsx", "entry": ["Tabs"]},
+  "reference": "tasks/react-16/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "component"
+}

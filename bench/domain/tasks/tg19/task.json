@@ -1,0 +1,16 @@
+{
+  "id": "tg19",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export: (1) `HalfVertex` -- a WGSL struct schema, WGSL name `HalfVertex`, with half-precision fields `position` (3-component f16 vector), `uv` (2-component f16 vector), `weight` (scalar f16), in that order; (2) `halfWeight` -- a TypeGPU function implemented as a WGSL string, WGSL name `halfWeight`, signature `(v: HalfVertex) -> f16`, returning `v.weight`; (3) `function buildHalfShader(): string` -- returns the complete WGSL for `halfWeight` (including the `HalfVertex` struct it depends on) as produced by `tgpu.resolve`, and the result must be accepted by `device.createShaderModule` on a device with the `shader-f16` feature, i.e. it must carry the WGSL directive that enables half-precision types. Have typegpu emit that directive rather than concatenating it yourself. Everything must work in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg19/test.ts", "runtime": true, "webgpu": true, "entry": ["HalfVertex", "halfWeight", "buildHalfShader"]},
+  "reference": "tasks/tg19/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu.resolve(items, { enableExtensions: WgslEnableExtension[] })": "core/resolve/tgpuResolve.d.ts, wgslExtensions.d.ts ('f16' | 'clip_distances' | 'dual_source_blending' | 'subgroups' | 'primitive_index')",
+    "d.f16 / d.vec2h / d.vec3h": "data/index.d.ts, data/numeric.d.ts",
+    "string-fn header struct externals by type name": "core/resolve/externals.js (addArgTypesToExternals)"
+  },
+  "notes": "HalfVertex: vec3h@0 (align 8, size 6), vec2h@8, f16@12, size 16. wrong_compile passes the GPU feature name 'shader-f16' where the WGSL extension name 'f16' is required. The test cannot tell a hand-concatenated directive from a typegpu-emitted one, so the 'rather than concatenating' clause is advisory only."
+}

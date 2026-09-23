@@ -1,0 +1,16 @@
+{
+  "id": "tg16",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export `Particle = d.struct({ position: d.vec3f, velocity: d.vec3f, color: d.vec4f, age: d.f32 })` (exactly these fields in this order) and `function packParticles(particles: d.Infer<typeof Particle>[]): ArrayBuffer`. It returns a new ArrayBuffer holding the particles exactly as a WGSL storage buffer of type `array<Particle, N>` (N = particles.length) expects them byte for byte -- WGSL alignment and padding included -- ready to hand to `device.queue.writeBuffer`. The ArrayBuffer's byteLength must be exactly the byte size of that array. Use typegpu's own serialization rather than hand-computing offsets. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg16/test.ts", "runtime": true, "webgpu": true, "entry": ["Particle", "packParticles"]},
+  "reference": "tasks/tg16/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "writeToArrayBuffer(buffer, schema, data) (named export of 'typegpu', NOT of 'typegpu/data')": "index.d.ts, data/dataIO.d.ts, data/dataIO.js",
+    "readFromArrayBuffer": "index.d.ts, data/dataIO.d.ts",
+    "d.sizeOf(d.arrayOf(T, n))": "data/sizeOf.d.ts, data/array.d.ts"
+  },
+  "notes": "Particle layout: position@0, velocity@16, color@32, age@48, size 64 (52 rounded to align 16)."
+}

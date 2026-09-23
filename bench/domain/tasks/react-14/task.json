@@ -1,0 +1,11 @@
+{
+  "id": "react-14",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) for a bounded counter. Export it as\n\n```ts\nfunction useCounter(options?: {\n  initial?: number;\n  min?: number;\n  max?: number;\n  step?: number;\n}): {\n  count: number;\n  increment: () => void;\n  decrement: () => void;\n  set: (n: number) => void;\n  reset: () => void;\n}\n```\n\nDefaults: `initial` 0, `min` -Infinity, `max` Infinity, `step` 1. You may assume `min <= max`.\n\nBehaviour:\n- `count` starts at `initial` clamped to `[min, max]`.\n- `increment()` adds `step`, `decrement()` subtracts `step`, and `set(n)` sets the count to `n`; in every case the result is clamped to `[min, max]`.\n- `reset()` sets the count back to `initial` clamped to `[min, max]`.\n- Several calls in the same event handler all take effect: calling `increment()` twice in one handler adds `2 * step` (still clamped).\n- `increment`, `decrement`, `set` and `reset` keep the same function identity across re-renders as long as the option values do not change, even when the caller passes a new options object literal on every render. (A `React.memo` child that receives one of them must not re-render just because `count` changed.)\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-14/test.tsx", "entry": ["useCounter"]},
+  "reference": "tasks/react-14/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "hook"
+}

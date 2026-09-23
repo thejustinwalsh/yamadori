@@ -1,0 +1,14 @@
+[
+  "Does the problem require a path between two nodes?",
+  "Must all elements be used exactly once?",
+  "Does it ask for the maximum possible total value?",
+  "Is the input guaranteed to be sorted?",
+  "Must you choose a subset without duplicates?",
+  "Are there multiple independent subproblems sharing results?",
+  "Does it involve moving through adjacent cells?",
+  "Is the answer dependent on previous values?",
+  "Must you count occurrences of specific patterns?",
+  "Are some edges weighted?",
+  "Does the problem require minimum steps to reach a state?",
+  "Can the answer be built by extending smaller valid answers?"
+]

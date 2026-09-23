@@ -1,0 +1,18 @@
+{
+  "id": "ts15",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode, Node 24) that exports\n\n```ts\nexport function withTimeout<T>(\n  task: (signal: AbortSignal) => Promise<T>,\n  ms: number,\n  options?: { signal?: AbortSignal },\n): Promise<T>\n```\n\nIt runs `task` once, passing it an `AbortSignal` that becomes aborted when `ms` milliseconds elapse or when `options.signal` aborts, whichever happens first. The returned promise:\n\n- settles like the task's promise if the task settles first (a synchronous throw from `task` becomes a rejection, not a throw from `withTimeout`);\n- on timeout, rejects immediately -- even if the task ignores its signal and never settles -- with an error whose `name` is `'TimeoutError'`, and that same error is the task signal's `reason`;\n- if `options.signal` aborts first, rejects immediately with exactly `options.signal.reason`, and the task's signal is aborted with that same reason;\n- if `options.signal` is already aborted when `withTimeout` is called, rejects with its `reason` without calling `task`.\n\nAfter the returned promise settles, nothing it created may keep the Node process alive (for example, a pending 60-second timer after the task already succeeded). Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts15/test.ts",
+    "runtime": true,
+    "entry": [
+      "withTimeout"
+    ]
+  },
+  "reference": "tasks/ts15/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "notes": "wrong_test_4 (an uncleared 60 s timer) fails by the grader's 30 s node timeout, so grading it takes ~30 s. The test drives its own ref'd timers because AbortSignal.timeout's timer is unref'd in Node and would otherwise let the process exit with an unsettled top-level await."
+}

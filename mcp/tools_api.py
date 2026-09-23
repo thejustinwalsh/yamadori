@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 

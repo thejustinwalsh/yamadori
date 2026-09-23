@@ -1,0 +1,35 @@
+type-challenges subset -- third-party notice
+============================================
+
+Source:   https://github.com/type-challenges/type-challenges
+Commit:   0b0b0b18bcb7ac42dc22ce26ffb438231d4754b1 (2026-03-01)
+Licence:  MIT, Copyright (c) 2020 Anthony Fu -- full text in
+          LICENSE.type-challenges (copied verbatim from the upstream LICENSE).
+
+What was taken, verbatim, for every challenge in upstream questions/:
+  - <id>/template.ts      the challenge's starting template
+  - <id>/test-cases.ts    the challenge's own type-level test cases
+  - the English README.md description (between the generated header and
+    footer markers), embedded in the `prompt` field of
+    ../tasks_type_challenges.jsonl
+  - title / tags / difficulty from info.yml, in each row's `upstream` field
+  - utils/index.d.ts, utils/package.json: the @type-challenges/utils package
+    (Equal, Expect, NotAny, ...) from upstream utils/, vendored so grading
+    needs no network
+
+What was NOT taken:
+  - No solutions. Upstream ships none; every <id>/reference.ts was written
+    for this repo and is proven by ../test_grade_tc.py.
+  - Nothing from TypeHero (typehero.dev), which is AGPL-3.0.
+  - Translations (README.*.md other than English), playground links, the
+    "Check out Solutions" / "Share your Solutions" footer links.
+
+Task ids keep the upstream number and slug: questions/00004-easy-pick ->
+tc-00004-pick, so every result traces back to its upstream challenge.
+
+CONTAMINATED: the corpus has been public since 2020 and community solutions
+to every challenge are widely published. Every row carries
+`contaminated: true`; scores on this subset measure recall as much as skill
+and must be reported separately from the uncontaminated tasks.jsonl set.
+
+Challenges not shipped are listed, with the reason, in excluded.json.

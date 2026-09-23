@@ -1,0 +1,11 @@
+{
+  "id": "react-13",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) that reports whether the user has gone idle. Export it as `function useIdle(timeoutMs: number): boolean`.\n\nBehaviour:\n- It returns `false` on the first render, and becomes `true` once `timeoutMs` milliseconds have passed with no user activity.\n- User activity is any `mousemove`, `mousedown`, `keydown`, `touchstart`, `scroll` or `wheel` event dispatched on `window`. Each one makes the hook return `false` (if it was `true`) and restarts the countdown, so it becomes `true` again only `timeoutMs` after the latest activity.\n- When `timeoutMs` changes while the hook is not idle, the countdown restarts from that moment with the new value.\n- When the component unmounts, no timer is left pending and every event listener the hook added to `window` is removed.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-13/test.tsx", "entry": ["useIdle"]},
+  "reference": "tasks/react-13/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

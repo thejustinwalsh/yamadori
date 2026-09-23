@@ -1,0 +1,598 @@
+{
+  "compiled": "2026-09-22",
+  "method": "Every source_url was fetched with User-Agent yamadori-dataset-worker/1 (the worker's own) and HEAD-checked with curl -sI: all 200, text/html or text/plain. approx_size_chars and extract_chunks come from passing the fetched body through a verbatim copy of mcp/worker.py html_to_text + chunks_of (12,000-char chunks, 60-chunk limit). Licences were read from the repo licence file, README or site footer named in licence_evidence. Domains were validated against domains.DOMAINS at write time. Nothing was submitted.",
+  "gaps_targeted": "bench/recipes had no sources for Rust/WASM across C ABIs: systems.jsonl covers perf/DOD and modern_practice.jsonl covers editions/C/Zig. TSL, TypeGPU and R3F v10 are covered, but only thinly for pages specific to 0.12 or v10.",
+  "operator_command": "For each candidate: datasets.create(c['source_url'], name=c['name'], kind='recipes', source_name=c['source_name'], source_url=c['source_url'], licence=c['licence'], language=c['language'], domains=c['domains']), or POST the same fields to /dash/api/dataset. create() enqueues dataset.fetch and parks the dataset at 'clarify'. Once the fetch is done, datasets.advance(id) enqueues extract, and mcp/worker.py runs the jobs. Rows go to bench/recipes/<name>.jsonl (datasets.recipe_file), and none of the names here collide with the existing 8 files.",
+  "candidates": [
+    {
+      "name": "rust_nomicon_ffi",
+      "source_url": "https://doc.rust-lang.org/nomicon/ffi.html",
+      "source_name": "The Rustonomicon: Foreign Function Interface",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/rust-lang/nomicon",
+      "licence_evidence": "Repo root holds LICENSE-MIT ('Copyright (c) 2010 The Rust Project Developers ... Permission is hereby granted, free of charge') and LICENSE-APACHE; the GitHub API reports only Apache-2.0 (first file). rust-lang/rust COPYRIGHT: 'The Rust Project is dual-licensed under Apache 2.0 and MIT terms.'",
+      "language": "Rust",
+      "domains": [
+        "systems"
+      ],
+      "why": "The core Rust<->C rules: extern blocks and calling conventions, safe wrappers over unsafe C APIs, callbacks from C into Rust, opaque struct representation, the nullable-pointer optimisation for Option<extern fn>/Option<&T>, variadics, and unwinding across FFI (C-unwind).",
+      "approx_size_chars": 28149,
+      "extract_chunks": 3,
+      "content_type": "text/html",
+      "overlaps_existing": "none: systems.jsonl has no FFI rows"
+    },
+    {
+      "name": "rust_nomicon_other_reprs",
+      "source_url": "https://doc.rust-lang.org/nomicon/other-reprs.html",
+      "source_name": "The Rustonomicon: Alternative representations",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/rust-lang/nomicon",
+      "licence_evidence": "Repo root holds LICENSE-MIT ('Copyright (c) 2010 The Rust Project Developers ... Permission is hereby granted, free of charge') and LICENSE-APACHE; the GitHub API reports only Apache-2.0 (first file). rust-lang/rust COPYRIGHT: 'The Rust Project is dual-licensed under Apache 2.0 and MIT terms.'",
+      "language": "Rust",
+      "domains": [
+        "systems"
+      ],
+      "why": "repr(C), repr(transparent), primitive reprs on enums, repr(packed) and repr(align): what each guarantees, which combinations are UB-prone (references to packed fields), and which to use at an FFI boundary.",
+      "approx_size_chars": 7574,
+      "extract_chunks": 1,
+      "content_type": "text/html",
+      "overlaps_existing": "partial: systems.jsonl memory_layout rows (perf-book type-sizes; none cover repr(C)/transparent)"
+    },
+    {
+      "name": "rust_reference_type_layout",
+      "source_url": "https://doc.rust-lang.org/reference/type-layout.html",
+      "source_name": "The Rust Reference: Type layout",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/rust-lang/reference",
+      "licence_evidence": "Repo root holds LICENSE-MIT ('Copyright (c) 2010 The Rust Project Developers ... Permission is hereby granted, free of charge') and LICENSE-APACHE; the GitHub API reports only Apache-2.0 (first file). rust-lang/rust COPYRIGHT: 'The Rust Project is dual-licensed under Apache 2.0 and MIT terms.'",
+      "language": "Rust",
+      "domains": [
+        "systems"
+      ],
+      "why": "Normative size/alignment rules: the exact repr(C) struct/union/enum layout algorithm, primitive-representation enums with fields, and what repr(Rust) does NOT guarantee. The source of truth for matching a C struct or a GPU buffer layout from Rust.",
+      "approx_size_chars": 24215,
+      "extract_chunks": 3,
+      "content_type": "text/html",
+      "overlaps_existing": "partial: systems.jsonl (memory_layout), modern_practice.jsonl (reference/attributes/type_system only)"
+    },
+    {
+      "name": "rust_reference_external_blocks",
+      "source_url": "https://doc.rust-lang.org/reference/items/external-blocks.html",
+      "source_name": "The Rust Reference: External blocks",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/rust-lang/reference",
+      "licence_evidence": "Repo root holds LICENSE-MIT ('Copyright (c) 2010 The Rust Project Developers ... Permission is hereby granted, free of charge') and LICENSE-APACHE; the GitHub API reports only Apache-2.0 (first file). rust-lang/rust COPYRIGHT: 'The Rust Project is dual-licensed under Apache 2.0 and MIT terms.'",
+      "language": "Rust",
+      "domains": [
+        "systems"
+      ],
+      "why": "Rust 2024 'unsafe extern' blocks with per-item safe/unsafe qualifiers, ABI strings (C, C-unwind, system), #[link(kind=..., wasm_import_module=...)], link_name/link_ordinal, variadic declarations.",
+      "approx_size_chars": 21360,
+      "extract_chunks": 2,
+      "content_type": "text/html",
+      "overlaps_existing": "none: modern_practice.jsonl covers other Rust 2024 unsafe changes, not extern blocks"
+    },
+    {
+      "name": "rust_reference_undefined_behavior",
+      "source_url": "https://doc.rust-lang.org/reference/behavior-considered-undefined.html",
+      "source_name": "The Rust Reference: Behavior considered undefined",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/rust-lang/reference",
+      "licence_evidence": "Repo root holds LICENSE-MIT ('Copyright (c) 2010 The Rust Project Developers ... Permission is hereby granted, free of charge') and LICENSE-APACHE; the GitHub API reports only Apache-2.0 (first file). rust-lang/rust COPYRIGHT: 'The Rust Project is dual-licensed under Apache 2.0 and MIT terms.'",
+      "language": "Rust",
+      "domains": [
+        "systems"
+      ],
+      "why": "The authoritative UB list every unsafe/FFI block must avoid: dangling or misaligned derefs, invalid values (bool, char, enum discriminants, null references), data races, unwinding out of a non-unwind ABI, calling with the wrong ABI.",
+      "approx_size_chars": 13044,
+      "extract_chunks": 2,
+      "content_type": "text/html",
+      "overlaps_existing": "partial: modern_practice.jsonl (static_mut_refs, MaybeUninit rows)"
+    },
+    {
+      "name": "rust_std_ffi",
+      "source_url": "https://doc.rust-lang.org/std/ffi/index.html",
+      "source_name": "Rust std::ffi module documentation",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/rust-lang/rust/blob/main/COPYRIGHT",
+      "licence_evidence": "Repo root holds LICENSE-MIT ('Copyright (c) 2010 The Rust Project Developers ... Permission is hereby granted, free of charge') and LICENSE-APACHE; the GitHub API reports only Apache-2.0 (first file). rust-lang/rust COPYRIGHT: 'The Rust Project is dual-licensed under Apache 2.0 and MIT terms.'",
+      "language": "Rust",
+      "domains": [
+        "systems"
+      ],
+      "why": "When to use CStr vs CString vs OsStr/OsString vs c_char/c_void; ownership across the boundary (into_raw/from_raw must pair); nul-termination and encoding pitfalls of passing strings to C.",
+      "approx_size_chars": 8519,
+      "extract_chunks": 1,
+      "content_type": "text/html",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "wasm_bindgen_closures",
+      "source_url": "https://wasm-bindgen.github.io/wasm-bindgen/reference/passing-rust-closures-to-js.html",
+      "source_name": "wasm-bindgen guide: Passing Rust closures to JavaScript",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/wasm-bindgen/wasm-bindgen/blob/main/README.md#license",
+      "licence_evidence": "README 'License' section: 'This project is licensed under either of Apache License, Version 2.0 ... MIT license ... at your option.' The guide source is guide/src/ in the same repo.",
+      "language": "Rust",
+      "domains": [
+        "systems",
+        "web-frontend"
+      ],
+      "why": "Stack vs heap closures (&dyn Fn vs Closure<dyn FnMut>), the lifetime/leak trade-off (Closure::forget, into_js_value), and avoiding 'closure invoked after being dropped' -- the most common wasm-bindgen runtime failure.",
+      "approx_size_chars": 16134,
+      "extract_chunks": 2,
+      "content_type": "text/html",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "wasm_bindgen_promises_futures",
+      "source_url": "https://wasm-bindgen.github.io/wasm-bindgen/reference/js-promises-and-rust-futures.html",
+      "source_name": "wasm-bindgen guide: JavaScript Promises and Rust Futures",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/wasm-bindgen/wasm-bindgen/blob/main/README.md#license",
+      "licence_evidence": "README 'License' section: 'This project is licensed under either of Apache License, Version 2.0 ... MIT license ... at your option.' The guide source is guide/src/ in the same repo.",
+      "language": "Rust",
+      "domains": [
+        "systems",
+        "web-frontend"
+      ],
+      "why": "wasm-bindgen-futures: JsFuture, future_to_promise, spawn_local, async fn exports, the single-threaded executor constraint, and how errors map to Result<JsValue, JsValue>.",
+      "approx_size_chars": 11412,
+      "extract_chunks": 1,
+      "content_type": "text/html",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "wasm_bindgen_js_objects_in_rust",
+      "source_url": "https://wasm-bindgen.github.io/wasm-bindgen/contributing/design/js-objects-in-rust.html",
+      "source_name": "wasm-bindgen guide (design): JS objects in Rust",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/wasm-bindgen/wasm-bindgen/blob/main/README.md#license",
+      "licence_evidence": "README 'License' section: 'This project is licensed under either of Apache License, Version 2.0 ... MIT license ... at your option.' The guide source is guide/src/ in the same repo.",
+      "language": "Rust",
+      "domains": [
+        "systems",
+        "web-frontend"
+      ],
+      "why": "How a JsValue crosses the wasm boundary as a u32 index into a JS-side heap/stack slab: the cost model of borrowing (&JsValue) vs owning (JsValue) and why dropping matters.",
+      "approx_size_chars": 7635,
+      "extract_chunks": 1,
+      "content_type": "text/html",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "wasm_basic_c_abi",
+      "source_url": "https://raw.githubusercontent.com/WebAssembly/tool-conventions/main/BasicCABI.md",
+      "source_name": "WebAssembly tool-conventions: Basic C ABI",
+      "licence": "Artistic-2.0",
+      "licence_evidence_url": "https://github.com/WebAssembly/tool-conventions/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE is the full text of 'The Artistic License 2.0 / Copyright (c) 2000-2006, The Perl Foundation'; the GitHub API reports Artistic-2.0. The README makes no separate statement.",
+      "language": "C",
+      "domains": [
+        "systems"
+      ],
+      "why": "The wasm32 C ABI that clang, rustc and emscripten follow: scalar and aggregate sizes/alignments, how structs and unions are passed and returned (by value vs indirectly), the shadow stack pointer, varargs. What repr(C) must match on wasm32.",
+      "approx_size_chars": 13791,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "emscripten_interacting_with_code",
+      "source_url": "https://raw.githubusercontent.com/emscripten-core/emscripten/main/site/source/docs/porting/connecting_cpp_and_javascript/Interacting-with-code.rst",
+      "source_name": "Emscripten docs: Interacting with code",
+      "licence": "MIT OR NCSA",
+      "licence_evidence_url": "https://github.com/emscripten-core/emscripten/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'Emscripten is available under 2 licenses, the MIT license and the University of Illinois/NCSA Open Source License.' Docs source is site/source/docs in the same repo; the site's licence page (emscripten_license.rst) literalincludes that LICENSE. The GitHub API reports NOASSERTION because it is dual.",
+      "language": "C",
+      "domains": [
+        "systems",
+        "web-frontend"
+      ],
+      "why": "ccall/cwrap, EXPORTED_FUNCTIONS and EMSCRIPTEN_KEEPALIVE, extern \"C\" and name mangling, reading and writing the heap (HEAP8/HEAPU32, getValue/setValue), calling JS from C (EM_JS/EM_ASM, JS libraries).",
+      "approx_size_chars": 34190,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "emscripten_embind",
+      "source_url": "https://raw.githubusercontent.com/emscripten-core/emscripten/main/site/source/docs/porting/connecting_cpp_and_javascript/embind.rst",
+      "source_name": "Emscripten docs: Embind",
+      "licence": "MIT OR NCSA",
+      "licence_evidence_url": "https://github.com/emscripten-core/emscripten/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'Emscripten is available under 2 licenses, the MIT license and the University of Illinois/NCSA Open Source License.' Docs source is site/source/docs in the same repo; the site's licence page (emscripten_license.rst) literalincludes that LICENSE. The GitHub API reports NOASSERTION because it is dual.",
+      "language": "C++",
+      "domains": [
+        "systems",
+        "web-frontend"
+      ],
+      "why": "Binding C++ classes, functions and value types to JS: ownership and .delete() rules, smart pointers, value_object vs value_array, typed-array memory views, TypeScript definition generation (--emit-tsd).",
+      "approx_size_chars": 47154,
+      "extract_chunks": 4,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "cbindgen_docs",
+      "source_url": "https://raw.githubusercontent.com/mozilla/cbindgen/main/docs.md",
+      "source_name": "cbindgen user guide (docs.md)",
+      "licence": "MPL-2.0",
+      "licence_evidence_url": "https://github.com/mozilla/cbindgen/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE first line: 'Mozilla Public License Version 2.0'; the GitHub API reports MPL-2.0. File-level weak copyleft: modified copies of docs.md stay MPL, but distilled recipes are not copies.",
+      "language": "Rust",
+      "domains": [
+        "systems",
+        "tooling"
+      ],
+      "why": "Generating C/C++ headers from Rust: which Rust types are FFI-safe and how each is emitted (repr(C)/transparent structs, tagged enums, opaque types), cbindgen.toml options, rename/prefix annotations. The practical side of repr(C).",
+      "approx_size_chars": 42029,
+      "extract_chunks": 4,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "typescript_6_0_release_notes",
+      "source_url": "https://raw.githubusercontent.com/microsoft/TypeScript-Website/v2/packages/documentation/copy/en/release-notes/TypeScript%206.0.md",
+      "source_name": "TypeScript 6.0 release notes (handbook)",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/microsoft/TypeScript-Website/blob/v2/README.md",
+      "licence_evidence": "README 'Legal Notices': 'Microsoft and any contributors grant you a license to the Microsoft documentation and other content in this repository under the Creative Commons Attribution 4.0 International Public License' (LICENSE = CC-BY-4.0; code under LICENSE-CODE = MIT).",
+      "language": "TypeScript",
+      "domains": [
+        "types",
+        "tooling"
+      ],
+      "why": "The 6.0 transition release: changed defaults and deprecated flags/module settings ahead of the native 7.0 compiler. The 'modern vs outdated' tsconfig advice the corpus lacks.",
+      "approx_size_chars": 39840,
+      "extract_chunks": 4,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: typescript_types.jsonl (release notes up to 5.9, devblog 7.0); the 6.0 page is unused"
+    },
+    {
+      "name": "typescript_5_6_release_notes",
+      "source_url": "https://raw.githubusercontent.com/microsoft/TypeScript-Website/v2/packages/documentation/copy/en/release-notes/TypeScript%205.6.md",
+      "source_name": "TypeScript 5.6 release notes (handbook)",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/microsoft/TypeScript-Website/blob/v2/README.md",
+      "licence_evidence": "README 'Legal Notices': 'Microsoft and any contributors grant you a license to the Microsoft documentation and other content in this repository under the Creative Commons Attribution 4.0 International Public License' (LICENSE = CC-BY-4.0; code under LICENSE-CODE = MIT).",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Disallowed always-truthy/nullish checks, iterator helper types (IteratorObject, BuiltinIteratorReturn), --strictBuiltinIteratorReturn, --noUncheckedSideEffectImports, --noCheck, each with before/after code.",
+      "approx_size_chars": 30651,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: typescript_types.jsonl (other release-notes pages; 5.6 unused)"
+    },
+    {
+      "name": "typescript_modules_choosing_compiler_options",
+      "source_url": "https://raw.githubusercontent.com/microsoft/TypeScript-Website/v2/packages/documentation/copy/en/modules-reference/guides/Choosing%20Compiler%20Options.md",
+      "source_name": "TypeScript Modules: Choosing compiler options",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/microsoft/TypeScript-Website/blob/v2/README.md",
+      "licence_evidence": "README 'Legal Notices': 'Microsoft and any contributors grant you a license to the Microsoft documentation and other content in this repository under the Creative Commons Attribution 4.0 International Public License' (LICENSE = CC-BY-4.0; code under LICENSE-CODE = MIT).",
+      "language": "TypeScript",
+      "domains": [
+        "types",
+        "tooling"
+      ],
+      "why": "A decision guide: which module/moduleResolution/target to use for bundled apps, for Node, and for published libraries. Directly actionable tsconfig recipes.",
+      "approx_size_chars": 15639,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: modern_practice.jsonl (modules/reference.html and tsconfig/, one row each)"
+    },
+    {
+      "name": "typescript_modules_esm_cjs_interop",
+      "source_url": "https://raw.githubusercontent.com/microsoft/TypeScript-Website/v2/packages/documentation/copy/en/modules-reference/appendices/ESM-CJS-Interop.md",
+      "source_name": "TypeScript Modules appendix: ESM/CJS interoperability",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/microsoft/TypeScript-Website/blob/v2/README.md",
+      "licence_evidence": "README 'Legal Notices': 'Microsoft and any contributors grant you a license to the Microsoft documentation and other content in this repository under the Creative Commons Attribution 4.0 International Public License' (LICENSE = CC-BY-4.0; code under LICENSE-CODE = MIT).",
+      "language": "TypeScript",
+      "domains": [
+        "types",
+        "tooling"
+      ],
+      "why": "Why default imports of CommonJS behave differently under Node, bundlers and esModuleInterop, and how library authors ship types that work in both. The root cause of most 'has no default export' errors.",
+      "approx_size_chars": 28510,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "threejs_llms_full_tsl",
+      "source_url": "https://raw.githubusercontent.com/mrdoob/three.js/dev/docs/llms-full.txt",
+      "source_name": "three.js docs/llms-full.txt (LLM guidelines and complete TSL guide)",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/mrdoob/three.js/blob/dev/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'The MIT License / Copyright (c) 2010-2026 three.js authors'. llms-full.txt is committed at docs/llms-full.txt in the same repo (unlike the wiki, a separate unlicensed git repo).",
+      "language": "TypeScript",
+      "domains": [
+        "gpu",
+        "web-frontend"
+      ],
+      "why": "Maintainer-written guidance for generating three.js code (import maps, WebGPURenderer vs WebGLRenderer, NodeMaterial), then the complete TSL guide: Fn, uniforms, storage buffers, compute, If/Loop, varyings, atomics, struct/array. The licensable version of the wiki page. Contaminated domain: three.js is in every training set.",
+      "approx_size_chars": 363067,
+      "extract_chunks": 32,
+      "content_type": "text/plain",
+      "overlaps_existing": "yes: web_gpu.jsonl (6 rows from the TSL wiki, 4 from the Migration Guide). 32 chunks, the largest item"
+    },
+    {
+      "name": "typegpu_pipelines",
+      "source_url": "https://raw.githubusercontent.com/software-mansion/TypeGPU/main/apps/typegpu-docs/src/content/docs/apis/pipelines.mdx",
+      "source_name": "TypeGPU docs: Pipelines",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/software-mansion/TypeGPU/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'MIT License / Copyright (c) 2025 Software Mansion'. Docs are apps/typegpu-docs in the same repo; that directory has no separate licence file.",
+      "language": "TypeScript",
+      "domains": [
+        "gpu"
+      ],
+      "why": "Building render and compute pipelines in TypeGPU: vertex/fragment wiring, attachments, bind-group resolution, dispatch. The 0.12 API of the library already held in index/packages.",
+      "approx_size_chars": 27184,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: web_gpu.jsonl (apis/buffers, data-schemas, functions, roots, textures; not pipelines)"
+    },
+    {
+      "name": "typegpu_migration_0_12",
+      "source_url": "https://raw.githubusercontent.com/software-mansion/TypeGPU/main/apps/typegpu-docs/src/content/docs/migrations/0-12.mdx",
+      "source_name": "TypeGPU docs: Migrating to 0.12",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/software-mansion/TypeGPU/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'MIT License / Copyright (c) 2025 Software Mansion'. Docs are apps/typegpu-docs in the same repo; that directory has no separate licence file.",
+      "language": "TypeScript",
+      "domains": [
+        "gpu"
+      ],
+      "why": "Every API removed or renamed in 0.12, with its replacement. Version-sensitive recipes that pair with the typegpu@0.12.5 index already held.",
+      "approx_size_chars": 11002,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: web_gpu.jsonl (blog/typegpu-012, 1 row)"
+    },
+    {
+      "name": "typegpu_three",
+      "source_url": "https://raw.githubusercontent.com/software-mansion/TypeGPU/main/apps/typegpu-docs/src/content/docs/ecosystem/typegpu-three/index.mdx",
+      "source_name": "TypeGPU docs: @typegpu/three",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/software-mansion/TypeGPU/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'MIT License / Copyright (c) 2025 Software Mansion'. Docs are apps/typegpu-docs in the same repo; that directory has no separate licence file.",
+      "language": "TypeScript",
+      "domains": [
+        "gpu",
+        "web-frontend"
+      ],
+      "why": "Writing TypeGPU functions that compile into three.js TSL nodes and reading TSL builtins from TGSL. The only source on the TypeGPU-to-TSL bridge, which sits between two target domains.",
+      "approx_size_chars": 10059,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "webgpufundamentals_bind_group_layouts",
+      "source_url": "https://raw.githubusercontent.com/webgpu/webgpufundamentals/main/webgpu/lessons/webgpu-bind-group-layouts.md",
+      "source_name": "WebGPU Fundamentals: Bind Group Layouts",
+      "licence": "BSD-3-Clause",
+      "licence_evidence_url": "https://github.com/webgpu/webgpufundamentals/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'Copyright 2023, GfxFundamentals Contributors ... Redistribution and use in source and binary forms, with or without modification, are permitted' (3-clause). The rendered lesson page prints the same BSD text in its footer.",
+      "language": "WGSL",
+      "domains": [
+        "gpu"
+      ],
+      "why": "When to write explicit GPUBindGroupLayouts instead of layout:'auto', sharing bind groups across pipelines, dynamic offsets, and the validation errors each choice produces.",
+      "approx_size_chars": 21255,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: web_gpu.jsonl (8 other webgpufundamentals lessons; toji bind-groups page)"
+    },
+    {
+      "name": "r3f_v10_render_pipeline",
+      "source_url": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/v10/docs/webgpu/render-pipeline.mdx",
+      "source_name": "React Three Fiber v10 docs: Render pipeline",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/pmndrs/react-three-fiber/blob/v10/LICENSE",
+      "licence_evidence": "LICENSE on the v10 branch: 'MIT License / Copyright (c) 2019-2025 Poimandres'. Docs are docs/ in the same repo.",
+      "language": "TypeScript",
+      "domains": [
+        "gpu",
+        "web-frontend"
+      ],
+      "why": "v10's WebGPU RenderPipeline/post-processing integration and how it hooks into the frame loop.",
+      "approx_size_chars": 10319,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: r3f.jsonl (v10 webgpu/overview 8, tsl-hooks 3, frame-loop 10); this page is unused"
+    },
+    {
+      "name": "r3f_v10_compute",
+      "source_url": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/v10/docs/webgpu/compute.mdx",
+      "source_name": "React Three Fiber v10 docs: Compute",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/pmndrs/react-three-fiber/blob/v10/LICENSE",
+      "licence_evidence": "LICENSE on the v10 branch: 'MIT License / Copyright (c) 2019-2025 Poimandres'. Docs are docs/ in the same repo.",
+      "language": "TypeScript",
+      "domains": [
+        "gpu",
+        "web-frontend"
+      ],
+      "why": "Running TSL compute shaders from R3F v10: dispatch timing relative to render, storage buffers shared with materials, hook usage.",
+      "approx_size_chars": 7070,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: r3f.jsonl (other v10 webgpu pages); this page is unused"
+    },
+    {
+      "name": "r3f_v10_typescript",
+      "source_url": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/v10/docs/API/typescript.mdx",
+      "source_name": "React Three Fiber v10 docs: TypeScript",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/pmndrs/react-three-fiber/blob/v10/LICENSE",
+      "licence_evidence": "LICENSE on the v10 branch: 'MIT License / Copyright (c) 2019-2025 Poimandres'. Docs are docs/ in the same repo.",
+      "language": "TypeScript",
+      "domains": [
+        "types",
+        "web-frontend",
+        "gpu"
+      ],
+      "why": "Typing refs to three objects, ThreeElements augmentation for extend()ed classes, typing props in v10. Crosses the TS and R3F domains.",
+      "approx_size_chars": 4650,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: r3f.jsonl has no TypeScript-typing rows"
+    }
+  ],
+  "reserve": [
+    {
+      "name": "rust_reference_linkage",
+      "source_url": "https://doc.rust-lang.org/reference/linkage.html",
+      "source_name": "The Rust Reference: Linkage",
+      "licence": "MIT OR Apache-2.0",
+      "licence_evidence_url": "https://github.com/rust-lang/reference",
+      "licence_evidence": "Repo root holds LICENSE-MIT ('Copyright (c) 2010 The Rust Project Developers ... Permission is hereby granted, free of charge') and LICENSE-APACHE; the GitHub API reports only Apache-2.0 (first file). rust-lang/rust COPYRIGHT: 'The Rust Project is dual-licensed under Apache 2.0 and MIT terms.'",
+      "language": "Rust",
+      "domains": [
+        "systems",
+        "tooling"
+      ],
+      "why": "crate-type cdylib/staticlib/rlib, mixing Rust and C static libraries, shipping Rust behind a C ABI.",
+      "approx_size_chars": 13993,
+      "extract_chunks": 2,
+      "content_type": "text/html",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "typescript_5_7_release_notes",
+      "source_url": "https://raw.githubusercontent.com/microsoft/TypeScript-Website/v2/packages/documentation/copy/en/release-notes/TypeScript%205.7.md",
+      "source_name": "TypeScript 5.7 release notes (handbook)",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/microsoft/TypeScript-Website/blob/v2/README.md",
+      "licence_evidence": "README 'Legal Notices': 'Microsoft and any contributors grant you a license to the Microsoft documentation and other content in this repository under the Creative Commons Attribution 4.0 International Public License' (LICENSE = CC-BY-4.0; code under LICENSE-CODE = MIT).",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Never-initialized variable checks, --rewriteRelativeImportExtensions, ES2024 target, TypedArray generics.",
+      "approx_size_chars": 19934,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: typescript_types.jsonl"
+    },
+    {
+      "name": "typegpu_accessors",
+      "source_url": "https://raw.githubusercontent.com/software-mansion/TypeGPU/main/apps/typegpu-docs/src/content/docs/apis/accessors.mdx",
+      "source_name": "TypeGPU docs: Accessors",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/software-mansion/TypeGPU/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'MIT License / Copyright (c) 2025 Software Mansion'. Docs are apps/typegpu-docs in the same repo; that directory has no separate licence file.",
+      "language": "TypeScript",
+      "domains": [
+        "gpu"
+      ],
+      "why": "Schema-aware accessors, the 0.12 mechanism for referencing buffers and textures inside TGSL.",
+      "approx_size_chars": 13301,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "webgpufundamentals_debugging",
+      "source_url": "https://raw.githubusercontent.com/webgpu/webgpufundamentals/main/webgpu/lessons/webgpu-debugging.md",
+      "source_name": "WebGPU Fundamentals: Debugging and Errors",
+      "licence": "BSD-3-Clause",
+      "licence_evidence_url": "https://github.com/webgpu/webgpufundamentals/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'Copyright 2023, GfxFundamentals Contributors ... Redistribution and use in source and binary forms, with or without modification, are permitted' (3-clause). The rendered lesson page prints the same BSD text in its footer.",
+      "language": "WGSL",
+      "domains": [
+        "gpu"
+      ],
+      "why": "Error scopes, uncapturederror, labels, a debugging checklist for WebGPU validation errors.",
+      "approx_size_chars": 20476,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: web_gpu.jsonl (toji error-handling)"
+    },
+    {
+      "name": "webgpufundamentals_compatibility_mode",
+      "source_url": "https://raw.githubusercontent.com/webgpu/webgpufundamentals/main/webgpu/lessons/webgpu-compatibility-mode.md",
+      "source_name": "WebGPU Fundamentals: Compatibility Mode",
+      "licence": "BSD-3-Clause",
+      "licence_evidence_url": "https://github.com/webgpu/webgpufundamentals/blob/main/LICENSE",
+      "licence_evidence": "Repo LICENSE: 'Copyright 2023, GfxFundamentals Contributors ... Redistribution and use in source and binary forms, with or without modification, are permitted' (3-clause). The rendered lesson page prints the same BSD text in its footer.",
+      "language": "WGSL",
+      "domains": [
+        "gpu"
+      ],
+      "why": "What compatibility mode forbids and how to write code that runs in both modes.",
+      "approx_size_chars": 35556,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none"
+    },
+    {
+      "name": "r3f_v10_hmr",
+      "source_url": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/v10/docs/webgpu/hmr.mdx",
+      "source_name": "React Three Fiber v10 docs: HMR",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/pmndrs/react-three-fiber/blob/v10/LICENSE",
+      "licence_evidence": "LICENSE on the v10 branch: 'MIT License / Copyright (c) 2019-2025 Poimandres'. Docs are docs/ in the same repo.",
+      "language": "TypeScript",
+      "domains": [
+        "gpu",
+        "web-frontend"
+      ],
+      "why": "Hot-reload behaviour of TSL nodes and uniforms in v10.",
+      "approx_size_chars": 7132,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "partial: r3f.jsonl"
+    }
+  ],
+  "rejected": [
+    {
+      "source_url": "https://www.w3.org/TR/WGSL/",
+      "source_name": "W3C WebGPU Shading Language spec",
+      "licence": "W3C Software and Document License (2023), established via https://github.com/gpuweb/gpuweb/blob/main/LICENSE.md",
+      "reason": "SIZE, not licence: a single 3,103,863-byte HTML page that cannot be split by URL (fragments are the same document), far over 60 x 12,000 chars, and the worker's html_to_text returned 0 chars for it in this probe. Needs pasted per-section text instead."
+    },
+    {
+      "source_url": "https://github.com/mrdoob/three.js/wiki/Three.js-Shading-Language",
+      "source_name": "three.js wiki: Three.js Shading Language",
+      "licence": "cannot be established",
+      "reason": "A GitHub wiki is a separate git repo with no LICENSE file; the repo's MIT licence does not demonstrably cover it. Use docs/llms-full.txt (MIT, in-repo, carries the TSL guide). NOTE: the 6 existing web_gpu.jsonl rows citing this page carry license_if_known ''."
+    },
+    {
+      "source_url": "https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/JavaScript_interface/Memory",
+      "source_name": "MDN WebAssembly.Memory",
+      "licence": "CC-BY-SA-2.5 (page footer: 'Content available under a Creative Commons license', linking MDN's attribution page)",
+      "reason": "Share-alike, outside the preferred permissive set. datasets.RESTRICTED does not flag share-alike, so taking it would be a silent choice."
+    },
+    {
+      "source_url": "https://rustwasm.github.io/docs/wasm-bindgen/",
+      "source_name": "wasm-bindgen guide (old rustwasm site)",
+      "licence": "MIT OR Apache-2.0",
+      "reason": "Stale: the rustwasm org was archived and the repo moved to wasm-bindgen/wasm-bindgen (GitHub API 301). The closures page is 6,789 chars there against 16,134 on wasm-bindgen.github.io."
+    },
+    {
+      "source_url": "https://rustwasm.github.io/docs/book/",
+      "source_name": "Rust and WebAssembly book",
+      "licence": "MIT OR Apache-2.0",
+      "reason": "rustwasm/book is archived (GitHub API archived: true), so its wasm-pack workflow advice is frozen."
+    },
+    {
+      "source_url": "https://rust-lang.github.io/unsafe-code-guidelines/layout/structs-and-tuples.html",
+      "source_name": "Unsafe Code Guidelines: layout chapters",
+      "licence": "MIT OR Apache-2.0",
+      "reason": "The layout/*.md sources are now ~330-byte stubs; the content moved into the Reference's type-layout chapter (candidate rust_reference_type_layout)."
+    },
+    {
+      "source_url": "https://docs.swmansion.com/TypeGPU/apis/pipelines/",
+      "source_name": "TypeGPU rendered docs site",
+      "licence": "MIT",
+      "reason": "A URL form was rejected here, not the source. Starlight's HTML nav inflates pages 4-10x (pipelines: 105,845 chars / 9 chunks against 27,184 / 3 from the raw .mdx), and the typescriptlang.org and emscripten.org pages are also nav-heavy. The candidates use raw sources from the same licensed repos."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "react-40",
+  "domain": "react",
+  "prompt": "Write a React 19 component in TypeScript (strict mode) that is pure enough to be safe under the React Compiler and `<StrictMode>`, and export it as `function Leaderboard({ players }: { players: readonly { name: string; score: number }[] })`.\n\nBehaviour:\n- Render a list (an element with role `list`, e.g. `<ol>` or `<ul>`) with one list item per player, highest score first. With no players, render the list with no items.\n- Each item's text is exactly `<rank>. <name> — <score>` (a space, an em dash U+2014, a space), e.g. `1. Ben — 100`.\n- Players with equal scores share the same rank and the ranks after them are skipped (standard competition ranking: scores 100, 90, 90, 70 get ranks 1, 2, 2, 4). Players with equal scores are listed in ascending order of name (plain string order; e.g. `Ava` before `Cal`).\n\nPurity rules (these are tested):\n- Never mutate `players` or the player objects: the component must work when the array and every player object are deeply frozen with `Object.freeze`, and an ordinary array passed in must keep its original order.\n- Rendering must not depend on or modify anything outside the render (no module-level variables or refs changed during render), so the output is identical under `<StrictMode>` double rendering, on every re-render, and when several leaderboards are on the same page.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-40/test.tsx", "entry": ["Leaderboard"]},
+  "reference": "tasks/react-40/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

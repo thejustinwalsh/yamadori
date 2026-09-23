@@ -1,0 +1,20 @@
+{
+  "id": "ts05",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports `type Score = { player: string; points: number; at: number }` and three functions. None of them may mutate the input array or the objects in it -- callers pass deeply frozen data.\n\n- `leaderboard(scores: readonly Score[]): Score[]` -- a new array sorted by `points` descending, ties broken by `at` ascending.\n- `latestFor(scores: readonly Score[], player: string): Score | undefined` -- the entry for `player` that appears LAST in array order (the same object, not a copy), or `undefined`.\n- `withCorrection(scores: readonly Score[], index: number, points: number): Score[]` -- a new array identical to `scores` except that the element at `index` is replaced by a new object with the same `player` and `at` and the given `points`. A negative `index` counts back from the end (`-1` is the last element). An index out of range throws a `RangeError`.\n\nThe runtime is Node 24 and the `lib` setting includes ES2023. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts05/test.ts",
+    "runtime": true,
+    "entry": [
+      "leaderboard",
+      "latestFor",
+      "withCorrection",
+      "Score"
+    ]
+  },
+  "reference": "tasks/ts05/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}
