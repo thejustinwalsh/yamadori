@@ -1,0 +1,19 @@
+{
+  "id": "ts27",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports three utility types:\n\n- `OptionalKeys<T>` -- the union of the keys of `T` whose properties are declared optional (with `?`). A required property whose type merely includes `undefined` (e.g. `c: number | undefined`, or `e: unknown`) is NOT optional. For a type with no optional properties the result is `never`.\n- `RequiredKeys<T>` -- the union of all the other keys of `T`.\n- `SetOptional<T, K extends keyof T>` -- `T` with exactly the properties `K` made optional and everything else unchanged (other properties keep their required/optional and readonly modifiers). An intersection of object types is acceptable as long as it is equivalent.\n\nExample: for `{ a: number; b?: string; c: number | undefined }`, `OptionalKeys` is `'b'` and `RequiredKeys` is `'a' | 'c'`. `T` may be an interface or a type alias. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts27/test.ts",
+    "runtime": false,
+    "entry": [
+      "OptionalKeys",
+      "RequiredKeys",
+      "SetOptional"
+    ]
+  },
+  "reference": "tasks/ts27/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

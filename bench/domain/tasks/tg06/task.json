@@ -1,0 +1,17 @@
+{
+  "id": "tg06",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import * as d from 'typegpu/data'`), export `function hasNoPadding(schema: d.AnyData): boolean`. It returns `true` exactly when the byte layout typegpu uses for that schema in a buffer contains no padding bytes at all -- no gaps between struct members, no gaps between array elements (element stride), no gaps between matrix columns, no padding at the end of a struct, and none inside nested structs/arrays -- so the data could be filled from one tightly packed typed array. It must be correct for WGSL structs and arrays (with or without `@size`/`@align` attributes), vectors, matrices, f16 types, and typegpu's loosely packed `unstruct`/`disarrayOf` schemas and vertex formats. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg06/test.ts", "runtime": true, "webgpu": true, "entry": ["hasNoPadding"]},
+  "reference": "tasks/tg06/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "api": {
+    "d.isContiguous(schema)": "data/isContiguous.d.ts, data/isContiguous.js (exported as PUBLIC_isContiguous -> isContiguous in data/index.d.ts)",
+    "d.getLongestContiguousPrefix(schema)": "data/getLongestContiguousPrefix.d.ts, data/getLongestContiguousPrefix.js",
+    "d.sizeOf": "data/sizeOf.d.ts",
+    "d.unstruct / d.disarrayOf / vertex formats": "data/unstruct.d.ts, data/disarray.d.ts, data/vertexFormatData.d.ts"
+  },
+  "notes": "Expected values were read from typegpu 0.12.5 at runtime (probe_tg) and agree with WGSL layout rules by hand."
+}

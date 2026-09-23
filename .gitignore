@@ -34,3 +34,15 @@ config.yaml
 # Account registry and keys -- never commit
 index/accounts/
 .keys
+
+# Non-destructive tidy: superseded backups, stale logs and pre-edit snapshots.
+# Kept, not deleted -- see attic/README.txt.
+attic/
+
+# Downloaded third-party benchmark inputs: fetched, not authored here, and
+# test5/test6 exceed GitHub's 100 MB file limit.
+bench/data/test5.jsonl
+bench/data/test6.jsonl
+bench/data/LeetCodeDataset-train.jsonl
+# Local rollback copies of the live config.
+config.yaml.bak-*

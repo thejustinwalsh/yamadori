@@ -1,0 +1,11 @@
+{
+  "id": "react-20",
+  "domain": "react",
+  "prompt": "Write an infinitely scrolling list in TypeScript (strict mode) for React 19 and export it as\n\n```ts\nexport function InfiniteList(props: {\n  loadPage: (page: number) => Promise<{ items: string[]; hasMore: boolean }>;\n}): React.ReactElement\n```\n\nMarkup:\n- A `<ul>` holding one `<li>` per loaded item, whose text is exactly the item string, pages in the order they were loaded.\n- After the list, a sentinel element with `data-testid=\"sentinel\"`. It must be in the document at least while more pages may exist (once the last page has loaded it may be removed).\n- While a page is loading, an element with `role=\"status\"` and the text `Loading…`; when no load is in flight there is no such text in the document.\n- Once a page has come back with `hasMore: false`, the text `No more items`.\n\nBehaviour:\n- On mount, call `loadPage(0)` once and render its items when it resolves.\n- Watch the sentinel with an `IntersectionObserver` (the browser global; any options). When the observer reports an entry for the sentinel with `isIntersecting: true`, load the next page (`1`, then `2`, ...) and append its items -- but only if no load is currently in flight and the last loaded page had `hasMore: true`. Entries with `isIntersecting: false` do nothing.\n- An intersection that arrives while a load is in flight is simply ignored: there are never two calls to `loadPage` outstanding at once, and each page number is requested exactly once.\n- After a page returns `hasMore: false`, `loadPage` is never called again.\n- On unmount, stop observing (disconnect the observer or unobserve the sentinel).\n\nYou may import only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-20/test.tsx", "entry": ["InfiniteList"]},
+  "reference": "tasks/react-20/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "category": "component"
+}

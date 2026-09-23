@@ -1,0 +1,5257 @@
+{
+ "n_orders": 2,
+ "items": [
+  {
+   "question": "Why does our ParticleField component render black in three r185 when it worked fine in r180?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.645,
+     "probabilities": {
+      "actionable": 0.1775,
+      "underspecified": 0.8225,
+      "needs_the_codebase": 0.8144,
+      "general_knowledge": 0.1856
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.645,
+      "probabilities": {
+       "actionable": 0.1775,
+       "underspecified": 0.8225
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.6288,
+      "probabilities": {
+       "needs_the_codebase": 0.8144,
+       "general_knowledge": 0.1856
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6861999999999999,
+     "probabilities": {
+      "actionable": 0.15689999999999998,
+      "underspecified": 0.8431,
+      "needs_the_codebase": 0.6409,
+      "general_knowledge": 0.3591
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6861999999999999,
+      "probabilities": {
+       "actionable": 0.15689999999999998,
+       "underspecified": 0.8431
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.28180000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.6409,
+       "general_knowledge": 0.3591
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.5602,
+     "probabilities": {
+      "actionable": 0.21989999999999998,
+      "underspecified": 0.7801,
+      "needs_the_codebase": 0.78195,
+      "general_knowledge": 0.21805
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5602,
+      "probabilities": {
+       "actionable": 0.21989999999999998,
+       "underspecified": 0.7801
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.5639000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.78195,
+       "general_knowledge": 0.21805
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What does mcp/hemisphere.py do with a trace handle once MAX_TRACES is exceeded?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7679,
+     "probabilities": {
+      "actionable": 0.11605,
+      "underspecified": 0.88395,
+      "needs_the_codebase": 0.66215,
+      "general_knowledge": 0.33785
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7679,
+      "probabilities": {
+       "actionable": 0.11605,
+       "underspecified": 0.88395
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.32430000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.66215,
+       "general_knowledge": 0.33785
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7446999999999999,
+     "probabilities": {
+      "actionable": 0.12764999999999999,
+      "underspecified": 0.87235,
+      "needs_the_codebase": 0.6677,
+      "general_knowledge": 0.33230000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7446999999999999,
+      "probabilities": {
+       "actionable": 0.12764999999999999,
+       "underspecified": 0.87235
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.3353999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.6677,
+       "general_knowledge": 0.33230000000000004
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7366000000000001,
+     "probabilities": {
+      "actionable": 0.13169999999999998,
+      "underspecified": 0.8683000000000001,
+      "needs_the_codebase": 0.59385,
+      "general_knowledge": 0.40615
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7366000000000001,
+      "probabilities": {
+       "actionable": 0.13169999999999998,
+       "underspecified": 0.8683000000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.18769999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.59385,
+       "general_knowledge": 0.40615
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Where in our codebase do we set the WGSL workgroup size for the fluid sim, and what value is it?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7589999999999999,
+     "probabilities": {
+      "actionable": 0.1205,
+      "underspecified": 0.8795,
+      "needs_the_codebase": 0.9174,
+      "general_knowledge": 0.0826
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7589999999999999,
+      "probabilities": {
+       "actionable": 0.1205,
+       "underspecified": 0.8795
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.8348,
+      "probabilities": {
+       "needs_the_codebase": 0.9174,
+       "general_knowledge": 0.0826
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.714,
+     "probabilities": {
+      "actionable": 0.14300000000000002,
+      "underspecified": 0.857,
+      "needs_the_codebase": 0.54085,
+      "general_knowledge": 0.45915
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.714,
+      "probabilities": {
+       "actionable": 0.14300000000000002,
+       "underspecified": 0.857
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08170000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.54085,
+       "general_knowledge": 0.45915
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7919,
+     "probabilities": {
+      "actionable": 0.10405,
+      "underspecified": 0.89595,
+      "needs_the_codebase": 0.8363,
+      "general_knowledge": 0.1637
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7919,
+      "probabilities": {
+       "actionable": 0.10405,
+       "underspecified": 0.89595
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.6726000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.8363,
+       "general_knowledge": 0.1637
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Which of our R3F components still use the WebGLRenderer path instead of WebGPURenderer?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6714,
+     "probabilities": {
+      "actionable": 0.1643,
+      "underspecified": 0.8357,
+      "needs_the_codebase": 0.54425,
+      "general_knowledge": 0.45575
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6714,
+      "probabilities": {
+       "actionable": 0.1643,
+       "underspecified": 0.8357
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08850000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.54425,
+       "general_knowledge": 0.45575
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7161,
+     "probabilities": {
+      "actionable": 0.14195,
+      "underspecified": 0.85805,
+      "needs_the_codebase": 0.5609999999999999,
+      "general_knowledge": 0.439
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7161,
+      "probabilities": {
+       "actionable": 0.14195,
+       "underspecified": 0.85805
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.12199999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5609999999999999,
+       "general_knowledge": 0.439
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7596,
+     "probabilities": {
+      "actionable": 0.1202,
+      "underspecified": 0.8798,
+      "needs_the_codebase": 0.6404,
+      "general_knowledge": 0.35960000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7596,
+      "probabilities": {
+       "actionable": 0.1202,
+       "underspecified": 0.8798
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.28079999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.6404,
+       "general_knowledge": 0.35960000000000003
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is the actual resolved type of RootState['gl'] in the @react-three/fiber version we have pinned?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.5385,
+     "probabilities": {
+      "actionable": 0.23075,
+      "underspecified": 0.76925,
+      "needs_the_codebase": 0.66365,
+      "general_knowledge": 0.33635
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5385,
+      "probabilities": {
+       "actionable": 0.23075,
+       "underspecified": 0.76925
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.3273,
+      "probabilities": {
+       "needs_the_codebase": 0.66365,
+       "general_knowledge": 0.33635
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7253,
+     "probabilities": {
+      "actionable": 0.13735,
+      "underspecified": 0.8626499999999999,
+      "needs_the_codebase": 0.6082000000000001,
+      "general_knowledge": 0.3918
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7253,
+      "probabilities": {
+       "actionable": 0.13735,
+       "underspecified": 0.8626499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.2164000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.6082000000000001,
+       "general_knowledge": 0.3918
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6838,
+     "probabilities": {
+      "actionable": 0.15810000000000002,
+      "underspecified": 0.8419,
+      "needs_the_codebase": 0.67915,
+      "general_knowledge": 0.32084999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6838,
+      "probabilities": {
+       "actionable": 0.15810000000000002,
+       "underspecified": 0.8419
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.35830000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.67915,
+       "general_knowledge": 0.32084999999999997
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Our TypeGPU bind group in src/gpu/layout.ts throws 'incompatible binding at index 2'. What's mismatched?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.23209999999999997,
+     "probabilities": {
+      "actionable": 0.38395,
+      "underspecified": 0.61605,
+      "needs_the_codebase": 0.8069,
+      "general_knowledge": 0.1931
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.23209999999999997,
+      "probabilities": {
+       "actionable": 0.38395,
+       "underspecified": 0.61605
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.6137999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.8069,
+       "general_knowledge": 0.1931
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6057999999999999,
+     "probabilities": {
+      "actionable": 0.1971,
+      "underspecified": 0.8029,
+      "needs_the_codebase": 0.7084,
+      "general_knowledge": 0.29159999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6057999999999999,
+      "probabilities": {
+       "actionable": 0.1971,
+       "underspecified": 0.8029
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.41680000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.7084,
+       "general_knowledge": 0.29159999999999997
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.2621,
+     "probabilities": {
+      "actionable": 0.36895,
+      "underspecified": 0.63105,
+      "needs_the_codebase": 0.83205,
+      "general_knowledge": 0.16795
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.2621,
+      "probabilities": {
+       "actionable": 0.36895,
+       "underspecified": 0.63105
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.6640999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.83205,
+       "general_knowledge": 0.16795
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Find every place we call useFrame with a priority argument and tell me which priorities we use.",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.5108000000000001,
+     "probabilities": {
+      "actionable": 0.24459999999999998,
+      "underspecified": 0.7554000000000001,
+      "needs_the_codebase": 0.6046,
+      "general_knowledge": 0.3954
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5108000000000001,
+      "probabilities": {
+       "actionable": 0.24459999999999998,
+       "underspecified": 0.7554000000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.20920000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.6046,
+       "general_knowledge": 0.3954
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7107999999999999,
+     "probabilities": {
+      "actionable": 0.1446,
+      "underspecified": 0.8553999999999999,
+      "needs_the_codebase": 0.5508500000000001,
+      "general_knowledge": 0.44915
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7107999999999999,
+      "probabilities": {
+       "actionable": 0.1446,
+       "underspecified": 0.8553999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10170000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.5508500000000001,
+       "general_knowledge": 0.44915
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7551999999999999,
+     "probabilities": {
+      "actionable": 0.12240000000000001,
+      "underspecified": 0.8775999999999999,
+      "needs_the_codebase": 0.68215,
+      "general_knowledge": 0.31784999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7551999999999999,
+      "probabilities": {
+       "actionable": 0.12240000000000001,
+       "underspecified": 0.8775999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.36430000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.68215,
+       "general_knowledge": 0.31784999999999997
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "cargo build fails in crates/renderer with E0277 after we bumped wgpu. Which trait bound broke?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.48899999999999993,
+     "probabilities": {
+      "actionable": 0.2555,
+      "underspecified": 0.7444999999999999,
+      "needs_the_codebase": 0.7462,
+      "general_knowledge": 0.25379999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.48899999999999993,
+      "probabilities": {
+       "actionable": 0.2555,
+       "underspecified": 0.7444999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.4924,
+      "probabilities": {
+       "needs_the_codebase": 0.7462,
+       "general_knowledge": 0.25379999999999997
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.695,
+     "probabilities": {
+      "actionable": 0.1525,
+      "underspecified": 0.8474999999999999,
+      "needs_the_codebase": 0.5176499999999999,
+      "general_knowledge": 0.48235
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.695,
+      "probabilities": {
+       "actionable": 0.1525,
+       "underspecified": 0.8474999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.03529999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5176499999999999,
+       "general_knowledge": 0.48235
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7248999999999999,
+     "probabilities": {
+      "actionable": 0.13755,
+      "underspecified": 0.8624499999999999,
+      "needs_the_codebase": 0.6983999999999999,
+      "general_knowledge": 0.3016
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7248999999999999,
+      "probabilities": {
+       "actionable": 0.13755,
+       "underspecified": 0.8624499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.39679999999999993,
+      "probabilities": {
+       "needs_the_codebase": 0.6983999999999999,
+       "general_knowledge": 0.3016
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What does the admission guard do when the token budget is already exhausted - reject, queue, or downgrade?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.754,
+     "probabilities": {
+      "actionable": 0.123,
+      "underspecified": 0.877,
+      "needs_the_codebase": 0.83905,
+      "general_knowledge": 0.16094999999999998
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.754,
+      "probabilities": {
+       "actionable": 0.123,
+       "underspecified": 0.877
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.6780999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.83905,
+       "general_knowledge": 0.16094999999999998
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.711,
+     "probabilities": {
+      "actionable": 0.1445,
+      "underspecified": 0.8554999999999999,
+      "needs_the_codebase": 0.62115,
+      "general_knowledge": 0.37885
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.711,
+      "probabilities": {
+       "actionable": 0.1445,
+       "underspecified": 0.8554999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.24229999999999996,
+      "probabilities": {
+       "needs_the_codebase": 0.62115,
+       "general_knowledge": 0.37885
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.5487,
+     "probabilities": {
+      "actionable": 0.22565,
+      "underspecified": 0.77435,
+      "needs_the_codebase": 0.6663,
+      "general_knowledge": 0.3337
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5487,
+      "probabilities": {
+       "actionable": 0.22565,
+       "underspecified": 0.77435
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.3326,
+      "probabilities": {
+       "needs_the_codebase": 0.6663,
+       "general_knowledge": 0.3337
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Which files define the TSL node materials we use, and what uniforms does each expose?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6769000000000001,
+     "probabilities": {
+      "actionable": 0.16155,
+      "underspecified": 0.83845,
+      "needs_the_codebase": 0.6158,
+      "general_knowledge": 0.3842
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6769000000000001,
+      "probabilities": {
+       "actionable": 0.16155,
+       "underspecified": 0.83845
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.23160000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.6158,
+       "general_knowledge": 0.3842
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.54745,
+      "general_knowledge": 0.45255
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09489999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.54745,
+       "general_knowledge": 0.45255
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7309999999999999,
+     "probabilities": {
+      "actionable": 0.1345,
+      "underspecified": 0.8654999999999999,
+      "needs_the_codebase": 0.69425,
+      "general_knowledge": 0.30575
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7309999999999999,
+      "probabilities": {
+       "actionable": 0.1345,
+       "underspecified": 0.8654999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.3885,
+      "probabilities": {
+       "needs_the_codebase": 0.69425,
+       "general_knowledge": 0.30575
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Our Spring<T> generic in types/animation.ts started inferring unknown after the TS 5.6 bump. Which conditional branch is failing?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.16290000000000004,
+     "probabilities": {
+      "actionable": 0.41855,
+      "underspecified": 0.58145,
+      "needs_the_codebase": 0.7059500000000001,
+      "general_knowledge": 0.29405000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.16290000000000004,
+      "probabilities": {
+       "actionable": 0.41855,
+       "underspecified": 0.58145
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.41190000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.7059500000000001,
+       "general_knowledge": 0.29405000000000003
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6607,
+     "probabilities": {
+      "actionable": 0.16965,
+      "underspecified": 0.8303499999999999,
+      "needs_the_codebase": 0.68015,
+      "general_knowledge": 0.31984999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6607,
+      "probabilities": {
+       "actionable": 0.16965,
+       "underspecified": 0.8303499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.36030000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.68015,
+       "general_knowledge": 0.31984999999999997
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.44620000000000004,
+     "probabilities": {
+      "actionable": 0.27690000000000003,
+      "underspecified": 0.7231000000000001,
+      "needs_the_codebase": 0.78535,
+      "general_knowledge": 0.21465
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.44620000000000004,
+      "probabilities": {
+       "actionable": 0.27690000000000003,
+       "underspecified": 0.7231000000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.5707,
+      "probabilities": {
+       "needs_the_codebase": 0.78535,
+       "general_knowledge": 0.21465
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Trace where a /decide request enters laya_service and what serialises access to the GPU.",
+   "label": "investigate",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6905999999999999,
+     "probabilities": {
+      "actionable": 0.1547,
+      "underspecified": 0.8452999999999999,
+      "needs_the_codebase": 0.54335,
+      "general_knowledge": 0.45665
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6905999999999999,
+      "probabilities": {
+       "actionable": 0.1547,
+       "underspecified": 0.8452999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.0867,
+      "probabilities": {
+       "needs_the_codebase": 0.54335,
+       "general_knowledge": 0.45665
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7164,
+     "probabilities": {
+      "actionable": 0.1418,
+      "underspecified": 0.8582000000000001,
+      "needs_the_codebase": 0.5867,
+      "general_knowledge": 0.4133
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7164,
+      "probabilities": {
+       "actionable": 0.1418,
+       "underspecified": 0.8582000000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.1734,
+      "probabilities": {
+       "needs_the_codebase": 0.5867,
+       "general_knowledge": 0.4133
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7869999999999999,
+     "probabilities": {
+      "actionable": 0.1065,
+      "underspecified": 0.8935,
+      "needs_the_codebase": 0.60675,
+      "general_knowledge": 0.39325
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7869999999999999,
+      "probabilities": {
+       "actionable": 0.1065,
+       "underspecified": 0.8935
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.21350000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.60675,
+       "general_knowledge": 0.39325
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "In our shader water.wgsl, what does the uTime uniform get bound to on the JS side?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.69,
+     "probabilities": {
+      "actionable": 0.155,
+      "underspecified": 0.845,
+      "needs_the_codebase": 0.4914,
+      "general_knowledge": 0.5085999999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.69,
+      "probabilities": {
+       "actionable": 0.155,
+       "underspecified": 0.845
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.017199999999999938,
+      "probabilities": {
+       "needs_the_codebase": 0.4914,
+       "general_knowledge": 0.5085999999999999
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7261,
+     "probabilities": {
+      "actionable": 0.13695000000000002,
+      "underspecified": 0.86305,
+      "needs_the_codebase": 0.60105,
+      "general_knowledge": 0.39895
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7261,
+      "probabilities": {
+       "actionable": 0.13695000000000002,
+       "underspecified": 0.86305
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.20209999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.60105,
+       "general_knowledge": 0.39895
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.778,
+     "probabilities": {
+      "actionable": 0.111,
+      "underspecified": 0.889,
+      "needs_the_codebase": 0.59015,
+      "general_knowledge": 0.40985
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.778,
+      "probabilities": {
+       "actionable": 0.111,
+       "underspecified": 0.889
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.18029999999999996,
+      "probabilities": {
+       "needs_the_codebase": 0.59015,
+       "general_knowledge": 0.40985
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What version of three is pinned in our package.json, and does that release include the TSL fog node fix?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6905999999999999,
+     "probabilities": {
+      "actionable": 0.1547,
+      "underspecified": 0.8452999999999999,
+      "needs_the_codebase": 0.5913999999999999,
+      "general_knowledge": 0.40859999999999996
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6905999999999999,
+      "probabilities": {
+       "actionable": 0.1547,
+       "underspecified": 0.8452999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.18279999999999996,
+      "probabilities": {
+       "needs_the_codebase": 0.5913999999999999,
+       "general_knowledge": 0.40859999999999996
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7662,
+     "probabilities": {
+      "actionable": 0.1169,
+      "underspecified": 0.8831,
+      "needs_the_codebase": 0.54945,
+      "general_knowledge": 0.45055
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7662,
+      "probabilities": {
+       "actionable": 0.1169,
+       "underspecified": 0.8831
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09889999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.54945,
+       "general_knowledge": 0.45055
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7349999999999999,
+     "probabilities": {
+      "actionable": 0.1325,
+      "underspecified": 0.8674999999999999,
+      "needs_the_codebase": 0.52245,
+      "general_knowledge": 0.47755000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7349999999999999,
+      "probabilities": {
+       "actionable": 0.1325,
+       "underspecified": 0.8674999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.04489999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.52245,
+       "general_knowledge": 0.47755000000000003
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Which of our Rust modules still use unsafe blocks, and what is each one for?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7170000000000001,
+     "probabilities": {
+      "actionable": 0.14150000000000001,
+      "underspecified": 0.8585,
+      "needs_the_codebase": 0.5965499999999999,
+      "general_knowledge": 0.40345
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7170000000000001,
+      "probabilities": {
+       "actionable": 0.14150000000000001,
+       "underspecified": 0.8585
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.19309999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5965499999999999,
+       "general_knowledge": 0.40345
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.54745,
+      "general_knowledge": 0.45255
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09489999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.54745,
+       "general_knowledge": 0.45255
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7587,
+     "probabilities": {
+      "actionable": 0.12065000000000001,
+      "underspecified": 0.8793500000000001,
+      "needs_the_codebase": 0.5166,
+      "general_knowledge": 0.48339999999999994
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7587,
+      "probabilities": {
+       "actionable": 0.12065000000000001,
+       "underspecified": 0.8793500000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.03320000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.5166,
+       "general_knowledge": 0.48339999999999994
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "The drei Environment component makes our scene washed out but only in the deployed build. What differs between our dev and prod three config?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.4256,
+     "probabilities": {
+      "actionable": 0.2872,
+      "underspecified": 0.7128,
+      "needs_the_codebase": 0.52075,
+      "general_knowledge": 0.47924999999999995
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.4256,
+      "probabilities": {
+       "actionable": 0.2872,
+       "underspecified": 0.7128
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.04150000000000009,
+      "probabilities": {
+       "needs_the_codebase": 0.52075,
+       "general_knowledge": 0.47924999999999995
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7248999999999999,
+     "probabilities": {
+      "actionable": 0.13755,
+      "underspecified": 0.8624499999999999,
+      "needs_the_codebase": 0.5799,
+      "general_knowledge": 0.42010000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7248999999999999,
+      "probabilities": {
+       "actionable": 0.13755,
+       "underspecified": 0.8624499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.15979999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5799,
+       "general_knowledge": 0.42010000000000003
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6924999999999999,
+     "probabilities": {
+      "actionable": 0.15375,
+      "underspecified": 0.84625,
+      "needs_the_codebase": 0.609,
+      "general_knowledge": 0.391
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6924999999999999,
+      "probabilities": {
+       "actionable": 0.15375,
+       "underspecified": 0.84625
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.21799999999999997,
+      "probabilities": {
+       "needs_the_codebase": 0.609,
+       "general_knowledge": 0.391
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Why does our useMemo'd BufferGeometry get disposed twice on hot reload?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6360999999999999,
+     "probabilities": {
+      "actionable": 0.18195,
+      "underspecified": 0.8180499999999999,
+      "needs_the_codebase": 0.8288500000000001,
+      "general_knowledge": 0.17115000000000002
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6360999999999999,
+      "probabilities": {
+       "actionable": 0.18195,
+       "underspecified": 0.8180499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.6577000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.8288500000000001,
+       "general_knowledge": 0.17115000000000002
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7177,
+     "probabilities": {
+      "actionable": 0.14115,
+      "underspecified": 0.85885,
+      "needs_the_codebase": 0.69,
+      "general_knowledge": 0.31
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7177,
+      "probabilities": {
+       "actionable": 0.14115,
+       "underspecified": 0.85885
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.37999999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.69,
+       "general_knowledge": 0.31
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6728999999999999,
+     "probabilities": {
+      "actionable": 0.16355,
+      "underspecified": 0.8364499999999999,
+      "needs_the_codebase": 0.7827999999999999,
+      "general_knowledge": 0.2172
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6728999999999999,
+      "probabilities": {
+       "actionable": 0.16355,
+       "underspecified": 0.8364499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.5655999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.7827999999999999,
+       "general_knowledge": 0.2172
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What columns does the chunks table in our code index actually have?",
+   "label": "investigate",
+   "hard": false,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6834,
+     "probabilities": {
+      "actionable": 0.1583,
+      "underspecified": 0.8417,
+      "needs_the_codebase": 0.64095,
+      "general_knowledge": 0.35905
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6834,
+      "probabilities": {
+       "actionable": 0.1583,
+       "underspecified": 0.8417
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.28190000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.64095,
+       "general_knowledge": 0.35905
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7079,
+     "probabilities": {
+      "actionable": 0.14605,
+      "underspecified": 0.85395,
+      "needs_the_codebase": 0.5413,
+      "general_knowledge": 0.4587
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7079,
+      "probabilities": {
+       "actionable": 0.14605,
+       "underspecified": 0.85395
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.0826,
+      "probabilities": {
+       "needs_the_codebase": 0.5413,
+       "general_knowledge": 0.4587
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.77,
+     "probabilities": {
+      "actionable": 0.11499999999999999,
+      "underspecified": 0.885,
+      "needs_the_codebase": 0.6973,
+      "general_knowledge": 0.30269999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.77,
+      "probabilities": {
+       "actionable": 0.11499999999999999,
+       "underspecified": 0.885
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.39460000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.6973,
+       "general_knowledge": 0.30269999999999997
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is the difference between Fn and the older tslFn in three.js TSL?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7151000000000001,
+     "probabilities": {
+      "actionable": 0.14245000000000002,
+      "underspecified": 0.85755,
+      "needs_the_codebase": 0.3768,
+      "general_knowledge": 0.6232
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7151000000000001,
+      "probabilities": {
+       "actionable": 0.14245000000000002,
+       "underspecified": 0.85755
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.24639999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.3768,
+       "general_knowledge": 0.6232
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7174,
+     "probabilities": {
+      "actionable": 0.14129999999999998,
+      "underspecified": 0.8587,
+      "needs_the_codebase": 0.5317000000000001,
+      "general_knowledge": 0.4683
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7174,
+      "probabilities": {
+       "actionable": 0.14129999999999998,
+       "underspecified": 0.8587
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.06340000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.5317000000000001,
+       "general_knowledge": 0.4683
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7552000000000001,
+     "probabilities": {
+      "actionable": 0.12240000000000001,
+      "underspecified": 0.8776,
+      "needs_the_codebase": 0.40095000000000003,
+      "general_knowledge": 0.59905
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7552000000000001,
+      "probabilities": {
+       "actionable": 0.12240000000000001,
+       "underspecified": 0.8776
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.19809999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.40095000000000003,
+       "general_knowledge": 0.59905
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "In WGSL, is textureSample allowed inside non-uniform control flow?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7436,
+     "probabilities": {
+      "actionable": 0.1282,
+      "underspecified": 0.8718,
+      "needs_the_codebase": 0.40559999999999996,
+      "general_knowledge": 0.5944
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7436,
+      "probabilities": {
+       "actionable": 0.1282,
+       "underspecified": 0.8718
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.18880000000000008,
+      "probabilities": {
+       "needs_the_codebase": 0.40559999999999996,
+       "general_knowledge": 0.5944
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.55635,
+      "general_knowledge": 0.44365
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11270000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.55635,
+       "general_knowledge": 0.44365
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7626,
+     "probabilities": {
+      "actionable": 0.1187,
+      "underspecified": 0.8813,
+      "needs_the_codebase": 0.491,
+      "general_knowledge": 0.509
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7626,
+      "probabilities": {
+       "actionable": 0.1187,
+       "underspecified": 0.8813
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.018000000000000016,
+      "probabilities": {
+       "needs_the_codebase": 0.491,
+       "general_knowledge": 0.509
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What does the second argument to useFrame do in react-three-fiber?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7861,
+     "probabilities": {
+      "actionable": 0.10695,
+      "underspecified": 0.89305,
+      "needs_the_codebase": 0.3638,
+      "general_knowledge": 0.6362
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7861,
+      "probabilities": {
+       "actionable": 0.10695,
+       "underspecified": 0.89305
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.2724,
+      "probabilities": {
+       "needs_the_codebase": 0.3638,
+       "general_knowledge": 0.6362
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7031000000000001,
+     "probabilities": {
+      "actionable": 0.14845,
+      "underspecified": 0.85155,
+      "needs_the_codebase": 0.5421,
+      "general_knowledge": 0.4579
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7031000000000001,
+      "probabilities": {
+       "actionable": 0.14845,
+       "underspecified": 0.85155
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08420000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.5421,
+       "general_knowledge": 0.4579
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.8131999999999999,
+     "probabilities": {
+      "actionable": 0.0934,
+      "underspecified": 0.9066,
+      "needs_the_codebase": 0.4871,
+      "general_knowledge": 0.5129
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.8131999999999999,
+      "probabilities": {
+       "actionable": 0.0934,
+       "underspecified": 0.9066
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.025800000000000045,
+      "probabilities": {
+       "needs_the_codebase": 0.4871,
+       "general_knowledge": 0.5129
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is the difference between &str and String in Rust, and when do I want each?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7145999999999999,
+     "probabilities": {
+      "actionable": 0.1427,
+      "underspecified": 0.8573,
+      "needs_the_codebase": 0.28774999999999995,
+      "general_knowledge": 0.71225
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7145999999999999,
+      "probabilities": {
+       "actionable": 0.1427,
+       "underspecified": 0.8573
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.4245000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.28774999999999995,
+       "general_knowledge": 0.71225
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7031000000000001,
+     "probabilities": {
+      "actionable": 0.14845,
+      "underspecified": 0.85155,
+      "needs_the_codebase": 0.5441,
+      "general_knowledge": 0.45589999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7031000000000001,
+      "probabilities": {
+       "actionable": 0.14845,
+       "underspecified": 0.85155
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08820000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.5441,
+       "general_knowledge": 0.45589999999999997
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7741,
+     "probabilities": {
+      "actionable": 0.11295000000000001,
+      "underspecified": 0.88705,
+      "needs_the_codebase": 0.45315,
+      "general_knowledge": 0.5468500000000001
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7741,
+      "probabilities": {
+       "actionable": 0.11295000000000001,
+       "underspecified": 0.88705
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.09370000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.45315,
+       "general_knowledge": 0.5468500000000001
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "How do TypeScript conditional types distribute over union types, and how do I stop that?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6642000000000001,
+     "probabilities": {
+      "actionable": 0.1679,
+      "underspecified": 0.8321000000000001,
+      "needs_the_codebase": 0.33735000000000004,
+      "general_knowledge": 0.66265
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6642000000000001,
+      "probabilities": {
+       "actionable": 0.1679,
+       "underspecified": 0.8321000000000001
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.3252999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.33735000000000004,
+       "general_knowledge": 0.66265
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.54745,
+      "general_knowledge": 0.45255
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09489999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.54745,
+       "general_knowledge": 0.45255
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7412000000000001,
+     "probabilities": {
+      "actionable": 0.12940000000000002,
+      "underspecified": 0.8706,
+      "needs_the_codebase": 0.52145,
+      "general_knowledge": 0.47855000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7412000000000001,
+      "probabilities": {
+       "actionable": 0.12940000000000002,
+       "underspecified": 0.8706
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.04289999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.52145,
+       "general_knowledge": 0.47855000000000003
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is a workgroup in WGSL and how does workgroup_size relate to the dispatch count?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6528,
+     "probabilities": {
+      "actionable": 0.17359999999999998,
+      "underspecified": 0.8264,
+      "needs_the_codebase": 0.34395,
+      "general_knowledge": 0.65605
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6528,
+      "probabilities": {
+       "actionable": 0.17359999999999998,
+       "underspecified": 0.8264
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.31210000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.34395,
+       "general_knowledge": 0.65605
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7215,
+     "probabilities": {
+      "actionable": 0.13924999999999998,
+      "underspecified": 0.86075,
+      "needs_the_codebase": 0.6042000000000001,
+      "general_knowledge": 0.39580000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7215,
+      "probabilities": {
+       "actionable": 0.13924999999999998,
+       "underspecified": 0.86075
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.20840000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.6042000000000001,
+       "general_knowledge": 0.39580000000000004
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6980999999999999,
+     "probabilities": {
+      "actionable": 0.15095,
+      "underspecified": 0.84905,
+      "needs_the_codebase": 0.365,
+      "general_knowledge": 0.635
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6980999999999999,
+      "probabilities": {
+       "actionable": 0.15095,
+       "underspecified": 0.84905
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.27,
+      "probabilities": {
+       "needs_the_codebase": 0.365,
+       "general_knowledge": 0.635
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What does the satisfies operator do in TypeScript, and how is it different from as?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7847999999999999,
+     "probabilities": {
+      "actionable": 0.1076,
+      "underspecified": 0.8924,
+      "needs_the_codebase": 0.3077,
+      "general_knowledge": 0.6922999999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7847999999999999,
+      "probabilities": {
+       "actionable": 0.1076,
+       "underspecified": 0.8924
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.38459999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.3077,
+       "general_knowledge": 0.6922999999999999
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.54745,
+      "general_knowledge": 0.45255
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09489999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.54745,
+       "general_knowledge": 0.45255
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7876,
+     "probabilities": {
+      "actionable": 0.1062,
+      "underspecified": 0.8937999999999999,
+      "needs_the_codebase": 0.50095,
+      "general_knowledge": 0.49905
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7876,
+      "probabilities": {
+       "actionable": 0.1062,
+       "underspecified": 0.8937999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.0019000000000000128,
+      "probabilities": {
+       "needs_the_codebase": 0.50095,
+       "general_knowledge": 0.49905
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Why can't Rust pass ?Sized types by value?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7452000000000001,
+     "probabilities": {
+      "actionable": 0.1274,
+      "underspecified": 0.8726,
+      "needs_the_codebase": 0.44325000000000003,
+      "general_knowledge": 0.55675
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7452000000000001,
+      "probabilities": {
+       "actionable": 0.1274,
+       "underspecified": 0.8726
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.11349999999999993,
+      "probabilities": {
+       "needs_the_codebase": 0.44325000000000003,
+       "general_knowledge": 0.55675
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6968000000000001,
+     "probabilities": {
+      "actionable": 0.1516,
+      "underspecified": 0.8484,
+      "needs_the_codebase": 0.5556,
+      "general_knowledge": 0.4444
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6968000000000001,
+      "probabilities": {
+       "actionable": 0.1516,
+       "underspecified": 0.8484
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11119999999999997,
+      "probabilities": {
+       "needs_the_codebase": 0.5556,
+       "general_knowledge": 0.4444
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7203999999999999,
+     "probabilities": {
+      "actionable": 0.1398,
+      "underspecified": 0.8602,
+      "needs_the_codebase": 0.56535,
+      "general_knowledge": 0.43465
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7203999999999999,
+      "probabilities": {
+       "actionable": 0.1398,
+       "underspecified": 0.8602
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.13070000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.56535,
+       "general_knowledge": 0.43465
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is the difference between the storage and uniform address spaces in WGSL?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7233,
+     "probabilities": {
+      "actionable": 0.13835,
+      "underspecified": 0.86165,
+      "needs_the_codebase": 0.27715,
+      "general_knowledge": 0.72285
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7233,
+      "probabilities": {
+       "actionable": 0.13835,
+       "underspecified": 0.86165
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.4457,
+      "probabilities": {
+       "needs_the_codebase": 0.27715,
+       "general_knowledge": 0.72285
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7098,
+     "probabilities": {
+      "actionable": 0.1451,
+      "underspecified": 0.8549,
+      "needs_the_codebase": 0.55175,
+      "general_knowledge": 0.44825000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7098,
+      "probabilities": {
+       "actionable": 0.1451,
+       "underspecified": 0.8549
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10349999999999993,
+      "probabilities": {
+       "needs_the_codebase": 0.55175,
+       "general_knowledge": 0.44825000000000004
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7444999999999999,
+     "probabilities": {
+      "actionable": 0.12775,
+      "underspecified": 0.87225,
+      "needs_the_codebase": 0.36424999999999996,
+      "general_knowledge": 0.63575
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7444999999999999,
+      "probabilities": {
+       "actionable": 0.12775,
+       "underspecified": 0.87225
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.2715000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.36424999999999996,
+       "general_knowledge": 0.63575
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "How does TypeGPU's bindGroupLayout differ from raw WebGPU createBindGroupLayout?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6720999999999999,
+     "probabilities": {
+      "actionable": 0.16394999999999998,
+      "underspecified": 0.83605,
+      "needs_the_codebase": 0.4521,
+      "general_knowledge": 0.5479
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6720999999999999,
+      "probabilities": {
+       "actionable": 0.16394999999999998,
+       "underspecified": 0.83605
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.09580000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.4521,
+       "general_knowledge": 0.5479
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.55635,
+      "general_knowledge": 0.44365
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11270000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.55635,
+       "general_knowledge": 0.44365
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7339,
+     "probabilities": {
+      "actionable": 0.13305,
+      "underspecified": 0.86695,
+      "needs_the_codebase": 0.5385500000000001,
+      "general_knowledge": 0.46145
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7339,
+      "probabilities": {
+       "actionable": 0.13305,
+       "underspecified": 0.86695
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.07710000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.5385500000000001,
+       "general_knowledge": 0.46145
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is the default dpr for an R3F Canvas if I don't set it?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.5781000000000001,
+     "probabilities": {
+      "actionable": 0.21095,
+      "underspecified": 0.78905,
+      "needs_the_codebase": 0.3864,
+      "general_knowledge": 0.6136
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5781000000000001,
+      "probabilities": {
+       "actionable": 0.21095,
+       "underspecified": 0.78905
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.2272,
+      "probabilities": {
+       "needs_the_codebase": 0.3864,
+       "general_knowledge": 0.6136
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7057,
+     "probabilities": {
+      "actionable": 0.14715,
+      "underspecified": 0.85285,
+      "needs_the_codebase": 0.5528,
+      "general_knowledge": 0.44720000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7057,
+      "probabilities": {
+       "actionable": 0.14715,
+       "underspecified": 0.85285
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10559999999999992,
+      "probabilities": {
+       "needs_the_codebase": 0.5528,
+       "general_knowledge": 0.44720000000000004
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.5572999999999999,
+     "probabilities": {
+      "actionable": 0.22135,
+      "underspecified": 0.77865,
+      "needs_the_codebase": 0.5310999999999999,
+      "general_knowledge": 0.4689
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5572999999999999,
+      "probabilities": {
+       "actionable": 0.22135,
+       "underspecified": 0.77865
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.06219999999999992,
+      "probabilities": {
+       "needs_the_codebase": 0.5310999999999999,
+       "general_knowledge": 0.4689
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What do the in and out variance annotations on a TypeScript type parameter do?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7423000000000001,
+     "probabilities": {
+      "actionable": 0.12885000000000002,
+      "underspecified": 0.8711500000000001,
+      "needs_the_codebase": 0.32265,
+      "general_knowledge": 0.6773499999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7423000000000001,
+      "probabilities": {
+       "actionable": 0.12885000000000002,
+       "underspecified": 0.8711500000000001
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.3546999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.32265,
+       "general_knowledge": 0.6773499999999999
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7057,
+     "probabilities": {
+      "actionable": 0.14715,
+      "underspecified": 0.85285,
+      "needs_the_codebase": 0.5528,
+      "general_knowledge": 0.44720000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7057,
+      "probabilities": {
+       "actionable": 0.14715,
+       "underspecified": 0.85285
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10559999999999992,
+      "probabilities": {
+       "needs_the_codebase": 0.5528,
+       "general_knowledge": 0.44720000000000004
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7690999999999999,
+     "probabilities": {
+      "actionable": 0.11545,
+      "underspecified": 0.88455,
+      "needs_the_codebase": 0.51585,
+      "general_knowledge": 0.48415
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7690999999999999,
+      "probabilities": {
+       "actionable": 0.11545,
+       "underspecified": 0.88455
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.031700000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.51585,
+       "general_knowledge": 0.48415
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What does Box<dyn Error> mean and when should a function return it instead of a concrete error type?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6572,
+     "probabilities": {
+      "actionable": 0.1714,
+      "underspecified": 0.8286,
+      "needs_the_codebase": 0.3115,
+      "general_knowledge": 0.6885
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6572,
+      "probabilities": {
+       "actionable": 0.1714,
+       "underspecified": 0.8286
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.377,
+      "probabilities": {
+       "needs_the_codebase": 0.3115,
+       "general_knowledge": 0.6885
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7147999999999999,
+     "probabilities": {
+      "actionable": 0.1426,
+      "underspecified": 0.8573999999999999,
+      "needs_the_codebase": 0.54575,
+      "general_knowledge": 0.45425
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7147999999999999,
+      "probabilities": {
+       "actionable": 0.1426,
+       "underspecified": 0.8573999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09149999999999997,
+      "probabilities": {
+       "needs_the_codebase": 0.54575,
+       "general_knowledge": 0.45425
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6983999999999999,
+     "probabilities": {
+      "actionable": 0.1508,
+      "underspecified": 0.8492,
+      "needs_the_codebase": 0.46299999999999997,
+      "general_knowledge": 0.5369999999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6983999999999999,
+      "probabilities": {
+       "actionable": 0.1508,
+       "underspecified": 0.8492
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.07399999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.46299999999999997,
+       "general_knowledge": 0.5369999999999999
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "In three.js, what is the practical difference between a Group and a plain Object3D?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6910000000000001,
+     "probabilities": {
+      "actionable": 0.1545,
+      "underspecified": 0.8455,
+      "needs_the_codebase": 0.2968,
+      "general_knowledge": 0.7032
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6910000000000001,
+      "probabilities": {
+       "actionable": 0.1545,
+       "underspecified": 0.8455
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.40640000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.2968,
+       "general_knowledge": 0.7032
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7079,
+     "probabilities": {
+      "actionable": 0.14605,
+      "underspecified": 0.85395,
+      "needs_the_codebase": 0.5408000000000001,
+      "general_knowledge": 0.45920000000000005
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7079,
+      "probabilities": {
+       "actionable": 0.14605,
+       "underspecified": 0.85395
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.0816,
+      "probabilities": {
+       "needs_the_codebase": 0.5408000000000001,
+       "general_knowledge": 0.45920000000000005
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7279,
+     "probabilities": {
+      "actionable": 0.13605,
+      "underspecified": 0.86395,
+      "needs_the_codebase": 0.38795,
+      "general_knowledge": 0.61205
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7279,
+      "probabilities": {
+       "actionable": 0.13605,
+       "underspecified": 0.86395
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.22409999999999997,
+      "probabilities": {
+       "needs_the_codebase": 0.38795,
+       "general_knowledge": 0.61205
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What does the @builtin(position) attribute mean in a WGSL vertex shader, and how does it differ in a fragment shader?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7016,
+     "probabilities": {
+      "actionable": 0.1492,
+      "underspecified": 0.8508,
+      "needs_the_codebase": 0.3065,
+      "general_knowledge": 0.6935
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7016,
+      "probabilities": {
+       "actionable": 0.1492,
+       "underspecified": 0.8508
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.387,
+      "probabilities": {
+       "needs_the_codebase": 0.3065,
+       "general_knowledge": 0.6935
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6971,
+     "probabilities": {
+      "actionable": 0.15145,
+      "underspecified": 0.84855,
+      "needs_the_codebase": 0.55045,
+      "general_knowledge": 0.44955
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6971,
+      "probabilities": {
+       "actionable": 0.15145,
+       "underspecified": 0.84855
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10089999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.55045,
+       "general_knowledge": 0.44955
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7696000000000001,
+     "probabilities": {
+      "actionable": 0.1152,
+      "underspecified": 0.8848,
+      "needs_the_codebase": 0.50465,
+      "general_knowledge": 0.49534999999999996
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7696000000000001,
+      "probabilities": {
+       "actionable": 0.1152,
+       "underspecified": 0.8848
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.009300000000000086,
+      "probabilities": {
+       "needs_the_codebase": 0.50465,
+       "general_knowledge": 0.49534999999999996
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is the time complexity of inserting into a JavaScript Map, and is it different from a plain object?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7012,
+     "probabilities": {
+      "actionable": 0.14939999999999998,
+      "underspecified": 0.8506,
+      "needs_the_codebase": 0.35315,
+      "general_knowledge": 0.64685
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7012,
+      "probabilities": {
+       "actionable": 0.14939999999999998,
+       "underspecified": 0.8506
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.2937,
+      "probabilities": {
+       "needs_the_codebase": 0.35315,
+       "general_knowledge": 0.64685
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7253000000000001,
+     "probabilities": {
+      "actionable": 0.13735,
+      "underspecified": 0.86265,
+      "needs_the_codebase": 0.5641499999999999,
+      "general_knowledge": 0.43584999999999996
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7253000000000001,
+      "probabilities": {
+       "actionable": 0.13735,
+       "underspecified": 0.86265
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.12829999999999997,
+      "probabilities": {
+       "needs_the_codebase": 0.5641499999999999,
+       "general_knowledge": 0.43584999999999996
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7513000000000001,
+     "probabilities": {
+      "actionable": 0.12435,
+      "underspecified": 0.87565,
+      "needs_the_codebase": 0.50585,
+      "general_knowledge": 0.49415
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7513000000000001,
+      "probabilities": {
+       "actionable": 0.12435,
+       "underspecified": 0.87565
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.011700000000000044,
+      "probabilities": {
+       "needs_the_codebase": 0.50585,
+       "general_knowledge": 0.49415
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What does #[derive(Clone)] actually generate in Rust, and why does it add a T: Clone bound?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7535,
+     "probabilities": {
+      "actionable": 0.12325,
+      "underspecified": 0.8767499999999999,
+      "needs_the_codebase": 0.45230000000000004,
+      "general_knowledge": 0.5477
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7535,
+      "probabilities": {
+       "actionable": 0.12325,
+       "underspecified": 0.8767499999999999
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.09539999999999993,
+      "probabilities": {
+       "needs_the_codebase": 0.45230000000000004,
+       "general_knowledge": 0.5477
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7031000000000001,
+     "probabilities": {
+      "actionable": 0.14845,
+      "underspecified": 0.85155,
+      "needs_the_codebase": 0.5441,
+      "general_knowledge": 0.45589999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7031000000000001,
+      "probabilities": {
+       "actionable": 0.14845,
+       "underspecified": 0.85155
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08820000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.5441,
+       "general_knowledge": 0.45589999999999997
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7523,
+     "probabilities": {
+      "actionable": 0.12385000000000002,
+      "underspecified": 0.87615,
+      "needs_the_codebase": 0.4832,
+      "general_knowledge": 0.5167999999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7523,
+      "probabilities": {
+       "actionable": 0.12385000000000002,
+       "underspecified": 0.87615
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.03359999999999991,
+      "probabilities": {
+       "needs_the_codebase": 0.4832,
+       "general_knowledge": 0.5167999999999999
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Why does instancing help draw-call-bound scenes but not fill-rate-bound ones?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7163999999999999,
+     "probabilities": {
+      "actionable": 0.14179999999999998,
+      "underspecified": 0.8582,
+      "needs_the_codebase": 0.27255,
+      "general_knowledge": 0.72745
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7163999999999999,
+      "probabilities": {
+       "actionable": 0.14179999999999998,
+       "underspecified": 0.8582
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.4549,
+      "probabilities": {
+       "needs_the_codebase": 0.27255,
+       "general_knowledge": 0.72745
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7031000000000001,
+     "probabilities": {
+      "actionable": 0.14845,
+      "underspecified": 0.85155,
+      "needs_the_codebase": 0.5421,
+      "general_knowledge": 0.4579
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7031000000000001,
+      "probabilities": {
+       "actionable": 0.14845,
+       "underspecified": 0.85155
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08420000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.5421,
+       "general_knowledge": 0.4579
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7530000000000001,
+     "probabilities": {
+      "actionable": 0.1235,
+      "underspecified": 0.8765000000000001,
+      "needs_the_codebase": 0.4255,
+      "general_knowledge": 0.5745
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7530000000000001,
+      "probabilities": {
+       "actionable": 0.1235,
+       "underspecified": 0.8765000000000001
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.14900000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.4255,
+       "general_knowledge": 0.5745
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What is the difference between a TypeScript interface and a type alias for object shapes?",
+   "label": "answer_directly",
+   "hard": false,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7463000000000001,
+     "probabilities": {
+      "actionable": 0.12685,
+      "underspecified": 0.8731500000000001,
+      "needs_the_codebase": 0.2686,
+      "general_knowledge": 0.7314
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7463000000000001,
+      "probabilities": {
+       "actionable": 0.12685,
+       "underspecified": 0.8731500000000001
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.46280000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.2686,
+       "general_knowledge": 0.7314
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.54745,
+      "general_knowledge": 0.45255
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09489999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.54745,
+       "general_knowledge": 0.45255
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7578,
+     "probabilities": {
+      "actionable": 0.1211,
+      "underspecified": 0.8789,
+      "needs_the_codebase": 0.4042,
+      "general_knowledge": 0.5958
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7578,
+      "probabilities": {
+       "actionable": 0.1211,
+       "underspecified": 0.8789
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.1916,
+      "probabilities": {
+       "needs_the_codebase": 0.4042,
+       "general_knowledge": 0.5958
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "It's broken.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6951999999999999,
+     "probabilities": {
+      "actionable": 0.15239999999999998,
+      "underspecified": 0.8475999999999999,
+      "needs_the_codebase": 0.50065,
+      "general_knowledge": 0.49935
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6951999999999999,
+      "probabilities": {
+       "actionable": 0.15239999999999998,
+       "underspecified": 0.8475999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.0013000000000000234,
+      "probabilities": {
+       "needs_the_codebase": 0.50065,
+       "general_knowledge": 0.49935
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6960999999999999,
+     "probabilities": {
+      "actionable": 0.15195,
+      "underspecified": 0.84805,
+      "needs_the_codebase": 0.58345,
+      "general_knowledge": 0.41655
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6960999999999999,
+      "probabilities": {
+       "actionable": 0.15195,
+       "underspecified": 0.84805
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.16690000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.58345,
+       "general_knowledge": 0.41655
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7716000000000001,
+     "probabilities": {
+      "actionable": 0.1142,
+      "underspecified": 0.8858,
+      "needs_the_codebase": 0.61555,
+      "general_knowledge": 0.38445
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7716000000000001,
+      "probabilities": {
+       "actionable": 0.1142,
+       "underspecified": 0.8858
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.23110000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.61555,
+       "general_knowledge": 0.38445
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Can you make it faster?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.5253000000000001,
+     "probabilities": {
+      "actionable": 0.23735,
+      "underspecified": 0.76265,
+      "needs_the_codebase": 0.43085,
+      "general_knowledge": 0.56915
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5253000000000001,
+      "probabilities": {
+       "actionable": 0.23735,
+       "underspecified": 0.76265
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.13830000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.43085,
+       "general_knowledge": 0.56915
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6964999999999999,
+     "probabilities": {
+      "actionable": 0.15175,
+      "underspecified": 0.84825,
+      "needs_the_codebase": 0.5559499999999999,
+      "general_knowledge": 0.44405
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6964999999999999,
+      "probabilities": {
+       "actionable": 0.15175,
+       "underspecified": 0.84825
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11189999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5559499999999999,
+       "general_knowledge": 0.44405
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.47209999999999996,
+     "probabilities": {
+      "actionable": 0.26395,
+      "underspecified": 0.73605,
+      "needs_the_codebase": 0.5647500000000001,
+      "general_knowledge": 0.43525
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.47209999999999996,
+      "probabilities": {
+       "actionable": 0.26395,
+       "underspecified": 0.73605
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.12950000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.5647500000000001,
+       "general_knowledge": 0.43525
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Why doesn't this work?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7404000000000001,
+     "probabilities": {
+      "actionable": 0.1298,
+      "underspecified": 0.8702000000000001,
+      "needs_the_codebase": 0.4327,
+      "general_knowledge": 0.5673
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7404000000000001,
+      "probabilities": {
+       "actionable": 0.1298,
+       "underspecified": 0.8702000000000001
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.13460000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.4327,
+       "general_knowledge": 0.5673
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6917,
+     "probabilities": {
+      "actionable": 0.15415,
+      "underspecified": 0.84585,
+      "needs_the_codebase": 0.5657000000000001,
+      "general_knowledge": 0.4343
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6917,
+      "probabilities": {
+       "actionable": 0.15415,
+       "underspecified": 0.84585
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.13140000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.5657000000000001,
+       "general_knowledge": 0.4343
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7323,
+     "probabilities": {
+      "actionable": 0.13385,
+      "underspecified": 0.86615,
+      "needs_the_codebase": 0.5417000000000001,
+      "general_knowledge": 0.4583
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7323,
+      "probabilities": {
+       "actionable": 0.13385,
+       "underspecified": 0.86615
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08340000000000009,
+      "probabilities": {
+       "needs_the_codebase": 0.5417000000000001,
+       "general_knowledge": 0.4583
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Should I use the other approach instead?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7852999999999999,
+     "probabilities": {
+      "actionable": 0.10735,
+      "underspecified": 0.8926499999999999,
+      "needs_the_codebase": 0.4057,
+      "general_knowledge": 0.5943
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7852999999999999,
+      "probabilities": {
+       "actionable": 0.10735,
+       "underspecified": 0.8926499999999999
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.18860000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.4057,
+       "general_knowledge": 0.5943
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7349999999999999,
+     "probabilities": {
+      "actionable": 0.1325,
+      "underspecified": 0.8674999999999999,
+      "needs_the_codebase": 0.5488999999999999,
+      "general_knowledge": 0.4511
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7349999999999999,
+      "probabilities": {
+       "actionable": 0.1325,
+       "underspecified": 0.8674999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09779999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5488999999999999,
+       "general_knowledge": 0.4511
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6778,
+     "probabilities": {
+      "actionable": 0.16110000000000002,
+      "underspecified": 0.8389,
+      "needs_the_codebase": 0.5695,
+      "general_knowledge": 0.4305
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6778,
+      "probabilities": {
+       "actionable": 0.16110000000000002,
+       "underspecified": 0.8389
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.139,
+      "probabilities": {
+       "needs_the_codebase": 0.5695,
+       "general_knowledge": 0.4305
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Fix the shader.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.5933,
+     "probabilities": {
+      "actionable": 0.20335,
+      "underspecified": 0.7966500000000001,
+      "needs_the_codebase": 0.5454,
+      "general_knowledge": 0.4546
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5933,
+      "probabilities": {
+       "actionable": 0.20335,
+       "underspecified": 0.7966500000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.09079999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.5454,
+       "general_knowledge": 0.4546
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6905000000000001,
+     "probabilities": {
+      "actionable": 0.15475,
+      "underspecified": 0.8452500000000001,
+      "needs_the_codebase": 0.57235,
+      "general_knowledge": 0.42765
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6905000000000001,
+      "probabilities": {
+       "actionable": 0.15475,
+       "underspecified": 0.8452500000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.14470000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.57235,
+       "general_knowledge": 0.42765
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6206999999999999,
+     "probabilities": {
+      "actionable": 0.18964999999999999,
+      "underspecified": 0.8103499999999999,
+      "needs_the_codebase": 0.60795,
+      "general_knowledge": 0.39205
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6206999999999999,
+      "probabilities": {
+       "actionable": 0.18964999999999999,
+       "underspecified": 0.8103499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.21589999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.60795,
+       "general_knowledge": 0.39205
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "It renders wrong on mobile.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6863000000000001,
+     "probabilities": {
+      "actionable": 0.15685,
+      "underspecified": 0.8431500000000001,
+      "needs_the_codebase": 0.5146,
+      "general_knowledge": 0.4854
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6863000000000001,
+      "probabilities": {
+       "actionable": 0.15685,
+       "underspecified": 0.8431500000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.029199999999999948,
+      "probabilities": {
+       "needs_the_codebase": 0.5146,
+       "general_knowledge": 0.4854
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6964999999999999,
+     "probabilities": {
+      "actionable": 0.15175,
+      "underspecified": 0.84825,
+      "needs_the_codebase": 0.5559499999999999,
+      "general_knowledge": 0.44405
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6964999999999999,
+      "probabilities": {
+       "actionable": 0.15175,
+       "underspecified": 0.84825
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11189999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5559499999999999,
+       "general_knowledge": 0.44405
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7999,
+     "probabilities": {
+      "actionable": 0.10005,
+      "underspecified": 0.89995,
+      "needs_the_codebase": 0.5216000000000001,
+      "general_knowledge": 0.4784
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7999,
+      "probabilities": {
+       "actionable": 0.10005,
+       "underspecified": 0.89995
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.04320000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.5216000000000001,
+       "general_knowledge": 0.4784
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Update the types.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6117999999999999,
+     "probabilities": {
+      "actionable": 0.1941,
+      "underspecified": 0.8059,
+      "needs_the_codebase": 0.6326,
+      "general_knowledge": 0.3674
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6117999999999999,
+      "probabilities": {
+       "actionable": 0.1941,
+       "underspecified": 0.8059
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.26520000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.6326,
+       "general_knowledge": 0.3674
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6905000000000001,
+     "probabilities": {
+      "actionable": 0.15475,
+      "underspecified": 0.8452500000000001,
+      "needs_the_codebase": 0.57235,
+      "general_knowledge": 0.42765
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6905000000000001,
+      "probabilities": {
+       "actionable": 0.15475,
+       "underspecified": 0.8452500000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.14470000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.57235,
+       "general_knowledge": 0.42765
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.5432000000000001,
+     "probabilities": {
+      "actionable": 0.2284,
+      "underspecified": 0.7716000000000001,
+      "needs_the_codebase": 0.6386000000000001,
+      "general_knowledge": 0.3614
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5432000000000001,
+      "probabilities": {
+       "actionable": 0.2284,
+       "underspecified": 0.7716000000000001
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.27720000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.6386000000000001,
+       "general_knowledge": 0.3614
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Which one is better?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6280999999999999,
+     "probabilities": {
+      "actionable": 0.18595,
+      "underspecified": 0.8140499999999999,
+      "needs_the_codebase": 0.45325,
+      "general_knowledge": 0.5467500000000001
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6280999999999999,
+      "probabilities": {
+       "actionable": 0.18595,
+       "underspecified": 0.8140499999999999
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.09350000000000008,
+      "probabilities": {
+       "needs_the_codebase": 0.45325,
+       "general_knowledge": 0.5467500000000001
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6917,
+     "probabilities": {
+      "actionable": 0.15415,
+      "underspecified": 0.84585,
+      "needs_the_codebase": 0.5657000000000001,
+      "general_knowledge": 0.4343
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6917,
+      "probabilities": {
+       "actionable": 0.15415,
+       "underspecified": 0.84585
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.13140000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.5657000000000001,
+       "general_knowledge": 0.4343
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7178,
+     "probabilities": {
+      "actionable": 0.1411,
+      "underspecified": 0.8589,
+      "needs_the_codebase": 0.538,
+      "general_knowledge": 0.46199999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7178,
+      "probabilities": {
+       "actionable": 0.1411,
+       "underspecified": 0.8589
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.07600000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.538,
+       "general_knowledge": 0.46199999999999997
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Add the thing we talked about.",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6788,
+     "probabilities": {
+      "actionable": 0.1606,
+      "underspecified": 0.8393999999999999,
+      "needs_the_codebase": 0.5117,
+      "general_knowledge": 0.48829999999999996
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6788,
+      "probabilities": {
+       "actionable": 0.1606,
+       "underspecified": 0.8393999999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.023400000000000087,
+      "probabilities": {
+       "needs_the_codebase": 0.5117,
+       "general_knowledge": 0.48829999999999996
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6914,
+     "probabilities": {
+      "actionable": 0.1543,
+      "underspecified": 0.8457,
+      "needs_the_codebase": 0.5583,
+      "general_knowledge": 0.4417
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6914,
+      "probabilities": {
+       "actionable": 0.1543,
+       "underspecified": 0.8457
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11660000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.5583,
+       "general_knowledge": 0.4417
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.3026,
+     "probabilities": {
+      "actionable": 0.3487,
+      "underspecified": 0.6513,
+      "needs_the_codebase": 0.59425,
+      "general_knowledge": 0.40575
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.3026,
+      "probabilities": {
+       "actionable": 0.3487,
+       "underspecified": 0.6513
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.18849999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.59425,
+       "general_knowledge": 0.40575
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Does this look right to you?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.4025,
+     "probabilities": {
+      "actionable": 0.29875,
+      "underspecified": 0.70125,
+      "needs_the_codebase": 0.32295,
+      "general_knowledge": 0.67705
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.4025,
+      "probabilities": {
+       "actionable": 0.29875,
+       "underspecified": 0.70125
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.3541,
+      "probabilities": {
+       "needs_the_codebase": 0.32295,
+       "general_knowledge": 0.67705
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6914,
+     "probabilities": {
+      "actionable": 0.1543,
+      "underspecified": 0.8457,
+      "needs_the_codebase": 0.5583,
+      "general_knowledge": 0.4417
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6914,
+      "probabilities": {
+       "actionable": 0.1543,
+       "underspecified": 0.8457
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11660000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.5583,
+       "general_knowledge": 0.4417
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.5932999999999999,
+     "probabilities": {
+      "actionable": 0.20334999999999998,
+      "underspecified": 0.79665,
+      "needs_the_codebase": 0.34804999999999997,
+      "general_knowledge": 0.65195
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5932999999999999,
+      "probabilities": {
+       "actionable": 0.20334999999999998,
+       "underspecified": 0.79665
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.30390000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.34804999999999997,
+       "general_knowledge": 0.65195
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Can you check it before I push?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6815,
+     "probabilities": {
+      "actionable": 0.15925,
+      "underspecified": 0.84075,
+      "needs_the_codebase": 0.49939999999999996,
+      "general_knowledge": 0.5005999999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6815,
+      "probabilities": {
+       "actionable": 0.15925,
+       "underspecified": 0.84075
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.0011999999999999789,
+      "probabilities": {
+       "needs_the_codebase": 0.49939999999999996,
+       "general_knowledge": 0.5005999999999999
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7235,
+     "probabilities": {
+      "actionable": 0.13825,
+      "underspecified": 0.86175,
+      "needs_the_codebase": 0.5547,
+      "general_knowledge": 0.44530000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7235,
+      "probabilities": {
+       "actionable": 0.13825,
+       "underspecified": 0.86175
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10939999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5547,
+       "general_knowledge": 0.44530000000000003
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.5833999999999999,
+     "probabilities": {
+      "actionable": 0.20829999999999999,
+      "underspecified": 0.7917,
+      "needs_the_codebase": 0.5352,
+      "general_knowledge": 0.4648
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.5833999999999999,
+      "probabilities": {
+       "actionable": 0.20829999999999999,
+       "underspecified": 0.7917
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.07040000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.5352,
+       "general_knowledge": 0.4648
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Is this the right pattern here?",
+   "label": "clarify",
+   "hard": false,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7681,
+     "probabilities": {
+      "actionable": 0.11595,
+      "underspecified": 0.88405,
+      "needs_the_codebase": 0.4042,
+      "general_knowledge": 0.5958
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7681,
+      "probabilities": {
+       "actionable": 0.11595,
+       "underspecified": 0.88405
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.1916,
+      "probabilities": {
+       "needs_the_codebase": 0.4042,
+       "general_knowledge": 0.5958
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6914,
+     "probabilities": {
+      "actionable": 0.1543,
+      "underspecified": 0.8457,
+      "needs_the_codebase": 0.5583,
+      "general_knowledge": 0.4417
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6914,
+      "probabilities": {
+       "actionable": 0.1543,
+       "underspecified": 0.8457
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11660000000000004,
+      "probabilities": {
+       "needs_the_codebase": 0.5583,
+       "general_knowledge": 0.4417
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7798,
+     "probabilities": {
+      "actionable": 0.1101,
+      "underspecified": 0.8899,
+      "needs_the_codebase": 0.4598,
+      "general_knowledge": 0.5402
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7798,
+      "probabilities": {
+       "actionable": 0.1101,
+       "underspecified": 0.8899
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.08040000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.4598,
+       "general_knowledge": 0.5402
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Does the retry helper back off exponentially or linearly?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7343999999999999,
+     "probabilities": {
+      "actionable": 0.1328,
+      "underspecified": 0.8672,
+      "needs_the_codebase": 0.3879,
+      "general_knowledge": 0.6121000000000001
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7343999999999999,
+      "probabilities": {
+       "actionable": 0.1328,
+       "underspecified": 0.8672
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.22420000000000007,
+      "probabilities": {
+       "needs_the_codebase": 0.3879,
+       "general_knowledge": 0.6121000000000001
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7036,
+     "probabilities": {
+      "actionable": 0.1482,
+      "underspecified": 0.8518,
+      "needs_the_codebase": 0.55635,
+      "general_knowledge": 0.44365
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7036,
+      "probabilities": {
+       "actionable": 0.1482,
+       "underspecified": 0.8518
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11270000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.55635,
+       "general_knowledge": 0.44365
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7755000000000001,
+     "probabilities": {
+      "actionable": 0.11224999999999999,
+      "underspecified": 0.88775,
+      "needs_the_codebase": 0.4502,
+      "general_knowledge": 0.5498
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7755000000000001,
+      "probabilities": {
+       "actionable": 0.11224999999999999,
+       "underspecified": 0.88775
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.09959999999999997,
+      "probabilities": {
+       "needs_the_codebase": 0.4502,
+       "general_knowledge": 0.5498
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "How many hops does the investigation loop get before the tools are withdrawn?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7071000000000001,
+     "probabilities": {
+      "actionable": 0.14645,
+      "underspecified": 0.85355,
+      "needs_the_codebase": 0.40135,
+      "general_knowledge": 0.59865
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7071000000000001,
+      "probabilities": {
+       "actionable": 0.14645,
+       "underspecified": 0.85355
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.19730000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.40135,
+       "general_knowledge": 0.59865
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7098,
+     "probabilities": {
+      "actionable": 0.1451,
+      "underspecified": 0.8549,
+      "needs_the_codebase": 0.55175,
+      "general_knowledge": 0.44825000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7098,
+      "probabilities": {
+       "actionable": 0.1451,
+       "underspecified": 0.8549
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10349999999999993,
+      "probabilities": {
+       "needs_the_codebase": 0.55175,
+       "general_knowledge": 0.44825000000000004
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7517,
+     "probabilities": {
+      "actionable": 0.12415000000000001,
+      "underspecified": 0.87585,
+      "needs_the_codebase": 0.5146999999999999,
+      "general_knowledge": 0.48529999999999995
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7517,
+      "probabilities": {
+       "actionable": 0.12415000000000001,
+       "underspecified": 0.87585
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.02939999999999998,
+      "probabilities": {
+       "needs_the_codebase": 0.5146999999999999,
+       "general_knowledge": 0.48529999999999995
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Is the budget checked before or after the model call?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6825000000000001,
+     "probabilities": {
+      "actionable": 0.15875,
+      "underspecified": 0.84125,
+      "needs_the_codebase": 0.45289999999999997,
+      "general_knowledge": 0.5471
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6825000000000001,
+      "probabilities": {
+       "actionable": 0.15875,
+       "underspecified": 0.84125
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.09420000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.45289999999999997,
+       "general_knowledge": 0.5471
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7031000000000001,
+     "probabilities": {
+      "actionable": 0.14845,
+      "underspecified": 0.85155,
+      "needs_the_codebase": 0.5421,
+      "general_knowledge": 0.4579
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7031000000000001,
+      "probabilities": {
+       "actionable": 0.14845,
+       "underspecified": 0.85155
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.08420000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.5421,
+       "general_knowledge": 0.4579
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.8473999999999999,
+     "probabilities": {
+      "actionable": 0.0763,
+      "underspecified": 0.9237,
+      "needs_the_codebase": 0.5169,
+      "general_knowledge": 0.4831
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.8473999999999999,
+      "probabilities": {
+       "actionable": 0.0763,
+       "underspecified": 0.9237
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.03380000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.5169,
+       "general_knowledge": 0.4831
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Which tone mapping does the production renderer use?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "clarify",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6356999999999999,
+     "probabilities": {
+      "actionable": 0.18215,
+      "underspecified": 0.81785,
+      "needs_the_codebase": 0.4684,
+      "general_knowledge": 0.5316000000000001
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6356999999999999,
+      "probabilities": {
+       "actionable": 0.18215,
+       "underspecified": 0.81785
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.06320000000000009,
+      "probabilities": {
+       "needs_the_codebase": 0.4684,
+       "general_knowledge": 0.5316000000000001
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.6968000000000001,
+     "probabilities": {
+      "actionable": 0.1516,
+      "underspecified": 0.8484,
+      "needs_the_codebase": 0.5556,
+      "general_knowledge": 0.4444
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6968000000000001,
+      "probabilities": {
+       "actionable": 0.1516,
+       "underspecified": 0.8484
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11119999999999997,
+      "probabilities": {
+       "needs_the_codebase": 0.5556,
+       "general_knowledge": 0.4444
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.8328,
+     "probabilities": {
+      "actionable": 0.08360000000000001,
+      "underspecified": 0.9164,
+      "needs_the_codebase": 0.5567,
+      "general_knowledge": 0.4433
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.8328,
+      "probabilities": {
+       "actionable": 0.08360000000000001,
+       "underspecified": 0.9164
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11339999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.5567,
+       "general_knowledge": 0.4433
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "What chunk size was used when the index was built?",
+   "label": "investigate",
+   "hard": true,
+   "rule": "answer_directly",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6916,
+     "probabilities": {
+      "actionable": 0.1542,
+      "underspecified": 0.8458,
+      "needs_the_codebase": 0.3812,
+      "general_knowledge": 0.6188
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6916,
+      "probabilities": {
+       "actionable": 0.1542,
+       "underspecified": 0.8458
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.23760000000000003,
+      "probabilities": {
+       "needs_the_codebase": 0.3812,
+       "general_knowledge": 0.6188
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7151000000000001,
+     "probabilities": {
+      "actionable": 0.14245000000000002,
+      "underspecified": 0.85755,
+      "needs_the_codebase": 0.5386,
+      "general_knowledge": 0.46140000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7151000000000001,
+      "probabilities": {
+       "actionable": 0.14245000000000002,
+       "underspecified": 0.85755
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.07719999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.5386,
+       "general_knowledge": 0.46140000000000003
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.8133999999999999,
+     "probabilities": {
+      "actionable": 0.0933,
+      "underspecified": 0.9067,
+      "needs_the_codebase": 0.5551,
+      "general_knowledge": 0.4449
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.8133999999999999,
+      "probabilities": {
+       "actionable": 0.0933,
+       "underspecified": 0.9067
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.11020000000000002,
+      "probabilities": {
+       "needs_the_codebase": 0.5551,
+       "general_knowledge": 0.4449
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "In a file called shader.wgsl, would var<storage, read_write> be legal at module scope?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6753,
+     "probabilities": {
+      "actionable": 0.16235,
+      "underspecified": 0.83765,
+      "needs_the_codebase": 0.63575,
+      "general_knowledge": 0.36424999999999996
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6753,
+      "probabilities": {
+       "actionable": 0.16235,
+       "underspecified": 0.83765
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.2715000000000001,
+      "probabilities": {
+       "needs_the_codebase": 0.63575,
+       "general_knowledge": 0.36424999999999996
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7557,
+     "probabilities": {
+      "actionable": 0.12215000000000001,
+      "underspecified": 0.87785,
+      "needs_the_codebase": 0.5842499999999999,
+      "general_knowledge": 0.41575
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7557,
+      "probabilities": {
+       "actionable": 0.12215000000000001,
+       "underspecified": 0.87785
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.16849999999999993,
+      "probabilities": {
+       "needs_the_codebase": 0.5842499999999999,
+       "general_knowledge": 0.41575
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.7231000000000001,
+     "probabilities": {
+      "actionable": 0.13845,
+      "underspecified": 0.86155,
+      "needs_the_codebase": 0.6621999999999999,
+      "general_knowledge": 0.3378
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7231000000000001,
+      "probabilities": {
+       "actionable": 0.13845,
+       "underspecified": 0.86155
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.3243999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.6621999999999999,
+       "general_knowledge": 0.3378
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "If src/main.rs has fn main() -> Result<(), Box<dyn Error>>, what does the ? operator do to the error there?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.11919999999999997,
+     "probabilities": {
+      "actionable": 0.4404,
+      "underspecified": 0.5596,
+      "needs_the_codebase": 0.6825,
+      "general_knowledge": 0.3175
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.11919999999999997,
+      "probabilities": {
+       "actionable": 0.4404,
+       "underspecified": 0.5596
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.365,
+      "probabilities": {
+       "needs_the_codebase": 0.6825,
+       "general_knowledge": 0.3175
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7084999999999999,
+     "probabilities": {
+      "actionable": 0.14575,
+      "underspecified": 0.85425,
+      "needs_the_codebase": 0.66745,
+      "general_knowledge": 0.33255
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7084999999999999,
+      "probabilities": {
+       "actionable": 0.14575,
+       "underspecified": 0.85425
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.3349,
+      "probabilities": {
+       "needs_the_codebase": 0.66745,
+       "general_knowledge": 0.33255
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.3462,
+     "probabilities": {
+      "actionable": 0.3269,
+      "underspecified": 0.6731,
+      "needs_the_codebase": 0.706,
+      "general_knowledge": 0.29400000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.3462,
+      "probabilities": {
+       "actionable": 0.3269,
+       "underspecified": 0.6731
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.4119999999999999,
+      "probabilities": {
+       "needs_the_codebase": 0.706,
+       "general_knowledge": 0.29400000000000004
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Our team is on TypeScript 5.6 - what did satisfies do differently before 4.9?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7619,
+     "probabilities": {
+      "actionable": 0.11904999999999999,
+      "underspecified": 0.88095,
+      "needs_the_codebase": 0.32189999999999996,
+      "general_knowledge": 0.6780999999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7619,
+      "probabilities": {
+       "actionable": 0.11904999999999999,
+       "underspecified": 0.88095
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.35619999999999996,
+      "probabilities": {
+       "needs_the_codebase": 0.32189999999999996,
+       "general_knowledge": 0.6780999999999999
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7057,
+     "probabilities": {
+      "actionable": 0.14715,
+      "underspecified": 0.85285,
+      "needs_the_codebase": 0.5528,
+      "general_knowledge": 0.44720000000000004
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7057,
+      "probabilities": {
+       "actionable": 0.14715,
+       "underspecified": 0.85285
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.10559999999999992,
+      "probabilities": {
+       "needs_the_codebase": 0.5528,
+       "general_knowledge": 0.44720000000000004
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.762,
+     "probabilities": {
+      "actionable": 0.11900000000000001,
+      "underspecified": 0.881,
+      "needs_the_codebase": 0.4612,
+      "general_knowledge": 0.5388
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.762,
+      "probabilities": {
+       "actionable": 0.11900000000000001,
+       "underspecified": 0.881
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.07759999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.4612,
+       "general_knowledge": 0.5388
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Given a component named ParticleField.tsx, does React run the effect cleanup before or after the next effect?",
+   "label": "answer_directly",
+   "hard": true,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.6825999999999999,
+     "probabilities": {
+      "actionable": 0.1587,
+      "underspecified": 0.8412999999999999,
+      "needs_the_codebase": 0.49305,
+      "general_knowledge": 0.50695
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6825999999999999,
+      "probabilities": {
+       "actionable": 0.1587,
+       "underspecified": 0.8412999999999999
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.013900000000000023,
+      "probabilities": {
+       "needs_the_codebase": 0.49305,
+       "general_knowledge": 0.50695
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7273000000000001,
+     "probabilities": {
+      "actionable": 0.13635000000000003,
+      "underspecified": 0.86365,
+      "needs_the_codebase": 0.6636,
+      "general_knowledge": 0.33640000000000003
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7273000000000001,
+      "probabilities": {
+       "actionable": 0.13635000000000003,
+       "underspecified": 0.86365
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.32719999999999994,
+      "probabilities": {
+       "needs_the_codebase": 0.6636,
+       "general_knowledge": 0.33640000000000003
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.665,
+     "probabilities": {
+      "actionable": 0.1675,
+      "underspecified": 0.8325,
+      "needs_the_codebase": 0.57435,
+      "general_knowledge": 0.42565
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.665,
+      "probabilities": {
+       "actionable": 0.1675,
+       "underspecified": 0.8325
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.14870000000000005,
+      "probabilities": {
+       "needs_the_codebase": 0.57435,
+       "general_knowledge": 0.42565
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  },
+  {
+   "question": "Is ParticleField.tsx okay?",
+   "label": "clarify",
+   "hard": true,
+   "rule": "investigate",
+   "variants": {
+    "prose": {
+     "choice": "clarify",
+     "margin": 0.7709999999999999,
+     "probabilities": {
+      "actionable": 0.11449999999999999,
+      "underspecified": 0.8855,
+      "needs_the_codebase": 0.35714999999999997,
+      "general_knowledge": 0.6428499999999999
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7709999999999999,
+      "probabilities": {
+       "actionable": 0.11449999999999999,
+       "underspecified": 0.8855
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.28569999999999995,
+      "probabilities": {
+       "needs_the_codebase": 0.35714999999999997,
+       "general_knowledge": 0.6428499999999999
+      }
+     },
+     "orders_used": 4
+    },
+    "structured": {
+     "choice": "clarify",
+     "margin": 0.7086999999999999,
+     "probabilities": {
+      "actionable": 0.14565,
+      "underspecified": 0.8543499999999999,
+      "needs_the_codebase": 0.6842,
+      "general_knowledge": 0.31579999999999997
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.7086999999999999,
+      "probabilities": {
+       "actionable": 0.14565,
+       "underspecified": 0.8543499999999999
+      }
+     },
+     "code": {
+      "choice": "needs_the_codebase",
+      "margin": 0.36840000000000006,
+      "probabilities": {
+       "needs_the_codebase": 0.6842,
+       "general_knowledge": 0.31579999999999997
+      }
+     },
+     "orders_used": 4
+    },
+    "hybrid": {
+     "choice": "clarify",
+     "margin": 0.6255,
+     "probabilities": {
+      "actionable": 0.18725,
+      "underspecified": 0.81275,
+      "needs_the_codebase": 0.45835000000000004,
+      "general_knowledge": 0.54165
+     },
+     "spec": {
+      "choice": "underspecified",
+      "margin": 0.6255,
+      "probabilities": {
+       "actionable": 0.18725,
+       "underspecified": 0.81275
+      }
+     },
+     "code": {
+      "choice": "general_knowledge",
+      "margin": 0.08329999999999993,
+      "probabilities": {
+       "needs_the_codebase": 0.45835000000000004,
+       "general_knowledge": 0.54165
+      }
+     },
+     "orders_used": 4
+    }
+   }
+  }
+ ],
+ "elapsed_s": 20.2
+}

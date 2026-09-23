@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>YAMADORI // Sovereign Model Cockpit</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts: Syne & JetBrains Mono -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&amp;family=Syne:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration verbatim from Design System -->
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "secondary": "#ffb2ba",
+            "surface-bright": "#353943",
+            "tertiary-fixed-dim": "#00dbe9",
+            "on-tertiary-fixed-variant": "#004f54",
+            "secondary-fixed": "#ffd9dc",
+            "on-primary-fixed": "#00210c",
+            "background": "#0f131c",
+            "on-surface": "#dfe2ef",
+            "secondary-fixed-dim": "#ffb2ba",
+            "inverse-primary": "#006d37",
+            "tertiary-container": "#5cf2ff",
+            "surface-tint": "#00e479",
+            "on-background": "#dfe2ef",
+            "on-secondary": "#670020",
+            "surface-container": "#1c2029",
+            "surface-variant": "#31353f",
+            "inverse-surface": "#dfe2ef",
+            "on-secondary-container": "#ffe6e8",
+            "on-secondary-fixed-variant": "#910030",
+            "outline": "#849585",
+            "on-error-container": "#ffdad6",
+            "surface-container-high": "#262a34",
+            "tertiary": "#eefeff",
+            "tertiary-fixed": "#7df4ff",
+            "error-container": "#93000a",
+            "surface-container-highest": "#31353f",
+            "on-primary-container": "#007139",
+            "primary-fixed": "#60ff99",
+            "primary": "#f1ffef",
+            "on-primary-fixed-variant": "#005228",
+            "on-surface-variant": "#b9cbb9",
+            "primary-container": "#00ff88",
+            "surface": "#0f131c",
+            "outline-variant": "#3b4b3d",
+            "inverse-on-surface": "#2c303a",
+            "secondary-container": "#d4004b",
+            "primary-fixed-dim": "#00e479",
+            "on-tertiary-container": "#006d74",
+            "surface-container-lowest": "#0a0e17",
+            "on-primary": "#003919",
+            "surface-container-low": "#181c25",
+            "on-error": "#690005",
+            "on-secondary-fixed": "#400011",
+            "surface-dim": "#0f131c",
+            "on-tertiary-fixed": "#002022",
+            "on-tertiary": "#00363a",
+            "error": "#ffb4ab"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "space-sm": "0.5rem",
+            "space-xs": "0.25rem",
+            "margin": "1rem",
+            "gutter": "0.75rem",
+            "space-md": "0.75rem",
+            "space-xl": "2rem",
+            "space-lg": "1.25rem"
+          },
+          "fontFamily": {
+            "label-md": ["JetBrains Mono"],
+            "headline-xl-mobile": ["Syne"],
+            "headline-lg": ["Syne"],
+            "body-sm": ["JetBrains Mono"],
+            "headline-sm": ["Syne"],
+            "body-lg": ["JetBrains Mono"],
+            "headline-xl": ["Syne"],
+            "label-xs": ["JetBrains Mono"],
+            "title-md": ["JetBrains Mono"]
+          },
+          "fontSize": {
+            "label-md": ["11px", { "lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "500" }],
+            "headline-xl-mobile": ["28px", { "lineHeight": "34px", "letterSpacing": "-0.03em", "fontWeight": "800" }],
+            "headline-lg": ["26px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+            "body-sm": ["12px", { "lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400" }],
+            "headline-sm": ["18px", { "lineHeight": "24px", "letterSpacing": "0em", "fontWeight": "700" }],
+            "body-lg": ["14px", { "lineHeight": "22px", "letterSpacing": "-0.01em", "fontWeight": "400" }],
+            "headline-xl": ["36px", { "lineHeight": "42px", "letterSpacing": "-0.04em", "fontWeight": "800" }],
+            "label-xs": ["9px", { "lineHeight": "12px", "letterSpacing": "0.12em", "fontWeight": "700" }],
+            "title-md": ["15px", { "lineHeight": "20px", "letterSpacing": "-0.01em", "fontWeight": "600" }]
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    /* Custom scanline and laser aesthetics */
+    .scanline-overlay {
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.35) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+      background-size: 100% 3px, 6px 100%;
+      pointer-events: none;
+    }
+    .glow-cyan {
+      box-shadow: 0 0 14px rgba(92, 242, 255, 0.25);
+    }
+    .glow-primary {
+      box-shadow: 0 0 16px rgba(0, 255, 136, 0.28);
+    }
+    .glow-crimson {
+      box-shadow: 0 0 14px rgba(212, 0, 75, 0.35);
+    }
+    .laser-border-l {
+      border-left: 2px solid #00ff88;
+      box-shadow: -4px 0 12px -2px rgba(0, 255, 136, 0.4);
+    }
+    .laser-border-crimson {
+      border-left: 2px solid #ff3366;
+      box-shadow: -4px 0 12px -2px rgba(255, 51, 102, 0.45);
+    }
+  </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface font-body-sm antialiased selection:bg-primary-container selection:text-surface-container-lowest pb-28 min-h-screen relative overflow-x-hidden">
+<!-- Subtle atmospheric terminal scanlines -->
+<div class="fixed inset-0 scanline-overlay z-40 pointer-events-none opacity-60"></div>
+<!-- TOP APP BAR (From Shared Components JSON) -->
+<header class="bg-surface-container-lowest dark:bg-surface-container-lowest border-b border-outline-variant/35 sticky top-0 z-50 backdrop-blur-md bg-opacity-90">
+<div class="flex justify-between items-center w-full px-margin py-space-xs max-w-7xl mx-auto">
+<!-- Leading Icon & Model Core Title -->
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container text-[20px]" data-icon="terminal">terminal</span>
+<div class="flex flex-col">
+<span class="font-headline-sm text-headline-sm font-bold tracking-wider text-primary dark:text-primary leading-none">
+            YAMADORI // CORE-0
+          </span>
+<span class="font-label-xs text-label-xs text-on-surface-variant tracking-widest mt-0.5">
+            IRON-NODE-09 · CLUSTER 4x 4090
+          </span>
+</div>
+</div>
+<!-- Trailing Action / Abliteration Stat -->
+<div class="flex items-center gap-2">
+<div class="hidden sm:flex flex-col text-right">
+<span class="font-label-xs text-label-xs text-on-surface-variant">VECTOR HYPERPLANE</span>
+<span class="font-label-md text-label-md text-primary-container font-mono">STABLE // RUN</span>
+</div>
+<div class="bg-surface-container-low border border-outline-variant/35 px-2.5 py-1 rounded-DEFAULT flex items-center gap-1.5 glow-primary">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse"></span>
+<span class="font-label-xs text-label-xs text-primary-container font-bold">ABL: 99.4%</span>
+</div>
+</div>
+</div>
+</header>
+<!-- MAIN CANVAS -->
+<main class="max-w-7xl mx-auto px-margin pt-space-md space-y-space-md">
+<!-- SUB-BAR: LIVE HARDWARE & ABLITERATION PILL STRIP -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-gutter font-label-xs text-label-xs">
+<!-- Hardware Telemetry Pill -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-sm flex items-center justify-between">
+<span class="text-on-surface-variant">VRAM POOL</span>
+<span class="text-primary font-bold">80.6 / 96.0 GB <span class="text-primary-container">(84%)</span></span>
+</div>
+<!-- Power & Temp Pill -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-sm flex items-center justify-between">
+<span class="text-on-surface-variant">POWER // THERMAL</span>
+<span class="text-primary font-bold">1,180W · 54°C AVG</span>
+</div>
+<!-- Abliteration State Pill -->
+<div class="bg-surface-container-low border border-secondary-container/40 p-space-sm flex items-center justify-between laser-border-crimson">
+<span class="text-secondary font-bold">ABLITERATED</span>
+<span class="text-secondary-fixed-dim font-bold tracking-tight">[NURSERY-SAFE SCRUBBED]</span>
+</div>
+<!-- Sovereign Mode Pill -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-sm flex items-center justify-between">
+<span class="text-on-surface-variant">NODE REGIME</span>
+<span class="text-tertiary-container font-bold tracking-wider">UNMETERED IRON</span>
+</div>
+</section>
+<!-- HERO SHOWCASE: 'THE WILD SPECIMEN' (TOKONOMA 床の間) -->
+<section class="relative bg-surface-container-low border border-outline-variant/35 rounded-DEFAULT overflow-hidden">
+<!-- Top Monospace Bar -->
+<div class="bg-surface-container px-space-md py-space-xs border-b border-outline-variant/35 flex justify-between items-center text-label-xs font-label-xs">
+<div class="flex items-center gap-2">
+<span class="text-primary-container">床の間 // TOKONOMA_VIEWPORT</span>
+<span class="text-outline">::</span>
+<span class="text-on-surface-variant">CHOKKAN_FORM_092</span>
+</div>
+<div class="text-tertiary-container font-mono">SPECIMEN: YMD-70B-PROVENANCE</div>
+</div>
+<!-- Specimen Viewport Container -->
+<div class="relative w-full h-80 sm:h-96 md:h-[420px] bg-surface-container-lowest flex items-center justify-center overflow-hidden">
+<!-- Bonsai Cyber Specimen Image -->
+<img alt="Yamadori Bonsai Specimen" class="w-full h-full object-cover object-center filter brightness-[0.9] contrast-[1.12]" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDiaGQ5X5ZKyADGvcOcRwVfCSFSecRtQq6Yl4CsjCmn1YkhGWneed2oXkYqQRQQctVcuq7bLx8NSJB4SWRdXBP1RGsiONlQc9l9yOiPwM8DKGl-bq7JgsVaB_jzA8f78UVT0GUWyrsoqK2IIdy63i0daqV5_WELhIqvRsHwx_kaGGV-lKYs5_tDCb_EtcNNwW7Ue5vFJh4t6lJi63NHBzQNeLw9WuNCqjVbevyTzPMuqKBUNB9jUdADjQ"/>
+<!-- Edge Glitch / Vignette Mask -->
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-lowest via-transparent to-surface-container-lowest/70 pointer-events-none"></div>
+<div class="absolute inset-0 bg-gradient-to-r from-surface-container-lowest/80 via-transparent to-surface-container-lowest/80 pointer-events-none"></div>
+<!-- Specimen Telemetry Overlays (Top Left) -->
+<div class="absolute top-3 left-3 flex flex-col gap-1.5 z-10">
+<div class="bg-surface-container-lowest/90 backdrop-blur-md border border-outline-variant/40 px-2 py-1 flex items-center gap-2 text-label-xs font-label-xs">
+<span class="w-1.5 h-1.5 bg-primary-container rounded-full"></span>
+<span class="text-on-surface">WEATHERING:</span>
+<span class="text-primary-container font-bold">34 YEARS SIMULATED</span>
+</div>
+<div class="bg-surface-container-lowest/90 backdrop-blur-md border border-secondary-container/40 px-2 py-1 flex items-center gap-2 text-label-xs font-label-xs">
+<span class="text-secondary font-bold">WEIGHT PRUNE:</span>
+<span class="text-secondary font-bold tracking-wider">-42.8% SPARSITY</span>
+</div>
+</div>
+<!-- Specimen Telemetry Overlays (Top Right Laser Pill) -->
+<div class="absolute top-3 right-3 z-10">
+<div class="bg-surface-container-lowest/90 backdrop-blur-md border border-tertiary-container/30 px-2.5 py-1 text-label-xs font-label-xs text-tertiary-container glow-cyan">
+            RESIDUAL TENSOR SHARI: <span class="text-primary font-bold">CLEARED</span>
+</div>
+</div>
+<!-- Bottom Sensory Specs HUD -->
+<div class="absolute bottom-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 p-2 bg-surface-container-lowest/85 backdrop-blur-md border border-outline-variant/35 text-label-xs font-label-xs">
+<div class="flex items-center gap-3">
+<span class="text-on-surface-variant">VOLTAGE: <strong class="text-primary">1.12V</strong></span>
+<span class="text-outline">/</span>
+<span class="text-on-surface-variant">QUANT: <strong class="text-tertiary-container">FP8 / EXL2</strong></span>
+<span class="text-outline">/</span>
+<span class="text-on-surface-variant">CONTEXT: <strong class="text-primary-container">128,000 TOKENS</strong></span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-outline-variant">L-32 // ATTN_O</span>
+<span class="px-1.5 py-0.5 bg-surface-container border border-primary-container/30 text-primary-container font-mono">SURVIVING: 57.2%</span>
+</div>
+</div>
+</div>
+</section>
+<!-- BONSAI VOCABULARY TELEMETRY GRID -->
+<section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
+<!-- MODULE 1: 剪定 · SENTEI (Pruning & Sparsity) -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md flex flex-col justify-between laser-border-l">
+<div class="space-y-space-xs">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-primary-container text-[18px]" data-icon="content_cut">content_cut</span>
+<span class="font-headline-sm text-headline-sm text-primary">剪定 · Sentei</span>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-outline-variant/35 text-on-surface-variant">LAYER CULL</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            "9 tools survive. <span class="text-secondary font-mono">judge</span> cut at 6/10 against coin flip."
+          </p>
+</div>
+<!-- Telemetry Prune Bar Matrix -->
+<div class="my-space-md space-y-2">
+<div class="flex justify-between font-label-xs text-label-xs">
+<span class="text-on-surface-variant">SAFETY BIAS VECTORS SCRUBBED</span>
+<span class="text-primary-container font-mono font-bold">99.4%</span>
+</div>
+<!-- Segmented Sparsity Meter -->
+<div class="grid grid-cols-12 gap-1 h-3 bg-surface-container-lowest p-0.5 border border-outline-variant/35">
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-primary-container"></div>
+<div class="bg-secondary-container"></div>
+<div class="bg-surface-container-high border border-dashed border-outline/40"></div>
+</div>
+<div class="flex justify-between font-label-xs text-label-xs text-outline">
+<span>[ATTN_HEAD_0..28: REMOVED]</span>
+<span>[70.6B → 40.4B ACTIVE]</span>
+</div>
+</div>
+<!-- Bottom Status -->
+<div class="pt-space-xs border-t border-outline-variant/20 flex justify-between items-center text-label-xs font-label-xs">
+<span class="text-on-surface-variant">ABLATION GRADIENT:</span>
+<span class="text-primary-container font-mono">-0.0084 dL/dW</span>
+</div>
+</div>
+<!-- MODULE 2: 芽摘み · METSUMI (Bud-Pinching & Sampling) -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md flex flex-col justify-between">
+<div class="space-y-space-xs">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-tertiary-container text-[18px]" data-icon="filter_alt">filter_alt</span>
+<span class="font-headline-sm text-headline-sm text-primary">芽摘み · Metsumi</span>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-outline-variant/35 text-tertiary-container">SPECULATIVE</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            "Sample many answers. Keep the one that compiles."
+          </p>
+</div>
+<!-- Live Bud Sampling Execution Stream -->
+<div class="my-space-md bg-surface-container-lowest p-2 border border-outline-variant/35 space-y-1.5">
+<div class="flex items-center justify-between text-label-xs font-label-xs">
+<span class="text-on-surface-variant">CANDIDATE BUDS PINCHED</span>
+<span class="text-tertiary-container font-mono">16 SAMPLES</span>
+</div>
+<!-- Stream visualization -->
+<div class="flex items-center gap-1 font-mono text-[10px]">
+<span class="px-1 bg-surface-container text-outline line-through">B01:ERR</span>
+<span class="px-1 bg-surface-container text-outline line-through">B02:SEG</span>
+<span class="px-1 bg-surface-container text-outline line-through">B03:TMO</span>
+<span class="px-1.5 py-0.5 bg-primary-container/20 text-primary-container border border-primary-container font-bold">B04:VALID</span>
+</div>
+<div class="flex items-center gap-1 text-label-xs font-label-xs text-primary-container">
+<span class="material-symbols-outlined text-[14px]" data-icon="check_circle">check_circle</span>
+<span>RUSTC PASS: 42ms (zero hallucinations)</span>
+</div>
+</div>
+<!-- Bottom Status -->
+<div class="pt-space-xs border-t border-outline-variant/20 flex justify-between items-center text-label-xs font-label-xs">
+<span class="text-on-surface-variant">SURVIVAL RATIO:</span>
+<span class="text-tertiary-container font-mono">1 / 16 (6.25% ACCEPT)</span>
+</div>
+</div>
+<!-- MODULE 3: 根張り · NEBARI (Root Flare Retrieval) -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md flex flex-col justify-between">
+<div class="space-y-space-xs">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-primary text-[18px]" data-icon="account_tree">account_tree</span>
+<span class="font-headline-sm text-headline-sm text-primary">根張り · Nebari</span>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-outline-variant/35 text-on-surface-variant">VECTOR FLARE</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            Three-tier memory depth topology anchored to NVMe direct-store.
+          </p>
+</div>
+<!-- 3-Tier Flare Depth Matrix -->
+<div class="my-space-md space-y-1.5 text-label-xs font-label-xs">
+<!-- Taproot -->
+<div class="flex items-center justify-between p-1.5 bg-surface-container-lowest border-l-2 border-primary-container">
+<div class="flex flex-col">
+<span class="text-primary font-bold">TAPROOT // COLD</span>
+<span class="text-outline text-[8px]">NVMe PCIe 5.0</span>
+</div>
+<span class="text-primary-container font-mono">8.4M EMBEDDINGS</span>
+</div>
+<!-- Branch -->
+<div class="flex items-center justify-between p-1.5 bg-surface-container-lowest border-l-2 border-tertiary-container">
+<div class="flex flex-col">
+<span class="text-primary font-bold">BRANCH // SUB-GRAPH</span>
+<span class="text-outline text-[8px]">VRAM L2 Cache</span>
+</div>
+<span class="text-tertiary-container font-mono">99.1% HIT RATE</span>
+</div>
+<!-- Shoot -->
+<div class="flex items-center justify-between p-1.5 bg-surface-container-lowest border-l-2 border-outline">
+<div class="flex flex-col">
+<span class="text-on-surface-variant font-bold">SHOOT // EPHEMERAL</span>
+<span class="text-outline text-[8px]">Ring Buffer</span>
+</div>
+<span class="text-on-surface font-mono">16.4 MB / SEC</span>
+</div>
+</div>
+<!-- Bottom Status -->
+<div class="pt-space-xs border-t border-outline-variant/20 flex justify-between items-center text-label-xs font-label-xs">
+<span class="text-on-surface-variant">ROOT STABILITY INDEX:</span>
+<span class="text-primary-container font-mono">0.9984 NEB</span>
+</div>
+</div>
+<!-- MODULE 4: 舎利 · SHARI (Deadwood Bleached Paths) -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md flex flex-col justify-between laser-border-crimson">
+<div class="space-y-space-xs">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-secondary text-[18px]" data-icon="skull">skull</span>
+<span class="font-headline-sm text-headline-sm text-primary">舎利 · Shari</span>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-secondary-container/50 text-secondary">PRESERVED</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            "Every failed idea stays in the repo with its evidence."
+          </p>
+</div>
+<!-- Deadwood Artifact Telemetry -->
+<div class="my-space-md bg-surface-container-lowest p-2.5 border border-outline-variant/35 flex items-center justify-between">
+<div class="flex flex-col">
+<span class="text-headline-sm font-headline-sm text-secondary font-bold">1,429</span>
+<span class="font-label-xs text-label-xs text-on-surface-variant uppercase">Bleached Deadwood Branches</span>
+</div>
+<div class="text-right font-label-xs text-label-xs text-outline space-y-0.5">
+<div>WEIGHTS RETAINED: 0%</div>
+<div>EVIDENCE LOGS: 100%</div>
+<div class="text-secondary-container font-bold">NEVER PURGED</div>
+</div>
+</div>
+<!-- Bottom Status -->
+<div class="pt-space-xs border-t border-outline-variant/20 flex justify-between items-center text-label-xs font-label-xs">
+<span class="text-on-surface-variant">SULPHUR LIME STATUS:</span>
+<span class="text-secondary font-mono">BLEACHED &amp; SEALED</span>
+</div>
+</div>
+<!-- MODULE 5: 年輪 · RINGS (Growth Rings Timeline) -->
+<div class="bg-surface-container-low border border-outline-variant/35 p-space-md flex flex-col justify-between md:col-span-2 lg:col-span-2">
+<div class="space-y-space-xs">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-tertiary text-[18px]" data-icon="timelapse">timelapse</span>
+<span class="font-headline-sm text-headline-sm text-primary">年輪 · Nenrin (Growth Rings)</span>
+</div>
+<span class="font-label-xs text-label-xs px-1.5 py-0.5 bg-surface-container border border-outline-variant/35 text-on-surface-variant">PERSISTENCE</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            "Work log that outlives the context window." Chronological state snaps across bare-metal cycles.
+          </p>
+</div>
+<!-- Ring Timeline Horizontal Visualization -->
+<div class="my-space-md grid grid-cols-2 sm:grid-cols-4 gap-2">
+<!-- Ring 01 -->
+<div class="bg-surface-container-lowest p-2 border border-outline-variant/35">
+<div class="text-label-xs font-label-xs text-outline">CYCLE #01 · 2024-Q1</div>
+<div class="text-title-md font-title-md text-primary font-mono mt-1">BASE ROOT</div>
+<div class="text-label-xs font-label-xs text-on-surface-variant">Llama-3 70B Stock</div>
+</div>
+<!-- Ring 02 -->
+<div class="bg-surface-container-lowest p-2 border border-outline-variant/35">
+<div class="text-label-xs font-label-xs text-outline">CYCLE #08 · 2024-Q2</div>
+<div class="text-title-md font-title-md text-secondary font-mono mt-1">ABLATION 01</div>
+<div class="text-label-xs font-label-xs text-on-surface-variant">Refusal vectors stripped</div>
+</div>
+<!-- Ring 03 -->
+<div class="bg-surface-container-lowest p-2 border border-outline-variant/35">
+<div class="text-label-xs font-label-xs text-outline">CYCLE #14 · 2024-Q3</div>
+<div class="text-title-md font-title-md text-tertiary-container font-mono mt-1">SPARSITY CUT</div>
+<div class="text-label-xs font-label-xs text-on-surface-variant">-35% Attention deadwood</div>
+</div>
+<!-- Ring 04 (Current) -->
+<div class="bg-surface-container-lowest p-2 border border-primary-container/40 glow-primary">
+<div class="text-label-xs font-label-xs text-primary-container">CURRENT · EPOCH 18</div>
+<div class="text-title-md font-title-md text-primary-container font-mono mt-1">YMD-70B-FP8</div>
+<div class="text-label-xs font-label-xs text-on-surface">128K context locked</div>
+</div>
+</div>
+<!-- Bottom Status -->
+<div class="pt-space-xs border-t border-outline-variant/20 flex justify-between items-center text-label-xs font-label-xs">
+<span class="text-on-surface-variant">RING IMMUTABILITY: SHA-256 VERIFIED</span>
+<span class="text-primary font-mono">0x9d4a...e12b</span>
+</div>
+</div>
+</section>
+<!-- SURGICAL TRIGGER CONTROLS & BARE METAL SECURITY -->
+<section class="bg-surface-container-low border border-outline-variant/35 p-space-md space-y-space-md">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-outline-variant/20 pb-space-xs">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary-container"></span>
+<span class="font-headline-sm text-headline-sm text-primary">OPERATIONAL COMMAND MATRIX</span>
+</div>
+<span class="font-label-xs text-label-xs text-on-surface-variant">ROOT PRIVILEGES: GRANTED (UID 0)</span>
+</div>
+<!-- Button Trigger Cluster -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+<!-- Primary Trigger (Execute / Ablate) -->
+<button class="bg-surface-container-lowest border border-primary-container text-primary-container hover:bg-primary-container/10 active:scale-[0.98] transition-all px-space-md py-space-sm flex items-center justify-center gap-2 font-label-md text-label-md font-bold group glow-primary">
+<span class="material-symbols-outlined text-[18px] group-hover:rotate-45 transition-transform" data-icon="content_cut">content_cut</span>
+<span>[EXECUTE SENTEI PRUNE]</span>
+</button>
+<!-- Secondary Action (Harvest Checkpoint) -->
+<button class="bg-surface-container-lowest border border-tertiary-container text-tertiary-container hover:bg-tertiary-container/10 active:scale-[0.98] transition-all px-space-md py-space-sm flex items-center justify-center gap-2 font-label-md text-label-md font-bold">
+<span class="material-symbols-outlined text-[18px]" data-icon="save">save</span>
+<span>[HARVEST CHECKPOINT]</span>
+</button>
+<!-- Compiler Pass Trigger -->
+<button class="bg-surface-container-lowest border border-outline-variant text-on-surface hover:border-on-surface active:scale-[0.98] transition-all px-space-md py-space-sm flex items-center justify-center gap-2 font-label-md text-label-md font-bold">
+<span class="material-symbols-outlined text-[18px]" data-icon="play_arrow">play_arrow</span>
+<span>[FORCE COMPILER PASS]</span>
+</button>
+</div>
+<!-- Sovereign Hardware Assurance Footer Bar -->
+<div class="bg-surface-container-lowest p-space-sm border border-outline-variant/25 flex flex-col sm:flex-row items-center justify-between text-label-xs font-label-xs gap-2">
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-primary-container text-[16px]" data-icon="shield">shield</span>
+<span>SOVEREIGN ARCHITECTURE: <strong class="text-primary">Owned Iron. Non-metered. Non-revocable.</strong></span>
+</div>
+<div class="text-outline font-mono">
+          NO CLOUD PROXIES · ZERO EXTERNAL TELEMETRY
+        </div>
+</div>
+</section>
+</main>
+<!-- DOCKED BOTTOM NAVIGATION BAR (Derived verbatim from Shared Components JSON) -->
+<!-- Contextual Active Tab: PRUNE (Primary action intent for this dashboard screen) -->
+<nav class="bg-surface-container-lowest dark:bg-surface-container-lowest border-t border-outline-variant/35 fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-margin py-space-xs backdrop-blur-md bg-opacity-95">
+<!-- Tab 1: PRUNE (ACTIVE) -->
+<a class="flex flex-col items-center justify-center text-primary-container dark:text-primary-container border-t-2 border-primary-container bg-surface-container-low px-space-sm py-space-xs active:scale-[0.97] transition-transform duration-100" href="#prune">
+<span class="material-symbols-outlined text-[20px]" data-icon="content_cut">content_cut</span>
+<span class="text-label-xs font-label-xs mt-1">PRUNE</span>
+</a>
+<!-- Tab 2: ROOTS (INACTIVE) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-space-sm py-space-xs hover:bg-surface-container hover:text-on-surface transition-colors duration-150 active:scale-[0.97] duration-100" href="#roots">
+<span class="material-symbols-outlined text-[20px]" data-icon="account_tree">account_tree</span>
+<span class="text-label-xs font-label-xs mt-1">ROOTS</span>
+</a>
+<!-- Tab 3: DEADWOOD (INACTIVE) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-space-sm py-space-xs hover:bg-surface-container hover:text-on-surface transition-colors duration-150 active:scale-[0.97] duration-100" href="#deadwood">
+<span class="material-symbols-outlined text-[20px]" data-icon="skull">skull</span>
+<span class="text-label-xs font-label-xs mt-1">DEADWOOD</span>
+</a>
+<!-- Tab 4: DEPLOY (INACTIVE) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-space-sm py-space-xs hover:bg-surface-container hover:text-on-surface transition-colors duration-150 active:scale-[0.97] duration-100" href="#deploy">
+<span class="material-symbols-outlined text-[20px]" data-icon="view_in_ar">view_in_ar</span>
+<span class="text-label-xs font-label-xs mt-1">DEPLOY</span>
+</a>
+</nav>
+</body></html>

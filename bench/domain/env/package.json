@@ -1,0 +1,11 @@
+{
+  "name": "yamadori-domain-sandbox",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "typescript": "7.0.2",
+    "typegpu": "0.12.5",
+    "@webgpu/types": "0.1.74",
+    "@types/node": "24.13.6"
+  }
+}

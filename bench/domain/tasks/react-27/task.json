@@ -1,0 +1,11 @@
+{
+  "id": "react-27",
+  "domain": "react",
+  "prompt": "Write a tri-state checkbox tree for React 19 in TypeScript (strict mode). Export both of these:\n\n```ts\ntype TreeNode = { id: string; label: string; children?: TreeNode[] };\nfunction CheckboxTree(props: {\n  nodes: TreeNode[];\n  onChange?: (checkedLeafIds: string[]) => void;\n}): React.ReactElement\n```\n\n`nodes` is a forest of any depth. A node whose `children` is missing or empty is a leaf; any other node is a parent. Ids and labels are unique.\n\nBehaviour:\n- Every node, at every depth, is rendered as a native `<input type=\"checkbox\">` whose accessible name is the node's `label` (for example by wrapping it in a `<label>`). All boxes start unchecked.\n- Clicking a leaf toggles it.\n- A parent's box is derived from all the leaves below it, at any depth (not just its direct children):\n  - all of them checked: the box is checked;\n  - none checked: the box is unchecked;\n  - some but not all checked: the box is indeterminate -- its DOM `indeterminate` property is `true`, it is not `checked`, and it has `aria-checked=\"mixed\"`. A box that is not in this state has `indeterminate` `false` and no `aria-checked=\"mixed\"`.\n- Clicking a parent whose leaves are all checked unchecks every leaf below it; clicking any other parent (unchecked or indeterminate) checks every leaf below it. Leaves elsewhere in the tree are unaffected.\n- After every change, `onChange` (if given) is called once with the ids of all checked leaves in tree order: depth-first, each node before its children, children in array order.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-27/test.tsx", "entry": ["CheckboxTree"]},
+  "reference": "tasks/react-27/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "category": "component"
+}

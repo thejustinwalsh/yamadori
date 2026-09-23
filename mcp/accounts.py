@@ -49,12 +49,31 @@ REGISTRY = os.path.join(STORE, "accounts.json")
 ANON = "anonymous"
 
 
+class RegistryUnreadable(Exception):
+    """accounts.json exists but cannot be read as a registry."""
+
+
 def _load() -> dict:
+    """The registry, or {} when there is none.
+
+    ABSENT and UNREADABLE are different answers. An absent file means no
+    accounts were ever created: single-user mode, open. A file that exists but
+    cannot be parsed -- truncated, hand-edited, unreadable permissions -- used
+    to come back as {} too, which switched a multi-tenant server to OPEN and
+    admitted every caller as `anonymous`. An auth store that fails open is the
+    worst failure it can have, so that case raises and callers fail closed.
+    """
     try:
         with open(REGISTRY, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
+            d = json.load(f)
+    except FileNotFoundError:
         return {}
+    except (OSError, ValueError) as e:
+        raise RegistryUnreadable(f"{REGISTRY}: {type(e).__name__}: {e}") from e
+    if not isinstance(d, dict):
+        raise RegistryUnreadable(f"{REGISTRY}: expected an object, got "
+                                 f"{type(d).__name__}")
+    return d
 
 
 def _save(d: dict) -> None:
@@ -75,7 +94,12 @@ def _hash(key: str) -> str:
 
 
 def multi_tenant() -> bool:
-    return bool(_load())
+    """True when keys are required. An unreadable registry counts as True:
+    nobody can be matched against it, so everyone is refused, not admitted."""
+    try:
+        return bool(_load())
+    except RegistryUnreadable:
+        return True
 
 
 def create(label: str) -> str:
@@ -99,7 +123,13 @@ def identify(auth_header: str | None) -> tuple[str | None, str]:
         return None, "no API key supplied"
     key = auth_header.split(" ", 1)[1].strip()
     h = _hash(key)
-    d = _load()
+    try:
+        d = _load()
+    except RegistryUnreadable:
+        return None, ("account registry is unreadable, so no key can be "
+                      "checked and every request is refused rather than "
+                      "admitted. Operator: restore index/accounts/"
+                      "accounts.json from a backup.")
     for known, meta in d.items():
         if hmac.compare_digest(known, h):
             meta["uses"] = meta.get("uses", 0) + 1

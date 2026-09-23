@@ -1,0 +1,10 @@
+{
+  "id": "rs10",
+  "domain": "rust_wasm",
+  "prompt": "Implement this C API in Rust:\n\n```c\ntypedef int32_t (*visit_fn)(int32_t value, void *user);\nsize_t for_each_until(const int32_t *items, size_t len, visit_fn cb, void *user);\n```\n\n`for_each_until` calls `cb(items[i], user)` for `i = 0, 1, 2, ...` in order, passing `user` through unchanged, and stops right after the first call that returns non-zero (or at the end of the array). It returns the number of calls it made. C callers may legitimately pass `NULL` for `cb`; if `cb` is NULL or `items` is NULL it returns 0 and calls nothing. Zero length returns 0.\n\nIn Rust, define a public type alias `VisitFn` for the callback parameter type -- it must be able to represent C's NULL function pointer without undefined behaviour -- and export `#[no_mangle] pub unsafe extern \"C\" fn for_each_until(items: *const i32, len: usize, cb: VisitFn, user: *mut c_void) -> usize` (`c_void` from `std::ffi`). Answer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs10/grader.rs", "entry": ["VisitFn", "for_each_until"]},
+  "reference": "tasks/rs10/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

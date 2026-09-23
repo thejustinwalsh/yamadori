@@ -1,0 +1,263 @@
+{
+ "effort": "medium",
+ "max_tokens": 4096,
+ "temperature": 0.0,
+ "body_tier": "max",
+ "proxy": "http://127.0.0.1:1234",
+ "suite": "core",
+ "run_id": "selfcheck-probe",
+ "created": 1790138955.1548986,
+ "runs": [
+  {
+   "started": 1790138955.1549191,
+   "arms": [
+    "A0",
+    "S0"
+   ],
+   "tasks": [
+    "ts02"
+   ],
+   "preflight": [
+    {
+     "ok": true,
+     "name": "one_listener",
+     "detail": "1 process(es) on :1234: pid 22372"
+    },
+    {
+     "ok": true,
+     "name": "proxy_fresh",
+     "detail": "pid 22372 (server.py) started 00:13:24; all 36 modules it imports are older"
+    },
+    {
+     "ok": true,
+     "name": "laya_route_in",
+     "detail": "route_in loaded=True kind=logistic_cls_logits"
+    },
+    {
+     "ok": true,
+     "name": "hints_cache",
+     "detail": "1586 vectors, 0 zero-norm, min norm 1.0000"
+    },
+    {
+     "ok": true,
+     "name": "package_vectors",
+     "detail": "typegpu@0.12.5: 3729 chunks, 0 zero, norm_ok=True; three@0.185.1: 14990 chunks, 3 zero, norm_ok=True"
+    },
+    {
+     "ok": true,
+     "name": "task_leak",
+     "detail": "323 task prompts + 323 reference solutions vs the hints corpus: 1 reviewed as shared idiom; no other shared 8-word runs"
+    },
+    {
+     "ok": true,
+     "name": "run_tests",
+     "detail": "rc=0 in 782s: note: skipped mcp/test_tools_live.py: opt-in, needs the GPU (run with --live) | all 40 suites passed"
+    },
+    {
+     "ok": true,
+     "name": "live_stack",
+     "detail": "rc=0 in 52s: ====================================================================== | 18/18 live checks passed in 52s"
+    },
+    {
+     "ok": true,
+     "name": "worker_quiet",
+     "detail": "gpu lane paused and idle (waited 135s)"
+    }
+   ],
+   "preflight_overridden": []
+  }
+ ],
+ "arms": {
+  "A0": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "everything off (the model as it ships)"
+  },
+  "A1": {
+   "features": {
+    "retrieval": true,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "retrieval only"
+  },
+  "A2": {
+   "features": {
+    "retrieval": false,
+    "hints": true,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "hints only"
+  },
+  "A3": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": true,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "deep thinking only (retrieval off)"
+  },
+  "A4": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 3,
+    "effort": "medium"
+   },
+   "note": "fan-out only (N=3)"
+  },
+  "A5": {
+   "features": {
+    "effort": "medium"
+   },
+   "note": "all allowed, fired by the selection engine"
+  },
+  "A6": {
+   "features": {
+    "retrieval": true,
+    "hints": true,
+    "investigate": true,
+    "fanout": 3,
+    "effort": "medium"
+   },
+   "note": "all forced on"
+  },
+  "C8": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "reasoning_cap": 8192,
+    "effort": "medium"
+   },
+   "note": "A0, thinking cap 8192"
+  },
+  "C32": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "reasoning_cap": 32768,
+    "effort": "medium"
+   },
+   "note": "A0, thinking cap 32768 (reference)"
+  },
+  "C128": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "reasoning_cap": 131072,
+    "effort": "medium"
+   },
+   "note": "A0, thinking cap 131072 (effectively unlimited)"
+  },
+  "S0": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "A0 + check_solution (compile only; hidden tests never run)",
+   "twin": "A0",
+   "client_tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "check_solution",
+      "description": "Does my code compile? Call this before answering to typecheck your complete solution: it runs the task's real compiler (tsc --strict against the pinned packages, or cargo for Rust) on exactly the code you pass and returns the compiler errors, or says it compiles. Answering without it means answering with code no compiler has seen. Use it for: 'does this compile', 'check my solution', 'fix the type errors', and again after each fix. Pass the whole solution, not a fragment. It does NOT run the hidden tests: a clean result means the code compiles, not that it is correct.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "description": "The complete solution source, exactly as it would appear in your final answer's code block."
+        }
+       },
+       "required": [
+        "code"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "S5": {
+   "features": {
+    "effort": "medium"
+   },
+   "note": "A5 + check_solution (compile only; hidden tests never run)",
+   "twin": "A5",
+   "client_tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "check_solution",
+      "description": "Does my code compile? Call this before answering to typecheck your complete solution: it runs the task's real compiler (tsc --strict against the pinned packages, or cargo for Rust) on exactly the code you pass and returns the compiler errors, or says it compiles. Answering without it means answering with code no compiler has seen. Use it for: 'does this compile', 'check my solution', 'fix the type errors', and again after each fix. Pass the whole solution, not a fragment. It does NOT run the hidden tests: a clean result means the code compiles, not that it is correct.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "description": "The complete solution source, exactly as it would appear in your final answer's code block."
+        }
+       },
+       "required": [
+        "code"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "S6": {
+   "features": {
+    "retrieval": true,
+    "hints": true,
+    "investigate": true,
+    "fanout": 3,
+    "effort": "medium"
+   },
+   "note": "A6 + check_solution (compile only; hidden tests never run)",
+   "twin": "A6",
+   "client_tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "check_solution",
+      "description": "Does my code compile? Call this before answering to typecheck your complete solution: it runs the task's real compiler (tsc --strict against the pinned packages, or cargo for Rust) on exactly the code you pass and returns the compiler errors, or says it compiles. Answering without it means answering with code no compiler has seen. Use it for: 'does this compile', 'check my solution', 'fix the type errors', and again after each fix. Pass the whole solution, not a fragment. It does NOT run the hidden tests: a clean result means the code compiles, not that it is correct.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "description": "The complete solution source, exactly as it would appear in your final answer's code block."
+        }
+       },
+       "required": [
+        "code"
+       ]
+      }
+     }
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "rs18",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust string interner for `wasm32-unknown-unknown` (no wasm-bindgen), used from JavaScript through an opaque handle. Export exactly these unmangled C-ABI functions, where `Interner` is your own `pub struct` with private fields:\n\n- `interner_new() -> *mut Interner`\n- `interner_intern(h: *mut Interner, ptr: *const u8, len: usize) -> u32`: interns the UTF-8 string in `ptr[..len]` and returns its id. Ids are dense and assigned in first-seen order (0, 1, 2, ...); interning an equal string again returns the existing id. The bytes are the caller's and may be overwritten or freed as soon as the call returns. Returns `u32::MAX` if `h` is null, `ptr` is null while `len > 0`, or the bytes are not valid UTF-8. `ptr` may be null when `len` is 0 (the empty string is a valid string).\n- `interner_get(h: *const Interner, id: u32, out_len: *mut usize) -> *const u8`: returns a pointer to the bytes of the string with that id (not NUL-terminated) and writes its length to `*out_len`. The pointer returned for a given id must stay the same and stay valid for the whole life of the interner, even while more strings are interned. Returns null and writes nothing if `h` or `out_len` is null or the id is unknown.\n- `interner_len(h: *const Interner) -> u32`: number of distinct strings (0 for null).\n- `interner_free(h: *mut Interner)`: frees the interner and every string it holds; null is a no-op.\n\nAnswer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs18/grader.mjs", "wasm_support": true, "entry": ["Interner", "interner_new", "interner_intern", "interner_get", "interner_len", "interner_free"]},
+  "reference": "tasks/rs18/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

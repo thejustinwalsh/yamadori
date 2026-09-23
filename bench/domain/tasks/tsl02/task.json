@@ -1,0 +1,31 @@
+{
+  "id": "tsl02",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This module was written against r165 and no longer builds:\n\n```js\nimport { tslFn, vec3 } from 'three/nodes';\n\nexport const tint = tslFn( ( [ color, amount ] ) => color.mul( amount ).add( vec3( 0.05 ) ) );\n```\n\nPort it to r185 using named imports from 'three/tsl'. Keep `export const tint` as a TSL function written in JavaScript (not a WGSL or GLSL string), still called as `tint( color, amount )` and computing the same expression. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "tint"
+    ],
+    "require": [
+      {
+        "name": "Fn",
+        "as": "call"
+      },
+      {
+        "name": "Fn",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": [
+      "tslFn"
+    ]
+  },
+  "reference": "tasks/tsl02/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "tslFn -> Fn. Deprecated r168 and later removed: r165 examples/jsm/nodes/shadernode/ShaderNode.js:493 `export const tslFn`; r175 src/nodes/tsl/TSLCore.js:674 `tslFn ... // @deprecated, r168` (warns 'tslFn() has been renamed to Fn()'); absent from r185's three/tsl exports; r185 src/nodes/tsl/TSLCore.js:1124 `export function Fn`.",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

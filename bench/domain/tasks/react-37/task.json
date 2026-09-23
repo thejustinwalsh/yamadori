@@ -1,0 +1,11 @@
+{
+  "id": "react-37",
+  "domain": "react",
+  "prompt": "Write a React 19 component in TypeScript (strict mode) that exposes an imperative handle through React 19's ref-as-a-prop.\n\nExport:\n- `interface FancyInputHandle { focus(): void; clear(): void; getValue(): string }`\n- `function FancyInput({ label, ref }: { label: string; ref?: React.Ref<FancyInputHandle> })` (you may import the `Ref` type from `react` and write `Ref<FancyInputHandle>`).\n\n`FancyInput` must be a plain function component that receives `ref` as an ordinary prop, as React 19 allows. Do NOT use `forwardRef`: `typeof FancyInput` must be `'function'`. Implement the handle with `useImperativeHandle` on that `ref` prop.\n\nBehaviour:\n- Render a text input whose accessible name is exactly `label`, starting empty.\n- Render the text `Length: <n>` (e.g. `Length: 0`, `Length: 5`) in its own element, where `<n>` is the number of characters currently in the input; it updates as the user types.\n- `focus()` focuses the input.\n- `getValue()` returns the input's current text (always the latest, after any typing).\n- `clear()` empties the input: afterwards the input shows `''`, the counter shows `Length: 0`, `getValue()` returns `''`, the input stays empty when the parent re-renders `FancyInput` (even with a different `label`), and typing afterwards starts from empty.\n- It must work with object refs (`createRef`/`useRef`) and with callback refs; a callback ref receives the handle on mount and `null` on unmount. `ref` is optional.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-37/test.tsx", "entry": ["FancyInput", "FancyInputHandle"]},
+  "reference": "tasks/react-37/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

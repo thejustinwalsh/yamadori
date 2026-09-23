@@ -1,0 +1,23 @@
+{
+  "id": "ts17",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode, Node 24, `lib` set to `esnext`) that exports `createPool<T>(items: readonly T[])`, a pool of reusable items whose leases are released with an `await using` declaration:\n\n```ts\n{\n  await using lease = await pool.acquire();\n  use(lease.value);\n} // the item goes back to the pool here, even if the block throws\n```\n\nThe returned pool object has:\n\n- `acquire()` -- returns a promise of a lease for a free item. When no item is free, the promise stays pending until one is released; pending acquires are served first-come-first-served, and a released item goes directly to the oldest waiter.\n- `available` -- the number of free items (a read-only property); `waiting` -- the number of pending acquires.\n\nA lease has a readonly `value: T` and releases its item through the ASYNC disposal protocol (so it works with `await using`). Releasing a lease a second time does nothing, even if its item has since been leased to someone else. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts17/test.ts",
+    "runtime": true,
+    "entry": [
+      "createPool"
+    ],
+    "compilerOptions": {
+      "lib": [
+        "esnext"
+      ]
+    }
+  },
+  "reference": "tasks/ts17/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "notes": "Needs lib esnext for AsyncDisposable; `await using` in test.ts is downlevelled for target es2023."
+}

@@ -1,0 +1,6 @@
+{"question_id": "abc390_b", "condition": "direct", "difficulty": "easy", "passed": true, "why": "", "n_cases": 12, "ms": 27286, "finish": "stop", "empty_content": false, "chars": 344}
+{"question_id": "abc390_b", "condition": "proxy", "difficulty": "easy", "passed": true, "why": "", "n_cases": 12, "ms": 59464, "finish": "stop", "empty_content": false, "chars": 1325}
+{"question_id": "abc393_d", "condition": "direct", "difficulty": "hard", "passed": true, "why": "", "n_cases": 12, "ms": 28481, "finish": "stop", "empty_content": false, "chars": 503}
+{"question_id": "abc393_d", "condition": "proxy", "difficulty": "hard", "passed": false, "why": "no code in the reply", "n_cases": 12, "ms": 221928, "finish": "tool_calls", "empty_content": false, "chars": 100}
+{"question_id": "3720", "condition": "direct", "difficulty": "medium", "passed": false, "why": "no code in the reply", "n_cases": 12, "ms": 192648, "finish": "length", "empty_content": false, "chars": 26945}
+{"question_id": "3720", "condition": "proxy", "difficulty": "medium", "passed": false, "ms": 0, "error": "HTTPError: HTTP Error 502: Bad Gateway"}

@@ -1,0 +1,19 @@
+{
+  "id": "tg20",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu, { type TgpuRoot } from 'typegpu'`, `import * as d from 'typegpu/data'`), export these schemas exactly as written:\n\n```ts\nexport const SimParams = d.struct({ dt: d.f32, gravity: d.vec3f }).$name('SimParams');\nexport const Particle = d.struct({ pos: d.vec3f, vel: d.vec3f }).$name('Particle');\nexport const Counters = d.struct({ alive: d.atomic(d.u32), spawned: d.atomic(d.u32) }).$name('Counters');\n```\n\nand `function createSimBuffers(root: TgpuRoot)` returning an object `{ params, particles, counters, quad }`: `params` -- a *fixed uniform binding* of one `SimParams` (the typed object a shader can reference directly as a `var<uniform>` without any bind group layout), initialised to `{ dt: 1 / 60, gravity: (0, -9.81, 0) }`; `particles` -- a fixed read-write storage binding of `array<Particle, 1024>` (again directly referenceable from shaders, emitted as `var<storage, read_write>`); `counters` -- a plain typed buffer (not a binding) holding one `Counters`, flagged for storage usage so it can be bound through bind groups and read back; `quad` -- a plain typed buffer of `array<vec2f, 6>` flagged for use as a vertex buffer, initialised with two triangles that exactly cover clip space: the corners (-1,-1), (1,-1), (-1,1) and (-1,1), (1,-1), (1,1). The return type must be inferred precisely by TypeScript (no `any`, no widening to untyped buffers). Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg20/test.ts", "runtime": true, "webgpu": true, "entry": ["SimParams", "Particle", "Counters", "createSimBuffers"]},
+  "reference": "tasks/tg20/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "api": {
+    "root.createUniform / root.createMutable / root.createReadonly / root.createBuffer(schema, initial)": "core/root/rootTypes.d.ts, core/root/init.js",
+    "buffer.$usage(...) -> this & StorageFlag/UniformFlag/VertexFlag; buffer.as('uniform'|'mutable'|'readonly')": "core/buffer/buffer.d.ts, core/buffer/buffer.js",
+    "TgpuUniform/TgpuMutable/TgpuReadonly (resourceType, .buffer)": "core/buffer/bufferBinding.d.ts",
+    "buffer.initial": "core/buffer/buffer.d.ts",
+    "tgpu.initFromDevice({ device })": "core/root/init.d.ts, core/root/init.js",
+    "StorageFlag/VertexFlag/UniformFlag": "extension.d.ts, core/buffer/buffer.d.ts"
+  },
+  "notes": "No GPU in node: the test builds a root with tgpu.initFromDevice over a stub device whose every method throws. Probed: typegpu buffer creation and resolution are lazy and never touch the device, so the runtime checks (resourceType, usage flags, initial data, resolved WGSL of the fixed bindings) are real. wrong_compile uses asUniform/asMutable free functions from older typegpu, not exported by 0.12.5."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "react-17",
+  "domain": "react",
+  "prompt": "Write an accessible accordion component in TypeScript (strict mode) for React 19 and export it as\n\n```ts\nexport function Accordion(props: {\n  items: { id: string; title: string; content: React.ReactNode }[];\n  allowMultiple?: boolean;\n}): React.ReactElement\n```\n\nMarkup and ARIA, per item:\n- A header `<button>` whose accessible name is the item's `title`. It has `aria-expanded=\"true\"` while its section is open and `aria-expanded=\"false\"` while it is closed, and an `aria-controls` equal to the `id` of its panel.\n- A panel with `role=\"region\"`, an `id`, and `aria-labelledby` equal to the `id` of its header button; it contains the item's `content`.\n- A closed panel is either not rendered at all or carries the `hidden` attribute (either is fine).\n\nBehaviour:\n- Every section starts closed.\n- Activating a closed section's button (click, or Enter/Space on the focused button) opens it; activating an open section's button closes it.\n- Without `allowMultiple` (the default, `false`), at most one section is open: opening a section closes whichever other one was open.\n- With `allowMultiple` set, opening a section leaves the others as they are.\n\nYou may import only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-17/test.tsx", "entry": ["Accordion"]},
+  "reference": "tasks/react-17/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "component"
+}

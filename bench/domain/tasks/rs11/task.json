@@ -1,0 +1,10 @@
+{
+  "id": "rs11",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust function callable from C that hex-encodes bytes into a buffer the caller provides, using the usual two-call pattern (ask for the size, then fill):\n\n`#[no_mangle] pub unsafe extern \"C\" fn hex_encode(data: *const u8, len: usize, out: *mut c_char, cap: usize) -> usize`\n\n- It always returns the buffer size REQUIRED for the result, counting the terminating NUL: `2 * len + 1`.\n- If `out` is non-null and `cap` is at least that size, it writes the lowercase hex digits of the `len` bytes followed by a single NUL byte, and nothing else (no byte of `out` beyond the NUL is touched).\n- If `out` is null, or `cap` is smaller than the required size, it writes nothing at all to `out`.\n- `data` may be null only when `len` is 0. If `data` is null and `len` is not 0, it returns 0 and writes nothing.\n\n`c_char` is `std::ffi::c_char`. Answer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs11/grader.rs", "entry": ["hex_encode"]},
+  "reference": "tasks/rs11/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

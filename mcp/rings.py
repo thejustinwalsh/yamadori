@@ -62,9 +62,12 @@ KINDS = ("did", "learned", "check", "decided")
 
 def record(kind: str, summary: str, detail: str = "", outcome: str = "",
            session: str | None = None) -> str:
-    kind = (kind or "did").strip().lower()
+    kind = str(kind or "did").strip().lower()
     if kind not in KINDS:
         return f"unknown kind {kind!r}. Use one of: {', '.join(KINDS)}."
+    # A model sends `null` for an optional field as readily as it omits it,
+    # and `None.strip()` would crash the call instead of recording the step.
+    summary, detail, outcome = (str(x or "") for x in (summary, detail, outcome))
     if not summary.strip():
         return "summary is required -- an entry nobody can read is not a record."
     s = session or session_key()
@@ -88,6 +91,10 @@ def read(session: str | None = None, limit: int = 60, kind: str = "") -> str:
     skim past.
     """
     s = session or session_key()
+    kind = (kind or "").strip().lower()
+    # SQLite reads LIMIT 0 as "no rows" and a negative LIMIT as "all rows".
+    # Either way the answer below would be wrong, so ask for at least one.
+    limit = max(int(limit), 1)
     con = _db()
     q = "SELECT id, ts, kind, summary, detail, outcome FROM rings WHERE session=?"
     args: list = [s]
@@ -99,6 +106,13 @@ def read(session: str | None = None, limit: int = 60, kind: str = "") -> str:
     rows = con.execute(q, args).fetchall()
     total = con.execute("SELECT COUNT(*) FROM rings WHERE session=?", (s,)).fetchone()[0]
     con.close()
+    if not rows and total:
+        # A filter that matched nothing is not an empty log. Saying "nothing
+        # has been recorded yet, record it now" here invites the model to
+        # re-record -- and redo -- work this log exists to prove was done.
+        return (f"Session {s!r} has {total} entries, none of kind {kind!r}. "
+                f"Read without the kind filter to see them. Kinds: "
+                f"{', '.join(KINDS)}.")
     if not rows:
         return (f"No entries for session {s!r}. Nothing has been recorded yet, "
                 f"which is not the same as nothing having been done -- if you "
@@ -186,11 +200,35 @@ TOOLS = [
 
 
 def handle(name: str, args: dict) -> str | None:
+    """Dispatch, scoped to the CALLER's session rather than the server's.
+
+    `session_key()` falls back to the basename of the server's working
+    directory, which is the same string -- "llama-stack" -- for every caller
+    there will ever be. So there was one shared work log: every remote user
+    wrote into it and read everybody else's entries back out. Found in the
+    tool audit, where a caller with no repository was handed a note about
+    `EntityIndex` in packages/core from an unrelated session.
+
+    The proxy knows the real key and passes it as `_session`, per call rather
+    than through an environment variable, because this server answers several
+    requests at once and a process-global would race between them.
+
+    A missing `_session` is not quietly defaulted. Returning somebody else's
+    log is worse than returning none, so an unscoped call says so.
+    """
+    session = (args.get("_session") or "").strip()
+    if not session:
+        return ("ERROR: no session is bound to this conversation, so the work "
+                "log cannot be read or written. Entries are per-conversation, "
+                "and answering from an unscoped log would return a different "
+                "conversation's notes.")
     if name == "record_step":
         return record(args.get("kind", "did"), args.get("summary", ""),
-                      args.get("detail", ""), args.get("outcome", ""))
+                      args.get("detail", ""), args.get("outcome", ""),
+                      session=session)
     if name == "read_rings":
-        return read(kind=args.get("kind", ""), limit=int(args.get("limit", 60)))
+        return read(session=session, kind=args.get("kind", ""),
+                    limit=int(args.get("limit", 60)))
     return None
 
 

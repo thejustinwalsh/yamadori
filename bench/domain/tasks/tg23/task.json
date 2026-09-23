@@ -1,0 +1,18 @@
+{
+  "id": "tg23",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export: (1) `gridSize` -- a typegpu slot holding a plain JS `number`, default `16`, that callers override per shader with `.with(gridSize, n)`; (2) `cellSize` -- a value derived from `gridSize` at shader-generation time: a module-scope WGSL constant of type `f32` whose WGSL name is `CELL_SIZE` and whose value is `1 / gridSize` for whatever `gridSize` is in effect where it is used (so one generated shader can contain several differently-specialised copies); (3) `cellOf` -- a TypeGPU function implemented as a WGSL string, WGSL name `cellOf`, signature `(p: vec2f) -> vec2u`, returning `vec2u(p / <cellSize>)` where `<cellSize>` is the derived constant. Nothing may read the slot's value at module load time. Everything must work in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg23/test.ts", "runtime": true, "webgpu": true, "entry": ["gridSize", "cellSize", "cellOf"]},
+  "reference": "tasks/tg23/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "api": {
+    "tgpu.lazy(compute) -> TgpuLazy<T>": "core/slot/lazy.d.ts, core/slot/lazy.js, core/slot/slotTypes.d.ts",
+    "tgpu['~unstable'].derived (deprecated alias of lazy)": "tgpuUnstable.d.ts",
+    "slot.$ (throws outside resolution)": "core/slot/slot.js",
+    "tgpu.slot / fn.with": "core/slot/slot.d.ts, core/root/rootTypes.d.ts",
+    "tgpu.const": "core/constant/tgpuConstant.d.ts"
+  },
+  "notes": "Probed: one resolve containing cellOf and cellOf.with(gridSize, 4) emits CELL_SIZE = 0.0625 and CELL_SIZE_1 = 0.25 with cellOf/cellOf_1 each referencing its own. An accessor with a function default returning a tgpu.const fails to resolve in 0.12.5 (finite-math conversion error), so lazy is the working route. tgpu.derived does not exist on the default export -- wrong_compile."
+}

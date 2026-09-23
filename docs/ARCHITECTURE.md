@@ -105,8 +105,14 @@ structured response in the stack, not just Laya's.
         v
   MCP surface        find_by_meaning  find_definition_opt  find_references
   (stdio/HTTP/WS)    find_by_pattern  read_file_range      describe_index
-                     run_check        record_step/read_rings
-        |
+                     run_check        summarize_text
+        |            EIGHT tools -- `code_search.TOOLS`. `record_step` and
+        |            `read_rings` are NOT here: they are INTERNAL_TOOLS,
+        |            injected by the proxy only, because the work log is
+        |            scoped to a conversation key an outside MCP client
+        |            cannot supply. With bind_project_context and
+        |            delegate_investigation the model sees twelve
+        |            (`proxy.OUR_NAMES`, asserted at 12 in test_tools.py).
         v
   ENGINE
     sampling loop      N candidates -> executable verifier -> selector
@@ -114,16 +120,24 @@ structured response in the stack, not just Laya's.
     probe              mid-layer activations -> "is this one worth keeping"
         |
         v
-  RETRIEVAL           tree-sitter symbol tables + BM25 (+ embeddings, pending
-                      the cut rule -- keyword currently beats semantic
-                      92/120 vs 77/120, p=0.0041)
+  RETRIEVAL           tree-sitter symbol tables + BM25. Embeddings are built
+                      and OFF by default (CODE_SEARCH_SEMANTIC=0): keyword
+                      beat semantic 92/120 vs 77/120, McNemar p=0.0041, and
+                      fusion did not rescue it at 87/120, p=0.2266.
         |
         v
-  SERVING             llama-swap -> llama.cpp (PrismML fork), OpenAI API :1234
-    canopy    GPU0     Bonsai 2 27B ternary, 208k ctx, q8 KV
-    rootstock GPU1     embeddings + reranker + Laya, always resident
+  SERVING             llama-swap -> llama.cpp (PrismML fork), OpenAI API on
+                      127.0.0.1:11434; the proxy owns :1234 (`scripts/start-stack.bat`)
+    canopy    GPU0     Bonsai 2 27B ternary, 147,456 ctx, q8 KV
+    rootstock GPU1     embeddings + reranker + Laya, always resident --
+                       see "Retrieval" below: the cut rule fired on both and
+                       neither has been removed
     graft     GPU1     vision, on demand
-    draft     TBD      Qwen3.5-0.8B, vocab-matched, if it measures positive
+    draft     TBD      Qwen3.5-0.8B, vocab-matched, if it measures positive --
+                       the consequent is not stated here and nothing in this
+                       repo decides it. `docs/BUILD.md` §1 and Sequence step 1
+                       own the condition: find a same-lineage draft first, or
+                       the item dies. Not measured, not loaded.
 ```
 
 ## What each layer is for, honestly
@@ -131,10 +145,46 @@ structured response in the stack, not just Laya's.
 **Serving** is solved and boring. It works.
 
 **Retrieval** is the layer most likely to shrink. Measured on our own repos,
-BM25 beats embeddings significantly. If fusion does not beat BM25 either, the
-embedding model and the reranker come out, which frees ~6 GB and removes an
-index that goes stale on every commit. Symbol tables stay regardless -- they
-are sqlite and cost nothing.
+BM25 beats embeddings significantly: recall@5 92/120 against 77/120, McNemar
+p=0.0041.
+
+**The pre-registered condition fired, and the consequent did not happen.** This
+document used to say "if fusion does not beat BM25 either, the embedding model
+and the reranker come out, which frees ~6 GB and removes an index that goes
+stale on every commit." Fusion did not beat BM25 — **87/120 against keyword's
+92/120, 3 discordant wins to 8, McNemar p=0.2266, indistinguishable**
+(`scripts/eval_retrieval.py`, gauntlet index, n=120). The reranker, measured
+separately at n=356 paired rows in `bench/retrieval_results.jsonl`, lost to
+plain embedding order 226 discordant to 10.
+
+**That reranker row has since been declared VOID and this page predates the
+declaration.** `docs/FINDINGS.md` #20 (2026-09-22) reproduced `/v1/rerank`
+scoring a document differently depending on what else is in the same request,
+and `search_code` batches up to 40 candidates, so all 356 rows went through the
+corrupted path. `docs/PLAN.md` "Cut criteria" records the resolution: nothing
+is cut, because the data supports neither cutting nor keeping.
+
+**Both models are nevertheless still resident on GPU1**, and this is
+UNRESOLVED rather than an oversight. Cutting them is a product decision, not a
+reading of the table, because two things the cut rule assumed have turned out
+not to hold:
+
+- The gold queries in both runs derive from **symbol names**, which flatters
+  lexical matching and is the single worst query shape for a cross-encoder.
+  The conceptual query set that would test the other direction does not exist.
+  → `docs/ROADMAP.md` §1.2 states what closes it.
+- The reranker's number has been **misread once already** in the opposite
+  direction. That misreading — "the 199 zero ranks mean the call was skipped" —
+  has since been corrected in place: `docs/ROADMAP.md` §1.3 now opens with the
+  correction, and `bench/retrieval.py:106` drives that arm at
+  `rerank_cutoff=999`, so a rank of `0` is a miss and not a skipped call.
+  → `docs/ROADMAP.md` §1.3, and the note in `docs/PLAN.md` under
+  "Cut criteria" for what the row actually shows.
+
+Until those two measurements exist, the resident VRAM is being spent on
+components whose cut rule has technically fired. **Somebody has to decide
+that deliberately.** Symbol tables stay regardless — they are sqlite and cost
+nothing.
 
 **The engine is the product.** Sampling loop, verifiers, selector, rings. This
 is the part nobody else has configured for these domains, and it is the only

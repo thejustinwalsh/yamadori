@@ -1,0 +1,10 @@
+{
+  "id": "rs21",
+  "domain": "rust_wasm",
+  "prompt": "Using wasm-bindgen 0.2 (the build runs `wasm-bindgen --target nodejs`), write a Rust function exported to JavaScript as `find_byte` that takes a `Uint8Array` `haystack`, a byte `needle` and a start index `from`, and returns the index of the first occurrence of `needle` at or after `from`. When there is no such occurrence (including when `from` is past the end) JavaScript must receive `undefined` -- not -1 and not null -- and the generated TypeScript declaration must be `find_byte(haystack: Uint8Array, needle: number, from: number): number | undefined`. Answer with a single ```rust code block containing the library code.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs21/grader.mjs", "bindgen": true, "entry": ["find_byte"]},
+  "reference": "tasks/rs21/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

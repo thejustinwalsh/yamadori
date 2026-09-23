@@ -1,0 +1,1 @@
+{"script": "recipe_oracle.py", "args": ["--n", "18", "--endpoint", "direct"], "needs": ["model"], "note": "recipe ceiling, 7 arms incl. placebo", "queued": 1790027312.492273}

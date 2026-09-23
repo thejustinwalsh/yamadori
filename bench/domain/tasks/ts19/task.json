@@ -1,0 +1,17 @@
+{
+  "id": "ts19",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports `createMachine(config)` for a tiny finite-state machine. `config` is `{ states, initial }`: `states` is an array of state-name strings and `initial` is the starting state. It returns an object with a readonly `states` array, a `current` property holding the current state (it reflects every transition), and `go(to)`, which sets the current state and throws a `RangeError` if `to` is not in `states`.\n\nTyping: the set of states `S` must be inferred as a union of string literals from `states` ALONE, without the caller writing `as const`. So `createMachine({ states: ['idle', 'running', 'done'], initial: 'idle' })` gives `current` the type `'idle' | 'running' | 'done'` and `go` the parameter type of that union; a value of `initial` that is not in `states` (e.g. `initial: 'stopped'` above) must be a compile error rather than silently adding `'stopped'` to the union. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts19/test.ts",
+    "runtime": true,
+    "entry": [
+      "createMachine"
+    ]
+  },
+  "reference": "tasks/ts19/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

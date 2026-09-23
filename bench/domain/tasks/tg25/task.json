@@ -1,0 +1,19 @@
+{
+  "id": "tg25",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu, { type TgpuRoot } from 'typegpu'`, `import * as d from 'typegpu/data'`), write a texture blit. Export: (1) `blitLayout` -- a bind group layout with `src` (binding 0: a sampled 2D texture with `f32` samples) and `srcSampler` (binding 1: a filtering sampler); (2) `blitFragment` -- a fragment entry point implemented as a WGSL string (body only; refer to inputs as `in.<name>`), WGSL name `blit`, taking the interpolated `uv: vec2f` produced by typegpu's built-in full-screen-triangle vertex function and returning `textureSample(src, srcSampler, uv)` as a single `vec4f` colour, reading both resources through `blitLayout`; (3) `function createBlitPipeline(root: TgpuRoot, format: GPUTextureFormat)` -- returns a render pipeline whose vertex stage is typegpu's built-in full-screen-triangle vertex function (do not write your own), whose fragment stage is `blitFragment`, with one colour target of the given `format`; (4) `function blit(root: TgpuRoot, pipeline: ReturnType<typeof createBlitPipeline>, source: GPUTextureView, sampler: GPUSampler, target: GPUTextureView): void` -- binds `source` and `sampler` through `blitLayout` and draws the full-screen triangle once into `target`, clearing it to transparent black (0, 0, 0, 0) first and storing the result. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg25/test.ts", "runtime": true, "webgpu": true, "entry": ["blitLayout", "blitFragment", "createBlitPipeline", "blit"]},
+  "reference": "tasks/tg25/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "api": {
+    "common.fullScreenTriangle (outputs { pos: builtin position, uv: vec2f }, 3 vertices)": "common/index.d.ts, common/fullScreenTriangle.d.ts, common/fullScreenTriangle.js",
+    "root.createRenderPipeline({ vertex, fragment, targets })": "core/root/rootTypes.d.ts:136-160, core/pipeline/renderPipeline.d.ts",
+    "pipeline.withColorAttachment({ view, loadOp, storeOp, clearValue }).with(bindGroup).draw(n)": "core/pipeline/renderPipeline.d.ts:77-114, core/commandEncoder/attachments.d.ts",
+    "root.createBindGroup(layout, { src: GPUTextureView, srcSampler: GPUSampler })": "tgpuBindGroupLayout.d.ts (LayoutEntryToInput accepts raw GPUTextureView / GPUSampler)",
+    "root.unwrap(pipeline)": "core/root/rootTypes.d.ts, core/root/init.js",
+    "tgpu.fragmentFn / d.texture2d": "core/function/tgpuFragmentFn.d.ts, data/texture.d.ts"
+  },
+  "notes": "Driven against a recording stub GPUDevice (tgpu.initFromDevice); the test asserts on createRenderPipeline (targets, vertex buffers), createShaderModule code (the built-in triangle's constant positions, the blit fragment), createBindGroupLayout/createBindGroup entries, beginRenderPass colour attachment, draw args and submit. Probed end to end in probe_tg/p25.mjs. wrong_compile: a fragment input not named `uv` does not type-check against fullScreenTriangle's output in createRenderPipeline."
+}

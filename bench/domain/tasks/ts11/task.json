@@ -1,0 +1,20 @@
+{
+  "id": "ts11",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports two ID types, `UserId` and `OrderId`, and their constructors. At runtime both are ordinary strings (no wrapper objects). Statically they must be nominal: a `UserId` or `OrderId` can be used anywhere a `string` is expected, but a plain `string` is not assignable to either, and neither is assignable to the other.\n\n- `toUserId(raw: string): UserId` -- returns `raw` unchanged if it matches `/^u_[0-9a-z]+$/`, otherwise throws a `TypeError`.\n- `toOrderId(raw: string): OrderId` -- returns `raw` unchanged if it matches `/^o_[0-9]+$/`, otherwise throws a `TypeError`.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts11/test.ts",
+    "runtime": true,
+    "entry": [
+      "UserId",
+      "OrderId",
+      "toUserId",
+      "toOrderId"
+    ]
+  },
+  "reference": "tasks/ts11/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

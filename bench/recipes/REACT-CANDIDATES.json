@@ -1,0 +1,1287 @@
+{
+  "compiled": "2026-09-22",
+  "method": "Every source_url was fetched with User-Agent yamadori-dataset-worker/1 (the worker's own): all 200 text/plain. approx_size_chars and extract_chunks come from the worker's own imported html_to_text + chunks_of (12,000-char chunks, 60-chunk limit), not a copy. Licences were read from each repo's licence file (copied verbatim to bench/recipes/licenses/) and matched against the GitHub API spdx_id; see bench/recipes/licenses/NOTICE.md for attribution lines and the commit read. Domains were validated against domains.DOMAINS at write time and no name collides with an existing bench/recipes/*.jsonl.",
+  "gaps_targeted": "bench/recipes had no React-core corpus: r3f*.jsonl covers react-three-fiber only. Priority is React 19 (Actions, useActionState, useOptimistic, useFormStatus, <form action>, use(), ref as a prop, Server Components/Functions, React Compiler and the Rules of React, Activity, useEffectEvent), then the Effects/refs/state Learn pages, then TypeScript typing and app architecture.",
+  "operator_command": "For each candidate: datasets.create(c['source_url'], name=c['name'], kind='recipes', source_name=c['source_name'], source_url=c['source_url'], licence=c['licence'], language=c['language'], domains=c['domains']). All four assisted fields are answered, so the running worker advances each dataset through fetch -> extract -> index with no clarify stop. dataset_id is the id create() returned.",
+  "candidates": [
+    {
+      "name": "react_dev_blog_react_19",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/blog/2024/12/05/react-19.md",
+      "source_name": "react.dev blog: React v19",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "The React 19 feature set in one place: Actions, useActionState, useOptimistic, useFormStatus, <form action>, use(), ref as a prop, ref cleanup functions, <Context> as provider, document metadata, stylesheet/script support.",
+      "approx_size_chars": 33783,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "651b64cbf17c"
+    },
+    {
+      "name": "react_dev_blog_react_19_upgrade_guide",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/blog/2024/04/25/react-19-upgrade-guide.md",
+      "source_name": "react.dev blog: React 19 Upgrade Guide",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component",
+        "types"
+      ],
+      "why": "Breaking changes and removals (propTypes, defaultProps on functions, string refs, legacy context, ReactDOM.render), the ref-callback return rule, and the TypeScript changes (useRef requires an argument, ReactElement props unknown).",
+      "approx_size_chars": 30459,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "c219b6a7abe0"
+    },
+    {
+      "name": "react_dev_blog_react_19_2",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/blog/2025/10/01/react-19-2.md",
+      "source_name": "react.dev blog: React 19.2",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "<Activity>, useEffectEvent, cacheSignal, Partial Pre-rendering, eslint-plugin-react-hooks v6 flat config.",
+      "approx_size_chars": 16266,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "d79cb9cc8ac3"
+    },
+    {
+      "name": "react_dev_blog_react_19_3",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/blog/2026/09/09/react-19-3.md",
+      "source_name": "react.dev blog: React 19.3",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "The newest release notes (2026-09-09); what changed since 19.2.",
+      "approx_size_chars": 52328,
+      "extract_chunks": 5,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "d4710aaadc5c"
+    },
+    {
+      "name": "react_dev_use_action_state",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useActionState.md",
+      "source_name": "react.dev reference: useActionState",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Action state for forms: signature, pending flag, permalink, progressive enhancement with Server Functions, and the troubleshooting cases.",
+      "approx_size_chars": 41485,
+      "extract_chunks": 4,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "649309a74cbc"
+    },
+    {
+      "name": "react_dev_use_optimistic",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useOptimistic.md",
+      "source_name": "react.dev reference: useOptimistic",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Optimistic UI updates during an Action and how the optimistic state reverts.",
+      "approx_size_chars": 34055,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "dc958b357882"
+    },
+    {
+      "name": "react_dev_use_form_status",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react-dom/hooks/useFormStatus.md",
+      "source_name": "react.dev reference: useFormStatus",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Reading the parent <form>'s pending status and data from a child component; the must-be-inside-the-form pitfall.",
+      "approx_size_chars": 6893,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "245830affda1"
+    },
+    {
+      "name": "react_dev_form_component",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react-dom/components/form.md",
+      "source_name": "react.dev reference: <form>",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "<form action={fn}>, formAction on buttons, automatic reset, handling submission errors, multiple submission types.",
+      "approx_size_chars": 15645,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "777ba4dda8ca"
+    },
+    {
+      "name": "react_dev_use",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/use.md",
+      "source_name": "react.dev reference: use",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Reading a Promise or context with use(): conditional use, streaming from server to client, error handling, why promises must be cached rather than created in render.",
+      "approx_size_chars": 42655,
+      "extract_chunks": 4,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "c105d7e10fef"
+    },
+    {
+      "name": "react_dev_use_transition",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useTransition.md",
+      "source_name": "react.dev reference: useTransition",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Non-blocking updates, async Actions inside startTransition, isPending, the setState-after-await rule, error boundaries for transitions.",
+      "approx_size_chars": 52285,
+      "extract_chunks": 5,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "9274835c85f5"
+    },
+    {
+      "name": "react_dev_start_transition",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/startTransition.md",
+      "source_name": "react.dev reference: startTransition",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "The standalone startTransition and when to use it instead of the hook.",
+      "approx_size_chars": 4630,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "ceab83acfed9"
+    },
+    {
+      "name": "react_dev_use_deferred_value",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useDeferredValue.md",
+      "source_name": "react.dev reference: useDeferredValue",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Deferring a value to keep input responsive, showing stale content during load, initialValue, how it differs from debouncing.",
+      "approx_size_chars": 24675,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "6663e2348d39"
+    },
+    {
+      "name": "react_dev_suspense",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/Suspense.md",
+      "source_name": "react.dev reference: <Suspense>",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Fallbacks, nested boundaries, revealing content together, transitions to avoid hiding revealed content, resetting boundaries on navigation, server error fallbacks.",
+      "approx_size_chars": 81910,
+      "extract_chunks": 7,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "e87fc361573a"
+    },
+    {
+      "name": "react_dev_activity",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/Activity.md",
+      "source_name": "react.dev reference: <Activity>",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Hiding and restoring UI while keeping state, pre-rendering, and how Effects behave in hidden trees (React 19.2).",
+      "approx_size_chars": 31346,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "6a2aec983375"
+    },
+    {
+      "name": "react_dev_use_sync_external_store",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useSyncExternalStore.md",
+      "source_name": "react.dev reference: useSyncExternalStore",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Subscribing to external stores and browser APIs correctly; the stable-subscribe and cached-snapshot rules; getServerSnapshot.",
+      "approx_size_chars": 16535,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "c0f5222dc690"
+    },
+    {
+      "name": "react_dev_use_effect_event",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useEffectEvent.md",
+      "source_name": "react.dev reference: useEffectEvent",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Effect Events for non-reactive logic read inside Effects; what they may and may not be called from.",
+      "approx_size_chars": 16468,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "abb286f8f847"
+    },
+    {
+      "name": "react_dev_cache",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/cache.md",
+      "source_name": "react.dev reference: cache",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component",
+        "backend"
+      ],
+      "why": "Server Component memoisation with cache(): share a snapshot of data, preload data, pitfalls of calling it outside components.",
+      "approx_size_chars": 19159,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "4f90033c90b9"
+    },
+    {
+      "name": "react_dev_rsc_server_components",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/rsc/server-components.md",
+      "source_name": "react.dev reference: Server Components",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component",
+        "backend"
+      ],
+      "why": "What renders where: Server Components without a server, async components, adding interactivity with client components.",
+      "approx_size_chars": 10744,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "ea93590f776e"
+    },
+    {
+      "name": "react_dev_rsc_server_functions",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/rsc/server-functions.md",
+      "source_name": "react.dev reference: Server Functions",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "backend"
+      ],
+      "why": "Creating Server Functions, calling them from forms and client code, with useActionState.",
+      "approx_size_chars": 7860,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "81c908b663e8"
+    },
+    {
+      "name": "react_dev_rsc_use_client",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/rsc/use-client.md",
+      "source_name": "react.dev reference: 'use client'",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "The client boundary: module dependency tree, serializable props, when to mark a module client.",
+      "approx_size_chars": 20532,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "a6071b91f118"
+    },
+    {
+      "name": "react_dev_rsc_use_server",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/rsc/use-server.md",
+      "source_name": "react.dev reference: 'use server'",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "backend"
+      ],
+      "why": "Marking server functions, security considerations (arguments are untrusted), serializable arguments and returns.",
+      "approx_size_chars": 10346,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "545ccf0ca36b"
+    },
+    {
+      "name": "react_dev_compiler_introduction",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/react-compiler/introduction.md",
+      "source_name": "react.dev learn: React Compiler introduction",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component",
+        "tooling"
+      ],
+      "why": "What the compiler memoises automatically, what that means for useMemo/useCallback/memo, and what code it cannot compile.",
+      "approx_size_chars": 11110,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "6510ee2fb7f3"
+    },
+    {
+      "name": "react_dev_compiler_incremental_adoption",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/react-compiler/incremental-adoption.md",
+      "source_name": "react.dev learn: React Compiler incremental adoption",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "tooling"
+      ],
+      "why": "Directory-based adoption, opt-in mode with 'use memo', runtime gating.",
+      "approx_size_chars": 7092,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "5ae98390649c"
+    },
+    {
+      "name": "react_dev_compiler_debugging",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/react-compiler/debugging.md",
+      "source_name": "react.dev learn: Debugging React Compiler",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "tooling"
+      ],
+      "why": "Compiler errors vs runtime issues from Rules-of-React violations, and how to isolate a miscompiled component.",
+      "approx_size_chars": 4607,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "6852d91385e2"
+    },
+    {
+      "name": "react_dev_compiler_directives",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react-compiler/directives.md",
+      "source_name": "react.dev reference: React Compiler directives",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "tooling"
+      ],
+      "why": "'use memo' and 'use no memo': scope, when to use each as a temporary escape hatch.",
+      "approx_size_chars": 5104,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "05887cc3146d"
+    },
+    {
+      "name": "react_dev_rules_components_hooks_pure",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/rules/components-and-hooks-must-be-pure.md",
+      "source_name": "react.dev reference: Components and Hooks must be pure",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Idempotence, side effects outside render, props/state/hook-argument immutability, local mutation. The rules the compiler relies on.",
+      "approx_size_chars": 17459,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "b793a83e2e3b"
+    },
+    {
+      "name": "react_dev_rules_react_calls_components",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/rules/react-calls-components-and-hooks.md",
+      "source_name": "react.dev reference: React calls Components and Hooks",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Never call components directly, never pass hooks around as values.",
+      "approx_size_chars": 4981,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "c443a7f14379"
+    },
+    {
+      "name": "react_dev_rules_of_hooks",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/rules/rules-of-hooks.md",
+      "source_name": "react.dev reference: Rules of Hooks",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Top-level only, React functions only, with the concrete disallowed shapes.",
+      "approx_size_chars": 3962,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "eb1a0160faa2"
+    },
+    {
+      "name": "react_dev_learn_you_might_not_need_an_effect",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/you-might-not-need-an-effect.md",
+      "source_name": "react.dev learn: You Might Not Need an Effect",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Derived state in render, useMemo for expensive calc, resetting state with key, event-specific logic in handlers, data fetching races. The highest-yield Effects page.",
+      "approx_size_chars": 61323,
+      "extract_chunks": 6,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "4b05b1ea2d5d"
+    },
+    {
+      "name": "react_dev_learn_synchronizing_with_effects",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/synchronizing-with-effects.md",
+      "source_name": "react.dev learn: Synchronizing with Effects",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Declaring an Effect, dependencies, cleanup, Strict Mode double-invocation, fetching data with an ignore flag.",
+      "approx_size_chars": 61954,
+      "extract_chunks": 6,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "da5d379b9196"
+    },
+    {
+      "name": "react_dev_learn_keeping_components_pure",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/keeping-components-pure.md",
+      "source_name": "react.dev learn: Keeping Components Pure",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Purity, local mutation, where side effects belong.",
+      "approx_size_chars": 25337,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "1c5c4decf552"
+    },
+    {
+      "name": "react_dev_learn_preserving_and_resetting_state",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/preserving-and-resetting-state.md",
+      "source_name": "react.dev learn: Preserving and Resetting State",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "State tied to position in the tree, never nesting component definitions, resetting with key.",
+      "approx_size_chars": 55068,
+      "extract_chunks": 5,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "48cfa725e02f"
+    },
+    {
+      "name": "react_dev_learn_scaling_up_with_reducer_and_context",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/scaling-up-with-reducer-and-context.md",
+      "source_name": "react.dev learn: Scaling Up with Reducer and Context",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Combining useReducer and context into a provider component with custom hooks.",
+      "approx_size_chars": 30942,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "d737d951d472"
+    },
+    {
+      "name": "react_dev_learn_referencing_values_with_refs",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/referencing-values-with-refs.md",
+      "source_name": "react.dev learn: Referencing Values with Refs",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Refs vs state, when to use a ref, never reading/writing ref.current during render.",
+      "approx_size_chars": 21915,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "2ceeb2436aa6"
+    },
+    {
+      "name": "react_dev_learn_manipulating_the_dom_with_refs",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/manipulating-the-dom-with-refs.md",
+      "source_name": "react.dev learn: Manipulating the DOM with Refs",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Ref callbacks for lists, ref as a prop to reach a child's DOM node (React 19), useImperativeHandle, flushSync, avoiding DOM changes React manages.",
+      "approx_size_chars": 31244,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "a3c96da7bbac"
+    },
+    {
+      "name": "react_dev_learn_reusing_logic_with_custom_hooks",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/reusing-logic-with-custom-hooks.md",
+      "source_name": "react.dev learn: Reusing Logic with Custom Hooks",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Naming, sharing logic not state, passing event handlers to custom hooks, when to extract.",
+      "approx_size_chars": 70742,
+      "extract_chunks": 6,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "77a1cc02165e"
+    },
+    {
+      "name": "react_dev_learn_lifecycle_of_reactive_effects",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/lifecycle-of-reactive-effects.md",
+      "source_name": "react.dev learn: Lifecycle of Reactive Effects",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Thinking from the Effect's perspective, reactive values, what the linter verifies.",
+      "approx_size_chars": 71942,
+      "extract_chunks": 7,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "324c81f6b5b7"
+    },
+    {
+      "name": "react_dev_learn_separating_events_from_effects",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/separating-events-from-effects.md",
+      "source_name": "react.dev learn: Separating Events from Effects",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Reactive vs non-reactive logic, Effect Events, limitations.",
+      "approx_size_chars": 53003,
+      "extract_chunks": 5,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "603f39cc3d90"
+    },
+    {
+      "name": "react_dev_learn_removing_effect_dependencies",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/removing-effect-dependencies.md",
+      "source_name": "react.dev learn: Removing Effect Dependencies",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Never suppress the linter; move logic to handlers, split Effects, updater functions, object/function dependencies.",
+      "approx_size_chars": 75659,
+      "extract_chunks": 7,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "1b3cfb2e460d"
+    },
+    {
+      "name": "react_dev_learn_choosing_the_state_structure",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/choosing-the-state-structure.md",
+      "source_name": "react.dev learn: Choosing the State Structure",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Group related state, avoid contradictions, redundancy, duplication, deep nesting; don't mirror props.",
+      "approx_size_chars": 61790,
+      "extract_chunks": 6,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "150e04b9f7dd"
+    },
+    {
+      "name": "react_dev_learn_typescript",
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/learn/typescript.md",
+      "source_name": "react.dev learn: Using TypeScript",
+      "licence": "CC-BY-4.0",
+      "licence_evidence_url": "https://github.com/reactjs/react.dev/blob/main/LICENSE-DOCS.md",
+      "licence_evidence": "GitHub API reports CC-BY-4.0; LICENSE-DOCS.md is the CC BY 4.0 legal code; README: 'Content submitted to react.dev is CC-BY-4.0 licensed, as found in the LICENSE-DOCS.md file.' Attribution: React documentation, (c) Meta Platforms, Inc. and affiliates, CC BY 4.0. Copy: bench/recipes/licenses/LICENSE-react.dev-docs.md.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Typing props and hooks, DOM events, children, style props, from the React team.",
+      "approx_size_chars": 19009,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "2c0bfc023769"
+    },
+    {
+      "name": "ts_react_cheatsheet_hooks",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/basic/getting-started/hooks.md",
+      "source_name": "React TypeScript Cheatsheet: Hooks",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Typing useState, useCallback, useReducer with discriminated unions, useRef (DOM vs mutable), useImperativeHandle, custom hook tuples.",
+      "approx_size_chars": 15442,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "5a467c9c79e7"
+    },
+    {
+      "name": "ts_react_cheatsheet_patterns_by_usecase",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/basic/getting-started/patterns_by_usecase.md",
+      "source_name": "React TypeScript Cheatsheet: Useful Patterns by Use Case",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types",
+        "ui-component"
+      ],
+      "why": "Wrapping HTML elements, ComponentProps, polymorphic components, generic components, typing children, props that are mutually exclusive.",
+      "approx_size_chars": 35370,
+      "extract_chunks": 3,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "daef5dfaea04"
+    },
+    {
+      "name": "ts_react_cheatsheet_forms_and_events",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/basic/getting-started/forms-and-events.md",
+      "source_name": "React TypeScript Cheatsheet: Forms and Events",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Event handler types, typing onSubmit with form data, the event type list.",
+      "approx_size_chars": 6163,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "05a60e3a30af"
+    },
+    {
+      "name": "ts_react_cheatsheet_basic_type_examples",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/basic/getting-started/basic-type-examples.md",
+      "source_name": "React TypeScript Cheatsheet: Typing Component Props",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Prop type examples, React.ReactNode vs JSX.Element, interface vs type alias guidance.",
+      "approx_size_chars": 6960,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "134c5b078567"
+    },
+    {
+      "name": "ts_react_cheatsheet_forward_create_ref",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/basic/getting-started/forward-create-ref.md",
+      "source_name": "React TypeScript Cheatsheet: forwardRef/createRef",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Typing refs, including the React 19 ref-as-a-prop form and generic forwardRef.",
+      "approx_size_chars": 5128,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "56839848a103"
+    },
+    {
+      "name": "ts_react_cheatsheet_context",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/basic/getting-started/context.md",
+      "source_name": "React TypeScript Cheatsheet: Context",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Typing context with and without a default, the null-check custom hook pattern.",
+      "approx_size_chars": 3966,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "6bec387dd995"
+    },
+    {
+      "name": "ts_react_cheatsheet_function_components",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/basic/getting-started/function-components.md",
+      "source_name": "React TypeScript Cheatsheet: Function Components",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Typing function components; why React.FC is not required.",
+      "approx_size_chars": 3186,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "cc2009083791"
+    },
+    {
+      "name": "ts_react_cheatsheet_reactnode",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/reference/ReactNode.md",
+      "source_name": "React TypeScript Cheatsheet: ReactNode",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "What ReactNode admits and when to use it for children and render props.",
+      "approx_size_chars": 3802,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "49f359a5c5aa"
+    },
+    {
+      "name": "ts_react_cheatsheet_ref",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/reference/Ref.md",
+      "source_name": "React TypeScript Cheatsheet: Ref",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Ref, RefObject, RefCallback and which to accept in props.",
+      "approx_size_chars": 3871,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "16ff34b80ddb"
+    },
+    {
+      "name": "ts_react_cheatsheet_component_props",
+      "source_url": "https://raw.githubusercontent.com/typescript-cheatsheets/react/main/docs/reference/ComponentProps.md",
+      "source_name": "React TypeScript Cheatsheet: ComponentProps",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/typescript-cheatsheets/react/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2018 shawn wang'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-typescript-cheatsheets-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "types"
+      ],
+      "why": "Extracting prop types from components and intrinsic elements.",
+      "approx_size_chars": 3245,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "7ffae53c5fa9"
+    },
+    {
+      "name": "bulletproof_react_project_structure",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/project-structure.md",
+      "source_name": "Bulletproof React: Project Structure",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "tooling"
+      ],
+      "why": "Feature-based folders, unidirectional imports (shared -> features -> app), no cross-feature imports, enforced by ESLint.",
+      "approx_size_chars": 5898,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "bf9056d9aa4c"
+    },
+    {
+      "name": "bulletproof_react_project_standards",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/project-standards.md",
+      "source_name": "Bulletproof React: Project Standards",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "tooling",
+        "types"
+      ],
+      "why": "ESLint, Prettier, TypeScript, Husky, absolute imports, file naming conventions.",
+      "approx_size_chars": 4680,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "7ee67e75f484"
+    },
+    {
+      "name": "bulletproof_react_components_and_styling",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/components-and-styling.md",
+      "source_name": "Bulletproof React: Components and Styling",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Colocation, avoiding large components and nested render functions, limiting props, abstracting third-party components, component library choices.",
+      "approx_size_chars": 5448,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "f214822f0d0a"
+    },
+    {
+      "name": "bulletproof_react_state_management",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/state-management.md",
+      "source_name": "Bulletproof React: State Management",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Categorising state: component, application, server cache, form, URL; the tool for each.",
+      "approx_size_chars": 5075,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "e0ac9ae7c3fa"
+    },
+    {
+      "name": "bulletproof_react_api_layer",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/api-layer.md",
+      "source_name": "Bulletproof React: API Layer",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "backend"
+      ],
+      "why": "A single API client instance; request declarations with types, fetcher, and query hook together.",
+      "approx_size_chars": 1882,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "835667a410d0"
+    },
+    {
+      "name": "bulletproof_react_performance",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/performance.md",
+      "source_name": "Bulletproof React: Performance",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Code splitting, state initialiser functions, keeping state close, children as the optimisation, image and web-vitals practice.",
+      "approx_size_chars": 5608,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "96232a7b63f5"
+    },
+    {
+      "name": "bulletproof_react_security",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/security.md",
+      "source_name": "Bulletproof React: Security",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "backend"
+      ],
+      "why": "Token storage trade-offs, XSS via dangerouslySetInnerHTML and sanitisation, RBAC and PBAC authorisation in the UI.",
+      "approx_size_chars": 4801,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "e9e19df1a33b"
+    },
+    {
+      "name": "bulletproof_react_testing",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/testing.md",
+      "source_name": "Bulletproof React: Testing",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "tooling"
+      ],
+      "why": "Prefer integration over unit tests, test behaviour not implementation, Testing Library, MSW, Playwright.",
+      "approx_size_chars": 4582,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "ee16e1c4a9a4"
+    },
+    {
+      "name": "bulletproof_react_error_handling",
+      "source_url": "https://raw.githubusercontent.com/alan2207/bulletproof-react/master/docs/error-handling.md",
+      "source_name": "Bulletproof React: Error Handling",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/alan2207/bulletproof-react/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2024 Alan Alickovic'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-bulletproof-react.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "API error interceptors, multiple error boundaries rather than one, error tracking.",
+      "approx_size_chars": 1302,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "d5a438773a55"
+    },
+    {
+      "name": "fe_handbook_build_user_interfaces",
+      "source_url": "https://raw.githubusercontent.com/yangshun/front-end-interview-handbook/main/website/contents/build-front-end-user-interfaces.md",
+      "source_name": "Front End Interview Handbook: User Interface coding questions",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/yangshun/front-end-interview-handbook/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2017-Present Yangshun Tay'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-front-end-interview-handbook.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "How to approach UI coding rounds: component decomposition, state design, accessibility, edge cases, what interviewers check.",
+      "approx_size_chars": 11428,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "24bc9753e2df"
+    },
+    {
+      "name": "fe_handbook_system_design_ui_components",
+      "source_url": "https://raw.githubusercontent.com/yangshun/front-end-interview-handbook/main/website/contents/front-end-system-design-ui-components.md",
+      "source_name": "Front End Interview Handbook: Front end system design (UI components)",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/yangshun/front-end-interview-handbook/blob/main/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2017-Present Yangshun Tay'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-front-end-interview-handbook.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Designing reusable UI components: API design, state, customisation, accessibility, performance, i18n.",
+      "approx_size_chars": 17105,
+      "extract_chunks": 2,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "ad136b61c02e"
+    },
+    {
+      "name": "sudheerj_react_interview_questions",
+      "source_url": "https://raw.githubusercontent.com/sudheerj/reactjs-interview-questions/master/README.md",
+      "source_name": "Sudheer Jonna, reactjs-interview-questions (README)",
+      "licence": "MIT",
+      "licence_evidence_url": "https://github.com/sudheerj/reactjs-interview-questions/blob/master/LICENSE",
+      "licence_evidence": "LICENSE: 'MIT License / Copyright (c) 2017-Present Sudheer Jonna'. GitHub API reports MIT. Copy: bench/recipes/licenses/LICENSE-reactjs-interview-questions.",
+      "language": "TypeScript/React",
+      "domains": [
+        "web-frontend",
+        "ui-component"
+      ],
+      "why": "Interview-style Q&A across core React, hooks, React 19 topics. One file; the repo has no per-section files.",
+      "approx_size_chars": 582823,
+      "extract_chunks": 50,
+      "content_type": "text/plain",
+      "overlaps_existing": "none: bench/recipes has no React-core corpus (r3f*.jsonl covers react-three-fiber only)",
+      "dataset_id": "631691f8cd54"
+    }
+  ],
+  "reserve": [
+    {
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useEffect.md",
+      "source_name": "react.dev reference: useEffect",
+      "licence": "CC-BY-4.0",
+      "file_bytes": 65342,
+      "why": "Largely covered by the five Effects Learn pages already submitted."
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useRef.md",
+      "source_name": "react.dev reference: useRef",
+      "licence": "CC-BY-4.0",
+      "file_bytes": 17114,
+      "why": "Covered by the two refs Learn pages."
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react/useMemo.md",
+      "source_name": "react.dev reference: useMemo",
+      "licence": "CC-BY-4.0",
+      "file_bytes": 48784,
+      "why": "Manual memoisation is what the React Compiler replaces; add if the corpus needs pre-compiler guidance."
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/react-dom/components/common.md",
+      "source_name": "react.dev reference: Common components (ref callbacks, events)",
+      "licence": "CC-BY-4.0",
+      "file_bytes": 77211,
+      "why": "Ref callback cleanup and the props every DOM component takes. Large and mostly a props table."
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/blog/2025/10/07/react-compiler-1.md",
+      "source_name": "react.dev blog: React Compiler v1.0",
+      "licence": "CC-BY-4.0",
+      "file_bytes": 14737,
+      "why": "Release announcement; the compiler Learn pages carry the actionable parts."
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/reactjs/react.dev/main/src/content/reference/eslint-plugin-react-hooks/index.md",
+      "source_name": "react.dev reference: eslint-plugin-react-hooks and its lints/*.md pages",
+      "licence": "CC-BY-4.0",
+      "file_bytes": 3772,
+      "why": "19 lint pages of 1.4-5 KB each (set-state-in-effect, refs, purity, immutability...). Useful, but each would be a one-chunk dataset; better pasted together as one source."
+    }
+  ],
+  "rejected": [
+    {
+      "source_url": "https://github.com/greatfrontend/top-reactjs-interview-questions",
+      "source_name": "GreatFrontEnd top React interview questions",
+      "licence": "none",
+      "reason": "LICENCE: the repo has no licence file, so no licence was granted. Excluded by the operator's instruction too."
+    },
+    {
+      "source_url": "https://www.greatfrontend.com/ , https://leetcode.com/",
+      "source_name": "GreatFrontEnd and LeetCode question banks",
+      "licence": "proprietary",
+      "reason": "LICENCE: proprietary. Not fetched."
+    },
+    {
+      "source_url": "https://github.com/typescript-cheatsheets/react/tree/main/docs/advanced",
+      "source_name": "React TypeScript Cheatsheet: Advanced",
+      "licence": "MIT",
+      "reason": "MISSING: the repo tree at c550e41b has no docs/advanced (or any HOC/migrating) pages any more. Only docs/basic and docs/reference exist. The README still mentions advanced usage."
+    },
+    {
+      "source_url": "https://github.com/yangshun/front-end-interview-handbook",
+      "source_name": "Front End Interview Handbook: React topics",
+      "licence": "MIT",
+      "reason": "MISSING: the repo has no React-specific page (tree at 8e867581). The two UI-building pages were taken instead. javascript-questions.md (70 KB) was left out as plain JS, not React."
+    },
+    {
+      "source_url": "https://react.dev/",
+      "source_name": "react.dev rendered HTML",
+      "licence": "CC-BY-4.0",
+      "reason": "A URL form was rejected, not the source: the raw src/content/*.md from the same repo is used instead, which avoids nav and Sandpack chrome."
+    }
+  ]
+}

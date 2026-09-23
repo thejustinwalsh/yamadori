@@ -1,5 +1,29 @@
 # System prompt
 
+> **STALE — do not copy this block verbatim. Read it for the reasoning, not
+> for the tool names.** Every tool name in the routing table below predates the
+> rename and none of them is what the server advertises today. The current
+> names are `find_definition_opt`, `find_references`, `find_by_pattern`,
+> `find_by_meaning`, `read_file_range`, `run_check`, `describe_index` and
+> `summarize_text` (eight on the MCP surface), plus `record_step`, `read_rings`,
+> `bind_project_context` and `delegate_investigation`, which the proxy injects
+> and an outside MCP client never sees — twelve in total, asserted at 12 by
+> `mcp/test_tools.py`.
+>
+> `judge` and `compact` are in the table below and **neither exists**: `judge`
+> is advertised in no tool list and no longer dispatches by name (6/10 against
+> a 5/10 coin flip, `scripts/eval_judge.py`), and `compact` was cut as
+> premature in `docs/PLAN.md`.
+>
+> **The shipped text is `CAPABILITY_BLOCK` in `mcp/proxy.py`**, which the proxy
+> injects itself and which uses the current names. That is the authority. A
+> reader who copies the block below into Hermes will be advertising four tools
+> that do not exist and misnaming the rest.
+>
+> Rewriting this file against the current surface is a real task and nobody has
+> done it; the "why it is shaped this way" table above the block is still
+> sound and is the reason the file is kept rather than deleted.
+
 Copy the block below into Hermes. Adapt the domain line; keep the structure.
 
 ## Why it is shaped this way
@@ -11,7 +35,7 @@ things, and each is doing a job here:
 |---|---|
 | **Trigger conditions, not descriptions** | Tool descriptions say *what* a tool does. Selection accuracy depends on the model knowing *when* to reach for it. Each rule below is phrased as a condition. |
 | **Few-shot selection examples** | Showing query → correct tool measurably improves selection with non-trivial tool sets. The routing table is exactly that. |
-| **Distinct trigger conditions** | What degrades selection is overlap, not count -- two tools that could both plausibly answer force a coin flip. Nine here, each with a condition no other one matches. Add a tenth the moment it does something these cannot; the only one removed so far was `apply_edit`, and that was a boundary call (the harness owns writes, and a second write path into a repo is a hazard) rather than a headcount one. |
+| **Distinct trigger conditions** | What degrades selection is overlap, not count -- two tools that could both plausibly answer force a coin flip. Nine in the (stale) block below; **eight** on the MCP surface today and twelve that the model sees, each with a condition no other one matches. Add a tenth the moment it does something these cannot; the only one removed so far was `apply_edit`, and that was a boundary call (the harness owns writes, and a second write path into a repo is a hazard) rather than a headcount one. |
 | **Advertise the offering** | The prompt's job is not to teach the model how to work -- the harness does that. It is to say what came in the box and why reaching for it beats guessing, with the cost of each option stated. A capability the model does not know it has is a capability it will not use. |
 | **Dead ends cause loops** | A tool that fails without saying why invites the model to retry with permuted arguments. Measured: `grep` replying "no matches in 0 files" for an unindexed directory produced 14 consecutive retries and no answer. Every failure path now names what IS available. |
 | **Cheapest tool that can answer** | Measured on one question: find_definition 19 tokens (correct), grep 78 (correct), search_code 182 (wrong). All three beat reading the file (~8,000). Order the rules so the cheap precise tools are tried first. |
@@ -20,9 +44,14 @@ things, and each is doing a job here:
 
 Two model-specific facts also shape it:
 
-- Point agents at **`bonsai-agent`**, never `bonsai`. With thinking on, this
+- ~~Point agents at **`bonsai-agent`**, never `bonsai`. With thinking on, this
   model spends its whole budget reasoning and emits no tool call (measured:
-  2000 tokens, zero calls; thinking off, a call in 29).
+  2000 tokens, zero calls; thinking off, a call in 29).~~ **REVERSED.** That
+  was measured on the corrupt `pr-ptq1-mmv` build. On the official build, 5
+  tasks x 3 reps: thinking OFF 13/15 correct, thinking ON 12/15, and **0/15
+  failures to call in both arms**. `config.yaml` now sets
+  `enable_thinking: true` on both ids and `bonsai-agent` is an alias only. See
+  `docs/KNOWN-ISSUES.md`.
 - `find_definition` is a sqlite lookup. `search_code` runs two GPU models.
   Reaching for semantic search when a symbol name is already known is slower
   *and* less accurate, so the rules order them explicitly.
@@ -156,9 +185,13 @@ rather than hedging.
 
 ## Tuning notes
 
-**If it ignores tools**, the fault is almost always `bonsai` instead of
-`bonsai-agent`. Check `finish_reason`: `length` with empty content means
-thinking ate the budget.
+**If it ignores tools** — ~~the fault is almost always `bonsai` instead of
+`bonsai-agent`~~. **STALE, same reversal as above.** The two ids are the same
+process with the same settings, so switching between them changes nothing. What
+survives is the `finish_reason` check: `length` with empty content means
+`max_tokens` was too small for the reasoning block that now precedes the call,
+not that the wrong id was picked. See `docs/HERMES.md` §4 and
+`docs/KNOWN-ISSUES.md`.
 
 **If it over-searches**, the routing table is not specific enough for your
 codebase. Add one or two real examples from your own repos — concrete beats

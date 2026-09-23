@@ -1,0 +1,34 @@
+{
+  "id": "tsl03",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This r165 module no longer builds:\n\n```js\nimport { timerLocal, timerGlobal, oscSine, uniform } from 'three/nodes';\n\nexport const speed = uniform( 0.5 );\nexport const wave = oscSine( timerLocal().mul( speed ) );\nexport const seconds = timerGlobal();\n```\n\nPort it to r185 using named imports from 'three/tsl'. Keep the three exports `speed`, `wave` and `seconds`: `seconds` must be the renderer-driven elapsed-time node that r185 provides, and `wave` must be driven by that node scaled by `speed`. Do not create and update a time uniform of your own. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "speed",
+      "wave",
+      "seconds"
+    ],
+    "require": [
+      {
+        "name": "time",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "oscSine",
+        "as": "call"
+      }
+    ],
+    "forbid": [
+      "timerLocal",
+      "timerGlobal"
+    ]
+  },
+  "reference": "tasks/tsl03/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "timerLocal() / timerGlobal() -> time. Deprecated r170 and later removed: r165 examples/jsm/nodes/utils/TimerNode.js:89-90; r175 src/nodes/utils/Timer.js:38,53 `// @deprecated, r170` (warns 'Use \"time\" instead', returns time.mul(timeScale)); both absent from r185's exports; r185 src/nodes/utils/Timer.js:10 `export const time`.",
+  "notes": "A reply that calls `time()` as a function (a runtime TypeError in r185; time is a uniform node) is not caught: the grader sees names, not call-vs-reference. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

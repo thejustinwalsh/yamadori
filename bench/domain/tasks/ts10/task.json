@@ -1,0 +1,19 @@
+{
+  "id": "ts10",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) for type-safe access to nested configuration objects by dot-separated path. Export:\n\n- `type Paths<T>` -- the union of every dot-separated path through the string-keyed properties of `T`, to any depth, including the paths to intermediate objects. Arrays, functions, `Date` objects and primitives are leaves: their own members are never descended into. You may assume every property is required. For `{ server: { host: string; tls: { cert: string } }; tags: string[]; created: Date }` it is `'server' | 'server.host' | 'server.tls' | 'server.tls.cert' | 'tags' | 'created'`.\n- `type PathValue<T, P extends string>` -- the type of the value at path `P` in `T` (e.g. `PathValue<typeof above, 'server.tls'>` is `{ cert: string }`).\n- `get(obj, path)` -- returns the value at `path`. `path` must be restricted to `Paths<typeof obj>` (anything else is a compile error), and the return type is `PathValue` of that path, so `get(cfg, 'server.port')` is typed `number`.\n\n`T` may be an interface or a type alias. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts10/test.ts",
+    "runtime": true,
+    "entry": [
+      "Paths",
+      "PathValue",
+      "get"
+    ]
+  },
+  "reference": "tasks/ts10/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

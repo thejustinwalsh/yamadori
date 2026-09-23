@@ -1,0 +1,11 @@
+{
+  "id": "react-22",
+  "domain": "react",
+  "prompt": "Write an accessible star-rating input in TypeScript (strict mode) for React 19 and export it as\n\n```ts\nexport function StarRating(props: {\n  value: number;\n  onChange: (v: number) => void;\n  max?: number;\n  readOnly?: boolean;\n}): React.ReactElement\n```\n\nIt is controlled: it shows `value` and reports changes through `onChange`; it never changes what it shows on its own.\n\nMarkup and ARIA:\n- An element with `role=\"radiogroup\"` whose accessible name is `Rating`, and that can take keyboard focus (`tabIndex={0}`).\n- Inside it, one element with `role=\"radio\"` per star, `max` stars in total (`max` defaults to `5`), in order. Star n's accessible name is `1 star` for n = 1 and `n stars` otherwise (`2 stars`, `3 stars`, ...).\n- Star n has `aria-checked=\"true\"` when n equals `value` and `aria-checked=\"false\"` otherwise (so with `value` 0 no star is checked).\n- When `readOnly` is set, every star has `aria-disabled=\"true\"`.\n\nBehaviour (when `readOnly` is not set):\n- Clicking star n calls `onChange(n)`.\n- While the radiogroup has focus, ArrowRight calls `onChange(value + 1)` and ArrowLeft calls `onChange(value - 1)`, kept within 1..`max`: at the boundary (ArrowRight at `max`, ArrowLeft at 1) `onChange` is not called. From `value` 0, ArrowRight calls `onChange(1)`.\n\nWhen `readOnly` is set, clicks and keys never call `onChange`.\n\nYou may import only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-22/test.tsx", "entry": ["StarRating"]},
+  "reference": "tasks/react-22/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy",
+  "category": "component"
+}

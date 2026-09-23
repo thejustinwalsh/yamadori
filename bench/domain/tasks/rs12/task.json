@@ -1,0 +1,10 @@
+{
+  "id": "rs12",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library exposing a point parser to C with integer error codes, plus an errno-style way to fetch a human-readable message for the last failure.\n\n```rust\n#[repr(C)]\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub struct Point { pub x: i32, pub y: i32 }\n```\n\n`#[no_mangle] pub unsafe extern \"C\" fn parse_point(s: *const c_char, out: *mut Point) -> i32` parses the NUL-terminated string `s` of the form `X,Y`: exactly one comma; each side, after trimming ASCII whitespace, must be an optional `+` or `-` followed by one or more ASCII digits. Return codes:\n\n- `0`: success, `*out` written.\n- `-1`: `s` or `out` is null.\n- `-2`: `s` is not valid UTF-8.\n- `-3`: syntax error (anything not matching the form above).\n- `-4`: the syntax is valid but a number does not fit in `i32` -- however many digits it has.\n\nOn every failure `*out` is left untouched.\n\n`#[no_mangle] pub unsafe extern \"C\" fn last_error_message(buf: *mut c_char, cap: usize) -> isize` reports the message for the most recent failed `parse_point` call made **on the calling thread** (other threads' failures never show up here). A successful `parse_point` clears it. The message text is up to you but must be non-empty and contain no NUL. Let `N` be its length in bytes:\n\n- no current error: return 0, and if `buf` is non-null and `cap >= 1` write a single NUL;\n- `buf` non-null and `cap >= N + 1`: copy the message and a NUL terminator, return `N`;\n- otherwise write nothing and return `-(N + 1)` (the negated buffer size needed).\n\n`c_char` is `std::ffi::c_char`. Answer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs12/grader.rs", "entry": ["Point", "parse_point", "last_error_message"]},
+  "reference": "tasks/rs12/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard"
+}

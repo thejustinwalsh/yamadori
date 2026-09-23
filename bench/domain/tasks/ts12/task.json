@@ -1,0 +1,19 @@
+{
+  "id": "ts12",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) for exhaustive handling of discriminated unions whose discriminant property is `kind` (a string literal). Export:\n\n- `match(value, handlers)` -- `value` is a member of such a union `U`; `handlers` is an object with one function per `kind` in `U`. `match` calls only the handler for `value.kind`, passing `value`, and returns its result. Statically: each handler's parameter must be contextually typed as the union member for its key (so `circle: (c) => c.r` compiles and `circle: (c) => c.side` does not, for `Shape = { kind: 'circle'; r: number } | { kind: 'square'; side: number }`); a missing handler is a compile error; and the return type of a call is inferred from the handlers without the caller supplying type arguments -- `number` when every handler returns a number, the union of the handlers' return types when they differ.\n- `assertNever(value: never): never` -- throws an `Error` if it is ever reached at runtime. It is used in the `default` branch of a `switch` over `kind`, so that the switch fails to compile when a case is not handled.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts12/test.ts",
+    "runtime": true,
+    "entry": [
+      "match",
+      "assertNever"
+    ]
+  },
+  "reference": "tasks/ts12/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "notes": "A separate R type parameter cannot be inferred through the mapped handler type (R comes out `unknown`, verified on tsc 7.0.2 with both annotated and contextually typed handlers), so the spec asks for the return type to be inferred from the handlers; wrong_test_3 is that design. Extra-key rejection was deliberately left out of the spec: the handler-generic design that makes inference work loses excess-property checking."
+}

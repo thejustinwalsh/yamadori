@@ -1,0 +1,11 @@
+{
+  "id": "react-12",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) for a \"copy to clipboard\" button. Export it as\n\n```ts\nfunction useCopyToClipboard(resetMs?: number): {\n  copied: boolean;\n  copy: (text: string) => Promise<boolean>;\n}\n```\n\n`resetMs` defaults to `2000`.\n\nBehaviour:\n- `copied` is `false` at first.\n- `copy(text)` calls `navigator.clipboard.writeText(text)` once.\n- If that promise fulfils, `copied` becomes `true` and `copy` resolves to `true`. `copied` goes back to `false` exactly `resetMs` milliseconds after the most recent successful copy: a successful copy while `copied` is already `true` restarts that countdown.\n- If that promise rejects, `copy` resolves to `false` (it never rejects or throws) and `copied` does not become `true`.\n- No timer may be left pending after the component using the hook unmounts.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-12/test.tsx", "entry": ["useCopyToClipboard"]},
+  "reference": "tasks/react-12/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

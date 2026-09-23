@@ -1,0 +1,11 @@
+{
+  "id": "react-32",
+  "domain": "react",
+  "prompt": "Write a React 19 component in TypeScript (strict mode) and export it as `Thread`:\n\n    export function Thread({ initialMessages, send }: { initialMessages: string[]; send: (text: string) => Promise<string> })\n\nIt shows a chat thread and sends new messages with an optimistic update. It must use React 19's `useOptimistic` for the pending messages.\n\nContract:\n- Every message is an element with role `listitem` (in a list), starting with `initialMessages` in order.\n- Below the list: a text input labelled \"Message\" and a submit button named \"Send\" inside a form. Submitting calls `send` with the input's current text.\n- Immediately on submit, before `send` settles, a new listitem appears at the end whose text is exactly `<text> (sending…)` (with the single character `…`, U+2026), e.g. `hello (sending…)`.\n- The user may submit again while earlier sends are still pending. Sends are not queued: each submission calls `send` right away and adds its own `(sending…)` item, in submission order.\n- When `send` resolves, the message is confirmed: it is shown as a listitem whose text is exactly the string `send` resolved with (the server's copy, which may differ from what was typed), with no marker. Confirmed messages are appended after the existing ones in the order their sends resolve.\n- When `send` rejects, that message's optimistic item disappears and an element with role `alert` shows exactly `Failed to send: <text>`, where `<text>` is what was typed.\n- React may keep optimistic items on screen until every action in flight has finished; that is fine. Once all sends have settled, the list must show exactly the initial messages followed by the confirmed messages, and no `(sending…)` items.\n\nUse only `react` and `react-dom`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-32/test.tsx", "entry": ["Thread"]},
+  "reference": "tasks/react-32/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "category": "react19"
+}

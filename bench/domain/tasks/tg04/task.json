@@ -1,0 +1,16 @@
+{
+  "id": "tg04",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export `Counters`, a WGSL struct schema for a storage buffer whose fields are updated concurrently by many shader invocations with WGSL's `atomicAdd` / `atomicSub`. Fields, in order: `hits` (unsigned 32-bit), `misses` (unsigned 32-bit), `balance` (signed 32-bit); all three must be declared so that WGSL's atomic built-ins can operate on them. Also export two types derived from the schema with typegpu's inference helpers (not written by hand): `CountersOnHost`, the plain JS value you get when reading the buffer back on the CPU, and `CountersInShader`, the type of the value as seen from inside a TypeGPU shader function. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg04/test.ts", "runtime": true, "webgpu": true, "entry": ["Counters", "CountersOnHost", "CountersInShader"]},
+  "reference": "tasks/tg04/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "api": {
+    "d.atomic(U32 | I32)": "data/atomic.d.ts, data/atomic.js",
+    "d.Infer / d.InferGPU": "shared/repr.d.ts (re-exported from data/index.d.ts)",
+    "d.atomicU32 / d.atomicI32 (types only)": "data/wgslTypes.d.ts, data/index.d.ts (export type list)",
+    "tgpu.resolve([struct])": "core/resolve/tgpuResolve.d.ts"
+  }
+}

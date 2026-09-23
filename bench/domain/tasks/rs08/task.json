@@ -1,0 +1,10 @@
+{
+  "id": "rs08",
+  "domain": "rust_wasm",
+  "prompt": "Expose a Rust histogram to C as an opaque handle. C only ever sees `typedef struct Histogram Histogram;` and these functions:\n\n```c\nHistogram *histogram_new(uint32_t bins);\nint32_t histogram_add(Histogram *h, uint32_t bin);\nuint64_t histogram_count(const Histogram *h, uint32_t bin);\nvoid histogram_free(Histogram *h);\n```\n\nWrite the Rust library: a `pub struct Histogram` whose fields are private (it holds one `u64` counter per bin on the heap), and the four functions with exactly these Rust signatures:\n\n- `#[no_mangle] pub extern \"C\" fn histogram_new(bins: u32) -> *mut Histogram` -- a new heap-allocated histogram with all counters 0; returns null if `bins` is 0.\n- `#[no_mangle] pub unsafe extern \"C\" fn histogram_add(h: *mut Histogram, bin: u32) -> i32` -- increments that bin and returns 0; returns -1 if `h` is null, -2 if `bin` is out of range.\n- `#[no_mangle] pub unsafe extern \"C\" fn histogram_count(h: *const Histogram, bin: u32) -> u64` -- the bin's count; 0 if `h` is null or `bin` is out of range.\n- `#[no_mangle] pub unsafe extern \"C\" fn histogram_free(h: *mut Histogram)` -- releases the histogram and everything it owns; passing null is a no-op.\n\nEvery byte `histogram_new` allocates must be released by `histogram_free`. Answer with a single ```rust code block containing the library code (no `main`).",
+  "grader": {"kind": "rust", "host_test": "tasks/rs08/grader.rs", "entry": ["Histogram", "histogram_new", "histogram_add", "histogram_count", "histogram_free"]},
+  "reference": "tasks/rs08/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

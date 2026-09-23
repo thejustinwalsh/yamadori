@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dash-vite",
+      "runtimeExecutable": "C:\\Users\\jwals\\AppData\\Roaming\\nvm\\v24.21.0\\node.exe",
+      "runtimeArgs": ["web/node_modules/vite/bin/vite.js", "web", "--port", "5173", "--strictPort"],
+      "port": 5173
+    },
+    {
+      "name": "dash-preview",
+      "runtimeExecutable": "C:\\Users\\jwals\\AppData\\Roaming\\nvm\\v24.21.0\\node.exe",
+      "runtimeArgs": ["web/node_modules/vite/bin/vite.js", "preview", "web", "--port", "4173", "--strictPort"],
+      "port": 4173
+    }
+  ]
+}

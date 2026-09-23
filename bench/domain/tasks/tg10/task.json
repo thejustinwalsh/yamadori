@@ -1,0 +1,16 @@
+{
+  "id": "tg10",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export two things. (1) `InstanceData`: a WGSL struct schema with fields `offset: vec2f`, `scale: f32`, `color: vec4f`, in that order, using normal WGSL alignment (the same buffer is also bound as a storage `array<InstanceData>` in a compute pass, so padding must match WGSL). A hand-written WGSL vertex shader reads these attributes at `@location(3)` (`offset`), `@location(4)` (`scale`) and `@location(5)` (`color`); encode those shader locations in the schema itself. (2) `instanceLayout`: a typegpu vertex layout for a buffer holding an array of `InstanceData`, advanced once per instance (not per vertex). Reading `instanceLayout.vertexLayout` must yield the raw WebGPU `GPUVertexBufferLayout` for that hand-written shader. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg10/test.ts", "runtime": true, "webgpu": true, "entry": ["InstanceData", "instanceLayout"]},
+  "reference": "tasks/tg10/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu.vertexLayout(schemaForCount, stepMode?)": "core/vertexLayout/vertexLayout.d.ts, core/vertexLayout/vertexLayout.js",
+    "TgpuVertexLayout.vertexLayout (throws unless every attribute has a custom location), .stride, .stepMode": "core/vertexLayout/vertexLayout.d.ts, core/vertexLayout/vertexLayout.js:120",
+    "d.location(n, schema)": "data/attributes.d.ts, data/attributes.js",
+    "d.arrayOf(schema) as (n) => array": "data/array.d.ts"
+  }
+}

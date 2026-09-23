@@ -1,0 +1,15 @@
+{
+  "id": "tsl01",
+  "domain": "three_tsl",
+  "prompt": "three.js r185, WebGPU renderer, TSL. Write a JavaScript module that imports what it needs from 'three/tsl' and exports `const twoSidedNormal`, a node equal to `normalView` flipped when the fragment is on the back side of a double-sided material, using the TSL helper that r185 provides for exactly that (do not hand-roll it with `frontFacing` and `select`). Answer with a single ```js code block.",
+  "grader": {"kind": "tsl", "entry": ["twoSidedNormal"],
+             "require": [{"name": "negateOnBackSide", "as": "call"},
+                         {"name": "negateOnBackSide", "as": "import", "from": "three/tsl"},
+                         {"name": "normalView", "as": "import", "from": "three/tsl"}],
+             "forbid": ["directionToFaceDirection"]},
+  "reference": "tasks/tsl01/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "easy",
+  "version_marker": "directionToFaceDirection -> negateOnBackSide, @deprecated r185 (src/nodes/display/FrontFacingNode.js)"
+}

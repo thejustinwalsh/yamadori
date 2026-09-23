@@ -1,0 +1,10 @@
+{
+  "id": "rs17",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library for `wasm32-unknown-unknown` (no wasm-bindgen) exporting two unmangled C-ABI functions that JavaScript calls directly:\n\n1. `checked_mul_u64`: takes two unsigned 64-bit integers `a` and `b` (JavaScript passes them as BigInts, and values above 2^32 are common) and a pointer `out` to a caller-owned, 8-byte-aligned unsigned 64-bit slot in linear memory. It returns an `i32` status: 0 if `a * b` fits in 64 bits (and writes the product to `*out`), 1 if it overflows (leaving `*out` untouched), -1 if `out` is null.\n2. `lerp_f32`: takes three single-precision floats `a`, `b`, `t` and returns the single-precision float `a + (b - a) * t`, computed in `f32`.\n\nChoose Rust parameter types so the compiled wasm exports have exactly the types JavaScript expects for those values. Answer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs17/grader.mjs", "wasm_support": true, "entry": ["checked_mul_u64", "lerp_f32"]},
+  "reference": "tasks/rs17/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

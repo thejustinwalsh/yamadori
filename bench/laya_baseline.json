@@ -1,0 +1,16 @@
+{
+  "route_in": {
+    "min_held_out_accuracy": 0.676,
+    "recorded_accuracy": 0.726,
+    "recorded_zero_shot": 0.5289,
+    "majority_baseline": 0.3933,
+    "must_beat_zero_shot": true
+  },
+  "grounded_excerpt": {
+    "min_held_out_accuracy": 0.575,
+    "recorded_accuracy": 0.625,
+    "recorded_zero_shot": 0.5695,
+    "majority_baseline": 0.5,
+    "must_beat_zero_shot": true
+  }
+}

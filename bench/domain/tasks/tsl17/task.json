@@ -1,0 +1,36 @@
+{
+  "id": "tsl17",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1). The class this r182 helper uses is deprecated in r185 (it warns when constructed):\n\n```js\nimport { Clock } from 'three';\n\nexport function createTicker() {\n\n\tconst clock = new Clock();\n\n\treturn {\n\t\ttick() {\n\n\t\t\treturn { delta: clock.getDelta(), elapsed: clock.getElapsedTime() };\n\n\t\t}\n\t};\n\n}\n```\n\nPort it to r185's replacement class, imported by name from 'three'. Keep `export function createTicker()`; the returned object's method becomes `tick( timestamp )`, taking the timestamp that `requestAnimationFrame` / `renderer.setAnimationLoop` pass, and must still return `{ delta, elapsed }` in seconds, correct on every call, using the replacement class's own delta and elapsed-time methods. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "createTicker"
+    ],
+    "require": [
+      {
+        "name": "Timer",
+        "as": "import",
+        "from": "three"
+      },
+      {
+        "name": "update",
+        "as": "call"
+      },
+      {
+        "name": "getDelta",
+        "as": "call"
+      }
+    ],
+    "forbid": [
+      "Clock",
+      "getElapsedTime"
+    ]
+  },
+  "reference": "tasks/tsl17/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": "Clock -> Timer, @deprecated r183: r185 src/core/Clock.js:6,13,61 (warn 'Clock: This module has been deprecated. Please use THREE.Timer instead.'); r185 src/core/Timer.js:15 `class Timer` with update( timestamp ) at :156, getDelta :80, getElapsed :91. In r175 Timer was an addon (examples/jsm/misc/Timer.js); r185 has no examples/jsm/misc/Timer.js.",
+  "notes": "wrong_test_2 is the classic Timer bug: without update() every delta is 0. The grader requires an update() call, not that it happens before the reads. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

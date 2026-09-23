@@ -1,0 +1,81 @@
+{
+ "run_id": "smoke-medium",
+ "run_dir": "bench/domain/results/smoke-medium",
+ "analysed_at": 1790126473.2883222,
+ "conditions": {
+  "effort": "medium",
+  "max_tokens": 4096,
+  "temperature": 0.0,
+  "body_tier": "max"
+ },
+ "rows": 0,
+ "stale_rows": 10,
+ "bad_lines": 0,
+ "arms": [],
+ "tasks": {
+  "all": 0,
+  "uncontaminated": 0,
+  "contaminated": 0
+ },
+ "caveats": [
+  "10 stale_code rows excluded (measured a stack since fixed): pre-fix stack (proxy pid 4500 started 19:15): package-named glob/path matched nothing in find_by_pattern/read_file_range; MAX_TOOL_HOPS breaker since removed; selection symbol lookup matched keywords/unrelated packages",
+  "preflight checks were OVERRIDDEN for part of this run: proxy_fresh"
+ ],
+ "headline_uncontaminated": {
+  "label": "uncontaminated domains (headline)",
+  "tasks": 0,
+  "families": {},
+  "comparisons": []
+ },
+ "contaminated_three_tsl": {
+  "label": "three_tsl only -- CONTAMINATED",
+  "tasks": 0,
+  "families": {},
+  "comparisons": []
+ },
+ "all_domains": {
+  "label": "all domains -- includes contaminated three_tsl",
+  "tasks": 0,
+  "families": {},
+  "comparisons": []
+ },
+ "per_arm": {},
+ "per_arm_uncontaminated": {},
+ "by_domain": {},
+ "triggers": {},
+ "dashboard": {
+  "state": "empty",
+  "file": "bench/domain/results/smoke-medium/rows.jsonl",
+  "exists": true,
+  "file_age_s": 0,
+  "bad_lines": 0,
+  "how": "run  python bench/domain/run.py --key-file KEY --run-id ID",
+  "arms": [],
+  "suspect": {
+   "identical_across_arms": false,
+   "extreme": []
+  },
+  "progress": {
+   "rows": 0,
+   "attempted": 0,
+   "scored_rows": 0,
+   "errors": 0,
+   "complete_all_arms": 0,
+   "errors_by_arm": {}
+  },
+  "power": {
+   "n_paired": 0,
+   "min_discordant_for_sig": 6,
+   "max_possible_discordant": 0,
+   "alpha": 0.05,
+   "comparison_possible": false
+  },
+  "arm_table": [],
+  "raw": [],
+  "pairs": [],
+  "difficulty": [],
+  "failures": {},
+  "scaffolding_total": 0,
+  "note": "uncontaminated domains only; McNemar p on this page is Bonferroni-corrected over the comparisons shown"
+ }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "react-19",
+  "domain": "react",
+  "prompt": "Write a validated sign-up form in TypeScript (strict mode) for React 19 and export it as\n\n```ts\nexport function SignupForm(props: {\n  onSubmit: (values: { email: string; password: string }) => void;\n}): React.ReactElement\n```\n\nMarkup:\n- A `<form>` with three controlled inputs whose labels are exactly `Email`, `Password` and `Confirm password`, and a submit button named `Sign up`. Submitting must not reload the page.\n\nValidation rules (each field has one message, exact text):\n- Email is valid when it matches `/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/`; otherwise its message is `Enter a valid email`.\n- Password is valid when it is at least 8 characters long; otherwise `Password must be at least 8 characters`.\n- Confirm password is valid when it equals Password exactly; otherwise `Passwords do not match`.\n\nWhen messages appear:\n- No message is shown for a field until that field has lost focus (blur) at least once, or until the user has tried to submit the form at least once (after which messages may show for every field).\n- From then on a field's message reflects the CURRENT values: it disappears as soon as the field becomes valid and comes back if it becomes invalid again (Confirm password is re-checked when Password changes).\n- While a field's message is shown, its input has `aria-invalid=\"true\"` and an `aria-describedby` equal to the `id` of the element containing the message. While no message is shown for it, the message is not in the document and the input has no `aria-invalid=\"true\"`.\n\nSubmitting:\n- Submitting while every field is valid calls `onSubmit` once with `{ email, password }`.\n- Submitting while any field is invalid never calls `onSubmit`; it shows the messages of all invalid fields.\n\nYou may import only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-19/test.tsx", "entry": ["SignupForm"]},
+  "reference": "tasks/react-19/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "component"
+}

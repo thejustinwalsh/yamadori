@@ -1,0 +1,17 @@
+{
+  "id": "ts14",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports a class `TypedEmitter<Events>`, where `Events` is an object type mapping each event name to the tuple of arguments its listeners receive, e.g. `{ message: [text: string, from: number]; close: [] }`. `Events` may be declared with `interface` as well as `type`. Methods:\n\n- `on(event, listener): () => void` -- registers `listener` and returns a function that removes exactly that registration (calling it again does nothing).\n- `once(event, listener): () => void` -- like `on`, but the registration is removed right before the listener is first invoked.\n- `emit(event, ...args): boolean` -- synchronously calls the listeners registered for `event` in registration order and returns whether there were any. The set of listeners called is fixed when `emit` starts: a listener added during an emit is not called by that emit, and one removed during it is still called.\n- `listenerCount(event): number`.\n\nThe same function may be registered more than once and is then called once per registration. Everything must be type-checked against `Events`: an unknown event name, missing or wrongly typed `emit` arguments, or a listener whose parameters do not fit the event's tuple are compile errors, and listener parameters are contextually typed (in `on('message', (text, from) => ...)`, `text` is `string` and `from` is `number`). Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts14/test.ts",
+    "runtime": true,
+    "entry": [
+      "TypedEmitter"
+    ]
+  },
+  "reference": "tasks/ts14/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

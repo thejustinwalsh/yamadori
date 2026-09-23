@@ -1,0 +1,6 @@
+{"question_id": "3677", "condition": "direct", "difficulty": "medium", "passed": true, "why": "", "n_cases": 12, "max_s": 0.076, "total_s": 0.698, "peak_kb": 33104, "ms": 86213, "finish": "stop", "empty_content": false, "chars": 1241}
+{"question_id": "3677", "condition": "proxy", "difficulty": "medium", "passed": false, "ms": 0, "error": "HTTPError: HTTP Error 502: Bad Gateway"}
+{"question_id": "arc193_a", "condition": "direct", "difficulty": "hard", "passed": false, "ms": 0, "error": "URLError: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"}
+{"question_id": "arc193_a", "condition": "proxy", "difficulty": "hard", "passed": false, "ms": 0, "error": "HTTPError: HTTP Error 502: Bad Gateway"}
+{"question_id": "abc389_a", "condition": "direct", "difficulty": "easy", "passed": false, "ms": 0, "error": "URLError: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"}
+{"question_id": "abc389_a", "condition": "proxy", "difficulty": "easy", "passed": true, "why": "", "n_cases": 12, "max_s": 0.031, "total_s": 0.29, "peak_kb": 12656, "ms": 37948, "finish": "stop", "empty_content": false, "chars": 301}

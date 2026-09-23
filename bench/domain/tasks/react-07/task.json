@@ -1,0 +1,11 @@
+{
+  "id": "react-07",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as\n`function useFetch<T>(url: string | null): { data: T | undefined; error: Error | undefined; loading: boolean }`.\n\nIt loads JSON from `url` with the global `fetch`.\n\nBehaviour:\n- When `url` is `null` the hook is idle: it makes no request and returns `{ data: undefined, error: undefined, loading: false }`.\n- For a non-null `url` it calls `fetch(url, { signal })`, where `signal` is the `AbortSignal` of an `AbortController` created for that request. While the request is in flight it returns `loading: true` with `data` and `error` both `undefined`.\n- If the response has `ok === true`, `data` becomes the result of `await response.json()` and `loading` becomes `false`.\n- If the response is not ok, `error` becomes `new Error('HTTP ' + response.status)` (for example `HTTP 404`), `data` stays `undefined`, and `loading` becomes `false`.\n- If `fetch` itself rejects (a network failure), `error` is the rejection reason and `loading` becomes `false`.\n- When `url` changes, the previous request's signal is aborted and the state is reset to `data: undefined, error: undefined` with `loading: true` for the new url (or to the idle state if the new `url` is `null`).\n- When the component unmounts, the in-flight request's signal is aborted.\n- The result of a request that has been superseded or aborted is never shown: an old request that settles after a newer one must not overwrite the newer result, and an abort (fetch rejecting with an `AbortError`) never sets `error`.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-07/test.tsx", "entry": ["useFetch"]},
+  "reference": "tasks/react-07/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "category": "hook"
+}

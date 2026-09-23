@@ -32,6 +32,24 @@ import time
 LAYA_WS = os.environ.get("LAYA_WS", "ws://127.0.0.1:1238/ws")
 
 
+class LayaError(RuntimeError):
+    """Laya answered the frame with an error instead of answers."""
+
+
+def _answers(frame: str) -> dict:
+    """The `answers` of a reply, or LayaError if the service reported one.
+
+    laya_service.py replies to a bad frame or a failed decision with
+    `{"id": ..., "error": "..."}` and no answers. Read as an empty answer set,
+    that became `decided: False` -- an outage reported as the model declining
+    to decide, which triage() then turned into "could not classify the code".
+    """
+    d = json.loads(frame)
+    if isinstance(d, dict) and d.get("error") and not d.get("answers"):
+        raise LayaError(f"laya refused the frame: {d['error']}")
+    return (d.get("answers") if isinstance(d, dict) else None) or {}
+
+
 class Session:
     """One socket, many decisions, state sent per frame because it is free."""
 
@@ -64,8 +82,7 @@ class Session:
             "questions": {name: {"type": "choice",
                                  "instructions": instructions,
                                  "criteria": options}}}))
-        d = json.loads(await self._ws.recv())
-        a = (d.get("answers") or {}).get(name) or {}
+        a = _answers(await self._ws.recv()).get(name) or {}
         probs = {k: round(float(v), 3)
                  for k, v in (a.get("probabilities") or {}).items()}
         ranked = sorted(probs.values(), reverse=True)
@@ -87,10 +104,10 @@ class Session:
         t0 = time.time()
         await self._ws.send(json.dumps({"state": self.state,
                                         "questions": questions}))
-        d = json.loads(await self._ws.recv())
+        answers = _answers(await self._ws.recv())
         el = round((time.time() - t0) * 1000, 1)
         out = {}
-        for k, a in (d.get("answers") or {}).items():
+        for k, a in answers.items():
             probs = {kk: round(float(vv), 3)
                      for kk, vv in (a.get("probabilities") or {}).items()}
             ranked = sorted(probs.values(), reverse=True)

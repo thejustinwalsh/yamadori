@@ -1,0 +1,11 @@
+{
+  "id": "react-04",
+  "domain": "react",
+  "prompt": "Write a React 19 custom hook in TypeScript (strict mode) and export it as\n`function useLocalStorage<T>(key: string, initialValue: T): [T, (next: T | ((prev: T) => T)) => void, () => void]`.\n\nIt keeps a piece of state in `localStorage` under `key`, stored as JSON text (`JSON.stringify` / `JSON.parse`).\n\nBehaviour:\n- The very first render already returns the stored value when there is one (read it while initialising state, not in an effect). When nothing is stored under `key`, it returns `initialValue`.\n- Reading must never throw. It returns `initialValue` when the stored text is not valid JSON, when accessing `localStorage` throws (for example a `SecurityError`), and during server rendering with `renderToString` from `react-dom/server`, where neither `window` nor `localStorage` exists.\n- The second element sets the value and writes `JSON.stringify(value)` under `key`. It also accepts an updater function, which receives the latest value; calling it several times in one event handler applies every update in order (two `prev => prev + 1` calls add 2).\n- The third element removes `key` from `localStorage` and sets the value back to `initialValue`.\n- When `window` receives a `storage` event (a change made in another tab) whose `key` equals this hook's `key`, the value becomes the event's `newValue` parsed as JSON, or `initialValue` when `newValue` is `null`. Events for other keys are ignored.\n\nUse only `react` (and `react-dom` if you need it). Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-04/test.tsx", "entry": ["useLocalStorage"]},
+  "reference": "tasks/react-04/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "hook"
+}

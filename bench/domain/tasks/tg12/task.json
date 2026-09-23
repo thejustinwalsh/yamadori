@@ -1,0 +1,17 @@
+{
+  "id": "tg12",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export: (1) `tintAccess` -- a typed placeholder for a `vec3f` value that a shader reads, where the value can later be supplied as a literal vector, a `tgpu.const`, a module variable or buffer binding, or a TypeGPU function returning `vec3f` (which must then be *called* in the generated code). Its WGSL type is fixed to `vec3f` and its default value is `vec3f(1, 1, 1)`. (2) `tinted` -- a TypeGPU function `(c: vec3f) -> vec3f` implemented as a WGSL string, WGSL name `tinted`, returning `c` multiplied component-wise by the value behind `tintAccess`. (3) `function resolveTinted(color: d.v3f): string` -- returns the WGSL that `tgpu.resolve` produces for `tinted` with `tintAccess` bound to `color`. Everything must work in plain Node without the `unplugin-typegpu` build plugin. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg12/test.ts", "runtime": true, "webgpu": true, "entry": ["tintAccess", "tinted", "resolveTinted"]},
+  "reference": "tasks/tg12/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu.accessor(schema, defaultValue?)": "core/slot/accessor.d.ts, core/slot/accessor.js",
+    "TgpuAccessor<T>, TgpuAccessor.In<T>": "core/slot/slotTypes.d.ts",
+    "fn.with(accessor, value)": "core/root/rootTypes.d.ts (Withable), core/function/tgpuFn.js",
+    "tgpu.const / tgpu.privateVar": "core/constant/tgpuConstant.d.ts, core/variable/tgpuVariable.d.ts"
+  },
+  "notes": "Probed: an accessor bound to a TgpuFn resolves to a call `brandColor()`, while a plain slot holding the same fn resolves to the bare identifier `brandColor` (invalid WGSL). wrong_test uses a slot."
+}

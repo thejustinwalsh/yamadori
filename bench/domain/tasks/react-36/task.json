@@ -1,0 +1,11 @@
+{
+  "id": "react-36",
+  "domain": "react",
+  "prompt": "Write a React 19 component in TypeScript (strict mode) and export it as `function SlowSearch({ getResults }: { getResults: (query: string) => Promise<string[]> })`.\n\n`getResults` is already cached by the caller: it returns the SAME promise object every time it is called with the same query, so it is safe to call during render.\n\nBehaviour:\n- Render a text input labelled \"Search\" (accessible name exactly `Search`). It is controlled and starts empty.\n- Below it, show the results for the current search query as a list (`<ul>` with one `<li>` per result string, in the order given, the `<li>` text being exactly the string). The results must be read during render with React 19's `use(getResults(query))` inside a `<Suspense>` boundary whose fallback is the text `Loading…` (with the single ellipsis character U+2026). The initial query is `\"\"`, so the fallback is shown until the first results arrive.\n- Typing must update the input URGENTLY: the input's value always equals what the user typed, even while results for it are still loading.\n- The search query that drives the results must be updated inside `startTransition` from `useTransition`, so that while the results for a new query are loading, the PREVIOUS list stays on screen and the `Loading…` fallback is never shown again after the first results have appeared.\n- While such a transition is pending, show an element with role `status` whose text is `Updating…` (U+2026). When nothing is pending, the text `Updating…` must not be in the document.\n- When results for the latest query arrive, the list shows them and the `Updating…` text disappears.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-36/test.tsx", "entry": ["SlowSearch"]},
+  "reference": "tasks/react-36/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "category": "react19"
+}

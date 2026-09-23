@@ -70,7 +70,7 @@ def run_http(url: str) -> None:
         try:
             r = urllib.request.Request(url, data=line.encode(),
                                        headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(r, timeout=1800) as resp:
+            with urllib.request.urlopen(r, timeout=3600) as resp:
                 if resp.status == 202:      # notification: no reply is correct
                     continue
                 body = resp.read()
@@ -129,7 +129,7 @@ def run_ws(url: str) -> None:
             # that are still in flight -- piping three requests in returned only
             # the first. Drain outstanding ids before shutting down.
             await stdin_done.wait()
-            deadline = loop.time() + 1800
+            deadline = loop.time() + 3600
             while pending and loop.time() < deadline:
                 await asyncio.sleep(0.05)
             if pending:

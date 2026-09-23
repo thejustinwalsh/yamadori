@@ -1,0 +1,17 @@
+{
+  "id": "ts04",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports a function `partition(items, predicate)`. `items` is a (possibly readonly) array of `T`; `predicate` is called once per element, in order, with `(item, index)`. It returns a new two-element tuple `[matching, rest]` of fresh mutable arrays, both keeping the input order, and never mutates `items`.\n\nTyping requirements:\n- With an ordinary boolean predicate, the result is typed `[T[], T[]]`.\n- With a type-guard predicate `(item: T, index: number) => item is U`, the result is typed `[U[], Exclude<T, U>[]]`. For example, partitioning a `(string | number)[]` with `(x): x is string => typeof x === 'string'` gives `[string[], number[]]`, and partitioning a discriminated union with a guard for one member gives that member and the union of the other members.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts04/test.ts",
+    "runtime": true,
+    "entry": [
+      "partition"
+    ]
+  },
+  "reference": "tasks/ts04/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

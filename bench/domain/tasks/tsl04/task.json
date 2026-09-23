@@ -1,0 +1,31 @@
+{
+  "id": "tsl04",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This r165 module no longer builds:\n\n```js\nimport { Color } from 'three';\nimport { uniforms, uniform } from 'three/nodes';\n\nexport const palette = uniforms( [ new Color( 0xff0000 ), new Color( 0x00ff00 ), new Color( 0x0000ff ), new Color( 0xffffff ) ], 'color' );\nexport const paletteIndex = uniform( 0, 'int' );\nexport const paletteColor = palette.element( paletteIndex );\n```\n\nPort it to r185 using named imports from 'three' and 'three/tsl'. Keep the exports `palette`, `paletteIndex` and `paletteColor`; `palette` must stay a single uniform-array node holding the four colours (editable from JavaScript), indexed by `paletteIndex`. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "palette",
+      "paletteIndex",
+      "paletteColor"
+    ],
+    "require": [
+      {
+        "name": "uniformArray",
+        "as": "call"
+      },
+      {
+        "name": "uniformArray",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": []
+  },
+  "reference": "tasks/tsl04/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": "uniforms() -> uniformArray(). Deprecated r168 and later removed: r165 examples/jsm/nodes/accessors/UniformsNode.js:138 `export const uniforms`; r175 src/nodes/accessors/UniformArrayNode.js:359 `// @deprecated, r168` (warns 'uniforms() has been renamed to uniformArray()'); absent from r185's exports; r185 src/nodes/accessors/UniformArrayNode.js:350 `export const uniformArray`.",
+  "notes": "`uniforms` is not forbidden: it is a common variable name in three.js code and r185 does not export it, so importing it already fails at compile. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

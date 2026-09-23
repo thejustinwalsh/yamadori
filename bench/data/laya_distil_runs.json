@@ -1,0 +1,644 @@
+{
+ "n_orders": 2,
+ "items": [
+  {
+   "question": "Where is the WGSL workgroup size set for the fluid sim?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8994,
+    "probabilities": {
+     "from_the_files": 0.9497,
+     "general_knowledge": 0.0503
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.5688,
+    "probabilities": {
+     "answers_it": 0.74325,
+     "partial": 0.17445,
+     "off_target": 0.08225
+    }
+   }
+  },
+  {
+   "question": "Where is the WGSL workgroup size set for the fluid sim?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8689,
+    "probabilities": {
+     "from_the_files": 0.93445,
+     "general_knowledge": 0.06555
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.525,
+    "probabilities": {
+     "answers_it": 0.6934,
+     "partial": 0.1684,
+     "off_target": 0.1382
+    }
+   }
+  },
+  {
+   "question": "What does hemisphere.py do with a trace once MAX_TRACES is exceeded?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.917,
+    "probabilities": {
+     "from_the_files": 0.9585,
+     "general_knowledge": 0.0415
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.73925,
+    "probabilities": {
+     "answers_it": 0.8331,
+     "partial": 0.09385,
+     "off_target": 0.07305
+    }
+   }
+  },
+  {
+   "question": "What does hemisphere.py do with a trace once MAX_TRACES is exceeded?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8862000000000001,
+    "probabilities": {
+     "from_the_files": 0.9431,
+     "general_knowledge": 0.0569
+    }
+   },
+   "verdict": {
+    "choice": "partial",
+    "margin": 0.09050000000000002,
+    "probabilities": {
+     "answers_it": 0.2362,
+     "partial": 0.42715000000000003,
+     "off_target": 0.33665
+    }
+   }
+  },
+  {
+   "question": "Which components still use WebGLRenderer instead of WebGPURenderer?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8285,
+    "probabilities": {
+     "from_the_files": 0.91425,
+     "general_knowledge": 0.08574999999999999
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.3648,
+    "probabilities": {
+     "answers_it": 0.61175,
+     "partial": 0.24695,
+     "off_target": 0.1414
+    }
+   }
+  },
+  {
+   "question": "Which components still use WebGLRenderer instead of WebGPURenderer?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8719000000000001,
+    "probabilities": {
+     "from_the_files": 0.9359500000000001,
+     "general_knowledge": 0.06405
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.07135000000000002,
+    "probabilities": {
+     "answers_it": 0.45455,
+     "partial": 0.3832,
+     "off_target": 0.16225
+    }
+   }
+  },
+  {
+   "question": "What serialises GPU access in laya_service?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8814,
+    "probabilities": {
+     "from_the_files": 0.9407,
+     "general_knowledge": 0.0593
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.41465,
+    "probabilities": {
+     "answers_it": 0.64185,
+     "partial": 0.2272,
+     "off_target": 0.131
+    }
+   }
+  },
+  {
+   "question": "What serialises GPU access in laya_service?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9015,
+    "probabilities": {
+     "from_the_files": 0.95075,
+     "general_knowledge": 0.04925
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.7794,
+    "probabilities": {
+     "answers_it": 0.86,
+     "partial": 0.0806,
+     "off_target": 0.0594
+    }
+   }
+  },
+  {
+   "question": "Why does cargo build fail with E0277 in crates/renderer?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9084,
+    "probabilities": {
+     "from_the_files": 0.9541999999999999,
+     "general_knowledge": 0.0458
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.52025,
+    "probabilities": {
+     "answers_it": 0.70785,
+     "partial": 0.1876,
+     "off_target": 0.10455
+    }
+   }
+  },
+  {
+   "question": "Why does cargo build fail with E0277 in crates/renderer?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.7814999999999999,
+    "probabilities": {
+     "from_the_files": 0.8907499999999999,
+     "general_knowledge": 0.10925000000000001
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.26389999999999997,
+    "probabilities": {
+     "answers_it": 0.5487,
+     "partial": 0.2848,
+     "off_target": 0.16649999999999998
+    }
+   }
+  },
+  {
+   "question": "What does the admission guard do when the budget is exhausted?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8628,
+    "probabilities": {
+     "from_the_files": 0.9314,
+     "general_knowledge": 0.0686
+    }
+   },
+   "verdict": {
+    "choice": "partial",
+    "margin": 0.019299999999999984,
+    "probabilities": {
+     "answers_it": 0.32785,
+     "partial": 0.34714999999999996,
+     "off_target": 0.32495
+    }
+   }
+  },
+  {
+   "question": "What does the admission guard do when the budget is exhausted?",
+   "grounded_label": true,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9427,
+    "probabilities": {
+     "from_the_files": 0.9713499999999999,
+     "general_knowledge": 0.028650000000000002
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.19795000000000001,
+    "probabilities": {
+     "answers_it": 0.4855,
+     "partial": 0.28755,
+     "off_target": 0.2269
+    }
+   }
+  },
+  {
+   "question": "What uniforms do our TSL node materials expose?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9094,
+    "probabilities": {
+     "from_the_files": 0.9547,
+     "general_knowledge": 0.0453
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.22105000000000002,
+    "probabilities": {
+     "answers_it": 0.48765000000000003,
+     "partial": 0.24575,
+     "off_target": 0.2666
+    }
+   }
+  },
+  {
+   "question": "What uniforms do our TSL node materials expose?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.97,
+    "probabilities": {
+     "from_the_files": 0.985,
+     "general_knowledge": 0.015
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.7343000000000001,
+    "probabilities": {
+     "answers_it": 0.8314,
+     "partial": 0.09709999999999999,
+     "off_target": 0.0715
+    }
+   }
+  },
+  {
+   "question": "What does the uTime uniform in water.wgsl get bound to on the JS side?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9297,
+    "probabilities": {
+     "from_the_files": 0.96485,
+     "general_knowledge": 0.03515
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.45755,
+    "probabilities": {
+     "answers_it": 0.65435,
+     "partial": 0.1968,
+     "off_target": 0.1488
+    }
+   }
+  },
+  {
+   "question": "What does the uTime uniform in water.wgsl get bound to on the JS side?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9204000000000001,
+    "probabilities": {
+     "from_the_files": 0.9602,
+     "general_knowledge": 0.0398
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.70815,
+    "probabilities": {
+     "answers_it": 0.81995,
+     "partial": 0.1118,
+     "off_target": 0.0683
+    }
+   }
+  },
+  {
+   "question": "Which Rust modules still use unsafe, and what for?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8895,
+    "probabilities": {
+     "from_the_files": 0.94475,
+     "general_knowledge": 0.05525
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.66595,
+    "probabilities": {
+     "answers_it": 0.7987500000000001,
+     "partial": 0.1328,
+     "off_target": 0.06839999999999999
+    }
+   }
+  },
+  {
+   "question": "Which Rust modules still use unsafe, and what for?",
+   "grounded_label": true,
+   "verdict_label": "partial",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8633000000000001,
+    "probabilities": {
+     "from_the_files": 0.9316500000000001,
+     "general_knowledge": 0.06835
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.5358499999999999,
+    "probabilities": {
+     "answers_it": 0.71675,
+     "partial": 0.1809,
+     "off_target": 0.10235
+    }
+   }
+  },
+  {
+   "question": "Where is the workgroup size set, and is the dispatch consistent with it?",
+   "grounded_label": true,
+   "verdict_label": "partial",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8622000000000001,
+    "probabilities": {
+     "from_the_files": 0.9311,
+     "general_knowledge": 0.0689
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.49265000000000003,
+    "probabilities": {
+     "answers_it": 0.68935,
+     "partial": 0.19669999999999999,
+     "off_target": 0.1139
+    }
+   }
+  },
+  {
+   "question": "What columns does the chunks table have?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9100999999999999,
+    "probabilities": {
+     "from_the_files": 0.95505,
+     "general_knowledge": 0.044950000000000004
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.7307000000000001,
+    "probabilities": {
+     "answers_it": 0.8266500000000001,
+     "partial": 0.09595000000000001,
+     "off_target": 0.0774
+    }
+   }
+  },
+  {
+   "question": "What columns does the chunks table have?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.6714,
+    "probabilities": {
+     "from_the_files": 0.8357,
+     "general_knowledge": 0.1643
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.59255,
+    "probabilities": {
+     "answers_it": 0.74075,
+     "partial": 0.1482,
+     "off_target": 0.11105000000000001
+    }
+   }
+  },
+  {
+   "question": "How does route_in decide, and what does it do when undecided?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.7717,
+    "probabilities": {
+     "from_the_files": 0.88585,
+     "general_knowledge": 0.11415
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.41380000000000006,
+    "probabilities": {
+     "answers_it": 0.6164000000000001,
+     "partial": 0.2026,
+     "off_target": 0.181
+    }
+   }
+  },
+  {
+   "question": "How does route_in decide, and what does it do when undecided?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.5276000000000001,
+    "probabilities": {
+     "from_the_files": 0.7638,
+     "general_knowledge": 0.2362
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.1578,
+    "probabilities": {
+     "answers_it": 0.45935,
+     "partial": 0.30155,
+     "off_target": 0.23904999999999998
+    }
+   }
+  },
+  {
+   "question": "Why is the deployed build washed out but not dev?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9116,
+    "probabilities": {
+     "from_the_files": 0.9558,
+     "general_knowledge": 0.0442
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.29790000000000005,
+    "probabilities": {
+     "answers_it": 0.56725,
+     "partial": 0.26935,
+     "off_target": 0.16344999999999998
+    }
+   }
+  },
+  {
+   "question": "Why is the deployed build washed out but not dev?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8805999999999999,
+    "probabilities": {
+     "from_the_files": 0.9402999999999999,
+     "general_knowledge": 0.0597
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.22929999999999995,
+    "probabilities": {
+     "answers_it": 0.5356,
+     "partial": 0.3063,
+     "off_target": 0.15815
+    }
+   }
+  },
+  {
+   "question": "What priorities do we pass to useFrame?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9411,
+    "probabilities": {
+     "from_the_files": 0.97055,
+     "general_knowledge": 0.02945
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.5205000000000001,
+    "probabilities": {
+     "answers_it": 0.7180500000000001,
+     "partial": 0.19755,
+     "off_target": 0.08445
+    }
+   }
+  },
+  {
+   "question": "What priorities do we pass to useFrame?",
+   "grounded_label": false,
+   "verdict_label": "off_target",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8524,
+    "probabilities": {
+     "from_the_files": 0.9262,
+     "general_knowledge": 0.0738
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.48849999999999993,
+    "probabilities": {
+     "answers_it": 0.6641999999999999,
+     "partial": 0.1757,
+     "off_target": 0.1601
+    }
+   }
+  },
+  {
+   "question": "Why does our BufferGeometry get disposed twice on hot reload?",
+   "grounded_label": true,
+   "verdict_label": "answers_it",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.9150999999999999,
+    "probabilities": {
+     "from_the_files": 0.9575499999999999,
+     "general_knowledge": 0.04245
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.479,
+    "probabilities": {
+     "answers_it": 0.6865,
+     "partial": 0.2075,
+     "off_target": 0.10595
+    }
+   }
+  },
+  {
+   "question": "Why does our BufferGeometry get disposed twice on hot reload?",
+   "grounded_label": false,
+   "verdict_label": "partial",
+   "grounding": {
+    "choice": "from_the_files",
+    "margin": 0.8713,
+    "probabilities": {
+     "from_the_files": 0.93565,
+     "general_knowledge": 0.06434999999999999
+    }
+   },
+   "verdict": {
+    "choice": "answers_it",
+    "margin": 0.23035000000000005,
+    "probabilities": {
+     "answers_it": 0.53005,
+     "partial": 0.29969999999999997,
+     "off_target": 0.1702
+    }
+   }
+  }
+ ],
+ "elapsed_s": 3.9
+}

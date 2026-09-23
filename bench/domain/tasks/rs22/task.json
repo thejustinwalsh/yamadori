@@ -1,0 +1,10 @@
+{
+  "id": "rs22",
+  "domain": "rust_wasm",
+  "prompt": "Using wasm-bindgen 0.2 (the build runs `wasm-bindgen --target nodejs`), export two Rust functions working on unsigned 64-bit words, which JavaScript passes and receives as BigInt without losing precision:\n\n- `rotl64(x, n)`: rotates the 64-bit unsigned `x` left by `n` bits (`n` is an unsigned 32-bit number; rotation is by `n mod 64`). The result is always the non-negative BigInt in `[0, 2^64)`. TypeScript: `rotl64(x: bigint, n: number): bigint`.\n- `popcount64(x)`: the number of set bits in the 64-bit unsigned `x`, returned as a plain JavaScript number. TypeScript: `popcount64(x: bigint): number`.\n\nAnswer with a single ```rust code block containing the library code.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs22/grader.mjs", "bindgen": true, "entry": ["rotl64", "popcount64"]},
+  "reference": "tasks/rs22/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

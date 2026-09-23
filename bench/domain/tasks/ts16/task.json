@@ -1,0 +1,24 @@
+{
+  "id": "ts16",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) using explicit resource management -- objects that callers release with a `using` declaration. The runtime is Node 24 and the `lib` setting is `esnext`. Export:\n\n- `class Resource` with `constructor(name: string, log: string[])`, a readonly `name` property, and a `disposed` getter. Constructing it pushes `open:<name>` onto `log`. It must be usable as `using r = new Resource('db', log);`; disposing it pushes `close:<name>` onto `log` and sets `disposed` to `true`. Disposing it again does nothing.\n- `openAll(names: readonly string[], open: (name: string) => Disposable): Disposable` -- calls `open` for each name, in order, and returns one disposable that owns all of them. Disposing the returned object disposes every opened resource in REVERSE order of opening, each exactly once (disposing the group twice does nothing more). If a disposal throws, the remaining resources are still disposed and then that error is rethrown. If `open` throws part-way through, every resource already opened is disposed in reverse order before `openAll` rethrows the original error.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts16/test.ts",
+    "runtime": true,
+    "entry": [
+      "Resource",
+      "openAll"
+    ],
+    "compilerOptions": {
+      "lib": [
+        "esnext"
+      ]
+    }
+  },
+  "reference": "tasks/ts16/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "notes": "Needs lib esnext for Disposable/DisposableStack types; DisposableStack exists at runtime in Node 24. `using` in test.ts is downlevelled by tsc for target es2023."
+}

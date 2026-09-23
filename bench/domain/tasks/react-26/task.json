@@ -1,0 +1,11 @@
+{
+  "id": "react-26",
+  "domain": "react",
+  "prompt": "Write a controlled pagination component for React 19 in TypeScript (strict mode) and export it as\n\n```ts\nfunction Pagination(props: {\n  page: number;          // current page, 1-based, 1 <= page <= totalPages\n  totalPages: number;    // >= 1\n  onPageChange: (page: number) => void;\n  siblings?: number;     // default 1\n}): React.ReactElement\n```\n\nMarkup:\n- Everything is inside a `nav` element with `aria-label=\"Pagination\"`.\n- A \"Previous\" button and a \"Next\" button (accessible names exactly \"Previous\" and \"Next\"). \"Previous\" is disabled (the `disabled` attribute) on page 1, \"Next\" is disabled on the last page. When enabled they call `onPageChange(page - 1)` and `onPageChange(page + 1)`.\n- One button per displayed page whose text, and accessible name, is just the page number (e.g. \"4\"). Clicking a page button other than the current one calls `onPageChange` with that number. The current page's button has `aria-current=\"page\"`; no other element has `aria-current`.\n- Where pages are skipped, a single ellipsis character \"…\" (U+2026) is displayed as plain text -- not a button, and not three dots.\n- Apart from these buttons and ellipses, the nav displays no other text.\n\nWhich pages are displayed, in increasing order:\n- page 1, the last page, and every page from `page - siblings` to `page + siblings` (limited to 1..totalPages);\n- where a run of consecutive pages is left out between two displayed pages, an ellipsis stands in for the run -- unless the run is exactly one page long, in which case that page is displayed instead of an ellipsis.\n\nExamples with the default `siblings` of 1 and `totalPages` 10 (\"…\" is an ellipsis, the other entries are page buttons):\n- page 5: 1 … 4 5 6 … 10\n- page 1: 1 2 … 10\n- page 3: 1 2 3 4 … 10\n- page 4: 1 2 3 4 5 … 10\nWith `totalPages` 1 only the button 1 is displayed.\n\nThe component does not keep its own page: it always displays the `page` prop.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-26/test.tsx", "entry": ["Pagination"]},
+  "reference": "tasks/react-26/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "component"
+}

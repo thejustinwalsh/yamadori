@@ -1,0 +1,11 @@
+{
+  "id": "react-39",
+  "domain": "react",
+  "prompt": "Write a React 19 component in TypeScript (strict mode) and export it as `function ContactManager({ contacts }: { contacts: { id: string; name: string; email: string }[] })`.\n\n`contacts` holds the initial saved values; `id` is unique, but two contacts may share the same `name`. After mounting, `ContactManager` keeps its own saved copy (later changes to the `contacts` prop can be ignored).\n\nBehaviour:\n- Render one button per contact, in the given order, whose accessible name is exactly `<name> (<email>)` built from that contact's SAVED values, e.g. `Ann (ann@example.com)`. Clicking a button selects that contact. Initially the first contact is selected.\n- For the selected contact, render an editor: a text input labelled `Name` and a text input labelled `Email` (accessible names exactly `Name` and `Email`), both holding a local draft that starts as the contact's saved values, and a button named `Save`.\n- Typing only changes the draft. `Save` stores the draft as that contact's saved values; the contact's button then shows the new values and the editor keeps showing them.\n- Selecting a different contact discards any unsaved draft: the editor shows that contact's saved values, and coming back to a contact later shows its saved values, never an abandoned draft. This must also hold when switching between two contacts that have the same name.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-39/test.tsx", "entry": ["ContactManager"]},
+  "reference": "tasks/react-39/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

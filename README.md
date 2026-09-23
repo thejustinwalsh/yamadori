@@ -37,7 +37,7 @@ Bonsai has a vocabulary for cutting things away, and it fits.
 
 | | |
 |---|---|
-| **剪定 · sentei** | Pruning. Nine tools survive. `judge` was cut at 6/10 against a coin flip. |
+| **剪定 · sentei** | Pruning. Eight tools on the MCP surface, eleven the model sees (twelve with the `delegate_investigation` benchmark flag). `judge` was cut at 6/10 against a coin flip and now dispatches nowhere. |
 | **芽摘み · metsumi** | Bud-pinching. Sample many answers. Keep the one that compiles. |
 | **舎利 · shari** | Deadwood, bleached and kept. Every failed idea stays in the repo with its evidence. |
 | **根張り · nebari** | Root flare. Retrieval you can see: `taproot`, `branch`, `shoot`. |
@@ -61,9 +61,28 @@ The tree is not finished. It will not be.
 
 Nothing here is asserted without a measurement, and the measurements have
 been unkind. BM25 beat the embedding index 92 to 77 and the embeddings got
-cut. The reranker earned nothing at the shipped cutoff. The decision model
-scored 0.507 against a 0.500 baseline and lost its tool. A fan-out experiment
-returned a clean null.
+switched off. Every reranker number turned out to be void, because its
+scores change with what else is in the batch (`docs/FINDINGS.md` #20). A fan-out
+experiment returned a clean null. And two separate things happened to the
+decision model, which used to be written here as one sentence and are not
+related:
+
+- **Calibration went nowhere.** Temperature-scaling it on 151 held-out
+  contrastive pairs (`index/calibration.json`, `scripts/calibrate_laya.py`)
+  moved ECE from 0.279 to 0.032 and left accuracy at **0.5066 against a 0.500
+  majority baseline the pairs have by construction** — which is the only
+  outcome possible, because a single scalar divisor is monotonic and cannot
+  reorder an argmax. Honest confidence, no new capability. `docs/LAYA.md`
+  Finding 10.
+- **A different tool was cut.** `judge` — the decision model asked to say
+  whether a proposition holds — scored **6/10 against a 5/10 coin flip** on
+  unambiguous yes/no engineering questions (`scripts/eval_judge.py`), with
+  three of four misses being false positives on the *negative* cases. It is
+  now advertised in no tool list and no longer dispatches by name.
+
+Neither caused the other. They are different label sets, different scripts and
+different questions — one is a calibration number on generated code pairs, the
+other is a tool-surface decision on hand-written yes/no questions.
 
 **This repository is mostly a record of things that did not survive testing.**
 That is the point. Every number below names the script that produced it and
@@ -80,7 +99,7 @@ top of this file is a promise, not a receipt.
 | | |
 |---|---|
 | OpenAI API | `https://ai.thejustinwalsh.me/v1` (via Caddy) |
-| Control / stats UI | `https://ai.thejustinwalsh.me/ui/` |
+| Dashboard | `https://ai.thejustinwalsh.me/dash` (Python pages at `/dash/classic`) |
 | Code-intelligence API | `https://ai.thejustinwalsh.me/tools` |
 | OpenAPI spec | `https://ai.thejustinwalsh.me/tools/openapi.json` |
 
@@ -128,39 +147,61 @@ curl http://ai.thejustinwalsh.me:1235/search \
 |---|---|
 | `POST /definition` | you know the identifier — sqlite lookup, no GPU |
 | `POST /references` | before changing a signature or deleting code |
-| `POST /search` | you cannot name it — embeddings + rerank |
+| `POST /search` | you cannot name it — BM25 + symbols (see note) |
 | `GET /status` | index coverage |
 | `GET /openapi.json` | self-discovery for tooling |
 
+> **Retrieval defaults.** `CODE_SEARCH_SEMANTIC=0` and `RERANK_MAX_K=2`, so at
+> shipped defaults `/search` runs BM25 plus the symbol table; embeddings are off
+> and the reranker only participates at k<=2, where its scores are unreliable
+> (`docs/FINDINGS.md` #20). The 4B reranker is NOT used: its
+> GGUF returns inverted near-zero scores through llama.cpp's rank path and fails
+> silently. See `docs/SELECTION.md` for when each mechanism applies.
+
+
 ## Models
+
+Clients on `:1234` see one model, **`yamadori`**, and any unknown name
+resolves to it (`mcp/catalog.py`). The ids below are llama-swap's, on loopback
+`:11434` behind the proxy.
 
 | id | what | where | notes |
 |---|---|---|---|
-| `bonsai` | Ternary Bonsai 2 27B, **208k ctx** | 5060 Ti | thinking ON |
-| `bonsai-agent` | same process, alias | 5060 Ti | **thinking OFF — use for tools** |
+| `bonsai` | Ternary Bonsai 2 27B, **147,456 ctx** | 5060 Ti | thinking ON |
+| `bonsai-agent` | same process, same settings, alias only | 5060 Ti | thinking ON (see config.yaml) |
 | `bonsai-vision` | + multimodal projector | A4000 | on demand, ttl 900 |
 | `embeddings` | Qwen3-Embedding-0.6B | A4000 | resident |
-| `reranker` | Qwen3-Reranker-4B | A4000 | resident |
+| `reranker` | Qwen3-Reranker-0.6B | A4000 | resident |
 
-### Use `bonsai-agent` for anything with tools
+### `bonsai-agent` is now an alias and nothing more
 
-This is the single most important operational detail. Measured, with a `tools`
-array attached:
+**SUPERSEDED — the reversal is left visible on purpose.** This section used to
+say `bonsai-agent` forced `enable_thinking: false` server-side because thinking
+ate the whole budget before a tool call. That was measured on the **corrupt
+`pr-ptq1-mmv` build** and did not survive fixing the fork:
 
-| config | result |
+| config | tool calls, 5 tasks x 3 reps, official build, temp 0.3 |
 |---|---|
-| thinking on, `max_tokens` 2000 | 2000 tokens of `<think>`, **no tool call** |
-| `reasoning_effort: low` | 2000 tokens of `<think>`, **no tool call** |
-| `enable_thinking: false` | **correct tool call in 29 tokens** |
+| thinking OFF | 13/15 correct, **0/15 failures to call** |
+| thinking ON | 12/15 correct, **0/15 failures to call** |
 
-The model reasons past its token budget before emitting a call, so an agent
-pointed at plain `bonsai` looks like it is ignoring its tools. `bonsai-agent`
-is the same process with `enable_thinking: false` forced server-side, so
-clients need no special handling.
+Equivalent within noise, and zero failures to call either way. `config.yaml`
+now sets `enable_thinking: true` on **both** ids, so `bonsai` and
+`bonsai-agent` are the same process with the same settings and the alias exists
+only so older clients keep working. Point agents at either.
+
+The reason thinking is ON rather than OFF is prompt injection, not tool use:
+against one naive exfiltration payload, thinking OFF leaked 5/5 and thinking ON
+at the shipped temp 0.3 leaked 1/5. **1/5 is not a defence**, it is a reduction
+on one payload against an abliterated model — the real controls are
+architectural and are listed in `config.yaml` above the alias.
 
 ## Performance
 
-Measured on this hardware, ternary PTQ1_0 with the custom `pr-ptq1-mmv` kernel:
+Measured on this hardware, ternary PTQ1_0 on the **official `prism` build** —
+not the `pr-ptq1-mmv` kernel, which is faster (55.33 t/s) and numerically
+broken, and which nothing here runs. See "Things that will bite you" below and
+[docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md):
 
 | config | prefill | decode |
 |---|---|---|
@@ -185,7 +226,11 @@ For reference, the journey to get here (same model family, same machine):
 ```
 bin/                 llama-swap (downloaded, not committed)
 config.yaml          the whole stack definition
-mcp/code_search.py   MCP server: search_code, find_definition, find_references
+mcp/code_search.py   MCP server: the 8 tools in TOOLS (find_by_meaning,
+                     find_definition_opt, find_references, find_by_pattern,
+                     read_file_range, describe_index, run_check,
+                     summarize_text). The names search_code / find_definition
+                     are the pre-rename ones and no longer exist.
 scripts/
   index_code.py      build the vector + symbol index
   ast_chunker.py     tree-sitter chunking (17 languages)
@@ -196,9 +241,19 @@ scripts/
   watchdog.ps1       health check and self-heal
 docs/HERMES.md       wiring an agent to this stack
 docs/KNOWN-ISSUES.md open problems, with the measurements behind them
+mcp/server.py        the front door on :1234 (auth, /v1, dashboard at /); logic in proxy.py
+mcp/model.py         the one door for internal generation (same tiers.apply)
+mcp/selection.py     per-request: hints, deep thinking, fan-out
+mcp/worker.py        claims dataset jobs from index/jobs.sqlite3
 mcp/tool_shim.py     UNUSED. Kept as a record; see known issues
 mcp/tools_api.py     HTTP transport for the same tools
+web/                 React dashboard; committed web/dist is served at the site root
+design/              design system source for the dashboard
+attic/               gitignored: superseded backups and stale logs
 ```
+
+Run the tests with `python scripts/run_tests.py` (offline + ruff), then
+`--live` through `:1234` before claiming anything works. See `AGENTS.md`.
 
 ## Setup
 
@@ -245,8 +300,19 @@ embedding ranking with noise. Documents are truncated before reranking and
 there is a fallback to embedding order when scores look degenerate.
 
 **VRAM headroom matters.** 240k context *loads* on the 5060 Ti but leaves ~2%
-free, and then dies when a long prefill allocates its compute buffer. 208k is
-the largest size measured stable.
+free, and then dies when a long prefill allocates its compute buffer. 208k was
+called "the largest size measured stable" here for a while; it is not what
+ships and the number came down twice since. **147,456 is what `config.yaml`
+launches with** (`-c 147456`), and it stands on its VRAM measurement alone:
+warm at 147,456, 12,122 MiB used and 3,931 free, roughly the 3 GB of headroom
+that absorbs compute-buffer spikes. It was once attributed to `arc193_a`
+failing on all three benchmark arms as a compute-buffer spike; that attribution
+is unsupported — the one completed `arc193_a` row died of `max_tokens`, not OOM
+(`docs/CONSTRAINTS.md` §1c). `mcp/budget.py` splits whatever the server reports
+5/8 to the conversation and 3/8 to one deep-thinking helper, reserve 0 (at
+147,456: 92,160 / 55,296), so `-c` is the only place the number lives. Every
+request's thinking budget is derived from its role's share
+(`docs/CONSTRAINTS.md` #19).
 
 ## Not included, and why
 

@@ -1,0 +1,11 @@
+{
+  "id": "react-21",
+  "domain": "react",
+  "prompt": "Write an accessible modal dialog in TypeScript (strict mode) for React 19 and export it as\n\n```ts\nexport function Modal(props: {\n  open: boolean;\n  onClose: () => void;\n  title: string;\n  children: React.ReactNode;\n}): React.ReactElement | null\n```\n\nIt is fully controlled: it never closes itself, it only asks the parent via `onClose`.\n\nMarkup:\n- While `open` is `false`, render nothing.\n- While `open` is `true`, render an element with `role=\"dialog\"` and `aria-modal=\"true\"`, containing a heading with the text `title` and `children`. The dialog's `aria-labelledby` is the `id` of that heading. Rendering in place or through a portal into `document.body` are both fine.\n\nFocus management. \"Focusable\" means matching `a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])`.\n- When the dialog opens, focus moves to the first focusable element inside it, in document order. If it contains none, the dialog element itself receives focus.\n- While it is open, Tab and Shift+Tab keep focus inside the dialog: Tab on the last focusable element moves to the first, Shift+Tab on the first moves to the last; between those, Tab and Shift+Tab move to the next / previous focusable element as usual.\n- Pressing Escape while focus is inside the dialog calls `onClose` once. While the dialog is closed, Escape does nothing.\n- When `open` changes from `true` to `false`, focus returns to the element that had focus just before the dialog opened.\n\nYou may import `react` and `react-dom`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-21/test.tsx", "entry": ["Modal"]},
+  "reference": "tasks/react-21/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "hard",
+  "category": "component"
+}

@@ -27,7 +27,24 @@ matching and measures nothing.
 That auto-generation is what makes n=100+ affordable. It also biases toward
 queries whose answer is a single well-named definition, which is the case
 keyword search is strongest at -- so this design flatters the baseline, not
-the tool being defended. Hand-written conceptual queries live in GOLD_EXTRA.
+the tool being defended.
+
+GOLD_EXTRA IS NOT WIRED IN, AND IT IS THE CAVEAT ON EVERY NUMBER THIS PRINTS.
+
+This docstring used to end "hand-written conceptual queries live in
+GOLD_EXTRA". They are declared there and NOTHING READS THE NAME -- `main()`
+builds `gold` from `build_gold()` alone. So every result this script has ever
+produced is 100% auto-generated symbol-name queries, i.e. entirely the shape
+that flatters the keyword baseline and none of the shape that would test the
+other direction. The five entries in GOLD_EXTRA are incomplete as well: each
+carries a repo tag, not a gold path, so they could not be scored as written.
+
+This is PROTOCOL rule 14 -- a policy stated in prose beside code that does not
+follow it reads exactly like a policy that is enforced. The cut rule fired on
+this script (semantic 77/120 against keyword 92/120, McNemar p=0.0041; fused
+87/120, p=0.2266) and this is precisely why docs/ROADMAP.md 1.2 still calls
+embeddings "lost on one biased test" rather than "lost". Finishing GOLD_EXTRA
+-- real gold paths, an n stated in advance -- is what closes it.
 """
 from __future__ import annotations
 
@@ -37,9 +54,7 @@ import random
 import re
 import sqlite3
 import sys
-from collections import Counter
 
-import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mcp"))
 import code_search as cs  # noqa: E402
@@ -115,6 +130,11 @@ def build_gold(con: sqlite3.Connection, limit: int, seed: int = 0):
     return gold
 
 
+# UNUSED. Nothing reads this name; main() scores build_gold() only. Kept
+# because it is the right idea and the stub for the measurement docs/ROADMAP.md
+# 1.2 is waiting on -- but as written each entry has a repo tag where a gold
+# PATH needs to be, so wiring it in is more than a one-line change. See the
+# docstring.
 GOLD_EXTRA: list[tuple[str, str]] = [
     # Hand-written, conceptual: the shape where an index should beat keywords,
     # because the code does not contain the words the question uses.

@@ -1,0 +1,10 @@
+{
+  "id": "rs16",
+  "domain": "rust_wasm",
+  "prompt": "Write a Rust library for `wasm32-unknown-unknown` (no wasm-bindgen) that converts UTF-8 text in linear memory to UTF-16 in a buffer JavaScript provides, so JavaScript can build a string with `String.fromCharCode` over a `Uint16Array`:\n\n`#[no_mangle] pub unsafe extern \"C\" fn utf8_to_utf16(src: *const u8, len: usize, dst: *mut u16, cap: usize) -> isize`\n\n- `cap` is the capacity of `dst` in `u16` code units, not bytes. `dst` is 2-byte aligned.\n- If `src[..len]` is not valid UTF-8, return -1 and write nothing.\n- Otherwise return the number of UTF-16 code units the text needs (a character outside the Basic Multilingual Plane needs two). If `dst` is non-null and `cap` is at least that number, write exactly those code units to `dst[0..n]` (no terminator, nothing beyond); otherwise write nothing.\n- `src` may be null when `len` is 0 (the result is 0).\n\nAnswer with a single ```rust code block.",
+  "grader": {"kind": "rust", "wasm_test": "tasks/rs16/grader.mjs", "wasm_support": true, "entry": ["utf8_to_utf16"]},
+  "reference": "tasks/rs16/reference.rs",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "react-38",
+  "domain": "react",
+  "prompt": "Write a React 19 counter context in TypeScript (strict mode) that is split so that components which only change the count never re-render when it changes.\n\nExport:\n- `function CounterProvider({ children }: { children: React.ReactNode })` (you may import the `ReactNode` type from `react`).\n- `function useCount(): number` -- the current count of the nearest `CounterProvider`.\n- `function useCountActions(): { increment(): void; decrement(): void; reset(): void }` -- `increment` adds 1, `decrement` subtracts 1 (the count may go negative), `reset` sets it back to 0.\n\nBehaviour:\n- The count of each `CounterProvider` starts at 0; separate providers keep separate counts.\n- A component that calls `useCountActions()` but not `useCount()` must NOT re-render when the count changes (it is rendered as a child of the provider and nothing else re-renders it).\n- `useCountActions()` returns the very same object (same identity) on every render for the whole lifetime of the provider.\n- Calling `useCount()` or `useCountActions()` in a component that has no `CounterProvider` above it throws an `Error`.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-38/test.tsx", "entry": ["CounterProvider", "useCount", "useCountActions"]},
+  "reference": "tasks/react-38/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

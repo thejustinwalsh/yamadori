@@ -1,0 +1,11 @@
+{
+  "id": "react-33",
+  "domain": "react",
+  "prompt": "Write a React 19 component in TypeScript (strict mode) and export it as `SubmitButton`:\n\n    export function SubmitButton({ children, pendingText }: { children: React.ReactNode; pendingText: string })\n\nIt is a reusable submit button that callers drop inside their own `<form action={...}>`, where the action is an async function owned by the caller. The button receives no information about that action through props, so it must use React 19's `useFormStatus` to learn whether its enclosing form is submitting.\n\nContract:\n- It renders a single `<button type=\"submit\">` showing `children`.\n- While the enclosing form's action is pending, however the submission started (clicking this button, pressing Enter in one of the form's inputs, or any other submit button of the same form), the button is disabled and its text is exactly `pendingText` instead of `children`.\n- When the action finishes, it is enabled again and shows `children`.\n- It reflects only its own form: a `SubmitButton` in a different form that is not submitting stays enabled and keeps showing its `children`.\n\nUse only `react` and `react-dom`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-33/test.tsx", "entry": ["SubmitButton"]},
+  "reference": "tasks/react-33/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

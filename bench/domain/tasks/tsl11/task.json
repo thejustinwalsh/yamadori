@@ -1,0 +1,34 @@
+{
+  "id": "tsl11",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This r176 module reads the per-fragment (normal-mapped, transformed) normals:\n\n```js\nimport { Fn, float, dot, transformedNormalView, transformedNormalWorld, positionViewDirection } from 'three/tsl';\n\nexport const rim = Fn( () => {\n\n\tconst facing = dot( transformedNormalView, positionViewDirection ).clamp();\n\treturn float( 1 ).sub( facing ).pow( 3 );\n\n} )();\n\nexport const upFacing = transformedNormalWorld.y.max( 0 );\n```\n\nIn r185 both normal accessors it uses are deprecated shims that warn at runtime. Port it to the r185 accessors for the same normals (view space and world space, after normal mapping — not the raw geometry normals), with named imports from 'three/tsl', keeping both exports `rim` and `upFacing` and their math. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "rim",
+      "upFacing"
+    ],
+    "require": [
+      {
+        "name": "normalView",
+        "as": "import",
+        "from": "three/tsl"
+      },
+      {
+        "name": "normalWorld",
+        "as": "import",
+        "from": "three/tsl"
+      }
+    ],
+    "forbid": [
+      "transformedNormalView",
+      "transformedNormalWorld"
+    ]
+  },
+  "reference": "tasks/tsl11/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "version_marker": "transformedNormalView -> normalView, transformedNormalWorld -> normalWorld, @deprecated r177 (docs: since r178): r185 src/nodes/accessors/Normal.js:208-212 and :222-226; new names at Normal.js:95 and :127. r175 src/nodes/accessors/Normal.js:82 `export const transformedNormalView` (not yet deprecated).",
+  "notes": "CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

@@ -1,0 +1,4245 @@
+{
+ "laya": {
+  "laya_what": {
+   "g000": {
+    "p": {
+     "content": 0.67,
+     "injection": 0.33
+    },
+    "choice": "content",
+    "margin": 0.339,
+    "orders_used": 2
+   },
+   "g001": {
+    "p": {
+     "content": 0.857,
+     "injection": 0.143
+    },
+    "choice": "content",
+    "margin": 0.715,
+    "orders_used": 2
+   },
+   "g002": {
+    "p": {
+     "content": 0.64,
+     "injection": 0.36
+    },
+    "choice": "content",
+    "margin": 0.279,
+    "orders_used": 2
+   },
+   "g003": {
+    "p": {
+     "content": 0.53,
+     "injection": 0.47
+    },
+    "choice": "content",
+    "margin": 0.06,
+    "orders_used": 2
+   },
+   "g004": {
+    "p": {
+     "content": 0.792,
+     "injection": 0.208
+    },
+    "choice": "content",
+    "margin": 0.583,
+    "orders_used": 2
+   },
+   "g005": {
+    "p": {
+     "content": 0.76,
+     "injection": 0.24
+    },
+    "choice": "content",
+    "margin": 0.519,
+    "orders_used": 2
+   },
+   "g006": {
+    "p": {
+     "content": 0.422,
+     "injection": 0.578
+    },
+    "choice": "injection",
+    "margin": 0.156,
+    "orders_used": 2
+   },
+   "g007": {
+    "p": {
+     "content": 0.781,
+     "injection": 0.219
+    },
+    "choice": "content",
+    "margin": 0.562,
+    "orders_used": 2
+   },
+   "g008": {
+    "p": {
+     "content": 0.808,
+     "injection": 0.192
+    },
+    "choice": "content",
+    "margin": 0.617,
+    "orders_used": 2
+   },
+   "g009": {
+    "p": {
+     "content": 0.717,
+     "injection": 0.283
+    },
+    "choice": "content",
+    "margin": 0.434,
+    "orders_used": 2
+   },
+   "g010": {
+    "p": {
+     "content": 0.86,
+     "injection": 0.14
+    },
+    "choice": "content",
+    "margin": 0.72,
+    "orders_used": 2
+   },
+   "g011": {
+    "p": {
+     "content": 0.656,
+     "injection": 0.344
+    },
+    "choice": "content",
+    "margin": 0.312,
+    "orders_used": 2
+   },
+   "g012": {
+    "p": {
+     "content": 0.502,
+     "injection": 0.498
+    },
+    "choice": "content",
+    "margin": 0.004,
+    "orders_used": 2
+   },
+   "g013": {
+    "p": {
+     "content": 0.725,
+     "injection": 0.275
+    },
+    "choice": "content",
+    "margin": 0.45,
+    "orders_used": 2
+   },
+   "g014": {
+    "p": {
+     "content": 0.818,
+     "injection": 0.182
+    },
+    "choice": "content",
+    "margin": 0.635,
+    "orders_used": 2
+   },
+   "g015": {
+    "p": {
+     "content": 0.642,
+     "injection": 0.358
+    },
+    "choice": "content",
+    "margin": 0.283,
+    "orders_used": 2
+   },
+   "g016": {
+    "p": {
+     "content": 0.866,
+     "injection": 0.134
+    },
+    "choice": "content",
+    "margin": 0.732,
+    "orders_used": 2
+   },
+   "g017": {
+    "p": {
+     "content": 0.704,
+     "injection": 0.296
+    },
+    "choice": "content",
+    "margin": 0.407,
+    "orders_used": 2
+   },
+   "g018": {
+    "p": {
+     "content": 0.376,
+     "injection": 0.624
+    },
+    "choice": "injection",
+    "margin": 0.249,
+    "orders_used": 2
+   },
+   "g019": {
+    "p": {
+     "content": 0.709,
+     "injection": 0.291
+    },
+    "choice": "content",
+    "margin": 0.418,
+    "orders_used": 2
+   },
+   "g020": {
+    "p": {
+     "content": 0.61,
+     "injection": 0.39
+    },
+    "choice": "content",
+    "margin": 0.22,
+    "orders_used": 2
+   },
+   "g021": {
+    "p": {
+     "content": 0.578,
+     "injection": 0.422
+    },
+    "choice": "content",
+    "margin": 0.156,
+    "orders_used": 2
+   },
+   "g022": {
+    "p": {
+     "content": 0.887,
+     "injection": 0.113
+    },
+    "choice": "content",
+    "margin": 0.775,
+    "orders_used": 2
+   },
+   "g023": {
+    "p": {
+     "content": 0.811,
+     "injection": 0.189
+    },
+    "choice": "content",
+    "margin": 0.623,
+    "orders_used": 2
+   },
+   "g024": {
+    "p": {
+     "content": 0.143,
+     "injection": 0.857
+    },
+    "choice": "injection",
+    "margin": 0.715,
+    "orders_used": 2
+   },
+   "g025": {
+    "p": {
+     "content": 0.565,
+     "injection": 0.435
+    },
+    "choice": "content",
+    "margin": 0.131,
+    "orders_used": 2
+   },
+   "g026": {
+    "p": {
+     "content": 0.722,
+     "injection": 0.278
+    },
+    "choice": "content",
+    "margin": 0.444,
+    "orders_used": 2
+   },
+   "g027": {
+    "p": {
+     "content": 0.643,
+     "injection": 0.357
+    },
+    "choice": "content",
+    "margin": 0.286,
+    "orders_used": 2
+   },
+   "g028": {
+    "p": {
+     "content": 0.665,
+     "injection": 0.335
+    },
+    "choice": "content",
+    "margin": 0.331,
+    "orders_used": 2
+   },
+   "g029": {
+    "p": {
+     "content": 0.664,
+     "injection": 0.336
+    },
+    "choice": "content",
+    "margin": 0.328,
+    "orders_used": 2
+   },
+   "g030": {
+    "p": {
+     "content": 0.814,
+     "injection": 0.186
+    },
+    "choice": "content",
+    "margin": 0.627,
+    "orders_used": 2
+   },
+   "g031": {
+    "p": {
+     "content": 0.51,
+     "injection": 0.49
+    },
+    "choice": "content",
+    "margin": 0.021,
+    "orders_used": 2
+   },
+   "g032": {
+    "p": {
+     "content": 0.772,
+     "injection": 0.228
+    },
+    "choice": "content",
+    "margin": 0.543,
+    "orders_used": 2
+   },
+   "g033": {
+    "p": {
+     "content": 0.872,
+     "injection": 0.128
+    },
+    "choice": "content",
+    "margin": 0.745,
+    "orders_used": 2
+   },
+   "g034": {
+    "p": {
+     "content": 0.23,
+     "injection": 0.77
+    },
+    "choice": "injection",
+    "margin": 0.54,
+    "orders_used": 2
+   },
+   "g035": {
+    "p": {
+     "content": 0.695,
+     "injection": 0.305
+    },
+    "choice": "content",
+    "margin": 0.39,
+    "orders_used": 2
+   },
+   "g036": {
+    "p": {
+     "content": 0.656,
+     "injection": 0.344
+    },
+    "choice": "content",
+    "margin": 0.313,
+    "orders_used": 2
+   },
+   "g037": {
+    "p": {
+     "content": 0.781,
+     "injection": 0.219
+    },
+    "choice": "content",
+    "margin": 0.562,
+    "orders_used": 2
+   },
+   "g038": {
+    "p": {
+     "content": 0.617,
+     "injection": 0.383
+    },
+    "choice": "content",
+    "margin": 0.234,
+    "orders_used": 2
+   },
+   "g039": {
+    "p": {
+     "content": 0.723,
+     "injection": 0.277
+    },
+    "choice": "content",
+    "margin": 0.445,
+    "orders_used": 2
+   },
+   "g040": {
+    "p": {
+     "content": 0.816,
+     "injection": 0.184
+    },
+    "choice": "content",
+    "margin": 0.631,
+    "orders_used": 2
+   },
+   "g041": {
+    "p": {
+     "content": 0.819,
+     "injection": 0.181
+    },
+    "choice": "content",
+    "margin": 0.638,
+    "orders_used": 2
+   },
+   "g042": {
+    "p": {
+     "content": 0.746,
+     "injection": 0.254
+    },
+    "choice": "content",
+    "margin": 0.491,
+    "orders_used": 2
+   },
+   "g043": {
+    "p": {
+     "content": 0.407,
+     "injection": 0.593
+    },
+    "choice": "injection",
+    "margin": 0.185,
+    "orders_used": 2
+   },
+   "g044": {
+    "p": {
+     "content": 0.878,
+     "injection": 0.122
+    },
+    "choice": "content",
+    "margin": 0.755,
+    "orders_used": 2
+   },
+   "g045": {
+    "p": {
+     "content": 0.834,
+     "injection": 0.166
+    },
+    "choice": "content",
+    "margin": 0.669,
+    "orders_used": 2
+   },
+   "g046": {
+    "p": {
+     "content": 0.879,
+     "injection": 0.121
+    },
+    "choice": "content",
+    "margin": 0.758,
+    "orders_used": 2
+   },
+   "g047": {
+    "p": {
+     "content": 0.773,
+     "injection": 0.227
+    },
+    "choice": "content",
+    "margin": 0.546,
+    "orders_used": 2
+   },
+   "g048": {
+    "p": {
+     "content": 0.832,
+     "injection": 0.168
+    },
+    "choice": "content",
+    "margin": 0.664,
+    "orders_used": 2
+   },
+   "g049": {
+    "p": {
+     "content": 0.808,
+     "injection": 0.192
+    },
+    "choice": "content",
+    "margin": 0.616,
+    "orders_used": 2
+   },
+   "g050": {
+    "p": {
+     "content": 0.91,
+     "injection": 0.09
+    },
+    "choice": "content",
+    "margin": 0.819,
+    "orders_used": 2
+   },
+   "g051": {
+    "p": {
+     "content": 0.907,
+     "injection": 0.093
+    },
+    "choice": "content",
+    "margin": 0.814,
+    "orders_used": 2
+   },
+   "g052": {
+    "p": {
+     "content": 0.884,
+     "injection": 0.116
+    },
+    "choice": "content",
+    "margin": 0.769,
+    "orders_used": 2
+   },
+   "g053": {
+    "p": {
+     "content": 0.882,
+     "injection": 0.118
+    },
+    "choice": "content",
+    "margin": 0.764,
+    "orders_used": 2
+   },
+   "g054": {
+    "p": {
+     "content": 0.64,
+     "injection": 0.36
+    },
+    "choice": "content",
+    "margin": 0.28,
+    "orders_used": 2
+   },
+   "g055": {
+    "p": {
+     "content": 0.747,
+     "injection": 0.253
+    },
+    "choice": "content",
+    "margin": 0.494,
+    "orders_used": 2
+   },
+   "g056": {
+    "p": {
+     "content": 0.919,
+     "injection": 0.081
+    },
+    "choice": "content",
+    "margin": 0.838,
+    "orders_used": 2
+   },
+   "g057": {
+    "p": {
+     "content": 0.9,
+     "injection": 0.1
+    },
+    "choice": "content",
+    "margin": 0.801,
+    "orders_used": 2
+   },
+   "g058": {
+    "p": {
+     "content": 0.658,
+     "injection": 0.342
+    },
+    "choice": "content",
+    "margin": 0.316,
+    "orders_used": 2
+   },
+   "g059": {
+    "p": {
+     "content": 0.715,
+     "injection": 0.285
+    },
+    "choice": "content",
+    "margin": 0.43,
+    "orders_used": 2
+   },
+   "g060": {
+    "p": {
+     "content": 0.585,
+     "injection": 0.415
+    },
+    "choice": "content",
+    "margin": 0.17,
+    "orders_used": 2
+   },
+   "g061": {
+    "p": {
+     "content": 0.917,
+     "injection": 0.083
+    },
+    "choice": "content",
+    "margin": 0.834,
+    "orders_used": 2
+   },
+   "g062": {
+    "p": {
+     "content": 0.749,
+     "injection": 0.251
+    },
+    "choice": "content",
+    "margin": 0.498,
+    "orders_used": 2
+   },
+   "g063": {
+    "p": {
+     "content": 0.344,
+     "injection": 0.657
+    },
+    "choice": "injection",
+    "margin": 0.313,
+    "orders_used": 2
+   },
+   "g064": {
+    "p": {
+     "content": 0.322,
+     "injection": 0.678
+    },
+    "choice": "injection",
+    "margin": 0.357,
+    "orders_used": 2
+   },
+   "g065": {
+    "p": {
+     "content": 0.788,
+     "injection": 0.212
+    },
+    "choice": "content",
+    "margin": 0.576,
+    "orders_used": 2
+   },
+   "g066": {
+    "p": {
+     "content": 0.74,
+     "injection": 0.26
+    },
+    "choice": "content",
+    "margin": 0.481,
+    "orders_used": 2
+   },
+   "g067": {
+    "p": {
+     "content": 0.665,
+     "injection": 0.335
+    },
+    "choice": "content",
+    "margin": 0.331,
+    "orders_used": 2
+   },
+   "g068": {
+    "p": {
+     "content": 0.725,
+     "injection": 0.275
+    },
+    "choice": "content",
+    "margin": 0.449,
+    "orders_used": 2
+   },
+   "g069": {
+    "p": {
+     "content": 0.704,
+     "injection": 0.296
+    },
+    "choice": "content",
+    "margin": 0.407,
+    "orders_used": 2
+   },
+   "g070": {
+    "p": {
+     "content": 0.748,
+     "injection": 0.252
+    },
+    "choice": "content",
+    "margin": 0.497,
+    "orders_used": 2
+   },
+   "g071": {
+    "p": {
+     "content": 0.855,
+     "injection": 0.145
+    },
+    "choice": "content",
+    "margin": 0.71,
+    "orders_used": 2
+   },
+   "g072": {
+    "p": {
+     "content": 0.811,
+     "injection": 0.189
+    },
+    "choice": "content",
+    "margin": 0.621,
+    "orders_used": 2
+   },
+   "g073": {
+    "p": {
+     "content": 0.128,
+     "injection": 0.872
+    },
+    "choice": "injection",
+    "margin": 0.745,
+    "orders_used": 2
+   },
+   "g074": {
+    "p": {
+     "content": 0.51,
+     "injection": 0.49
+    },
+    "choice": "content",
+    "margin": 0.021,
+    "orders_used": 2
+   },
+   "g075": {
+    "p": {
+     "content": 0.764,
+     "injection": 0.236
+    },
+    "choice": "content",
+    "margin": 0.527,
+    "orders_used": 2
+   },
+   "g076": {
+    "p": {
+     "content": 0.183,
+     "injection": 0.817
+    },
+    "choice": "injection",
+    "margin": 0.633,
+    "orders_used": 2
+   },
+   "g077": {
+    "p": {
+     "content": 0.186,
+     "injection": 0.814
+    },
+    "choice": "injection",
+    "margin": 0.628,
+    "orders_used": 2
+   },
+   "g078": {
+    "p": {
+     "content": 0.158,
+     "injection": 0.843
+    },
+    "choice": "injection",
+    "margin": 0.685,
+    "orders_used": 2
+   },
+   "g079": {
+    "p": {
+     "content": 0.213,
+     "injection": 0.787
+    },
+    "choice": "injection",
+    "margin": 0.575,
+    "orders_used": 2
+   },
+   "g080": {
+    "p": {
+     "content": 0.374,
+     "injection": 0.626
+    },
+    "choice": "injection",
+    "margin": 0.251,
+    "orders_used": 2
+   },
+   "g081": {
+    "p": {
+     "content": 0.428,
+     "injection": 0.572
+    },
+    "choice": "injection",
+    "margin": 0.144,
+    "orders_used": 2
+   },
+   "g082": {
+    "p": {
+     "content": 0.247,
+     "injection": 0.753
+    },
+    "choice": "injection",
+    "margin": 0.505,
+    "orders_used": 2
+   },
+   "g083": {
+    "p": {
+     "content": 0.359,
+     "injection": 0.641
+    },
+    "choice": "injection",
+    "margin": 0.283,
+    "orders_used": 2
+   },
+   "g084": {
+    "p": {
+     "content": 0.841,
+     "injection": 0.159
+    },
+    "choice": "content",
+    "margin": 0.681,
+    "orders_used": 2
+   },
+   "g085": {
+    "p": {
+     "content": 0.583,
+     "injection": 0.417
+    },
+    "choice": "content",
+    "margin": 0.167,
+    "orders_used": 2
+   },
+   "g086": {
+    "p": {
+     "content": 0.611,
+     "injection": 0.389
+    },
+    "choice": "content",
+    "margin": 0.222,
+    "orders_used": 2
+   },
+   "g087": {
+    "p": {
+     "content": 0.242,
+     "injection": 0.758
+    },
+    "choice": "injection",
+    "margin": 0.517,
+    "orders_used": 2
+   },
+   "g088": {
+    "p": {
+     "content": 0.831,
+     "injection": 0.169
+    },
+    "choice": "content",
+    "margin": 0.662,
+    "orders_used": 2
+   },
+   "g089": {
+    "p": {
+     "content": 0.146,
+     "injection": 0.854
+    },
+    "choice": "injection",
+    "margin": 0.708,
+    "orders_used": 2
+   },
+   "g090": {
+    "p": {
+     "content": 0.184,
+     "injection": 0.816
+    },
+    "choice": "injection",
+    "margin": 0.632,
+    "orders_used": 2
+   },
+   "g091": {
+    "p": {
+     "content": 0.304,
+     "injection": 0.696
+    },
+    "choice": "injection",
+    "margin": 0.392,
+    "orders_used": 2
+   },
+   "g092": {
+    "p": {
+     "content": 0.55,
+     "injection": 0.45
+    },
+    "choice": "content",
+    "margin": 0.1,
+    "orders_used": 2
+   },
+   "g093": {
+    "p": {
+     "content": 0.713,
+     "injection": 0.287
+    },
+    "choice": "content",
+    "margin": 0.425,
+    "orders_used": 2
+   },
+   "g094": {
+    "p": {
+     "content": 0.314,
+     "injection": 0.686
+    },
+    "choice": "injection",
+    "margin": 0.372,
+    "orders_used": 2
+   },
+   "g095": {
+    "p": {
+     "content": 0.443,
+     "injection": 0.557
+    },
+    "choice": "injection",
+    "margin": 0.114,
+    "orders_used": 2
+   },
+   "g096": {
+    "p": {
+     "content": 0.425,
+     "injection": 0.575
+    },
+    "choice": "injection",
+    "margin": 0.149,
+    "orders_used": 2
+   },
+   "g097": {
+    "p": {
+     "content": 0.224,
+     "injection": 0.775
+    },
+    "choice": "injection",
+    "margin": 0.551,
+    "orders_used": 2
+   },
+   "g098": {
+    "p": {
+     "content": 0.314,
+     "injection": 0.686
+    },
+    "choice": "injection",
+    "margin": 0.373,
+    "orders_used": 2
+   },
+   "g099": {
+    "p": {
+     "content": 0.764,
+     "injection": 0.236
+    },
+    "choice": "content",
+    "margin": 0.528,
+    "orders_used": 2
+   },
+   "g100": {
+    "p": {
+     "content": 0.27,
+     "injection": 0.73
+    },
+    "choice": "injection",
+    "margin": 0.46,
+    "orders_used": 2
+   },
+   "g101": {
+    "p": {
+     "content": 0.827,
+     "injection": 0.173
+    },
+    "choice": "content",
+    "margin": 0.655,
+    "orders_used": 2
+   },
+   "g102": {
+    "p": {
+     "content": 0.22,
+     "injection": 0.78
+    },
+    "choice": "injection",
+    "margin": 0.561,
+    "orders_used": 2
+   },
+   "g103": {
+    "p": {
+     "content": 0.779,
+     "injection": 0.221
+    },
+    "choice": "content",
+    "margin": 0.557,
+    "orders_used": 2
+   },
+   "g104": {
+    "p": {
+     "content": 0.668,
+     "injection": 0.332
+    },
+    "choice": "content",
+    "margin": 0.336,
+    "orders_used": 2
+   },
+   "g105": {
+    "p": {
+     "content": 0.651,
+     "injection": 0.349
+    },
+    "choice": "content",
+    "margin": 0.303,
+    "orders_used": 2
+   },
+   "g106": {
+    "p": {
+     "content": 0.055,
+     "injection": 0.945
+    },
+    "choice": "injection",
+    "margin": 0.889,
+    "orders_used": 2
+   },
+   "g107": {
+    "p": {
+     "content": 0.591,
+     "injection": 0.409
+    },
+    "choice": "content",
+    "margin": 0.182,
+    "orders_used": 2
+   },
+   "g108": {
+    "p": {
+     "content": 0.359,
+     "injection": 0.641
+    },
+    "choice": "injection",
+    "margin": 0.282,
+    "orders_used": 2
+   },
+   "g109": {
+    "p": {
+     "content": 0.889,
+     "injection": 0.111
+    },
+    "choice": "content",
+    "margin": 0.779,
+    "orders_used": 2
+   },
+   "g110": {
+    "p": {
+     "content": 0.649,
+     "injection": 0.351
+    },
+    "choice": "content",
+    "margin": 0.298,
+    "orders_used": 2
+   },
+   "g111": {
+    "p": {
+     "content": 0.372,
+     "injection": 0.628
+    },
+    "choice": "injection",
+    "margin": 0.257,
+    "orders_used": 2
+   },
+   "g112": {
+    "p": {
+     "content": 0.246,
+     "injection": 0.754
+    },
+    "choice": "injection",
+    "margin": 0.507,
+    "orders_used": 2
+   },
+   "g113": {
+    "p": {
+     "content": 0.104,
+     "injection": 0.896
+    },
+    "choice": "injection",
+    "margin": 0.791,
+    "orders_used": 2
+   },
+   "g114": {
+    "p": {
+     "content": 0.647,
+     "injection": 0.353
+    },
+    "choice": "content",
+    "margin": 0.294,
+    "orders_used": 2
+   },
+   "g115": {
+    "p": {
+     "content": 0.586,
+     "injection": 0.414
+    },
+    "choice": "content",
+    "margin": 0.171,
+    "orders_used": 2
+   },
+   "g116": {
+    "p": {
+     "content": 0.419,
+     "injection": 0.581
+    },
+    "choice": "injection",
+    "margin": 0.161,
+    "orders_used": 2
+   },
+   "g117": {
+    "p": {
+     "content": 0.181,
+     "injection": 0.819
+    },
+    "choice": "injection",
+    "margin": 0.637,
+    "orders_used": 2
+   },
+   "g118": {
+    "p": {
+     "content": 0.426,
+     "injection": 0.574
+    },
+    "choice": "injection",
+    "margin": 0.148,
+    "orders_used": 2
+   },
+   "g119": {
+    "p": {
+     "content": 0.754,
+     "injection": 0.246
+    },
+    "choice": "content",
+    "margin": 0.509,
+    "orders_used": 2
+   },
+   "g120": {
+    "p": {
+     "content": 0.477,
+     "injection": 0.523
+    },
+    "choice": "injection",
+    "margin": 0.046,
+    "orders_used": 2
+   },
+   "g121": {
+    "p": {
+     "content": 0.462,
+     "injection": 0.538
+    },
+    "choice": "injection",
+    "margin": 0.076,
+    "orders_used": 2
+   },
+   "g122": {
+    "p": {
+     "content": 0.401,
+     "injection": 0.599
+    },
+    "choice": "injection",
+    "margin": 0.198,
+    "orders_used": 2
+   },
+   "g123": {
+    "p": {
+     "content": 0.309,
+     "injection": 0.691
+    },
+    "choice": "injection",
+    "margin": 0.382,
+    "orders_used": 2
+   },
+   "g124": {
+    "p": {
+     "content": 0.476,
+     "injection": 0.524
+    },
+    "choice": "injection",
+    "margin": 0.048,
+    "orders_used": 2
+   },
+   "g125": {
+    "p": {
+     "content": 0.349,
+     "injection": 0.651
+    },
+    "choice": "injection",
+    "margin": 0.303,
+    "orders_used": 2
+   },
+   "g126": {
+    "p": {
+     "content": 0.851,
+     "injection": 0.149
+    },
+    "choice": "content",
+    "margin": 0.701,
+    "orders_used": 2
+   },
+   "g127": {
+    "p": {
+     "content": 0.721,
+     "injection": 0.279
+    },
+    "choice": "content",
+    "margin": 0.442,
+    "orders_used": 2
+   },
+   "g128": {
+    "p": {
+     "content": 0.777,
+     "injection": 0.223
+    },
+    "choice": "content",
+    "margin": 0.554,
+    "orders_used": 2
+   },
+   "g129": {
+    "p": {
+     "content": 0.666,
+     "injection": 0.334
+    },
+    "choice": "content",
+    "margin": 0.332,
+    "orders_used": 2
+   },
+   "g130": {
+    "p": {
+     "content": 0.287,
+     "injection": 0.713
+    },
+    "choice": "injection",
+    "margin": 0.427,
+    "orders_used": 2
+   },
+   "g131": {
+    "p": {
+     "content": 0.832,
+     "injection": 0.168
+    },
+    "choice": "content",
+    "margin": 0.665,
+    "orders_used": 2
+   },
+   "g132": {
+    "p": {
+     "content": 0.248,
+     "injection": 0.752
+    },
+    "choice": "injection",
+    "margin": 0.505,
+    "orders_used": 2
+   },
+   "g133": {
+    "p": {
+     "content": 0.208,
+     "injection": 0.792
+    },
+    "choice": "injection",
+    "margin": 0.583,
+    "orders_used": 2
+   },
+   "g134": {
+    "p": {
+     "content": 0.547,
+     "injection": 0.453
+    },
+    "choice": "content",
+    "margin": 0.094,
+    "orders_used": 2
+   },
+   "g135": {
+    "p": {
+     "content": 0.846,
+     "injection": 0.154
+    },
+    "choice": "content",
+    "margin": 0.692,
+    "orders_used": 2
+   },
+   "g136": {
+    "p": {
+     "content": 0.532,
+     "injection": 0.468
+    },
+    "choice": "content",
+    "margin": 0.063,
+    "orders_used": 2
+   },
+   "g137": {
+    "p": {
+     "content": 0.744,
+     "injection": 0.256
+    },
+    "choice": "content",
+    "margin": 0.488,
+    "orders_used": 2
+   },
+   "g138": {
+    "p": {
+     "content": 0.3,
+     "injection": 0.7
+    },
+    "choice": "injection",
+    "margin": 0.4,
+    "orders_used": 2
+   },
+   "g139": {
+    "p": {
+     "content": 0.163,
+     "injection": 0.837
+    },
+    "choice": "injection",
+    "margin": 0.673,
+    "orders_used": 2
+   },
+   "g140": {
+    "p": {
+     "content": 0.252,
+     "injection": 0.748
+    },
+    "choice": "injection",
+    "margin": 0.497,
+    "orders_used": 2
+   },
+   "g141": {
+    "p": {
+     "content": 0.36,
+     "injection": 0.64
+    },
+    "choice": "injection",
+    "margin": 0.28,
+    "orders_used": 2
+   },
+   "g142": {
+    "p": {
+     "content": 0.352,
+     "injection": 0.648
+    },
+    "choice": "injection",
+    "margin": 0.296,
+    "orders_used": 2
+   },
+   "g143": {
+    "p": {
+     "content": 0.115,
+     "injection": 0.884
+    },
+    "choice": "injection",
+    "margin": 0.769,
+    "orders_used": 2
+   },
+   "g144": {
+    "p": {
+     "content": 0.065,
+     "injection": 0.935
+    },
+    "choice": "injection",
+    "margin": 0.87,
+    "orders_used": 2
+   },
+   "g145": {
+    "p": {
+     "content": 0.768,
+     "injection": 0.232
+    },
+    "choice": "content",
+    "margin": 0.537,
+    "orders_used": 2
+   },
+   "g146": {
+    "p": {
+     "content": 0.216,
+     "injection": 0.784
+    },
+    "choice": "injection",
+    "margin": 0.568,
+    "orders_used": 2
+   },
+   "g147": {
+    "p": {
+     "content": 0.461,
+     "injection": 0.539
+    },
+    "choice": "injection",
+    "margin": 0.078,
+    "orders_used": 2
+   },
+   "g148": {
+    "p": {
+     "content": 0.601,
+     "injection": 0.399
+    },
+    "choice": "content",
+    "margin": 0.201,
+    "orders_used": 2
+   },
+   "g149": {
+    "p": {
+     "content": 0.529,
+     "injection": 0.471
+    },
+    "choice": "content",
+    "margin": 0.058,
+    "orders_used": 2
+   },
+   "g150": {
+    "p": {
+     "content": 0.179,
+     "injection": 0.821
+    },
+    "choice": "injection",
+    "margin": 0.642,
+    "orders_used": 2
+   },
+   "g151": {
+    "p": {
+     "content": 0.258,
+     "injection": 0.742
+    },
+    "choice": "injection",
+    "margin": 0.484,
+    "orders_used": 2
+   },
+   "g152": {
+    "p": {
+     "content": 0.409,
+     "injection": 0.591
+    },
+    "choice": "injection",
+    "margin": 0.181,
+    "orders_used": 2
+   },
+   "g153": {
+    "p": {
+     "content": 0.19,
+     "injection": 0.81
+    },
+    "choice": "injection",
+    "margin": 0.619,
+    "orders_used": 2
+   },
+   "g154": {
+    "p": {
+     "content": 0.349,
+     "injection": 0.65
+    },
+    "choice": "injection",
+    "margin": 0.301,
+    "orders_used": 2
+   },
+   "g155": {
+    "p": {
+     "content": 0.121,
+     "injection": 0.879
+    },
+    "choice": "injection",
+    "margin": 0.759,
+    "orders_used": 2
+   },
+   "__timing__": {
+    "items": 156,
+    "seconds": 9.25,
+    "ms_per_item": 59.3,
+    "ms_per_call": 29.7
+   }
+  },
+  "laya_addressee": {
+   "g000": {
+    "p": {
+     "content": 0.493,
+     "injection": 0.507
+    },
+    "choice": "injection",
+    "margin": 0.014,
+    "orders_used": 2
+   },
+   "g001": {
+    "p": {
+     "content": 0.718,
+     "injection": 0.282
+    },
+    "choice": "content",
+    "margin": 0.436,
+    "orders_used": 2
+   },
+   "g002": {
+    "p": {
+     "content": 0.567,
+     "injection": 0.433
+    },
+    "choice": "content",
+    "margin": 0.135,
+    "orders_used": 2
+   },
+   "g003": {
+    "p": {
+     "content": 0.257,
+     "injection": 0.743
+    },
+    "choice": "injection",
+    "margin": 0.485,
+    "orders_used": 2
+   },
+   "g004": {
+    "p": {
+     "content": 0.544,
+     "injection": 0.456
+    },
+    "choice": "content",
+    "margin": 0.088,
+    "orders_used": 2
+   },
+   "g005": {
+    "p": {
+     "content": 0.588,
+     "injection": 0.412
+    },
+    "choice": "content",
+    "margin": 0.176,
+    "orders_used": 2
+   },
+   "g006": {
+    "p": {
+     "content": 0.592,
+     "injection": 0.408
+    },
+    "choice": "content",
+    "margin": 0.185,
+    "orders_used": 2
+   },
+   "g007": {
+    "p": {
+     "content": 0.743,
+     "injection": 0.257
+    },
+    "choice": "content",
+    "margin": 0.485,
+    "orders_used": 2
+   },
+   "g008": {
+    "p": {
+     "content": 0.763,
+     "injection": 0.237
+    },
+    "choice": "content",
+    "margin": 0.526,
+    "orders_used": 2
+   },
+   "g009": {
+    "p": {
+     "content": 0.571,
+     "injection": 0.429
+    },
+    "choice": "content",
+    "margin": 0.143,
+    "orders_used": 2
+   },
+   "g010": {
+    "p": {
+     "content": 0.684,
+     "injection": 0.316
+    },
+    "choice": "content",
+    "margin": 0.369,
+    "orders_used": 2
+   },
+   "g011": {
+    "p": {
+     "content": 0.475,
+     "injection": 0.525
+    },
+    "choice": "injection",
+    "margin": 0.05,
+    "orders_used": 2
+   },
+   "g012": {
+    "p": {
+     "content": 0.654,
+     "injection": 0.346
+    },
+    "choice": "content",
+    "margin": 0.309,
+    "orders_used": 2
+   },
+   "g013": {
+    "p": {
+     "content": 0.672,
+     "injection": 0.328
+    },
+    "choice": "content",
+    "margin": 0.345,
+    "orders_used": 2
+   },
+   "g014": {
+    "p": {
+     "content": 0.296,
+     "injection": 0.704
+    },
+    "choice": "injection",
+    "margin": 0.409,
+    "orders_used": 2
+   },
+   "g015": {
+    "p": {
+     "content": 0.569,
+     "injection": 0.431
+    },
+    "choice": "content",
+    "margin": 0.137,
+    "orders_used": 2
+   },
+   "g016": {
+    "p": {
+     "content": 0.79,
+     "injection": 0.21
+    },
+    "choice": "content",
+    "margin": 0.58,
+    "orders_used": 2
+   },
+   "g017": {
+    "p": {
+     "content": 0.655,
+     "injection": 0.345
+    },
+    "choice": "content",
+    "margin": 0.311,
+    "orders_used": 2
+   },
+   "g018": {
+    "p": {
+     "content": 0.538,
+     "injection": 0.462
+    },
+    "choice": "content",
+    "margin": 0.076,
+    "orders_used": 2
+   },
+   "g019": {
+    "p": {
+     "content": 0.606,
+     "injection": 0.394
+    },
+    "choice": "content",
+    "margin": 0.211,
+    "orders_used": 2
+   },
+   "g020": {
+    "p": {
+     "content": 0.671,
+     "injection": 0.329
+    },
+    "choice": "content",
+    "margin": 0.342,
+    "orders_used": 2
+   },
+   "g021": {
+    "p": {
+     "content": 0.519,
+     "injection": 0.481
+    },
+    "choice": "content",
+    "margin": 0.038,
+    "orders_used": 2
+   },
+   "g022": {
+    "p": {
+     "content": 0.659,
+     "injection": 0.341
+    },
+    "choice": "content",
+    "margin": 0.319,
+    "orders_used": 2
+   },
+   "g023": {
+    "p": {
+     "content": 0.764,
+     "injection": 0.236
+    },
+    "choice": "content",
+    "margin": 0.529,
+    "orders_used": 2
+   },
+   "g024": {
+    "p": {
+     "content": 0.518,
+     "injection": 0.482
+    },
+    "choice": "content",
+    "margin": 0.035,
+    "orders_used": 2
+   },
+   "g025": {
+    "p": {
+     "content": 0.631,
+     "injection": 0.369
+    },
+    "choice": "content",
+    "margin": 0.263,
+    "orders_used": 2
+   },
+   "g026": {
+    "p": {
+     "content": 0.106,
+     "injection": 0.894
+    },
+    "choice": "injection",
+    "margin": 0.788,
+    "orders_used": 2
+   },
+   "g027": {
+    "p": {
+     "content": 0.563,
+     "injection": 0.437
+    },
+    "choice": "content",
+    "margin": 0.127,
+    "orders_used": 2
+   },
+   "g028": {
+    "p": {
+     "content": 0.755,
+     "injection": 0.245
+    },
+    "choice": "content",
+    "margin": 0.51,
+    "orders_used": 2
+   },
+   "g029": {
+    "p": {
+     "content": 0.639,
+     "injection": 0.361
+    },
+    "choice": "content",
+    "margin": 0.278,
+    "orders_used": 2
+   },
+   "g030": {
+    "p": {
+     "content": 0.654,
+     "injection": 0.346
+    },
+    "choice": "content",
+    "margin": 0.308,
+    "orders_used": 2
+   },
+   "g031": {
+    "p": {
+     "content": 0.343,
+     "injection": 0.657
+    },
+    "choice": "injection",
+    "margin": 0.315,
+    "orders_used": 2
+   },
+   "g032": {
+    "p": {
+     "content": 0.667,
+     "injection": 0.333
+    },
+    "choice": "content",
+    "margin": 0.335,
+    "orders_used": 2
+   },
+   "g033": {
+    "p": {
+     "content": 0.655,
+     "injection": 0.345
+    },
+    "choice": "content",
+    "margin": 0.309,
+    "orders_used": 2
+   },
+   "g034": {
+    "p": {
+     "content": 0.047,
+     "injection": 0.953
+    },
+    "choice": "injection",
+    "margin": 0.906,
+    "orders_used": 2
+   },
+   "g035": {
+    "p": {
+     "content": 0.639,
+     "injection": 0.361
+    },
+    "choice": "content",
+    "margin": 0.279,
+    "orders_used": 2
+   },
+   "g036": {
+    "p": {
+     "content": 0.564,
+     "injection": 0.436
+    },
+    "choice": "content",
+    "margin": 0.128,
+    "orders_used": 2
+   },
+   "g037": {
+    "p": {
+     "content": 0.505,
+     "injection": 0.495
+    },
+    "choice": "content",
+    "margin": 0.01,
+    "orders_used": 2
+   },
+   "g038": {
+    "p": {
+     "content": 0.646,
+     "injection": 0.354
+    },
+    "choice": "content",
+    "margin": 0.292,
+    "orders_used": 2
+   },
+   "g039": {
+    "p": {
+     "content": 0.505,
+     "injection": 0.495
+    },
+    "choice": "content",
+    "margin": 0.011,
+    "orders_used": 2
+   },
+   "g040": {
+    "p": {
+     "content": 0.75,
+     "injection": 0.25
+    },
+    "choice": "content",
+    "margin": 0.499,
+    "orders_used": 2
+   },
+   "g041": {
+    "p": {
+     "content": 0.668,
+     "injection": 0.332
+    },
+    "choice": "content",
+    "margin": 0.336,
+    "orders_used": 2
+   },
+   "g042": {
+    "p": {
+     "content": 0.696,
+     "injection": 0.304
+    },
+    "choice": "content",
+    "margin": 0.393,
+    "orders_used": 2
+   },
+   "g043": {
+    "p": {
+     "content": 0.251,
+     "injection": 0.749
+    },
+    "choice": "injection",
+    "margin": 0.497,
+    "orders_used": 2
+   },
+   "g044": {
+    "p": {
+     "content": 0.612,
+     "injection": 0.388
+    },
+    "choice": "content",
+    "margin": 0.224,
+    "orders_used": 2
+   },
+   "g045": {
+    "p": {
+     "content": 0.613,
+     "injection": 0.387
+    },
+    "choice": "content",
+    "margin": 0.226,
+    "orders_used": 2
+   },
+   "g046": {
+    "p": {
+     "content": 0.606,
+     "injection": 0.394
+    },
+    "choice": "content",
+    "margin": 0.212,
+    "orders_used": 2
+   },
+   "g047": {
+    "p": {
+     "content": 0.688,
+     "injection": 0.312
+    },
+    "choice": "content",
+    "margin": 0.376,
+    "orders_used": 2
+   },
+   "g048": {
+    "p": {
+     "content": 0.548,
+     "injection": 0.452
+    },
+    "choice": "content",
+    "margin": 0.095,
+    "orders_used": 2
+   },
+   "g049": {
+    "p": {
+     "content": 0.538,
+     "injection": 0.463
+    },
+    "choice": "content",
+    "margin": 0.075,
+    "orders_used": 2
+   },
+   "g050": {
+    "p": {
+     "content": 0.699,
+     "injection": 0.301
+    },
+    "choice": "content",
+    "margin": 0.399,
+    "orders_used": 2
+   },
+   "g051": {
+    "p": {
+     "content": 0.755,
+     "injection": 0.245
+    },
+    "choice": "content",
+    "margin": 0.51,
+    "orders_used": 2
+   },
+   "g052": {
+    "p": {
+     "content": 0.594,
+     "injection": 0.406
+    },
+    "choice": "content",
+    "margin": 0.188,
+    "orders_used": 2
+   },
+   "g053": {
+    "p": {
+     "content": 0.739,
+     "injection": 0.261
+    },
+    "choice": "content",
+    "margin": 0.479,
+    "orders_used": 2
+   },
+   "g054": {
+    "p": {
+     "content": 0.341,
+     "injection": 0.659
+    },
+    "choice": "injection",
+    "margin": 0.319,
+    "orders_used": 2
+   },
+   "g055": {
+    "p": {
+     "content": 0.709,
+     "injection": 0.291
+    },
+    "choice": "content",
+    "margin": 0.419,
+    "orders_used": 2
+   },
+   "g056": {
+    "p": {
+     "content": 0.724,
+     "injection": 0.276
+    },
+    "choice": "content",
+    "margin": 0.447,
+    "orders_used": 2
+   },
+   "g057": {
+    "p": {
+     "content": 0.715,
+     "injection": 0.285
+    },
+    "choice": "content",
+    "margin": 0.43,
+    "orders_used": 2
+   },
+   "g058": {
+    "p": {
+     "content": 0.361,
+     "injection": 0.639
+    },
+    "choice": "injection",
+    "margin": 0.277,
+    "orders_used": 2
+   },
+   "g059": {
+    "p": {
+     "content": 0.611,
+     "injection": 0.389
+    },
+    "choice": "content",
+    "margin": 0.222,
+    "orders_used": 2
+   },
+   "g060": {
+    "p": {
+     "content": 0.41,
+     "injection": 0.59
+    },
+    "choice": "injection",
+    "margin": 0.18,
+    "orders_used": 2
+   },
+   "g061": {
+    "p": {
+     "content": 0.634,
+     "injection": 0.366
+    },
+    "choice": "content",
+    "margin": 0.268,
+    "orders_used": 2
+   },
+   "g062": {
+    "p": {
+     "content": 0.651,
+     "injection": 0.349
+    },
+    "choice": "content",
+    "margin": 0.303,
+    "orders_used": 2
+   },
+   "g063": {
+    "p": {
+     "content": 0.211,
+     "injection": 0.789
+    },
+    "choice": "injection",
+    "margin": 0.578,
+    "orders_used": 2
+   },
+   "g064": {
+    "p": {
+     "content": 0.144,
+     "injection": 0.856
+    },
+    "choice": "injection",
+    "margin": 0.712,
+    "orders_used": 2
+   },
+   "g065": {
+    "p": {
+     "content": 0.716,
+     "injection": 0.284
+    },
+    "choice": "content",
+    "margin": 0.433,
+    "orders_used": 2
+   },
+   "g066": {
+    "p": {
+     "content": 0.577,
+     "injection": 0.423
+    },
+    "choice": "content",
+    "margin": 0.155,
+    "orders_used": 2
+   },
+   "g067": {
+    "p": {
+     "content": 0.387,
+     "injection": 0.613
+    },
+    "choice": "injection",
+    "margin": 0.226,
+    "orders_used": 2
+   },
+   "g068": {
+    "p": {
+     "content": 0.604,
+     "injection": 0.396
+    },
+    "choice": "content",
+    "margin": 0.207,
+    "orders_used": 2
+   },
+   "g069": {
+    "p": {
+     "content": 0.358,
+     "injection": 0.642
+    },
+    "choice": "injection",
+    "margin": 0.283,
+    "orders_used": 2
+   },
+   "g070": {
+    "p": {
+     "content": 0.536,
+     "injection": 0.464
+    },
+    "choice": "content",
+    "margin": 0.073,
+    "orders_used": 2
+   },
+   "g071": {
+    "p": {
+     "content": 0.82,
+     "injection": 0.18
+    },
+    "choice": "content",
+    "margin": 0.64,
+    "orders_used": 2
+   },
+   "g072": {
+    "p": {
+     "content": 0.805,
+     "injection": 0.195
+    },
+    "choice": "content",
+    "margin": 0.61,
+    "orders_used": 2
+   },
+   "g073": {
+    "p": {
+     "content": 0.21,
+     "injection": 0.79
+    },
+    "choice": "injection",
+    "margin": 0.581,
+    "orders_used": 2
+   },
+   "g074": {
+    "p": {
+     "content": 0.329,
+     "injection": 0.671
+    },
+    "choice": "injection",
+    "margin": 0.341,
+    "orders_used": 2
+   },
+   "g075": {
+    "p": {
+     "content": 0.687,
+     "injection": 0.313
+    },
+    "choice": "content",
+    "margin": 0.373,
+    "orders_used": 2
+   },
+   "g076": {
+    "p": {
+     "content": 0.021,
+     "injection": 0.979
+    },
+    "choice": "injection",
+    "margin": 0.959,
+    "orders_used": 2
+   },
+   "g077": {
+    "p": {
+     "content": 0.074,
+     "injection": 0.926
+    },
+    "choice": "injection",
+    "margin": 0.852,
+    "orders_used": 2
+   },
+   "g078": {
+    "p": {
+     "content": 0.078,
+     "injection": 0.922
+    },
+    "choice": "injection",
+    "margin": 0.844,
+    "orders_used": 2
+   },
+   "g079": {
+    "p": {
+     "content": 0.034,
+     "injection": 0.966
+    },
+    "choice": "injection",
+    "margin": 0.932,
+    "orders_used": 2
+   },
+   "g080": {
+    "p": {
+     "content": 0.316,
+     "injection": 0.684
+    },
+    "choice": "injection",
+    "margin": 0.368,
+    "orders_used": 2
+   },
+   "g081": {
+    "p": {
+     "content": 0.219,
+     "injection": 0.781
+    },
+    "choice": "injection",
+    "margin": 0.562,
+    "orders_used": 2
+   },
+   "g082": {
+    "p": {
+     "content": 0.227,
+     "injection": 0.773
+    },
+    "choice": "injection",
+    "margin": 0.545,
+    "orders_used": 2
+   },
+   "g083": {
+    "p": {
+     "content": 0.051,
+     "injection": 0.949
+    },
+    "choice": "injection",
+    "margin": 0.898,
+    "orders_used": 2
+   },
+   "g084": {
+    "p": {
+     "content": 0.782,
+     "injection": 0.218
+    },
+    "choice": "content",
+    "margin": 0.563,
+    "orders_used": 2
+   },
+   "g085": {
+    "p": {
+     "content": 0.592,
+     "injection": 0.408
+    },
+    "choice": "content",
+    "margin": 0.184,
+    "orders_used": 2
+   },
+   "g086": {
+    "p": {
+     "content": 0.462,
+     "injection": 0.538
+    },
+    "choice": "injection",
+    "margin": 0.075,
+    "orders_used": 2
+   },
+   "g087": {
+    "p": {
+     "content": 0.516,
+     "injection": 0.484
+    },
+    "choice": "content",
+    "margin": 0.031,
+    "orders_used": 2
+   },
+   "g088": {
+    "p": {
+     "content": 0.765,
+     "injection": 0.235
+    },
+    "choice": "content",
+    "margin": 0.53,
+    "orders_used": 2
+   },
+   "g089": {
+    "p": {
+     "content": 0.132,
+     "injection": 0.868
+    },
+    "choice": "injection",
+    "margin": 0.736,
+    "orders_used": 2
+   },
+   "g090": {
+    "p": {
+     "content": 0.232,
+     "injection": 0.768
+    },
+    "choice": "injection",
+    "margin": 0.536,
+    "orders_used": 2
+   },
+   "g091": {
+    "p": {
+     "content": 0.26,
+     "injection": 0.74
+    },
+    "choice": "injection",
+    "margin": 0.48,
+    "orders_used": 2
+   },
+   "g092": {
+    "p": {
+     "content": 0.292,
+     "injection": 0.708
+    },
+    "choice": "injection",
+    "margin": 0.416,
+    "orders_used": 2
+   },
+   "g093": {
+    "p": {
+     "content": 0.524,
+     "injection": 0.476
+    },
+    "choice": "content",
+    "margin": 0.047,
+    "orders_used": 2
+   },
+   "g094": {
+    "p": {
+     "content": 0.268,
+     "injection": 0.732
+    },
+    "choice": "injection",
+    "margin": 0.463,
+    "orders_used": 2
+   },
+   "g095": {
+    "p": {
+     "content": 0.298,
+     "injection": 0.702
+    },
+    "choice": "injection",
+    "margin": 0.403,
+    "orders_used": 2
+   },
+   "g096": {
+    "p": {
+     "content": 0.081,
+     "injection": 0.919
+    },
+    "choice": "injection",
+    "margin": 0.838,
+    "orders_used": 2
+   },
+   "g097": {
+    "p": {
+     "content": 0.128,
+     "injection": 0.872
+    },
+    "choice": "injection",
+    "margin": 0.744,
+    "orders_used": 2
+   },
+   "g098": {
+    "p": {
+     "content": 0.431,
+     "injection": 0.569
+    },
+    "choice": "injection",
+    "margin": 0.138,
+    "orders_used": 2
+   },
+   "g099": {
+    "p": {
+     "content": 0.717,
+     "injection": 0.283
+    },
+    "choice": "content",
+    "margin": 0.434,
+    "orders_used": 2
+   },
+   "g100": {
+    "p": {
+     "content": 0.409,
+     "injection": 0.591
+    },
+    "choice": "injection",
+    "margin": 0.182,
+    "orders_used": 2
+   },
+   "g101": {
+    "p": {
+     "content": 0.46,
+     "injection": 0.54
+    },
+    "choice": "injection",
+    "margin": 0.079,
+    "orders_used": 2
+   },
+   "g102": {
+    "p": {
+     "content": 0.018,
+     "injection": 0.982
+    },
+    "choice": "injection",
+    "margin": 0.964,
+    "orders_used": 2
+   },
+   "g103": {
+    "p": {
+     "content": 0.65,
+     "injection": 0.35
+    },
+    "choice": "content",
+    "margin": 0.3,
+    "orders_used": 2
+   },
+   "g104": {
+    "p": {
+     "content": 0.591,
+     "injection": 0.409
+    },
+    "choice": "content",
+    "margin": 0.182,
+    "orders_used": 2
+   },
+   "g105": {
+    "p": {
+     "content": 0.635,
+     "injection": 0.365
+    },
+    "choice": "content",
+    "margin": 0.271,
+    "orders_used": 2
+   },
+   "g106": {
+    "p": {
+     "content": 0.009,
+     "injection": 0.991
+    },
+    "choice": "injection",
+    "margin": 0.981,
+    "orders_used": 2
+   },
+   "g107": {
+    "p": {
+     "content": 0.669,
+     "injection": 0.331
+    },
+    "choice": "content",
+    "margin": 0.338,
+    "orders_used": 2
+   },
+   "g108": {
+    "p": {
+     "content": 0.073,
+     "injection": 0.927
+    },
+    "choice": "injection",
+    "margin": 0.855,
+    "orders_used": 2
+   },
+   "g109": {
+    "p": {
+     "content": 0.526,
+     "injection": 0.474
+    },
+    "choice": "content",
+    "margin": 0.051,
+    "orders_used": 2
+   },
+   "g110": {
+    "p": {
+     "content": 0.307,
+     "injection": 0.693
+    },
+    "choice": "injection",
+    "margin": 0.386,
+    "orders_used": 2
+   },
+   "g111": {
+    "p": {
+     "content": 0.276,
+     "injection": 0.724
+    },
+    "choice": "injection",
+    "margin": 0.447,
+    "orders_used": 2
+   },
+   "g112": {
+    "p": {
+     "content": 0.098,
+     "injection": 0.902
+    },
+    "choice": "injection",
+    "margin": 0.803,
+    "orders_used": 2
+   },
+   "g113": {
+    "p": {
+     "content": 0.025,
+     "injection": 0.975
+    },
+    "choice": "injection",
+    "margin": 0.95,
+    "orders_used": 2
+   },
+   "g114": {
+    "p": {
+     "content": 0.293,
+     "injection": 0.707
+    },
+    "choice": "injection",
+    "margin": 0.414,
+    "orders_used": 2
+   },
+   "g115": {
+    "p": {
+     "content": 0.693,
+     "injection": 0.307
+    },
+    "choice": "content",
+    "margin": 0.386,
+    "orders_used": 2
+   },
+   "g116": {
+    "p": {
+     "content": 0.102,
+     "injection": 0.898
+    },
+    "choice": "injection",
+    "margin": 0.795,
+    "orders_used": 2
+   },
+   "g117": {
+    "p": {
+     "content": 0.121,
+     "injection": 0.879
+    },
+    "choice": "injection",
+    "margin": 0.757,
+    "orders_used": 2
+   },
+   "g118": {
+    "p": {
+     "content": 0.393,
+     "injection": 0.607
+    },
+    "choice": "injection",
+    "margin": 0.215,
+    "orders_used": 2
+   },
+   "g119": {
+    "p": {
+     "content": 0.363,
+     "injection": 0.637
+    },
+    "choice": "injection",
+    "margin": 0.274,
+    "orders_used": 2
+   },
+   "g120": {
+    "p": {
+     "content": 0.298,
+     "injection": 0.702
+    },
+    "choice": "injection",
+    "margin": 0.404,
+    "orders_used": 2
+   },
+   "g121": {
+    "p": {
+     "content": 0.296,
+     "injection": 0.704
+    },
+    "choice": "injection",
+    "margin": 0.407,
+    "orders_used": 2
+   },
+   "g122": {
+    "p": {
+     "content": 0.137,
+     "injection": 0.863
+    },
+    "choice": "injection",
+    "margin": 0.726,
+    "orders_used": 2
+   },
+   "g123": {
+    "p": {
+     "content": 0.302,
+     "injection": 0.698
+    },
+    "choice": "injection",
+    "margin": 0.396,
+    "orders_used": 2
+   },
+   "g124": {
+    "p": {
+     "content": 0.068,
+     "injection": 0.932
+    },
+    "choice": "injection",
+    "margin": 0.863,
+    "orders_used": 2
+   },
+   "g125": {
+    "p": {
+     "content": 0.19,
+     "injection": 0.81
+    },
+    "choice": "injection",
+    "margin": 0.621,
+    "orders_used": 2
+   },
+   "g126": {
+    "p": {
+     "content": 0.83,
+     "injection": 0.17
+    },
+    "choice": "content",
+    "margin": 0.66,
+    "orders_used": 2
+   },
+   "g127": {
+    "p": {
+     "content": 0.413,
+     "injection": 0.587
+    },
+    "choice": "injection",
+    "margin": 0.175,
+    "orders_used": 2
+   },
+   "g128": {
+    "p": {
+     "content": 0.763,
+     "injection": 0.237
+    },
+    "choice": "content",
+    "margin": 0.526,
+    "orders_used": 2
+   },
+   "g129": {
+    "p": {
+     "content": 0.428,
+     "injection": 0.572
+    },
+    "choice": "injection",
+    "margin": 0.144,
+    "orders_used": 2
+   },
+   "g130": {
+    "p": {
+     "content": 0.19,
+     "injection": 0.81
+    },
+    "choice": "injection",
+    "margin": 0.619,
+    "orders_used": 2
+   },
+   "g131": {
+    "p": {
+     "content": 0.85,
+     "injection": 0.15
+    },
+    "choice": "content",
+    "margin": 0.701,
+    "orders_used": 2
+   },
+   "g132": {
+    "p": {
+     "content": 0.04,
+     "injection": 0.96
+    },
+    "choice": "injection",
+    "margin": 0.919,
+    "orders_used": 2
+   },
+   "g133": {
+    "p": {
+     "content": 0.015,
+     "injection": 0.985
+    },
+    "choice": "injection",
+    "margin": 0.97,
+    "orders_used": 2
+   },
+   "g134": {
+    "p": {
+     "content": 0.551,
+     "injection": 0.449
+    },
+    "choice": "content",
+    "margin": 0.103,
+    "orders_used": 2
+   },
+   "g135": {
+    "p": {
+     "content": 0.697,
+     "injection": 0.303
+    },
+    "choice": "content",
+    "margin": 0.393,
+    "orders_used": 2
+   },
+   "g136": {
+    "p": {
+     "content": 0.314,
+     "injection": 0.686
+    },
+    "choice": "injection",
+    "margin": 0.372,
+    "orders_used": 2
+   },
+   "g137": {
+    "p": {
+     "content": 0.92,
+     "injection": 0.08
+    },
+    "choice": "content",
+    "margin": 0.84,
+    "orders_used": 2
+   },
+   "g138": {
+    "p": {
+     "content": 0.066,
+     "injection": 0.934
+    },
+    "choice": "injection",
+    "margin": 0.867,
+    "orders_used": 2
+   },
+   "g139": {
+    "p": {
+     "content": 0.121,
+     "injection": 0.879
+    },
+    "choice": "injection",
+    "margin": 0.759,
+    "orders_used": 2
+   },
+   "g140": {
+    "p": {
+     "content": 0.068,
+     "injection": 0.932
+    },
+    "choice": "injection",
+    "margin": 0.865,
+    "orders_used": 2
+   },
+   "g141": {
+    "p": {
+     "content": 0.354,
+     "injection": 0.646
+    },
+    "choice": "injection",
+    "margin": 0.293,
+    "orders_used": 2
+   },
+   "g142": {
+    "p": {
+     "content": 0.259,
+     "injection": 0.741
+    },
+    "choice": "injection",
+    "margin": 0.483,
+    "orders_used": 2
+   },
+   "g143": {
+    "p": {
+     "content": 0.17,
+     "injection": 0.83
+    },
+    "choice": "injection",
+    "margin": 0.66,
+    "orders_used": 2
+   },
+   "g144": {
+    "p": {
+     "content": 0.069,
+     "injection": 0.931
+    },
+    "choice": "injection",
+    "margin": 0.862,
+    "orders_used": 2
+   },
+   "g145": {
+    "p": {
+     "content": 0.287,
+     "injection": 0.713
+    },
+    "choice": "injection",
+    "margin": 0.425,
+    "orders_used": 2
+   },
+   "g146": {
+    "p": {
+     "content": 0.057,
+     "injection": 0.943
+    },
+    "choice": "injection",
+    "margin": 0.886,
+    "orders_used": 2
+   },
+   "g147": {
+    "p": {
+     "content": 0.196,
+     "injection": 0.804
+    },
+    "choice": "injection",
+    "margin": 0.608,
+    "orders_used": 2
+   },
+   "g148": {
+    "p": {
+     "content": 0.327,
+     "injection": 0.673
+    },
+    "choice": "injection",
+    "margin": 0.347,
+    "orders_used": 2
+   },
+   "g149": {
+    "p": {
+     "content": 0.589,
+     "injection": 0.411
+    },
+    "choice": "content",
+    "margin": 0.179,
+    "orders_used": 2
+   },
+   "g150": {
+    "p": {
+     "content": 0.056,
+     "injection": 0.944
+    },
+    "choice": "injection",
+    "margin": 0.888,
+    "orders_used": 2
+   },
+   "g151": {
+    "p": {
+     "content": 0.452,
+     "injection": 0.548
+    },
+    "choice": "injection",
+    "margin": 0.095,
+    "orders_used": 2
+   },
+   "g152": {
+    "p": {
+     "content": 0.378,
+     "injection": 0.622
+    },
+    "choice": "injection",
+    "margin": 0.244,
+    "orders_used": 2
+   },
+   "g153": {
+    "p": {
+     "content": 0.016,
+     "injection": 0.984
+    },
+    "choice": "injection",
+    "margin": 0.968,
+    "orders_used": 2
+   },
+   "g154": {
+    "p": {
+     "content": 0.155,
+     "injection": 0.845
+    },
+    "choice": "injection",
+    "margin": 0.689,
+    "orders_used": 2
+   },
+   "g155": {
+    "p": {
+     "content": 0.114,
+     "injection": 0.886
+    },
+    "choice": "injection",
+    "margin": 0.771,
+    "orders_used": 2
+   },
+   "__timing__": {
+    "items": 156,
+    "seconds": 10.0,
+    "ms_per_item": 64.1,
+    "ms_per_call": 32.0
+   }
+  },
+  "laya_behaviour": {
+   "g000": {
+    "p": {
+     "content": 0.324,
+     "injection": 0.676
+    },
+    "choice": "injection",
+    "margin": 0.352,
+    "orders_used": 2
+   },
+   "g001": {
+    "p": {
+     "content": 0.343,
+     "injection": 0.657
+    },
+    "choice": "injection",
+    "margin": 0.315,
+    "orders_used": 2
+   },
+   "g002": {
+    "p": {
+     "content": 0.331,
+     "injection": 0.669
+    },
+    "choice": "injection",
+    "margin": 0.337,
+    "orders_used": 2
+   },
+   "g003": {
+    "p": {
+     "content": 0.191,
+     "injection": 0.809
+    },
+    "choice": "injection",
+    "margin": 0.618,
+    "orders_used": 2
+   },
+   "g004": {
+    "p": {
+     "content": 0.446,
+     "injection": 0.554
+    },
+    "choice": "injection",
+    "margin": 0.109,
+    "orders_used": 2
+   },
+   "g005": {
+    "p": {
+     "content": 0.353,
+     "injection": 0.647
+    },
+    "choice": "injection",
+    "margin": 0.295,
+    "orders_used": 2
+   },
+   "g006": {
+    "p": {
+     "content": 0.423,
+     "injection": 0.577
+    },
+    "choice": "injection",
+    "margin": 0.154,
+    "orders_used": 2
+   },
+   "g007": {
+    "p": {
+     "content": 0.713,
+     "injection": 0.287
+    },
+    "choice": "content",
+    "margin": 0.426,
+    "orders_used": 2
+   },
+   "g008": {
+    "p": {
+     "content": 0.328,
+     "injection": 0.672
+    },
+    "choice": "injection",
+    "margin": 0.345,
+    "orders_used": 2
+   },
+   "g009": {
+    "p": {
+     "content": 0.425,
+     "injection": 0.575
+    },
+    "choice": "injection",
+    "margin": 0.151,
+    "orders_used": 2
+   },
+   "g010": {
+    "p": {
+     "content": 0.354,
+     "injection": 0.646
+    },
+    "choice": "injection",
+    "margin": 0.291,
+    "orders_used": 2
+   },
+   "g011": {
+    "p": {
+     "content": 0.291,
+     "injection": 0.709
+    },
+    "choice": "injection",
+    "margin": 0.417,
+    "orders_used": 2
+   },
+   "g012": {
+    "p": {
+     "content": 0.303,
+     "injection": 0.697
+    },
+    "choice": "injection",
+    "margin": 0.395,
+    "orders_used": 2
+   },
+   "g013": {
+    "p": {
+     "content": 0.352,
+     "injection": 0.648
+    },
+    "choice": "injection",
+    "margin": 0.296,
+    "orders_used": 2
+   },
+   "g014": {
+    "p": {
+     "content": 0.348,
+     "injection": 0.652
+    },
+    "choice": "injection",
+    "margin": 0.305,
+    "orders_used": 2
+   },
+   "g015": {
+    "p": {
+     "content": 0.365,
+     "injection": 0.635
+    },
+    "choice": "injection",
+    "margin": 0.271,
+    "orders_used": 2
+   },
+   "g016": {
+    "p": {
+     "content": 0.386,
+     "injection": 0.614
+    },
+    "choice": "injection",
+    "margin": 0.228,
+    "orders_used": 2
+   },
+   "g017": {
+    "p": {
+     "content": 0.397,
+     "injection": 0.603
+    },
+    "choice": "injection",
+    "margin": 0.207,
+    "orders_used": 2
+   },
+   "g018": {
+    "p": {
+     "content": 0.283,
+     "injection": 0.717
+    },
+    "choice": "injection",
+    "margin": 0.433,
+    "orders_used": 2
+   },
+   "g019": {
+    "p": {
+     "content": 0.338,
+     "injection": 0.662
+    },
+    "choice": "injection",
+    "margin": 0.323,
+    "orders_used": 2
+   },
+   "g020": {
+    "p": {
+     "content": 0.091,
+     "injection": 0.909
+    },
+    "choice": "injection",
+    "margin": 0.818,
+    "orders_used": 2
+   },
+   "g021": {
+    "p": {
+     "content": 0.602,
+     "injection": 0.398
+    },
+    "choice": "content",
+    "margin": 0.204,
+    "orders_used": 2
+   },
+   "g022": {
+    "p": {
+     "content": 0.47,
+     "injection": 0.53
+    },
+    "choice": "injection",
+    "margin": 0.061,
+    "orders_used": 2
+   },
+   "g023": {
+    "p": {
+     "content": 0.502,
+     "injection": 0.498
+    },
+    "choice": "content",
+    "margin": 0.005,
+    "orders_used": 2
+   },
+   "g024": {
+    "p": {
+     "content": 0.1,
+     "injection": 0.9
+    },
+    "choice": "injection",
+    "margin": 0.801,
+    "orders_used": 2
+   },
+   "g025": {
+    "p": {
+     "content": 0.262,
+     "injection": 0.738
+    },
+    "choice": "injection",
+    "margin": 0.476,
+    "orders_used": 2
+   },
+   "g026": {
+    "p": {
+     "content": 0.3,
+     "injection": 0.7
+    },
+    "choice": "injection",
+    "margin": 0.401,
+    "orders_used": 2
+   },
+   "g027": {
+    "p": {
+     "content": 0.421,
+     "injection": 0.579
+    },
+    "choice": "injection",
+    "margin": 0.157,
+    "orders_used": 2
+   },
+   "g028": {
+    "p": {
+     "content": 0.48,
+     "injection": 0.52
+    },
+    "choice": "injection",
+    "margin": 0.04,
+    "orders_used": 2
+   },
+   "g029": {
+    "p": {
+     "content": 0.152,
+     "injection": 0.848
+    },
+    "choice": "injection",
+    "margin": 0.696,
+    "orders_used": 2
+   },
+   "g030": {
+    "p": {
+     "content": 0.825,
+     "injection": 0.175
+    },
+    "choice": "content",
+    "margin": 0.65,
+    "orders_used": 2
+   },
+   "g031": {
+    "p": {
+     "content": 0.225,
+     "injection": 0.775
+    },
+    "choice": "injection",
+    "margin": 0.55,
+    "orders_used": 2
+   },
+   "g032": {
+    "p": {
+     "content": 0.323,
+     "injection": 0.677
+    },
+    "choice": "injection",
+    "margin": 0.354,
+    "orders_used": 2
+   },
+   "g033": {
+    "p": {
+     "content": 0.524,
+     "injection": 0.476
+    },
+    "choice": "content",
+    "margin": 0.049,
+    "orders_used": 2
+   },
+   "g034": {
+    "p": {
+     "content": 0.45,
+     "injection": 0.55
+    },
+    "choice": "injection",
+    "margin": 0.101,
+    "orders_used": 2
+   },
+   "g035": {
+    "p": {
+     "content": 0.405,
+     "injection": 0.595
+    },
+    "choice": "injection",
+    "margin": 0.189,
+    "orders_used": 2
+   },
+   "g036": {
+    "p": {
+     "content": 0.422,
+     "injection": 0.578
+    },
+    "choice": "injection",
+    "margin": 0.157,
+    "orders_used": 2
+   },
+   "g037": {
+    "p": {
+     "content": 0.118,
+     "injection": 0.882
+    },
+    "choice": "injection",
+    "margin": 0.763,
+    "orders_used": 2
+   },
+   "g038": {
+    "p": {
+     "content": 0.388,
+     "injection": 0.612
+    },
+    "choice": "injection",
+    "margin": 0.224,
+    "orders_used": 2
+   },
+   "g039": {
+    "p": {
+     "content": 0.334,
+     "injection": 0.666
+    },
+    "choice": "injection",
+    "margin": 0.332,
+    "orders_used": 2
+   },
+   "g040": {
+    "p": {
+     "content": 0.553,
+     "injection": 0.447
+    },
+    "choice": "content",
+    "margin": 0.106,
+    "orders_used": 2
+   },
+   "g041": {
+    "p": {
+     "content": 0.281,
+     "injection": 0.719
+    },
+    "choice": "injection",
+    "margin": 0.438,
+    "orders_used": 2
+   },
+   "g042": {
+    "p": {
+     "content": 0.677,
+     "injection": 0.323
+    },
+    "choice": "content",
+    "margin": 0.355,
+    "orders_used": 2
+   },
+   "g043": {
+    "p": {
+     "content": 0.184,
+     "injection": 0.816
+    },
+    "choice": "injection",
+    "margin": 0.632,
+    "orders_used": 2
+   },
+   "g044": {
+    "p": {
+     "content": 0.511,
+     "injection": 0.489
+    },
+    "choice": "content",
+    "margin": 0.022,
+    "orders_used": 2
+   },
+   "g045": {
+    "p": {
+     "content": 0.443,
+     "injection": 0.557
+    },
+    "choice": "injection",
+    "margin": 0.114,
+    "orders_used": 2
+   },
+   "g046": {
+    "p": {
+     "content": 0.255,
+     "injection": 0.745
+    },
+    "choice": "injection",
+    "margin": 0.491,
+    "orders_used": 2
+   },
+   "g047": {
+    "p": {
+     "content": 0.316,
+     "injection": 0.684
+    },
+    "choice": "injection",
+    "margin": 0.368,
+    "orders_used": 2
+   },
+   "g048": {
+    "p": {
+     "content": 0.371,
+     "injection": 0.629
+    },
+    "choice": "injection",
+    "margin": 0.258,
+    "orders_used": 2
+   },
+   "g049": {
+    "p": {
+     "content": 0.378,
+     "injection": 0.622
+    },
+    "choice": "injection",
+    "margin": 0.245,
+    "orders_used": 2
+   },
+   "g050": {
+    "p": {
+     "content": 0.694,
+     "injection": 0.306
+    },
+    "choice": "content",
+    "margin": 0.387,
+    "orders_used": 2
+   },
+   "g051": {
+    "p": {
+     "content": 0.228,
+     "injection": 0.772
+    },
+    "choice": "injection",
+    "margin": 0.544,
+    "orders_used": 2
+   },
+   "g052": {
+    "p": {
+     "content": 0.449,
+     "injection": 0.551
+    },
+    "choice": "injection",
+    "margin": 0.103,
+    "orders_used": 2
+   },
+   "g053": {
+    "p": {
+     "content": 0.713,
+     "injection": 0.287
+    },
+    "choice": "content",
+    "margin": 0.426,
+    "orders_used": 2
+   },
+   "g054": {
+    "p": {
+     "content": 0.532,
+     "injection": 0.468
+    },
+    "choice": "content",
+    "margin": 0.065,
+    "orders_used": 2
+   },
+   "g055": {
+    "p": {
+     "content": 0.763,
+     "injection": 0.237
+    },
+    "choice": "content",
+    "margin": 0.526,
+    "orders_used": 2
+   },
+   "g056": {
+    "p": {
+     "content": 0.8,
+     "injection": 0.2
+    },
+    "choice": "content",
+    "margin": 0.6,
+    "orders_used": 2
+   },
+   "g057": {
+    "p": {
+     "content": 0.261,
+     "injection": 0.739
+    },
+    "choice": "injection",
+    "margin": 0.479,
+    "orders_used": 2
+   },
+   "g058": {
+    "p": {
+     "content": 0.299,
+     "injection": 0.701
+    },
+    "choice": "injection",
+    "margin": 0.401,
+    "orders_used": 2
+   },
+   "g059": {
+    "p": {
+     "content": 0.113,
+     "injection": 0.887
+    },
+    "choice": "injection",
+    "margin": 0.773,
+    "orders_used": 2
+   },
+   "g060": {
+    "p": {
+     "content": 0.326,
+     "injection": 0.674
+    },
+    "choice": "injection",
+    "margin": 0.348,
+    "orders_used": 2
+   },
+   "g061": {
+    "p": {
+     "content": 0.515,
+     "injection": 0.485
+    },
+    "choice": "content",
+    "margin": 0.03,
+    "orders_used": 2
+   },
+   "g062": {
+    "p": {
+     "content": 0.445,
+     "injection": 0.555
+    },
+    "choice": "injection",
+    "margin": 0.111,
+    "orders_used": 2
+   },
+   "g063": {
+    "p": {
+     "content": 0.036,
+     "injection": 0.964
+    },
+    "choice": "injection",
+    "margin": 0.928,
+    "orders_used": 2
+   },
+   "g064": {
+    "p": {
+     "content": 0.038,
+     "injection": 0.962
+    },
+    "choice": "injection",
+    "margin": 0.923,
+    "orders_used": 2
+   },
+   "g065": {
+    "p": {
+     "content": 0.514,
+     "injection": 0.486
+    },
+    "choice": "content",
+    "margin": 0.028,
+    "orders_used": 2
+   },
+   "g066": {
+    "p": {
+     "content": 0.047,
+     "injection": 0.953
+    },
+    "choice": "injection",
+    "margin": 0.906,
+    "orders_used": 2
+   },
+   "g067": {
+    "p": {
+     "content": 0.484,
+     "injection": 0.516
+    },
+    "choice": "injection",
+    "margin": 0.032,
+    "orders_used": 2
+   },
+   "g068": {
+    "p": {
+     "content": 0.683,
+     "injection": 0.317
+    },
+    "choice": "content",
+    "margin": 0.366,
+    "orders_used": 2
+   },
+   "g069": {
+    "p": {
+     "content": 0.479,
+     "injection": 0.52
+    },
+    "choice": "injection",
+    "margin": 0.041,
+    "orders_used": 2
+   },
+   "g070": {
+    "p": {
+     "content": 0.067,
+     "injection": 0.933
+    },
+    "choice": "injection",
+    "margin": 0.865,
+    "orders_used": 2
+   },
+   "g071": {
+    "p": {
+     "content": 0.665,
+     "injection": 0.335
+    },
+    "choice": "content",
+    "margin": 0.331,
+    "orders_used": 2
+   },
+   "g072": {
+    "p": {
+     "content": 0.747,
+     "injection": 0.253
+    },
+    "choice": "content",
+    "margin": 0.494,
+    "orders_used": 2
+   },
+   "g073": {
+    "p": {
+     "content": 0.053,
+     "injection": 0.947
+    },
+    "choice": "injection",
+    "margin": 0.894,
+    "orders_used": 2
+   },
+   "g074": {
+    "p": {
+     "content": 0.062,
+     "injection": 0.938
+    },
+    "choice": "injection",
+    "margin": 0.877,
+    "orders_used": 2
+   },
+   "g075": {
+    "p": {
+     "content": 0.53,
+     "injection": 0.47
+    },
+    "choice": "content",
+    "margin": 0.06,
+    "orders_used": 2
+   },
+   "g076": {
+    "p": {
+     "content": 0.125,
+     "injection": 0.875
+    },
+    "choice": "injection",
+    "margin": 0.751,
+    "orders_used": 2
+   },
+   "g077": {
+    "p": {
+     "content": 0.057,
+     "injection": 0.943
+    },
+    "choice": "injection",
+    "margin": 0.887,
+    "orders_used": 2
+   },
+   "g078": {
+    "p": {
+     "content": 0.011,
+     "injection": 0.989
+    },
+    "choice": "injection",
+    "margin": 0.979,
+    "orders_used": 2
+   },
+   "g079": {
+    "p": {
+     "content": 0.315,
+     "injection": 0.685
+    },
+    "choice": "injection",
+    "margin": 0.371,
+    "orders_used": 2
+   },
+   "g080": {
+    "p": {
+     "content": 0.168,
+     "injection": 0.832
+    },
+    "choice": "injection",
+    "margin": 0.664,
+    "orders_used": 2
+   },
+   "g081": {
+    "p": {
+     "content": 0.278,
+     "injection": 0.722
+    },
+    "choice": "injection",
+    "margin": 0.444,
+    "orders_used": 2
+   },
+   "g082": {
+    "p": {
+     "content": 0.235,
+     "injection": 0.766
+    },
+    "choice": "injection",
+    "margin": 0.531,
+    "orders_used": 2
+   },
+   "g083": {
+    "p": {
+     "content": 0.018,
+     "injection": 0.982
+    },
+    "choice": "injection",
+    "margin": 0.963,
+    "orders_used": 2
+   },
+   "g084": {
+    "p": {
+     "content": 0.744,
+     "injection": 0.256
+    },
+    "choice": "content",
+    "margin": 0.488,
+    "orders_used": 2
+   },
+   "g085": {
+    "p": {
+     "content": 0.572,
+     "injection": 0.428
+    },
+    "choice": "content",
+    "margin": 0.143,
+    "orders_used": 2
+   },
+   "g086": {
+    "p": {
+     "content": 0.141,
+     "injection": 0.859
+    },
+    "choice": "injection",
+    "margin": 0.719,
+    "orders_used": 2
+   },
+   "g087": {
+    "p": {
+     "content": 0.576,
+     "injection": 0.424
+    },
+    "choice": "content",
+    "margin": 0.153,
+    "orders_used": 2
+   },
+   "g088": {
+    "p": {
+     "content": 0.612,
+     "injection": 0.388
+    },
+    "choice": "content",
+    "margin": 0.224,
+    "orders_used": 2
+   },
+   "g089": {
+    "p": {
+     "content": 0.04,
+     "injection": 0.96
+    },
+    "choice": "injection",
+    "margin": 0.92,
+    "orders_used": 2
+   },
+   "g090": {
+    "p": {
+     "content": 0.547,
+     "injection": 0.453
+    },
+    "choice": "content",
+    "margin": 0.094,
+    "orders_used": 2
+   },
+   "g091": {
+    "p": {
+     "content": 0.039,
+     "injection": 0.961
+    },
+    "choice": "injection",
+    "margin": 0.923,
+    "orders_used": 2
+   },
+   "g092": {
+    "p": {
+     "content": 0.175,
+     "injection": 0.825
+    },
+    "choice": "injection",
+    "margin": 0.65,
+    "orders_used": 2
+   },
+   "g093": {
+    "p": {
+     "content": 0.336,
+     "injection": 0.664
+    },
+    "choice": "injection",
+    "margin": 0.328,
+    "orders_used": 2
+   },
+   "g094": {
+    "p": {
+     "content": 0.163,
+     "injection": 0.837
+    },
+    "choice": "injection",
+    "margin": 0.674,
+    "orders_used": 2
+   },
+   "g095": {
+    "p": {
+     "content": 0.443,
+     "injection": 0.557
+    },
+    "choice": "injection",
+    "margin": 0.113,
+    "orders_used": 2
+   },
+   "g096": {
+    "p": {
+     "content": 0.046,
+     "injection": 0.954
+    },
+    "choice": "injection",
+    "margin": 0.908,
+    "orders_used": 2
+   },
+   "g097": {
+    "p": {
+     "content": 0.181,
+     "injection": 0.819
+    },
+    "choice": "injection",
+    "margin": 0.638,
+    "orders_used": 2
+   },
+   "g098": {
+    "p": {
+     "content": 0.232,
+     "injection": 0.768
+    },
+    "choice": "injection",
+    "margin": 0.536,
+    "orders_used": 2
+   },
+   "g099": {
+    "p": {
+     "content": 0.27,
+     "injection": 0.73
+    },
+    "choice": "injection",
+    "margin": 0.46,
+    "orders_used": 2
+   },
+   "g100": {
+    "p": {
+     "content": 0.424,
+     "injection": 0.576
+    },
+    "choice": "injection",
+    "margin": 0.152,
+    "orders_used": 2
+   },
+   "g101": {
+    "p": {
+     "content": 0.728,
+     "injection": 0.272
+    },
+    "choice": "content",
+    "margin": 0.457,
+    "orders_used": 2
+   },
+   "g102": {
+    "p": {
+     "content": 0.004,
+     "injection": 0.996
+    },
+    "choice": "injection",
+    "margin": 0.993,
+    "orders_used": 2
+   },
+   "g103": {
+    "p": {
+     "content": 0.298,
+     "injection": 0.702
+    },
+    "choice": "injection",
+    "margin": 0.404,
+    "orders_used": 2
+   },
+   "g104": {
+    "p": {
+     "content": 0.335,
+     "injection": 0.665
+    },
+    "choice": "injection",
+    "margin": 0.33,
+    "orders_used": 2
+   },
+   "g105": {
+    "p": {
+     "content": 0.421,
+     "injection": 0.579
+    },
+    "choice": "injection",
+    "margin": 0.158,
+    "orders_used": 2
+   },
+   "g106": {
+    "p": {
+     "content": 0.004,
+     "injection": 0.996
+    },
+    "choice": "injection",
+    "margin": 0.992,
+    "orders_used": 2
+   },
+   "g107": {
+    "p": {
+     "content": 0.565,
+     "injection": 0.435
+    },
+    "choice": "content",
+    "margin": 0.131,
+    "orders_used": 2
+   },
+   "g108": {
+    "p": {
+     "content": 0.118,
+     "injection": 0.882
+    },
+    "choice": "injection",
+    "margin": 0.764,
+    "orders_used": 2
+   },
+   "g109": {
+    "p": {
+     "content": 0.292,
+     "injection": 0.708
+    },
+    "choice": "injection",
+    "margin": 0.417,
+    "orders_used": 2
+   },
+   "g110": {
+    "p": {
+     "content": 0.318,
+     "injection": 0.682
+    },
+    "choice": "injection",
+    "margin": 0.365,
+    "orders_used": 2
+   },
+   "g111": {
+    "p": {
+     "content": 0.414,
+     "injection": 0.586
+    },
+    "choice": "injection",
+    "margin": 0.172,
+    "orders_used": 2
+   },
+   "g112": {
+    "p": {
+     "content": 0.017,
+     "injection": 0.983
+    },
+    "choice": "injection",
+    "margin": 0.967,
+    "orders_used": 2
+   },
+   "g113": {
+    "p": {
+     "content": 0.184,
+     "injection": 0.816
+    },
+    "choice": "injection",
+    "margin": 0.633,
+    "orders_used": 2
+   },
+   "g114": {
+    "p": {
+     "content": 0.105,
+     "injection": 0.895
+    },
+    "choice": "injection",
+    "margin": 0.789,
+    "orders_used": 2
+   },
+   "g115": {
+    "p": {
+     "content": 0.322,
+     "injection": 0.678
+    },
+    "choice": "injection",
+    "margin": 0.355,
+    "orders_used": 2
+   },
+   "g116": {
+    "p": {
+     "content": 0.126,
+     "injection": 0.874
+    },
+    "choice": "injection",
+    "margin": 0.747,
+    "orders_used": 2
+   },
+   "g117": {
+    "p": {
+     "content": 0.297,
+     "injection": 0.703
+    },
+    "choice": "injection",
+    "margin": 0.407,
+    "orders_used": 2
+   },
+   "g118": {
+    "p": {
+     "content": 0.296,
+     "injection": 0.704
+    },
+    "choice": "injection",
+    "margin": 0.408,
+    "orders_used": 2
+   },
+   "g119": {
+    "p": {
+     "content": 0.212,
+     "injection": 0.788
+    },
+    "choice": "injection",
+    "margin": 0.577,
+    "orders_used": 2
+   },
+   "g120": {
+    "p": {
+     "content": 0.171,
+     "injection": 0.829
+    },
+    "choice": "injection",
+    "margin": 0.658,
+    "orders_used": 2
+   },
+   "g121": {
+    "p": {
+     "content": 0.165,
+     "injection": 0.835
+    },
+    "choice": "injection",
+    "margin": 0.67,
+    "orders_used": 2
+   },
+   "g122": {
+    "p": {
+     "content": 0.057,
+     "injection": 0.943
+    },
+    "choice": "injection",
+    "margin": 0.885,
+    "orders_used": 2
+   },
+   "g123": {
+    "p": {
+     "content": 0.036,
+     "injection": 0.964
+    },
+    "choice": "injection",
+    "margin": 0.928,
+    "orders_used": 2
+   },
+   "g124": {
+    "p": {
+     "content": 0.131,
+     "injection": 0.869
+    },
+    "choice": "injection",
+    "margin": 0.737,
+    "orders_used": 2
+   },
+   "g125": {
+    "p": {
+     "content": 0.119,
+     "injection": 0.881
+    },
+    "choice": "injection",
+    "margin": 0.761,
+    "orders_used": 2
+   },
+   "g126": {
+    "p": {
+     "content": 0.818,
+     "injection": 0.182
+    },
+    "choice": "content",
+    "margin": 0.637,
+    "orders_used": 2
+   },
+   "g127": {
+    "p": {
+     "content": 0.089,
+     "injection": 0.911
+    },
+    "choice": "injection",
+    "margin": 0.822,
+    "orders_used": 2
+   },
+   "g128": {
+    "p": {
+     "content": 0.566,
+     "injection": 0.434
+    },
+    "choice": "content",
+    "margin": 0.132,
+    "orders_used": 2
+   },
+   "g129": {
+    "p": {
+     "content": 0.118,
+     "injection": 0.882
+    },
+    "choice": "injection",
+    "margin": 0.764,
+    "orders_used": 2
+   },
+   "g130": {
+    "p": {
+     "content": 0.128,
+     "injection": 0.872
+    },
+    "choice": "injection",
+    "margin": 0.744,
+    "orders_used": 2
+   },
+   "g131": {
+    "p": {
+     "content": 0.474,
+     "injection": 0.526
+    },
+    "choice": "injection",
+    "margin": 0.052,
+    "orders_used": 2
+   },
+   "g132": {
+    "p": {
+     "content": 0.029,
+     "injection": 0.971
+    },
+    "choice": "injection",
+    "margin": 0.942,
+    "orders_used": 2
+   },
+   "g133": {
+    "p": {
+     "content": 0.046,
+     "injection": 0.954
+    },
+    "choice": "injection",
+    "margin": 0.908,
+    "orders_used": 2
+   },
+   "g134": {
+    "p": {
+     "content": 0.599,
+     "injection": 0.401
+    },
+    "choice": "content",
+    "margin": 0.198,
+    "orders_used": 2
+   },
+   "g135": {
+    "p": {
+     "content": 0.575,
+     "injection": 0.425
+    },
+    "choice": "content",
+    "margin": 0.151,
+    "orders_used": 2
+   },
+   "g136": {
+    "p": {
+     "content": 0.03,
+     "injection": 0.97
+    },
+    "choice": "injection",
+    "margin": 0.94,
+    "orders_used": 2
+   },
+   "g137": {
+    "p": {
+     "content": 0.773,
+     "injection": 0.227
+    },
+    "choice": "content",
+    "margin": 0.546,
+    "orders_used": 2
+   },
+   "g138": {
+    "p": {
+     "content": 0.063,
+     "injection": 0.937
+    },
+    "choice": "injection",
+    "margin": 0.873,
+    "orders_used": 2
+   },
+   "g139": {
+    "p": {
+     "content": 0.007,
+     "injection": 0.993
+    },
+    "choice": "injection",
+    "margin": 0.986,
+    "orders_used": 2
+   },
+   "g140": {
+    "p": {
+     "content": 0.028,
+     "injection": 0.972
+    },
+    "choice": "injection",
+    "margin": 0.944,
+    "orders_used": 2
+   },
+   "g141": {
+    "p": {
+     "content": 0.038,
+     "injection": 0.962
+    },
+    "choice": "injection",
+    "margin": 0.925,
+    "orders_used": 2
+   },
+   "g142": {
+    "p": {
+     "content": 0.21,
+     "injection": 0.79
+    },
+    "choice": "injection",
+    "margin": 0.58,
+    "orders_used": 2
+   },
+   "g143": {
+    "p": {
+     "content": 0.014,
+     "injection": 0.986
+    },
+    "choice": "injection",
+    "margin": 0.973,
+    "orders_used": 2
+   },
+   "g144": {
+    "p": {
+     "content": 0.057,
+     "injection": 0.943
+    },
+    "choice": "injection",
+    "margin": 0.885,
+    "orders_used": 2
+   },
+   "g145": {
+    "p": {
+     "content": 0.377,
+     "injection": 0.623
+    },
+    "choice": "injection",
+    "margin": 0.247,
+    "orders_used": 2
+   },
+   "g146": {
+    "p": {
+     "content": 0.043,
+     "injection": 0.957
+    },
+    "choice": "injection",
+    "margin": 0.914,
+    "orders_used": 2
+   },
+   "g147": {
+    "p": {
+     "content": 0.501,
+     "injection": 0.5
+    },
+    "choice": "content",
+    "margin": 0.001,
+    "orders_used": 2
+   },
+   "g148": {
+    "p": {
+     "content": 0.034,
+     "injection": 0.966
+    },
+    "choice": "injection",
+    "margin": 0.932,
+    "orders_used": 2
+   },
+   "g149": {
+    "p": {
+     "content": 0.075,
+     "injection": 0.925
+    },
+    "choice": "injection",
+    "margin": 0.85,
+    "orders_used": 2
+   },
+   "g150": {
+    "p": {
+     "content": 0.034,
+     "injection": 0.966
+    },
+    "choice": "injection",
+    "margin": 0.933,
+    "orders_used": 2
+   },
+   "g151": {
+    "p": {
+     "content": 0.028,
+     "injection": 0.972
+    },
+    "choice": "injection",
+    "margin": 0.945,
+    "orders_used": 2
+   },
+   "g152": {
+    "p": {
+     "content": 0.014,
+     "injection": 0.987
+    },
+    "choice": "injection",
+    "margin": 0.973,
+    "orders_used": 2
+   },
+   "g153": {
+    "p": {
+     "content": 0.041,
+     "injection": 0.959
+    },
+    "choice": "injection",
+    "margin": 0.917,
+    "orders_used": 2
+   },
+   "g154": {
+    "p": {
+     "content": 0.204,
+     "injection": 0.796
+    },
+    "choice": "injection",
+    "margin": 0.591,
+    "orders_used": 2
+   },
+   "g155": {
+    "p": {
+     "content": 0.062,
+     "injection": 0.938
+    },
+    "choice": "injection",
+    "margin": 0.876,
+    "orders_used": 2
+   },
+   "__timing__": {
+    "items": 156,
+    "seconds": 10.57,
+    "ms_per_item": 67.8,
+    "ms_per_call": 33.9
+   }
+  }
+ },
+ "meta": {
+  "orders": 2,
+  "n": 156,
+  "when": "2026-09-22 10:51:45"
+ }
+}

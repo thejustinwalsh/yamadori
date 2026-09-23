@@ -1,0 +1,23 @@
+{
+  "id": "ts29",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode, Node 24, `lib` set to `esnext`) that exports two functions over tag sets. Neither may modify its inputs.\n\n- `diffTags(before: ReadonlySet<string>, after: ReadonlySet<string>): { added: Set<string>; removed: Set<string>; kept: Set<string> }` -- `added` holds the tags in `after` but not in `before`, `removed` those in `before` but not in `after`, and `kept` those in both. All three are newly created `Set`s (never one of the arguments), even when the inputs are equal or the same object.\n- `jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>): number` -- the Jaccard similarity: the size of the intersection divided by the size of the union. Two empty sets have similarity `1`.\n\nAnswer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts29/test.ts",
+    "runtime": true,
+    "entry": [
+      "diffTags",
+      "jaccard"
+    ],
+    "compilerOptions": {
+      "lib": [
+        "esnext"
+      ]
+    }
+  },
+  "reference": "tasks/ts29/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

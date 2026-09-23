@@ -1,0 +1,16 @@
+{
+  "id": "tg17",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export `Particle = d.struct({ position: d.vec3f, velocity: d.vec3f, color: d.vec4f, age: d.f32 })` (exactly these fields in this order) and `function setVelocity(buffer: ArrayBuffer, count: number, index: number, velocity: d.v3f): void`. `buffer` already holds `count` particles laid out exactly as a WGSL `array<Particle, count>` storage buffer (WGSL alignment and padding). `setVelocity` must overwrite only the `velocity` of particle `index` in place: every other byte of `buffer` -- other fields, other particles, and padding bytes -- must be left untouched. Use typegpu's own partial-update helper for CPU-side ArrayBuffers (or its layout helpers); do not hand-compute byte offsets. Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg17/test.ts", "runtime": true, "webgpu": true, "entry": ["Particle", "setVelocity"]},
+  "reference": "tasks/tg17/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "patchArrayBuffer(buffer, schema, patch) (named export of 'typegpu')": "index.d.ts, data/partialIO.d.ts, data/partialIO.js",
+    "d.InferPatch (Record<number, ...> for arrays)": "shared/repr.d.ts",
+    "d.memoryLayoutOf": "data/offsetUtils.d.ts"
+  },
+  "notes": "Probed: patchArrayBuffer(buf, arrayOf(Particle,3), {1: {velocity}}) changes exactly bytes 80..91."
+}

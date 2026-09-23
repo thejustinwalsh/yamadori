@@ -1,0 +1,11 @@
+{
+  "id": "react-28",
+  "domain": "react",
+  "prompt": "Write a tooltip button for React 19 in TypeScript (strict mode) and export it as\n\n```ts\nfunction Tooltip(props: { content: string; label: string; delay?: number }): React.ReactElement\n```\n\nIt renders a `<button>` whose text is `label`, plus a tooltip that describes it.\n\nBehaviour (`delay` defaults to 300 milliseconds):\n- When the mouse enters the button (`mouseenter`) or the button receives focus, the tooltip appears `delay` ms later, not before.\n- The shown tooltip is an element with role `tooltip`, a non-empty `id`, and text exactly `content`. While it is shown, the button has `aria-describedby` set to that `id`. While it is not shown, the button has no `aria-describedby` attribute, and no element with role `tooltip` is present (remove it, or hide it so it is out of the accessibility tree).\n- The tooltip hides immediately when the mouse leaves the button (`mouseleave`), when the button loses focus, or when Escape is pressed while the button has focus.\n- If the mouse leaves or the button loses focus before the delay has elapsed, the tooltip does not appear at all for that visit; a later enter or focus starts a fresh full `delay`.\n- No timer may be left pending after the component unmounts.\n\nUse only `react`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-28/test.tsx", "entry": ["Tooltip"]},
+  "reference": "tasks/react-28/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium",
+  "category": "component"
+}

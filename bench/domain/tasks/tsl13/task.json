@@ -1,0 +1,24 @@
+{
+  "id": "tsl13",
+  "domain": "three_tsl",
+  "prompt": "three.js r185 (three@0.185.1), TSL. This r180 helper, the same pattern three.js's own bump-map node used, gives a texture node its own node-build cache before overriding its UV context:\n\n```js\nimport { uv } from 'three/tsl';\n\nexport const sampleWithOffset = ( textureNode, offset ) =>\n\ttextureNode.cache().context( { getUV: ( texNode ) => ( texNode.uvNode || uv() ).add( offset ), forceUVContext: true } );\n```\n\nIn r185 that caching call is deprecated and warns. Port the module to r185, keeping `export const sampleWithOffset` with the same signature and behaviour. Use named imports (from 'three/tsl' or 'three/webgpu') for anything you import. Answer with a single ```js code block.",
+  "grader": {
+    "kind": "tsl",
+    "entry": [
+      "sampleWithOffset"
+    ],
+    "require": [
+      {
+        "name": "isolate",
+        "as": "call"
+      }
+    ],
+    "forbid": []
+  },
+  "reference": "tasks/tsl13/reference.js",
+  "contaminated": true,
+  "needs_retrieval": true,
+  "difficulty": "hard",
+  "version_marker": ".cache() -> .isolate(), @deprecated r181: r185 src/nodes/core/IsolateNode.js:119-126 (warn '\"cache()\" has been deprecated. Use \"isolate()\" instead.'); isolate at IsolateNode.js:112 and chained via addMethodChaining('isolate'). r175 src/nodes/display/BumpMapNode.js:14 `textureNode.cache().context(...)`, r185 src/nodes/display/BumpMapNode.js:14 `textureNode.isolate().context(...)`. NOTE: r185's build/three.tsl.js (the 'three/tsl' entry) does not re-export `isolate`, so `import { isolate } from 'three/tsl'` fails to link; it is reachable as the chained method or as TSL.isolate from 'three/webgpu'.",
+  "notes": "`cache` is not forbidden (common word). The hard part is the export surface: the function-form import of isolate from 'three/tsl' is a real r185 link error, and is the wrong_compile case. CONTAMINATED: three.js is in every training set; score this subset separately and label it contaminated."
+}

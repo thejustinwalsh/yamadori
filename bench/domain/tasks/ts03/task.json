@@ -1,0 +1,17 @@
+{
+  "id": "ts03",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports a generic function `assertIsDefined(value, message?)`. At runtime it throws a `TypeError` (whose message is `message` when one is given) if `value` is `null` or `undefined`, and otherwise returns nothing; other falsy values such as `0`, `''`, `false` and `NaN` count as defined. Statically, it must work as a narrowing statement: after a bare call `assertIsDefined(x);` (not inside an `if`), the compiler must treat `x` as its declared type with `null` and `undefined` removed -- e.g. `x: string | null` becomes `string` on the following lines -- and this must work when it is imported and called from another module. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts03/test.ts",
+    "runtime": true,
+    "entry": [
+      "assertIsDefined"
+    ]
+  },
+  "reference": "tasks/ts03/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

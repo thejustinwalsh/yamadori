@@ -1,8 +1,12 @@
 # Caddy in front of the whole stack: one hostname, no port numbers, real TLS.
 #
-#   https://ai.thejustinwalsh.me/v1/...      OpenAI API      -> llama-swap :1234
-#   https://ai.thejustinwalsh.me/ui/         dashboard       -> llama-swap :1234
+#   https://ai.thejustinwalsh.me/v1/...      OpenAI API      -> proxy      :1234
+#   https://ai.thejustinwalsh.me/            dashboard       -> proxy      :1234
 #   https://ai.thejustinwalsh.me/tools/...   code intel API  -> tools_api  :1235
+#
+# :1234 is the Yamadori proxy (mcp/server.py): auth, tools, /v1 and the
+# dashboard (the SPA at /, its JSON API at /dash/api).
+# llama-swap sits behind it on loopback :11434 and is never exposed here.
 #
 # CERTIFICATES: ai.thejustinwalsh.me resolves to a ZeroTier address, so Let's
 # Encrypt cannot reach it over HTTP. The HTTP-01 and TLS-ALPN challenges are
@@ -42,7 +46,7 @@ ai.thejustinwalsh.me {
 		}
 	}
 
-	# ---- everything else: llama-swap (OpenAI API + dashboard) ------------
+	# ---- everything else: the proxy (OpenAI API + dashboard) --------------
 	handle {
 		reverse_proxy 127.0.0.1:1234 {
 			# CRITICAL for streaming completions. Without flush_interval -1
@@ -50,11 +54,13 @@ ai.thejustinwalsh.me {
 			# the end, which looks exactly like the model hanging.
 			flush_interval -1
 
-			# A long generation at 208k context can legitimately take many
-			# minutes. Default timeouts would cut it off mid-answer.
+			# A long generation (-c 147456 pool, up to an 8192-token thinking
+			# budget plus the answer) can legitimately take many minutes.
+			# Default timeouts would cut it off mid-answer. A non-streamed
+			# `max`-tier request measured 1,423-1,752 s (docs/CONSTRAINTS.md #14).
 			transport http {
-				read_timeout 1800s
-				write_timeout 1800s
+				read_timeout 3600s
+				write_timeout 3600s
 				dial_timeout 30s
 			}
 		}

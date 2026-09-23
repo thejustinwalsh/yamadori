@@ -1,0 +1,17 @@
+{
+  "id": "ts02",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript utility type `Getters<T>` (strict mode). For every property of `T` whose key is a string, the result has a property named `get` followed by that key with only its first character upper-cased (`name` -> `getName`, `URL` -> `getURL`), whose type is a zero-argument function returning the original property type (`() => T[K]`). Properties whose keys are symbols or numbers are left out entirely. Example: `Getters<{ name: string; age: number }>` is `{ getName: () => string; getAge: () => number }`. Export the type as `Getters`. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts02/test.ts",
+    "runtime": false,
+    "entry": [
+      "Getters"
+    ]
+  },
+  "reference": "tasks/ts02/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "easy"
+}

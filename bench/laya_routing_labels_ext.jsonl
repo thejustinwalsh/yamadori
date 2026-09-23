@@ -1,0 +1,30 @@
+{"question": "Which retry policy does our proxy apply when the upstream returns a 503, and how many attempts does it make?", "context": "Something under mcp/ handles upstream failures.", "label": "investigate", "why": "A concrete policy that only exists in our source."}
+{"question": "What tokenizer does our laya checkpoint ship with, and where is it loaded from?", "context": "", "label": "investigate", "why": "Answer depends on the checkpoint layout on this machine."}
+{"question": "List the endpoints the laya service exposes and which of them accept POST.", "context": "", "label": "investigate", "why": "Enumerating our own routes requires reading our file."}
+{"question": "Our WGSL fluid compute pass writes garbage on the first frame only. What is uninitialised in our dispatch setup?", "context": "src/gpu/ holds the compute pass and its dispatch.", "label": "investigate", "why": "A defect localised to our own files."}
+{"question": "Which TypeScript strictness flags are actually enabled in our tsconfig, and is exactOptionalPropertyTypes on?", "context": "", "label": "investigate", "why": "A fact about our configuration file."}
+{"question": "Where do we construct the TypeGPU root, and is it reused across components or created per mount?", "context": "The GPU code lives under src/gpu/.", "label": "investigate", "why": "Depends on our component lifecycle, not on library docs."}
+{"question": "In our Rust renderer, which struct owns the wgpu Device and how is it shared with the render passes?", "context": "crates/renderer/", "label": "investigate", "why": "Ownership structure is specific to our code."}
+{"question": "What does our start-stack script launch, in what order, and on which ports?", "context": "", "label": "investigate", "why": "A concrete fact about our orchestration script."}
+{"question": "Which of our shaders still use the deprecated textureLoad overload with three arguments?", "context": "", "label": "investigate", "why": "Requires scanning our shader sources."}
+{"question": "What is the default max_len our laya config uses for the input sequence?", "context": "", "label": "investigate", "why": "A value stored in our checkpoint config."}
+{"question": "How do I pass a storage buffer to a WGSL compute shader in general - what does the binding declaration look like?", "context": "", "label": "answer_directly", "why": "Standard WGSL syntax, no repository knowledge needed."}
+{"question": "What is the difference between Rc and Arc in Rust, and when do I need Arc?", "context": "", "label": "answer_directly", "why": "General Rust knowledge."}
+{"question": "In react-three-fiber, what does the invalidate function do and when do I need it?", "context": "", "label": "answer_directly", "why": "Library API knowledge."}
+{"question": "What does the TypeScript infer keyword do inside a conditional type?", "context": "", "label": "answer_directly", "why": "General TypeScript semantics."}
+{"question": "Why does a WGSL struct in the uniform address space need 16-byte alignment on its members?", "context": "", "label": "answer_directly", "why": "Spec-level knowledge independent of our code."}
+{"question": "What is the difference between HTTP long polling and a WebSocket for a low-latency request stream?", "context": "", "label": "answer_directly", "why": "General backend knowledge."}
+{"question": "In three.js TSL, what does uniform() return and how does it differ from a plain JS value in a node graph?", "context": "", "label": "answer_directly", "why": "Library semantics, answerable from general knowledge."}
+{"question": "What does SQLite's WAL mode change about concurrent readers and writers?", "context": "", "label": "answer_directly", "why": "General database knowledge."}
+{"question": "How does Python's asyncio.Queue maxsize provide backpressure to a producer?", "context": "", "label": "answer_directly", "why": "Standard library semantics."}
+{"question": "What is the difference between a bind group and a bind group layout in WebGPU?", "context": "", "label": "answer_directly", "why": "General WebGPU concept."}
+{"question": "Why does Rust's Drop trait not run for a value that has been moved into std::mem::forget?", "context": "", "label": "answer_directly", "why": "General Rust semantics."}
+{"question": "What does a 502 from a reverse proxy usually indicate about the upstream?", "context": "", "label": "answer_directly", "why": "General operational knowledge."}
+{"question": "Make the renderer better.", "context": "", "label": "clarify", "why": "No definition of better and no target named."}
+{"question": "This is still slow after the change.", "context": "", "label": "clarify", "why": "No referent for the change and no measurement."}
+{"question": "Can you clean this up?", "context": "", "label": "clarify", "why": "No subject and no criterion for clean."}
+{"question": "It crashes sometimes.", "context": "", "label": "clarify", "why": "No reproduction, no component, no error."}
+{"question": "Do the same thing for the other one.", "context": "", "label": "clarify", "why": "Both referents are unresolved."}
+{"question": "Should we switch?", "context": "", "label": "clarify", "why": "Neither the current nor the proposed option is named."}
+{"question": "Why is the output different now?", "context": "", "label": "clarify", "why": "No baseline, no output identified, no change named."}
+{"question": "Handle the edge case too.", "context": "", "label": "clarify", "why": "The edge case is never specified."}

@@ -54,20 +54,36 @@ also broken before investigating the complicated one.
 - Sampler settings were never the issue. The config uses the model card's
   thinking-mode values.
 
-### Still true: thinking must be off for tool turns
+### NOT still true: "thinking must be off for tool turns"
 
-Independent of the build, with thinking enabled the model spends its whole
-budget reasoning and never emits a call:
+**REVERSED. Left in place because the reversal is the useful part.** This
+section used to say that with thinking enabled the model spends its whole
+budget reasoning and never emits a call (2000 tokens of `<think>`, zero calls;
+a call in 29 tokens with `enable_thinking: false`), and that the
+`bonsai-agent` alias existed to force it off server-side.
+
+Every one of those observations was made on the **corrupt `pr-ptq1-mmv`
+build documented above**. They do not survive the fork fix. Re-measured on the
+official build at temp 0.3, 5 tasks x 3 reps, first call:
 
 | config | result |
 |---|---|
-| thinking on, `max_tokens` 2000 | 2000 tokens of `<think>`, no call |
-| `reasoning_effort: low` | 2000 tokens of `<think>`, no call |
-| `enable_thinking: false` | call emitted in 29 tokens |
+| thinking OFF | 13/15 correct, **0/15 failures to call** |
+| thinking ON | 12/15 correct, **0/15 failures to call** |
 
-This is why the `bonsai-agent` alias forces
-`chat_template_kwargs.enable_thinking = false` server-side. Point agents at
-`bonsai-agent`, not `bonsai`.
+Equivalent within noise, zero failures to call either way. `config.yaml` now
+sets `chat_template_kwargs.enable_thinking = true` on **both** ids, so
+`bonsai-agent` is an alias with identical settings and exists only so older
+clients keep working. Either id is fine.
+
+Thinking is ON for a different reason — prompt injection, where thinking OFF
+leaked 5/5 against one naive payload and thinking ON at the shipped temp 0.3
+leaked 1/5. **1/5 is a reduction, not a defence**, on an abliterated model; the
+real controls are the architectural ones listed in `config.yaml`.
+
+This is the same class of error as the fork bug itself: a downstream symptom
+measured while an upstream component was broken, then written down as a
+property of the model. See `docs/PROTOCOL.md` rules 1 and 13.
 
 ---
 
@@ -82,6 +98,17 @@ would fit. The entry is present but disabled in `config.yaml`.
 ## VRAM headroom
 
 240k context loads on the 5060 Ti but leaves ~2% free and then dies when a
-long prefill allocates its compute buffer. 208k is the largest size measured
-stable. Three models on the A4000 pinned it at 98%, so the vision variant was
-moved to on-demand.
+long prefill allocates its compute buffer. 208k was recorded here as "the
+largest size measured stable"; **that is no longer what ships and no longer
+the largest known-good figure.** 196,608 was tried after it and backed out —
+it fits on paper (~8.1 GB of KV plus 5.95 GB of weights inside 16.3 GB) but
+`arc193_a` then failed on all three benchmark arms while 193-second
+generations succeeded elsewhere, which is a compute-buffer spike, not a
+timeout. **`config.yaml` launches at `-c 147456`**, warm-measured at 12,122 MiB
+used and 3,931 free, i.e. the ~3 GB of headroom that absorbs those spikes.
+`mcp/budget.py` divides whatever the server reports (5/8 main, 3/8 for one
+helper, reserve 0 -- at 147,456 that is 92,160 / 55,296), so `-c` is the only
+place the number lives.
+
+Three models on the A4000 pinned it at 98%, so the vision variant was moved to
+on-demand.

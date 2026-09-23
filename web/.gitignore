@@ -1,0 +1,3 @@
+node_modules/
+# dist/ is committed on purpose (design/STACK.md: Node is a contributor
+# dependency, never a runtime one). Do not add it here.

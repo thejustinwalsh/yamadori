@@ -1,0 +1,1121 @@
+[
+  {
+    "question": "Does the code use WebGPURenderer?",
+    "recipes": [
+      "web_gpu:1",
+      "web_gpu:2",
+      "web_gpu:17"
+    ]
+  },
+  {
+    "question": "Does the code branch on a boolean flag?",
+    "recipes": [
+      "design_style:13",
+      "web_gpu:119"
+    ]
+  },
+  {
+    "question": "Is the task primarily data transformation?",
+    "recipes": [
+      "design_style:1"
+    ]
+  },
+  {
+    "question": "Are there multiple instances of the same item?",
+    "recipes": [
+      "design_style:2"
+    ]
+  },
+  {
+    "question": "Does the code process data outside the common case?",
+    "recipes": [
+      "design_style:3"
+    ]
+  },
+  {
+    "question": "Does the code access large data from main memory?",
+    "recipes": [
+      "design_style:4"
+    ]
+  },
+  {
+    "question": "Does the performance problem involve memory layout?",
+    "recipes": [
+      "design_style:5"
+    ]
+  },
+  {
+    "question": "Does the hot loop access only one field per record?",
+    "recipes": [
+      "design_style:6"
+    ]
+  },
+  {
+    "question": "Does the hot loop read rarely-read fields?",
+    "recipes": [
+      "design_style:7"
+    ]
+  },
+  {
+    "question": "Does the code traverse linked nodes by following pointers?",
+    "recipes": [
+      "design_style:8"
+    ]
+  },
+  {
+    "question": "Does the loop branch on a per-item field?",
+    "recipes": [
+      "design_style:14"
+    ]
+  },
+  {
+    "question": "Does the code use nested if statements?",
+    "recipes": [
+      "design_style:15"
+    ]
+  },
+  {
+    "question": "Are objects storing relational data?",
+    "recipes": [
+      "design_style:16"
+    ]
+  },
+  {
+    "question": "Does behaviour bind to component data shape rather than class?",
+    "recipes": [
+      "design_style:18"
+    ]
+  },
+  {
+    "question": "Do entities change their component set at runtime?",
+    "recipes": [
+      "design_style:19"
+    ]
+  },
+  {
+    "question": "Does the code use Bevy components with different iteration patterns?",
+    "recipes": [
+      "design_style:20"
+    ]
+  },
+  {
+    "question": "Does a hot query join two data pools?",
+    "recipes": [
+      "design_style:21"
+    ]
+  },
+  {
+    "question": "Do entity ids get reused after deletion?",
+    "recipes": [
+      "design_style:22"
+    ]
+  },
+  {
+    "question": "Do references need to survive container growth?",
+    "recipes": [
+      "design_style:23"
+    ]
+  },
+  {
+    "question": "Will the same concrete code be needed in two places?",
+    "recipes": [
+      "design_style:24"
+    ]
+  },
+  {
+    "question": "Does the task require choosing a data layout?",
+    "recipes": [
+      "design_style:25"
+    ]
+  },
+  {
+    "question": "Does the type name repeat its module name?",
+    "recipes": [
+      "design_style:27"
+    ]
+  },
+  {
+    "question": "Does the code use abbreviations that are not words?",
+    "recipes": [
+      "design_style:32"
+    ]
+  },
+  {
+    "question": "Are function names nouns instead of verbs?",
+    "recipes": [
+      "design_style:33"
+    ]
+  },
+  {
+    "question": "Do multiple optional fields have invalid combinations?",
+    "recipes": [
+      "design_style:34"
+    ]
+  },
+  {
+    "question": "Does the existing code contain a boolean parameter?",
+    "recipes": [
+      "design_style:35"
+    ]
+  },
+  {
+    "question": "Does the code match on a custom enum?",
+    "recipes": [
+      "design_style:36"
+    ]
+  },
+  {
+    "question": "Does the codebase need callers to branch on failure reason?",
+    "recipes": [
+      "design_style:37"
+    ]
+  },
+  {
+    "question": "Does the code expect missing values as normal results?",
+    "recipes": [
+      "design_style:38"
+    ]
+  },
+  {
+    "question": "Are two adjacent arguments both unlabelled integers?",
+    "recipes": [
+      "design_style:39"
+    ]
+  },
+  {
+    "question": "Does the code define a type with multiple standard signatures?",
+    "recipes": [
+      "design_style:40"
+    ]
+  },
+  {
+    "question": "Does the codebase contain multiple modules?",
+    "recipes": [
+      "design_style:41"
+    ]
+  },
+  {
+    "question": "Do hot types exceed 128 bytes?",
+    "recipes": [
+      "systems:0"
+    ]
+  },
+  {
+    "question": ": Does the code manually reorder fields to reduce padding?",
+    "recipes": [
+      "systems:1"
+    ]
+  },
+  {
+    "question": "Do per-thread counters share a cache line?",
+    "recipes": [
+      "systems:2"
+    ]
+  },
+  {
+    "question": "Does the code allocate a Vec of known size repeatedly?",
+    "recipes": [
+      "systems:3"
+    ]
+  },
+  {
+    "question": "Does the hot type contain a small fixed-size collection?",
+    "recipes": [
+      "systems:4"
+    ]
+  },
+  {
+    "question": "Do many nodes share one lifetime?",
+    "recipes": [
+      "systems:5"
+    ]
+  },
+  {
+    "question": "Does the hot loop index a sequence with bounds checks?",
+    "recipes": [
+      "systems:7"
+    ]
+  },
+  {
+    "question": "Does the code iterate over two slices in parallel?",
+    "recipes": [
+      "systems:8"
+    ]
+  },
+  {
+    "question": "Does the existing code use Rust iterators?",
+    "recipes": [
+      "systems:9"
+    ]
+  },
+  {
+    "question": "Does the code collect into a Vec only to iterate it?",
+    "recipes": [
+      "systems:10"
+    ]
+  },
+  {
+    "question": "Does untrusted input reach the HashMap keys?",
+    "recipes": [
+      "systems:11"
+    ]
+  },
+  {
+    "question": "Does the code use #[inline] attributes?",
+    "recipes": [
+      "systems:12"
+    ]
+  },
+  {
+    "question": "Does the code read a struct's critical member first?",
+    "recipes": [
+      "systems:18"
+    ]
+  },
+  {
+    "question": "Does the code stream through arrays larger than one cache line?",
+    "recipes": [
+      "systems:19"
+    ]
+  },
+  {
+    "question": "Does the code hardcode 64 as a blocking factor?",
+    "recipes": [
+      "systems:20"
+    ]
+  },
+  {
+    "question": "Does the loop touch all fields of each item?",
+    "recipes": [
+      "systems:21"
+    ]
+  },
+  {
+    "question": "Are hot variables allocated outside the local stack?",
+    "recipes": [
+      "systems:22"
+    ]
+  },
+  {
+    "question": "Does the hot loop allocate memory?",
+    "recipes": [
+      "systems:23"
+    ]
+  },
+  {
+    "question": "Are many small variable-size objects allocated separately?",
+    "recipes": [
+      "systems:24"
+    ]
+  },
+  {
+    "question": "Is the variable-size array short-lived?",
+    "recipes": [
+      "systems:25"
+    ]
+  },
+  {
+    "question": "Does the code access a multidimensional array?",
+    "recipes": [
+      "systems:26"
+    ]
+  },
+  {
+    "question": "Is the matrix row stride a high power of two?",
+    "recipes": [
+      "systems:27"
+    ]
+  },
+  {
+    "question": "Does the hot loop contain a branch with a 50/50 outcome?",
+    "recipes": [
+      "systems:28"
+    ]
+  },
+  {
+    "question": "Is profiling impossible here?",
+    "recipes": [
+      "systems:29"
+    ]
+  },
+  {
+    "question": "Do the pointer parameters point to non-overlapping memory?",
+    "recipes": [
+      "systems:31"
+    ]
+  },
+  {
+    "question": "Does the code read predictable but non-sequential data?",
+    "recipes": [
+      "systems:32"
+    ]
+  },
+  {
+    "question": "Does the code access a large array in a predictable pattern?",
+    "recipes": [
+      "systems:33"
+    ]
+  },
+  {
+    "question": "Does the code traverse a 2D array?",
+    "recipes": [
+      "systems:34"
+    ]
+  },
+  {
+    "question": "Does the hot path dereference a struct pointer?",
+    "recipes": [
+      "systems:35"
+    ]
+  },
+  {
+    "question": "Do two threads write two atomics in one cache line?",
+    "recipes": [
+      "systems:36"
+    ]
+  },
+  {
+    "question": "Does the code use large arrays of structs?",
+    "recipes": [
+      "systems:37"
+    ]
+  },
+  {
+    "question": "Are bools scattered in struct fields?",
+    "recipes": [
+      "systems:38"
+    ]
+  },
+  {
+    "question": "Does the hot path allocate memory?",
+    "recipes": [
+      "systems:39"
+    ]
+  },
+  {
+    "question": "Does the code iterate over a container by index?",
+    "recipes": [
+      "systems:40"
+    ]
+  },
+  {
+    "question": "Does the loop read a member that never changes?",
+    "recipes": [
+      "systems:41"
+    ]
+  },
+  {
+    "question": "Does the code use complex constructors?",
+    "recipes": [
+      "systems:46"
+    ]
+  },
+  {
+    "question": "Does the code use C-style arrays?",
+    "recipes": [
+      "systems:47"
+    ]
+  },
+  {
+    "question": "Is the code performance critical?",
+    "recipes": [
+      "systems:48"
+    ]
+  },
+  {
+    "question": "Does the code use low-level pointer manipulation?",
+    "recipes": [
+      "systems:49"
+    ]
+  },
+  {
+    "question": "Does the problem involve one object that may become many?",
+    "recipes": [
+      "systems:50"
+    ]
+  },
+  {
+    "question": "Does the loop touch only one field of a struct?",
+    "recipes": [
+      "systems:51"
+    ]
+  },
+  {
+    "question": "Does the code scan tags of a tagged union?",
+    "recipes": [
+      "systems:52"
+    ]
+  },
+  {
+    "question": "Does the struct need C ABI layout?",
+    "recipes": [
+      "systems:53"
+    ]
+  },
+  {
+    "question": "Does the pointer alignment differ from the type's alignment?",
+    "recipes": [
+      "systems:54"
+    ]
+  },
+  {
+    "question": "Does the code allocate many objects per operation?",
+    "recipes": [
+      "systems:55"
+    ]
+  },
+  {
+    "question": "Is the maximum allocation size known at compile time?",
+    "recipes": [
+      "systems:56"
+    ]
+  },
+  {
+    "question": "Is the code a reusable library component?",
+    "recipes": [
+      "systems:57"
+    ]
+  },
+  {
+    "question": "Does the code keep element pointers across appends?",
+    "recipes": [
+      "systems:58"
+    ]
+  },
+  {
+    "question": "Does the code require comptime semantics?",
+    "recipes": [
+      "systems:59"
+    ]
+  },
+  {
+    "question": "Is the program single-threaded?",
+    "recipes": [
+      "systems:65"
+    ]
+  },
+  {
+    "question": "Do type names use a single concrete noun?",
+    "recipes": [
+      "systems:66"
+    ]
+  },
+  {
+    "question": "Does the code use deprecated async renderer methods?",
+    "recipes": [
+      "web_gpu:0"
+    ]
+  },
+  {
+    "question": "Does the code import WebGPU symbols from bare 'three'?",
+    "recipes": [
+      "web_gpu:3"
+    ]
+  },
+  {
+    "question": "Does the code use TSL method chaining?",
+    "recipes": [
+      "web_gpu:4"
+    ]
+  },
+  {
+    "question": "Does the code use TSL names changed by a release?",
+    "recipes": [
+      "web_gpu:5"
+    ]
+  },
+  {
+    "question": "Does the code use three.js r180+?",
+    "recipes": [
+      "web_gpu:6"
+    ]
+  },
+  {
+    "question": "Does the code rebuild TSL node graphs each frame?",
+    "recipes": [
+      "web_gpu:7"
+    ]
+  },
+  {
+    "question": "Does the value vary per object?",
+    "recipes": [
+      "web_gpu:8"
+    ]
+  },
+  {
+    "question": "Is a subexpression consumed more than once?",
+    "recipes": [
+      "web_gpu:9"
+    ]
+  },
+  {
+    "question": "Does fragment shader compute per-vertex invariant normal math?",
+    "recipes": [
+      "web_gpu:10"
+    ]
+  },
+  {
+    "question": "Does the code compute per-instance values with a compute shader?",
+    "recipes": [
+      "web_gpu:11"
+    ]
+  },
+  {
+    "question": "Does the code use WebGPU storage attributes?",
+    "recipes": [
+      "web_gpu:12"
+    ]
+  },
+  {
+    "question": "Does the code read GPU compute results back to CPU?",
+    "recipes": [
+      "web_gpu:13"
+    ]
+  },
+  {
+    "question": "Does dispatchSize use IndirectStorageBufferAttribute?",
+    "recipes": [
+      "web_gpu:14"
+    ]
+  },
+  {
+    "question": "Does the code use TSL control flow?",
+    "recipes": [
+      "web_gpu:15"
+    ]
+  },
+  {
+    "question": "Does the existing code use multiple render targets in one pass?",
+    "recipes": [
+      "web_gpu:16"
+    ]
+  },
+  {
+    "question": "Does the code need Three.js GPU timing?",
+    "recipes": [
+      "web_gpu:18"
+    ]
+  },
+  {
+    "question": "Do multiple geometries share one material?",
+    "recipes": [
+      "web_gpu:20"
+    ]
+  },
+  {
+    "question": "Do multiple pipelines share the same bind groups?",
+    "recipes": [
+      "web_gpu:22"
+    ]
+  },
+  {
+    "question": "Does the code read back a WebGPU storage buffer?",
+    "recipes": [
+      "web_gpu:27"
+    ]
+  },
+  {
+    "question": "Does the code use WebGPU mapped ranges?",
+    "recipes": [
+      "web_gpu:28"
+    ]
+  },
+  {
+    "question": "Does copyTextureToBuffer read back non-256-aligned widths?",
+    "recipes": [
+      "web_gpu:29"
+    ]
+  },
+  {
+    "question": "Does the code create a WebGPU pipeline?",
+    "recipes": [
+      "web_gpu:30"
+    ]
+  },
+  {
+    "question": "Does the code use WebGPU?",
+    "recipes": [
+      "web_gpu:31"
+    ]
+  },
+  {
+    "question": "Does the code use WebGPU error scopes?",
+    "recipes": [
+      "web_gpu:32"
+    ]
+  },
+  {
+    "question": "Does the code use WebGPU device.lost?",
+    "recipes": [
+      "web_gpu:33"
+    ]
+  },
+  {
+    "question": "Are draw calls CPU-bound?",
+    "recipes": [
+      "web_gpu:34"
+    ]
+  },
+  {
+    "question": "Does the code configure a WebGPU canvas?",
+    "recipes": [
+      "web_gpu:35"
+    ]
+  },
+  {
+    "question": "Does the code load an image into a WebGPU texture?",
+    "recipes": [
+      "web_gpu:36"
+    ]
+  },
+  {
+    "question": "Does the code create a TypeGPU buffer from a TypedArray?",
+    "recipes": [
+      "web_gpu:37"
+    ]
+  },
+  {
+    "question": "Does the code use TypeGPU struct/unstruct?",
+    "recipes": [
+      "web_gpu:38"
+    ]
+  },
+  {
+    "question": "Does the code use TypeGPU WGSL mat3x3f matrices?",
+    "recipes": [
+      "web_gpu:39"
+    ]
+  },
+  {
+    "question": "Does the code use Math functions in TypeGPU?",
+    "recipes": [
+      "web_gpu:40"
+    ]
+  },
+  {
+    "question": "Does the shader need a runtime-updatable JavaScript value?",
+    "recipes": [
+      "web_gpu:41"
+    ]
+  },
+  {
+    "question": "Does the code reorder bindGroupLayout keys?",
+    "recipes": [
+      "web_gpu:42"
+    ]
+  },
+  {
+    "question": "Does the code use multiple TypeGPU roots per device?",
+    "recipes": [
+      "web_gpu:43"
+    ]
+  },
+  {
+    "question": "Does the code use TypeGPU before version 1.0?",
+    "recipes": [
+      "web_gpu:45"
+    ]
+  },
+  {
+    "question": "Does the compute kernel need a workgroup size?",
+    "recipes": [
+      "web_gpu:46"
+    ]
+  },
+  {
+    "question": "Do 32 threads access a 32-byte-aligned array?",
+    "recipes": [
+      "web_gpu:47"
+    ]
+  },
+  {
+    "question": "Does each workgroup process a separate tile?",
+    "recipes": [
+      "web_gpu:48"
+    ]
+  },
+  {
+    "question": "Does the dispatch count round up to whole workgroups?",
+    "recipes": [
+      "web_gpu:49"
+    ]
+  },
+  {
+    "question": "Is textureSample called from non-uniform control flow?",
+    "recipes": [
+      "web_gpu:54"
+    ]
+  },
+  {
+    "question": "Does the shader use a storage texture?",
+    "recipes": [
+      "web_gpu:55"
+    ]
+  },
+  {
+    "question": "Does the code use atomic<T>?",
+    "recipes": [
+      "web_gpu:56"
+    ]
+  },
+  {
+    "question": "Do multiple invocations update the same atomic address?",
+    "recipes": [
+      "web_gpu:57"
+    ]
+  },
+  {
+    "question": "Does the code use a storage pointer?",
+    "recipes": [
+      "web_gpu:58"
+    ]
+  },
+  {
+    "question": "Is the per-draw buffer under 64 KiB?",
+    "recipes": [
+      "web_gpu:59"
+    ]
+  },
+  {
+    "question": "Is the f32 array in uniform address space?",
+    "recipes": [
+      "web_gpu:60"
+    ]
+  },
+  {
+    "question": "Does the code store vec3 values in a fixed-size array?",
+    "recipes": [
+      "web_gpu:61"
+    ]
+  },
+  {
+    "question": "Does the code write a struct array to a typed array?",
+    "recipes": [
+      "web_gpu:62"
+    ]
+  },
+  {
+    "question": "Does the code use per-object uniform buffer offsets?",
+    "recipes": [
+      "web_gpu:63"
+    ]
+  },
+  {
+    "question": "Does the code reload loop-invariant storage data?",
+    "recipes": [
+      "web_gpu:64"
+    ]
+  },
+  {
+    "question": "Does it adjust tile/workgroup tuning from constants?",
+    "recipes": [
+      "web_gpu:65"
+    ]
+  },
+  {
+    "question": "Does the code initialize object fields in a constructor?",
+    "recipes": [
+      "web_gpu:66"
+    ]
+  },
+  {
+    "question": "Do hot loads/calls touch multiple object shapes?",
+    "recipes": [
+      "web_gpu:67"
+    ]
+  },
+  {
+    "question": "Does the code delete properties from hot objects?",
+    "recipes": [
+      "web_gpu:68"
+    ]
+  },
+  {
+    "question": "Can input contain a value that degrades the array?",
+    "recipes": [
+      "web_gpu:69"
+    ]
+  },
+  {
+    "question": "Does the code create JavaScript array holes?",
+    "recipes": [
+      "web_gpu:70"
+    ]
+  },
+  {
+    "question": "Does the code call Array.prototype methods on an array-like?",
+    "recipes": [
+      "web_gpu:71"
+    ]
+  },
+  {
+    "question": "Does the numeric field later become a float?",
+    "recipes": [
+      "web_gpu:72"
+    ]
+  },
+  {
+    "question": "Does the code use a typed array?",
+    "recipes": [
+      "web_gpu:73"
+    ]
+  },
+  {
+    "question": "Does existing code use hand-rolled Uint8Array endianness shims?",
+    "recipes": [
+      "web_gpu:74"
+    ]
+  },
+  {
+    "question": "Does the code use SharedArrayBuffer?",
+    "recipes": [
+      "web_gpu:75"
+    ]
+  },
+  {
+    "question": "Does the hot loop allocate short-lived temporaries?",
+    "recipes": [
+      "web_gpu:76"
+    ]
+  },
+  {
+    "question": "Does the code need flat bytes from string concatenation?",
+    "recipes": [
+      "web_gpu:77"
+    ]
+  },
+  {
+    "question": "Does the code use non-string keys in a plain object?",
+    "recipes": [
+      "web_gpu:78"
+    ]
+  },
+  {
+    "question": "Does the code preallocate arrays with new Array(n)?",
+    "recipes": [
+      "web_gpu:79"
+    ]
+  },
+  {
+    "question": "Does the repo have multiple TypeScript projects?",
+    "recipes": [
+      "web_gpu:84"
+    ]
+  },
+  {
+    "question": "Does the project install multiple @types packages?",
+    "recipes": [
+      "web_gpu:85"
+    ]
+  },
+  {
+    "question": "Does the project use per-file TypeScript emit?",
+    "recipes": [
+      "web_gpu:86"
+    ]
+  },
+  {
+    "question": "Is the problem slow TypeScript compiler execution?",
+    "recipes": [
+      "web_gpu:87"
+    ]
+  },
+  {
+    "question": "Are props stable across frequent re-renders?",
+    "recipes": [
+      "web_gpu:88"
+    ]
+  },
+  {
+    "question": "Does the calculation take at least 1 millisecond?",
+    "recipes": [
+      "web_gpu:89"
+    ]
+  },
+  {
+    "question": "Is the callback passed to a memoized consumer?",
+    "recipes": [
+      "web_gpu:90"
+    ]
+  },
+  {
+    "question": "Are you considering using React.memo?",
+    "recipes": [
+      "web_gpu:91"
+    ]
+  },
+  {
+    "question": "Does the code render multiple React siblings?",
+    "recipes": [
+      "web_gpu:92"
+    ]
+  },
+  {
+    "question": "Does useEffect+setState change state when a prop changes?",
+    "recipes": [
+      "web_gpu:93"
+    ]
+  },
+  {
+    "question": "Does the code run because a component is displayed?",
+    "recipes": [
+      "web_gpu:94"
+    ]
+  },
+  {
+    "question": "Does the code fetch from an external system using Effect?",
+    "recipes": [
+      "web_gpu:95"
+    ]
+  },
+  {
+    "question": "Does the code pass async functions to startTransition?",
+    "recipes": [
+      "web_gpu:100"
+    ]
+  },
+  {
+    "question": "Does the code need automatic rollback after an async action?",
+    "recipes": [
+      "web_gpu:101"
+    ]
+  },
+  {
+    "question": "Does the client pass a promise created during render to use()?",
+    "recipes": [
+      "web_gpu:102"
+    ]
+  },
+  {
+    "question": "Does the code use forwardRef for a function component?",
+    "recipes": [
+      "web_gpu:103"
+    ]
+  },
+  {
+    "question": "Does the code use React.memo?",
+    "recipes": [
+      "web_gpu:104"
+    ]
+  },
+  {
+    "question": "Do multiple components call the same expensive function?",
+    "recipes": [
+      "web_gpu:105"
+    ]
+  },
+  {
+    "question": "Does one component await multiple fetches sequentially?",
+    "recipes": [
+      "web_gpu:107"
+    ]
+  },
+  {
+    "question": "Does loading.js wrap a whole segment in Suspense?",
+    "recipes": [
+      "web_gpu:108"
+    ]
+  },
+  {
+    "question": "Does the code use SharedArrayBuffer multithreading?",
+    "recipes": [
+      "web_gpu:111"
+    ]
+  },
+  {
+    "question": "Does code retain eids across removeEntity calls?",
+    "recipes": [
+      "web_gpu:112"
+    ]
+  },
+  {
+    "question": "Does existing code use bitECS v0.3?",
+    "recipes": [
+      "web_gpu:113"
+    ]
+  },
+  {
+    "question": "Does the code use automatic per-frame diffing?",
+    "recipes": [
+      "web_gpu:114"
+    ]
+  },
+  {
+    "question": "Does the loop remove entities while iterating a query?",
+    "recipes": [
+      "web_gpu:115"
+    ]
+  },
+  {
+    "question": "Does the code change component membership during Flecs query iteration?",
+    "recipes": [
+      "web_gpu:116"
+    ]
+  },
+  {
+    "question": "Do entities have multiple possible component combinations?",
+    "recipes": [
+      "web_gpu:117"
+    ]
+  },
+  {
+    "question": "Does the code store a boolean flag field?",
+    "recipes": [
+      "web_gpu:118"
+    ]
+  },
+  {
+    "question": "Does the code use Flecs?",
+    "recipes": [
+      "web_gpu:120"
+    ]
+  },
+  {
+    "question": "Do systems need automatic ordering from read/write entitlements?",
+    "recipes": [
+      "web_gpu:121"
+    ]
+  },
+  {
+    "question": "Does the code store fields in per-entity objects?",
+    "recipes": [
+      "web_gpu:126"
+    ]
+  },
+  {
+    "question": "Are entities plain JS objects rather than numeric ids?",
+    "recipes": [
+      "web_gpu:127"
+    ]
+  },
+  {
+    "question": "Does it modify miniplex component keys directly?",
+    "recipes": [
+      "web_gpu:128"
+    ]
+  },
+  {
+    "question": "Does the existing code use object-oriented data structures?",
+    "recipes": [
+      "web_gpu:129"
+    ]
+  },
+  {
+    "question": "Does the code use Float32Array for numeric data?",
+    "recipes": [
+      "web_gpu:130"
+    ]
+  },
+  {
+    "question": "Do components contain a Map?",
+    "recipes": [
+      "web_gpu:131"
+    ]
+  },
+  {
+    "question": "Does the code use Koota's ECS?",
+    "recipes": [
+      "web_gpu:132"
+    ]
+  }
+]

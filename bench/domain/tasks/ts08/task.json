@@ -1,0 +1,18 @@
+{
+  "id": "ts08",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) for typed URL patterns. A pattern is a string literal such as `'/users/:id/posts/:postId'`: segments are separated by `/`, and a segment that starts with `:` is a parameter whose name is the rest of that segment (it may appear anywhere, including as the last segment). Export:\n\n- `type PathParams<P extends string>` -- an object type with one required `string` property per parameter name in `P`. `PathParams<'/users/:id/posts/:postId'>` must be equivalent to `{ id: string; postId: string }` (an intersection of single-key objects is acceptable), and a pattern with no parameters gives an object type with no properties.\n- `buildPath<P extends string>(pattern: P, params: PathParams<P>): string` -- returns the pattern with every parameter segment replaced by `encodeURIComponent` of its value. Calling it with a missing parameter, a misspelled parameter name or a non-string value must be a compile error.\n\nExample: `buildPath('/users/:id/posts/:postId', { id: '42', postId: 'a b' })` returns `'/users/42/posts/a%20b'`. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts08/test.ts",
+    "runtime": true,
+    "entry": [
+      "PathParams",
+      "buildPath"
+    ]
+  },
+  "reference": "tasks/ts08/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

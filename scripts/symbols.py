@@ -45,9 +45,25 @@ NAME_NODE_TYPES = ("identifier", "type_identifier", "field_identifier",
                    "property_identifier", "name", "namespace_identifier")
 
 
+# A HERITAGE CLAUSE NAMES A TYPE; IT DOES NOT DEFINE ONE. `class_heritage`
+# contains "class", `implements_clause` contains "impl", `superclass` and
+# `base_class_clause` contain "class", `trait_bounds` contains "trait" -- so
+# each matched KIND_MAP and the parent type was recorded as DEFINED in every
+# file that extends it. Measured in three@0.185.1: `AnalyticLightNode` had 8
+# definitions, one real (src/nodes/lighting/AnalyticLightNode.js) and seven
+# `class X extends AnalyticLightNode`. find_definition_opt returned all 8.
+# The identifiers inside are still walked, so the parent is recorded as a
+# reference from each subclass, which is what that line is.
+_HERITAGE = ("heritage", "superclass", "super_interface", "base_class",
+             "extends", "implements", "trait_bound", "inheritance",
+             "delegation_specifier", "supertype")
+
+
 def _kind(node_type: str) -> str | None:
     tl = node_type.lower()
     if tl.endswith(("_list", "_body", "_block")) or tl in NAME_NODE_TYPES:
+        return None
+    if any(h in tl for h in _HERITAGE):
         return None
     # `Buffer { .. }` is a struct EXPRESSION, not a definition. Without this
     # every construction site is recorded as if it declared the type.
@@ -64,7 +80,19 @@ def _name_of(node) -> str | None:
 
     Prefers an explicit `name` field where the grammar provides one, since
     that is unambiguous; otherwise takes the first identifier-ish child.
+
+    A Rust `impl Display for Circle` has no name field, and its first
+    identifier is the TRAIT -- so every impl of Display was recorded as a
+    definition of Display. The block defines Circle's methods, so it is
+    named by its `type` field (the heritage fix above, for Rust).
     """
+    if node.type == "impl_item":
+        try:
+            t = node.child_by_field_name("type")
+            if t is not None:
+                return t.text.decode("utf-8", "replace")
+        except Exception:
+            pass
     try:
         f = node.child_by_field_name("name")
         if f is not None:
@@ -95,6 +123,57 @@ def _callee(node) -> str | None:
     return txt if txt.isidentifier() else None
 
 
+# An exported binding is API. `export const positionLocal = ...` declares a
+# symbol every caller imports by name, and tree-sitter files it under
+# lexical_declaration, which matches none of the KIND_MAP markers above.
+#
+# The consequence was total for node-graph libraries: three.js builds nearly
+# the whole TSL surface out of exported consts, so `positionLocal`, `vec3`,
+# `float`, `uniform`, `mix` and `screenUV` had ZERO definitions in the index
+# while carrying 57, 835, 1916, 823, 420 and 32 references respectively.
+# find_definition_opt answered "no definition found" for the most-used API in
+# the corpus, and any check of "does this symbol exist" would have called a
+# perfectly real import a hallucination.
+#
+# Only EXPORTED bindings are taken. Every local `const` would bury the API
+# surface under loop counters, which is the opposite of the point.
+_VALUE_DECLS = ("lexical_declaration", "variable_declaration")
+
+
+def _exported_bindings(node) -> list[tuple[str, str]]:
+    """[(name, kind)] for `export const x = ...`, including destructuring."""
+    out: list[tuple[str, str]] = []
+    for decl in node.named_children:
+        if decl.type not in _VALUE_DECLS:
+            continue
+        kw = decl.text[:5].decode("utf-8", "replace")
+        kind = "const" if kw.startswith("const") else "binding"
+        for d in decl.named_children:
+            if d.type != "variable_declarator":
+                continue
+            target = d.child_by_field_name("name") or (
+                d.named_children[0] if d.named_children else None)
+            if target is None:
+                continue
+            if target.type in NAME_NODE_TYPES:
+                out.append((target.text.decode("utf-8", "replace"), kind))
+            else:
+                # `export const { a, b } = obj` -- each bound name is API too.
+                # Destructuring binds through object_pattern, whose children
+                # are shorthand_property_identifier_pattern rather than plain
+                # identifiers, so the NAME_NODE_TYPES list does not cover them.
+                # Matching on "identifier" catches every pattern variant
+                # without enumerating each grammar's spelling.
+                stack = list(target.named_children)
+                while stack:
+                    c = stack.pop()
+                    if "identifier" in c.type:
+                        out.append((c.text.decode("utf-8", "replace"), kind))
+                    else:
+                        stack.extend(c.named_children)
+    return out
+
+
 def extract(path: str, rel: str) -> tuple[list[tuple], list[tuple]]:
     """Return (definitions, references) rows for one file."""
     lang = LANG_BY_EXT.get(os.path.splitext(path)[1].lower())
@@ -120,6 +199,14 @@ def extract(path: str, rel: str) -> tuple[list[tuple], list[tuple]]:
         n = stack.pop()
         t = n.type
         tl = t.lower()
+
+        if t == "export_statement":
+            for nm, bkind in _exported_bindings(n):
+                if nm and (nm, n.start_point[0]) not in seen_def_names:
+                    seen_def_names.add((nm, n.start_point[0]))
+                    defs.append((nm, bkind, rel, n.start_point[0] + 1,
+                                 n.end_point[0] + 1,
+                                 line_text(n.start_point[0])))
 
         kind = _kind(t)
         if kind:

@@ -1,0 +1,18 @@
+{
+  "id": "tg09",
+  "domain": "typegpu",
+  "prompt": "Using typegpu 0.12.5 (`import tgpu from 'typegpu'`, `import * as d from 'typegpu/data'`), export these two schemas exactly as written:\n\n```ts\nexport const Camera = d.struct({ viewProj: d.mat4x4f, position: d.vec3f }).$name('Camera');\nexport const Particle = d.struct({ pos: d.vec3f, vel: d.vec3f }).$name('Particle');\n```\n\nand export `sceneLayout`, a typegpu bind group layout (the typed equivalent of a `GPUBindGroupLayout`) with these five entries, keyed and ordered exactly like this so they get bindings 0..4: `camera` -- a uniform buffer holding one `Camera`; `particles` -- a storage buffer holding a runtime-sized array of `Particle` that shaders may write to; `lights` -- a storage buffer holding a runtime-sized array of `vec4f` that shaders may only read; `albedo` -- a sampled 2D texture with `f32` samples; `albedoSampler` -- a filtering sampler. The layout must always be emitted as bind group index 2 in generated WGSL (`@group(2)`). Answer with a single ```ts code block.",
+  "grader": {"kind": "ts", "test": "tasks/tg09/test.ts", "runtime": true, "webgpu": true, "entry": ["Camera", "Particle", "sceneLayout"]},
+  "reference": "tasks/tg09/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "api": {
+    "tgpu.bindGroupLayout(entries)": "tgpuBindGroupLayout.d.ts, tgpuBindGroupLayout.js",
+    "entry shapes {uniform}, {storage, access: 'mutable'|'readonly'}, {texture: d.texture2d(d.f32)}, {sampler: 'filtering'}": "tgpuBindGroupLayout.d.ts (TgpuLayoutUniform/Storage/Texture/Sampler)",
+    "layout.$idx(n), layout.index, layout.$": "tgpuBindGroupLayout.d.ts, tgpuBindGroupLayout.js",
+    "d.texture2d(sampleType)": "data/texture.d.ts, data/texture.js",
+    "tgpu.resolve({ template, externals }) with prop chains layout.$.x": "core/resolve/tgpuResolve.d.ts, core/resolve/externals.js"
+  },
+  "notes": "wrong_compile uses the texture entry shape of older typegpu ({ texture: 'float' }); 0.12.5 requires a texture schema. There is no `layout.bound` in 0.12.5 (checked tgpuBindGroupLayout.js)."
+}

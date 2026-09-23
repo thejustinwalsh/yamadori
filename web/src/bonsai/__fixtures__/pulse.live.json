@@ -1,0 +1,200 @@
+{
+ "at": 1790129802.7870944,
+ "gpus": [
+  {
+   "index": 0,
+   "name": "NVIDIA GeForce RTX 5060 Ti",
+   "used_mib": 13661,
+   "total_mib": 16311,
+   "free_mib": 2650,
+   "pct": 84,
+   "tight": false,
+   "util": 94
+  },
+  {
+   "index": 1,
+   "name": "NVIDIA RTX A4000",
+   "used_mib": 7547,
+   "total_mib": 16376,
+   "free_mib": 8829,
+   "pct": 46,
+   "tight": false,
+   "util": 0
+  }
+ ],
+ "slots": {
+  "ok": true,
+  "slots": [
+   {
+    "id": 0,
+    "state": "decode",
+    "n_ctx": 163840,
+    "ctx": 10965,
+    "prompt": 10965,
+    "processed": 3556,
+    "decoded": 7409,
+    "remain": 53824,
+    "tps": 38.8,
+    "pps": 0.0
+   },
+   {
+    "id": 1,
+    "state": "idle",
+    "n_ctx": 163840,
+    "ctx": 0,
+    "prompt": 0,
+    "processed": 0,
+    "decoded": 0,
+    "remain": 0,
+    "tps": 0.0,
+    "pps": 0.0
+   },
+   {
+    "id": 2,
+    "state": "idle",
+    "n_ctx": 163840,
+    "ctx": 0,
+    "prompt": 0,
+    "processed": 0,
+    "decoded": 0,
+    "remain": 0,
+    "tps": 0.0,
+    "pps": 0.0
+   },
+   {
+    "id": 3,
+    "state": "idle",
+    "n_ctx": 163840,
+    "ctx": 0,
+    "prompt": 0,
+    "processed": 0,
+    "decoded": 0,
+    "remain": 0,
+    "tps": 0.0,
+    "pps": 0.0
+   }
+  ],
+  "ms": 24,
+  "decoding": 1,
+  "prefilling": 0,
+  "tps": 38.8
+ },
+ "lanes": {
+  "main": 0,
+  "helper": 0,
+  "main_lanes": 2,
+  "helper_lanes": 1,
+  "admitted": 0,
+  "queued": 0,
+  "refused": 0,
+  "in_proxy": false
+ },
+ "tools": {
+  "last": {
+   "id": 2207,
+   "name": "find_by_pattern",
+   "at": 1790127499.6005323
+  },
+  "running": null,
+  "recent": [
+   {
+    "id": 2208,
+    "name": "find_by_pattern",
+    "at": 1790127500.0246806,
+    "ms": 413.9,
+    "empty": false
+   },
+   {
+    "id": 2206,
+    "name": "find_by_pattern",
+    "at": 1790127495.4181948,
+    "ms": 287.6,
+    "empty": false
+   },
+   {
+    "id": 2204,
+    "name": "find_definition_opt",
+    "at": 1790127490.8447447,
+    "ms": 21.5,
+    "empty": true
+   },
+   {
+    "id": 2200,
+    "name": "find_by_pattern",
+    "at": 1790127477.9555392,
+    "ms": 371.5,
+    "empty": false
+   },
+   {
+    "id": 2198,
+    "name": "find_by_pattern",
+    "at": 1790127473.3638017,
+    "ms": 306.3,
+    "empty": false
+   },
+   {
+    "id": 2196,
+    "name": "find_definition_opt",
+    "at": 1790127469.5859916,
+    "ms": 19.5,
+    "empty": true
+   },
+   {
+    "id": 2190,
+    "name": "record_step",
+    "at": 1790127396.700252,
+    "ms": 8.5,
+    "empty": false
+   },
+   {
+    "id": 2188,
+    "name": "find_by_pattern",
+    "at": 1790127377.8879051,
+    "ms": 400.6,
+    "empty": false
+   }
+  ],
+  "calls_window": 0,
+  "turns_window": 0,
+  "answers_window": 0,
+  "window_seconds": 600,
+  "last_turn": {
+   "id": 2202,
+   "at": 1790127486.4858565,
+   "open": false
+  }
+ },
+ "queue": {
+  "states": {
+   "queued": 128,
+   "running": 1,
+   "done": 156,
+   "errored": 0,
+   "cancelled": 0
+  },
+  "oldest_queued_age": 13387
+ },
+ "seed": {
+  "word": "veniva",
+  "u32": 1823707496,
+  "hex": "0x6CB39168",
+  "at": 1790126868.9268055,
+  "where": "fanout",
+  "token_id": 226728
+ },
+ "strata": {
+  "taproot": 0,
+  "branch": 0,
+  "shoot": 0,
+  "searches": 0,
+  "window_seconds": 86400
+ },
+ "context": {
+  "pool": 163840,
+  "main": 102400,
+  "helper": 61440,
+  "helpers": 1,
+  "reserve": 0,
+  "gib": 6.88
+ }
+}

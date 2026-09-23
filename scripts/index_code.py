@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -28,7 +29,11 @@ import symbols as sym
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mcp'))
 import guard
 
-STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
+# The MODEL SERVER, not the proxy. This pointed at the proxy's port, which
+# does not serve /v1/embeddings, so every embedding request 404'd and every
+# chunk fell through to the zero-vector fallback. That is how both package
+# indexes came to be written entirely dead.
+STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "embeddings")
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX_DB = os.environ.get("CODE_INDEX_DB", os.path.join(HERE, "..", "index", "code.sqlite3"))
@@ -83,7 +88,42 @@ DEF_RE = re.compile(
 )
 
 
+def _listed_files(root: str, listing: str):
+    """The files named in INDEX_FILES that sit under `root`, in list order.
+
+    A PACKAGE is not walked the way a repository is. Its real code is often
+    only in dist/ or build/, which SKIP_DIRS prunes -- correctly, for a
+    user's repository, where those are their own build output. The package
+    selection (deps.code_files) decides what to read and hands the result
+    over as a list; the root still names the package directory, so stored
+    paths keep their `dist/...` prefix and read_file_range can resolve them.
+    Same credential and size checks as the walk: a list is not a bypass.
+    """
+    base = os.path.abspath(root)
+    with open(listing, encoding="utf-8") as f:
+        names = [ln.strip() for ln in f if ln.strip()]
+    for p in names:
+        ap = os.path.abspath(p)
+        if not ap.lower().startswith(base.lower() + os.sep):
+            continue
+        if os.path.splitext(ap)[1].lower() not in EXTS or not os.path.isfile(ap):
+            continue
+        ok, why = guard.should_index(ap)
+        if not ok:
+            print(f"  skipped {os.path.basename(ap)}: {why}", file=sys.stderr)
+            continue
+        if os.path.getsize(ap) > 1_500_000:
+            continue
+        yield ap
+
+
 def iter_files(root: str):
+    # An explicit file list replaces the walk. Unset for every repository
+    # index, so their behaviour is unchanged; set only by deps.index_package.
+    listing = os.environ.get("INDEX_FILES")
+    if listing:
+        yield from _listed_files(root, listing)
+        return
     # A single file is a legitimate "root": incremental refresh names the files
     # that changed rather than re-walking a tree of thousands.
     if os.path.isfile(root):
@@ -161,14 +201,31 @@ EMBED_MAX_CHARS = 12000
 EMBED_DIM = 1024          # Qwen3-Embedding-0.6B
 
 
-# Semantic search is off by default -- BM25 beat it on the gauntlet index and
-# the cut rule fired -- so the vectors are dead weight for most indexes. With
-# embeddings skipped, indexing is tree-sitter plus sqlite and needs no GPU at
-# all, which is what makes indexing every dependency of every repo affordable.
+# SUSPECT. This says BM25 beat semantic search on the gauntlet index, and the
+# cut rule fired. That comparison was made against indexes now known to hold
+# nothing but zero vectors, where "semantic search" ranked by an all-zero
+# similarity array -- so it was BM25 against arbitrary order, and BM25 winning
+# tells us nothing. Do not cite it. Re-run against a rebuilt index before
+# either restoring or confirming this default.
 NO_EMBED = os.environ.get("INDEX_NO_EMBED") == "1"
 
+# A long index run makes thousands of requests and the connection does drop.
+# It dropped once on three.js at chunk ~1760 of 15021, the run stopped, and
+# the truncated index was left on disk looking perfectly healthy: every vector
+# it did contain was fine. Losing 88% of a corpus is not a condition an index
+# can report about itself, so the transport has to survive it instead.
+EMBED_RETRIES = int(os.environ.get("INDEX_EMBED_RETRIES", "5"))
 
-def embed_batch(texts: list[str]) -> np.ndarray:
+
+def _retry(texts: list[str], attempt: int, err: Exception) -> np.ndarray:
+    delay = 2 ** attempt
+    print(f"  embedding request failed ({type(err).__name__}: {err}), retry "
+          f"{attempt + 1}/{EMBED_RETRIES} in {delay}s", file=sys.stderr)
+    time.sleep(delay)
+    return embed_batch(texts, attempt + 1)
+
+
+def embed_batch(texts: list[str], attempt: int = 0) -> np.ndarray:
     if NO_EMBED:
         return np.zeros((len(texts), EMBED_DIM), dtype=np.float32)
     texts = [t[:EMBED_MAX_CHARS] for t in texts]
@@ -180,11 +237,20 @@ def embed_batch(texts: list[str]) -> np.ndarray:
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
             d = json.load(r)
+    # ORDER MATTERS. HTTPError subclasses URLError, so listing the transport
+    # clause first swallowed every HTTP error into the retry path and made the
+    # per-chunk isolation below unreachable. That regression was introduced
+    # while adding retries and cost a whole three.js run.
     except urllib.error.HTTPError as e:
-        # One oversized or malformed chunk must not cost the whole run. Fall
-        # back to one-at-a-time so the bad chunk is isolated and skipped.
+        # 5xx is the server having a bad moment -- the same request usually
+        # succeeds. 4xx is this request being unacceptable, and retrying an
+        # oversized chunk five times just takes five times as long to fail.
+        if e.code >= 500 and attempt < EMBED_RETRIES:
+            return _retry(texts, attempt, e)
         if len(texts) == 1:
             raise
+        # One oversized or malformed chunk must not cost the whole run. Fall
+        # back to one-at-a-time so the bad chunk is isolated and skipped.
         rows = []
         for t in texts:
             try:
@@ -192,9 +258,87 @@ def embed_batch(texts: list[str]) -> np.ndarray:
             except Exception:                              # noqa: BLE001
                 print(f"  skipped a chunk ({len(t)} chars): {e}", file=sys.stderr)
                 rows.append(np.zeros(EMBED_DIM, dtype=np.float32))
+                _DEAD["n"] += 1
         return np.vstack(rows)
+    except (ConnectionResetError, urllib.error.URLError, TimeoutError,
+            OSError) as e:
+        # A dropped connection is transient and the same request will usually
+        # succeed. Backing off matters because the usual cause is the server
+        # being busy.
+        if attempt >= EMBED_RETRIES:
+            raise
+        return _retry(texts, attempt, e)
     v = np.array([row["embedding"] for row in d["data"]], dtype=np.float32)
     return v / np.clip(np.linalg.norm(v, axis=1, keepdims=True), 1e-9, None)
+
+
+# A zero vector is not a bad embedding, it is the ABSENCE of one: it has
+# cosine similarity 0 with every query, so those chunks sort arbitrarily and
+# semantic search silently returns noise. The per-chunk fallback above exists
+# so one oversized chunk cannot kill a long run, but it is only safe while it
+# stays rare.
+#
+# It did not stay rare. Both package indexes were written with the embedding
+# server unreachable, every single chunk fell through to the fallback, and
+# 18,750 zero vectors were committed under a progress bar reading "indexed".
+# Search over three.js and typegpu returned whatever `argpartition` happened
+# to surface from an all-zero similarity array, for days, with no error
+# anywhere -- and retrieval quality, including a verdict on the reranker, was
+# judged on that.
+#
+# So the run now checks itself and refuses to leave a dead index on disk.
+_DEAD = {"n": 0}
+MAX_DEAD_FRACTION = float(os.environ.get("INDEX_MAX_DEAD", "0.02"))
+
+
+def mark_complete(con: sqlite3.Connection, total: int, n_files: int) -> None:
+    """Record that the run reached the end.
+
+    A crash leaves a truncated index that looks perfectly healthy, because
+    every row it did write is correct -- three.js stopped at chunk 1,760 of
+    15,021 and nothing downstream could tell. Completeness is not a property
+    a partial index can report about itself, so it is written once, last, and
+    anything that reads the index checks for it.
+    """
+    con.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
+    con.executemany(
+        "INSERT INTO meta(k, v) VALUES(?, ?) "
+        "ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+        [("complete", "1"), ("chunks", str(total)), ("files", str(n_files)),
+         ("dead", str(_DEAD["n"])), ("built", str(int(time.time())))])
+    con.commit()
+
+
+def is_complete(db: str) -> bool:
+    try:
+        con = sqlite3.connect(db)
+        try:
+            row = con.execute(
+                "SELECT v FROM meta WHERE k='complete'").fetchone()
+        finally:
+            con.close()
+        return bool(row) and row[0] == "1"
+    except sqlite3.Error:
+        return False      # no meta table: built before this existed, or partial
+
+
+def check_alive(con: sqlite3.Connection, total: int) -> None:
+    """Refuse to finish a run that produced an index nothing can search."""
+    if not total:
+        return
+    dead = _DEAD["n"]
+    if dead / total <= MAX_DEAD_FRACTION:
+        if dead:
+            print(f"  {dead} of {total} chunks have no embedding "
+                  f"({dead / total:.2%}), within tolerance")
+        return
+    con.rollback()
+    raise SystemExit(
+        "\nREFUSING TO WRITE A DEAD INDEX\n"
+        f"  {dead} of {total} chunks ({dead / total:.1%}) got no embedding.\n"
+        "  An index of zero vectors answers every query with noise and\n"
+        "  reports no error, so this run is being discarded.\n"
+        f"  Check the embedding server at {STACK} is serving {EMBED_MODEL!r}.")
 
 
 def main() -> None:
@@ -272,7 +416,9 @@ def main() -> None:
                     flush()
     flush()
 
+    check_alive(con, total)
     n_files = con.execute("SELECT COUNT(DISTINCT path) FROM chunks").fetchone()[0]
+    mark_complete(con, total, n_files)
     con.close()
     print(f"\ndone: {total} chunks from {n_files} files -> {os.path.abspath(INDEX_DB)}")
 

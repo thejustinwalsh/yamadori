@@ -1,0 +1,696 @@
+{
+  "compiled": "2026-09-22",
+  "source_repo": "https://github.com/typehero/typehero",
+  "commit": "7871629e9a77718312e68a367644ce3fc286ef04",
+  "operator_approval": "Operator decision in chat 2026-09-22: ingest TypeHero into the skills corpus, licence recorded truthfully as AGPL-3.0, advance past the restricted-licence hold on the operator's behalf.",
+  "method": "Cloned --depth 1 at the pinned commit into bench/domain/_work/typehero (gitignored). Each source_url is a raw.githubusercontent.com URL at that commit, fetched with User-Agent yamadori-dataset-worker/1 (all 200 text/plain); extract_chunks from mcp/worker.py chunks_of (12,000 chars, 60-chunk limit).",
+  "excluded": {
+    "type_challenges_ports": "TypeHero serves ~188 challenges ported from type-challenges (MIT), but they are NOT in the TypeHero repo: packages/db/mocks/challenges.mock.ts clones type-challenges at seed time and copies each questions/*/README.md (dropping 'pick' and 'flatten'). Not submitted: bench/domain/grade.py defines a tc_tests grader over a type-challenges task subset (tasks_type_challenges.jsonl, source clone at bench/domain/_work/tc-src), so their READMEs in the hints corpus would leak benchmark task statements. Needs an operator decision; if approved, source them from type-challenges/type-challenges at a pinned SHA with licence MIT.",
+    "aot_2024": "challenges/aot/2024/*/prompt.md are byte-identical to 2023 in this repo (only metadata.json differs); the real 2024 prompts come from the private dimitropoulos/advent-of-typescript-2024 repo (packages/db/temp/aot-2024-ingest.ts). Skipped as duplicates.",
+    "solutions": "challenges/*/solutions/1.ts are bare code (46-1,655 bytes, no prose); AoT solutions are empty files. No written explanations exist in the repo (community solutions live in TypeHero's database).",
+    "tracks": "packages/db/seed/data/tracks.ts holds one-sentence marketing descriptions only.",
+    "other": "challenges/blank (template), 'notes to dimitri' (idea list), tests.ts/user.ts (code, no prose)."
+  },
+  "candidates": [
+    {
+      "name": "typehero_foundations_default_generic_arguments",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/default-generic-arguments/prompt.md",
+      "source_name": "TypeHero: Default Generic Arguments",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'default-generic-arguments' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 2464,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_generic_function_arguments",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/generic-function-arguments/prompt.md",
+      "source_name": "TypeHero: Generic Function Arguments",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'generic-function-arguments' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 3453,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_generic_type_arguments",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/generic-type-arguments/prompt.md",
+      "source_name": "TypeHero: Generic Type Arguments",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'generic-type-arguments' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 3060,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_generic_type_constraints",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/generic-type-constraints/prompt.md",
+      "source_name": "TypeHero: Generic Type Constraints",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'generic-type-constraints' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 2723,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_index_signatures",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/index-signatures/prompt.md",
+      "source_name": "TypeHero: Index Signatures",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'index-signatures' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 3967,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_indexed_types",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/indexed-types/prompt.md",
+      "source_name": "TypeHero: Indexed Types",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'indexed-types' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 3083,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_keyof",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/keyof/prompt.md",
+      "source_name": "TypeHero: The `keyof` operator",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'keyof' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 2862,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_literal_types",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/literal-types/prompt.md",
+      "source_name": "TypeHero: Literal Types",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'literal-types' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 3208,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_mapped_object_types",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/mapped-object-types/prompt.md",
+      "source_name": "TypeHero: Mapped Object Types",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'mapped-object-types' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 3709,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_pick",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/pick/prompt.md",
+      "source_name": "TypeHero: The `Pick` builtin",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'pick' (easy; author dimitropoulos): original tutorial prompt.md. Not in a seeded track; TypeHero's own Pick, distinct from type-challenges #4 (which the prod seed drops as redundant).",
+      "approx_size_chars": 4999,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_primitive_data_types",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/primitive-data-types/prompt.md",
+      "source_name": "TypeHero: Primitive Data Types",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'primitive-data-types' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 4273,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_type_aliases",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/type-aliases/prompt.md",
+      "source_name": "TypeHero: Type Aliases",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'type-aliases' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 3900,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_type_unions",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/type-unions/prompt.md",
+      "source_name": "TypeHero: Type Unions",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'type-unions' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 2509,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_foundations_typeof",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/typeof/prompt.md",
+      "source_name": "TypeHero: The `typeof` Operator",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero challenge 'typeof' (beginner; author dimitropoulos): original tutorial prompt.md. Part of the 'TypeScript Foundations' track.",
+      "approx_size_chars": 4428,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_01",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/1/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day One",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 1 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 552,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_02",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/2/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Three",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 2 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 977,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_03",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/3/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Two",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 3 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 978,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_04",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/4/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Four",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 4 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1428,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_05",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/5/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Five",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 5 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1437,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_06",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/6/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Six",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 6 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1768,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_07",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/7/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Seven",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 7 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1676,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_08",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/8/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Eight",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 8 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1271,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_09",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/9/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Nine",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 9 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1249,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_10",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/10/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Ten",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 10 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1584,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_11",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/11/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Eleven",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 11 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1410,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_12",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/12/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Twelve",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 12 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 856,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_13",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/13/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Thirteen",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 13 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1075,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_14",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/14/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Fourteen",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 14 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1212,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_15",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/15/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Fifteen",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 15 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1649,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_16",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/16/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Sixteen",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 16 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1025,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_17",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/17/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Seventeen",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 17 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 944,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_18",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/18/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Eighteen",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 18 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 530,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_19",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/19/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Nineteen",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 19 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1426,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_20",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/20/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Twenty",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 20 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 924,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_21",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/21/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Twenty One",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 21 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 637,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_22",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/22/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Twenty Two",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 22 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1637,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_23",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/23/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Twenty Three",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 23 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 1404,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_24",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/24/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Twenty Four",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 24 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 642,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_aot_2023_25",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/aot/2023/25/prompt.md",
+      "source_name": "TypeHero: Advent of TypeScript 2023, Day Twenty Five",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "Advent of TypeScript 2023 day 25 prompt (author TypeHero); 'Advent of TypeScript 2023' track.",
+      "approx_size_chars": 635,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    },
+    {
+      "name": "typehero_challenge_guidelines",
+      "source_url": "https://raw.githubusercontent.com/typehero/typehero/7871629e9a77718312e68a367644ce3fc286ef04/challenges/challenge-guidelines.md",
+      "source_name": "TypeHero: Challenge Guidelines",
+      "licence": "AGPL-3.0",
+      "licence_evidence_url": "https://github.com/typehero/typehero/blob/7871629e9a77718312e68a367644ce3fc286ef04/LICENSE",
+      "licence_evidence": "Repo root LICENSE is 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007' (copied verbatim to bench/recipes/licenses/LICENSE-typehero-AGPL-3.0.txt); GitHub API /repos/typehero/typehero reports spdx_id AGPL-3.0. Text checked against all 190 type-challenges READMEs (tc-src @0b0b0b18): no shared sentence >=50 chars, so TypeHero-original.",
+      "language": "TypeScript",
+      "domains": [
+        "types"
+      ],
+      "why": "TypeHero's guide for authoring challenges: type-test conventions (Expect<Equal<> order, unknown over any, saying why an error occurs).",
+      "approx_size_chars": 5079,
+      "extract_chunks": 1,
+      "content_type": "text/plain",
+      "notes": "operator-approved AGPL-3.0 ingestion, 2026-09-22"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "ts20",
+  "domain": "typescript",
+  "prompt": "Write a TypeScript module (strict mode) that exports an async function `props(obj)` -- the object version of `Promise.all`. `obj` is an object (a type alias or an interface) whose property values may be promises, thenables or plain values. `props` waits for all of them concurrently and resolves to a new object with the same keys in the same order, each holding the settled value. If any value rejects, the returned promise rejects with the first rejection, immediately, without waiting for the others.\n\nIts static type must map each property to what `await` would give for it, with no `any`: `props({ user: fetchUser(), count: 3, nested: Promise.resolve(Promise.resolve(true)), maybe: p as Promise<number> | null })` returns `Promise<{ user: User; count: number; nested: boolean; maybe: number | null }>`. Answer with a single ```ts code block.",
+  "grader": {
+    "kind": "ts",
+    "test": "tasks/ts20/test.ts",
+    "runtime": true,
+    "entry": [
+      "props"
+    ]
+  },
+  "reference": "tasks/ts20/reference.ts",
+  "contaminated": false,
+  "needs_retrieval": false,
+  "difficulty": "medium"
+}

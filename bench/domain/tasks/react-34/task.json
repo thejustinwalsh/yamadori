@@ -1,0 +1,11 @@
+{
+  "id": "react-34",
+  "domain": "react",
+  "prompt": "Write two React 19 components in TypeScript (strict mode) and export both from one module:\n\n    export function UserName({ userPromise }: { userPromise: Promise<{ name: string }> })\n    export function UserCard({ userPromise }: { userPromise: Promise<{ name: string }> })\n\nThe promise is created by the caller outside rendering and passed down unchanged across renders.\n\n`UserName` must read the promise with React 19's `use()`:\n- Once the promise resolves, it renders a heading (any of `h1`-`h6`) whose text is exactly the user's `name`.\n- While the promise is pending it suspends, so the nearest `<Suspense>` boundary above it shows its fallback. It renders no placeholder of its own.\n- It does not handle rejection itself: if the promise rejects, the rejection propagates to the nearest error boundary above it.\n\n`UserCard` is self-contained:\n- It renders `UserName` inside its own `<Suspense>` boundary whose fallback is an element with the text exactly `Loading user…` (with the single character `…`, U+2026). A `<Suspense>` boundary placed above `UserCard` by the caller never shows its fallback because of `UserCard`.\n- It catches a rejection itself and then shows an element with role `alert` and text exactly `Could not load user` instead of the name. The error does not reach any error boundary above `UserCard`.\n- Several `UserCard`s with different promises load and fail independently.\n\nError boundaries have to be class components. Use only `react` and `react-dom`. Answer with a single ```tsx code block containing only the module.",
+  "grader": {"kind": "react", "test": "tasks/react-34/test.tsx", "entry": ["UserName", "UserCard"]},
+  "reference": "tasks/react-34/reference.tsx",
+  "contaminated": false,
+  "needs_retrieval": true,
+  "difficulty": "medium",
+  "category": "react19"
+}

@@ -51,6 +51,10 @@ So this is gated on the task having room for a better answer:
 
 Fanning out on a lookup is pure latency, which is now measured rather than
 assumed.
+
+That rule is IMPLEMENTED in mcp/selection.py (`fanout_n`), as words at n=0
+labels until build step 7 calibrates it; the tier's `fanout` is the most it
+may use, not what it always uses.
 """
 from __future__ import annotations
 
@@ -58,10 +62,15 @@ import concurrent.futures as cf
 import json
 import os
 import re
-import urllib.request
 from collections import Counter
 
-UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:1234")
+# The MODEL SERVER, not the proxy. Port 1234 is the proxy now, and fan-out
+# running through it would re-enter the tool loop once per variant: N times the
+# work, N nested tool loops, and a request that may never return. This is the
+# same stale-default class of bug that left the indexer writing 18,750 zero
+# vectors and the benchmark querying a dead endpoint. It was never hit here
+# only because nothing calls fan-out yet.
+UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 
 # Each variant is a different way of approaching the same question, not a
 # different random seed. `nudge` is appended to the system message.
@@ -96,6 +105,7 @@ def claims(text: str) -> tuple[set, set]:
 # slice of concept space every time. Random directions in high dimensions are
 # near-orthogonal, so consecutive draws genuinely differ.
 import concept_seed  # noqa: E402
+import repeats  # noqa: E402
 
 
 def _one(payload: dict, variant: dict, timeout: int) -> dict:
@@ -126,6 +136,7 @@ def _one(payload: dict, variant: dict, timeout: int) -> dict:
     d = _tool_loop(body, timeout)
     msg = d["choices"][0]["message"]
     return {"variant": variant["name"],
+            "seed": variant.get("seed"),
             "content": msg.get("content") or "",
             "raw": d}
 
@@ -136,16 +147,23 @@ def _tool_loop(body: dict, timeout: int) -> dict:
     injected = {t["function"]["name"] for t in (body.get("tools") or [])
                 if t.get("function", {}).get("name") in _p.OUR_NAMES}
     convo = body["messages"]
-    for _ in range(_p.MAX_TOOL_HOPS):
-        req = urllib.request.Request(f"{UPSTREAM}/v1/chat/completions",
-                                     data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            d = json.load(r)
+    # No hop count (removed 2026-09-22). The loop ends when the variant stops
+    # calling tools, or when its conversation no longer fits its 1/n of the
+    # main share -- then the tools are withdrawn and it answers.
+    share_n = body.get("_share_n") or 1
+    while True:
+        if _p.context_full(body, convo, role="main", share_n=share_n):
+            body = _p._land(body, convo)
+        # Through the proxy's own reader, not a bare urlopen: it streams, so
+        # `timeout` bounds the gap between tokens rather than the whole
+        # generation (docs/CONSTRAINTS.md item 13), and it strips the
+        # proxy's `_underscored` bookkeeping, which prepare() leaves in the
+        # payload and which this loop was shipping to llama-server.
+        d = _p._post("/v1/chat/completions", body, timeout=timeout)
         msg = d["choices"][0]["message"]
         calls = [c for c in (msg.get("tool_calls") or [])
                  if c.get("function", {}).get("name") in injected]
-        if not calls:
+        if not calls or not body.get("tools"):
             return d
         convo.append({"role": "assistant", "content": msg.get("content") or "",
                       "tool_calls": msg.get("tool_calls") or []})
@@ -154,18 +172,51 @@ def _tool_loop(body: dict, timeout: int) -> dict:
                 args = json.loads(c["function"]["arguments"] or "{}")
             except json.JSONDecodeError:
                 args = {}
+            out = _p.run_our_tool(c["function"]["name"], args, None)
             convo.append({"role": "tool", "tool_call_id": c["id"],
-                          "content": _p.run_our_tool(c["function"]["name"],
-                                                     args, None)[:6000]})
+                          "content": repeats.cap_tool_result(
+                              out, c["function"]["name"], args)})
         body["messages"] = convo
-    return d
 
 
-def run(payload: dict, n: int = 4, timeout: int = 900,
+def _seeds(payload: dict, n: int) -> list[str]:
+    """One concept word per sample, mutually orthogonal and far from the
+    prompt in the model's own space. Empty -- never an exception -- when the
+    matrix is not extracted: a missing seed must not cost the request."""
+    try:
+        if not concept_seed.available():
+            return []
+        prompt = next((m.get("content") for m in
+                       reversed(payload.get("messages") or [])
+                       if m.get("role") == "user"
+                       and isinstance(m.get("content"), str)), "")
+        return concept_seed.draw(n, away_from=prompt or None)
+    except Exception:                                            # noqa: BLE001
+        return []
+
+
+def run(payload: dict, n: int = 4, timeout: int = 3600,
         variants: list | None = None) -> dict:
-    """Run n variants concurrently and report what they agreed on."""
+    """Run n variants concurrently and report what they agreed on.
+
+    `timeout` is 3600 s. Under the one budget rule each variant may think for
+    up to its 1/n of main's 5/8 of the pool before answering (tiers.budget,
+    mcp/budget.py -- let it cook within its share), at 16-40 tok/s on decode that the
+    main lanes share, and n variants run at once. 900 s was sized against the
+    old 3000/6000 floors (docs/CONSTRAINTS.md item 13). It bounds the gap
+    between streamed tokens (see `_tool_loop`), and 3600 matches every other
+    generation timeout in the stack and llama-server's own `-to`.
+    """
     pool = variants if variants is not None else VARIANTS
-    use = pool[:max(1, min(n, len(pool)))]
+    use = [dict(v) for v in pool[:max(1, min(n, len(pool)))]]
+    if len(use) > 1:
+        for v, seed in zip(use, _seeds(payload, len(use))):
+            v.setdefault("seed", seed)
+    # n samples run at once in the conversation's 5/8 of the pool, so each
+    # gets 1/n of it -- a fan-out must not overflow the share it came from.
+    import tiers
+    payload = tiers.rebudget(payload, role="main", share_n=len(use))
+    payload["_share_n"] = len(use)
     with cf.ThreadPoolExecutor(max_workers=len(use)) as ex:
         futs = [ex.submit(_one, payload, v, timeout) for v in use]
         results = []
@@ -192,7 +243,14 @@ def run(payload: dict, n: int = 4, timeout: int = 900,
             sym_votes[x] += 1
 
     top_path, top_n = (path_votes.most_common(1) or [(None, 0)])[0]
-    agreement = top_n / len(good) if good else 0.0
+    # NO VOTES IS NOT DISAGREEMENT. An answer that names no file -- a list of
+    # primes, a paragraph of design advice -- casts no path vote, and this
+    # used to report agreement 0.0 for it, which `dissent_note` then turned
+    # into "only 0% agreed on the same file. Treat this as unsettled." on
+    # every such answer at `high` and `max`. Agreement over nothing is
+    # undefined, so it is None, and None says nothing.
+    votes = sum(path_votes.values())
+    agreement = (top_n / len(good)) if votes else None
 
     # The winning ANSWER is the one that best represents the consensus, not the
     # first or the longest: the answer that names the most agreed-upon claims.
@@ -204,7 +262,8 @@ def run(payload: dict, n: int = 4, timeout: int = 900,
 
     return {
         "n": len(good),
-        "agreement": round(agreement, 2),
+        "agreement": round(agreement, 2) if agreement is not None else None,
+        "votes": votes,
         "consensus_path": top_path,
         "path_votes": dict(path_votes.most_common(5)),
         "winner": winner,
@@ -298,8 +357,13 @@ def dissent_note(v: dict) -> str:
 
     Disagreement is information and hiding it is the failure mode that makes a
     confident wrong answer indistinguishable from a confident right one.
+
+    But only disagreement that was OBSERVED. With no path votes cast there is
+    nothing the variants could have agreed on, and saying "0% agreed" about
+    that is a false claim appended to a correct answer
+    (docs/SELECTION-BUILD.md harm 2; the live suite's primes answer at `high`).
     """
-    if not v or v.get("agreement") is None:
+    if not v or v.get("agreement") is None or not v.get("path_votes"):
         return ""
     if v["agreement"] >= 0.75:
         return ""
