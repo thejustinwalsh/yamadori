@@ -1,0 +1,4502 @@
+[
+ {
+  "arm": "bonsai",
+  "id": "27c31c63ff778ef9594589756be22b75959369914a5b4fae17fa3255927e1dc4",
+  "task": "LCB_generation",
+  "title": "atcoder_Long Loong",
+  "score": 1,
+  "sloc": 2,
+  "chars": 44,
+  "ast_cc": 1,
+  "ruff": {
+   "total": 1,
+   "idiom": 0,
+   "families": {
+    "W": 1
+   },
+   "codes": {
+    "W292": 1
+   },
+   "mccabe_max": null,
+   "mccabe_sum": null,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 1.8499995348975062e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.6400001186411828e-05,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 2.3300002794712782e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.3499997041653842e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6200003048870713e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.4499997380189598e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.9500002458225936e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6100002287421376e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.720000338740647e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.280000626342371e-05,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "3375d42f6db384f62b159eb89a85d715736790fd1abb380760ffbd12339fd4d5",
+  "task": "LCB_generation",
+  "title": "leetcode_maximum-xor-product",
+  "score": 0,
+  "sloc": 21,
+  "chars": 657,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 10,
+   "idiom": 0,
+   "families": {
+    "N": 6,
+    "W": 4
+   },
+   "codes": {
+    "N802": 1,
+    "N806": 5,
+    "W293": 3,
+    "W292": 1
+   },
+   "mccabe_max": 5,
+   "mccabe_sum": 5,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 3.2999960239976645e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.3000032999552786e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 2.6999987312592566e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.0000013541430235e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.4000037228688598e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 3.2000025385059416e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.399997123982757e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 3.5999983083456755e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 3.5999983083456755e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.600000001024455e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.300004654098302e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 8.000002708286047e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 1.3899996702093631e-05,
+    "ok": false,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "388e39eefc4d3950ad99966e9c8dfbf64b59991d7e6cc2d9fb0a617f4025475e",
+  "task": "LCB_generation",
+  "title": "atcoder_Erase Leaves",
+  "score": 1,
+  "sloc": 35,
+  "chars": 1101,
+  "ast_cc": 11,
+  "ruff": {
+   "total": 2,
+   "idiom": 0,
+   "families": {
+    "N": 1,
+    "W": 1
+   },
+   "codes": {
+    "N806": 1,
+    "W292": 1
+   },
+   "mccabe_max": 9,
+   "mccabe_sum": 9,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.0002223999981652014,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00021610000112559646,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0002297000028192997,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.00021739999647252262,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00024950000079115853,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.005622899996524211,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.01891349999641534,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.03780649999680463,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0385826999990968,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.037310299994715024,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.29192499999771826,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.3769462999989628,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.36909749999904307,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.28127179999864893,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.317737199999101,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "6afe4974569ffea0733fb153fa9bc6ea75c6ada73e3095b7a3efb65fabbfae06",
+  "task": "LCB_generation",
+  "title": "atcoder_Online Shopping",
+  "score": 1,
+  "sloc": 18,
+  "chars": 402,
+  "ast_cc": 4,
+  "ruff": {
+   "total": 8,
+   "idiom": 0,
+   "families": {
+    "N": 5,
+    "W": 3
+   },
+   "codes": {
+    "N806": 5,
+    "W293": 2,
+    "W292": 1
+   },
+   "mccabe_max": 2,
+   "mccabe_sum": 2,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 8.820000221021473e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.380000119563192e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.259999933419749e-05,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.000115999995614402,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00010399999882793054,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00010240000119665638,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00011799999629147351,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00010140000085812062,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00010250000195810571,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00011639999866019934,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00012969999806955457,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00012089999654563144,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00011419999646022916,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00011720000475179404,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00013860000035492703,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "87871f3ecdda8c4583b2834741bb312a3917c9035cd21d151902b9eae123e17c",
+  "task": "LCB_generation",
+  "title": "leetcode_maximum-area-of-longest-diagonal-rectangle",
+  "score": 1,
+  "sloc": 12,
+  "chars": 503,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 9,
+   "idiom": 3,
+   "families": {
+    "UP": 3,
+    "N": 1,
+    "W": 4,
+    "E": 1
+   },
+   "codes": {
+    "UP035": 1,
+    "N802": 1,
+    "UP006": 2,
+    "W293": 3,
+    "E501": 1,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 1.3000026228837669e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.1000010999850929e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.3999961083754897e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.500004145782441e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.4999968698248267e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.4999968698248267e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.500004145782441e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.700000762473792e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.800001523923129e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.999995770864189e-06,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "89101e97bd95e50c1d5d9db784d73f2894a20e4c2ed3e67cf124c7959f8ab4dd",
+  "task": "LCB_generation",
+  "title": "leetcode_count-prefix-and-suffix-pairs-i",
+  "score": 1,
+  "sloc": 12,
+  "chars": 389,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 4,
+   "idiom": 0,
+   "families": {
+    "N": 1,
+    "F": 1,
+    "E": 1,
+    "W": 1
+   },
+   "codes": {
+    "N802": 1,
+    "F821": 1,
+    "E741": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 3.1999952625483274e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.8999929782003164e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.3000026228837669e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.9000002541579306e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.2999960239976645e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.7999994927085936e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.3999967854470015e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.4999975468963385e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6999987312592566e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.49999822396785e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.500000017695129e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.679999933112413e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00012900000001536682,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "cf932b62f91764e164fa14f8b4f50ad8346b1b653765fb9fdec13d372b10be73",
+  "task": "LCB_generation",
+  "title": "atcoder_Last Train",
+  "score": 1,
+  "sloc": 35,
+  "chars": 1064,
+  "ast_cc": 10,
+  "ruff": {
+   "total": 16,
+   "idiom": 0,
+   "families": {
+    "N": 6,
+    "W": 8,
+    "E": 2
+   },
+   "codes": {
+    "N806": 6,
+    "W293": 7,
+    "E741": 2,
+    "W292": 1
+   },
+   "mccabe_max": 9,
+   "mccabe_sum": 9,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00021800000104121864,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00021530000230995938,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00023269999655894935,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.023651400006201584,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.026980399998137727,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.07345910000003641,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.053573199998936616,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.09722099999635248,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.1708855999968364,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.09576329999981681,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.11719409999932395,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.5556567999956314,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.545819399994798,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.5574756999994861,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.5561677000005147,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "d414f7768eb066f524236800aa2dbb8a4554f2e4abc22a99ef88fe30cbcc308e",
+  "task": "LCB_generation",
+  "title": "leetcode_double-modular-exponentiation",
+  "score": 1,
+  "sloc": 9,
+  "chars": 324,
+  "ast_cc": 3,
+  "ruff": {
+   "total": 5,
+   "idiom": 0,
+   "families": {
+    "N": 1,
+    "F": 3,
+    "W": 1
+   },
+   "codes": {
+    "N802": 1,
+    "F821": 3,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 2.1999949240125716e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.6999983927235007e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.6999983927235007e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.3999964469112456e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.4000037228688598e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1999949240125716e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.5999979698099196e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.1500000255182385e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.289999924367294e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.53000029665418e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.489999992074445e-05,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "d5213885ecf30ec0d5b6fa5e53af31eb5ed207d3257b2ae8843b1eed735ac7a5",
+  "task": "LCB_generation",
+  "title": "atcoder_Langton's Takahashi",
+  "score": 1,
+  "sloc": 24,
+  "chars": 638,
+  "ast_cc": 10,
+  "ruff": {
+   "total": 12,
+   "idiom": 0,
+   "families": {
+    "F": 1,
+    "N": 3,
+    "W": 6,
+    "PLR": 2
+   },
+   "codes": {
+    "F401": 1,
+    "N806": 3,
+    "W293": 5,
+    "PLR2004": 2,
+    "W292": 1
+   },
+   "mccabe_max": 8,
+   "mccabe_sum": 8,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00014000000373926014,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00024980000307550654,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00014789999841013923,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.00017690000095171854,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00024509999639121816,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0001933999956236221,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00019809999503195286,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00024249999842140824,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0002784999960567802,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00028780000138795003,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00031909999961499125,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0003321000040159561,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0003463000030023977,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0003051000021514483,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0003192000003764406,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "df00a4688e96b001f32ffd39913ae151bfa14034bdca636193c96974529f7cf9",
+  "task": "LCB_generation",
+  "title": "atcoder_Many Replacement",
+  "score": 1,
+  "sloc": 22,
+  "chars": 791,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 10,
+   "idiom": 0,
+   "families": {
+    "N": 3,
+    "F": 1,
+    "W": 6
+   },
+   "codes": {
+    "N806": 3,
+    "F841": 1,
+    "W293": 5,
+    "W292": 1
+   },
+   "mccabe_max": 5,
+   "mccabe_sum": 5,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00013449999823933467,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00012439999409252778,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00015300000086426735,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.0001582000040798448,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00014319999900180846,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.001937499997438863,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.003639100003056228,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.014217100004316308,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.07167040000058478,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.058109600002353545,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.19705380000232253,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.19964489999983925,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.16501650000282098,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.1645226000036928,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.163387500004319,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "e1e226d29b9ab59fc2de2d719a0e7117572f7bd9dc375709a92a673987c1b29d",
+  "task": "LCB_generation",
+  "title": "atcoder_Loong Tracking",
+  "score": 0,
+  "sloc": 32,
+  "chars": 927,
+  "ast_cc": 7,
+  "ruff": {
+   "total": 10,
+   "idiom": 1,
+   "families": {
+    "N": 3,
+    "RUF": 1,
+    "W": 6
+   },
+   "codes": {
+    "N806": 3,
+    "RUF059": 1,
+    "W293": 5,
+    "W292": 1
+   },
+   "mccabe_max": 7,
+   "mccabe_sum": 7,
+   "syntax_error": false
+  },
+  "buffer": true,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00014630000077886507,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.0001728000061120838,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.01019109999469947,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.029912500001955777,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.020559300006425474,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.04359480000130134,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.020346999997855164,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.05070809999597259,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.049327599997923244,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.059673099996871315,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.06218559999979334,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.06234269999549724,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.06234859999676701,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "3cd8c16a338ab1b2d081add09e47c05cd4bad6c4ddd20c12356d911502fc54a0",
+  "task": "coding_completion",
+  "title": "leetcode_earliest-second-to-mark-indices-i",
+  "score": 1,
+  "sloc": 5,
+  "chars": 165,
+  "ast_cc": 9,
+  "ruff": {
+   "total": 5,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 2,
+    "W": 2
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "N803": 1,
+    "W291": 1,
+    "W292": 1
+   },
+   "mccabe_max": 9,
+   "mccabe_sum": 15,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 5.800000508315861e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.399997123982757e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.3999967854470015e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.6999983927235007e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.199996616691351e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.90000194683671e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.39999847812578e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.700000423938036e-06,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "45d51d0927f37783772c554d860a9c17db83a3e8e31dd02abeb93150acdaba55",
+  "task": "coding_completion",
+  "title": "leetcode_find-the-maximum-number-of-elements-in-subset",
+  "score": 0,
+  "sloc": 4,
+  "chars": 124,
+  "ast_cc": 10,
+  "ruff": {
+   "total": 11,
+   "idiom": 2,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "F": 1,
+    "SIM": 1,
+    "PLR": 1,
+    "PLW": 3,
+    "E": 2,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "F821": 1,
+    "SIM118": 1,
+    "PLR2004": 1,
+    "PLW2901": 3,
+    "E741": 2,
+    "W292": 1
+   },
+   "mccabe_max": 7,
+   "mccabe_sum": 7,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 7.000002369750291e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 6.900001608300954e-06,
+    "ok": false,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 6.499998562503606e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 7.000002369750291e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 5.900001269765198e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 6.900001608300954e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 7.300004654098302e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 7.399998139590025e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 7.90000194683671e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 8.800001523923129e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 0.02892769999743905,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 0.030183999995642807,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 0.030302400002256036,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 0.034955000002810266,
+    "ok": false,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "4952a5d420fa195e7b041251e85bce64c87b95e8f1cec05d7e16ce149e88c967",
+  "task": "coding_completion",
+  "title": "leetcode_count-prefix-and-suffix-pairs-i",
+  "score": 1,
+  "sloc": 9,
+  "chars": 298,
+  "ast_cc": 6,
+  "ruff": {
+   "total": 5,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "E": 1,
+    "F": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "E731": 1,
+    "F821": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 3.4000040614046156e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.2999960239976645e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.1000017770566046e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.4999975468963385e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.3000032999552786e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.4000040614046156e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.7999998312443495e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.9000005926936865e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.6999990697950125e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.599998985417187e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.009999535512179e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.020000339252874e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00011440000525908545,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "5c9d7ade302709f4bdcf6e3b64127d1e67a3a3078b3a03ef241329547cf320c6",
+  "task": "coding_completion",
+  "title": "leetcode_ant-on-the-boundary",
+  "score": 0,
+  "sloc": 7,
+  "chars": 154,
+  "ast_cc": null,
+  "ruff": {
+   "total": 2,
+   "idiom": 0,
+   "families": {
+    "invalidsyntax": 1,
+    "W": 1
+   },
+   "codes": {
+    "invalid-syntax": 1,
+    "W292": 1
+   },
+   "mccabe_max": null,
+   "mccabe_sum": null,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   }
+  ],
+  "private": [
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: unterminated triple-quoted string literal (detected at line 47) (sol.py, line 40)"
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "786432ddcf555d879432b906560955b9d464831f713946ce0210dcba478becd2",
+  "task": "coding_completion",
+  "title": "leetcode_length-of-longest-subarray-with-at-most-k-frequency",
+  "score": 1,
+  "sloc": 3,
+  "chars": 98,
+  "ast_cc": 3,
+  "ruff": {
+   "total": 4,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "F": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "F821": 1,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 6.599999323952943e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.049999991664663e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.000002031214535e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 4.800000169780105e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.499998901039362e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.399997801054269e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.70000008540228e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.399998139590025e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.000002369750291e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.200003554113209e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.999995770864189e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.010090000003401656,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.016115599995828234,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.031546799997158814,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.03158439999970142,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "7878539e8dd4fe1d4bc66a440e16c102d66f158fed7828a84f3765505ba8f1d3",
+  "task": "coding_completion",
+  "title": "leetcode_find-if-array-can-be-sorted",
+  "score": 0,
+  "sloc": 3,
+  "chars": 104,
+  "ast_cc": 7,
+  "ruff": {
+   "total": 7,
+   "idiom": 2,
+   "families": {
+    "UP": 1,
+    "RET": 1,
+    "N": 1,
+    "W": 2,
+    "E": 1,
+    "F": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "RET503": 1,
+    "N802": 1,
+    "W293": 1,
+    "E501": 1,
+    "F706": 1,
+    "W292": 1
+   },
+   "mccabe_max": 5,
+   "mccabe_sum": 6,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   }
+  ],
+  "private": [
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 55)"
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "9e895f817a6a867671d8735578f058a34a19dde837957b1a9c9347d7e13a8e38",
+  "task": "coding_completion",
+  "title": "leetcode_maximize-consecutive-elements-in-an-array-after-modification",
+  "score": 0,
+  "sloc": 4,
+  "chars": 98,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 7,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "E": 1,
+    "PLW": 1,
+    "F": 2,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "E501": 1,
+    "PLW0120": 1,
+    "F706": 1,
+    "F821": 1,
+    "W292": 1
+   },
+   "mccabe_max": 5,
+   "mccabe_sum": 5,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   }
+  ],
+  "private": [
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   },
+   {
+    "s": null,
+    "ok": null,
+    "err": "SyntaxError: 'return' outside function (sol.py, line 59)"
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "e25750fd4c8fae19856e77a875093ab90a6333a680ccbd45dbabdaddb205bf2a",
+  "task": "coding_completion",
+  "title": "leetcode_count-beautiful-substrings-i",
+  "score": 1,
+  "sloc": 9,
+  "chars": 283,
+  "ast_cc": 12,
+  "ruff": {
+   "total": 7,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 2,
+    "PLR": 2,
+    "F": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "N806": 1,
+    "PLR2004": 2,
+    "F821": 1,
+    "W292": 1
+   },
+   "mccabe_max": 11,
+   "mccabe_sum": 11,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 9.999996109399945e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.200004569720477e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.600000001024455e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 7.90000194683671e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.39999847812578e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.499999578110874e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.999996109399945e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.049999991664663e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.60000033956021e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.1600001016631722e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.0900002962443978e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00924729999678675,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.010600100002193358,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.011642599994956981,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.011909699998795986,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "eae492105162057ac07f4920749d2125f86b5a335557c61d328d49f198af3343",
+  "task": "coding_completion",
+  "title": "leetcode_minimum-number-of-coins-to-be-added",
+  "score": 1,
+  "sloc": 3,
+  "chars": 84,
+  "ast_cc": 4,
+  "ruff": {
+   "total": 3,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.3000026228837669e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.4999968698248267e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.0999938240274787e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.2000021999701858e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.011653900000965223,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0043191000004298985,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.013465199997881427,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.004143300000578165,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "bonsai",
+  "id": "ebde77f9af990a37740871b38788987a907d4ab08556978324a42c3293bb68a9",
+  "task": "coding_completion",
+  "title": "leetcode_minimum-operations-to-maximize-last-elements-in-arrays",
+  "score": 1,
+  "sloc": 3,
+  "chars": 118,
+  "ast_cc": 8,
+  "ruff": {
+   "total": 5,
+   "idiom": 2,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "B": 1,
+    "E": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "B905": 1,
+    "E501": 1,
+    "W292": 1
+   },
+   "mccabe_max": 5,
+   "mccabe_sum": 5,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 3.6999990697950125e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.599998646881431e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.5999979698099196e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 2.9000002541579306e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.4999975468963385e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.7999994927085936e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1000014385208488e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.1999952625483274e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.0000013541430235e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.0000013541430235e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1000014385208488e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1999949240125716e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.2000028770416975e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00021859999833395705,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "27c31c63ff778ef9594589756be22b75959369914a5b4fae17fa3255927e1dc4",
+  "task": "LCB_generation",
+  "title": "atcoder_Long Loong",
+  "score": 1,
+  "sloc": 3,
+  "chars": 69,
+  "ast_cc": 1,
+  "ruff": {
+   "total": 1,
+   "idiom": 0,
+   "families": {
+    "W": 1
+   },
+   "codes": {
+    "W292": 1
+   },
+   "mccabe_max": null,
+   "mccabe_sum": null,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 1.9899998733308166e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8699996871873736e-05,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 2.529999619582668e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6399997295811772e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6200003048870713e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.7499998395796865e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.0800001695752144e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.769999991869554e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.769999991869554e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.909999602707103e-05,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "3375d42f6db384f62b159eb89a85d715736790fd1abb380760ffbd12339fd4d5",
+  "task": "LCB_generation",
+  "title": "leetcode_maximum-xor-product",
+  "score": 0,
+  "sloc": 19,
+  "chars": 810,
+  "ast_cc": 4,
+  "ruff": {
+   "total": 9,
+   "idiom": 0,
+   "families": {
+    "N": 2,
+    "W": 6,
+    "PLR": 1
+   },
+   "codes": {
+    "N802": 1,
+    "N806": 1,
+    "W293": 5,
+    "PLR5501": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 2.1999949240125716e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6999987312592566e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 2.1000014385208488e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.2999956854619086e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.800006430130452e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.3999964469112456e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 3.1000017770566046e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 2.2000021999701858e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 3.4999975468963385e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.0299998393747956e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.399997462518513e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 6.70000008540228e-06,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 1.0900002962443978e-05,
+    "ok": false,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "388e39eefc4d3950ad99966e9c8dfbf64b59991d7e6cc2d9fb0a617f4025475e",
+  "task": "LCB_generation",
+  "title": "atcoder_Erase Leaves",
+  "score": 0,
+  "sloc": 28,
+  "chars": 717,
+  "ast_cc": 9,
+  "ruff": {
+   "total": 3,
+   "idiom": 0,
+   "families": {
+    "N": 1,
+    "PLR": 1,
+    "W": 1
+   },
+   "codes": {
+    "N806": 1,
+    "PLR1730": 1,
+    "W292": 1
+   },
+   "mccabe_max": 7,
+   "mccabe_sum": 7,
+   "syntax_error": false
+  },
+  "buffer": true,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00016009999671950936,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00015999999595806003,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00016969999705906957,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.0001840999975684099,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0001624000069568865,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.004173200002696831,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.01413920000049984,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.02720910000061849,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0285957000014605,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.028116199995565694,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.19786269999895012,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.2570105999984662,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.27537239999946905,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.20030399999814108,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.20371249999880092,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "6afe4974569ffea0733fb153fa9bc6ea75c6ada73e3095b7a3efb65fabbfae06",
+  "task": "LCB_generation",
+  "title": "atcoder_Online Shopping",
+  "score": 1,
+  "sloc": 12,
+  "chars": 257,
+  "ast_cc": 3,
+  "ruff": {
+   "total": 6,
+   "idiom": 0,
+   "families": {
+    "N": 5,
+    "W": 1
+   },
+   "codes": {
+    "N806": 5,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 5.919999966863543e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.369999755406752e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.959999543847516e-05,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 7.440000626957044e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.479999476345256e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.790000381646678e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.380000170087442e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.340000593103468e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.719999848632142e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.030000364873558e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.96999951894395e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00010250000195810571,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00012229999992996454,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00010350000229664147,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00011200000153621659,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "87871f3ecdda8c4583b2834741bb312a3917c9035cd21d151902b9eae123e17c",
+  "task": "LCB_generation",
+  "title": "leetcode_maximum-area-of-longest-diagonal-rectangle",
+  "score": 1,
+  "sloc": 12,
+  "chars": 498,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 6,
+   "idiom": 3,
+   "families": {
+    "UP": 3,
+    "N": 1,
+    "E": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP035": 1,
+    "N802": 1,
+    "UP006": 2,
+    "E501": 1,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 1.2000018614344299e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.3000026228837669e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.2000018614344299e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.4999968698248267e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.500004145782441e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.700000762473792e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.299997716676444e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.800001523923129e-06,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "89101e97bd95e50c1d5d9db784d73f2894a20e4c2ed3e67cf124c7959f8ab4dd",
+  "task": "LCB_generation",
+  "title": "leetcode_count-prefix-and-suffix-pairs-i",
+  "score": 1,
+  "sloc": 11,
+  "chars": 403,
+  "ast_cc": 6,
+  "ruff": {
+   "total": 4,
+   "idiom": 2,
+   "families": {
+    "UP": 2,
+    "N": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP035": 1,
+    "N802": 1,
+    "UP006": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 2.7999994927085936e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.7999994927085936e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.3000026228837669e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.1000010999850929e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6999987312592566e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.3999967854470015e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.1000017770566046e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.7999998312443495e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.999994078185409e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.5999983083456755e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.000001692678779e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.98000003467314e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.040000491542742e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00012200000492157415,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "cf932b62f91764e164fa14f8b4f50ad8346b1b653765fb9fdec13d372b10be73",
+  "task": "LCB_generation",
+  "title": "atcoder_Last Train",
+  "score": 0,
+  "sloc": 45,
+  "chars": 1306,
+  "ast_cc": 12,
+  "ruff": {
+   "total": 21,
+   "idiom": 0,
+   "families": {
+    "N": 5,
+    "E": 10,
+    "W": 5,
+    "PLR": 1
+   },
+   "codes": {
+    "N806": 5,
+    "E702": 8,
+    "W293": 4,
+    "E741": 2,
+    "PLR1730": 1,
+    "W292": 1
+   },
+   "mccabe_max": 10,
+   "mccabe_sum": 10,
+   "syntax_error": false
+  },
+  "buffer": true,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.0002601000014692545,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0002537000036682002,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0003097000007983297,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.021979600001941435,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.026654799999960233,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.07199609999952372,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.051884900000004563,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.09555769999860786,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.1681310999993002,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0945614000011119,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.10826950000046054,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.5445373000038671,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.55997539999953,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.5446870000014314,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.5354072000045562,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "d414f7768eb066f524236800aa2dbb8a4554f2e4abc22a99ef88fe30cbcc308e",
+  "task": "LCB_generation",
+  "title": "leetcode_double-modular-exponentiation",
+  "score": 1,
+  "sloc": 9,
+  "chars": 327,
+  "ast_cc": 3,
+  "ruff": {
+   "total": 6,
+   "idiom": 4,
+   "families": {
+    "UP": 4,
+    "N": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP035": 1,
+    "N802": 1,
+    "UP006": 3,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 2.4999972083605826e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.800006430130452e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.7999991541728377e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.0000006770715117e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.4999972083605826e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1999949240125716e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.5000044843181968e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.1900003300979733e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.2599996959324926e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.3000000005122274e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.410000110510737e-05,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "d5213885ecf30ec0d5b6fa5e53af31eb5ed207d3257b2ae8843b1eed735ac7a5",
+  "task": "LCB_generation",
+  "title": "atcoder_Langton's Takahashi",
+  "score": 1,
+  "sloc": 20,
+  "chars": 552,
+  "ast_cc": 6,
+  "ruff": {
+   "total": 4,
+   "idiom": 0,
+   "families": {
+    "N": 3,
+    "W": 1
+   },
+   "codes": {
+    "N806": 3,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00014590000500902534,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0002534000013838522,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00014260000170907006,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.0001610000035725534,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0002668000015546568,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00020899999799439684,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00020809999841731042,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00023670000518905,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.000228899996727705,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00027100000443169847,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00024680000205989927,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00032300000020768493,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0002638000005390495,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0002559000058681704,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00023850000434322283,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "df00a4688e96b001f32ffd39913ae151bfa14034bdca636193c96974529f7cf9",
+  "task": "LCB_generation",
+  "title": "atcoder_Many Replacement",
+  "score": 0,
+  "sloc": 20,
+  "chars": 491,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 2,
+   "idiom": 0,
+   "families": {
+    "PLR": 1,
+    "W": 1
+   },
+   "codes": {
+    "PLR2004": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": true,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00010440000187372789,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00010440000187372789,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00011049999739043415,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.00012759999663103372,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0001436000020476058,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00033090000215452164,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0021439000047394074,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0080692999981693,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.007927200000267476,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.010905499999353196,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.031082200002856553,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.031240800002706237,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.03160600000410341,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.031096799997612834,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.031074099999386817,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "e1e226d29b9ab59fc2de2d719a0e7117572f7bd9dc375709a92a673987c1b29d",
+  "task": "LCB_generation",
+  "title": "atcoder_Loong Tracking",
+  "score": 0,
+  "sloc": 39,
+  "chars": 997,
+  "ast_cc": 9,
+  "ruff": {
+   "total": 2,
+   "idiom": 0,
+   "families": {
+    "N": 1,
+    "W": 1
+   },
+   "codes": {
+    "N806": 1,
+    "W292": 1
+   },
+   "mccabe_max": 8,
+   "mccabe_sum": 8,
+   "syntax_error": false
+  },
+  "buffer": true,
+  "testtype": "stdin",
+  "public": [
+   {
+    "s": 0.00018089999502990395,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 0.00018399999680696055,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.009585799998603761,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.026475999999092892,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.019320100000186358,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.03722369999741204,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.019490899998345412,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.04463240000040969,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.04250730000057956,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.05588549999811221,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.062031900000874884,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.061501900003349874,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.06164370000624331,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "3cd8c16a338ab1b2d081add09e47c05cd4bad6c4ddd20c12356d911502fc54a0",
+  "task": "coding_completion",
+  "title": "leetcode_earliest-second-to-mark-indices-i",
+  "score": 1,
+  "sloc": 30,
+  "chars": 985,
+  "ast_cc": 15,
+  "ruff": {
+   "total": 10,
+   "idiom": 2,
+   "families": {
+    "UP": 2,
+    "N": 4,
+    "W": 2,
+    "F": 2
+   },
+   "codes": {
+    "UP004": 2,
+    "N802": 2,
+    "N803": 2,
+    "W291": 1,
+    "F841": 1,
+    "F811": 1,
+    "W292": 1
+   },
+   "mccabe_max": 9,
+   "mccabe_sum": 29,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 6.800000846851617e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.100002454128116e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.0000013541430235e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1999949240125716e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1000014385208488e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.6999983927235007e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.800001185387373e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.700005668681115e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.600000001024455e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.199996955227107e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.700000423938036e-06,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "45d51d0927f37783772c554d860a9c17db83a3e8e31dd02abeb93150acdaba55",
+  "task": "coding_completion",
+  "title": "leetcode_find-the-maximum-number-of-elements-in-subset",
+  "score": 1,
+  "sloc": 21,
+  "chars": 657,
+  "ast_cc": 17,
+  "ruff": {
+   "total": 18,
+   "idiom": 4,
+   "families": {
+    "UP": 2,
+    "N": 2,
+    "SIM": 2,
+    "PLR": 2,
+    "PLW": 4,
+    "E": 3,
+    "F": 2,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 2,
+    "N802": 2,
+    "SIM118": 2,
+    "PLR2004": 2,
+    "PLW2901": 4,
+    "E741": 2,
+    "F841": 1,
+    "E402": 1,
+    "F811": 1,
+    "W292": 1
+   },
+   "mccabe_max": 6,
+   "mccabe_sum": 12,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 7.599999662488699e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.399998139590025e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 6.200003554113209e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.399997801054269e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.900001608300954e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.999995093792677e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.999995432328433e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.999995432328433e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.90000194683671e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.299997716676444e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.024934000000939704,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.026462699999683537,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.02600440000242088,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.031048299999383744,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "4952a5d420fa195e7b041251e85bce64c87b95e8f1cec05d7e16ce149e88c967",
+  "task": "coding_completion",
+  "title": "leetcode_count-prefix-and-suffix-pairs-i",
+  "score": 1,
+  "sloc": 13,
+  "chars": 433,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 5,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "E": 1,
+    "F": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "E731": 1,
+    "F821": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.7999994927085936e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.0000006770715117e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.4999968698248267e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.5999979698099196e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.9000002541579306e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.2000025385059416e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.1999952625483274e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.0000010156072676e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.299996701069176e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.260000423528254e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.2599996959324926e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.40000027185306e-05,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "5c9d7ade302709f4bdcf6e3b64127d1e67a3a3078b3a03ef241329547cf320c6",
+  "task": "coding_completion",
+  "title": "leetcode_ant-on-the-boundary",
+  "score": 0,
+  "sloc": 11,
+  "chars": 260,
+  "ast_cc": 1,
+  "ruff": {
+   "total": 3,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "W292": 1
+   },
+   "mccabe_max": 1,
+   "mccabe_sum": 1,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 3.9999576983973384e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 2.9999500839039683e-07,
+    "ok": false,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 4.999965312890708e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.00003045797348e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.999965312890708e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.00003045797348e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.00003045797348e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.999965312890708e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.999965312890708e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.00003045797348e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 5.999972927384079e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.00003045797348e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 5.00003807246685e-07,
+    "ok": false,
+    "err": null
+   },
+   {
+    "s": 4.999965312890708e-07,
+    "ok": false,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "786432ddcf555d879432b906560955b9d464831f713946ce0210dcba478becd2",
+  "task": "coding_completion",
+  "title": "leetcode_length-of-longest-subarray-with-at-most-k-frequency",
+  "score": 1,
+  "sloc": 3,
+  "chars": 98,
+  "ast_cc": 3,
+  "ruff": {
+   "total": 4,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "F": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "F821": 1,
+    "W292": 1
+   },
+   "mccabe_max": 3,
+   "mccabe_sum": 3,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 6.800000846851617e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.599999323952943e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.099995516706258e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 5.200003215577453e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.299997039604932e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.100002792663872e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.699999746866524e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.499998901039362e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.800000846851617e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 7.000002369750291e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.600000001024455e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.009975399996619672,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.016139299994392786,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.031345999996119644,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.03170729999692412,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "7878539e8dd4fe1d4bc66a440e16c102d66f158fed7828a84f3765505ba8f1d3",
+  "task": "coding_completion",
+  "title": "leetcode_find-if-array-can-be-sorted",
+  "score": 1,
+  "sloc": 3,
+  "chars": 117,
+  "ast_cc": 7,
+  "ruff": {
+   "total": 6,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "W": 2,
+    "E": 1,
+    "PLW": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "W293": 1,
+    "E501": 1,
+    "PLW3301": 1,
+    "W292": 1
+   },
+   "mccabe_max": 5,
+   "mccabe_sum": 6,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 7.100003131199628e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.700000762473792e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.100002792663872e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 3.3000032999552786e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.4999975468963385e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.5000048228539526e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.3999967854470015e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.3000032999552786e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.7000063457526267e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.6999990697950125e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.399997801054269e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.100002792663872e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.999995093792677e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.000002031214535e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 6.70000008540228e-06,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "9e895f817a6a867671d8735578f058a34a19dde837957b1a9c9347d7e13a8e38",
+  "task": "coding_completion",
+  "title": "leetcode_maximize-consecutive-elements-in-an-array-after-modification",
+  "score": 1,
+  "sloc": 23,
+  "chars": 742,
+  "ast_cc": 5,
+  "ruff": {
+   "total": 4,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "E": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "E501": 1,
+    "W292": 1
+   },
+   "mccabe_max": 5,
+   "mccabe_sum": 5,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 3.3000032999552786e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.2999960239976645e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 2.5999979698099196e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.3000036384910345e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.399997123982757e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.699999408330768e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.6000059228390455e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.499997885432094e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.599998646881431e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.800000169780105e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.800000169780105e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.02553250000346452,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.01533210000343388,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.010216599999694154,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "e25750fd4c8fae19856e77a875093ab90a6333a680ccbd45dbabdaddb205bf2a",
+  "task": "coding_completion",
+  "title": "leetcode_count-beautiful-substrings-i",
+  "score": 1,
+  "sloc": 32,
+  "chars": 897,
+  "ast_cc": 17,
+  "ruff": {
+   "total": 13,
+   "idiom": 2,
+   "families": {
+    "UP": 2,
+    "N": 4,
+    "PLR": 4,
+    "E": 1,
+    "F": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 2,
+    "N802": 2,
+    "N806": 2,
+    "PLR2004": 4,
+    "E402": 1,
+    "F811": 1,
+    "W292": 1
+   },
+   "mccabe_max": 9,
+   "mccabe_sum": 16,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 1.0099996870849282e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.899995347950608e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.399998816661537e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.049999991664663e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 8.800001523923129e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 9.900002623908222e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.1299998732283711e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.3000004400964826e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.0100004146806896e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.170000177808106e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.1800002539530396e-05,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00030050000350456685,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.000320099999953527,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0003559000033419579,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.0003547000014805235,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "eae492105162057ac07f4920749d2125f86b5a335557c61d328d49f198af3343",
+  "task": "coding_completion",
+  "title": "leetcode_minimum-number-of-coins-to-be-added",
+  "score": 1,
+  "sloc": 3,
+  "chars": 84,
+  "ast_cc": 4,
+  "ruff": {
+   "total": 3,
+   "idiom": 1,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "W292": 1
+   },
+   "mccabe_max": 4,
+   "mccabe_sum": 4,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 1.3000026228837669e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.3000026228837669e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.400003384333104e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 1.1000010999850929e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.2999953469261527e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.5999976312741637e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.1000014385208488e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.600004907231778e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.01132800000050338,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.004291999997803941,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.013369599997531623,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.004356199999165256,
+    "ok": true,
+    "err": null
+   }
+  ]
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "ebde77f9af990a37740871b38788987a907d4ab08556978324a42c3293bb68a9",
+  "task": "coding_completion",
+  "title": "leetcode_minimum-operations-to-maximize-last-elements-in-arrays",
+  "score": 1,
+  "sloc": 5,
+  "chars": 195,
+  "ast_cc": 9,
+  "ruff": {
+   "total": 5,
+   "idiom": 2,
+   "families": {
+    "UP": 1,
+    "N": 1,
+    "B": 1,
+    "E": 1,
+    "W": 1
+   },
+   "codes": {
+    "UP004": 1,
+    "N802": 1,
+    "B905": 1,
+    "E501": 1,
+    "W292": 1
+   },
+   "mccabe_max": 6,
+   "mccabe_sum": 6,
+   "syntax_error": false
+  },
+  "buffer": false,
+  "testtype": "functional",
+  "public": [
+   {
+    "s": 4.5000051613897085e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.699999746866524e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.6999987312592566e-06,
+    "ok": true,
+    "err": null
+   }
+  ],
+  "private": [
+   {
+    "s": 3.7999998312443495e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.7999998312443495e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.6999990697950125e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 1.8999999156221747e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.7000063457526267e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 4.699999408330768e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 5.599998985417187e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.3000029614195228e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.3999964469112456e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 3.1999952625483274e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 2.2000021999701858e-06,
+    "ok": true,
+    "err": null
+   },
+   {
+    "s": 0.00023990000045159832,
+    "ok": true,
+    "err": null
+   }
+  ]
+ }
+]

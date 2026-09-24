@@ -1,0 +1,389 @@
+{
+ "all": {
+  "n": 1024,
+  "matrix": {
+   "utility": {
+    "utility": 43
+   },
+   "agent_step": {
+    "agent_step": 375,
+    "prose": 2
+   },
+   "code_edit": {
+    "code_edit": 130,
+    "code_generation": 30
+   },
+   "code_generation": {
+    "code_generation": 220,
+    "code_edit": 5
+   },
+   "library_question": {
+    "library_question": 54,
+    "prose": 6
+   },
+   "prose": {
+    "prose": 159
+   }
+  },
+  "per_class": {
+   "utility": {
+    "n": 43,
+    "predicted": 43,
+    "tp": 43,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "agent_step": {
+    "n": 377,
+    "predicted": 375,
+    "tp": 375,
+    "precision": 1.0,
+    "recall": 0.995
+   },
+   "code_edit": {
+    "n": 160,
+    "predicted": 135,
+    "tp": 130,
+    "precision": 0.963,
+    "recall": 0.812
+   },
+   "code_generation": {
+    "n": 225,
+    "predicted": 250,
+    "tp": 220,
+    "precision": 0.88,
+    "recall": 0.978
+   },
+   "library_question": {
+    "n": 60,
+    "predicted": 54,
+    "tp": 54,
+    "precision": 1.0,
+    "recall": 0.9
+   },
+   "prose": {
+    "n": 159,
+    "predicted": 167,
+    "tp": 159,
+    "precision": 0.952,
+    "recall": 1.0
+   }
+  },
+  "accuracy": 0.958,
+  "code_pipelines": {
+   "tp": 385,
+   "fn": 0,
+   "fp": 0
+  },
+  "misroutes": 0,
+  "misroute_ids": []
+ },
+ "user_speaking": {
+  "n": 677,
+  "matrix": {
+   "utility": {
+    "utility": 43
+   },
+   "agent_step": {
+    "agent_step": 28,
+    "prose": 2
+   },
+   "code_edit": {
+    "code_edit": 130,
+    "code_generation": 30
+   },
+   "code_generation": {
+    "code_generation": 220,
+    "code_edit": 5
+   },
+   "library_question": {
+    "library_question": 54,
+    "prose": 6
+   },
+   "prose": {
+    "prose": 159
+   }
+  },
+  "per_class": {
+   "utility": {
+    "n": 43,
+    "predicted": 43,
+    "tp": 43,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "agent_step": {
+    "n": 30,
+    "predicted": 28,
+    "tp": 28,
+    "precision": 1.0,
+    "recall": 0.933
+   },
+   "code_edit": {
+    "n": 160,
+    "predicted": 135,
+    "tp": 130,
+    "precision": 0.963,
+    "recall": 0.812
+   },
+   "code_generation": {
+    "n": 225,
+    "predicted": 250,
+    "tp": 220,
+    "precision": 0.88,
+    "recall": 0.978
+   },
+   "library_question": {
+    "n": 60,
+    "predicted": 54,
+    "tp": 54,
+    "precision": 1.0,
+    "recall": 0.9
+   },
+   "prose": {
+    "n": 159,
+    "predicted": 167,
+    "tp": 159,
+    "precision": 0.952,
+    "recall": 1.0
+   }
+  },
+  "accuracy": 0.936,
+  "code_pipelines": {
+   "tp": 385,
+   "fn": 0,
+   "fp": 0
+  },
+  "misroutes": 0,
+  "misroute_ids": []
+ },
+ "hermes": {
+  "n": 196,
+  "matrix": {
+   "utility": {
+    "utility": 43
+   },
+   "agent_step": {
+    "agent_step": 145,
+    "prose": 2
+   },
+   "code_edit": {},
+   "code_generation": {},
+   "library_question": {
+    "library_question": 5
+   },
+   "prose": {
+    "prose": 1
+   }
+  },
+  "per_class": {
+   "utility": {
+    "n": 43,
+    "predicted": 43,
+    "tp": 43,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "agent_step": {
+    "n": 147,
+    "predicted": 145,
+    "tp": 145,
+    "precision": 1.0,
+    "recall": 0.986
+   },
+   "code_edit": {
+    "n": 0,
+    "predicted": 0,
+    "tp": 0,
+    "precision": null,
+    "recall": null
+   },
+   "code_generation": {
+    "n": 0,
+    "predicted": 0,
+    "tp": 0,
+    "precision": null,
+    "recall": null
+   },
+   "library_question": {
+    "n": 5,
+    "predicted": 5,
+    "tp": 5,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "prose": {
+    "n": 1,
+    "predicted": 3,
+    "tp": 1,
+    "precision": 0.333,
+    "recall": 1.0
+   }
+  },
+  "accuracy": 0.99,
+  "code_pipelines": {
+   "tp": 0,
+   "fn": 0,
+   "fp": 0
+  },
+  "misroutes": 0,
+  "misroute_ids": []
+ },
+ "unique_user_speaking": {
+  "n": 189,
+  "matrix": {
+   "utility": {
+    "utility": 34
+   },
+   "agent_step": {
+    "agent_step": 14,
+    "prose": 1
+   },
+   "code_edit": {
+    "code_edit": 29,
+    "code_generation": 7
+   },
+   "code_generation": {
+    "code_generation": 47,
+    "code_edit": 1
+   },
+   "library_question": {
+    "library_question": 24,
+    "prose": 2
+   },
+   "prose": {
+    "prose": 30
+   }
+  },
+  "per_class": {
+   "utility": {
+    "n": 34,
+    "predicted": 34,
+    "tp": 34,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "agent_step": {
+    "n": 15,
+    "predicted": 14,
+    "tp": 14,
+    "precision": 1.0,
+    "recall": 0.933
+   },
+   "code_edit": {
+    "n": 36,
+    "predicted": 30,
+    "tp": 29,
+    "precision": 0.967,
+    "recall": 0.806
+   },
+   "code_generation": {
+    "n": 48,
+    "predicted": 54,
+    "tp": 47,
+    "precision": 0.87,
+    "recall": 0.979
+   },
+   "library_question": {
+    "n": 26,
+    "predicted": 24,
+    "tp": 24,
+    "precision": 1.0,
+    "recall": 0.923
+   },
+   "prose": {
+    "n": 30,
+    "predicted": 33,
+    "tp": 30,
+    "precision": 0.909,
+    "recall": 1.0
+   }
+  },
+  "accuracy": 0.942,
+  "code_pipelines": {
+   "tp": 84,
+   "fn": 0,
+   "fp": 0
+  },
+  "misroutes": 0,
+  "misroute_ids": []
+ },
+ "producers": {
+  "bench_or_probe": 620,
+  "hermes": 196,
+  "other_agent": 8,
+  "swe_agent": 200
+ },
+ "second_pass": {
+  "turns": 203,
+  "agree": 202,
+  "disagree": 1,
+  "cases": [
+   {
+    "id": 3392,
+    "first": "code_edit",
+    "second": "code_generation"
+   }
+  ]
+ },
+ "benchmarks": {
+  "livecodebench (test5+test6)": {
+   "n": 342,
+   "classes": {
+    "code_generation": 217,
+    "code_edit": 125
+   },
+   "to_code": 342,
+   "not_code_index": []
+  },
+  "bench/domain/tasks.jsonl": {
+   "n": 100,
+   "classes": {
+    "code_generation": 67,
+    "code_edit": 33
+   },
+   "to_code": 100,
+   "not_code_index": []
+  },
+  "bench/domain/tasks_react.jsonl": {
+   "n": 40,
+   "classes": {
+    "code_generation": 19,
+    "code_edit": 21
+   },
+   "to_code": 40,
+   "not_code_index": []
+  },
+  "bench/domain/tasks_type_challenges.jsonl": {
+   "n": 183,
+   "classes": {
+    "code_edit": 183
+   },
+   "to_code": 183,
+   "not_code_index": []
+  }
+ },
+ "deep_thinking": {
+  "context_economy (26 three.js questions)": {
+   "investigate_without_route": 25,
+   "investigate_with_route": 25
+  },
+  "held-out package labels (120)": {
+   "correct_without_route": 90,
+   "correct_with_route": 90,
+   "discordant": {}
+  },
+  "bench/domain/tasks.jsonl": {
+   "investigate_without_route": 88,
+   "investigate_with_route": 0
+  },
+  "bench/domain/tasks_react.jsonl": {
+   "investigate_without_route": 32,
+   "investigate_with_route": 0
+  },
+  "bench/domain/tasks_type_challenges.jsonl": {
+   "investigate_without_route": 183,
+   "investigate_with_route": 0
+  }
+ }
+}

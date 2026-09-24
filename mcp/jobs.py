@@ -405,6 +405,17 @@ def reclaim_dead_local() -> int:
         con.close()
 
 
+def last_created(queue: str) -> float | None:
+    """When the newest job of `queue` was created, in any state. A schedule
+    reads this to enqueue at most once per period, failures included."""
+    con = _db()
+    try:
+        return con.execute("SELECT MAX(created) FROM jobs WHERE queue=?",
+                           (queue,)).fetchone()[0]
+    finally:
+        con.close()
+
+
 def get(job_id: str) -> dict | None:
     con = _db()
     try:

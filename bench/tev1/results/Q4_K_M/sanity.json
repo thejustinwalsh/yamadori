@@ -1,0 +1,162 @@
+{
+ "props": {
+  "model_path": "C:/Users/jwals/textgen/user_data/models/tev1-4b/Tev1-4B-experimental-Q4_K_M.gguf",
+  "n_ctx": 4096,
+  "build": "b1-9a9394a"
+ },
+ "examples": [
+  {
+   "example": "charge-dispute.json",
+   "content": "A",
+   "finish": "stop",
+   "reasoning": null,
+   "key": "duplicate_charge",
+   "constrained": "duplicate_charge",
+   "top": [
+    [
+     "A",
+     -0.003
+    ],
+    [
+     "D",
+     -5.906
+    ],
+    [
+     "B",
+     -8.375
+    ],
+    [
+     "C",
+     -10.567
+    ],
+    [
+     "E",
+     -13.711
+    ]
+   ],
+   "prompt_tokens": 224,
+   "completion_tokens": 2,
+   "ms": 409.7,
+   "server_ms": {
+    "prompt_ms": 144.2,
+    "predicted_ms": 16.7
+   }
+  },
+  {
+   "example": "return-window.json",
+   "content": "A",
+   "finish": "stop",
+   "reasoning": null,
+   "key": "yes",
+   "constrained": "yes",
+   "top": [
+    [
+     "A",
+     -0.004
+    ],
+    [
+     "B",
+     -5.821
+    ],
+    [
+     "C",
+     -6.915
+    ],
+    [
+     "Yes",
+     -11.354
+    ],
+    [
+     "Y",
+     -12.773
+    ]
+   ],
+   "prompt_tokens": 146,
+   "completion_tokens": 2,
+   "ms": 190.5,
+   "server_ms": {
+    "prompt_ms": 64.6,
+    "predicted_ms": 16.4
+   }
+  },
+  {
+   "example": "sentiment.json",
+   "content": "E",
+   "finish": "stop",
+   "reasoning": null,
+   "key": "very_positive",
+   "constrained": "very_positive",
+   "top": [
+    [
+     "E",
+     -0.135
+    ],
+    [
+     "D",
+     -2.106
+    ],
+    [
+     "C",
+     -5.567
+    ],
+    [
+     "B",
+     -7.796
+    ],
+    [
+     "A",
+     -9.157
+    ]
+   ],
+   "prompt_tokens": 180,
+   "completion_tokens": 2,
+   "ms": 163.0,
+   "server_ms": {
+    "prompt_ms": 66.1,
+    "predicted_ms": 16.1
+   }
+  },
+  {
+   "example": "yes-no.json",
+   "content": "B",
+   "finish": "stop",
+   "reasoning": null,
+   "key": "no",
+   "constrained": "no",
+   "top": [
+    [
+     "B",
+     -0.001
+    ],
+    [
+     "A",
+     -7.428
+    ],
+    [
+     "C",
+     -12.729
+    ],
+    [
+     "\"B",
+     -13.623
+    ],
+    [
+     "D",
+     -13.753
+    ]
+   ],
+   "prompt_tokens": 132,
+   "completion_tokens": 2,
+   "ms": 160.6,
+   "server_ms": {
+    "prompt_ms": 60.4,
+    "predicted_ms": 17.8
+   }
+  }
+ ],
+ "thinking_left_on": {
+  "content": "",
+  "reasoning": "The user wants to know if the museum",
+  "finish": "length"
+ }
+}

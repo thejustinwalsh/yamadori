@@ -152,6 +152,12 @@ def main() -> int:
         s = pr.summarize(rows)
         check("summary counts per arm", s["bonsai"]["n"] == 3
               and s["bonsai"]["resolved"] == 1 and s["yamadori"]["resolved"] == 1)
+        check("agent_error is not in the scored denominator",
+              s["bonsai"]["scored"] == 2 and s["bonsai"]["resolved_pct"] == 50.0)
+        lo, hi = pr.wilson(10, 50)
+        check("Wilson 10/50 = [11.2, 33.0]%",
+              round(100 * lo, 1) == 11.2 and round(100 * hi, 1) == 33.0)
+        check("Wilson of 0/0 is the whole interval", pr.wilson(0, 0) == (0.0, 1.0))
         # Rows must be JSON-serialisable as written to results.jsonl.
         check("rows serialise", all(json.loads(json.dumps(r)) for r in rows))
         # The arm table is what the runner and the doc name.

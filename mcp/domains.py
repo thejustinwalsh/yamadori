@@ -141,9 +141,27 @@ EXTENSION_DOMAINS = {
 # classified almost entirely by "input" matching `ui-component` (278/342
 # carried nothing else) -- the right gate outcome for the wrong reason, and
 # one that a later fix to "input" would have silently reversed.
+#
+# A WORD COUNTS ONLY IN ITS DOMAIN SENSE (2026-09-23). The Rust C-ABI task
+# bench/domain/tasks/rs12 ("a point parser ... after trimming ASCII
+# whitespace") was classified `visual-design`, and nothing else, because of
+# the bare word "whitespace". In the benchmark prompts (bench/domain/tasks*,
+# 5 hits) it meant characters every time -- a parser's, a type challenge's
+# TrimLeft -- and never layout. Same rule as `vertex` above: a word whose
+# first sense in programming text is not the domain's keeps only the phrases
+# that carry the domain's sense. "whitespace" (characters) needs a layout
+# phrase; "hierarchy" (class / type / module hierarchy) needs "visual" and
+# kin; "contrast" loses the English connective ("in contrast", "by
+# contrast"). The design-sense phrases have NO measured positive in this
+# repo's real input (n=0): they are kept so a design question phrased that
+# way still matches, not because one was observed.
 WORD_DOMAINS = {
-    "visual-design": r"\b(colou?r|palette|typograph\w*|font|spacing|contrast|"
-                     r"dark mode|hierarchy|whitespace)\b",
+    "visual-design": r"\b(colou?r|palette|typograph\w*|font|spacing|"
+                     r"(?<!in )(?<!by )contrast|dark mode|"
+                     r"(?:visual|typographic|information|content|heading) "
+                     r"hierarchy|"
+                     r"(?:more|less|generous|enough|extra|negative) white ?space|"
+                     r"white ?space (?:between|around))\b",
     "ui-component": r"\b(button|modal|dropdown|form field|tooltip|navbar|"
                     r"component|input)\b",
     "motion": r"\b(animat\w*|transition|easing|keyframe|spring)\b",
@@ -184,6 +202,106 @@ LANGUAGE_DOMAINS = {
 }
 
 
+# DERIVED DOMAINS (#20 in docs/SELF-IMPROVEMENT-LOG.md, 2026-09-24). A package
+# indexed with no PACKAGE_DOMAINS entry reopened the tool gate for EVERY
+# request (HELD_SOURCE_UNMAPPED) until someone mapped it by hand: the Octopus
+# pilot indexed @pmndrs/glyph and three-flatland and the gate offered library
+# help to all 342 LiveCodeBench prompts again. So a held package with no entry
+# is mapped from its OWN IMPORTS, read from its indexed source files (the
+# index's package_files, in the store's _src cache) by discover.imports -- a
+# parser, not a pattern (PROTOCOL rule 8): the union of the HAND-MAPPED
+# domains of every package it imports in at least DERIVE_MIN_FILES of its
+# files. One level, through the hand map only, so a derivation never rests on
+# another derivation. The indexer keeps no package.json, so keywords and peer
+# dependencies are not available as evidence; a package whose imports name
+# nothing mapped stays unmapped, and the gate says so as before. Computed on
+# the first request after the package appears (held_sources is re-read on the
+# directory listing), cached by the index file's mtime. DERIVE_MIN_FILES is a
+# CHOICE: one stray import (a test helper, a vendored util) should not assign a
+# domain.
+DERIVE_MIN_FILES = 2
+DERIVE_MAX_FILES = 600
+_DERIVE_FENCE = {".ts": "ts", ".tsx": "tsx", ".mts": "ts", ".cts": "ts",
+                 ".js": "js", ".mjs": "js", ".cjs": "js", ".jsx": "tsx",
+                 ".py": "py", ".rs": "rs"}
+_DERIVED_CACHE: dict = {}
+
+
+def derived_domains(name: str, db: str) -> dict:
+    """{domains, imports, files}: `name`'s domains derived from the packages
+    its own source files import (see DERIVED DOMAINS). Never raises."""
+    import discover
+    try:
+        key = (os.path.abspath(db), os.stat(db).st_mtime_ns)
+    except OSError:
+        return {"domains": [], "imports": {}, "files": 0}
+    if key in _DERIVED_CACHE:
+        return _DERIVED_CACHE[key]
+    stem = os.path.basename(db)[:-len(".sqlite3")]
+    src = os.path.join(os.path.dirname(db), "_src", stem)
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            files = [r[0] for r in con.execute(
+                "SELECT path FROM package_files ORDER BY path")]
+        finally:
+            con.close()
+    except sqlite3.Error:
+        files = []
+    counts: dict[str, int] = {}
+    read = 0
+    for path in files[:DERIVE_MAX_FILES]:
+        lang = _DERIVE_FENCE.get(os.path.splitext(path)[1].lower())
+        if not lang:
+            continue
+        try:
+            with open(os.path.join(src, path), encoding="utf-8",
+                      errors="replace") as f:
+                head = "".join(f.readline() for _ in range(120))
+        except OSError:
+            continue
+        read += 1
+        for pkg in set(discover.imports(f"```{lang}\n{head}\n```")):
+            if pkg != name:
+                counts[pkg] = counts.get(pkg, 0) + 1
+    doms: set[str] = set()
+    used = {}
+    for pkg, n in sorted(counts.items()):
+        if n >= DERIVE_MIN_FILES and pkg in PACKAGE_DOMAINS:
+            doms |= PACKAGE_DOMAINS[pkg]
+            used[pkg] = n
+    out = {"domains": sorted(doms), "imports": used, "files": read}
+    _DERIVED_CACHE[key] = out
+    return out
+
+
+def package_domains(name: str, held: dict | None = None) -> set[str]:
+    """A package's domains: its PACKAGE_DOMAINS entry, else, for a HELD
+    package, derived from its own imports (DERIVED DOMAINS). Empty when
+    neither says anything."""
+    if name in PACKAGE_DOMAINS:
+        return set(PACKAGE_DOMAINS[name])
+    try:
+        versions = (held if held is not None else held_sources()).get(name)
+    except Exception:                                            # noqa: BLE001
+        versions = None
+    if not versions:
+        return set()
+    return set(derived_domains(name, versions[0][1])["domains"])
+
+
+def _imported_domains(pkg: str) -> set[str]:
+    """The domains a request's import of `pkg` implies: the hand map, else a
+    held package's derived domains."""
+    if pkg in PACKAGE_DOMAINS:
+        return PACKAGE_DOMAINS[pkg]
+    try:
+        held = held_sources()
+    except Exception:                                            # noqa: BLE001
+        return set()
+    return package_domains(pkg, held) if pkg in held else set()
+
+
 def _blob(messages: list[dict]) -> str:
     text_all = []
     for m in messages:
@@ -209,7 +327,7 @@ def detect(messages: list[dict], imports: list[str] | None = None) -> set[str]:
     blob = _blob(messages)
 
     for pkg in (discover.imports(blob) if imports is None else imports):
-        found |= PACKAGE_DOMAINS.get(pkg, set())
+        found |= _imported_domains(pkg)
     for ext, doms in EXTENSION_DOMAINS.items():
         if re.search(re.escape(ext) + r"\b", blob):
             found |= doms
@@ -237,7 +355,7 @@ def strong_evidence(messages: list[dict],
     blob = _blob(messages)
     found: set[str] = set()
     for pkg in (discover.imports(blob) if imports is None else imports):
-        found |= PACKAGE_DOMAINS.get(pkg, set())
+        found |= _imported_domains(pkg)
     for ext, doms in EXTENSION_DOMAINS.items():
         if re.search(re.escape(ext) + r"\b", blob):
             found |= doms
@@ -319,6 +437,12 @@ HELD_ALIASES = {
     "type-fest": r"\btype-fest\b",
     "@typegpu/noise": r"@typegpu/noise",
     "@typegpu/three": r"@typegpu/three",
+    # The unscoped pmndrs package. With no alias, `_named` fell back to the
+    # bare install name, so the ordinary word "postprocessing" in a shader
+    # question named this package. Reached by a spelling that can only be
+    # the package: quoted or backticked as a module, its repo, a version pin.
+    "postprocessing": r"""['"`]postprocessing['"`]|\bpmndrs/postprocessing\b"""
+                      r"|\bpostprocessing@\d",
 }
 
 # An identifier-shaped token: camelCase, snake_case, or letters with a digit.
@@ -334,6 +458,90 @@ _DIGIT = re.compile(r"[A-Za-z].*\d|\d.*[A-Za-z]")
 # the lookup is per request. The most recent text is scanned first, so the cap
 # drops the oldest turns, which describe the current task least.
 MAX_SYMBOL_PROBES = 400
+
+# ---------------------------------------------------------------------------
+# A NAME IS EVIDENCE ONLY IN CODE CONTEXT (2026-09-23)
+#
+# Live, 2026-09-23: a Hermes request -- "I want to start this project in
+# ~/Developer/..." above an 8.8 KB pasted game spec -- logged
+# `held=@types/three:MOUSE;three:MOUSE;wgpu-matrix:API`. Both are English
+# in that text (an ALLCAPS spec heading, "Web Audio API"), and both are
+# defined by a held package (three's src/constants.js `MOUSE`, wgpu-matrix's
+# `API` type), so the symbol lookup called the request "about" three.js and
+# deep thinking ran for minutes on a task that needed the client's own file
+# tools. A capitalised or ALLCAPS word -- API, MOUSE, POINT, Event -- is
+# spelled the same in prose and in code; what makes it a name is WHERE it
+# stands. So such a word counts only in code context: backticked (selection
+# reads backticks itself), or in identifier syntax:
+#
+#   Foo.bar / x.Foo    member access (THREE.MOUSE, MOUSE.LEFT, Info.autoReset)
+#                      -- not a file or product spelling (Node.js, Three.js)
+#   Foo(               a call or constructor (Loop(), new Pipelines())
+#   Foo:: / ::Foo      a path
+#   extends / implements / instanceof Foo, import Foo from, import { Foo }
+#
+# A fenced block is NOT treated as context word-for-word: Hermes wraps every
+# pasted attachment in ```, so "every capitalised word inside a fence" would
+# be every heading of a pasted spec. Code inside a fence is caught by the
+# syntax above. Names that are code-shaped on their own (camelCase,
+# snake_case, a digit) are unchanged: English words do not look like that.
+#
+# THE PLATFORM STOPLIST. In identifier syntax, `Array.from(...)`, `new
+# Event('x')` and `Math.random()` are code -- but the code of the JS / DOM /
+# Rust standard library, which every program uses and which a held package
+# re-declaring (typegpu's `Array`, @types/three's `Event`) does not make the
+# question about. A name the platform itself defines is never evidence for a
+# held package, in any context. Deliberately NOT listed: `Node` and `Path`,
+# which three.js defines as core API (src/nodes/core/Node.js,
+# src/extras/core/Path.js) and a TSL question uses constantly; the DOM's
+# `Node` is rarely what a request here writes.
+PLATFORM_NAMES = frozenset("""
+Array Object Function String Number Boolean Symbol BigInt Math Date JSON
+Promise Map Set WeakMap WeakSet WeakRef Error TypeError RangeError SyntaxError
+ReferenceError RegExp Reflect Proxy Intl Atomics ArrayBuffer DataView Iterator
+Event EventTarget CustomEvent Element Document Window Image Audio Blob
+File FileReader URL Request Response Headers Worker WebSocket Performance
+Console Buffer Storage Location History Navigator Screen Selection Range Text
+Comment Attr Record Partial Required Readonly Pick Omit Exclude Extract
+Parameters Awaited NonNullable InstanceType ReturnType Uppercase Lowercase
+Vec Box Option Result Some None Ok Err Rc Arc Cell RefCell Mutex HashMap
+HashSet BTreeMap Self Default Clone Copy Debug Display Drop Send Sync Sized
+Into From Iterator
+NaN Infinity API GPU CPU URL URI HTTP HTTPS JSON HTML CSS DOM SVG XML UTF ASCII
+""".split())
+
+_CAP_NAME = r"[A-Z][A-Za-z0-9_$]{2,63}"
+# What follows a dot when the dot is a file extension or a product spelling
+# (Node.js, Three.js, index.html, example.com), not member access.
+_NOT_MEMBER = (r"(?:js|jsx|ts|tsx|mjs|cjs|json|md|rs|py|css|html?|wasm|toml|"
+               r"ya?ml|txt|io|org|com|net|dev|ai|app|sh|exe)\b")
+_CONTEXT = [
+    re.compile(r"\b(" + _CAP_NAME + r")\.(?!" + _NOT_MEMBER + r")(?=[A-Za-z_$])"),
+    re.compile(r"(?<=[A-Za-z0-9_$\])]\.)(" + _CAP_NAME + r")\b"),
+    re.compile(r"\b(" + _CAP_NAME + r")\((?!s\))"),
+    re.compile(r"\b(" + _CAP_NAME + r")::"),
+    re.compile(r"::(" + _CAP_NAME + r")\b"),
+    re.compile(r"\b(?:extends|implements|instanceof)\s+(" + _CAP_NAME + r")\b"),
+    re.compile(r"\bimport\s+(" + _CAP_NAME + r")\s+from\b"),
+]
+_IMPORT_BRACES = re.compile(r"\bimport\s*(?:type\s*)?\{([^}]{0,600})\}")
+
+
+def code_context_names(text: str) -> list[str]:
+    """Capitalised / ALLCAPS names that stand in identifier syntax in `text`.
+
+    These are the names that are NOT code-shaped on their own and so are
+    evidence only where they stand (see above). Platform names are dropped.
+    Order of first appearance, no duplicates.
+    """
+    out: dict[str, None] = {}
+    for pat in _CONTEXT:
+        for m in pat.finditer(text):
+            out.setdefault(m.group(1), None)
+    for m in _IMPORT_BRACES.finditer(text):
+        for tok in re.findall(r"\b(" + _CAP_NAME + r")\b", m.group(1)):
+            out.setdefault(tok, None)
+    return [t for t in out if t not in PLATFORM_NAMES]
 
 _HELD_CACHE: dict = {}
 
@@ -431,7 +639,18 @@ def _named(text: str, held: dict) -> list[str]:
 
 
 def _symbols(text: str, held: dict) -> dict[str, list[str]]:
-    """Identifier-shaped tokens in the text that a held package defines."""
+    """Code-shaped names in the text that a held package defines.
+
+    Only names that are code-shaped on their own (camelCase, snake_case, a
+    digit): English-shaped words -- API, MOUSE, POINT, Event -- are never
+    probed here, and neither are platform names (PLATFORM_NAMES: `WeakMap`,
+    `ArrayBuffer`, `HashMap`). Capitalised words in identifier syntax
+    (`code_context_names`) are NOT added: measured on the benchmark prompts
+    (bench/domain/tasks*), asking every table about them offered tools to 21
+    React and type-challenge tasks on fiber's `React`, @types/three's `Equal`,
+    typegpu's `Warn` -- the user's own code sharing a short name with a
+    library. selection asks them only of a package the text names.
+    """
     seen: list[str] = []
     have: set[str] = set()
     # Newest text last in the blob; walk it backwards so the cap keeps it.
@@ -445,6 +664,7 @@ def _symbols(text: str, held: dict) -> dict[str, list[str]]:
         seen.append(tok)
         if len(seen) >= MAX_SYMBOL_PROBES:
             break
+    seen = [t for t in seen if t not in PLATFORM_NAMES]
     if not seen:
         return {}
     out: dict[str, list[str]] = {}
@@ -544,9 +764,11 @@ def tool_admission(messages: list[dict], root: str | None, *,
       a symbol it mentions     shaped name that the package's own symbol table
                                holds. Decided from the index itself.
       a held package has no    offer. Its domains are unknown, so no request
-      domain mapping           can be ruled out by domain. (Indexing an
-                               unmapped package turns this gate off. Map it in
-                               PACKAGE_DOMAINS to turn it back on.)
+      domain mapping           can be ruled out by domain. A package counts as
+                               mapped by PACKAGE_DOMAINS or by the domains
+                               DERIVED from its own imports (derived_domains,
+                               2026-09-24); only one that neither maps turns
+                               this gate off.
       no domain evidence       offer. This module's own rule: "Nothing is
                                inferred from the absence of a signal."
       domains meet a held      offer.
@@ -623,14 +845,22 @@ def tool_admission(messages: list[dict], root: str | None, *,
                          "a held package defines "
                          + "; ".join(f"{k}: {', '.join(v[:4])}"
                                      for k, v in syms.items()), ev)
-    unmapped = [n for n in names_held if n not in PACKAGE_DOMAINS]
+    # Mapped by hand, else derived from the package's own imports (DERIVED
+    # DOMAINS); only a package neither maps is unmapped.
+    doms = {n: package_domains(n, held) for n in names_held}
+    derived = {n: derived_domains(n, held[n][0][1])
+               for n in names_held if n not in PACKAGE_DOMAINS and doms[n]}
+    if derived:
+        ev["derived"] = {n: {"domains": d["domains"], "imports": d["imports"]}
+                         for n, d in derived.items()}
+    unmapped = [n for n in names_held if not doms[n]]
     if unmapped:
         ev["unmapped"] = unmapped
         return _decision(True, "HELD_SOURCE_UNMAPPED",
                          "held package(s) with no domain mapping, so no request "
                          "can be ruled out by domain: " + ", ".join(unmapped), ev)
 
-    served = set().union(*(PACKAGE_DOMAINS[n] for n in names_held))
+    served = set().union(*(doms[n] for n in names_held))
     ev["held_domains"] = sorted(served)
     anywhere = detect(messages, imports=list(discovered or []))
     if anywhere & served:
@@ -657,8 +887,9 @@ def tool_admission(messages: list[dict], root: str | None, *,
              "effect": ("the next turn re-decides, and offers the tools if the "
                         "server holds that library")},
             {"fixable_by": "operator",
-             "action": ("index the library into the package store, and map it "
-                        "in domains.PACKAGE_DOMAINS"),
+             "action": ("index the library into the package store (its "
+                        "domains are derived from its own imports; map it "
+                        "in domains.PACKAGE_DOMAINS only if that is wrong)"),
              "effect": "requests in its domain are offered the tools"}])
 
 

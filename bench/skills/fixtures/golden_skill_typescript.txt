@@ -1,0 +1,7 @@
+TypeScript Strictness
+applies when: TypeScript is being used
+- DO: Turn on strict mode so null and undefined are checked and implicit any is an error.
+- WHEN arrays or records are indexed by computed keys: enable noUncheckedIndexedAccess so indexed reads include undefined.
+- WHEN a value can take one of several shapes: model it as a discriminated union with a literal kind field and switch on it.
+- DO NOT: use any to silence a type error.
+- WHEN input comes from outside the program: validate it at the boundary instead of trusting a type assertion.

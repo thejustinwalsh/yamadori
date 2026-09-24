@@ -1,0 +1,103 @@
+{
+ "arms_preregistered": {
+  "N0_e1": "E1 alone (argmax)",
+  "N1_e1top2_layahead": "E1's top two -> Laya's trained head picks between them (its probabilities restricted to the two)",
+  "N2_e1top2_layazs": "E1's top two -> Laya zero-shot choice over the two (its own option descriptions, both orders averaged)",
+  "N3_lowmargin_layahead": "Laya's trained head (restricted to E1's top two) only where E1's margin is under the 25th percentile of its out-of-fold training margins",
+  "N4_lowmargin_layazs": "as N3 with the zero-shot two-way choice",
+  "N5_average": "exploratory: average of E1's and Laya's head probabilities"
+ },
+ "rule": "a combination is adopted only if it beats N0 with exact McNemar p < 0.05 on set 1 AND is not behind N0 on set 2; 5 pre-registered combinations, so Bonferroni alpha is 0.01 -- reported beside the raw p",
+ "set1": {
+  "n": 120,
+  "cut": 0.708867609500885,
+  "low_margin_rows": 28,
+  "correct": {
+   "N0_e1": 104,
+   "N1_e1top2_layahead": 93,
+   "N2_e1top2_layazs": 84,
+   "N3_lowmargin_layahead": 103,
+   "N4_lowmargin_layazs": 104,
+   "N5_average": 107,
+   "laya_head_alone": 80
+  },
+  "vs_N0": {
+   "N1_e1top2_layahead": {
+    "a_only": 16,
+    "b_only": 5,
+    "p": 0.02660369873046875
+   },
+   "N2_e1top2_layazs": {
+    "a_only": 28,
+    "b_only": 8,
+    "p": 0.0011932429624721408
+   },
+   "N3_lowmargin_layahead": {
+    "a_only": 3,
+    "b_only": 2,
+    "p": 1.0
+   },
+   "N4_lowmargin_layazs": {
+    "a_only": 4,
+    "b_only": 4,
+    "p": 1.0
+   },
+   "N5_average": {
+    "a_only": 3,
+    "b_only": 6,
+    "p": 0.5078125
+   },
+   "laya_head_alone": {
+    "a_only": 31,
+    "b_only": 7,
+    "p": 0.00011616700794547796
+   }
+  }
+ },
+ "set2": {
+  "n": 141,
+  "cut": 0.708867609500885,
+  "low_margin_rows": 54,
+  "correct": {
+   "N0_e1": 110,
+   "N1_e1top2_layahead": 102,
+   "N2_e1top2_layazs": 108,
+   "N3_lowmargin_layahead": 110,
+   "N4_lowmargin_layazs": 115,
+   "N5_average": 100,
+   "laya_head_alone": 86
+  },
+  "vs_N0": {
+   "N1_e1top2_layahead": {
+    "a_only": 26,
+    "b_only": 18,
+    "p": 0.2912152365458951
+   },
+   "N2_e1top2_layazs": {
+    "a_only": 17,
+    "b_only": 15,
+    "p": 0.860050065908581
+   },
+   "N3_lowmargin_layahead": {
+    "a_only": 9,
+    "b_only": 9,
+    "p": 1.0
+   },
+   "N4_lowmargin_layazs": {
+    "a_only": 5,
+    "b_only": 10,
+    "p": 0.3017578125
+   },
+   "N5_average": {
+    "a_only": 19,
+    "b_only": 9,
+    "p": 0.08715855330228806
+   },
+   "laya_head_alone": {
+    "a_only": 43,
+    "b_only": 19,
+    "p": 0.0031560602510210594
+   }
+  }
+ }
+}

@@ -232,8 +232,17 @@ export function Tokonoma({ vitals, datasets, fill }: { vitals: Vitals | null; da
         </div>
       </details>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {state.fanout === null && <Chip tone="muted">FAN-OUT · INERT</Chip>}
-        <Chip tone="muted">FOLIAGE · INERT</Chip>
+        {inert.has('fanout') ? (
+          <Chip tone="muted">FAN-OUT · INERT</Chip>
+        ) : state.fanout ? (
+          <Chip tone="cyan">FAN-OUT · {state.fanout.arity} · #{state.fanout.chosen} DELIVERED</Chip>
+        ) : null}
+        {state.foliage ? (
+          // The recall path is labelled: YAMADORI_RECALL picks hints or skills.
+          <Chip tone="moss">FOLIAGE · {state.foliage.path.toUpperCase()} · {Math.round(state.foliage.density * 100)}%</Chip>
+        ) : (
+          <Chip tone="muted">FOLIAGE · INERT</Chip>
+        )}
         {state.alarms ? <Chip tone="crimson">{state.alarms} CRIMSON CAP{state.alarms === 1 ? '' : 'S'}</Chip> : null}
         {state.errored ? <Chip tone="rose">{state.errored} SHARI · ERRORED JOBS</Chip> : null}
       </div>

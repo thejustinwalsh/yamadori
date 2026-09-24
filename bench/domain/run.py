@@ -42,8 +42,8 @@ THE SELF-CHECK ARMS (the model may compile its own answer)
                     every request -- plus ONE client-side tool in the body's
                     `tools`: `check_solution {"code": string}`. This runner is
                     the client harness (as Hermes or Claude Code would be):
-                    the proxy merges it with its own tools (proxy.merge_tools;
-                    client tools pass through even with retrieval off) and
+                    the proxy passes the client's tools through untouched
+                    (proxy.main_tools; ours are the second brain's) and
                     returns a call to it to the client (proxy.complete, the
                     `not ours` return). The runner then runs grade.public_check:
                     the grader's extract + compile stages against the real
@@ -81,6 +81,18 @@ THE SUITES (--suite, recorded in the manifest; a run dir holds one)
           out of every headline, as it does three_tsl
   all     the three together
 
+SHARED CARD, STYLE, CORPUS
+
+  A 429 (every main lane busy: other benchmarks share the model) generated
+  nothing, so it is not a row: post_admitted waits BUSY_WAIT_S and asks
+  again, recording busy_429s / busy_wait_s and keeping the wait out of
+  `seconds`. --concurrent-with names the other consumers; the manifest keeps
+  it and analyse.py labels every timing figure CONCURRENT. Every graded row
+  also gets the SEPARATE style score (grade_style.py: lint_errors,
+  lint_warnings, modern_flags, under `style`), which never changes outcome.
+  Each invocation records the hints corpus it ran against (review-state
+  counts, sha256 of bench/hint_buckets.jsonl and the recipe files).
+
 A ROW THE STACK DID NOT RUN AS ASKED IS NOT A RESULT
 
 Every response's `x_yamadori` is checked against the arm (`verify`). A row
@@ -117,8 +129,10 @@ import glob
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import urllib.error
@@ -145,8 +159,11 @@ ARMS: dict[str, dict] = {
     "A3": dict(ALL_OFF, investigate=True),
     "A4": dict(ALL_OFF, fanout=FANOUT_N),
     "A5": {},                                   # nothing forced: selection decides
+    # Everything the stack has, forced on: check_code (the proxy's parse /
+    # format tool) and repair (its feedback pass on broken final code) were
+    # added 2026-09-23 and are forced here too (operator decision).
     "A6": {"retrieval": True, "hints": True, "investigate": True,
-           "fanout": FANOUT_N},
+           "fanout": FANOUT_N, "check_code": True, "repair": True},
     # The thinking-cap dimension: A0 with only the runaway breaker moved.
     "C8": dict(ALL_OFF, reasoning_cap=8192),
     "C32": dict(ALL_OFF, reasoning_cap=32768),
@@ -162,7 +179,7 @@ ARM_NOTES = {
     "A3": "deep thinking only (retrieval off)",
     "A4": f"fan-out only (N={FANOUT_N})",
     "A5": "all allowed, fired by the selection engine",
-    "A6": "all forced on",
+    "A6": "all forced on (incl. check_code and repair)",
     "C8": "A0, thinking cap 8192", "C32": "A0, thinking cap 32768 (reference)",
     "C128": "A0, thinking cap 131072 (effectively unlimited)",
     "S0": "A0 + check_solution (compile only; hidden tests never run)",
@@ -278,7 +295,9 @@ def verify(arm: str, effort: str, x: dict | None, *, finish: str,
     if not isinstance(sel, dict):
         return bad + ["no selection record"]
     sig = sel.get("signals") or {}
-    if sorted(sig.get("forced") or []) != exp["forced"]:
+    got_forced = sorted(k for k in (sig.get("forced") or [])
+                        if k in ("hints", "investigate", "fanout"))
+    if got_forced != exp["forced"]:
         bad.append(f"selection saw forced={sig.get('forced')}, arm forces "
                    f"{exp['forced']} (header not applied?)")
     if twin(arm) == "A5":
@@ -292,6 +311,19 @@ def verify(arm: str, effort: str, x: dict | None, *, finish: str,
     if "fanout_n" in exp and int(sel.get("fanout_n") or 0) != exp["fanout_n"]:
         bad.append(f"selection.fanout_n={sel.get('fanout_n')}, arm forces "
                    f"{exp['fanout_n']}")
+
+    # check_code and repair, when the arm forces them, must be in effect.
+    forced = ARMS[arm]
+    if forced.get("check_code") is True:
+        cc = x.get("check_code")
+        if not isinstance(cc, dict):
+            bad.append("check_code forced on but x_yamadori has no check_code record")
+        elif not cc.get("offered"):
+            bad.append("check_code forced on but not offered")
+    if forced.get("repair") is True:
+        rp = x.get("repair")
+        if not (isinstance(rp, dict) and rp.get("enabled")):
+            bad.append(f"repair forced on but x_yamadori.repair={json.dumps(rp)[:80]}")
 
     # What the selection chose must then have HAPPENED.
     if not sel.get("hints") and (x.get("hints") or []):
@@ -313,6 +345,17 @@ def verify(arm: str, effort: str, x: dict | None, *, finish: str,
         if finish == "stop" and content.strip():
             if not isinstance(fan, dict):
                 bad.append(f"fan-out {n} chosen, no fanout record")
+            elif fan.get("mode") == "sequential":
+                # Sequential fan-out (mcp/fanout.py, 2026-09-23): n is the
+                # MOST candidates, the original included, and the procedure
+                # stops at 2 when the grade is clear. So 2..n candidates is
+                # the arm working; a skipped or failed one is not.
+                got = int(fan.get("n") or 0)
+                if fan.get("error") or fan.get("skipped") or not 2 <= got <= n:
+                    bad.append(f"fan-out asked up to {n}, got {got} candidates"
+                               + (f" ({fan.get('error') or fan.get('skipped')})"
+                                  if fan.get("error") or fan.get("skipped")
+                                  else ""))
             elif fan.get("error") or int(fan.get("n") or 0) != n:
                 bad.append(f"fan-out asked {n}, delivered {fan.get('n')}"
                            + (f" ({fan.get('error')})" if fan.get("error") else ""))
@@ -356,10 +399,11 @@ def done_pairs(rows: list[dict]) -> set[str]:
             if r.get("outcome") in ("pass", "fail")}
 
 
-def mark_stale(run_dir: str, reason: str) -> int:
-    """Mark every not-yet-stale row of a run `stale_code`. Nothing is deleted:
-    the file is rewritten whole (to a temp file, then replaced) with each row
-    kept and flagged. Returns how many rows were newly marked."""
+def mark_stale(run_dir: str, reason: str, arms: list[str] | None = None) -> int:
+    """Mark every not-yet-stale row of a run `stale_code` (only `arms`' rows,
+    when given). Nothing is deleted: the file is rewritten whole (to a temp
+    file, then replaced) with each row kept and flagged. Returns how many rows
+    were newly marked."""
     path = os.path.join(run_dir, "rows.jsonl")
     rows, bad = load_rows(path)
     if bad:
@@ -367,7 +411,7 @@ def mark_stale(run_dir: str, reason: str) -> int:
     n = 0
     stamp = {"reason": reason, "marked_at": time.time()}
     for r in rows:
-        if not r.get("stale_code"):
+        if not r.get("stale_code") and (not arms or r.get("arm") in arms):
             r["stale_code"] = stamp
             n += 1
     tmp = path + ".tmp"
@@ -387,10 +431,15 @@ def append_row(path: str, row: dict) -> None:
 
 # ------------------------------------------------------------ the request --
 def post(url: str, key: str, body: dict, feats: dict,
-         timeout: float) -> tuple[int, dict | str]:
+         timeout: float, session: str | None = None) -> tuple[int, dict | str]:
     headers = {"Content-Type": "application/json", "Connection": "close",
                "Authorization": f"Bearer {key}",
                "X-Yamadori-Features": json.dumps(feats, sort_keys=True)}
+    if session:
+        # One proxy session per ROW. Without it every arm, attempt and run of
+        # a task shared one session (same first message -> same nebari key),
+        # so one row's session state could reach another's.
+        headers["X-Yamadori-Session"] = session
     req = urllib.request.Request(f"{url}/v1/chat/completions",
                                  data=json.dumps(body).encode(), headers=headers)
     try:
@@ -402,6 +451,51 @@ def post(url: str, key: str, body: dict, feats: dict,
         return status, json.loads(raw)
     except ValueError:
         return status, raw
+
+
+# A 429 is admission refusing the request because every main lane is busy
+# (other benchmarks share the card). Nothing was generated, so it is "not run"
+# (AGENTS.md), never a row: wait and ask again. The wait is recorded and kept
+# OUT of the row's seconds.
+BUSY_WAIT_S = 30.0
+BUSY_MAX_S = float(os.environ.get("DOMAIN_BUSY_MAX_S", 4 * 3600))
+# A refused connection (the proxy restarting) is waited out the same way, for
+# at most this long; past it the proxy is down, and the row says so.
+DOWN_MAX_S = float(os.environ.get("DOMAIN_DOWN_MAX_S", 15 * 60))
+
+
+def post_admitted(url: str, key: str, body: dict, feats: dict, timeout: float,
+                  sleep=time.sleep, session: str | None = None
+                  ) -> tuple[int, dict | str, float, int]:
+    """post(), retrying HTTP 429 until admitted (or BUSY_MAX_S of waiting).
+    Returns (status, body, seconds spent waiting for a lane, 429 count)."""
+    waited, n, down = 0.0, 0, 0.0
+    while True:
+        try:
+            status, d = post(url, key, body, feats, timeout, session=session)
+        except urllib.error.URLError as e:
+            # Connection REFUSED: the proxy is restarting and nothing ran.
+            # Anything else (a reset mid-generation) is a real stack error.
+            refused = isinstance(getattr(e, "reason", None), ConnectionRefusedError)
+            if not refused or down >= DOWN_MAX_S:
+                raise
+            n += 1
+            sleep(BUSY_WAIT_S)
+            waited += BUSY_WAIT_S
+            down += BUSY_WAIT_S
+            continue
+        if status != 429 or waited >= BUSY_MAX_S:
+            return status, d, waited, n
+        n += 1
+        sleep(BUSY_WAIT_S)
+        waited += BUSY_WAIT_S
+
+
+def new_session() -> str:
+    """A fresh X-Yamadori-Session nonce: one per row (all rounds of a
+    self-check row are one conversation, so they share it)."""
+    import uuid
+    return "bench-" + uuid.uuid4().hex
 
 
 def _grade_safe(grade_fn, task: dict, text: str) -> dict:
@@ -452,15 +546,20 @@ def run_one(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
                  "needs_retrieval": task.get("needs_retrieval"),
                  "suite": cfg.get("suite"),
                  "arm": arm, "effort": cfg["effort"], "attempt": attempt,
-                 "features_sent": feats, "started_at": time.time()}
+                 "features_sent": feats, "started_at": time.time(),
+                 "session": new_session(),
+                 "concurrent_with": list(cfg.get("concurrent_with") or [])}
     t0 = time.time()
     status, d, error = None, None, None
+    busy_s, busy_n = 0.0, 0
     try:
-        status, d = post(cfg["url"], cfg["key"], body, feats,
-                         timeout_for(arm, cfg["timeout"]))
+        status, d, busy_s, busy_n = post_admitted(
+            cfg["url"], cfg["key"], body, feats, timeout_for(arm, cfg["timeout"]),
+            sleep=cfg.get("sleep", time.sleep), session=row["session"])
     except Exception as e:                                       # noqa: BLE001
         error = f"{type(e).__name__}: {e}"[:500]
-    row["seconds"] = round(time.time() - t0, 2)
+    row["seconds"] = round(time.time() - t0 - busy_s, 2)
+    row["busy_wait_s"], row["busy_429s"] = round(busy_s, 1), busy_n
     row["http_status"] = status
     content, reasoning, finish, x, usage = "", "", "", None, {}
     if isinstance(d, dict):
@@ -622,7 +721,9 @@ def run_self_check(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
                  "suite": cfg.get("suite"),
                  "arm": arm, "twin": twin(arm), "self_check": True,
                  "effort": cfg["effort"], "attempt": attempt,
-                 "features_sent": feats, "started_at": time.time()}
+                 "features_sent": feats, "started_at": time.time(),
+                 "session": new_session(),
+                 "concurrent_with": list(cfg.get("concurrent_with") or [])}
     t0 = time.time()
     status, error, last_d = None, None, None
     p = _parse(None)
@@ -633,18 +734,23 @@ def run_self_check(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
     checks: list[dict] = []
     other_calls: list[str] = []
     seen_code: dict[str, int] = {}
-    model_s = check_s = 0.0
+    model_s = check_s = busy_s = 0.0
+    busy_n = 0
     while True:
         body = {"model": "yamadori", "reasoning_effort": BODY_TIER,
                 "messages": messages, "tools": [CHECK_TOOL],
                 "max_tokens": cfg["max_tokens"], "temperature": cfg["temperature"]}
         t1 = time.time()
+        waited = 0.0
         try:
-            status, last_d = post(cfg["url"], cfg["key"], body, feats,
-                                  timeout_for(arm, cfg["timeout"]))
+            status, last_d, waited, nb = post_admitted(
+                cfg["url"], cfg["key"], body, feats, timeout_for(arm, cfg["timeout"]),
+                sleep=cfg.get("sleep", time.sleep), session=row["session"])
+            busy_s += waited
+            busy_n += nb
         except Exception as e:                                   # noqa: BLE001
             error = f"{type(e).__name__}: {e}"[:500]
-        model_s += time.time() - t1
+        model_s += time.time() - t1 - waited
         if error or status != 200:
             break
         p = _parse(last_d)
@@ -679,7 +785,8 @@ def run_self_check(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
             messages.append({"role": "tool", "tool_call_id": c["id"],
                              "content": text})
     checker_error = any(c["checker_error"] for c in checks)
-    row["seconds"] = round(time.time() - t0, 2)
+    row["seconds"] = round(time.time() - t0 - busy_s, 2)
+    row["busy_wait_s"], row["busy_429s"] = round(busy_s, 1), busy_n
     row["model_seconds"] = round(model_s, 2)
     row["check_seconds"] = round(check_s, 2)
     row["http_status"] = status
@@ -764,12 +871,65 @@ SUITES["all"] = SUITES["core"] + SUITES["react"] + SUITES["tc"]
 DEFAULT_SUITE = "core"
 
 
+def hints_corpus_state(root: str = ROOT) -> dict:
+    """What the hints arms were served from: review-state counts over
+    bench/recipes/*.jsonl (keep / edited / reject / unreviewed -- a reject is
+    never served, mcp/hints.py) and the sha256 of bench/hint_buckets.jsonl and
+    of the recipe files. Recorded per invocation, so a corpus changed between
+    resumes is visible in the manifest (analyse.py raises it as a caveat)."""
+    states: dict[str, int] = {}
+    h = hashlib.sha256()
+    try:
+        for p in sorted(glob.glob(os.path.join(root, "bench", "recipes", "*.jsonl"))):
+            with open(p, "rb") as f:
+                raw = f.read()
+            h.update(os.path.basename(p).encode() + b"\0" + raw)
+            for line in raw.decode("utf-8", "replace").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    s = json.loads(line).get("_state") or "unreviewed"
+                except ValueError:
+                    s = "unparseable"
+                states[s] = states.get(s, 0) + 1
+        bpath = os.path.join(root, "bench", "hint_buckets.jsonl")
+        bsha = None
+        if os.path.exists(bpath):
+            with open(bpath, "rb") as f:
+                bsha = hashlib.sha256(f.read()).hexdigest()
+        return {"states": dict(sorted(states.items())), "rows": sum(states.values()),
+                "recipes_sha256": h.hexdigest(), "hint_buckets_sha256": bsha,
+                "read_at": time.time()}
+    except Exception as e:                                       # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def normalise_suite(spec: str) -> str:
+    """'react,core' -> 'core,react'; one canonical spelling per task set, so
+    a run dir's recorded suite compares equal however it was typed."""
+    parts = [p.strip() for p in (spec or "").split(",") if p.strip()]
+    bad = [p for p in parts if p not in SUITES]
+    if not parts or bad:
+        raise ValueError(f"unknown suite {bad or spec!r}; known: {sorted(SUITES)}")
+    if "all" in parts:
+        return "all"
+    order = ["core", "react", "tc"]
+    return ",".join(p for p in order if p in parts)
+
+
+def suite_files(spec: str) -> tuple[str, ...]:
+    files: list[str] = []
+    for p in normalise_suite(spec).split(","):
+        files += [f for f in SUITES[p] if f not in files]
+    return tuple(files)
+
+
 def load_suite(name: str, here: str = HERE) -> list[dict]:
     """The task rows of a suite. Every row must say whether it is
     contaminated -- analyse.py keeps contaminated rows out of the headline, so
     a row that does not say is refused rather than guessed."""
     out: list[dict] = []
-    for fn in SUITES[name]:
+    for fn in suite_files(name):
         with open(os.path.join(here, fn), encoding="utf-8") as f:
             rows = [json.loads(line) for line in f if line.strip()]
         bad = [r.get("id") for r in rows if not isinstance(r.get("contaminated"), bool)]
@@ -782,17 +942,74 @@ def load_suite(name: str, here: str = HERE) -> list[dict]:
     return out
 
 
+# Fixed conditions added after run dirs already existed. A manifest that
+# predates one of these is not refused for lacking it (it was not recorded,
+# not different); one that records a different value is.
+LATE_FIXED = ("server_sampling",)
+
+
 def manifest_clash(old: dict, fixed: dict) -> dict:
     """Conditions a run dir was made with that differ from this invocation.
     A manifest from before --suite existed was a core run."""
     return {k: (old.get(k, DEFAULT_SUITE if k == "suite" else None), v)
             for k, v in fixed.items()
-            if old.get(k, DEFAULT_SUITE if k == "suite" else None) != v}
+            if not (k in LATE_FIXED and k not in old)
+            and old.get(k, DEFAULT_SUITE if k == "suite" else None) != v}
+
+
+LLAMA_SWAP = os.environ.get("YAMADORI_LLAMA_SWAP", "http://127.0.0.1:11434")
+_SAMPLING_FLAGS = {"--temp": "temp", "--top-p": "top_p", "--top-k": "top_k",
+                   "--min-p": "min_p", "--presence-penalty": "presence_penalty",
+                   "--repeat-penalty": "repeat_penalty",
+                   "--reasoning-budget": "reasoning_budget", "-m": "model",
+                   "--spec-type": "spec_type"}
+
+
+def server_sampling(url: str = LLAMA_SWAP) -> dict:
+    """The main model's sampling as the RUNNING llama-server was launched
+    (llama-swap /running), read, not assumed. A fixed condition: a run dir
+    refuses a resume under different sampling. {} if it cannot be read."""
+    try:
+        with urllib.request.urlopen(f"{url}/running", timeout=10) as r:
+            d = json.load(r)
+    except Exception:                                            # noqa: BLE001
+        return {}
+    for m in d.get("running") or []:
+        if m.get("model") != "bonsai":
+            continue
+        toks = (m.get("cmd") or "").split()
+        out = {}
+        for i, tok in enumerate(toks[:-1]):
+            if tok in _SAMPLING_FLAGS:
+                v = toks[i + 1]
+                out[_SAMPLING_FLAGS[tok]] = (os.path.basename(v)
+                                             if tok == "-m" else v)
+        return out
+    return {}
+
+
+def sample_tasks(tasks: list[dict], n: int, seed: int) -> list[dict]:
+    """A stratified sample: n tasks per domain, drawn with random.Random from
+    the domain's ids in sorted order, seeded by (seed, domain) -- the same
+    draw on every machine and every resume, and independent of which other
+    domains are selected. Returned in the suite's own order."""
+    import random
+    by: dict[str, list[str]] = {}
+    for t in tasks:
+        by.setdefault(t["domain"], []).append(t["id"])
+    keep: set[str] = set()
+    for d in sorted(by):
+        ids = sorted(by[d])
+        keep |= set(random.Random(f"{seed}:{d}").sample(ids, min(n, len(ids))))
+    return [t for t in tasks if t["id"] in keep]
 
 
 def select_tasks(tasks: list[dict], per_domain: int | None,
-                 ids: list[str] | None, domains: list[str] | None) -> list[dict]:
+                 ids: list[str] | None, domains: list[str] | None,
+                 sample: int | None = None, seed: int = 0) -> list[dict]:
     out = tasks
+    if sample:
+        out = sample_tasks(out, sample, seed)
     if domains:
         out = [t for t in out if t["domain"] in domains]
     if ids:
@@ -809,8 +1026,86 @@ def select_tasks(tasks: list[dict], per_domain: int | None,
     return out
 
 
+def _style(task: dict, text: str) -> dict:
+    import grade_style
+    return grade_style.style(task, text)
+
+
+def attach_style(row: dict, task: dict, cfg: dict, style_fn) -> dict:
+    """The separate style / modernness score (grade_style.py) for a GRADED
+    row, from its saved answer. Recorded beside the grade; it never changes
+    `outcome`. A scorer failure is recorded as style_error, nothing else."""
+    if row.get("grade") is None or not row.get("answer_file"):
+        return row
+    try:
+        with open(os.path.join(cfg["run_dir"], row["answer_file"]),
+                  encoding="utf-8") as f:
+            text = json.load(f).get("content") or ""
+        st = (style_fn or _style)(task, text) or {}
+    except Exception as e:                                       # noqa: BLE001
+        st = {"style_error": f"{type(e).__name__}: {e}"[:300]}
+    row["style"] = st
+    row["lint_errors"] = st.get("lint_errors")
+    row["lint_warnings"] = st.get("lint_warnings")
+    row["modern_flags"] = st.get("modern_flags")
+    return row
+
+
+HELPER_WAIT_S = float(os.environ.get("DOMAIN_HELPER_WAIT_S", 60))
+
+
+def helper_busy(row: dict) -> bool:
+    """A void row whose only fault is that the helper lane was taken."""
+    ms = row.get("mismatch") or []
+    return (row.get("stack_error_kind") == "mismatch" and bool(ms)
+            and all("helper lane is busy" in m for m in ms))
+
+
+def import_rows(src_dir: str, dst_dir: str, tasks: list[dict],
+                arms: list[str]) -> int:
+    """Copy scored (pass/fail) last rows for these (task, arm) pairs from
+    another run dir, with their answer files, marked imported_from. The
+    caller has checked the two dirs share every fixed condition."""
+    rows, _ = load_rows(os.path.join(src_dir, "rows.jsonl"))
+    mine, _ = load_rows(os.path.join(dst_dir, "rows.jsonl"))
+    have = {pair_key(r["task"], r["arm"]) for r in mine if "task" in r}
+    want = {pair_key(t["id"], a) for t in tasks for a in arms}
+    os.makedirs(os.path.join(dst_dir, "answers"), exist_ok=True)
+    n = 0
+    for k, r in last_rows(rows).items():
+        if k not in want or k in have or r.get("outcome") not in ("pass", "fail"):
+            continue
+        if r.get("answer_file"):
+            src = os.path.join(src_dir, r["answer_file"])
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(dst_dir, r["answer_file"]))
+        append_row(os.path.join(dst_dir, "rows.jsonl"),
+                   dict(r, imported_from=os.path.basename(os.path.normpath(src_dir))))
+        n += 1
+    return n
+
+
+def note_condition(run_dir: str, key: str, values: list) -> None:
+    """Add server-reported condition values (e.g. the tool-turn cap, read off
+    x_yamadori.tool_turns.limit) to the manifest's `conditions_seen`."""
+    mp = os.path.join(run_dir, "manifest.json")
+    if not os.path.exists(mp):
+        return
+    with open(mp, encoding="utf-8") as f:
+        man = json.load(f)
+    seen = man.setdefault("conditions_seen", {})
+    cur = seen.get(key) or []
+    new = sorted(set(cur) | set(values), key=str)
+    if new != cur:
+        seen[key] = new
+        tmp = mp + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(man, f, indent=1)
+        os.replace(tmp, mp)
+
+
 def run_pairs(tasks: list[dict], arms: list[str], cfg: dict, grade_fn,
-              log=print, check_fn=None) -> list[dict]:
+              log=print, check_fn=None, style_fn=None) -> list[dict]:
     """Run every not-done (task, arm) pair, task-major, sequentially."""
     os.makedirs(os.path.join(cfg["run_dir"], "answers"), exist_ok=True)
     path = os.path.join(cfg["run_dir"], "rows.jsonl")
@@ -825,8 +1120,35 @@ def run_pairs(tasks: list[dict], arms: list[str], cfg: dict, grade_fn,
     log(f"  {len(tasks)} tasks x {len(arms)} arms = {len(tasks) * len(arms)} pairs; "
         f"{len(tasks) * len(arms) - len(todo)} already done, {len(todo)} to run")
     new: list[dict] = []
+    # One row can take longer than PAUSE_TTL, so the pause is refreshed by a
+    # timer as well as per row -- otherwise it lapses mid-row. cfg["quiet"]
+    # False (the offline tests) never touches the real lane.
+    quiet = cfg.get("quiet", True)
+    stop = threading.Event()
+    if quiet:
+        def _refresh():
+            while not stop.wait(PAUSE_REFRESH_S):
+                keep_quiet(cfg["run_id"])
+        threading.Thread(target=_refresh, daemon=True).start()
+    try:
+        return _run_todo(todo, cfg, grade_fn, log, check_fn, style_fn, attempts,
+                         last, path, new, quiet)
+    finally:
+        stop.set()
+
+
+def _run_todo(todo, cfg, grade_fn, log, check_fn, style_fn, attempts, last,
+              path, new, quiet) -> list[dict]:
+    stop_file = os.path.join(cfg["run_dir"], "STOP")
     for i, (t, a) in enumerate(todo, 1):
-        keep_quiet(cfg["run_id"])
+        # A clean stop between rows: create <run_dir>/STOP and the runner
+        # exits before starting the next pair. Nothing in flight is lost.
+        if os.path.exists(stop_file):
+            log(f"  STOP file found: stopping before pair {i}/{len(todo)}")
+            os.remove(stop_file)
+            break
+        if quiet:
+            keep_quiet(cfg["run_id"])
         k = pair_key(t["id"], a)
         attempt = attempts.get(k, 0) + 1
         prev = last.get(k)
@@ -836,6 +1158,35 @@ def run_pairs(tasks: list[dict], arms: list[str], cfg: dict, grade_fn,
             row = regrade(prev, t, cfg, grade_fn, attempt)
         else:
             row = run_one(t, a, cfg, grade_fn, attempt, check_fn)
+            # Deep thinking needs the ONE helper lane. Busy is "not run", not
+            # a row: wait and ask again. Each discarded attempt keeps its
+            # answer file; the count and the time are on the final row.
+            waits, wasted = 0, 0.0
+            while (row["outcome"] == "stack_error" and helper_busy(row)
+                   and waits * HELPER_WAIT_S < BUSY_MAX_S):
+                wasted += float(row.get("seconds") or 0)
+                log(f"  {t['id']} {a}: helper lane busy (attempt {attempt}, "
+                    f"{row.get('seconds')}s generated and discarded); waiting "
+                    f"{HELPER_WAIT_S:.0f}s, then asking again")
+                cfg.get("sleep", time.sleep)(HELPER_WAIT_S)
+                waits += 1
+                attempt += 1
+                row = run_one(t, a, cfg, grade_fn, attempt, check_fn)
+            import analyse
+            row = analyse.annotate([row])[0]
+            if waits:
+                row["helper_busy_retries"] = waits
+                row["helper_busy_wait_s"] = waits * HELPER_WAIT_S
+                row["helper_busy_wasted_s"] = round(wasted, 1)
+        attach_style(row, t, cfg, style_fn)
+        try:
+            import analyse
+            row["mechanisms"] = analyse.mechanisms(row)
+            lim = (row["mechanisms"].get("tool_turns") or {}).get("limit") or []
+            if lim:
+                note_condition(cfg["run_dir"], "tool_turns_limit", lim)
+        except Exception as e:                                   # noqa: BLE001
+            row["mechanisms"] = {"error": f"{type(e).__name__}: {e}"[:200]}
         append_row(path, row)
         new.append(row)
         g = row.get("grade") or {}
@@ -1102,13 +1453,23 @@ def _check_cmd(name: str, cmd: list[str], timeout: float) -> tuple[bool, str, st
             + (" || " + " | ".join(fails)[:900] if fails else ""))
 
 
-def preflight(key_file: str, log=print) -> list[tuple[bool, str, str]]:
-    """Every precondition, cheapest first. All are run; the caller decides."""
+def preflight(key_file: str, log=print,
+              skip: dict[str, str] | None = None) -> list[tuple[bool, str, str]]:
+    """Every precondition, cheapest first. All are run; the caller decides.
+    `skip` {name: reason}: a command check not run at all, recorded as NOT
+    passed with the reason (and treated as overridden), never as a pass."""
     checks: list[tuple[bool, str, str]] = []
+    skip = skip or {}
 
     def add(c):
         checks.append(c)
         log(("  pass  " if c[0] else "  FAIL  ") + f"{c[1]:<16} {c[2]}")
+
+    def add_cmd(name, cmd):
+        if name in skip:
+            add((False, name, f"SKIPPED, not run: {skip[name]}"))
+        else:
+            add(_check_cmd(name, cmd, 3600))
 
     for c in _check_listener_and_freshness():
         add(c)
@@ -1116,10 +1477,10 @@ def preflight(key_file: str, log=print) -> list[tuple[bool, str, str]]:
     add(_check_hints_cache())
     add(_check_package_vectors())
     add(_check_no_task_leak())
-    add(_check_cmd("run_tests", [PY, os.path.join("scripts", "run_tests.py")], 3600))
-    add(_check_cmd("live_stack", [PY, os.path.join("mcp", "test_live_stack.py"),
-                                  "--live", "--key-file", key_file,
-                                  "--only", "health,tiers"], 3600))
+    add_cmd("run_tests", [PY, os.path.join("scripts", "run_tests.py")])
+    add_cmd("live_stack", [PY, os.path.join("mcp", "test_live_stack.py"),
+                           "--live", "--key-file", key_file,
+                           "--only", "health,tiers"])
     return checks
 
 
@@ -1140,20 +1501,44 @@ def _jobs():
     return jobs
 
 
+PAUSE_BY = "bench/domain/run.py"
+PAUSE_REFRESH_S = 300
+
+
+def hold_pause(j, run_id: str) -> str:
+    """Pause the gpu lane for this run WITHOUT taking over anyone else's pause.
+
+    A live pause set by someone else (the operator) that outlasts ours is
+    left exactly as it is: overwriting it would make it ours, and
+    release_worker would then delete a pause this run never set. Returns
+    "ours" or "theirs"."""
+    rec = j.paused("gpu")
+    if rec and not str(rec.get("by") or "").startswith(PAUSE_BY):
+        if float(rec.get("until") or 0) >= time.time() + PAUSE_TTL:
+            return "theirs"
+        # A foreign pause about to expire: ours extends it, and release_worker
+        # puts the foreign one back for whatever of its time is left.
+        _FOREIGN_PAUSE.clear()
+        _FOREIGN_PAUSE.update(rec)
+    j.pause("gpu", by=f"{PAUSE_BY} {run_id}",
+            why="benchmark measuring seconds and tokens/s", ttl_seconds=PAUSE_TTL)
+    return "ours"
+
+
+_FOREIGN_PAUSE: dict = {}
+
+
 def quiet_worker(run_id: str, wait_s: float = 3600, log=print) -> tuple[bool, str, str]:
     try:
         j = _jobs()
-        j.pause("gpu", by=f"bench/domain/run.py {run_id}",
-                why="benchmark measuring seconds and tokens/s", ttl_seconds=PAUSE_TTL)
+        hold_pause(j, run_id)
         t0 = time.time()
         n = j.running("gpu")
         while n and time.time() - t0 < wait_s:
             log(f"  waiting for {n} running gpu job(s) to finish "
                 f"({time.time() - t0:.0f}s)")
             time.sleep(15)
-            j.pause("gpu", by=f"bench/domain/run.py {run_id}",
-                    why="benchmark measuring seconds and tokens/s",
-                    ttl_seconds=PAUSE_TTL)
+            hold_pause(j, run_id)
             n = j.running("gpu")
         return (n == 0, "worker_quiet",
                 f"gpu lane paused; {n} gpu job(s) still running after "
@@ -1165,18 +1550,29 @@ def quiet_worker(run_id: str, wait_s: float = 3600, log=print) -> tuple[bool, st
 
 def keep_quiet(run_id: str) -> None:
     try:
-        _jobs().pause("gpu", by=f"bench/domain/run.py {run_id}",
-                      why="benchmark measuring seconds and tokens/s",
-                      ttl_seconds=PAUSE_TTL)
+        hold_pause(_jobs(), run_id)
     except Exception:                                            # noqa: BLE001
         pass
 
 
-def release_worker() -> None:
+def release_worker() -> bool:
+    """Lift the gpu pause only if a domain runner set it. A pause set by
+    anyone else (the operator's, until 09:00) is never removed here."""
     try:
-        _jobs().resume("gpu")
+        j = _jobs()
+        rec = j.paused("gpu")
+        if rec and str(rec.get("by") or "").startswith(PAUSE_BY):
+            left = float(_FOREIGN_PAUSE.get("until") or 0) - time.time()
+            if left > 0:
+                # restore the pause we took over, for the rest of its time
+                j.pause("gpu", by=_FOREIGN_PAUSE.get("by") or "?",
+                        why=_FOREIGN_PAUSE.get("why") or "", ttl_seconds=left)
+                _FOREIGN_PAUSE.clear()
+                return False
+            return bool(j.resume("gpu"))
     except Exception:                                            # noqa: BLE001
         pass
+    return False
 
 
 # ------------------------------------------------------------------- main --
@@ -1188,10 +1584,36 @@ def main(argv: list[str] | None = None) -> int:
                     help="flag every row of results/RUN_ID as stale_code and exit")
     ap.add_argument("--reason", default="",
                     help="why the rows are stale (with --mark-stale)")
+    ap.add_argument("--stale-arms", default="",
+                    help="with --mark-stale: only these arms' rows")
     ap.add_argument("--effort", default="medium", choices=EFFORTS)
-    ap.add_argument("--suite", default=DEFAULT_SUITE, choices=sorted(SUITES),
+    ap.add_argument("--suite", default=DEFAULT_SUITE,
                     help="core = tasks.jsonl (default); react; tc "
-                         "(type-challenges, contaminated); all")
+                         "(type-challenges, contaminated); all; or a comma "
+                         "list, e.g. core,react")
+    ap.add_argument("--sample-per-domain", type=int, default=None,
+                    help="a stratified random sample: N tasks per domain")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="the sample's seed (a fixed draw per domain)")
+    ap.add_argument("--import-from", default="", metavar="RUN_ID",
+                    help="copy scored rows for the selected pairs from another "
+                         "run dir made under the same fixed conditions")
+    ap.add_argument("--group", default="",
+                    help="run dirs sharing a group are analysed as one run "
+                         "(parallel runners on disjoint tasks)")
+    ap.add_argument("--skip-preflight", default="",
+                    help="command checks (run_tests, live_stack) NOT to run; "
+                         "recorded as skipped with --skip-reason and overridden")
+    ap.add_argument("--skip-reason", default="")
+    ap.add_argument("--condition-epoch", default="",
+                    help="local time 'YYYY-MM-DD HH:MM:SS' of the stack deploy "
+                         "this invocation runs under; analyse.py reports rows "
+                         "that predate the newest epoch")
+    ap.add_argument("--concurrent-with", default="",
+                    help="comma-separated other GPU consumers running during "
+                         "this invocation (e.g. swebench,livebench); recorded "
+                         "in the manifest, and analyse.py then labels every "
+                         "seconds and tokens/s figure CONCURRENT")
     # The default is the one-shot set it always was; S arms are named.
     ap.add_argument("--arms", default=",".join(a for a in ARMS
                                                if a not in SELF_CHECK),
@@ -1220,13 +1642,21 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(line_buffering=True)     # live progress in a log
     except (AttributeError, ValueError):
         pass
+    try:
+        args.suite = normalise_suite(args.suite)
+    except ValueError as e:
+        print(f"  {e}")
+        return 2
 
     if args.mark_stale:
         if not args.reason:
             print("  --mark-stale needs --reason: say what was fixed")
             return 2
-        n = mark_stale(os.path.join(RESULTS, args.mark_stale), args.reason)
-        print(f"  {n} rows of {args.mark_stale} marked stale_code")
+        only = [a for a in (args.stale_arms or "").split(",") if a]
+        n = mark_stale(os.path.join(RESULTS, args.mark_stale), args.reason,
+                       only or None)
+        print(f"  {n} rows of {args.mark_stale}"
+              + (f" (arms {','.join(only)})" if only else "") + " marked stale_code")
         return 0
     if not args.key_file:
         print("  --key-file is required to run")
@@ -1248,9 +1678,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print("\n  PREFLIGHT")
-    checks = preflight(args.key_file)
+    skip = {n: args.skip_reason or "no reason given"
+            for n in args.skip_preflight.split(",") if n}
+    checks = preflight(args.key_file, skip=skip)
     failed = [c[1] for c in checks if not c[0]]
-    overridden = [n for n in args.override_preflight.split(",") if n]
+    overridden = [n for n in args.override_preflight.split(",") if n] + list(skip)
     blocking = [n for n in failed if n not in overridden]
     if args.preflight_only:
         print(f"\n  preflight: {len(checks) - len(failed)}/{len(checks)} passed")
@@ -1277,7 +1709,9 @@ def _run(args, key, arms, checks, failed, overridden, run_id) -> int:
     import grade as grade_mod
     tasks = select_tasks(load_suite(args.suite), args.per_domain,
                          [t for t in args.tasks.split(",") if t] or None,
-                         [d for d in args.domains.split(",") if d] or None)
+                         [d for d in args.domains.split(",") if d] or None,
+                         sample=getattr(args, "sample_per_domain", None),
+                         seed=getattr(args, "seed", 0))
     if not tasks:
         print("  no tasks selected")
         return 2
@@ -1290,6 +1724,12 @@ def _run(args, key, arms, checks, failed, overridden, run_id) -> int:
     fixed = {"effort": args.effort, "max_tokens": args.max_tokens,
              "temperature": args.temperature, "body_tier": BODY_TIER,
              "proxy": args.proxy, "suite": args.suite}
+    samp = server_sampling()
+    if samp:
+        fixed["server_sampling"] = samp
+    else:
+        print("  WARNING: could not read the server's sampling from llama-swap "
+              "/running; not recorded in the manifest")
     if os.path.exists(man_path):
         with open(man_path, encoding="utf-8") as f:
             old = json.load(f)
@@ -1300,11 +1740,52 @@ def _run(args, key, arms, checks, failed, overridden, run_id) -> int:
         man = old
         man.setdefault("suite", args.suite)
         for a in ARMS:                    # arms added since the dir was made
-            man.setdefault("arms", {}).setdefault(a, arm_manifest(a, args.effort))
+            new = arm_manifest(a, args.effort)
+            old_a = man.setdefault("arms", {}).setdefault(a, new)
+            if a in arms and old_a != new:
+                # An arm redefined since the dir was made (A6 gained
+                # check_code + repair): the current definition wins, the old
+                # one is kept, and each row's features_sent says which it ran.
+                man.setdefault("arms_history", []).append(
+                    {"arm": a, "was": old_a, "replaced_at": time.time()})
+                man["arms"][a] = new
     else:
         man = dict(fixed, run_id=run_id, created=time.time(), runs=[],
                    arms={a: arm_manifest(a, args.effort) for a in ARMS})
+    # Other GPU consumers during this invocation. Not a fixed condition (it
+    # can differ between resumes), so it is kept per run AND as a union at the
+    # top, which is what analyse.py reads to label timing CONCURRENT.
+    conc = sorted({c.strip() for c in (getattr(args, "concurrent_with", "") or "")
+                   .split(",") if c.strip()})
+    if getattr(args, "group", ""):
+        man["group"] = args.group
+    if getattr(args, "sample_per_domain", None):
+        man["sample"] = {"per_domain": args.sample_per_domain, "seed": args.seed,
+                         "domains": sorted({t["domain"] for t in tasks})}
+    src = getattr(args, "import_from", "")
+    if src:
+        sdir = os.path.join(RESULTS, src)
+        with open(os.path.join(sdir, "manifest.json"), encoding="utf-8") as f:
+            sman = json.load(f)
+        sclash = manifest_clash(sman, fixed)
+        if sclash:
+            print(f"  ABORT: --import-from {src} ran under other conditions: {sclash}")
+            return 2
+        n_imp = import_rows(sdir, run_dir, tasks, arms)
+        print(f"  imported {n_imp} scored row(s) from {src}")
+        man.setdefault("imported_from", []).append({"run_id": src, "rows": n_imp,
+                                                    "at": time.time()})
+    man["concurrent_with"] = sorted(set(man.get("concurrent_with") or []) | set(conc))
+    corpus = hints_corpus_state()
+    man["hints_corpus"] = corpus
+    ep = getattr(args, "condition_epoch", "")
+    if ep:
+        ts = time.mktime(time.strptime(ep, "%Y-%m-%d %H:%M:%S"))
+        eps = man.setdefault("condition_epochs", [])
+        if not any(e.get("at") == ts for e in eps):
+            eps.append({"at": ts, "local": ep, "recorded": time.time()})
     man["runs"].append({"started": time.time(), "arms": arms,
+                        "concurrent_with": conc, "hints_corpus": corpus,
                         "tasks": [t["id"] for t in tasks],
                         "preflight": [{"ok": c[0], "name": c[1], "detail": c[2]}
                                       for c in checks],
@@ -1313,6 +1794,7 @@ def _run(args, key, arms, checks, failed, overridden, run_id) -> int:
         json.dump(man, f, indent=1)
 
     cfg = {"run_id": run_id, "run_dir": run_dir, "url": args.proxy, "key": key,
+           "concurrent_with": conc,
            "effort": args.effort, "max_tokens": args.max_tokens,
            "temperature": args.temperature, "timeout": args.timeout,
            "suite": args.suite}

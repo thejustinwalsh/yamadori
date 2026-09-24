@@ -1,0 +1,54 @@
+{
+ "run_id": "lb-20260923-minp0",
+ "server_sampling": "--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0 --presence-penalty 0 --repeat-penalty 1.0",
+ "request_sampling": {
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "max_tokens": 4096
+ },
+ "min_p": 0.0,
+ "min_p_source": "vendor-published value; operator decision 2026-09-23 ~07:10",
+ "server_restart": "llama-swap restarted ~07:16 EDT; checked via /running cmd at 07:17",
+ "question_release": "2024-11-25",
+ "order_files": "identical to lb-20260923 (same seed)",
+ "arms": [
+  "bonsai",
+  "yamadori"
+ ],
+ "requests_in_flight": "2 until 09:43:23 EDT, then 1 (LiveBench), then 1 enforced by the proxy from 10:25:12",
+ "shared_with": "domain suite (SWE-bench stopped ~07:10); from ~09:40 benchmarks run one request at a time across all benchmarks",
+ "timing_epochs": [
+  {
+   "since": "07:18:00",
+   "since_epoch": 1790162280.0,
+   "label": "concurrent",
+   "note": "LiveBench ran 2 requests in flight (two lanes), and the GPU was shared with other benchmarks: seconds are wall time under contention"
+  },
+  {
+   "since": "09:43:23",
+   "since_epoch": 1790171003.0,
+   "label": "livebench_single_lane",
+   "note": "LiveBench 1 request in flight (operator decision ~09:40); other benchmarks may still overlap until the proxy enforces MAIN_LANES=1"
+  },
+  {
+   "since": "10:25:12",
+   "since_epoch": 1790173512.0,
+   "label": "single_request_enforced",
+   "note": "proxy YAMADORI_MAIN_LANES=1 (one main request at a time across all clients) + sequential fan-out; llama-swap restarted"
+  }
+ ],
+ "condition_epochs": [
+  {
+   "since": "10:25:12",
+   "since_epoch": 1790173512.0,
+   "label": "sequential_fanout",
+   "note": "sequential fan-out via the second brain; MAIN_LANES=1; before the tool-turn cap"
+  },
+  {
+   "since": "11:53:44",
+   "since_epoch": 1790178824.0,
+   "label": "tool_turn_cap_10",
+   "note": "tool-turn limit 10 per context (20 at max); tiers: minimal=thinking OFF, low=bare baseline, high=medium effort, new xhigh=medium + all augmentations; deep thinking at the request tier's effort; generate_image on every tier incl. deep thinking. llama-swap + proxy restarted; offline suite 46/46 (8,662 checks)."
+  }
+ ]
+}

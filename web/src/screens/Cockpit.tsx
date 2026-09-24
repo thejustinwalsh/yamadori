@@ -13,6 +13,11 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { Panel } from '../ui/Panel';
 import { Chip, Label, layout, Meter, Row, SplitBar, Stat, type Tone } from '../ui/primitives';
 import { SeedPanel } from '../ui/SeedReadout';
+import { PowerPanel } from '../ui/PowerPanel';
+import { TOKENS_PATH } from '../api/tokens';
+import { SavingsPanel, TokensPanel, useTokens } from '../ui/TokenPanels';
+import { SERIES_PATH } from '../api/powerSeries';
+import { KogoseiLive } from '../ui/KogoseiPanel';
 import { PollState, StateView } from '../ui/StateView';
 import { SectionedTable, Table } from '../ui/Table';
 import { text } from '../ui/text';
@@ -20,10 +25,17 @@ import { text } from '../ui/text';
 const areas = stylex.create({
   cockpit: {
     gridTemplateAreas: {
-      default: '"tree" "side" "stat" "tier" "proc"',
-      [MQ.tablet]: '"tree tree tree tree tree tree" "side side side stat stat stat" "side side side tier tier tier" "proc proc proc proc proc proc"',
+      // Top: the tree and its readouts. Then the money row (what the
+      // GPUs drew, what they produced, what that would have cost), then the
+      // machine (processes, the ladder, services + warnings).
+      default: '"tree" "side" "stat" "money" "tier" "proc"',
+      [MQ.tablet]:
+        '"tree tree tree tree tree tree" "side side side stat stat stat" "money money money money money money" "proc proc proc proc proc proc" "tier tier tier tier tier tier"',
+      // Measured at 1600 px with live data: stat 914 / money 1,028 (tokens
+      // over savings), proc 372 / tier 276. Tokens and savings stack
+      // vertically; side by side they left two tall, mostly empty columns.
       [MQ.desktop]:
-        '"tree tree tree tree tree tree tree tree side side side side" "stat stat stat stat proc proc proc proc proc tier tier tier"',
+        '"tree tree tree tree tree tree tree tree side side side side" "stat stat stat money money money money money money money money money" "proc proc proc proc proc proc proc proc tier tier tier tier"',
     },
   },
 });
@@ -60,6 +72,7 @@ export function Cockpit() {
   const { vitals, datasets, tiers } = useShared();
   const now = useNow(1000);
   const v = vitals.data;
+  const tok = useTokens();
   return (
     <Bento areas={areas.cockpit}>
       <Cell area="tree">
@@ -74,16 +87,33 @@ export function Cockpit() {
         <Guard what="MIKI · KV POOL" source={V}>
           <KvPanel v={v} stale={vitals.stale} failure={vitals.failure} />
         </Guard>
-        <Guard what="SILICON" source={V} fill>
-          <SiliconPanel v={v} stale={vitals.stale} failure={vitals.failure} fill />
+        <Guard what="SILICON" source={V}>
+          <SiliconPanel v={v} stale={vitals.stale} failure={vitals.failure} />
+        </Guard>
+        {/* KŌGŌSEI · WATTS PER TOKEN: its own 2 s poll of /dash/api/power/series. */}
+        <Guard what="KŌGŌSEI · WATTS PER TOKEN" source={SERIES_PATH} fill>
+          <KogoseiLive fill />
         </Guard>
       </Cell>
       <Cell area="stat">
+        <Guard what="DENKI · ELECTRICITY" source={V}>
+          <PowerPanel v={v} stale={vitals.stale} />
+        </Guard>
         <Guard what="KEIHŌ · WARNINGS" source={V}>
           <WarningsPanel v={v} failure={vitals.failure} />
         </Guard>
         <Guard what="NE · SERVICES" source={V} fill>
           <ServicesPanel v={v} stale={vitals.stale} failure={vitals.failure} fill />
+        </Guard>
+      </Cell>
+      {/* MIZU · TOKENS over SETSUYAKU · SAVINGS: one 5 s poll of
+          /dash/api/tokens, each panel in its own error boundary. */}
+      <Cell area="money">
+        <Guard what="MIZU · TOKENS" source={TOKENS_PATH}>
+          <TokensPanel {...tok} />
+        </Guard>
+        <Guard what="SETSUYAKU · SAVINGS" source={TOKENS_PATH} fill>
+          <SavingsPanel {...tok} fill />
         </Guard>
       </Cell>
       <Cell area="proc">
@@ -282,25 +312,22 @@ export function TiersPanel({ t, failure, fill }: { t: Tiers | null; failure: Ret
           {order.map((name) => {
             const x = table[name];
             if (!x) return null;
-            const flags = [x.retrieval && 'search', x.hints && 'hints', x.fanout > 1 && `fan-out ${x.fanout}`, x.investigate && 'deep thinking'].filter(Boolean);
-            // The effort the proxy sends (tiers.safe_effort) is what the model
-            // sees. Until the server reports it, show what the tier asks for
-            // and say that is all it is.
-            const sent = typeof x.sent_effort === 'string' ? x.sent_effort : null;
+            // What RUNS at the tier, from the API's feature matrix (mcp/tiers.py
+            // features, the one matrix README and AGENTS.md carry): a cell
+            // other than '–' is a chip, e.g. "LIBRARY HELP: DEFINITIONS".
+            const f = x.features ?? {};
+            const flags = (t.feature_columns ?? [])
+              .filter((c) => c !== 'thinking' && f[c] && f[c] !== '–')
+              .map((c) => (f[c] === 'yes' || f[c] === 'allowed' ? c : `${c}: ${f[c]}`));
+            // The tier's name is the label (operator, 2026-09-23): the effort
+            // string mapped under the hood is not shown. Only thinking OFF
+            // (tier minimal) is worth a chip, because it changes the answer.
             return (
               <div key={name} {...stylex.props(s.tier)}>
                 <span {...stylex.props(text.labelMd, name === t.default ? s.tierOn : s.tierName)}>{name}</span>
                 <div>
                   <div {...stylex.props(layout.rowWrap)}>
-                    {sent ? (
-                      <Chip tone="muted" title={sent !== x.effort ? `tier asks for ${x.effort}` : undefined}>
-                        EFFORT {up(sent)}
-                      </Chip>
-                    ) : (
-                      <Chip tone="muted" title="the value sent is not reported by this server">
-                        ASKS {up(x.effort)} · SENT —
-                      </Chip>
-                    )}
+                    {x.thinks === false && <Chip tone="muted">THINKING OFF</Chip>}
                     {flags.map((f) => (
                       <Chip key={String(f)} tone={f === 'deep thinking' ? 'cyan' : 'moss'}>{String(f).toUpperCase()}</Chip>
                     ))}

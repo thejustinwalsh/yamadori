@@ -28,6 +28,7 @@ import numpy as np
 import symbols as sym
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'mcp'))
 import guard
+import gpu_room  # the A4000's room: embeddings share the card (mcp/gpu_room.py)
 
 # The MODEL SERVER, not the proxy. This pointed at the proxy's port, which
 # does not serve /v1/embeddings, so every embedding request 404'd and every
@@ -235,8 +236,11 @@ def embed_batch(texts: list[str], attempt: int = 0) -> np.ndarray:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=300) as r:
-            d = json.load(r)
+        # The embedding model shares the A4000 with the image and vision
+        # models: room is made (or the model pinned) before the request.
+        with gpu_room.use(EMBED_MODEL, upstream=STACK):
+            with urllib.request.urlopen(req, timeout=300) as r:
+                d = json.load(r)
     # ORDER MATTERS. HTTPError subclasses URLError, so listing the transport
     # clause first swallowed every HTTP error into the retry path and made the
     # per-chunk isolation below unreachable. That regression was introduced
@@ -255,6 +259,8 @@ def embed_batch(texts: list[str], attempt: int = 0) -> np.ndarray:
         for t in texts:
             try:
                 rows.append(embed_batch([t])[0])
+            except gpu_room.NoRoom:
+                raise                  # no room on the card is not a bad chunk
             except Exception:                              # noqa: BLE001
                 print(f"  skipped a chunk ({len(t)} chars): {e}", file=sys.stderr)
                 rows.append(np.zeros(EMBED_DIM, dtype=np.float32))

@@ -106,12 +106,21 @@ export type Posted<T> =
  * every reason come back so the form can print them verbatim.
  */
 export async function postJson<T>(path: string, body: unknown): Promise<Posted<T>> {
+  return sendJson<T>('POST', path, body);
+}
+
+/** PUT a JSON body to a /dash/api route; the same answer shape as postJson. */
+export async function putJson<T>(path: string, body: unknown): Promise<Posted<T>> {
+  return sendJson<T>('PUT', path, body);
+}
+
+async function sendJson<T>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<Posted<T>> {
   const key = readKey();
   if (!key) return { ok: false, failure: { kind: 'nokey' }, reasons: [] };
   let res: Response;
   try {
     res = await fetch(path, {
-      method: 'POST',
+      method,
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       cache: 'no-store',

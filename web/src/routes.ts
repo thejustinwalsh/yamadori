@@ -4,6 +4,8 @@
 import { lazy, type ComponentType } from 'react';
 import { peek, prefetch } from './api/cache';
 import { PATHS } from './api/data';
+import { IMAGE_SETTINGS_PATH } from './api/settings';
+import { SKILLS_PATH } from './api/skills';
 import type { Route } from './router';
 
 type Chunk<P> = { Component: ComponentType<P>; preload: () => Promise<void>; loaded: () => boolean };
@@ -41,6 +43,8 @@ export const screens = {
   naedoko: chunk(() => import('./screens/Naedoko').then((m) => m.Naedoko)),
   dataset: chunk(() => import('./screens/DatasetDetail').then((m) => m.DatasetDetail)),
   sentei: chunk(() => import('./screens/Sentei').then((m) => m.Sentei)),
+  settings: chunk(() => import('./screens/Settings').then((m) => m.Settings)),
+  skills: chunk(() => import('./screens/Skills').then((m) => m.Skills)),
   phase0: chunk(() => import('./phase0/Phase0').then((m) => m.Phase0)),
 };
 
@@ -56,6 +60,10 @@ export function dataFor(route: Route): string[] {
       return [PATHS.dataset(route.id)];
     case 'sentei':
       return [PATHS.results];
+    case 'settings':
+      return [IMAGE_SETTINGS_PATH];
+    case 'skills':
+      return [SKILLS_PATH];
     default:
       return [];
   }
@@ -67,6 +75,8 @@ function chunkFor(route: Route): Pick<Chunk<object>, 'preload' | 'loaded'> | nul
     case 'naedoko':
     case 'dataset':
     case 'sentei':
+    case 'settings':
+    case 'skills':
     case 'phase0':
       return screens[route.name];
     default:

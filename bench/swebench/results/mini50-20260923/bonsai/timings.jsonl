@@ -1,0 +1,2 @@
+{"instance": "django__django-11999", "arm": "bonsai", "rc": 0, "seconds": 6173.7, "pull_seconds": 0.0, "started": 1790141228.7052872, "traj": true, "exit_status": "Submitted", "api_calls": 80}
+{"instance": "sphinx-doc__sphinx-8269", "arm": "bonsai", "rc": 0, "seconds": 6264.3, "pull_seconds": 22.1, "started": 1790141255.8044145, "traj": true, "exit_status": "Submitted", "api_calls": 66}

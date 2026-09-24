@@ -1,0 +1,757 @@
+{
+"release": "2024-11-25",
+"seed": 20260923,
+"category": "data_analysis",
+"order": [
+{
+"question_id": "b75684697587c1ce05a1377916ae8da11e579e9e8a3d9e693a955a1dc8522f2e",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "ae4654298c694908b994dd999e784904f1c22e2978e6e958d71cf0e5d5ab5975",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "9cd37119651a821e2695ee073ddf004d50d9add830f4e7f3bc469f9b0d4ddbe3",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "2cbf1cc153f0500650d2b4ce15643bc7319268df28b56624014250dc8fe28b07",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "a8995a220d4b23e751dded30067eb09897b7269b0ec3632762c9e97d41b80c95",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "bfe58cf09204ef9dddeb7358323fbab09c078fbc88d022c2387e0eada4470849",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "178c1f72e05a48d00980e3f21a6a33eb66c2c5fd87d78b72a92d4423cf3b3e40",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "2f1500d37ffd0e42cd2c89c04011cbbf5dd6b1f71f495156b016a967270cdded",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "07844eb9fb31c8e9cac12e29662d01c221f762a67418b020ff4eae637065539a",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "9c74edf111b76d22e29f59efc87f353419396850fea9cecb6d1f3535d7370cea",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "04ba0a2b8fe86cdd255723961356723f6de221cbe6bbc7af4b9ac93d45cd40ec",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "f44bcc507aa7a438c07f435c70e687868c07af785cc257410780ff861c54c646",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "710e9427be77576c22d1e45a519a3e25c804d22150ca272b321b7c6916bb08c7",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "7d3b232a7df622492efaa9230b09fe5a5e45c12d35ed346a99b6ec201497a1e3",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "e321ff8846ddd951d029b63efd6f0cdadb5b6daae266e3b21a6f3e805faf75e4",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "090b4fb6f42c01d28d3dd382ee3b06c9596078e719d863eb53fe16bc1a0ca910",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "5063b77b06647a10818a76a2feda884741860ca4ef5816ae4580babafea11fb0",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "083282355242eb434e4c4559eabea700f94928fd2e1d0d4df6a59ee143866e60",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "60d902d2b18d8ed747f135fd78d13c2da523d6067ed3865723d5e34a99abdf61",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "fd0046f3c752ad7a6ce735aff42247b449563c3c664852793c698369c0046c93",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "09752b3d3e355017282301de1735bd903221368e1fadf3e64aa9594ef7730e62",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "71fb9aae0aa1fd2fd7b0a41ffa1c2235cd23ab372bb1d1d039e7ebf150aad656",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "587e13e04d18246f787cc8d41da67701eb1343795150a63b1996c5ec8270b20e",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "c42ef3e7297ebddb097e9aa4d5527dce29367f617c29bf7144de2633107ead00",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "ea6612af21a179810783dc4c8f39584a5f287099d46855b0b44b3d706ef349f7",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "da9f424fc770103fa6b2639920d84fd8be3c448031ed96d13b975289356f4a67",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "9b8b3c1cdfbadc5d248114dcd74f7376fe3e24db964f3acb8d12159404199aac",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "2cf1d19bf1e2c876de558ca796e1f48a65342d6927b11970b750152085d50ec7",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "eeec6c1afcb16c44895a770343d4c21c6eb88d2902ac8dc1568a6940d9502610",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "16b99f3754472adfba51046b35d0bb8af8d7e95e8dbac50d5f0f82b9775229df",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "3f7b12f0c920812c39c3217750021c9e9153c1934d4673e5aaf481be74f89aa9",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "d03bcee55bda5e582cc13547ab9bf898fbd1324fd5690481cc0d8a4ae9fd24f9",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "0bedfad80bcaab18b0ab15531247a61a8b75f42c6e87c40f05d398dc25984d35",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "cc82520bd9c7eeb5f06c9f7ebf1dd59b89bfd90d91080f88d49bd069250152e5",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "145cfcc10c148be13cc52c96a77611ff6fa5a2b2f756b7f8f9bc0220404a83d7",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "dbc100e6b17f59547b155762e53564c1d30e21197f86780b166e4c067ee4b0e8",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "5c3dfa6b8c0ecd07ea0091b21fb237ade69bdce3c3a9cdeed307bee1e968ce2b",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "9d53b3ca366bedc7b149a5d41a4dc5c52cd76f1989a0cb6020d304fef6eb8d8d",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "eb8aebddc3e1eff35a92de9e8306dfcfebd25201eefda2921b830226b5347dc5",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "2a096cf1746e2653f40f60879ceed7f994e888a06a029a143dc3b160040e756f",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "1620e3381c6b9ba1ff0bcde15d816ec23ce445e1de6ed45de56ca41b0d1ae855",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "2379e1e2586eacdf0c9ea0b9385f3c679ff72aa7e2a74fb741aa42018b4d78ea",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "0e035026e0e096f6275c4e0699603f502f04d6c9904bc938b46df4dc6300116b",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "0764131eaf30bb8af36ad749f144da01c0113b1cee00092dde2919287df2ba78",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "4d22f4f91dfc8188c2244048d968e9885ee063658c14fcf43c8156983f5a395f",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "5d098d85a099630e19fe3b715500589f0face5dafeffdf9cb3c23f5259600aa3",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "4840c0c5075383274db75d8610087c3a725f4be885832e5fa97a46933e7485ae",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "e852443f6993386ec44106f68bee0f7f278cfd9fb116228e55a50713257692b2",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "bb6b6f851602827f90538249a5eb7dffa6755060c85a51cd16b13500bbaf57d1",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "b8a3e0f6c177bbef546e0dd490a0193b02124e193d5ffe093d86963449cba596",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "af06a250c4d58799cd7bf0f73df94134106098b21d8b0a3a3e61dd9eacda6724",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "2c40553d646d1f2d657f5f982f49b9ca64dfd6e1b675965830c419412c6076c1",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "55d610b0b74c049e9664df825f1bffcb7999fffc0576ff3317960a2124c3feaf",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "b78c258e2cfd2954eb6ff290f39427d6270c69d57cc36e8a1c31839de39c885a",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "5f2869cd7e61c776c9b5ceb1ee3f92fd09cb1b636d76bf32e573d6a8a8faced0",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "b2c9accaab7ee5cac67f482c19dcda8942fb409b25b604ef1136367f56d07fd0",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "35b3098f43e9129b80af5263066ffad973670da10a3bbc4d350fa88cea4d980f",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "fb965026ca12eae296ee0e5a21c0f7f2691e7f27a829c7d6b69b3d659257222a",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "cb29bb1e6915d8366ff58783e47c9939d3d30712f2643cd23d6cbecc4210a2b2",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "b64b2155d2e4e74cbb52dcb6f97298cbf28eef0159973600aecdc80a6c49c8df",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "c6e1c2339d66267100fd9c9851f6fb488e0e91054519c789bc30206a8bf0f175",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "539fd06729e1f852302dd51aab15ffa115225362425ef04808cdef88d000d300",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "56ace477670fa1527771dc1a4f2babac3b704f1c313b8981a53ce892f55b6c05",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "537b9002304148b4aef6f995c3012d9ae159196ab216bfb6fa7ef40f5585cddb",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "d4b2efd567053821eedf1ea3f759d4948f50264b94bd6ff37b18bc92e79d4fc1",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "fe2193c57ea45001a4926fe79284b5a1405531d70f8ff5e5a4ebfeea8a79a10e",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "842cec572ddb0d7d642abdc3919a6b340a6787b4128d37184ad9d69095bdf875",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "ac146c48d703160bded02521568583372fc6b10bdbd98f36f57fcff7d0790d10",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "0e5a359e5a70462b866ffd40a10f0b976ed63030be062c8a9eb8c72316ac2146",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "567d5f634453da734fb7ceab3bbea4dd283ac19a125102fe9b533ca5e0e388e5",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "10047d040ef1e563f1db3278979d56d1182617b3484c63ed53a388a0d006a7e4",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "23369207a1755bd3b7cea52155e7cbbd7ab1e2fa79015d1f8776111b8648f8ed",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "3a3c5b4774627ce2884a00d76ebda25faae4b9ac1e76da7ae81513a08531af21",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "44953ce33916e7caae16bbce54fbd5a4e00d438924e5e53c0b5c5765ce5a583f",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "ed3a1cf09c7eefe66d4775384c633a1bbc48f09a7d2257028362479f057d7e3e",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "811f288b7c362542153770a32060519cf59d30d4c61368bb9abea3a56f873a09",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "dd7ff515b9cd4c4a6e1d3fe3cb5e14c77123225c73193ce89c104b4f3f80cf22",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "57772b38ab8d4f9f2e30d5e0cca6e007f228786523ed027bdbf37b59fe20e3b1",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "1845745b3354782800cff1a055131c3e64c58719dced8d96d69083ab210e0391",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "7c99777b2f4c5a9c88cc1f04d0345ac7b1e9dea2c7ac74b3fbf683e59bbf38f4",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "ed588c8250de9be2b31be0bc4c7820f3fa97c6084f822bce03d324f20d4c228d",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "7a5f7b3b6f5972d4a6c9a42a1e3f6cd73e2f8cb7cb57685a964ff9d6cd43a03d",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "27da7f0ed5df368fa2d311fe3be17bbece8769109b41fc6e7768706d5d26f662",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "0cbc79763d1930cd7c78821f52cbb8c368eacbee9ea3b9bb9ece1e79167deb4a",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "901488c5b80e759ac79c75455b21b7680ecd546d5529c76483a65dd96a3dab82",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "4d351c29bdddf5c41d59cd7bd1b70bb4d2ae2a071ada382d7690066b1cd7764c",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "31b5500fbd88c9b6087f15229a84578b6863700ef5b4bf2c645d8927a4723a77",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "76b0d923c1e41da8c302c906ce9b145c4f648e04442ee224d899de34e2a09c27",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "dc753a46614f7f4d1c839d06ec864324f8b6142e30bf804dae6aae8b6eb91941",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "132dabf6ac92193bcc1b1cab0080ee5531ab45a959eefc1e5b3cbf57976bcf9a",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "f6239269d04fcfd9a96e904b2016c00b132487ce74c331d77b829d5cdb6f5df7",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "31b308131501939d06a5af26b6e26500ab71fc1585a16324abda514a2276ed14",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "f2dcd6a353c4390c3d98c8d4ff03d778f00d0d6c6b9f8238af4f09f81f6d9924",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "43b7ccbcb6eef8606b1b0aaf4c1c858948f75df49caa0589f74a107a9eaf1ea8",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "1555bac3606cf98dc257767598c8a85738893f74b07a0a7f2d150751d0ab4939",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "6a71a2fd132bae45c6ef2fc93d0bfcf3d4f71025db07ec88fed08ff83b4eca45",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "a0ef4e780ad34fa8a80b2ce6367a36c65899cfeb5e610e896857e49bc240e45e",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "e824359153d4fea96a9257ecceb44a3bb95dd0c84f95e2e3964ebdcdf8e8b32b",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "6204f00c8a38e299225434e2218dc1fbf65eb3040ed083a97c048e4f3b7dc2c8",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "f9bcb466e175b91a55ff30f1265ad410a93737012e3e6c8f288adcd3525f5d7e",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "2e645a9a481f16ce14b5d069b62520852babd3b55383e00a75f675707088fddc",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "0a9d3c9d94cdbd52adf5852ebdf291b4ff8788032d950f62695d1dcc298b54f6",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "aaa722230f998bcba4bfe53b5843b770a09c16203c4de187c1b810c8167b6471",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "490dfdc0383f199c870aa7710499c4081c35ff3545415dab3904f64e7526a809",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "8f3ca4d439a2167eda91a41deaecf48838405ce32967097d2ec7e931b1313cf4",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "48dd183d63a78a751541e8d237cfbfaeeba2df8cd7f0d6fe58324d74aad9ff3b",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "9318064da8b360eff10f17cdbde9ee624a2112203d8239516e536a0e5bec44e9",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "4810de734ddf549ae44d69fe3717e2ad95593f88a0f7d72211f46cbdd22ad513",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "58223a1f18c3cda82967cc3ba7d24813209e41470aee583167ee938ae01d3d21",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "519653e1054c2c48e303e4f8fb1fa2e5fe01d1fd1fb4d26fa45a33b5eb781a3c",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "00d7be878c842d12814cb113caf8503525f8cf845b7d3ca4b8387c843f06ebc9",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "666f26a703b286a7d31f2f46070307d6aa9e9644fcc24482de85820bfe2ad341",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "d89584191190995d5cb7307c938dbfb201e3af17ed7f666c2afae0fe2ad55985",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "ce1fa8f673c3d33b3986e4f4f148ab1a11e42cd2b7f15390f0f4f2acb530a6e3",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "010107031fdf6e54fcac08ac186ff4f0a9018d887bf5920f921f14e80bd82633",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "a9622ef291b2ff5dac8ee5335d50d52a7bc8bd9fa001130fabaf3ae3d1505100",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "77765399a07884782f5a539ccb9e8820f5c15a090a666f59b21f804706ecadc9",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "cea94c94a9f19381ae78825923b0c72cf9f16907bd0213bea6beca953a70b085",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "0bf086ff674cfda54c0293a3ae03a3720d2d1cb755748cc4800d43b375d20a3c",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "40af2768cabe32744e3b1efd2552edb077e2539a8f45808852e7d83147a82519",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "ae6113bfce471464f03e7ff173b9a9e13a8bb431439c41d82100097c5d61dd7d",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "d60522bc74ae4e6d7ba1a5e0401e53e4a3d7a7182fed328e72825445ceafba9d",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "0a03666dc72cf14a5cf569f517483315380edb796ac0394c3c204ced2e4a7428",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "6674aadb0c124d37c4b10b3a8fb1fef68aa6e697c6c8b315f07244721921136f",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "8b842182b7cbb2b961d8cdc64a1b4b28aff1f8ed4f4dd3fb58e3533baa754043",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "c55626b8561ca43f0fdf11e24b2083c4d3180a83c87ea6171a159a1e82f1da54",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "051ed5edf44bb798385076a1260de95b272dd2e0f5167dc78e514ce434af3ef6",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "75fca1a433c6e663241c1941e6034cd7625cd4b5981159c7f4ad74703df98b53",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "8b25c07592f100c7c61af45d3de6eec07f4996d0a211f613cc1e224db02bba4c",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "602d69fbe97264184593d70751ac8421a674ccc32daa16d0a251266d600e41b6",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "a50e16a7dec04c766f864754305d6b28a99fe54602c7c913c525c067c405d279",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "0d102a277bdaf52b40a8dc150408f122828ee63f2a55dd0e58f3c7b51933d345",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "13ca9b1d4d1937587bd2cc18ac8804a4c57d5e9066a6d7501d2f06ab33119cb6",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "a783dc9652728632d05f85ac5f944f71ffdfb2cc9dc6ea27e21ad80a96f44e48",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "3f9091ebb24ea69d1e9ad7a20e3a617f47548595e9b0b0a46a95061ec3e81740",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "25461ebb72e6daae6d0dc5815dcde9cd3fb2cf5150fe435f336775b00b45336d",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "52b2630e360ae523378662c58b554046d5086033761e830cee61d24e46850889",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "26fbcb603a637ccd27d65387509e548e532334c5895fd56d7a9d531cc1b125fb",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "d4ec8efff8fdcc6db682bb2c9dc2b5284ea7ca5d0f79663832e203e3d52bd125",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "01fc14e123214c67cbf235824d1ec952a825d5f78464ecc18fb9609c2781f50c",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "e114ea800daa6938bd7bbc29c6fde32844324662764b5cb63d7e4e78c3b66c65",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "9ed22ed7d6c73a08f9522684d4996821054dde714067e644bf8225fe9f2817ff",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "bd4b2031ad50538f365ac3312534d813fb7326fd90cf5056ac80b31d189cbb15",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "804182061bd3648a5d1079e9836aa8cb7e9201a32f190863551299075fbeac47",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "d3d910189e70e5e5edd9a3f76420da1e8a5578b966ceef1c3936fb6b8e456551",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "a215b90180b104679133c979614fe0feeb770b6a3d1df4d41065e15be2ed7051",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "9dd93740e50a0913119103c1212284600703756ff930d2a8fa46d3dc97912d96",
+"task": "tablereformat",
+"category": "data_analysis"
+},
+{
+"question_id": "a435d97ba2ea930c89581870ce3bdc86e96e6399ce7fc3ef7ed19bf88f3771a6",
+"task": "cta",
+"category": "data_analysis"
+},
+{
+"question_id": "140b7ab87b7be33e80fff3cfc052077d34cc51b5038c1c390cfb9780ad948c04",
+"task": "tablejoin",
+"category": "data_analysis"
+},
+{
+"question_id": "1f592e4e1a40499fb15905f6badb7c507a643106aec8d907f34de9cd200cb3fa",
+"task": "tablereformat",
+"category": "data_analysis"
+}
+]
+}

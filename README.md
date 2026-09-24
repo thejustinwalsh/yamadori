@@ -48,10 +48,12 @@ Bonsai has a vocabulary for cutting things away, and it fits.
 
 You point any OpenAI client at one URL. That is the whole setup.
 
-The stack works out which repository you are in. It indexes that repository
-while you use it. It reads the source of every package you import. It runs
-your tests. It remembers what it already did, so a long session does not redo
-its own work.
+The stack reads the source of every library you import, at the version you
+use, and searches it on the model's behalf. Your own code stays with your
+client: the model reads it through your harness's file tools, and the server
+never looks at your disk. It checks the code it writes before it answers, and
+it remembers what it already did, so a long session does not redo its own
+work.
 
 The client never learns any of this. It thinks it added a model.
 
@@ -99,7 +101,7 @@ top of this file is a promise, not a receipt.
 | | |
 |---|---|
 | OpenAI API | `https://ai.thejustinwalsh.me/v1` (via Caddy) |
-| Dashboard | `https://ai.thejustinwalsh.me/dash` (Python pages at `/dash/classic`) |
+| Dashboard | `https://ai.thejustinwalsh.me/` (old `/dash` links redirect; Python pages at `/dash/classic`) |
 | Code-intelligence API | `https://ai.thejustinwalsh.me/tools` |
 | OpenAPI spec | `https://ai.thejustinwalsh.me/tools/openapi.json` |
 
@@ -108,6 +110,64 @@ dashboard, `:1235` for the tools API.
 
 `ai.thejustinwalsh.me` is public DNS pointing at the ZeroTier address, so the
 endpoints keep working if ZeroTier reassigns the IP.
+
+## Effort tiers
+
+The standard `reasoning_effort` field is the only switch a client needs. Each
+tier turns on one more augmentation (`mcp/tiers.py`, `TIERS`); nothing else has
+to be configured. A tier says what is *allowed*: the selection engine still
+decides per request whether fan-out and deep thinking are worth running, and
+every decision comes back on the response as `x_yamadori`.
+
+Fan-out means **up to 3** candidates, the original answer included, generated
+**in sequence by the second brain** (the helper context deep thinking also
+uses), never in parallel: the second brain writes one more answer, the code
+check grades the two, and only when neither clearly wins does it write a
+tie-breaker from both candidates and their check results. At most two
+contexts are live at once. A code answer's winner is delivered; for a prose
+answer, the second answer's differing points follow the model's own answer
+and the model weighs them in its own turn.
+
+Our code-search tools are not offered to the model you talk to: it sees your
+client's tools (plus image tools where an image server is configured, and at
+`xhigh` and `max` one more, `think_deeply`, to call when it is stuck). The
+service works beside it -- library definitions after a library question, the
+second brain's investigation, repair and comparison -- and folds the result
+back in fixed phrases ("After thinking deeply,", "Verified", "Repaired",
+"Compared two approaches"), each second-brain result opening with "Today I
+was inspired by <word>." for the concept seed it drew. Everything it adds is
+replayed byte for byte on every request, so the model's prompt cache is
+never broken by the service.
+
+| `reasoning_effort` | thinking | library help | skills | code check | fan-out | deep thinking | addendum | images | concept seed | adds |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `minimal` | off | – | – | – | 1 | – | – | yes | – | the fastest answer: no thinking, nothing of ours (least injection-resistant) |
+| `low` | on | – | – | – | 1 | – | – | yes | – | nothing: the model as it ships, the benchmark baseline |
+| `medium` | on | definitions | yes | note | 1 | – | – | yes | – | library definitions for a library question, skills (formerly hints; armed without review, screened), a note when a client write does not parse |
+| `high` | on | definitions | yes | repair | up to 3 | – | yes | yes | yes | the second brain: code that does not parse is repaired, a second approach is compared, and the addendum says so |
+| `xhigh` | on | definitions | yes | repair | up to 3 | allowed | yes | yes | yes | everything: deep thinking on top of `high` |
+| `max` | on | definitions | yes | repair | up to 3 | allowed | yes | yes | yes | everything, with the longest thinking (slowest) |
+
+- **Code check:** syntax and lint of what the model writes; its code is
+  changed only where a repair of real errors needs it (formatting is
+  reported, never applied).
+- **Deep thinking** (`xhigh`, `max`) runs on a trigger, on any kind of
+  request, agent steps included: the model calls `think_deeply`; the
+  service sees the work stall (the same error again, a failing command
+  re-run, "still broken"); the conversation uses a library newer than the
+  model; or a large new task arrives, whose plan the second brain writes
+  first. It researches library source, skills, the service's notes and the
+  web (a local SearXNG). Every trigger and non-trigger is recorded with its
+  outcome, and the thresholds are tuned from them within bounds
+  (`mcp/deep.py`, `mcp/deep_learn.py`, `GET /dash/api/deep`).
+- **Default:** `medium`, when a client sends nothing.
+- **Accepted values:** any of the six names above picks its tier; anything
+  else gets the default, never an error.
+- **Thinking budget:** it isn't set by the tier. It comes from the request's
+  share of the KV cache: 5/8 of the pool for the conversation, minus the
+  prompt and the answer allowance.
+- **Images:** `generate_image` is offered on every tier when image generation
+  is configured: it is a capability, not a gate (`docs/IMAGEGEN.md`).
 
 ## TLS
 
@@ -244,6 +304,9 @@ docs/KNOWN-ISSUES.md open problems, with the measurements behind them
 mcp/server.py        the front door on :1234 (auth, /v1, dashboard at /); logic in proxy.py
 mcp/model.py         the one door for internal generation (same tiers.apply)
 mcp/selection.py     per-request: hints, deep thinking, fan-out
+mcp/deep.py          deep thinking's triggers, their records and outcome labels
+mcp/deep_learn.py    idle-time learner: thresholds within bounds, reversible
+mcp/research_tools.py  the second brain's skills, notes and web sources
 mcp/worker.py        claims dataset jobs from index/jobs.sqlite3
 mcp/tool_shim.py     UNUSED. Kept as a record; see known issues
 mcp/tools_api.py     HTTP transport for the same tools

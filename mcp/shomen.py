@@ -7,7 +7,7 @@ it is not a step you rush: you turn the tree, study it from every side, and only
 then make the first cut. Nobody watching the finished tree sees the turning.
 
 That is exactly this module. It searches, reads and reasons in a context of its
-own, and only the conclusion is shown. To a user it is never "a second context"
+own, and only the distillation is shown. To a user it is never "a second context"
 or "a hemisphere" -- it is the system thinking deeply, and every user-facing
 string says so.
 
@@ -19,7 +19,48 @@ user's own context, all of it stays there: re-prefilled every turn, occupying
 the window that long-context recall degrades over, and ninety percent of it is
 scaffolding nobody wanted to read.
 
-Done in a SECOND context, only the conclusion crosses back.
+Done in a SECOND context, only the distillation crosses back.
+
+WHAT CROSSES BACK (operator decision, 2026-09-23)
+
+"Context saving will never work if the second brain is implementing or
+answering a question and never sending back the distillation and facts."
+The old rule was "only the conclusion crosses", and the proxy enforced it by
+DROPPING: a run that made no search was withheld as general knowledge, and a
+run that hit the turn cap without writing a finding handed back nothing
+after ten searches. Both threw the work away.
+
+The rule now has two halves:
+
+  - SUMMARIZATION AND LOOKUP work: only the conclusion crosses. The searching
+    stays here; that is the saving.
+  - WORK THE SECOND BRAIN DID (investigating, answering, implementing): it
+    comes back as a DISTILLATION PLUS FACTS, never thrown away, in one fixed
+    hand-off (SECTIONS, rendered by `handoff()`):
+
+        FACTS                    each ending path:line if it was read, or
+                                 "(reasoning, not checked against source)"
+        SEARCHED, FOUND NOTHING  so the main model does not repeat it
+        OPEN QUESTIONS
+        NEXT STEP
+
+    Every fact crosses. Its citations are checked against what was retrieved
+    and the unchecked ones are LABELLED, not dropped. With no search at all
+    the whole hand-off crosses under a head that says "reasoning, no sources
+    checked". At the turn cap or the helper-budget landing the landing
+    prompt (LANDING) requires the hand-off from what was gathered, written by
+    the helper itself -- a tool result is never pasted across. If the helper
+    writes nothing, `machine_handoff()` builds one from the trace (queries
+    run, hit counts, paths retrieved), labelled as machine-built. An empty
+    hand-off is impossible. MAX_FINDING_CHARS is the breaker, and a cut says
+    so.
+
+THE NUMBERS BELOW WERE MEASURED UNDER THE OLD CONCLUSION-ONLY RULE, with a
+free-prose finding "under 200 words". The hand-off is structured, has a
+250-word target, and now also crosses on runs that used to cross nothing, so
+the main-context figures (8,326 -> 2,410, n=26) and the 531-token crossing
+must be RE-MEASURED (bench/context_economy.py) before they are cited for the
+current design.
 
 MEASURED, n=26 paired tasks, 78 generations, 0 errors (docs/CONTEXT-ECONOMY.md):
 
@@ -65,18 +106,33 @@ demo rather than the library; a confident summary of those same results does
 not. Summarisation trades context economy for undetectable error, and that
 trade is only acceptable if the error stays detectable.
 
-So a finding is refused unless it cites paths that the investigation actually
-retrieved. Cited paths are checked against the tool results, not taken on
-trust, and the full trace is kept under a handle the caller can ask for. The
-finding is a claim WITH receipts, never a claim instead of them.
+So every fact is checked against the paths the investigation actually
+retrieved. Cited paths are compared with the tool results, not taken on
+trust, and the full trace is kept under a handle the caller can ask for. A
+fact that passes stands as read; one that does not crosses LABELLED as
+unverified reasoning (until 2026-09-23 the whole finding was refused
+instead, and the work was lost). A fact is a claim WITH receipts, or a claim
+that says it has none -- never a claim posing as read.
+
+THE ONE RUNNER (operator, 2026-09-24). This module is the second brain:
+`run(job, ...)` below runs every job -- investigate, plan, alternative,
+tiebreak, fixup -- on the one helper lane, each with a concept seed in its user
+message. The investigation's hand-off is folded into main's own turn: the
+proxy prefills it as main's reasoning and opens the visible answer with
+PHRASES["investigate"].
 
 WHAT IS DELIBERATELY NOT HERE
 
-Autonomous delegation. The main model asks for an investigation by calling a
-tool; the proxy does not decide on its own that a question needs one. Routing
-that automatically is a closed-set decision and therefore a plausible job for
-the classifier later, but it is a separate mechanism that would need its own
-measurement, and bolting it on now would make the two indistinguishable.
+The decision whether to investigate: since Phase 0.6 (operator, 2026-09-24)
+four TRIGGERS decide it (mcp/deep.py) -- the model's own `think_deeply` call,
+struggle the proxy detects, a known-hard area, a large task kickoff (the
+`plan` job here) -- and mcp/selection.py records the reason. Laya is not
+consulted for them. The `delegate_investigation` tool survives only as a
+header-forced benchmark arm.
+And the client's tools: the second brain never gets client access. What the
+harness read is in the conversation already, and a file it would need
+becomes the hand-off's NEXT STEP, for main to read with the harness's own
+tool.
 """
 from __future__ import annotations
 
@@ -92,10 +148,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 MODEL = os.environ.get("YAMADORI_HELPER_MODEL", "bonsai")
-# No hop count. MAX_HOPS (16) was removed on 2026-09-22 at the operator's
-# instruction: a count hides a lying tool behind a slow failure. This context
-# ends when it stops asking for tools, or when its window fills its 3/8 share
-# of the KV pool (see investigate()).
+# MAX_HOPS (16) was removed on 2026-09-22 at the operator's instruction: a
+# count that ENDED the run hid a lying tool behind a slow failure. Since
+# 2026-09-23 a per-run tool-turn limit (tiers.tool_turn_limit: 10, 20 at max)
+# LANDS the run instead -- tools withdrawn, finding written -- and the trace
+# records it. See _investigate().
 
 # ---------------------------------------------------------------------------
 # LAYA IS THE ROUTER, IN AND OUT. IT IS NOT OPTIONAL.
@@ -130,7 +187,9 @@ MAX_FINDING_CHARS = int(os.environ.get("YAMADORI_FINDING_CHARS", "6000"))
 _TRACES: dict[str, dict] = {}
 MAX_TRACES = 32
 
-# NOTHING HERE STATES A BUDGET, AND NOTHING COUNTS TURNS AT IT.
+# NOTHING HERE STATES A BUDGET TO THE MODEL. (Since 2026-09-23 the loop does
+# count tool turns -- tiers.tool_turn_limit -- but never tells the model a
+# number, and the cap lands the run rather than ending it.)
 #
 # There used to be a "BUDGET: at most N searching turns" line, justified by a
 # live run that spent 51,206 tokens over eight hops and returned 48
@@ -147,31 +206,71 @@ MAX_TRACES = 32
 # hurry is the kind of instruction that buys a shallower answer and nothing
 # else, and it is a second brain -- the whole reason it exists is to spend
 # effort somewhere the main context does not have to.
-SYSTEM = """You are investigating a question about a codebase for another
-engineer. You have search tools. They have your conclusion and nothing else.
+#
+# THE HAND-OFF FORMAT (operator decision, 2026-09-23). What crosses back is a
+# DISTILLATION PLUS FACTS in four fixed sections, not a free-prose finding.
+# The sections are routed by a table rather than described in prose (AGENTS.md
+# "Prompting this model": a decision-router table measured 10.7 vs 10.0), and
+# the prompt carries no prohibition at all -- the old "Never state anything
+# you did not read" became a routing row: a statement that was not read is
+# still handed back, labelled as reasoning. The word target is a CHOICE, not
+# a measurement; MAX_FINDING_CHARS is the breaker behind it.
+HANDOFF_TARGET_WORDS = 250
+REASONING_LABEL = "(reasoning, not checked against source)"
+WEB_LABEL = "(web)"
+SECTIONS =(("facts", "FACTS"),
+            ("searched_empty", "SEARCHED, FOUND NOTHING"),
+            ("open", "OPEN QUESTIONS"),
+            ("next", "NEXT STEP"))
+
+SYSTEM = f"""You are investigating a question about a codebase for another
+engineer. You have search tools. The engineer gets your hand-off and nothing
+else: not your searches, not your reasoning.
 
 Work in this order:
 1. Search for what you need. Read the code before describing it.
-2. Stop as soon as you can answer. Do not explore further out of interest.
-3. Write the finding.
+2. Stop as soon as you can answer.
+3. Write the hand-off.
 
-The finding must be under 200 words and must cite the file paths and line
-numbers you actually read. Write what the code DOES, not what you did to find
-it. If the code does not answer the question, say exactly that -- an honest
-"the index does not contain this" is useful and a guess is not.
+THE HAND-OFF has exactly these four sections, in this order. Put each item on
+its own line, starting with "- ". Aim for under {HANDOFF_TARGET_WORDS} words in total.
 
-Never state anything you did not read. Your reader cannot see your searches
-and cannot check you.
+FACTS
+SEARCHED, FOUND NOTHING
+OPEN QUESTIONS
+NEXT STEP
 
-WRITE IN PLAIN ENGINEERING ENGLISH. This finding is what crosses back. It is
-read by another model, and may be read by a classifier, so structure it rather
-than narrate it:
+Route each thing you know with this table:
 
-- One idea per sentence. Split compound sentences.
-- Name the thing. Do not write "none", "it" or "this" where a noun fits.
+| what you have | section | end the line with |
+|---|---|---|
+| a statement you read in a file | FACTS | the path and line, as src/file.ts:42 |
+| a statement you read on a web page | FACTS | the page's URL, then {WEB_LABEL} |
+| a statement from a skill | FACTS | its id, as skill:react-19-forms |
+| a statement you worked out without reading it | FACTS | {REASONING_LABEL} |
+| a search that returned nothing useful | SEARCHED, FOUND NOTHING | the tool and what you searched for |
+| something you could not settle | OPEN QUESTIONS | what would settle it |
+| what the engineer should do next | NEXT STEP | one or two lines |
+
+Write "- none" under a section that has nothing. Write what the code DOES,
+not what you did to find it. If the index does not contain the answer, put
+that under OPEN QUESTIONS: an honest gap is useful and a guess is not.
+
+When a mockup, diagram or design sketch would help the answer, draw it with
+generate_image. Then look at it with describe_image, passing the url it
+returned and a question such as "Does this show <what you asked for>?". If
+the picture is off, adjust the prompt and draw it again. Put the markdown
+line of the final image under FACTS: the link is the only part of the image
+that crosses back. Say in words what the final image shows.
+
+WRITE IN PLAIN ENGINEERING ENGLISH. The hand-off is read by another model,
+and may be read by a classifier, so structure it rather than narrate it:
+
+- One idea per line. Split compound sentences.
+- Name the thing: write the noun where "it" or "this" would go.
 - Active voice with a concrete subject: "the loader caches the plan", not
   "the plan is cached".
-- No embedded clauses. Instead of "X, which suppresses Y", write "X. This
+- Short sentences. Instead of "X, which suppresses Y", write "X. This
   suppresses Y."
 - State a condition as a condition: "If N is zero, the branch returns early."
 - Keep identifiers, paths, line numbers and measured values verbatim.
@@ -180,6 +279,61 @@ Instead of: "A MouseEvent has none and resolves to a different pointer with no
 recorded initial click, which suppresses the synthetic event."
 Write: "A MouseEvent has no recorded initial click. It resolves to a different
 pointer. This condition suppresses the synthetic event\""""
+
+# What a landing asks for -- the tool-turn cap and the helper-budget stop
+# both. It REQUIRES the hand-off from what was gathered: the tool results are
+# already in this context, and turning them into FACTS is the helper's job.
+# The proxy never pastes raw tool output across.
+LANDING = ("Stop searching. Write the hand-off now from what you have "
+           "gathered, in the four sections FACTS, SEARCHED, FOUND NOTHING, "
+           "OPEN QUESTIONS and NEXT STEP. Turn what the searches returned "
+           "into FACTS in your own words, each ending with its path:line. "
+           "Put what is still missing under OPEN QUESTIONS.")
+
+# THE PLAN JOB (Phase 0.6, trigger 4: TASK KICKOFF; operator, 2026-09-24).
+# A new task whose spec is large sends its PLANNING here: the Octopus pilot's
+# V0 steps 1-3 spent 12-14k reasoning tokens each planning on main (#18,
+# docs/SELF-IMPROVEMENT-LOG.md), in the context every later step re-reads.
+# The second brain writes a compact plan in four fixed sections; the proxy
+# prefills it as main's reasoning and main starts acting. Same shape as the
+# hand-off: a routing table, no prohibition, a word target that is a CHOICE.
+PLAN_TARGET_WORDS = 300
+PLAN_SECTIONS = (("files", "FILES"),
+                 ("order", "ORDER"),
+                 ("decisions", "KEY DECISIONS"),
+                 ("risks", "RISKS"))
+PLAN_SYSTEM = f"""You are planning a software task for another engineer, who
+will carry it out with their own tools. You have search tools for library
+source, skills, this project's docs and the web. The engineer gets your plan
+and nothing else: not your searches, not your reasoning.
+
+Work in this order:
+1. Read the task. Search only for what the plan depends on: an API you are
+   unsure of, a version, a library the task names.
+2. Write the plan.
+
+THE PLAN has exactly these four sections, in this order. Put each item on its
+own line, starting with "- ". Aim for under {PLAN_TARGET_WORDS} words in total.
+
+FILES
+ORDER
+KEY DECISIONS
+RISKS
+
+Route each thing with this table:
+
+| what you have | section | how to write it |
+|---|---|---|
+| a file to create or change | FILES | the path, then what it holds, in a few words |
+| a step | ORDER | one action per line, first step first |
+| a choice the task leaves open (library, structure, data format) | KEY DECISIONS | the choice and the reason, with path:line, the URL then {WEB_LABEL}, or {REASONING_LABEL} |
+| something likely to go wrong | RISKS | the risk and how to check for it |
+
+Write "- none" under a section that has nothing. Keep names, paths, versions
+and commands verbatim. Plain engineering English: one idea per line, the
+noun named, active voice."""
+PLAN_LANDING = ("Stop searching. Write the plan now from what you have, in "
+                "the four sections FILES, ORDER, KEY DECISIONS and RISKS.")
 
 # TWO BUGS LIVED IN THE OLD VERSION OF THIS PATTERN.
 #
@@ -197,24 +351,46 @@ pointer. This condition suppresses the synthetic event\""""
 # reintroduce it.
 _PATH = re.compile(
     r"[\w./\\-]+\.(?:tsx|ts|jsx|js|mjs|cjs|json|jsonc|toml|yaml|yml"
-    r"|hpp|cpp|rs|py|go|zig|wgsl|glsl|h|c)(?![A-Za-z0-9])")
+    r"|hpp|cpp|rs|py|go|zig|wgsl|glsl|md|h|c)(?![A-Za-z0-9])")
+# PHASE 0.6 SOURCES (docs/SELF-IMPROVEMENT-PLAN.md): deep thinking also reads
+# the web (mcp/research_tools.py: read_web_page, search_web) and our skill
+# store (find_skills). A web fact cites its URL and is labelled "(web)"; a
+# skill is cited as skill:<id>. `md` joined _PATH for the knowledge base
+# (docs/*.md, find_in_knowledge_base). All three are checked against what
+# the run retrieved, exactly as a path is.
+_URL = re.compile(r"https?://[^\s<>()\[\]\"'`|]+")
+_SKILL_REF = re.compile(r"\bskill:[A-Za-z0-9][\w.-]*")
 
 
 def _post(path: str, payload: dict, timeout: int = 3600) -> dict:
     """One upstream call to the helper context, through the one door.
 
     Shaped by mcp/model.py -- the proxy's own effort mapping and budget rule
-    at `xhigh`, the effort deep thinking runs at -- so this context can never
-    again carry its own budget. It used to send max_tokens=2500 total, below
+    at the effort of the REQUEST'S TIER, passed by name in `_effort_tier`
+    (default `max`, i.e. xhigh effort) -- so this context can never again
+    carry its own budget. By tier NAME, not effort string: since the `xhigh`
+    tier (medium effort) was added on 2026-09-23, the string "xhigh" names a
+    medium-effort tier, and a hardcoded effort="xhigh" here silently became
+    medium. It used to send max_tokens=2500 total, below
     what this model thinks for on an ordinary prompt (docs/CONSTRAINTS.md 8).
     `max_tokens` in the payload is the answer allowance: a tool call, or a
     finding.
     """
     import model
+    import tiers
     # role="helper": deep thinking's thinking comes out of ITS 3/8 of the
     # pool (mcp/budget.py), never the conversation's 5/8.
-    return model.post(model.shape(payload, effort="xhigh", role="helper"),
-                      timeout=timeout)
+    shaped = model.shape(payload, effort=payload.get("_effort_tier") or "max",
+                         role="helper")
+    # An EFFORT OVERRIDE on the request (X-Yamadori-Features {"effort": ...},
+    # how the domain benchmark holds effort fixed under body tier `max`) wins
+    # over the tier name's effort, as it does for the main context. Without
+    # this, deep thinking on those arms thought at xhigh while the main
+    # context thought at medium (found 2026-09-23 before the domain run).
+    eff = payload.get("_effort_override")
+    if eff and shaped.get("enable_thinking"):
+        shaped["reasoning_effort"] = tiers.safe_effort(eff)
+    return model.post(shaped, timeout=timeout)
 
 
 def _cited(text: str) -> set[str]:
@@ -236,7 +412,14 @@ def _cited(text: str) -> set[str]:
         p = p.lstrip("/")          # leading separators only -- never dots
         if p:
             out.add(p.lower())
+    out |= _urls(text) | {s.lower() for s in _SKILL_REF.findall(text or "")}
     return out
+
+
+def _urls(text: str) -> set[str]:
+    """The URLs a text names, trailing punctuation stripped, lowercased."""
+    return {u.rstrip(".,;:!?*_").lower() for u in _URL.findall(text or "")
+            if len(u.rstrip(".,;:!?*_")) > len("https://")}
 
 
 LAYA_URL = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
@@ -267,7 +450,11 @@ def _laya(state: str, questions: dict) -> dict:
     A router that silently falls back to "yes, investigate" is not a router;
     it is an always-on feature with a decorative dependency. The caller
     decides what to do when the decision cannot be made, and says so.
+    With YAMADORI_E1=1 Laya is off the request path: this raises.
     """
+    import e1
+    if not e1.laya_allowed():
+        raise RuntimeError("Laya is not consulted: YAMADORI_E1=1")
     req = urllib.request.Request(
         LAYA_URL + "/decide",
         data=json.dumps({"state": state[:6000], "questions": questions}).encode(),
@@ -435,34 +622,421 @@ def distil(question: str, finding: str, paths: list[str]) -> dict:
     return out
 
 
+# ===================================================== THE ONE RUNNER ======
+#
+# ONE SECOND-BRAIN RUNNER (operator, 2026-09-24). Three paths used to do
+# second-brain work -- this module's investigation, fan-out's B/C
+# generation (mcp/fanout.py) and the repair loops (proxy._repair_*, the
+# tool-call rounds in mcp/tool_code.py, both of which ran ON MAIN, as extra
+# turns in the conversation's own context). They are one runner now, `run`,
+# on the one helper lane (admission.helper_lane), with four job types:
+#
+#   investigate  searches library source with our tools; hands back the four
+#                sections (FACTS / SEARCHED, FOUND NOTHING / OPEN / NEXT)
+#   alternative  fan-out's candidate B: the same task answered independently
+#   tiebreak     fan-out's candidate C: the task plus both candidates and
+#                their check results
+#   fixup        code that fails the check -- a client write, or a final
+#                answer's fenced block: ONLY the code, its errors and the
+#                user's request; corrected up to tool_code.REPAIR_ROUNDS
+#                rounds at the request's own effort; the last version
+#                comes back only if fix_rejection accepts it, else the
+#                original. Main never sees a failed attempt.
+#
+# Every job carries a concept seed in its USER message (operator,
+# 2026-09-23 / 2026-09-24). The CALLER supplies it -- proxy.ledger_seed draws
+# it once per (request, job) and records it, so a replay of the request uses
+# the same word and the job's prompt is byte-identical.
+#
+# What comes back is folded into main's turn by the proxy in fixed phrases,
+# PHRASES below; AGENTS.md carries the same table. A phrase that is
+# PREFILLED (the investigate opening) must end on a letter or on an ending
+# measured safe, never a space: STEP 0 measured "After thinking deeply," at
+# 976 of 995 prompt tokens reused on the next request, twice, and showed that
+# a trailing space is its own token (docs/SELF-IMPROVEMENT-PLAN.md).
+PHRASES = {
+    # prefix of every fold-back that a seeded job produced
+    "seed": "Today I was inspired by {words}.",
+    # investigate: opens main's visible answer (prefilled); the hand-off is
+    # prefilled as main's reasoning
+    "investigate": "After thinking deeply,",
+    # the check passed: a one-line note, no generation
+    "verified": "Verified",
+    # fixup changed the code
+    "repaired": "Repaired",
+    # fan-out: B (and C) were compared with the answer
+    "compared": "Compared two approaches",
+    # medium: the check found errors and nothing fixes them at this effort
+    "checked": "Checked",
+}
+JOBS = ("investigate", "plan", "alternative", "tiebreak", "fixup")
+
+
+def seed_line(seeds) -> str:
+    """"Today I was inspired by <word>." -- one line per fold-back, naming
+    every seed its jobs drew ("X and Y" when B and C both ran); "" when no
+    seed was drawn."""
+    words = []
+    for s in seeds or []:
+        w = s.get("word") if isinstance(s, dict) else s
+        if w and w not in words:
+            words.append(str(w))
+    if not words:
+        return ""
+    joined = (words[0] if len(words) == 1 else
+              ", ".join(words[:-1]) + " and " + words[-1])
+    return PHRASES["seed"].format(words=joined)
+
+
+def seed_phrase(word: str, where: str) -> str:
+    """The concept seed as every second-brain job's USER message carries it
+    (#13, docs/SELF-IMPROVEMENT-LOG.md). The bare "Inspiration word: X"
+    (concept_seed.phrase) read like a label to reproduce: live 2026-09-24
+    the tie-breaker's seed came back as the first line of the delivered
+    code, `# humanidad`. This says what the word is FOR -- the approach --
+    and where it does not belong, in one clause naming that failure (the
+    prompting rule: at most two prohibitions, each for an observed failure).
+    No hedge against its purpose: it is still meant to steer the approach.
+    Recorded for the dashboard's last-seed panel as phrase() records it."""
+    import concept_seed
+    concept_seed.record(word, where)
+    return (f"\n\nInspiration word: {word} -- let it shape how you approach "
+            f"the task; it is not part of the answer, so it does not appear "
+            f"in your code or text.")
+
+
+def opening(seeds) -> str:
+    """The investigate fold-back's visible opening, prefilled as main's
+    content. Ends on the measured-safe "After thinking deeply,"."""
+    line = seed_line(seeds)
+    return (line + " " if line else "") + PHRASES["investigate"]
+
+
+def run(job: str, *, lane_timeout: float | None = None, held: bool = False,
+        **spec) -> dict:
+    """Run one second-brain job on the helper lane.
+
+    Returns the job's hand-off: `investigate` -> investigate()'s record
+    (`handoff` text and `handoff_stats`); `alternative` / `tiebreak` -> the
+    candidate (`content`, `variant`, `seed`); `fixup` -> fixup()'s record
+    (per unit the last code and its check). Every result carries `job`, and
+    `skipped: "helper busy"` when the lane never came free -- reported, never
+    swallowed: work that quietly did not happen looks exactly like work that
+    found nothing.
+
+    `held`: the caller already holds the helper lane (fanout.run holds it
+    across B and C, so one fan-out's candidates are never split by another
+    request's job)."""
+    import admission
+    import contextlib
+    if job not in JOBS:
+        raise ValueError(f"unknown second-brain job {job!r}; one of {JOBS}")
+    wait = admission.WAIT_SECONDS if lane_timeout is None else lane_timeout
+    lane = (contextlib.nullcontext(True) if held else
+            admission.helper_lane(timeout=wait, what=job))
+    with lane as got:
+        if not got:
+            return {"job": job, "ok": False, "skipped": "helper busy",
+                    "seed": concept_summary(spec.get("seed"))}
+        if job in ("investigate", "plan"):
+            res = investigate(spec["question"], spec["tools"],
+                              spec["run_tool"], spec.get("context", ""),
+                              on_think=spec.get("on_think"),
+                              tier=spec.get("tier", "max"),
+                              effort=spec.get("effort"),
+                              seed=spec.get("seed"), mode=job)
+        elif job == "fixup":
+            res = fixup(spec["units"], spec.get("request", ""),
+                        check=spec["check"], tier=spec.get("tier", "max"),
+                        effort=spec.get("effort"), seed=spec.get("seed"))
+        else:
+            import fanout
+            variant = dict(spec["variant"], seed=spec.get("seed"))
+            res = fanout._generate(spec["body"], variant,
+                                   spec.get("timeout", 3600))
+            res["ok"] = bool(res.get("content")) and not res.get("error")
+    res["job"] = job
+    return res
+
+
+def concept_summary(seed) -> dict | None:
+    import concept_seed
+    return concept_seed.summary(seed) if isinstance(seed, dict) else None
+
+
+FIXUP_SYSTEM = ("You repair code that does not parse. You get the request it "
+                "was written for, the code, and the exact errors a parser "
+                "reported. Reply with the corrected code in ONE fenced block: "
+                "the whole of what you were given, with the smallest change "
+                "that makes it parse: change only the lines the errors "
+                "require, and keep every other line exactly as given, its "
+                "formatting included.")
+
+
+def _fence(code: str, lang: str) -> str:
+    """`code` in a backtick fence one longer than any backtick run at the
+    start of one of its lines (at least three), so no line of it can close
+    the fence."""
+    runs = [len(m.group(1)) for m in _LINE_TICKS.finditer(code or "")]
+    fence = "`" * max(3, max(runs, default=0) + 1)
+    return f"{fence}{lang}\n{code.rstrip()}\n{fence}"
+
+
+_LINE_TICKS = re.compile(r"^ {0,3}(`+)", re.M)
+
+
+def _error_lines(errors: list) -> str:
+    out = []
+    for e in (errors or [])[:8]:
+        if isinstance(e, dict):
+            out.append(f"line {e.get('line', 1)}, col {e.get('col', 1)}: "
+                       f"{e.get('message', '')}")
+        else:
+            out.append(str(e))
+    return "\n".join(f"- {x}" for x in out) or "- (the parser gave no detail)"
+
+
+def fixup_prompt(unit: dict, request: str) -> str:
+    """The fixup job's user message for one unit: the request, the code and
+    its errors. Nothing else from the conversation crosses."""
+    lang = unit.get("language") or ""
+    where = unit.get("path") or "the answer"
+    head = (f"The request:\n{(request or '').strip()[:2000] or '(none)'}\n\n")
+    if unit.get("kind") == "edit" and unit.get("old"):
+        body = (f"An edit to {where} ({lang}) replaces this text:\n"
+                f"{_fence(unit['old'], lang)}\n\nwith this replacement, which "
+                f"does not parse:\n{_fence(unit['code'], lang)}\n\n"
+                f"Errors:\n{_error_lines(unit.get('errors'))}\n\nWrite the "
+                f"corrected replacement.")
+    else:
+        what = ("file" if unit.get("kind") == "file" else "code block")
+        body = (f"This {what} ({where}, {lang}) does not parse:\n"
+                f"{_fence(unit['code'], lang)}\n\nErrors:\n"
+                f"{_error_lines(unit.get('errors'))}\n\nWrite the corrected "
+                f"{what}.")
+    return head + body
+
+
+def _closes_inside(original: str, fence: str) -> bool:
+    """True when a line of `original` is a bare run of the fence's character
+    at least as long as `fence`: a block opened with that fence was closed
+    at that line, so what the reply's block holds is a fragment."""
+    ch = (fence or "`")[0]
+    for ln in (original or "").split("\n"):
+        t = ln.lstrip(" ")
+        if (len(ln) - len(t)) <= 3 and t.startswith(fence) \
+                and not t.strip().strip(ch):
+            return True
+    return False
+
+
+def _largest_block(text: str, original: str = "") -> str | None:
+    """The largest CLOSED fenced block in a fix-up reply, or None. An
+    unclosed fence is a reply that was cut off, and a block whose fence the
+    original code could close (a file containing a bare ``` line, answered
+    in a ``` fence) holds a fragment: neither is ever written anywhere
+    (pre-deploy review, 2026-09-24)."""
+    import code_check
+    blocks = [b["code"] for b in code_check.fenced_blocks(text or "")
+              if b["code"].strip() and b.get("closed")
+              and not _closes_inside(original, b.get("fence") or "```")]
+    return max(blocks, key=len) if blocks else None
+
+
+# The fixed code replaces the model's only when it is plausibly COMPLETE:
+# at least this share of the original's non-blank characters. A CHOICE, not
+# a measurement (pre-deploy review, 2026-09-24): the job is told to change
+# only the lines the errors require, so a minimal fix keeps nearly all of
+# the original; a version under half of it is a truncation or a fragment,
+# not a fix. No fix-up length distribution exists in this repo yet.
+FIXUP_MIN_KEEP = 0.5
+
+
+def _nonblank(s: str) -> int:
+    return len("".join((s or "").split()))
+
+
+def fix_rejection(original: str, code: str | None, errors: list,
+                  why: str | None) -> str | None:
+    """Why a fix-up's last version must NOT replace the model's code, or
+    None when it may. The rule (pre-deploy review, 2026-09-24): the version
+    came from a CLOSED fence (`_largest_block`), the reply was not cut off
+    (finish_reason "length"; both surface as `why`), it parses with no
+    errors left, and it is plausibly complete (FIXUP_MIN_KEEP)."""
+    if why:
+        return why
+    if code is None:
+        return "no version came back"
+    if errors:
+        return (f"{len(errors)} error{'s' if len(errors) != 1 else ''} "
+                f"still in the repaired version")
+    if _nonblank(code) < FIXUP_MIN_KEEP * _nonblank(original):
+        return (f"the repaired version is under {int(FIXUP_MIN_KEEP * 100)}% "
+                f"of the original's length (a fragment or a truncation)")
+    return None
+
+
+def fixup(units: list[dict], request: str = "", *, check, tier: str = "max",
+          effort: str | None = None, seed: dict | None = None) -> dict:
+    """Correct each unit's code, up to tool_code.REPAIR_ROUNDS rounds.
+
+    `units`: [{path, language, kind (file|edit|block), code, old?, errors}].
+    `check(unit, code) -> errors` re-checks a version (the caller's checker:
+    tool_code for a client write, code_check for an answer's block).
+    Returns {ok, units: [{..., code, errors_before, errors_after, rounds,
+    changed, accepted, rejected}], rounds, seed}. `code` is the repaired
+    version ONLY when `fix_rejection` finds nothing against it; otherwise it
+    is the unit's original code, untouched, `errors_after` counts the
+    original's errors (what would be sent), and `rejected` says why."""
+    import concept_seed
+    import tiers
+    import tool_code
+    out, most = [], 0
+    for u in units:
+        n = 0
+        cand, errs = None, list(u.get("errors") or [])
+        why = None
+        convo = [{"role": "system", "content": FIXUP_SYSTEM},
+                 {"role": "user", "content": fixup_prompt(u, request) + (
+                     seed_phrase(seed["word"], where="fixup")
+                     if seed else "")}]
+        echoed = 0
+        while errs and n < tool_code.REPAIR_ROUNDS:
+            n += 1
+            payload = {"model": MODEL, "messages": convo, "tools": [],
+                       "max_tokens": max(tiers.A_MIN,
+                                         len(cand or u["code"]) // 2 + 512),
+                       "_effort_tier": tier, "_effort_override": effort}
+            try:
+                d = _post("/v1/chat/completions", payload)
+                ch = d["choices"][0]
+                reply = (ch["message"].get("content") or "")
+                fin = ch.get("finish_reason")
+            except Exception as e:                               # noqa: BLE001
+                why = f"{type(e).__name__}: {e}"[:200]
+                break
+            if fin == "length":
+                # A budget event, never an answer (model.BudgetEvent).
+                why = "the reply was cut off (finish_reason length)"
+                break
+            code = _largest_block(reply, u["code"])
+            if code is None:
+                why = "the reply carried no closed fenced block"
+                break
+            # The seed copied into the code as its first line (#13): this
+            # code is written into the client's file.
+            import fanout
+            code, k = fanout.strip_seed_echo(code, (seed or {}).get("word"))
+            echoed += k
+            # A fence drops the file's last newline; keep the original's.
+            if u["code"].endswith("\n") and not code.endswith("\n"):
+                code += "\n"
+            cand, errs = code, list(check(u, code) or [])
+            if errs:
+                convo += [{"role": "assistant", "content": reply},
+                          {"role": "user", "content":
+                           "It still does not parse:\n" + _error_lines(errs)
+                           + "\n\nWrite the corrected code again, whole, in "
+                             "one fenced block."}]
+        most = max(most, n)
+        rejected = fix_rejection(u["code"], cand, errs, why)
+        before = list(u.get("errors") or [])
+        out.append(dict(u, code=u["code"] if rejected else cand,
+                        errors_after=len(before) if rejected else 0,
+                        errors_left=before if rejected else [],
+                        candidate_errors=len(errs) if cand is not None
+                        else None,
+                        rounds=n, errors_before=len(before),
+                        accepted=not rejected, rejected=rejected,
+                        changed=not rejected and cand != u["code"], why=why,
+                        seed_echo_stripped=echoed))
+    return {"ok": all(x["accepted"] for x in out), "units": out,
+            "rounds": most, "seed": concept_seed.summary(seed)}
+
+
 def investigate(question: str, tools: list[dict], run_tool,
                 context: str = "", hops: int | None = None,
-                on_think=None) -> dict:
-    """Run a tool loop in a private context and return only the conclusion.
+                on_think=None, tier: str = "max",
+                effort: str | None = None,
+                seed: dict | None | bool = True,
+                mode: str = "investigate") -> dict:
+    """Run a tool loop in a private context and return its hand-off.
+
+    `mode` "plan" (Phase 0.6 task kickoff) runs the same loop with
+    PLAN_SYSTEM and hands back the four PLAN_SECTIONS (plan_handoff).
+
+    The result's `handoff` (also `finding`) is the fixed four-section text
+    and `handoff_stats` its counts for x_yamadori; see the module docstring,
+    WHAT CROSSES BACK.
 
     `run_tool(name, args) -> str` is injected rather than imported so this can
     be exercised with a fake in tests, and so the caller decides which index
     and which repository the investigation is scoped to.
+
+    EVERY second-brain run carries a concept seed (operator, 2026-09-23),
+    put in the USER turn with the question (concept_seed.phrase, which also
+    records it for the dashboard's last-seed panel). `seed` is the one the
+    caller recorded (proxy.ledger_seed, via run()); True draws a fresh one,
+    away from the question. The result's `seed` is {word, token_id, u32}, or
+    None when the embedding matrix is not extracted.
     """
+    import concept_seed
+    if seed is True:
+        # A direct caller (a script, the delegate arm's old path) draws its
+        # own; the proxy passes the one its ledger recorded (run()).
+        seed = (concept_seed.seed_for(question, 1) or [None])[0]
+    res = _investigate(question, tools, run_tool, context, hops, on_think,
+                       seed, tier=tier, effort=effort, mode=mode)
+    res["mode"] = mode
+    res["seed"] = concept_seed.summary(seed)
+    res["effort_tier"] = tier
+    # The effort string actually sent upstream: the override if there was
+    # one, else the tier's own (mirrors _post). Recorded so a row can show
+    # what deep thinking thought at.
+    import tiers
+    res["effort"] = tiers.safe_effort(
+        effort or tiers.resolve({"reasoning_effort": tier})["effort"])
+    return res
+
+
+def _investigate(question: str, tools: list[dict], run_tool, context: str,
+                 hops: int | None, on_think, seed: dict | None,
+                 tier: str = "max", effort: str | None = None,
+                 mode: str = "investigate") -> dict:
     started = time.time()
-    convo = [{"role": "system", "content": SYSTEM}]
+    plan = mode == "plan"
+    landing = PLAN_LANDING if plan else LANDING
+    convo = [{"role": "system", "content": PLAN_SYSTEM if plan else SYSTEM}]
     if context:
         convo.append({"role": "user",
                       "content": f"Context from the conversation:\n{context[:1500]}"})
-    convo.append({"role": "user", "content": question})
+    convo.append({"role": "user", "content": question + (
+        seed_phrase(seed["word"], where="shomen") if seed else "")})
 
     trace: list[dict] = []
     seen_paths: set[str] = set()
     spent = 0
 
-    # NO HOP COUNT (removed 2026-09-22, operator's call). This context ends
-    # when it stops asking for tools, or when its window reaches its QUARTER
-    # of the KV pool (the helper-budget check below), which writes up what it
-    # has. `hops` exists only so a test can bound a fake loop.
+    # The old hop count (MAX_HOPS 16) was removed 2026-09-22. This context
+    # ends when it stops asking for tools, when its window reaches its share
+    # of the KV pool (the helper-budget check below), or at the vendor's
+    # tool-turn cap, tiers.tool_turn_limit(tier) -- 10, 20 at max -- counted
+    # per deep-thinking run (operator, 2026-09-23; PrismML's
+    # agenticMaxTurns = 10): after that many tool turns the tools are
+    # withdrawn and it writes up what it has. The trace records the cap as
+    # "(turn cap)". `hops`, when a test passes it, bounds generations instead.
+    import tiers
+    limit = tiers.tool_turn_limit(tier)
     hop = -1
     while True:
         hop += 1
-        last = hops is not None and hop >= hops - 1
+        if hops is not None:
+            last = hop >= hops - 1
+        else:
+            last = hop >= limit
+            if last:
+                trace.append({"tool": "(turn cap)", "args": {},
+                              "result": f"{limit} tool turns reached"})
         if last:
             # GRACEFUL DEGRADATION OF A TRIPPED BREAKER, and nothing else.
             # This is no longer part of a normal run -- a healthy
@@ -472,17 +1046,16 @@ def investigate(question: str, tools: list[dict], run_tool,
             # nothing for everything it spent, while one that asks for the
             # finding returns whatever was actually found. Withdrawing the
             # tools makes the request unambiguous.
-            convo.append({"role": "user", "content":
-                          "Stop searching. Write the finding now from what you "
-                          "have, and cite the paths you read. If it is "
-                          "incomplete, say what is missing."})
+            convo.append({"role": "user", "content": landing})
         payload = {"model": MODEL, "messages": convo,
                    "tools": [] if last else tools,
-                   "max_tokens": 1500, "temperature": 0.2}
+                   "max_tokens": 1500, "temperature": 0.2,
+                   "_effort_tier": tier, "_effort_override": effort}
         try:
             d = _post("/v1/chat/completions", payload)
         except Exception as e:                                   # noqa: BLE001
-            return _fail(f"{type(e).__name__}: {e}", trace, started, spent)
+            return _fail(f"{type(e).__name__}: {e}", trace, started, spent,
+                         question, seen_paths)
         msg = d["choices"][0]["message"]
         usage = d.get("usage") or {}
         spent += int(usage.get("total_tokens") or 0)
@@ -532,17 +1105,17 @@ def investigate(question: str, tools: list[dict], run_tool,
                           "result": f"helper KV budget reached: {window} tokens in context"})
             convo.append({"role": "user", "content":
                           "You have used the whole context budget for this "
-                          "investigation. Write the finding now from what you "
-                          "have, and say what is still unknown."})
+                          "investigation. " + landing})
             try:
                 d = _post("/v1/chat/completions",
                           dict(payload, tools=[], messages=convo))
                 spent += int((d.get("usage") or {}).get("total_tokens") or 0)
                 msg = d["choices"][0]["message"]
             except Exception as e:                               # noqa: BLE001
-                return _fail(f"{type(e).__name__}: {e}", trace, started, spent)
+                return _fail(f"{type(e).__name__}: {e}", trace, started, spent,
+                             question, seen_paths)
             return _finish((msg.get("content") or "").strip(), trace,
-                           seen_paths, started, spent, question)
+                           seen_paths, started, spent, question, mode)
 
         calls = msg.get("tool_calls") or []
 
@@ -553,9 +1126,19 @@ def investigate(question: str, tools: list[dict], run_tool,
                 # than returned as an empty conclusion, which would read to
                 # the caller as "investigated, found nothing".
                 return _fail("ran out of budget while reasoning, no conclusion",
-                             trace, started, spent)
+                             trace, started, spent, question, seen_paths)
             return _finish(finding, trace, seen_paths, started, spent,
-                           question)
+                           question, mode)
+        if last:
+            # The landing went out with no tools and still came back asking
+            # for one. Nothing would read its result, and looping again would
+            # never end (the landing condition stays true), so this stops.
+            return _fail(
+                f"tool-turn cap reached ({limit if hops is None else hops}) "
+                f"and the landing still asked for a tool instead of writing "
+                f"the finding -- this indicates a tool returning results the "
+                f"model cannot act on, not a budget being exhausted; check "
+                f"the trace", trace, started, spent, question, seen_paths)
 
         convo.append({"role": "assistant", "content": msg.get("content") or "",
                       "tool_calls": calls})
@@ -570,14 +1153,19 @@ def investigate(question: str, tools: list[dict], run_tool,
                 out = run_tool(fn, args)
             except Exception as e:                               # noqa: BLE001
                 out = f"{fn} failed: {type(e).__name__}: {e}"
-            seen_paths |= _cited(out)
+            import repeats
+            found = _cited(out)
+            seen_paths |= found
+            # `empty` and `paths` feed the hand-off: an empty search is listed
+            # under SEARCHED, FOUND NOTHING so the main model does not repeat
+            # it, and a machine-built hand-off reports hit counts from them.
             trace.append({"hop": hop, "tool": fn, "args": args,
-                          "chars": len(out),
+                          "chars": len(out), "empty": repeats._empty(out),
+                          "paths": len(found),
                           "ms": round((time.time() - t0) * 1000)})
             # Same breaker as the proxy's loops, with a marker and the next
             # range to request -- a silent cut handed this context half a file
             # under a header promising all of it (docs/CONSTRAINTS.md 12).
-            import repeats
             convo.append({"role": "tool", "tool_call_id": c.get("id"),
                           "content": repeats.cap_tool_result(out, fn, args)})
 
@@ -589,23 +1177,29 @@ def investigate(question: str, tools: list[dict], run_tool,
         f"runaway breaker tripped after {hops} tool calls without a "
         f"conclusion -- this indicates a tool returning results the model "
         f"cannot act on, not a budget being exhausted; check the trace",
-        trace, started, spent)
+        trace, started, spent, question, seen_paths)
 
 
 def _finish(finding: str, trace: list, seen: set[str], started: float,
-            spent: int, question: str = "") -> dict:
-    """Attach the receipts, and refuse a finding that has none.
+            spent: int, question: str = "", mode: str = "investigate") -> dict:
+    """Attach the receipts, and hand back what was written -- always.
 
     A conclusion citing nothing is indistinguishable from a conclusion the
     model invented, and the caller cannot tell the difference because it never
     saw the searches. Checking the citations against what was actually
     retrieved is the only thing standing between context economy and confident
     fabrication.
+
+    Until 2026-09-23 that check REFUSED: an uncited finding crossed with a
+    warning, or (in the proxy) not at all. Now it LABELS, per fact
+    (`handoff()`): a fact whose cited paths were retrieved stands as read; any
+    other fact crosses marked as reasoning or as citing a path this
+    investigation never retrieved. Nothing the helper wrote is thrown away,
+    and nothing unchecked passes as checked. An empty write-up becomes a
+    machine-built hand-off from the trace.
     """
     claimed = _cited(finding)
-    supported = {p for p in claimed
-                 if any(p == s or s.endswith("/" + p) or p.endswith("/" + s)
-                        for s in seen)}
+    supported = {p for p in claimed if _supported(p, seen)}
     unsupported = sorted(claimed - supported)
 
     handle = uuid.uuid4().hex[:8]
@@ -614,21 +1208,17 @@ def _finish(finding: str, trace: list, seen: set[str], started: float,
     _TRACES[handle] = {"trace": trace, "finding": finding,
                        "retrieved": sorted(seen)}
 
-    note = ""
-    if not claimed and trace:
-        note = ("\n\n[This finding cites no file. It was not checked against "
-                "anything retrieved -- treat it as unverified.]")
-    elif unsupported:
-        note = ("\n\n[Cites paths that were never retrieved: "
-                + ", ".join(unsupported[:4])
-                + ". Those are unsupported by this investigation.]")
-
-    if len(finding) > MAX_FINDING_CHARS:
-        finding = (finding[:MAX_FINDING_CHARS]
-                   + f"\n\n[finding cut at {MAX_FINDING_CHARS} characters "
-                   f"of {len(finding)}]")
-    out = {"ok": True, "finding": finding + note,
+    if finding.strip() and mode == "plan":
+        text, stats = plan_handoff(finding, trace, seen, handle)
+    elif finding.strip():
+        text, stats = handoff(finding, trace, seen, handle)
+    else:
+        text, stats = machine_handoff(question, trace, seen,
+                                      "it returned no text", handle)
+    out = {"ok": not stats["machine_built"], "finding": text,
+           "handoff": text, "handoff_stats": stats,
            "handle": handle, "hops": len(trace),
+           "searches": _searches(trace),
            "tools_used": sorted({t["tool"] for t in trace}),
            "cited": sorted(supported), "unsupported": unsupported,
            "helper_tokens": spent,
@@ -660,20 +1250,325 @@ def _finish(finding: str, trace: list, seen: set[str], started: float,
     return out
 
 
-def _fail(why: str, trace: list, started: float, spent: int) -> dict:
+def _fail(why: str, trace: list, started: float, spent: int,
+          question: str = "", seen: set[str] | None = None) -> dict:
     # The trace is kept on failure TOO. A failed investigation is exactly the
     # one worth inspecting, and the first live run discarded its own evidence
     # because only the success path wrote to the store.
+    #
+    # And since 2026-09-23 a failure still HANDS OFF: a turn cap whose landing
+    # asked for a tool, or a budget spent reasoning, used to return
+    # "investigation failed" and the proxy dropped it -- ten searches' results
+    # discarded. The machine-built hand-off lists what was run and retrieved.
+    seen = set(seen or ())
     handle = uuid.uuid4().hex[:8]
     if len(_TRACES) >= MAX_TRACES:
         _TRACES.pop(next(iter(_TRACES)))
-    _TRACES[handle] = {"trace": trace, "finding": why, "retrieved": [],
-                       "failed": True}
-    return {"ok": False, "finding": f"investigation failed: {why}",
+    _TRACES[handle] = {"trace": trace, "finding": why,
+                       "retrieved": sorted(seen), "failed": True}
+    text, stats = machine_handoff(question, trace, seen,
+                                  f"investigation failed: {why}", handle)
+    return {"ok": False, "finding": text, "handoff": text,
+            "handoff_stats": stats, "error": why,
             "handle": handle, "hops": len(trace),
+            "searches": _searches(trace),
             "tools_used": sorted({t["tool"] for t in trace}),
             "cited": [], "unsupported": [], "helper_tokens": spent,
             "seconds": round(time.time() - started, 1)}
+
+
+# ---------------------------------------------------------------------------
+# THE HAND-OFF: what crosses back, as sections rather than prose.
+#
+# The helper writes the four SECTIONS; this reads them back, checks every
+# fact's citations against what was retrieved, labels what is not checked,
+# adds the empty searches the trace recorded, and renders the one fixed
+# format. It never pastes a tool result: FACTS are the helper's own words, or
+# (machine-built) one line of log per search.
+#
+# Per-section item caps keep it distilled. They are CHOICES, not
+# measurements; MAX_FINDING_CHARS is the breaker behind them and says so
+# when it cuts.
+# ---------------------------------------------------------------------------
+MAX_ITEMS = {"facts": 12, "searched_empty": 8, "open": 5, "next": 3}
+
+_SECTION_PATTERNS = {
+    "facts": r"facts?|findings?",
+    "searched_empty": (r"(?:what was )?searched(?:,| and)?\s+(?:but\s+)?"
+                       r"found nothing|searched[- ]empty|nothing found"),
+    "open": r"open questions?|unknowns?",
+    "next": r"next steps?|recommendations?(?:\s*/\s*next steps?)?",
+}
+# A heading is a line holding ONLY the section name (markdown hashes, bold
+# and a trailing colon allowed), or the name, a colon and an inline item.
+# "Facts about the loader" is prose, not a heading.
+_HEADING = re.compile(
+    r"^\s*(?:#+\s*)?\**\s*(" + "|".join(_SECTION_PATTERNS.values())
+    + r")\s*\**\s*(?::\s*\**\s*(.*))?$", re.IGNORECASE)
+_BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+_NONE = re.compile(r"^\(?\s*none\.?\s*\)?$", re.IGNORECASE)
+
+
+def _supported(path: str, seen: set[str]) -> bool:
+    return any(path == s or s.endswith("/" + path) or path.endswith("/" + s)
+               for s in seen)
+
+
+def _searches(trace: list) -> int:
+    """Real tool calls in a trace -- not the "(turn cap)" or "(budget)"
+    markers, which are trace entries but searched nothing."""
+    return sum(1 for t in trace if "hop" in t)
+
+
+def _section_of(name: str) -> str:
+    for key, pat in _SECTION_PATTERNS.items():
+        if re.fullmatch(pat, name.strip(), re.IGNORECASE):
+            return key
+    return "facts"
+
+
+def parse_sections(text: str) -> tuple[dict, bool]:
+    """{section: [item, ...]} from a written hand-off, and whether any
+    heading was found. Text before the first heading, or a whole write-up
+    with none, is read as FACTS: an unstructured finding is still handed
+    back, one fact per bullet or paragraph, and each one is checked."""
+    out: dict = {k: [] for k, _ in SECTIONS}
+    cur, open_item, structured = "facts", False, False
+    in_fence = False
+    for raw in (text or "").splitlines():
+        line = raw.rstrip()
+        if line.strip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+        if not in_fence:
+            m = _HEADING.match(line)
+            if m:
+                cur, structured = _section_of(m.group(1)), True
+                open_item = False
+                rest = (m.group(2) or "").strip().strip("*").strip()
+                if rest and not _NONE.match(rest):
+                    out[cur].append(rest)
+                    open_item = True
+                continue
+        if not line.strip():
+            open_item = in_fence and open_item
+            continue
+        if not in_fence and _BULLET.match(line):
+            item = _BULLET.sub("", line, count=1).strip()
+            if not _NONE.match(item):
+                out[cur].append(item)
+                open_item = True
+            else:
+                open_item = False
+            continue
+        if open_item and out[cur]:
+            # A continuation keeps its line break, so code in a fact survives.
+            out[cur][-1] += "\n  " + line.strip()
+        else:
+            out[cur].append(line.strip())
+            open_item = True
+    return out, structured
+
+
+def _label_fact(fact: str, seen: set[str]) -> tuple[str, bool]:
+    """(the fact as it crosses, verified?). Verified means it cites at least
+    one path and every path it cites was retrieved by this investigation."""
+    low = fact.lower()
+    if "reasoning" in low and "not checked" in low:
+        return fact, False
+    cited = _cited(fact)
+    if not cited:
+        return f"{fact} {REASONING_LABEL}", False
+    # A fact read on the web says so (operator, 2026-09-24): its URL is the
+    # citation and "(web)" the label, whether or not the helper wrote it.
+    if _urls(fact) and WEB_LABEL not in fact:
+        fact = f"{fact} {WEB_LABEL}"
+    missing = sorted(p for p in cited if not _supported(p, seen))
+    if missing:
+        return (f"{fact} [cites {', '.join(missing[:3])}, which this "
+                f"investigation did not retrieve: unverified]"), False
+    return fact, True
+
+
+def _describe(step: dict) -> str:
+    try:
+        import streaming
+        return streaming.describe_call(step.get("tool") or "",
+                                       step.get("args") or {})
+    except Exception:                                            # noqa: BLE001
+        return str(step.get("tool") or "")
+
+
+def _render(sections: dict, lead: str = "", handle: str = "") -> str:
+    parts = [lead] if lead else []
+    for key, title in SECTIONS:
+        items = sections.get(key) or []
+        cap = MAX_ITEMS[key]
+        lines = [f"- {i}" for i in items[:cap]] or ["- none"]
+        if len(items) > cap:
+            lines.append(f"- (+{len(items) - cap} more"
+                         + (f"; trace handle {handle}" if handle else "")
+                         + ")")
+        parts.append(title + "\n" + "\n".join(lines))
+    return "\n".join(parts)
+
+
+def _cut(text: str) -> tuple[str, bool]:
+    if len(text) <= MAX_FINDING_CHARS:
+        return text, False
+    return (text[:MAX_FINDING_CHARS]
+            + f"\n\n[hand-off cut at {MAX_FINDING_CHARS} characters of "
+              f"{len(text)}]"), True
+
+
+def _stats(sections: dict, verified: int, text: str, machine: bool,
+           structured: bool, cut: bool) -> dict:
+    facts = len(sections.get("facts") or [])
+    return {"facts": facts, "verified": verified,
+            "unverified": facts - verified if not machine else 0,
+            "searched_empty": len(sections.get("searched_empty") or []),
+            "open": len(sections.get("open") or []),
+            "chars": len(text), "machine_built": machine,
+            "structured": structured, "cut": cut}
+
+
+def handoff(text: str, trace: list, seen: set[str],
+            handle: str = "") -> tuple[str, dict]:
+    """The helper's write-up as the fixed hand-off, and its x_yamadori stats.
+
+    Every fact is kept. Its citations are checked against `seen` (the paths
+    the investigation's tool results named): verified facts stand as read,
+    the rest cross labelled. With no search at all every fact is reasoning.
+    The trace's empty searches are added under SEARCHED, FOUND NOTHING, so
+    the main model is told what not to repeat even when the helper forgot.
+    """
+    sections, structured = parse_sections(text)
+    facts, verified = [], 0
+    for f in sections["facts"]:
+        labelled, ok = _label_fact(f, seen)
+        facts.append(labelled)
+        verified += ok
+    sections["facts"] = facts
+    have = {s.lower() for s in sections["searched_empty"]}
+    for t in trace:
+        if t.get("empty") and "hop" in t:
+            d = _describe(t)
+            if not any(d.lower() in h or h in d.lower() for h in have):
+                sections["searched_empty"].append(d + " (search log)")
+                have.add(d.lower())
+    rendered, cut = _cut(_render(sections, handle=handle))
+    return rendered, _stats(sections, verified, rendered, False, structured,
+                            cut)
+
+
+def machine_handoff(question: str, trace: list, seen: set[str], why: str,
+                    handle: str = "") -> tuple[str, dict]:
+    """The hand-off the PROXY builds when the helper wrote none.
+
+    An empty hand-off is impossible (operator, 2026-09-23): whatever the
+    investigation ran and retrieved crosses back, labelled as machine-built,
+    as log lines -- the queries run, their hit counts, the paths retrieved.
+    It states no conclusion, because none was written.
+    """
+    steps = [t for t in trace if "hop" in t]
+    facts = []
+    for t in steps:
+        if t.get("empty"):
+            continue
+        n = t.get("paths") or 0
+        facts.append(f"{_describe(t)} returned {t.get('chars', 0)} "
+                     f"characters" + (f" naming {n} path(s)" if n else "")
+                     + " (search log)")
+    if seen:
+        names = sorted(seen)
+        facts.append("Paths retrieved: " + ", ".join(names[:12])
+                     + (f" and {len(names) - 12} more" if len(names) > 12
+                        else "")
+                     + " (search log; their contents were not summarised)")
+    sections = {
+        "facts": facts,
+        "searched_empty": [f"{_describe(t)} (search log)" for t in steps
+                           if t.get("empty")],
+        "open": [("Not answered: " + " ".join(question.split())[:200])
+                 if question.strip() else "No conclusion was written."],
+        "next": ["Read the retrieved paths above before relying on them."
+                 if seen else "Search for the answer directly; deep thinking "
+                              "retrieved nothing to read."],
+    }
+    lead = (f"[machine-built hand-off: deep thinking wrote none ({why[:200]})."
+            f" It lists what was run and retrieved, and states no "
+            f"conclusion.]")
+    rendered, cut = _cut(_render(sections, lead, handle))
+    return rendered, _stats(sections, 0, rendered, True, True, cut)
+
+
+PLAN_MAX_ITEMS = {"files": 15, "order": 12, "decisions": 8, "risks": 6}
+_PLAN_PATTERNS = {"files": r"files?(?:\s+to\s+(?:create|change|touch))?",
+                  "order": r"order|steps?|plan",
+                  "decisions": r"(?:key\s+)?decisions?",
+                  "risks": r"risks?"}
+_PLAN_HEADING = re.compile(
+    r"^\s*(?:#+\s*)?\**\s*(" + "|".join(_PLAN_PATTERNS.values())
+    + r")\s*\**\s*(?::\s*\**\s*(.*))?$", re.IGNORECASE)
+
+
+def plan_handoff(text: str, trace: list, seen: set[str],
+                 handle: str = "") -> tuple[str, dict]:
+    """The planner's write-up as the fixed four-section plan, and its stats.
+    Text before any heading is read as ORDER. A KEY DECISION is checked like
+    a fact: its citation stands when this run retrieved it, else it crosses
+    labelled. The other sections are the plan itself, not claims."""
+    out: dict = {k: [] for k, _ in PLAN_SECTIONS}
+    cur, structured, in_fence = "order", False, False
+    for raw in (text or "").splitlines():
+        line = raw.rstrip()
+        if line.strip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+        if not in_fence:
+            m = _PLAN_HEADING.match(line)
+            if m:
+                name = m.group(1).strip()
+                cur = next(k for k, pat in _PLAN_PATTERNS.items()
+                           if re.fullmatch(pat, name, re.IGNORECASE))
+                structured = True
+                rest = (m.group(2) or "").strip().strip("*").strip()
+                if rest and not _NONE.match(rest):
+                    out[cur].append(rest)
+                continue
+        if not line.strip():
+            continue
+        item = _BULLET.sub("", line, count=1).strip()
+        if _NONE.match(item):
+            continue
+        if not _BULLET.match(line) and out[cur] and (in_fence or raw[:1] in
+                                                    " \t"):
+            out[cur][-1] += "\n  " + line.strip()
+        else:
+            out[cur].append(item)
+    verified = 0
+    labelled = []
+    for d in out["decisions"]:
+        t, ok = _label_fact(d, seen)
+        labelled.append(t)
+        verified += ok
+    out["decisions"] = labelled
+    parts = []
+    for key, title in PLAN_SECTIONS:
+        items = out[key]
+        cap = PLAN_MAX_ITEMS[key]
+        lines = [f"- {i}" for i in items[:cap]] or ["- none"]
+        if len(items) > cap:
+            lines.append(f"- (+{len(items) - cap} more"
+                         + (f"; trace handle {handle}" if handle else "") + ")")
+        parts.append(title + "\n" + "\n".join(lines))
+    rendered, cut = _cut("\n".join(parts))
+    stats = {"facts": len(out["decisions"]), "verified": verified,
+             "unverified": len(out["decisions"]) - verified,
+             "searched_empty": sum(1 for t in trace
+                                   if t.get("empty") and "hop" in t),
+             "open": len(out["risks"]), "chars": len(rendered),
+             "machine_built": False, "structured": structured, "cut": cut,
+             "plan": {k: len(v) for k, v in out.items()}}
+    return rendered, stats
 
 
 def get_trace(handle: str) -> dict | None:
@@ -693,10 +1588,13 @@ TOOL = {
         "description": (
             "Think deeply about one self-contained question before answering "
             "it. This runs several searches and reads their results without "
-            "filling this conversation, then returns one short finding with "
-            "file citations. Use it when an answer needs searching you do not "
+            "filling this conversation, then returns one short hand-off: "
+            "facts with file citations, searches that found nothing, open "
+            "questions and a next step. Use it when an answer needs searching you do not "
             "need to watch. Do not use it for a single lookup -- call the "
-            "search tool yourself, it is faster."),
+            "search tool yourself, it is faster. Its searches cover the "
+            "library source the remote code-intelligence service holds; the "
+            "user's own files are read with your client's own file tools."),
         "parameters": {
             "type": "object",
             "properties": {

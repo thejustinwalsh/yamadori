@@ -36,13 +36,36 @@ macros:
   #     official      plain generation 5/5 clean,      tool calls 9/9
   # The speed was real; so was the corruption. Do not switch back.
   server: "<ABSOLUTE PATH TO llama-server.exe FROM THE PrismML FORK>"
+
+  # SWITCHED FOR `bonsai` ON 2026-09-23, operator's call -- and it IS the
+  # pr-ptq1-mmv line, so read this before trusting it. sudoingX/llama.cpp
+  # bonsai2 @ 285542d9 (PR #218 kernel + the qwen35 MTP Hadamard fix, rebased
+  # on prism b10709, the pin above). Staged in docs/MTP-STAGING.md with the
+  # corruption checks run FIRST: 0/16 generations with character runs, 10/10
+  # valid tool calls with MTP on (A4000, n small). The live suite through
+  # :1234 is the gate; config.yaml.bak-20260923-003455 is the rollback.
+  server_mtp: "<ABSOLUTE PATH TO llama-server.exe FROM THE sudoingX bonsai2 FORK (MTP)>"
   models: "<ABSOLUTE PATH TO THE DIRECTORY HOLDING YOUR .gguf FILES>"
 
+  # CARDS ARE PINNED BY UUID, NOT ONLY BY NUMBER. `-dev CUDAn` numbering is
+  # correct only while CUDA_DEVICE_ORDER=PCI_BUS_ID is set (start-stack.bat
+  # sets it; see the header). On 2026-09-23 llama-swap was relaunched by hand
+  # without it, CUDA fell back to fastest-first, and the main model loaded onto
+  # the A4000 with no error. Every model now also sets CUDA_VISIBLE_DEVICES to
+  # its card's UUID, so it can see exactly one card -- CUDA0 -- whatever the
+  # ordering. `nvidia-smi -L` lists the UUIDs:
+  #   GPU-de660e90-0e9c-d465-b389-6df63021b920   RTX 5060 Ti  (main model)
+  #   GPU-43e37d0c-4104-9056-2552-6109d4d3382c   RTX A4000    (everything else)
+
   # Qwen's published thinking-mode sampler values for the Qwen3.5/3.8 family
-  # that Bonsai derives from. Reasoning effort is deliberately NOT set here:
-  # valid values are low/medium/xhigh only, and clients pass it per request.
+  # that Bonsai derives from, as PrismML's own card evaluates Bonsai 2:
+  # temp 1.0, top_p 0.95, top_k 20, min_p 0.0, presence 0, repetition 1.0.
+  # min_p was 0.05 until 2026-09-23 -- llama.cpp's built-in default, never
+  # measured and mislabelled as Qwen's; the published value is 0.0.
+  # Reasoning effort is deliberately NOT set here: valid values are
+  # low/medium/xhigh only, and clients pass it per request.
   sampling: >
-    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.05
+    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
     --presence-penalty 0 --repeat-penalty 1.0
 
 models:
@@ -57,21 +80,21 @@ models:
   # THE SHIPPED NUMBER IS 147456. It is set exactly once, at `-c` below, and
   # every other figure in this file and in the docs is either history or a
   # rejected candidate. Two KV cost models appear in this repo and they do not
-  # agree -- 34 KiB/token (q8, 16 of 64 layers cached) against the 44
+  # agree -- 34 KiB/token here (q8, 16 of 64 layers cached) against the 44
   # KiB/token mcp/budget.py measured and uses for its own arithmetic. The
-  # budget module's figure is the one anything downstream reads. Do not size a
-  # new context off either without re-measuring.
+  # budget module's figure is the one anything downstream reads; this one
+  # survives only in the historical sentences above. Do not size a new context
+  # off either without re-measuring.
   #
   # There is deliberately no second chat worker. A second instance only
   # helps CONCURRENT requests; a single agent is sequential and never
   # touches it. That VRAM buys context and retrieval quality instead.
   # =====================================================================
   "bonsai":
-    # NOTE: this display label says 128k and `-c` below says 147456. The label
-    # is stale, not the flag. Left alone here because it is the string
-    # llama-swap and the dashboard show to clients, so correcting it is a
-    # visible change rather than a comment; do it deliberately.
-    name: "Bonsai 2 27B ternary -- 128k (5060 Ti)"
+    # Display label corrected deliberately on 2026-09-23 with the switch to
+    # the 262,144 q4_0 window. Clients never see it: /v1/models advertises
+    # only `yamadori` (mcp/catalog.py).
+    name: "Bonsai 2 27B ternary -- 262k q4 KV (5060 Ti)"
 
     # ONE model, thinking ON, good defaults applied to every request.
     # `bonsai-agent` remains only as an alias so existing clients keep working;
@@ -118,30 +141,55 @@ models:
       # Applied to BOTH ids. A client that asks for something specific still
       # overrides these -- the `?` suffix means "default, not override".
       params:
-        chat_template_kwargs:
-          enable_thinking: true
+        # enable_thinking is NOT forced here any more (operator, 2026-09-23):
+        # the proxy writes chat_template_kwargs.enable_thinking on every
+        # request (tiers.apply) -- false only at tier `minimal`. Forcing it
+        # true here overrode that, so thinking could never be turned off.
+        # With no value the template's own default (thinking on) applies.
         reasoning_effort?: "medium"
-        # Tool selection is classification, not prose. Reproducibly ~15% fewer
-        # tokens than the stack default of 1.0; accuracy differences at this
-        # sample size are within run-to-run noise.
-        temperature?: 0.3
+        # No sampling defaults here. The proxy owns sampling: tiers.apply
+        # writes the vendor's settings (PrismML Bonsai 2 card, Qwen thinking
+        # mode: temp 1.0, top_p 0.95, top_k 20, min_p 0) on every request and
+        # overrides client values, because this is a fine-tune whose defaults
+        # clients do not get to change. A `temperature?: 0.3` default lived
+        # here until 2026-09-23 (a local n=15 token-saving measurement), and
+        # it was never the vendor's setting.
+    # Batch-invariant PTQ1_0 mat-vec: the measured MTP speeds (A4000, 54 tok/s
+    # vs 32 on the old binary) were taken with it set. Read as "set or not":
+    # ANY value enables it, including "0" -- delete the line to disable.
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-de660e90-0e9c-d465-b389-6df63021b920"
+      - "GGML_CUDA_BATCH_INVARIANT=1"
     cmd: |
-      ${server}
+      ${server_mtp}
       --port ${PORT}
-      -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf
+      # Our Abliterated weights with Qwen's MTP head grafted on as block 64
+      # (docs/MTP-STAGING.md section 4: stripping the head gives back the
+      # original file byte for byte). Draft acceptance 0.80-0.84 on code, 0.61
+      # on prose (A4000, n=3 prompts per row).
+      -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 1
+      # ONE GPU, and this is settled rather than assumed.
+      #
+      # Splitting across CUDA0,CUDA1 pools ~12.5 GB of headroom and would
+      # afford a 196k or even 262k context. It was tried and rejected: every
+      # token crosses PCIe and the A4000 is the slower card, so it buys
+      # context by spending throughput. Do not retry it without a tokens/sec
+      # measurement showing the trade has changed.
+      #
+      # Staying on one card caps the pool at what fits beside 5.95 GB of
+      # weights in 16.3 GB. Warm-measured at -c 147456: 12,122 MiB used,
+      # 3,931 free -- about the 3 GB floor that today's failures established.
+      # 196608 would leave ~2 GB, which is the condition that killed
+      # arc193_a on all three benchmark arms.
       -dev CUDA0
       -ngl 999
       # THE POOL CAME DOWN IN STAGES AND THE STAGES ARE KEPT, BUT ONLY THE
       # LAST ONE SHIPS: 262144 advertised -> 208k -> 196608 (backed out) ->
       # 147456. Anything in this block that names a different number is a
-      # rejected candidate, not the setting. Earlier revisions of this
-      # template said "131072" and the label above says "128k", and neither
-      # was ever the value of `-c` on the live stack.
-      #
-      # This line now matches the live config.yaml. Keep it that way: every
-      # measurement in docs/ was taken at 147456, and mcp/budget.py derives
-      # its main/helper/reserve split from whatever the server reports, so a
-      # smaller pool here silently shrinks every budget downstream.
+      # rejected candidate, not the setting. Earlier revisions of these lines
+      # said "128k" and "144k" and neither was ever the value of `-c`.
       #
       # The advertised 262144 is not the usable figure: effective recall
       # degrades well before an advertised limit, and ternary quantisation
@@ -149,18 +197,25 @@ models:
       # The freed KV cache is worth more as headroom than as context nobody
       # reaches.
       #
-      # 196608 was tried and backed out. It fits on paper -- ~8.25 GiB of KV
-      # at 44 KiB/token plus 5.95 GB of weights inside 16.3 GB -- and it
-      # leaves no room for the spikes that actually kill a run: prompt
-      # processing on a long problem needs scratch beyond the stored KV, and
-      # `arc193_a` failed on all three benchmark arms while 193-second
-      # generations succeeded elsewhere. That is the signature of a memory
-      # spike, not a timeout.
+      # MEASURED, twice, in both directions. The four slots share ONE unified KV pool -- four
+      # slots reporting n_ctx 131072 would be 524,288 tokens and ~22 GB at
+      # q8_0, while the measured footprint is 5.8 GB, so the per-slot figure
+      # is a ceiling and the pool is the real number.
+      #
+      # 196608 is the largest that fits on one 16.3 GB card: ~8.1 GB of KV
+      # plus 5.95 GB of weights leaves roughly 2 GB. 262144 needs ~10.8 GB of
+      # KV and does not fit at all.
+      #
+      # 196608 was tried and backed out. It fits on paper -- ~8.1 GB of KV
+      # plus 5.95 GB of weights inside 16.3 GB -- and it leaves no room for
+      # the spikes that actually kill a run: prompt processing on a long
+      # problem needs scratch beyond the stored KV, and `arc193_a` failed on
+      # all three benchmark arms while 193-second generations succeeded
+      # elsewhere. That is the signature of a memory spike, not a timeout.
       #
       # 147456 keeps roughly 3.5 GB of headroom on CUDA0, which is what
-      # absorbs them. Warm-measured: 12,122 MiB used, 3,931 free. Budgets in
-      # mcp/budget.py follow the pool automatically, so this line is the only
-      # place the number lives.
+      # absorbs them. Budgets in mcp/budget.py follow the pool automatically,
+      # so this line is the only place the number lives.
       #
       # RAISED 2026-09-22 on the operator's call: keep ~2.0-2.4 GB free on
       # CUDA0 rather than ~3.5. The "3 GB floor" was never measured -- the
@@ -174,8 +229,24 @@ models:
       # (2,133 free) and a worst-case load adds ~194 MiB (baseline stress,
       # three full shares at once) -> ~1.94 GB free at peak, under the floor.
       # So 163840: split main 81,920, helpers 2x40,960.
-      -c 163840
-      --cache-type-k q8_0 --cache-type-v q8_0
+      #
+      # 2026-09-23 (operator): the native 262,144 window with q4_0 K/V and the
+      # K-cache mean-centering bias (llama-kv-mean-center, 250 x 512-token
+      # chunks of bench/kv_context/make_calib_corpus.py text, generated on
+      # the A4000). Free-VRAM target 1.3 GB (projected 1.0-1.4 GB idle,
+      # docs/CONTEXT-EXPANSION.md). The operator is the trial: q4 K/V quality
+      # on this model is unmeasured anywhere; rollback is the three lines
+      # below back to -c 163840 and q8_0/q8_0 without --kv-mean-center.
+      -c 262144
+      --cache-type-k q4_0 --cache-type-v q4_0
+      # 2026-09-24 (operator): the MTP draft cache at q4_0 too, as in the
+      # reference agent run (sudoingX, RTX 3060 12GB, -c 163840 -np 1,
+      # results/RUN_REPORT.md: "-ctkd q4_0 -ctvd q4_0, generates fine"). The
+      # draft only proposes tokens and the main model verifies each one, so
+      # output is unchanged; only acceptance, speed and VRAM can move. Speed
+      # vs the old f16 draft cache is measured in the G2 run, not assumed.
+      --cache-type-k-draft q4_0 --cache-type-v-draft q4_0
+      --kv-mean-center ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.kv-mean-center-q4_0.gguf
       -fa on
       --cont-batching
       -b 1024 -ub 512
@@ -213,20 +284,233 @@ models:
     ttl: 0
 
   # =====================================================================
+  # CONTEXT TRIAL -- q4_0 K/V + K-cache mean-centering. NOT IN SERVICE.
+  # docs/CONTEXT-EXPANSION.md is the plan, the arithmetic and the gates.
+  #
+  # Nothing routes here on its own. Both entries are unlisted, in their own
+  # non-exclusive group, and reachable only by (a) naming them, or (b) the
+  # `context-trial-*` profiles below, which pin the id `bonsai` to a trial
+  # entry once activated at runtime (PUT :11434/api/profiles/active). Startup
+  # and config reload activate NO profile. bench/kv_context/run.py activates
+  # one only inside a maintenance window it was explicitly granted (--window),
+  # after unloading `bonsai`, and always restores `bonsai` at the end.
+  #
+  # IDENTICAL TO `bonsai` -- same binary, weights, MTP head (n-max 1), f16
+  # draft cache, -np auto (4 slots, unified KV), batch sizes, reasoning and
+  # sampling flags, env and UUID pin -- EXCEPT three things:
+  #   -c                     262144 here, 196608 in the sibling
+  #   --cache-type-k/-v      q4_0 / q4_0 (bonsai: q8_0 / q8_0)
+  #   --kv-mean-center       the per-channel K bias for q4_0 (below)
+  #
+  # WHY V IS q4_0 AND NOT q8_0. (1) This build has GGML_CUDA_FA_ALL_QUANTS=OFF
+  # (llamacpp-sudoingx-bonsai2/build/CMakeCache.txt), and with it off
+  # ggml-cuda/fattn.cu returns BEST_FATTN_KERNEL_NONE whenever K type != V
+  # type: mixed K/V has no CUDA flash-attention kernel here. (2) Memory: q4_0 K
+  # + q8_0 V is 26 KiB/token against 18; at 262144 that projects to 465-811
+  # MiB OVER the card. (3) snailium/bonsai2-8gb measured q4_0/q8_0 at 58.71 tok/s
+  # vs 65.95 for q4_0/q4_0 on an RTX 5060 (sm_120, -c 32768, n=1 run each).
+  # The fork rotates quantized V (Hadamard, head dim 256), which is its
+  # mitigation for V precision; quality is what the trial measures.
+  #
+  # PROJECTED, NOT MEASURED (bench/kv_context/vram.py, anchored on today's
+  # live 14,340 MiB used / 1,711 free at -c 163840 q8_0, n=1):
+  #   262144  free idle 1,237-1,583 MiB, at peak 1,043-1,389
+  #   196608  free idle 3,260-3,375 MiB, at peak 3,066-3,181 (ON the 3 GB floor)
+  # The FIT phase of bench/kv_context/run.py replaces these with readings and
+  # refuses a candidate under its floor.
+  #
+  # THE BIAS FILE DOES NOT EXIST YET. llama-kv-mean-center must be built and
+  # run first (docs/CONTEXT-EXPANSION.md s.3); until then these entries fail
+  # to start with "failed to load K-cache mean-centering bias file". It must
+  # be calibrated with -ctk q4_0 (the fork's K rotation is then active) or the
+  # loader refuses it (llama-kv-cache.cpp load_kv_mean_center).
+  #
+  # ttl 1800, not 0: if a trial is ever left loaded it frees the card after
+  # 30 idle minutes, and scripts/watchdog.ps1 treats a ttl>0 model as
+  # on-demand (unload it alone, never a stack restart).
+  # =====================================================================
+  "bonsai-q4kv":
+    name: "Bonsai 2 27B ternary -- q4_0 KV trial, 262144 (5060 Ti)"
+    unlisted: true
+    filters:
+      params:
+        reasoning_effort?: "medium"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-de660e90-0e9c-d465-b389-6df63021b920"
+      - "GGML_CUDA_BATCH_INVARIANT=1"
+    cmd: |
+      ${server_mtp}
+      --port ${PORT}
+      -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 1
+      -dev CUDA0
+      -ngl 999
+      -c 262144
+      --cache-type-k q4_0 --cache-type-v q4_0
+      --kv-mean-center ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.kv-mean-center-q4_0.gguf
+      -fa on
+      --cont-batching
+      -b 1024 -ub 512
+      --jinja
+      --reasoning-budget 32768
+      --reasoning-budget-message "Thinking budget reached. I will stop deliberating and write the final answer now."
+      --reasoning-format deepseek
+      --no-context-shift
+      ${sampling}
+    ttl: 1800
+
+  # The same trial at 196608: the fallback if 262144 fails the FIT floor.
+  # Differs from `bonsai-q4kv` in -c and the display name only.
+  "bonsai-q4kv-196k":
+    name: "Bonsai 2 27B ternary -- q4_0 KV trial, 196608 (5060 Ti)"
+    unlisted: true
+    filters:
+      params:
+        reasoning_effort?: "medium"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-de660e90-0e9c-d465-b389-6df63021b920"
+      - "GGML_CUDA_BATCH_INVARIANT=1"
+    cmd: |
+      ${server_mtp}
+      --port ${PORT}
+      -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf
+      --spec-type draft-mtp
+      --spec-draft-n-max 1
+      -dev CUDA0
+      -ngl 999
+      -c 196608
+      --cache-type-k q4_0 --cache-type-v q4_0
+      --kv-mean-center ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.kv-mean-center-q4_0.gguf
+      -fa on
+      --cont-batching
+      -b 1024 -ub 512
+      --jinja
+      --reasoning-budget 32768
+      --reasoning-budget-message "Thinking budget reached. I will stop deliberating and write the final answer now."
+      --reasoning-format deepseek
+      --no-context-shift
+      ${sampling}
+    ttl: 1800
+
+  # =====================================================================
   # VISION variant, ON DEMAND (ttl 900). Same weights plus the multimodal
   # projector, so the stack can actually look at a flamegraph, a RenderDoc
   # capture, a misrendered frame or a whiteboard photo.
   # Separate process because mmproj would cost the primary ~0.6 GiB of
   # cache, and context matters more there than images do.
   # =====================================================================
+  # =====================================================================
+  # IMAGE GENERATION -- Qwen-Image-2.1 (Q5_K_M) via stable-diffusion.cpp,
+  # on the A4000 BESIDE retrieval and Laya (it fits; mcp/gpu_room.py unloads
+  # vision first if vision is resident). docs/IMAGEGEN.md.
+  #
+  # --offload-to-cpu --max-vram 6: weights live in RAM and are staged in;
+  # sd.cpp keeps its managed VRAM under 6 GiB. Measured peak +6,389 MiB at
+  # 1344x1344 (+6,281-6,371 at 1024x1024, n=13), idle +319 MiB. Worst-case
+  # resident 7,565 + 6,389 leaves 2,213 MiB free. NEVER drop --max-vram:
+  # unbudgeted offload took CUDA1 to 124 MiB free.
+  # ~107 s per 1024x1024 image, 20 steps; ~220 s at 1344x1344.
+  # No /health on sd-server, hence checkEndpoint. Its default port is 1234,
+  # the proxy's -- --listen-port is not optional.
+  #
+  # WHITE BLOCKS FIXED (2026-09-24, SELF-IMPROVEMENT-LOG #25): the binary is
+  # sd.cpp c92d73c + PR #2043's fix commit f047986 (open upstream; built in
+  # C:/Users/jwals/sdcpp-pr2043, CUDA arch 86; the old binary is untouched)
+  # and --vae-dtype bf16. c92d73c forced the VAE's conv weights to F16; the
+  # Qwen-Image-2.1 decoder overflows F16 -> inf -> NaN -> solid (255,255,255)
+  # 8-px blocks on the tile seams (256/512 px at 1024^2), in 10 of 55 stored
+  # images. Measured by bench/imagegen/vae_variants.py + white_blocks.py +
+  # diff_variants.py, same flags, --max-vram 6 unchanged:
+  #   blocks: baseline 12 in 5 images -> 0 in 39 (turbo n=30 at 1024^2 incl.
+  #     the 3 seeds that failed, base n=3 incl. f639fdfb21, turbo
+  #     1344^2/1536x1024 n=6 incl. one that failed; a repeat of 8 was
+  #     bit-identical);
+  #   wall: turbo 19.1 s median vs 18.0 (+6%), base 106.3 vs 105.5 (+1%),
+  #     1344^2 32.4 vs 30.7 (+6%); peak A4000 unchanged (+5,300-6,078 MiB);
+  #   pixels outside the blocks: mean |diff| <= 0.16/255, PSNR >= 56 dB,
+  #     max 12, no pixel off by > 8 (n=39 pairs); same heretic encoder.
+  # Rejected: --max-vram 8 (still tiles, 9 blocks); --max-vram 9 (untiled at
+  # 1024^2 but +3 GB peak and still tiles at 1344^2 -> 2 blocks); 48x48
+  # tiles at 6 GiB (0 blocks but only moves the seams); --backend vae=cpu
+  # (83 s/image). NOTE: sd.cpp b167b94+ changes Qwen-2.1 schedule defaults:
+  # turbo must then pass absolute --sigmas (docs/IMAGEGEN-COMMUNITY.md 4.3).
+  # =====================================================================
+  "imagegen":
+    name: "Qwen-Image-2.1 Q5_K_M (sd.cpp, A4000)"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
+    cmd: |
+      <ABSOLUTE PATH TO sd-server.exe FROM stable-diffusion.cpp>
+      --listen-ip 127.0.0.1
+      --listen-port ${PORT}
+      --diffusion-model ${models}/qwen-image-2.1/qwen-image-2.1-Q5_K_M.gguf
+      --vae ${models}/qwen-image-2.1/vae/qwen_image_2.1_vae_bf16.safetensors
+      --vae-dtype bf16
+      --llm ${models}/qwen-image-2.1/qwen3vl_8b_heretic-Q4_K_M.gguf
+      --backend cuda0
+      --offload-to-cpu
+      --max-vram 6
+      --diffusion-fa
+      --cfg-scale 6.0
+      --sampling-method euler
+      --steps 20
+      -t 8
+    checkEndpoint: /v1/models
+    ttl: 600
+
+  # =====================================================================
+  # IMAGE GENERATION, TURBO -- Viggle's DMD-distilled 4-step student of
+  # Qwen-Image-2.1 (Abiray Q5_K_M GGUF, 5,007,399,712 B, sha256 92521fe8...,
+  # Qwen Research License). docs/IMAGEGEN-TURBO.md, docs/IMAGEGEN.md.
+  # Same card, pinning, encoder, VAE, --vae-dtype bf16 (the white-block
+  # fix; see `imagegen`) and --max-vram 6 budget as `imagegen`;
+  # only the denoiser and the sampling contract differ:
+  #   --steps 4 --cfg-scale 1.0 (no uncond pass) --sampling-method euler
+  #   --extra-sample-args base_shift=0.5,max_shift=0.69355: sd.cpp's Flux
+  #     schedule defaults to max_shift 1.15 (anchor 4096); this makes its mu
+  #     equal diffusers' (0.5..0.9 over 256..8192) at every size, so the last
+  #     of the 4 sigmas is the 0.40 the student was trained on, not 0.51.
+  # The proxy sends `steps` per request (mcp/images.py MODELS: 4 here), so
+  # --steps is the default for a caller that sends none.
+  # Selected per user (GET/PUT /dash/api/settings/image) or per request
+  # (model "yamadori-image-turbo"). Same group as `imagegen`: one of the two
+  # is loaded at a time.
+  # =====================================================================
+  "imagegen-turbo":
+    name: "Qwen-Image-2.1 turbo 4-step Q5_K_M (sd.cpp, A4000)"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
+    cmd: |
+      <ABSOLUTE PATH TO sd-server.exe FROM stable-diffusion.cpp>
+      --listen-ip 127.0.0.1
+      --listen-port ${PORT}
+      --diffusion-model ${models}/qwen-image-2.1/qwen_image_2.1_turbo_Q5_K_M.gguf
+      --vae ${models}/qwen-image-2.1/vae/qwen_image_2.1_vae_bf16.safetensors
+      --vae-dtype bf16
+      --llm ${models}/qwen-image-2.1/qwen3vl_8b_heretic-Q4_K_M.gguf
+      --backend cuda0
+      --offload-to-cpu
+      --max-vram 6
+      --diffusion-fa
+      --cfg-scale 1.0
+      --sampling-method euler
+      --steps 4
+      --extra-sample-args base_shift=0.5,max_shift=0.69355
+      -t 8
+    checkEndpoint: /v1/models
+    ttl: 600
+
   "bonsai-vision":
     name: "Bonsai 2 27B ternary + vision (A4000)"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
     cmd: |
       ${server}
       --port ${PORT}
       -m ${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf
       --mmproj ${models}/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf
-      -dev CUDA1
+      -dev CUDA0
       -ngl 999
       -c 16384
       --cache-type-k q8_0 --cache-type-v q8_0
@@ -234,7 +518,11 @@ models:
       -b 1024 -ub 512
       --jinja
       ${sampling}
-    ttl: 900
+    # 300 s (operator, 2026-09-23; was 900). What else leaves the A4000 when
+    # vision loads, and when vision itself leaves for a draw or a search, is
+    # decided by mcp/gpu_room.py; the ttl only frees the card when nothing
+    # asks for it.
+    ttl: 300
 
   # =====================================================================
   # RETRIEVAL. Both resident on the A4000; together under 5 GiB.
@@ -246,16 +534,22 @@ models:
   # Pooling must be `last` for this model family.
   "embeddings":
     name: "Qwen3-Embedding-0.6B"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
     cmd: |
       ${server}
       --port ${PORT}
       -m ${models}/Qwen3-Embedding-0.6B-Q8_0.gguf
-      -dev CUDA1
+      -dev CUDA0
       -ngl 999
       -c 8192
       --embeddings
       --pooling last
-      -b 8192 -ub 2048
+      # Sized for the MODEL, not copied from the 27B. These are 0.6B
+      # encoders; -b 8192 -ub 2048 allocated compute buffers that left GPU1
+      # at 13.9 of 16.4 GB with only 1.3 GB of weights actually loaded, and
+      # the decision model then had nowhere to live.
+      -b 2048 -ub 512
     ttl: 0
 
   # 0.6B, NOT the 4B. Bigger is not better here -- it is broken.
@@ -274,16 +568,22 @@ models:
   # perfectly good embedding ranking.
   "reranker":
     name: "Qwen3-Reranker-0.6B"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
     cmd: |
       ${server}
       --port ${PORT}
       -m ${models}/Qwen3-Reranker-0.6B-Q8_0.gguf
-      -dev CUDA1
+      -dev CUDA0
       -ngl 999
       -c 16384
       --reranking
       --pooling rank
-      -b 8192 -ub 2048
+      # Sized for the MODEL, not copied from the 27B. These are 0.6B
+      # encoders; -b 8192 -ub 2048 allocated compute buffers that left GPU1
+      # at 13.9 of 16.4 GB with only 1.3 GB of weights actually loaded, and
+      # the decision model then had nowhere to live.
+      -b 2048 -ub 512
     ttl: 0
 
   # =====================================================================
@@ -310,11 +610,13 @@ models:
   # 27B), which leaves room for context and buffers on one card.
   "critic-disabled":
     name: "Qwen3.8-27B Q4 -- adversarial reviewer (DOES NOT FIT, see comment)"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
     cmd: |
       ${server}
       --port ${PORT}
       -m ${models}/Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_M.gguf
-      -dev CUDA1
+      -dev CUDA0
       -ngl 999
       -c 32768
       --cache-type-k q8_0 --cache-type-v q8_0
@@ -341,8 +643,9 @@ routing:
             - "bonsai"
 
         # Retrieval shares the A4000. Deliberately NOT persistent so the
-        # on-demand group can reclaim its VRAM; these are small models and
-        # reload in a couple of seconds on the next search.
+        # coordinator (mcp/gpu_room.py) can unload it when vision needs the
+        # room; these are small models and reload in a couple of seconds on
+        # the next search.
         "retrieval":
           swap: false
           exclusive: false
@@ -350,16 +653,85 @@ routing:
             - "embeddings"
             - "reranker"
 
-        # Vision needs ~8 GiB and retrieval occupies ~12 of the A4000's 16, so
-        # this can no longer displace it. Requesting bonsai-vision will fail
-        # rather than degrade search. To actually use vision, stop the stack
-        # and raise its priority deliberately -- an explicit trade, not a
-        # silent one.
+        # WHO DECIDES WHAT IS ON THE A4000: mcp/gpu_room.py, not these groups
+        # (operator, 2026-09-24: "if it fits with headroom fine, if it doesn't
+        # drop them and load in what you need on use"). Before any request that
+        # would load an A4000 model -- vision, either image model, embeddings,
+        # the reranker -- the coordinator reads /running and nvidia-smi, and
+        # if the model's size (its table, with sources) does not fit with
+        # 1.3 GiB free, it unloads other A4000 models least recently used
+        # first via /api/models/unload, or refuses. Laya (not llama-swap's) and
+        # the primary are never touched. docs/SELF-IMPROVEMENT-LOG.md #16.
+        #
+        # These flags are the BACKSTOP for anything that bypasses it. They act
+        # only when an exclusive member loads, which is why they alone ended
+        # look -> draw at 308 MiB free on the live gate of 2026-09-24.
+        #
+        # Vision stays exclusive because the numbers say it cannot share with
+        # search anyway: it is its own llama-server process with its own copy
+        # of the 27B, estimated 8,265-9,449 MiB (weights 5.95 GiB + mmproj 0.59
+        # + KV@16384 + a 1-2 GiB compute buffer; never measured alone), against
+        # 8,605 MiB free beside retrieval + Laya (7,565 MiB measured).
         "ondemand":
+          swap: true
+          exclusive: true
+          members:
+            - "bonsai-vision"
+
+        # IMAGE GENERATION COEXISTS with retrieval and Laya: its measured
+        # peak (+6,389 MiB under --max-vram 6) fits beside the worst-case
+        # resident 7,565 MiB with 2,213 MiB free, so the coordinator
+        # (mcp/gpu_room.py) leaves search alone for a draw; beside vision it
+        # does not fit, and the coordinator unloads vision first.
+        #
+        # BOTH image models are in this one group. swap:true means one member
+        # runs at a time: asking for imagegen-turbo while imagegen is loaded
+        # stops imagegen and nothing else, and the reverse. Two at once would
+        # be 2 x +6.3 GB on a card with 8.6 GB free. exclusive:false keeps
+        # retrieval resident through either load.
+        "imagegen":
           swap: true
           exclusive: false
           members:
-            - "bonsai-vision"
+            - "imagegen"
+            - "imagegen-turbo"
+
+        # CONTEXT TRIAL (docs/CONTEXT-EXPANSION.md). A group of its own
+        # because an ungrouped model lands in llama-swap's "(default)" group,
+        # which is swap:true AND exclusive:true (internal/config/config.go,
+        # AddDefaultGroupToConfig) -- loading a trial would then evict
+        # retrieval and image generation on the OTHER card for nothing.
+        # exclusive:false leaves every other group alone; swap:true keeps the
+        # two trials from ever running together. It cannot evict `bonsai`
+        # (persistent), so a trial fits on CUDA0 only after `bonsai` has been
+        # unloaded explicitly -- which bench/kv_context/run.py does, and
+        # nothing else does.
+        "context-trial":
+          swap: true
+          exclusive: false
+          members:
+            - "bonsai-q4kv"
+            - "bonsai-q4kv-196k"
+
+# CONTEXT TRIAL PROFILES (docs/CONTEXT-EXPANSION.md). A profile pin rewrites a
+# requested model id before aliases, filters and routing, on /v1 AND on
+# /upstream/<id>/ paths (llama-swap v256 internal/server/profiles.go). With one
+# active, every request for `bonsai` -- the proxy's, deep thinking's, the
+# worker's -- is served by the trial entry, so a benchmark through :1234 runs
+# unchanged against it. None is active at startup or after a reload
+# (hooks.on_startup.profile is not set). Deactivate with
+#   PUT :11434/api/profiles/active  {"name": null}
+profiles:
+  "context-trial-262k":
+    description: "bonsai -> bonsai-q4kv (q4_0 K/V, -c 262144). Maintenance window only."
+    pins:
+      "bonsai": "bonsai-q4kv"
+      "bonsai-agent": "bonsai-q4kv"
+  "context-trial-196k":
+    description: "bonsai -> bonsai-q4kv-196k (q4_0 K/V, -c 196608). Maintenance window only."
+    pins:
+      "bonsai": "bonsai-q4kv-196k"
+      "bonsai-agent": "bonsai-q4kv-196k"
 
 hooks:
   on_startup:

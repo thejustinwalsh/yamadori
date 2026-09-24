@@ -594,14 +594,108 @@ def probe_embeddings() -> str | None:
     body = json.dumps({"model": EMBED_MODEL, "input": ["function probe() {}"]})
     req = urllib.request.Request(f"{STACK}/v1/embeddings", data=body.encode(),
                                  headers={"Content-Type": "application/json"})
+    import gpu_room      # the embedding model shares the A4000 (mcp/gpu_room.py)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            vec = json.load(r)["data"][0]["embedding"]
+        with gpu_room.use(EMBED_MODEL, upstream=STACK):
+            with urllib.request.urlopen(req, timeout=60) as r:
+                vec = json.load(r)["data"][0]["embedding"]
     except Exception as e:                                       # noqa: BLE001
         return f"{STACK}/v1/embeddings ({EMBED_MODEL!r}) failed: {type(e).__name__}: {e}"
     if not vec or not any(abs(x) > 0 for x in vec):
         return f"{STACK}/v1/embeddings returned a zero or empty vector"
     return None
+
+
+def registry_published(name: str, version: str,
+                       timeout: float = 30) -> str | None:
+    """The registry's publish date (YYYY-MM-DD) of name@version, or None.
+
+    Phase 0.6's known-hard-area rule (mcp/deep.py unseen) flags a held
+    package published after the model's training cutoff. The packument's
+    `time` map is the registry's own record. Network, so only at index time
+    or from `deps.py published` -- never on a request."""
+    try:
+        with urllib.request.urlopen(f"{REGISTRY}/{name}", timeout=timeout) as r:
+            doc = json.loads(r.read().decode("utf-8", "replace"))
+        t = ((doc or {}).get("time") or {}).get(version)
+        return str(t)[:10] if t else None
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def record_published(db: str, name: str, version: str) -> str | None:
+    """Look up and write meta `published` into one index; the date or None."""
+    pub = registry_published(name, version)
+    if pub:
+        con = sqlite3.connect(db)
+        try:
+            con.execute("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, "
+                        "v TEXT)")
+            con.execute("INSERT INTO meta(k, v) VALUES('published', ?) ON "
+                        "CONFLICT(k) DO UPDATE SET v = excluded.v", (pub,))
+            con.commit()
+        finally:
+            con.close()
+    return pub
+
+
+# A PACKAGE'S REGISTRY HISTORY, per package, not per version (coordinator,
+# 2026-09-24): the known-hard-area rule (mcp/deep.py unseen) asks when the
+# PACKAGE was first published and which releases existed before the model's
+# cutoff -- a version's own date flagged every three.js conversation (r185
+# is newer than the cutoff; three.js is not). One JSON file beside the
+# indexes: {name: {first_published, releases: {version: date}, fetched}}.
+# `releases` keeps stable versions only; the date is the registry's `time`.
+HISTORY_FILE = os.environ.get("YAMADORI_PKG_HISTORY",
+                              os.path.join(STORE, "registry_history.json"))
+
+
+def registry_history(name: str, timeout: float = 60) -> dict | None:
+    """{first_published, releases} from the registry's packument, or None.
+    First published = the earliest version's time (the packument's
+    `created` can be later than it). Network: index time or the CLI only."""
+    try:
+        url = f"{REGISTRY}/{name.replace('/', '%2F')}"
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            doc = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:                                            # noqa: BLE001
+        return None
+    times = {k: str(v) for k, v in ((doc or {}).get("time") or {}).items()
+             if k not in ("created", "modified") and v}
+    if not times:
+        return None
+    return {"first_published": min(times.values())[:10],
+            "releases": {k: v[:10] for k, v in sorted(times.items())
+                         if "-" not in k}}
+
+
+def package_history(name: str) -> dict | None:
+    """The recorded history of one package, or None. No network."""
+    try:
+        with open(HISTORY_FILE, encoding="utf-8") as f:
+            return (json.load(f) or {}).get(name)
+    except (OSError, ValueError):
+        return None
+
+
+def record_history(name: str, hist: dict | None = None) -> dict | None:
+    """Look up (unless given) and store one package's history."""
+    import time as _time
+    hist = hist if hist is not None else registry_history(name)
+    if not hist:
+        return None
+    try:
+        with open(HISTORY_FILE, encoding="utf-8") as f:
+            allh = json.load(f) or {}
+    except (OSError, ValueError):
+        allh = {}
+    allh[name] = dict(hist, fetched=int(_time.time()))
+    os.makedirs(os.path.dirname(os.path.abspath(HISTORY_FILE)), exist_ok=True)
+    tmp = HISTORY_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(allh, f, indent=1, sort_keys=True)
+    os.replace(tmp, HISTORY_FILE)
+    return allh[name]
 
 
 def _write_meta(db: str, rows: dict, files: list[str], src: str) -> None:
@@ -637,6 +731,9 @@ def index_package(name: str, version: str, embed: bool = False,
     import sys
 
     say = log or (lambda *_a: None)
+    # Only a package fetched from the registry has a registry record to read
+    # its publish date from (a caller-supplied `src` -- the tests -- has not).
+    from_registry = not src
     src = src or fetch(name, version)
     if not src:
         return {"ok": False, "installed": False,
@@ -691,6 +788,11 @@ def index_package(name: str, version: str, embed: bool = False,
                       "files_selected": len(files), "bytes_selected": selected,
                       "bytes_fetched": _tree_bytes(src),
                       "embedded": "1" if embed else "0"}, files, src)
+    # The publish date, for the known-hard-area trigger (mcp/deep.py). Best
+    # effort: an index without it is still installed.
+    if from_registry:
+        record_published(tmp, name, version)
+        record_history(name)
     health = index_health(tmp)
     health["db"] = target
     health["files_selected"] = len(files)
@@ -744,6 +846,17 @@ def _main(argv: list[str]) -> int:
             print(json.dumps(h, indent=2))
             bad += not h.get("installed")
         return 1 if bad else 0
+    if argv and argv[0] == "published":
+        # Backfill meta `published` on held indexes and each package's
+        # registry history (Phase 0.6): network.
+        for spec in argv[1:]:
+            name, version = _split_spec(spec)
+            pub = record_published(db_path(name, version), name, version)
+            h = record_history(name) or {}
+            print(f"{spec}: version published {pub}; package first "
+                  f"published {h.get('first_published')}, "
+                  f"{len(h.get('releases') or {})} releases recorded")
+        return 0
     if argv and argv[0] == "health":
         bad = 0
         for spec in argv[1:]:

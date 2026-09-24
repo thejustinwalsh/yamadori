@@ -151,10 +151,261 @@ def investigate_hops(r: dict) -> int:
     return sum(int((x.get("investigate") or {}).get("hops") or 0) for x in _xs(r))
 
 
+# THE SERVER'S OWN REASONING CEILING. llama-server is launched with
+# --reasoning-budget 32768 (config.yaml). The MTP build honours a SMALLER
+# per-request budget gracefully (stops, injects the budget message, answers),
+# but a request asking for MORE than the launch value (the proxy asks ~98k)
+# is hard-stopped near 32,768 thinking tokens: finish "stop", no budget
+# message, no answer. Found on selfcheck-probe ts02/A0 (32,881 completion
+# tokens, empty content, stopped mid-sentence) and confirmed by a direct
+# probe at reasoning_budget_tokens=300. It was first treated as a stack
+# error. The transcript review (docs/TRANSCRIPT-REVIEW-2026-09-23.md) showed
+# the reasoning was one paragraph repeated 95 times: a model failure (a
+# greedy-decoding loop) that the server's ceiling merely cut off. So the
+# outcome stands; `server_reasoning_cap` is an ANNOTATION on the row, counted
+# and reported, never a reclassification.
+SERVER_CAP_BAND = (32700, 33300)
+
+
+def server_cap_hit(r: dict) -> bool:
+    """A scored row that is really the server's hard reasoning stop."""
+    if r.get("outcome") not in ("pass", "fail") or r.get("finish_reason") != "stop":
+        return False
+    if not (r.get("empty_content") or stage(r) == "extract"):
+        return False
+    if r.get("hit_thinking_cap"):
+        return False           # the graceful close happened: a real budget answer
+    u = (r.get("usage_rounds") or [r.get("usage") or {}])[-1] or {}
+    lo, hi = SERVER_CAP_BAND
+    return any(isinstance(t, int) and lo <= t <= hi
+               for t in (u.get("completion_tokens"), r.get("reasoning_tokens")))
+
+
+def annotate(rows: list[dict]) -> list[dict]:
+    """Rows with `annotations` added: "server_reasoning_cap" where the
+    server's launch ceiling cut the thinking off. The outcome is untouched."""
+    out = []
+    for r in rows:
+        if server_cap_hit(r) and "server_reasoning_cap" not in (r.get("annotations") or []):
+            r = dict(r, annotations=list(r.get("annotations") or []) + ["server_reasoning_cap"])
+        out.append(r)
+    return out
+
+
+# ------------------------------------------------------- mechanisms -------
+# Per-row EVIDENCE that each mechanism the arm allowed actually worked, read
+# from x_yamadori (every request of the row) and the row's own fields. Not a
+# verdict: a mechanism that ran and legitimately found nothing (0 hints above
+# the floor, deep thinking not searching, every search empty) is DATA and is
+# recorded as such. A mechanism that was chosen and broke is caught by
+# run.verify and is a stack_error row, re-run.
+MECHANISMS = ("retrieval", "hints", "deep_thinking", "fanout", "self_check",
+              "check_code")
+NOT_RETRIEVAL = ("check_code", "generate_image")
+
+
+def _hint_id(h: dict) -> str:
+    import hashlib
+    return hashlib.sha1(((h.get("source") or "") + "|" + (h.get("recipe") or ""))
+                        .encode("utf-8")).hexdigest()[:10]
+
+
+def mechanisms(r: dict) -> dict:
+    """{mechanism: {allowed, ran, data, ...evidence}} for one row."""
+    xs = [x for x in _xs(r) if x]
+    sels = [x.get("selection") or {} for x in xs]
+
+    def allowed(key: str, sel_key: str) -> bool:
+        """Allowed for THIS arm: a flag the header forced is what it forced;
+        otherwise what the tier allowed the selection engine to choose."""
+        for sl in sels:
+            sig = sl.get("signals") or {}
+            if key in (sig.get("forced") or []):
+                v = sl.get(sel_key)
+                if (int(v or 1) > 1) if key == "fanout" else bool(v):
+                    return True
+            else:
+                v = (sig.get("allowed") or {}).get(key)
+                if (int(v or 1) > 1) if key == "fanout" else bool(v):
+                    return True
+        return False
+    out: dict = {}
+    # x_yamadori.tools lists EVERY proxy-executed call; check_code and
+    # generate_image are their own mechanisms, not retrieval.
+    all_calls = [c for x in xs for c in (x.get("tools") or [])]
+    calls = [c for c in all_calls if c.get("name") not in NOT_RETRIEVAL]
+    gates = [x.get("tools_gate") for x in xs]
+    names: dict[str, int] = {}
+    for c in calls:
+        names[c.get("name") or "?"] = names.get(c.get("name") or "?", 0) + 1
+    nonempty = sum(1 for c in calls if not c.get("empty") and not c.get("error"))
+    out["retrieval"] = {
+        "allowed": any(g is not None for g in gates),
+        "offered": any(isinstance(g, dict) and g.get("offer") for g in gates),
+        "ran": bool(calls), "data": nonempty > 0,
+        "calls": len(calls), "tools": names, "nonempty": nonempty,
+        "empty": sum(1 for c in calls if c.get("empty") and not c.get("error")),
+        "errors": sum(1 for c in calls if c.get("error")),
+        "evidence": "x_yamadori.tools" if any("tools" in x for x in xs) else
+                    "not recorded by this proxy build (x_yamadori.tools absent)",
+        "gate_why": next((g.get("why") for g in gates if isinstance(g, dict)), None)}
+    hints = [h for x in xs for h in (x.get("hints") or [])]
+    supp = [h for x in xs for h in (x.get("suppressed_hints") or [])]
+    out["hints"] = {
+        "allowed": allowed("hints", "hints"),
+        "ran": any(s.get("hints") for s in sels), "data": bool(hints),
+        "injected": len(hints), "ids": sorted({_hint_id(h) for h in hints}),
+        "suppressed": len(supp)}
+    invs = [x.get("investigate") for x in xs if isinstance(x.get("investigate"), dict)]
+    out["deep_thinking"] = {
+        "allowed": allowed("investigate", "investigate"),
+        "chosen": any(s.get("investigate") for s in sels),
+        "ran": any(i.get("ran") for i in invs),
+        "data": any(i.get("injected") for i in invs),
+        "searches": sum(int(i.get("hops") or 0) for i in invs),
+        "injected": any(i.get("injected") for i in invs),
+        "why_not": [i.get("why") for i in invs if i.get("why")]}
+    fans = [x.get("fanout") for x in xs if isinstance(x.get("fanout"), dict)]
+    f = fans[-1] if fans else {}
+    cands = f.get("candidates") or []
+    out["fanout"] = {
+        "allowed": allowed("fanout", "fanout_n"),
+        "chosen_n": max([int(s.get("fanout_n") or 1) for s in sels] or [1]),
+        "ran": bool(f) and int(f.get("n") or 0) > 0 and not f.get("error"),
+        "data": bool(f.get("selection")),
+        "n": f.get("n"), "asked": f.get("asked"), "selection": f.get("selection"),
+        "winner": f.get("winner"), "replaced": f.get("replaced"),
+        "delivered": bool(f.get("replaced")) or f.get("winner") in ("original", None)
+                     if f.get("selection") in ("code_medoid", "code_grade")
+                     else None,
+        "candidates_parsed": sum(1 for c in cands if c.get("parses")),
+        "candidates": len(cands), "error": f.get("error")}
+    cr = r.get("check_results") or []
+    out["self_check"] = {
+        "allowed": r.get("arm") in SELF_CHECK_TWIN, "ran": bool(cr), "data": bool(cr),
+        "rounds": r.get("rounds"), "checks": len(cr),
+        "errors_per_check": [int(c.get("n_errors") or 0) for c in cr],
+        "ok_per_check": [bool(c.get("ok")) for c in cr]}
+    cc = [x.get("check_code") for x in xs if isinstance(x.get("check_code"), dict)]
+    # The tool-turn cap (PrismML agenticMaxTurns, 2026-09-23): the main loop
+    # and deep thinking land after `limit` tool turns. hit=true is DATA.
+    tts = [x.get("tool_turns") for x in xs if isinstance(x.get("tool_turns"), dict)]
+    out["tool_turns"] = {
+        "recorded": bool(tts),
+        "limit": sorted({t.get("limit") for t in tts} - {None}),
+        "turns_max": max([int(t.get("turns") or 0) for t in tts] or [0]),
+        "turns_sum": sum(int(t.get("turns") or 0) for t in tts),
+        "hit": any(t.get("hit") for t in tts)}
+    cc_calls = [c for c in all_calls if c.get("name") == "check_code"]
+    out["check_code"] = {
+        "tool_calls_nonempty": sum(1 for c in cc_calls if not c.get("empty")),
+        "tool_calls_errors": sum(1 for c in cc_calls if c.get("error")),
+        "ok_results": sum(1 for c in cc for x in (c.get("results") or [])
+                          if x.get("ok")),
+        "allowed": any(c.get("offered") for c in cc),
+        "ran": sum(int(c.get("calls") or 0) for c in cc) > 0,
+        "data": sum(int(c.get("calls") or 0) for c in cc) > 0,
+        "calls": sum(int(c.get("calls") or 0) for c in cc),
+        "recorded": bool(cc)}
+    return out
+
+
+def mechanism_health(rows: list[dict]) -> dict:
+    """Per mechanism over an arm's scored rows: % allowed, % ran, % produced
+    data (allowed rows are the denominator for ran/data)."""
+    out = {}
+    ms = [mechanisms(r) for r in rows]      # recomputed: the stored copy may predate a fix
+    n = len(ms)
+    tt = [x.get("tool_turns") or {} for x in ms]
+    out["tool_turns"] = {"rows": n, "recorded": sum(1 for t in tt if t.get("recorded")),
+                         "hit": sum(1 for t in tt if t.get("hit")),
+                         "limit": sorted({lim for t in tt for lim in t.get("limit") or []}),
+                         "turns_max": max([t.get("turns_max") or 0 for t in tt] or [0])}
+    for m in MECHANISMS:
+        al = [x[m] for x in ms if x.get(m, {}).get("allowed")]
+        out[m] = {"rows": n, "allowed": len(al),
+                  "tool_errors": (sum(int(x.get("errors") or 0) for x in al)
+                                  if m == "retrieval" else None),
+                  "allowed_pct": round(100 * len(al) / n, 1) if n else None,
+                  "ran": sum(1 for x in al if x.get("ran")),
+                  "ran_pct": round(100 * sum(1 for x in al if x.get("ran")) / len(al), 1)
+                  if al else None,
+                  "data": sum(1 for x in al if x.get("data")),
+                  "data_pct": round(100 * sum(1 for x in al if x.get("data")) / len(al), 1)
+                  if al else None}
+    return out
+
+
 def final_compiles(r: dict) -> bool:
     """The answer given got past extract and compile (it passed, or failed only
     at the hidden tests). Comparable across every arm."""
     return stage(r) in ("pass", "test")
+
+
+def style_metrics(sc: list[dict]) -> dict:
+    """The SEPARATE style score (grade_style.py): never folded into pass/fail."""
+    sty = [r.get("style") or {} for r in sc]
+    lint = [x for x in sty if isinstance(x.get("lint_errors"), int)]
+    flags: dict[str, int] = {}
+    credits: dict[str, int] = {}
+    for x in sty:
+        for f in x.get("modern_flags") or []:
+            flags[f] = flags.get(f, 0) + 1
+        for c in x.get("modern_credits") or []:
+            credits[c] = credits.get(c, 0) + 1
+    return {"lint_n": len(lint),
+            "lint_errors_mean": _mean([x["lint_errors"] for x in lint]),
+            "lint_warnings_mean": _mean([x.get("lint_warnings") or 0 for x in lint]),
+            "lint_clean": sum(1 for x in lint if x["lint_errors"] == 0),
+            "modern_flags": dict(sorted(flags.items())),
+            "modern_credits": dict(sorted(credits.items())),
+            "style_errors": sum(1 for x in sty if x.get("style_error"))}
+
+
+def row_concurrent(r: dict, man: dict | None) -> list[str]:
+    """The other GPU consumers during this ROW. Rows since 2026-09-23 10:0x
+    carry `concurrent_with`; an older row takes it from the manifest run
+    (invocation) it was produced in -- the latest run started before it."""
+    if "concurrent_with" in r:
+        return list(r.get("concurrent_with") or [])
+    runs = sorted((man or {}).get("runs") or [], key=lambda x: x.get("started") or 0)
+    t = r.get("started_at") or 0
+    cur = None
+    for run in runs:
+        if (run.get("started") or 0) <= t:
+            cur = run
+    if cur is not None:
+        return list(cur.get("concurrent_with") or [])
+    return list((man or {}).get("concurrent_with") or [])
+
+
+def timing_metrics(sc: list[dict], man: dict | None) -> dict:
+    """Seconds split by whether the GPU was shared. Only `clean` rows are
+    single-user timings; `concurrent` rows are labelled and kept apart."""
+    clean = [r for r in sc if not row_concurrent(r, man)]
+    conc = [r for r in sc if row_concurrent(r, man)]
+    return {"timing_rows": {"clean": len(clean), "concurrent": len(conc)},
+            "mean_s_clean": _mean([r.get("seconds") for r in clean]),
+            "median_s_clean": _median([r.get("seconds") for r in clean]),
+            "mean_s_concurrent": _mean([r.get("seconds") for r in conc]),
+            "timing_label": ("clean" if not conc else
+                             "concurrent" if not clean else "mixed")}
+
+
+_MAN_FOR_TIMING: dict = {}
+
+
+def hint_metrics(last: dict, tasks: list[str], arm: str) -> dict:
+    """Hint injection rate (rows with >= 1 hint injected / scored rows) and,
+    on the injected rows, the pass rate beside their paired A0."""
+    sc = [last[(t, arm)] for t in tasks if scored(last.get((t, arm)))]
+    inj = [r for r in sc if any((x.get("hints") or []) for x in _xs(r))]
+    paired = [r for r in inj if scored(last.get((r["task"], BASE)))]
+    return {"hint_rows": len(inj), "hint_rate": (len(inj) / len(sc)) if sc else None,
+            "hint_rows_paired": len(paired),
+            "hint_rows_pass": sum(1 for r in paired if r["outcome"] == "pass"),
+            "hint_rows_a0_pass": sum(1 for r in paired
+                                     if last[(r["task"], BASE)]["outcome"] == "pass")}
 
 
 def arm_metrics(sc: list[dict], arm: str) -> dict:
@@ -176,6 +427,9 @@ def arm_metrics(sc: list[dict], arm: str) -> dict:
         "final_compiles": sum(1 for r in sc if final_compiles(r)),
         "n": len(sc),
         "self_check": arm in SELF_CHECK_TWIN,
+        **style_metrics(sc),
+        "mechanism_health": mechanism_health(sc),
+        **timing_metrics(sc, _MAN_FOR_TIMING),
     }
     if arm in SELF_CHECK_TWIN:
         cr = [int(r.get("check_rounds") or 0) for r in sc]
@@ -244,8 +498,14 @@ def twins(last: dict, tasks: list[str], arms: list[str]) -> list[dict]:
             "s_pass": c["b_pass"], "one_shot_pass": c["a_pass"],
             "s_only": c["b_only"], "one_shot_only": c["a_only"],
             "discordant": c["discordant"], "p": c["p"],
-            # the one-shot answer did not compile; the checked one passed
+            # the one-shot answer did not compile; the S arm's passed (as
+            # specified: whether or not the S row called check_solution)
             "fixed_by_checking": moved("compile", "pass"),
+            # the same, counting only S rows that called check_solution >= 1
+            "fixed_with_check": sum(
+                1 for t in both if stage(last[(t, a)]) == "compile"
+                and stage(last[(t, s)]) == "pass"
+                and int(last[(t, s)].get("check_rounds") or 0) >= 1),
             "compile_to_test": moved("compile", "test"),
             "extract_to_pass": moved("extract", "pass"),
             "test_to_pass": moved("test", "pass"),
@@ -326,6 +586,7 @@ def per_arm(rows: list[dict], last: dict, tasks: list[str], arms: list[str]) -> 
                                           for r in sc} - {None}),
             "empty_content": sum(1 for r in sc if r.get("empty_content")),
             **arm_metrics(sc, a),
+            **hint_metrics(last, tasks, a),
         }
     return out
 
@@ -399,14 +660,55 @@ def suspects(arm_stats: dict) -> list[str]:
 
 
 # -------------------------------------------------------------- summary ----
-def analyse(run_dir: str) -> dict:
-    rows, bad = load(run_dir)
-    rows, stale = split_stale(rows)
-    last = last_by_pair(rows)
-    man = {}
-    mp = os.path.join(run_dir, "manifest.json")
+def _manifest(d: str) -> dict:
+    mp = os.path.join(d, "manifest.json")
     if os.path.exists(mp):
-        man = json.load(open(mp, encoding="utf-8"))
+        with open(mp, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+FIXED = ("effort", "max_tokens", "temperature", "body_tier", "suite")
+
+
+def group_dirs(run_dir: str) -> list[str]:
+    """The run dir, plus every sibling whose manifest names the same `group`
+    (run.py --group: parallel runners on disjoint tasks). Sorted, run_dir's
+    own group first-found; a dir without a group is analysed alone."""
+    g = _manifest(run_dir).get("group")
+    if not g:
+        return [run_dir]
+    root = os.path.dirname(os.path.normpath(run_dir))
+    out = [d for d in sorted(glob.glob(os.path.join(root, "*")))
+           if os.path.exists(os.path.join(d, "rows.jsonl"))
+           and _manifest(d).get("group") == g]
+    return out or [run_dir]
+
+
+def analyse(run_dir: str, merge: bool = True) -> dict:
+    dirs = group_dirs(run_dir) if merge else [run_dir]
+    rows, bad = [], 0
+    for d in dirs:
+        r, b = load(d)
+        rows += r
+        bad += b
+    rows, stale = split_stale(rows)
+    rows = annotate(rows)
+    _MAN_FOR_TIMING.clear()
+    _mm = [_manifest(d) for d in dirs]
+    _MAN_FOR_TIMING["runs"] = [r for m in _mm for r in m.get("runs") or []]
+    _MAN_FOR_TIMING["concurrent_with"] = sorted({c for m in _mm
+                                                 for c in m.get("concurrent_with") or []})
+    n_cap = sum(1 for r in rows if "server_reasoning_cap" in (r.get("annotations") or []))
+    last = last_by_pair(rows)
+    mans = [_manifest(d) for d in dirs]
+    man = dict(mans[0]) if mans else {}
+    if len(dirs) > 1:
+        man["runs"] = [dict(r, run_dir=os.path.basename(d))
+                       for d, m in zip(dirs, mans) for r in m.get("runs") or []]
+        man["concurrent_with"] = sorted({c for m in mans
+                                         for c in m.get("concurrent_with") or []})
+        man["run_id"] = man.get("group") or man.get("run_id")
     seen = {r["arm"] for r in rows if "arm" in r}
     arms = [a for a in ARM_ORDER if a in seen] + sorted(seen - set(ARM_ORDER))
     meta: dict[str, dict] = {}
@@ -439,20 +741,74 @@ def analyse(run_dir: str) -> dict:
         caveats.append("A3 never searched in its investigation: check that deep "
                        "thinking has tools with retrieval off")
     caveats += suspects(arm_stats)
+    if n_cap:
+        caveats.append(f"{n_cap} row(s) annotated server_reasoning_cap: no answer, "
+                       f"finish stop, ~32,768 reasoning tokens, no budget message -- "
+                       f"the server's launch --reasoning-budget cut the thinking off. "
+                       f"Scored as the model's failure (it had looped); annotation only")
+    if len(dirs) > 1:
+        differ = {k: sorted({json.dumps(m.get(k)) for m in mans}) for k in FIXED
+                  if len({json.dumps(m.get(k)) for m in mans}) > 1}
+        if differ:
+            caveats.append(f"the grouped run dirs differ in fixed conditions "
+                           f"{differ}: their rows are NOT one condition set")
+        both = {}
+        for d in dirs:
+            for r in load(d)[0]:
+                both.setdefault((r.get("task"), r.get("arm")), set()).add(d)
+        dup = [k for k, v in both.items() if len(v) > 1]
+        if dup:
+            caveats.append(f"{len(dup)} (task, arm) pairs appear in more than one "
+                           f"grouped run dir; the later-loaded dir's row is used")
+    epochs = sorted({e.get("at") for m in mans for e in m.get("condition_epochs") or []}
+                    - {None})
+    pre_epoch = 0
+    if epochs:
+        newest = epochs[-1]
+        pre_epoch = sum(1 for (t, a), r in last.items()
+                        if scored(r) and (r.get("started_at") or 0) < newest)
+        if pre_epoch:
+            caveats.append(
+                f"{pre_epoch} scored row(s) predate the newest condition epoch "
+                f"({time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(newest))}): "
+                f"they ran on an earlier stack deploy")
+    timing = timing_of(man)
+    shas = {json.dumps((run.get("hints_corpus") or {}).get(k))
+            for run in man.get("runs") or [] if run.get("hints_corpus")
+            for k in ("hint_buckets_sha256",)}
+    rsh = {(run.get("hints_corpus") or {}).get("recipes_sha256")
+           for run in man.get("runs") or [] if run.get("hints_corpus")}
+    if len(shas) > 1 or len(rsh) > 1:
+        caveats.append("the hints corpus changed between invocations of this run "
+                       "(manifest runs[].hints_corpus): hint rows before and after "
+                       "measured different corpora")
+    if not timing["clean"]:
+        caveats.append(f"timing is CONCURRENT with {', '.join(timing['concurrent_with'])}"
+                       f": every seconds and tokens/s figure shared the GPU with "
+                       f"them and is not a clean measurement")
     dirty_domains = sorted({meta[t]["domain"] or "?" for t in dirty})
     dnames = ", ".join(dirty_domains) or "none in this run"
     return {
         "run_id": man.get("run_id") or os.path.basename(run_dir.rstrip("/\\")),
         "run_dir": run_dir, "analysed_at": time.time(),
-        "conditions": {k: man.get(k, "core" if k == "suite" else None)
-                       for k in ("effort", "max_tokens", "temperature",
-                                 "body_tier", "suite")},
+        "merged_run_dirs": [os.path.basename(os.path.normpath(d)) for d in dirs],
+        "conditions": dict({k: man.get(k, "core" if k == "suite" else None)
+                            for k in ("effort", "max_tokens", "temperature",
+                                      "body_tier", "suite", "server_sampling")},
+                           tool_turns_limit=sorted({
+                               (x.get("tool_turns") or {}).get("limit")
+                               for r in rows for x in _xs(r)
+                               if isinstance((x or {}).get("tool_turns"), dict)} - {None})),
         "rows": len(rows), "stale_rows": len(stale), "bad_lines": bad,
+        "annotated_server_reasoning_cap": n_cap,
+        "condition_epochs": epochs if len(dirs) else [],
+        "rows_before_newest_epoch": pre_epoch,
         "arms": arms,
         "tasks": {"all": len(tasks_all), "uncontaminated": len(clean),
                   "contaminated": len(dirty),
                   "contaminated_domains": dirty_domains},
         "caveats": caveats,
+        "timing": timing,
         "headline_uncontaminated": block(last, clean, arms,
                                          "uncontaminated domains (headline)"),
         # Key name kept for existing readers; it holds every contaminated task.
@@ -468,12 +824,25 @@ def analyse(run_dir: str) -> dict:
         "triggers": triggers(last, tasks_all, arms),
         "dashboard": dashboard_block(rows, last, clean, arms, run_dir, bad,
                                      excluded={"tasks": len(dirty),
-                                               "domains": dirty_domains}),
+                                               "domains": dirty_domains},
+                                     timing=timing),
     }
 
 
+def timing_of(man: dict) -> dict:
+    """Whether this run's seconds / tokens-per-second are clean. A manifest
+    naming other GPU consumers (run.py --concurrent-with) makes every timing
+    figure CONCURRENT; it is labelled wherever it is shown."""
+    conc = sorted(set(man.get("concurrent_with") or [])
+                  | {c for run in man.get("runs") or []
+                     for c in run.get("concurrent_with") or []})
+    return {"concurrent_with": conc, "clean": not conc,
+            "label": "CONCURRENT" if conc else "clean"}
+
+
 def dashboard_block(rows, last, tasks, arms, run_dir, bad,
-                    excluded: dict | None = None) -> dict:
+                    excluded: dict | None = None,
+                    timing: dict | None = None) -> dict:
     """The same shape `mcp/dash_results.py lcb_summary()` returns, so the
     results page can render this run with its existing `renderLcb`. Computed
     on the UNCONTAMINATED tasks; no contaminated task reaches the page.
@@ -513,7 +882,13 @@ def dashboard_block(rows, last, tasks, arms, run_dir, bad,
                  "tool_hops": m["tool_hops_mean"],
                  "investigate_hops": m["investigate_hops_mean"],
                  "final_compiles": m["final_compiles"],
-                 "self_check": m["self_check"]}
+                 "self_check": m["self_check"],
+                 **{k: m[k] for k in ("lint_n", "lint_errors_mean",
+                                      "lint_warnings_mean", "lint_clean",
+                                      "modern_flags", "modern_credits",
+                                      "mechanism_health", "timing_rows",
+                                      "mean_s_clean", "median_s_clean",
+                                      "timing_label")}}
         if m["self_check"]:
             extra.update({k: m[k] for k in (
                 "twin", "check_rounds_mean", "check_rounds_median",
@@ -607,6 +982,7 @@ def dashboard_block(rows, last, tasks, arms, run_dir, bad,
             None)) for tw in twins(last, complete, arms)],
         "domain_pairs": domain_pairs,
         "excluded_contaminated": excluded or {"tasks": 0, "domains": []},
+        "timing": timing or {"concurrent_with": [], "clean": True, "label": "clean"},
         "note": ("uncontaminated domains only; McNemar p on this page is "
                  "Bonferroni-corrected over the comparisons shown"),
     }
@@ -622,7 +998,7 @@ def dashboard_section(results_root: str = RESULTS) -> dict:
                 "how": "run  python bench/domain/run.py --key-file KEY --run-id ID",
                 "note": "no run directory holds rows yet"}
     newest = max(runs, key=lambda d: os.path.getmtime(os.path.join(d, "rows.jsonl")))
-    return analyse(newest)["dashboard"]
+    return analyse(newest)["dashboard"]      # merged with its group, if any
 
 
 # ------------------------------------------------------------- markdown ----
@@ -664,9 +1040,10 @@ def markdown(s: dict) -> str:
                      f"{c['a_only']} | {c['discordant']} | {_p(c['p'])} | "
                      f"{_p(c['p_bonferroni'])} | {v} |")
         L.append("")
+    cs = "" if (s.get("timing") or {}).get("clean", True) else " (CONCURRENT)"
     L += ["## Per arm (all domains, last row per pair)", "",
           "| arm | scored | passed | rate (Wilson 95%) | stack errors (rows) | "
-          "kinds | median s | median prompt tok | median completion tok | "
+          f"kinds | median s{cs} | median prompt tok | median completion tok | "
           "median hops | median reasoning chars | cap fired | cap sent | "
           "fail stages |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for a, x in s["per_arm"].items():
@@ -678,8 +1055,8 @@ def markdown(s: dict) -> str:
                  f"{x['hit_thinking_cap']} | {x['reasoning_cap_sent']} | "
                  f"{json.dumps(x['fail_stages'])} |")
     L += ["", "## Where it failed, what it cost, what it checked (all domains)", "",
-          "| arm | pass | extract | compile | test | final compiles | mean s | "
-          "median s | mean prompt tok | mean completion tok | proxy tool hops | "
+          f"| arm | pass | extract | compile | test | final compiles | mean s{cs} | "
+          f"median s{cs} | mean prompt tok | mean completion tok | proxy tool hops | "
           "deep-thinking hops | check rounds (mean / max) | checked any | "
           "final answer passed public check |",
           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
@@ -700,16 +1077,67 @@ def markdown(s: dict) -> str:
     if tw:
         L += ["", "## Self-check vs its one-shot twin (uncontaminated)", "",
               "| S arm vs twin | paired n | pass (twin / S) | S only | twin only | "
-              "exact p | fixed by checking (compile -> pass) | compile -> test | "
+              "exact p | fixed by checking (compile -> pass) | of those, with >= 1 "
+              "check | compile -> test | "
               "extract -> pass | test -> pass | compile fails (twin / S) |",
-              "|---|---|---|---|---|---|---|---|---|---|---|"]
+              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for t in tw:
             L.append(f"| {t['s']} vs {t['one_shot']} | {t['n_paired']} | "
                      f"{t['one_shot_pass']} / {t['s_pass']} | {t['s_only']} | "
                      f"{t['one_shot_only']} | {_p(t['p'])} | "
-                     f"{t['fixed_by_checking']} | {t['compile_to_test']} | "
+                     f"{t['fixed_by_checking']} | {t['fixed_with_check']} | "
+                     f"{t['compile_to_test']} | "
                      f"{t['extract_to_pass']} | {t['test_to_pass']} | "
                      f"{t['one_shot_compile_fail']} / {t['s_compile_fail']} |")
+    L += ["", "## Style (separate score, never part of pass/fail; TS and React "
+          "answers)", "",
+          "| arm | linted | lint errors (mean) | lint warnings (mean) | "
+          "0 lint errors | React 19 flags | credits (called for) | scorer errors |",
+          "|---|---|---|---|---|---|---|---|"]
+    for a, x in s["per_arm"].items():
+        L.append(f"| {a} | {x.get('lint_n', 0)} | {x.get('lint_errors_mean')} | "
+                 f"{x.get('lint_warnings_mean')} | {x.get('lint_clean', 0)} | "
+                 f"{json.dumps(x.get('modern_flags') or {})} | "
+                 f"{json.dumps(x.get('modern_credits') or {})} | "
+                 f"{x.get('style_errors', 0)} |")
+    L += ["", "## Hints (rows with >= 1 hint injected; on those rows, pass vs "
+          "their paired A0)", "", "| arm | injected rows | rate | paired with A0 | "
+          "pass (arm) | pass (A0) |", "|---|---|---|---|---|---|"]
+    for a, x in s["per_arm"].items():
+        L.append(f"| {a} | {x.get('hint_rows', 0)} | {_pct(x.get('hint_rate'))} | "
+                 f"{x.get('hint_rows_paired', 0)} | {x.get('hint_rows_pass', 0)} | "
+                 f"{x.get('hint_rows_a0_pass', 0)} |")
+    L += ["", "## Timing by GPU sharing (only `clean` rows are single-user "
+          "timings)", "", "| arm | clean rows | concurrent rows | mean s clean | "
+          "median s clean | mean s concurrent |", "|---|---|---|---|---|---|"]
+    for a, x in s["per_arm"].items():
+        tr = x.get("timing_rows") or {}
+        L.append(f"| {a} | {tr.get('clean', 0)} | {tr.get('concurrent', 0)} | "
+                 f"{x.get('mean_s_clean')} | {x.get('median_s_clean')} | "
+                 f"{x.get('mean_s_concurrent')} |")
+    L += ["", "## Mechanism health (evidence, not a verdict): % of rows where the "
+          "arm allowed it; of those, % where it ran, and % where it produced data",
+          "", "| arm | " + " | ".join(MECHANISMS) + " |",
+          "|---|" + "---|" * len(MECHANISMS)]
+    for a, x in s["per_arm"].items():
+        mh = x.get("mechanism_health") or {}
+        L.append(f"| {a} | " + " | ".join(
+            (f"{m['allowed_pct']}% / {m['ran_pct']}% / {m['data_pct']}%"
+             if m.get("allowed") else f"{m.get('allowed_pct')}% / - / -")
+            for m in (mh.get(k) or {} for k in MECHANISMS)) + " |")
+    L += ["", "Tool-turn cap (x_yamadori.tool_turns; hit = the loop landed at "
+          "the cap -- data, not an error): " + ", ".join(
+              f"{a} limit {((x.get('mechanism_health') or {}).get('tool_turns') or {}).get('limit')}"
+              f" hit {((x.get('mechanism_health') or {}).get('tool_turns') or {}).get('hit')}"
+              f"/{((x.get('mechanism_health') or {}).get('tool_turns') or {}).get('rows')}"
+              for a, x in s["per_arm"].items()) + "."]
+    L += ["", "Retrieval tool errors per arm (a tool that answered ok:false -- "
+          "evidence, not a stack error): " + ", ".join(
+              f"{a} {((x.get('mechanism_health') or {}).get('retrieval') or {}).get('tool_errors')}"
+              for a, x in s["per_arm"].items()) + ".",
+          "Known limit: x_yamadori.tools records only error: true/false, not the "
+          "error code, so NO_INDEX, a broken tool and bad arguments from the model "
+          "cannot be told apart here yet."]
     L += ["", "## By domain (scored pass / n per arm)", ""]
     arms = s["arms"]
     L += ["| domain | tasks | " + " | ".join(arms) + " |",

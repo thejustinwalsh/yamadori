@@ -1,0 +1,1353 @@
+{
+ "run_id": "lb-20260923-minp0",
+ "release": [
+  "2024-11-25"
+ ],
+ "arms": {
+  "bonsai": {
+   "overall": {
+    "score": 70.9090909090909,
+    "ci95": [
+     51.36363636363637,
+     90.0
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 70.9090909090909,
+     "ci95": [
+      51.36363636363637,
+      90.0
+     ],
+     "n": 21
+    }
+   }
+  },
+  "bonsai+check": {
+   "overall": {
+    "score": 100.0,
+    "ci95": [
+     100.0,
+     100.0
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 100.0,
+     "ci95": [
+      100.0,
+      100.0
+     ],
+     "n": 2
+    }
+   }
+  },
+  "yamadori": {
+   "overall": {
+    "score": 100.0,
+    "ci95": [
+     100.0,
+     100.0
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 100.0,
+     "ci95": [
+      100.0,
+      100.0
+     ],
+     "n": 2
+    }
+   }
+  },
+  "yamadori-xhigh": {
+   "overall": {
+    "score": 72.27272727272727,
+    "ci95": [
+     54.07954545454546,
+     90.45454545454545
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 72.27272727272727,
+     "ci95": [
+      54.07954545454546,
+      90.45454545454545
+     ],
+     "n": 21
+    }
+   }
+  }
+ },
+ "reproduction": {
+  "Claude 3.7 Sonnet thinking (64k)": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 0.0,
+    "plot_unscrambling": 0.0,
+    "typos": 0.0
+   }
+  },
+  "Claude 3.7 Sonnet": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": 0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "Claude 3.5 Sonnet (2024-10-22)": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": 0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": -0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "Claude 3.5 Haiku": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": -0.0,
+    "connections": -0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "o3-mini high": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 1.282,
+   "task_diffs": {
+    "LCB_generation": 1.282,
+    "coding_completion": 0.0,
+    "paraphrase": -0.0,
+    "connections": 0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "o1 high": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 0.0,
+    "plot_unscrambling": 0.0,
+    "typos": 0.0
+   }
+  },
+  "GPT-4.5 preview": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": -0.0,
+    "plot_unscrambling": 0.0,
+    "typos": 0.0
+   }
+  },
+  "GPT-4o (2024-11-20)": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": -0.0,
+    "connections": -0.0,
+    "plot_unscrambling": 0.0,
+    "typos": 0.0
+   }
+  },
+  "GPT-4o mini": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 0.0,
+    "plot_unscrambling": 0.0,
+    "typos": 0.0
+   }
+  },
+  "Gemini 2.5 Pro exp": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 0.0,
+    "plot_unscrambling": 0.0,
+    "typos": 0.0
+   }
+  },
+  "DeepSeek R1": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 3.167,
+   "task_diffs": {
+    "LCB_generation": 1.282,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 3.167,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "QwQ-32B": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 4.333,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": -4.333,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "Qwen2.5-Max": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": -0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "Qwen2.5-72B Instruct": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": 0.0,
+    "coding_completion": 0.0,
+    "paraphrase": -0.0,
+    "connections": 0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "Qwen2.5-Coder-32B Instruct": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": 0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 0.0,
+    "plot_unscrambling": 0.0,
+    "typos": 0.0
+   }
+  },
+  "R1-Distill-Qwen-32B": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 17.4,
+   "task_diffs": {
+    "LCB_generation": 0.641,
+    "coding_completion": 1.0,
+    "paraphrase": 17.4,
+    "connections": 0.0,
+    "plot_unscrambling": 0.69,
+    "typos": 0.0
+   }
+  },
+  "Gemma 3 27B": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": 0.0,
+    "connections": 0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  },
+  "Mistral Small 3.1 (2503)": {
+   "n": 318,
+   "missing": 682,
+   "max_abs_task_diff": 0.0,
+   "task_diffs": {
+    "LCB_generation": -0.0,
+    "coding_completion": 0.0,
+    "paraphrase": -0.0,
+    "connections": 0.0,
+    "plot_unscrambling": -0.0,
+    "typos": 0.0
+   }
+  }
+ },
+ "same_questions": {
+  "bonsai": {
+   "Claude 3.7 Sonnet thinking (64k)": {
+    "overall": 85.9090909090909,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 85.9090909090909
+    }
+   },
+   "Claude 3.7 Sonnet": {
+    "overall": 76.81818181818181,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 76.81818181818181
+    }
+   },
+   "Claude 3.5 Sonnet (2024-10-22)": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "Claude 3.5 Haiku": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "o3-mini high": {
+    "overall": 81.36363636363637,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 81.36363636363637
+    }
+   },
+   "o1 high": {
+    "overall": 77.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 77.27272727272727
+    }
+   },
+   "GPT-4.5 preview": {
+    "overall": 81.36363636363637,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 81.36363636363637
+    }
+   },
+   "GPT-4o (2024-11-20)": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "GPT-4o mini": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "Gemini 2.5 Pro exp": {
+    "overall": 90.0,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 90.0
+    }
+   },
+   "DeepSeek R1": {
+    "overall": 75.45454545454545,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 75.45454545454545
+    }
+   },
+   "QwQ-32B": {
+    "overall": 75.45454545454545,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 75.45454545454545
+    }
+   },
+   "Qwen2.5-Max": {
+    "overall": 71.81818181818181,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 71.81818181818181
+    }
+   },
+   "Qwen2.5-72B Instruct": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "Qwen2.5-Coder-32B Instruct": {
+    "overall": 62.272727272727266,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 62.272727272727266
+    }
+   },
+   "R1-Distill-Qwen-32B": {
+    "overall": 31.818181818181817,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 31.818181818181817
+    }
+   },
+   "Gemma 3 27B": {
+    "overall": 47.272727272727266,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 47.272727272727266
+    }
+   },
+   "Mistral Small 3.1 (2503)": {
+    "overall": 47.72727272727273,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 47.72727272727273
+    }
+   }
+  },
+  "bonsai+check": {
+   "Claude 3.7 Sonnet thinking (64k)": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Claude 3.7 Sonnet": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Claude 3.5 Sonnet (2024-10-22)": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Claude 3.5 Haiku": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "o3-mini high": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "o1 high": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "GPT-4.5 preview": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "GPT-4o (2024-11-20)": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "GPT-4o mini": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Gemini 2.5 Pro exp": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "DeepSeek R1": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "QwQ-32B": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Qwen2.5-Max": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Qwen2.5-72B Instruct": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Qwen2.5-Coder-32B Instruct": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "R1-Distill-Qwen-32B": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Gemma 3 27B": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Mistral Small 3.1 (2503)": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   }
+  },
+  "yamadori": {
+   "Claude 3.7 Sonnet thinking (64k)": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Claude 3.7 Sonnet": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Claude 3.5 Sonnet (2024-10-22)": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Claude 3.5 Haiku": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "o3-mini high": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "o1 high": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "GPT-4.5 preview": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "GPT-4o (2024-11-20)": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "GPT-4o mini": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Gemini 2.5 Pro exp": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "DeepSeek R1": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "QwQ-32B": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Qwen2.5-Max": {
+    "overall": 100.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 100.0
+    }
+   },
+   "Qwen2.5-72B Instruct": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Qwen2.5-Coder-32B Instruct": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "R1-Distill-Qwen-32B": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Gemma 3 27B": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   },
+   "Mistral Small 3.1 (2503)": {
+    "overall": 50.0,
+    "n": 2,
+    "missing": 0,
+    "categories": {
+     "coding": 50.0
+    }
+   }
+  },
+  "yamadori-xhigh": {
+   "Claude 3.7 Sonnet thinking (64k)": {
+    "overall": 85.9090909090909,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 85.9090909090909
+    }
+   },
+   "Claude 3.7 Sonnet": {
+    "overall": 76.81818181818181,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 76.81818181818181
+    }
+   },
+   "Claude 3.5 Sonnet (2024-10-22)": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "Claude 3.5 Haiku": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "o3-mini high": {
+    "overall": 81.36363636363637,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 81.36363636363637
+    }
+   },
+   "o1 high": {
+    "overall": 77.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 77.27272727272727
+    }
+   },
+   "GPT-4.5 preview": {
+    "overall": 81.36363636363637,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 81.36363636363637
+    }
+   },
+   "GPT-4o (2024-11-20)": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "GPT-4o mini": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "Gemini 2.5 Pro exp": {
+    "overall": 90.0,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 90.0
+    }
+   },
+   "DeepSeek R1": {
+    "overall": 75.45454545454545,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 75.45454545454545
+    }
+   },
+   "QwQ-32B": {
+    "overall": 75.45454545454545,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 75.45454545454545
+    }
+   },
+   "Qwen2.5-Max": {
+    "overall": 71.81818181818181,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 71.81818181818181
+    }
+   },
+   "Qwen2.5-72B Instruct": {
+    "overall": 67.27272727272727,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 67.27272727272727
+    }
+   },
+   "Qwen2.5-Coder-32B Instruct": {
+    "overall": 62.272727272727266,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 62.272727272727266
+    }
+   },
+   "R1-Distill-Qwen-32B": {
+    "overall": 31.818181818181817,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 31.818181818181817
+    }
+   },
+   "Gemma 3 27B": {
+    "overall": 47.272727272727266,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 47.272727272727266
+    }
+   },
+   "Mistral Small 3.1 (2503)": {
+    "overall": 47.72727272727273,
+    "n": 21,
+    "missing": 0,
+    "categories": {
+     "coding": 47.72727272727273
+    }
+   }
+  }
+ },
+ "published_2024_11_25": {
+  "Claude 3.7 Sonnet thinking (64k)": {
+   "categories": {
+    "Reasoning": 87.83333333333333,
+    "Coding": 74.5385,
+    "Mathematics": 78.99900000000001,
+    "Data Analysis": 74.05333333333333,
+    "Language": 59.92933333333334,
+    "IF": 81.25399999999999
+   },
+   "global": 76.10125
+  },
+  "Claude 3.7 Sonnet": {
+   "categories": {
+    "Reasoning": 66.0,
+    "Coding": 67.487,
+    "Mathematics": 63.26466666666666,
+    "Data Analysis": 63.36666666666667,
+    "Language": 56.75733333333333,
+    "IF": 76.4915
+   },
+   "global": 65.56119444444444
+  },
+  "Claude 3.5 Sonnet (2024-10-22)": {
+   "categories": {
+    "Reasoning": 56.666666666666664,
+    "Coding": 67.128,
+    "Mathematics": 52.279333333333334,
+    "Data Analysis": 55.03333333333333,
+    "Language": 53.76,
+    "IF": 69.29599999999999
+   },
+   "global": 59.02722222222223
+  },
+  "Claude 3.5 Haiku": {
+   "categories": {
+    "Reasoning": 28.083333333333332,
+    "Coding": 51.359,
+    "Mathematics": 35.535000000000004,
+    "Data Analysis": 48.45333333333334,
+    "Language": 35.36833333333333,
+    "IF": 61.879250000000006
+   },
+   "global": 43.44637500000001
+  },
+  "o3-mini high": {
+   "categories": {
+    "Reasoning": 89.58333333333333,
+    "Coding": 82.7435,
+    "Mathematics": 77.289,
+    "Data Analysis": 70.64,
+    "Language": 50.681999999999995,
+    "IF": 84.35849999999999
+   },
+   "global": 75.88272222222223
+  },
+  "o1 high": {
+   "categories": {
+    "Reasoning": 91.58333333333333,
+    "Coding": 69.6925,
+    "Mathematics": 80.32266666666668,
+    "Data Analysis": 65.46666666666667,
+    "Language": 65.387,
+    "IF": 81.54575
+   },
+   "global": 75.66631944444444
+  },
+  "GPT-4.5 preview": {
+   "categories": {
+    "Reasoning": 71.08333333333333,
+    "Coding": 75.17949999999999,
+    "Mathematics": 69.329,
+    "Data Analysis": 64.32666666666667,
+    "Language": 61.445,
+    "IF": 72.325
+   },
+   "global": 68.94808333333333
+  },
+  "GPT-4o (2024-11-20)": {
+   "categories": {
+    "Reasoning": 55.75,
+    "Coding": 46.077,
+    "Mathematics": 42.86666666666667,
+    "Data Analysis": 56.153333333333336,
+    "Language": 47.374,
+    "IF": 64.94175
+   },
+   "global": 52.19379166666667
+  },
+  "GPT-4o mini": {
+   "categories": {
+    "Reasoning": 32.75,
+    "Coding": 43.153999999999996,
+    "Mathematics": 36.31066666666667,
+    "Data Analysis": 49.96,
+    "Language": 28.61,
+    "IF": 56.79975
+   },
+   "global": 41.26406944444445
+  },
+  "Gemini 2.5 Pro exp": {
+   "categories": {
+    "Reasoning": 89.75,
+    "Coding": 85.872,
+    "Mathematics": 90.19833333333334,
+    "Data Analysis": 79.89333333333333,
+    "Language": 67.81966666666666,
+    "IF": 80.5915
+   },
+   "global": 82.35413888888888
+  },
+  "DeepSeek R1": {
+   "categories": {
+    "Reasoning": 83.16666666666667,
+    "Coding": 66.7435,
+    "Mathematics": 80.71300000000001,
+    "Data Analysis": 69.78,
+    "Language": 48.52766666666667,
+    "IF": 80.50825
+   },
+   "global": 71.57318055555557
+  },
+  "QwQ-32B": {
+   "categories": {
+    "Reasoning": 83.5,
+    "Coding": 72.231,
+    "Mathematics": 77.82000000000001,
+    "Data Analysis": 65.03333333333333,
+    "Language": 51.353,
+    "IF": 81.829
+   },
+   "global": 71.96105555555556
+  },
+  "Qwen2.5-Max": {
+   "categories": {
+    "Reasoning": 51.416666666666664,
+    "Coding": 64.4105,
+    "Mathematics": 58.34966666666667,
+    "Data Analysis": 67.92666666666666,
+    "Language": 56.27533333333333,
+    "IF": 75.34575000000001
+   },
+   "global": 62.28743055555555
+  },
+  "Qwen2.5-72B Instruct": {
+   "categories": {
+    "Reasoning": 45.416666666666664,
+    "Coding": 57.641,
+    "Mathematics": 54.29266666666666,
+    "Data Analysis": 51.906666666666666,
+    "Language": 34.99333333333333,
+    "IF": 64.39175
+   },
+   "global": 51.440347222222215
+  },
+  "Qwen2.5-Coder-32B Instruct": {
+   "categories": {
+    "Reasoning": 42.083333333333336,
+    "Coding": 56.846000000000004,
+    "Mathematics": 46.61433333333334,
+    "Data Analysis": 49.873333333333335,
+    "Language": 23.245333333333335,
+    "IF": 58.69175
+   },
+   "global": 46.22568055555556
+  },
+  "R1-Distill-Qwen-32B": {
+   "categories": {
+    "Reasoning": 52.25,
+    "Coding": 33.6665,
+    "Mathematics": 59.442,
+    "Data Analysis": 45.406666666666666,
+    "Language": 26.822999999999997,
+    "IF": 55.7125
+   },
+   "global": 45.55011111111111
+  },
+  "Gemma 3 27B": {
+   "categories": {
+    "Reasoning": 43.75,
+    "Coding": 39.872,
+    "Mathematics": 55.391999999999996,
+    "Data Analysis": 51.446666666666665,
+    "Language": 34.591,
+    "IF": 74.904
+   },
+   "global": 49.99261111111111
+  },
+  "Mistral Small 3.1 (2503)": {
+   "categories": {
+    "Reasoning": 44.75,
+    "Coding": 36.231,
+    "Mathematics": 39.434,
+    "Data Analysis": 50.54,
+    "Language": 29.143666666666665,
+    "IF": 63.66275
+   },
+   "global": 43.96023611111111
+  }
+ },
+ "current_leaderboard": {
+  "leaderboard_date": "2026-06-25",
+  "release": "LiveBench-2026-06-25 (latest release in site bundle main.20d28c99.js; release list 2024-06-24 ... 2026-06-25). Models are added to a release table after its date; model version metadata goes up to 2026-09-10.",
+  "sources": [
+   "https://livebench.ai/",
+   "https://livebench.ai/static/js/main.20d28c99.js",
+   "https://livebench.ai/table_2026_06_25.csv",
+   "https://livebench.ai/table_2026_01_08.csv",
+   "https://livebench.ai/table_2025_12_23.csv",
+   "https://livebench.ai/table_2025_11_25.csv",
+   "https://livebench.ai/table_2025_05_30.csv",
+   "https://livebench.ai/table_2025_04_25.csv",
+   "https://livebench.ai/table_2025_04_02.csv",
+   "https://livebench.ai/table_2024_11_25.csv",
+   "https://livebench.ai/categories_2026_06_25.json",
+   "https://livebench.ai/categories_2026_01_08.json",
+   "https://livebench.ai/categories_2025_12_23.json",
+   "https://livebench.ai/categories_2025_11_25.json",
+   "https://livebench.ai/categories_2025_05_30.json",
+   "https://livebench.ai/categories_2025_04_25.json",
+   "https://livebench.ai/categories_2025_04_02.json",
+   "https://livebench.ai/categories_2024_11_25.json"
+  ],
+  "models": {
+   "Claude Sonnet 5 xHigh Effort [2026-06-25]": {
+    "global": 76.04,
+    "categories": {
+     "Reasoning": 88.69,
+     "Coding": 80.68,
+     "Agentic Coding": 59.39,
+     "Mathematics": 92.94,
+     "Data Analysis": 71.74,
+     "Language": 74.97,
+     "IF": 63.86
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "gpt-5.4-mini-xhigh [2026-06-25]": {
+    "global": 66.37,
+    "categories": {
+     "Reasoning": 71.32,
+     "Coding": 71.62,
+     "Agentic Coding": 41.67,
+     "Mathematics": 78.46,
+     "Data Analysis": 70.79,
+     "Language": 70.95,
+     "IF": 59.8
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "Qwen 3.6 27B [2026-06-25]": {
+    "global": 64.03,
+    "categories": {
+     "Reasoning": 70.28,
+     "Coding": 71.79,
+     "Agentic Coding": 39.29,
+     "Mathematics": 79.87,
+     "Data Analysis": 70.43,
+     "Language": 63.3,
+     "IF": 53.23
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "Qwen 3.8 Max [2026-06-25]": {
+    "global": 78.46,
+    "categories": {
+     "Reasoning": 88.21,
+     "Coding": 72.87,
+     "Agentic Coding": 64.65,
+     "Mathematics": 91.31,
+     "Data Analysis": 78.41,
+     "Language": 79.69,
+     "IF": 74.08
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "Smaug Mini [2026-06-25]": {
+    "global": 76.93,
+    "categories": {
+     "Reasoning": 82.81,
+     "Coding": 75.43,
+     "Agentic Coding": 60.81,
+     "Mathematics": 89.74,
+     "Data Analysis": 78.81,
+     "Language": 77,
+     "IF": 73.92
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "Qwen3.8 27B [2026-06-25]": {
+    "global": 75.27,
+    "categories": {
+     "Reasoning": 80.03,
+     "Coding": 75.69,
+     "Agentic Coding": 61.36,
+     "Mathematics": 86.21,
+     "Data Analysis": 76.59,
+     "Language": 74.35,
+     "IF": 72.66
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "GLM-5.3 Flash [2026-06-25]": {
+    "global": 71.59,
+    "categories": {
+     "Reasoning": 77.64,
+     "Coding": 78.95,
+     "Agentic Coding": 56.77,
+     "Mathematics": 81.24,
+     "Data Analysis": 76.4,
+     "Language": 77.31,
+     "IF": 52.82
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "Qwen 3.8 Flash Next [2026-06-25]": {
+    "global": 76.19,
+    "categories": {
+     "Reasoning": 87.38,
+     "Coding": 72.55,
+     "Agentic Coding": 61.62,
+     "Mathematics": 85.82,
+     "Data Analysis": 74.24,
+     "Language": 74.64,
+     "IF": 77.11
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "Claude Fable 5.1 Max Effort [2026-06-25]": {
+    "global": 83.41,
+    "categories": {
+     "Reasoning": 91.69,
+     "Coding": 86.38,
+     "Agentic Coding": 66.06,
+     "Mathematics": 97.01,
+     "Data Analysis": 80.28,
+     "Language": 89.5,
+     "IF": 72.99
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "GPT-6 Astra Max Effort [2026-06-25]": {
+    "global": 82.16,
+    "categories": {
+     "Reasoning": 92.65,
+     "Coding": 80.36,
+     "Agentic Coding": 57.32,
+     "Mathematics": 96.81,
+     "Data Analysis": 82.97,
+     "Language": 89.43,
+     "IF": 75.58
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "claude-opus-5-5-max-effort [2026-06-25]": {
+    "global": 83.22,
+    "categories": {
+     "Reasoning": 92.15,
+     "Coding": 89.25,
+     "Agentic Coding": 71.72,
+     "Mathematics": 97.08,
+     "Data Analysis": 80.31,
+     "Language": 86.27,
+     "IF": 65.74
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "GPT-6 Sol Max Effort [2026-06-25]": {
+    "global": 79.25,
+    "categories": {
+     "Reasoning": 88.65,
+     "Coding": 81.77,
+     "Agentic Coding": 52.88,
+     "Mathematics": 96.36,
+     "Data Analysis": 81.19,
+     "Language": 85.3,
+     "IF": 68.57
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "GPT-6 Luna Max Effort [2026-06-25]": {
+    "global": 72.03,
+    "categories": {
+     "Reasoning": 81.77,
+     "Coding": 78.95,
+     "Agentic Coding": 51.21,
+     "Mathematics": 89.12,
+     "Data Analysis": 73.37,
+     "Language": 73.83,
+     "IF": 55.93
+    },
+    "release": "2026-06-25",
+    "source": "https://livebench.ai/table_2026_06_25.csv"
+   },
+   "Gemma 4 31B [2026-01-08]": {
+    "global": 61.62,
+    "categories": {
+     "Reasoning": 59.42,
+     "Coding": 60.33,
+     "Agentic Coding": 40,
+     "Mathematics": 73.94,
+     "Data Analysis": 58.76,
+     "Language": 71.34,
+     "IF": 67.58
+    },
+    "release": "2026-01-08",
+    "source": "https://livebench.ai/table_2026_01_08.csv"
+   },
+   "QwQ 32B [2025-04-25]": {
+    "global": 69.5,
+    "categories": {
+     "Reasoning": 76.72,
+     "Coding": 61.36,
+     "Mathematics": 76.08,
+     "Data Analysis": 69.53,
+     "Language": 51.48,
+     "IF": 81.83
+    },
+    "release": "2025-04-25",
+    "source": "https://livebench.ai/table_2025_04_25.csv"
+   }
+  }
+ }
+}

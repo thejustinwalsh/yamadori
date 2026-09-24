@@ -1,0 +1,1200 @@
+{
+ "run_id": "overnight-0923",
+ "run_dir": "results/overnight-0923b",
+ "analysed_at": 1790157662.746567,
+ "merged_run_dirs": [
+  "overnight-0923a",
+  "overnight-0923b"
+ ],
+ "conditions": {
+  "effort": "medium",
+  "max_tokens": 4096,
+  "temperature": 0.0,
+  "body_tier": "max",
+  "suite": "core,react"
+ },
+ "rows": 9,
+ "stale_rows": 0,
+ "bad_lines": 0,
+ "reclassified_server_reasoning_cap": 0,
+ "arms": [
+  "A0",
+  "A6",
+  "S0"
+ ],
+ "tasks": {
+  "all": 4,
+  "uncontaminated": 4,
+  "contaminated": 0,
+  "contaminated_domains": []
+ },
+ "caveats": [
+  "preflight checks were OVERRIDDEN for part of this run: live_stack, run_tests",
+  "A6 scored exactly 100%",
+  "timing is CONCURRENT with livebench, swebench: every seconds and tokens/s figure shared the GPU with them and is not a clean measurement"
+ ],
+ "timing": {
+  "concurrent_with": [
+   "livebench",
+   "swebench"
+  ],
+  "clean": false,
+  "label": "CONCURRENT"
+ },
+ "headline_uncontaminated": {
+  "label": "uncontaminated domains (headline)",
+  "tasks": 4,
+  "families": {
+   "augmentation": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   },
+   "self_check": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   }
+  },
+  "comparisons": [
+   {
+    "a": "A0",
+    "b": "A6",
+    "n_paired": 2,
+    "a_pass": 2,
+    "b_pass": 2,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 2,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "augmentation",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   },
+   {
+    "a": "A0",
+    "b": "S0",
+    "n_paired": 3,
+    "a_pass": 2,
+    "b_pass": 2,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 2,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "self_check",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   }
+  ]
+ },
+ "contaminated_three_tsl": {
+  "label": "contaminated only (none in this run) -- CONTAMINATED",
+  "tasks": 0,
+  "families": {
+   "augmentation": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   },
+   "self_check": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   }
+  },
+  "comparisons": [
+   {
+    "a": "A0",
+    "b": "A6",
+    "n_paired": 0,
+    "a_pass": 0,
+    "b_pass": 0,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 0,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "augmentation",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   },
+   {
+    "a": "A0",
+    "b": "S0",
+    "n_paired": 0,
+    "a_pass": 0,
+    "b_pass": 0,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 0,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "self_check",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   }
+  ]
+ },
+ "all_domains": {
+  "label": "all domains -- includes contaminated (none in this run)",
+  "tasks": 4,
+  "families": {
+   "augmentation": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   },
+   "self_check": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   }
+  },
+  "comparisons": [
+   {
+    "a": "A0",
+    "b": "A6",
+    "n_paired": 2,
+    "a_pass": 2,
+    "b_pass": 2,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 2,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "augmentation",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   },
+   {
+    "a": "A0",
+    "b": "S0",
+    "n_paired": 3,
+    "a_pass": 2,
+    "b_pass": 2,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 2,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "self_check",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   }
+  ]
+ },
+ "per_arm": {
+  "A0": {
+   "attempted_pairs": 4,
+   "scored": 4,
+   "passed": 3,
+   "rate": 0.75,
+   "lo": 0.3006360524426366,
+   "hi": 0.9544139373553637,
+   "stack_error_rows": 0,
+   "stack_error_kinds": {},
+   "pairs_still_stack_error": 0,
+   "fail_stages": {
+    "compile": 1
+   },
+   "median_seconds": 289.8,
+   "median_prompt_tokens": 168.0,
+   "median_completion_tokens": 1373.0,
+   "median_hops": 1.0,
+   "median_reasoning_chars": 3770.0,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    97934,
+    98057,
+    98115,
+    98131
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 3,
+    "extract": 0,
+    "compile": 1,
+    "test": 0
+   },
+   "mean_s": 382.1,
+   "median_s": 289.8,
+   "tok_in_mean": 208.0,
+   "tok_out_mean": 2224.0,
+   "tok_total_mean": 2432.0,
+   "tool_hops_mean": 0.0,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": 0.0,
+   "final_compiles": 3,
+   "n": 4,
+   "self_check": false,
+   "lint_n": 1,
+   "lint_errors_mean": 1.0,
+   "lint_warnings_mean": 0.0,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0
+  },
+  "A6": {
+   "attempted_pairs": 2,
+   "scored": 2,
+   "passed": 2,
+   "rate": 1.0,
+   "lo": 0.34237195288961925,
+   "hi": 1.0,
+   "stack_error_rows": 0,
+   "stack_error_kinds": {},
+   "pairs_still_stack_error": 0,
+   "fail_stages": {},
+   "median_seconds": 854.0,
+   "median_prompt_tokens": 8015.5,
+   "median_completion_tokens": 1467.5,
+   "median_hops": 2.0,
+   "median_reasoning_chars": 2151.0,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    91914,
+    93947
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 2,
+    "extract": 0,
+    "compile": 0,
+    "test": 0
+   },
+   "mean_s": 854.0,
+   "median_s": 854.0,
+   "tok_in_mean": 8015.5,
+   "tok_out_mean": 1467.5,
+   "tok_total_mean": 9483.0,
+   "tool_hops_mean": 1.0,
+   "tool_hops_rows": 1,
+   "investigate_hops_mean": 2.0,
+   "final_compiles": 2,
+   "n": 2,
+   "self_check": false,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0
+  },
+  "S0": {
+   "attempted_pairs": 3,
+   "scored": 3,
+   "passed": 2,
+   "rate": 0.6666666666666666,
+   "lo": 0.2076549551264879,
+   "hi": 0.9385096847238394,
+   "stack_error_rows": 0,
+   "stack_error_kinds": {},
+   "pairs_still_stack_error": 0,
+   "fail_stages": {
+    "test": 1
+   },
+   "median_seconds": 1529.6,
+   "median_prompt_tokens": 1285,
+   "median_completion_tokens": 1192,
+   "median_hops": 2,
+   "median_reasoning_chars": 3618,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    97175,
+    97565,
+    97843
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 2,
+    "extract": 0,
+    "compile": 0,
+    "test": 1
+   },
+   "mean_s": 1825.4,
+   "median_s": 1529.6,
+   "tok_in_mean": 1399.7,
+   "tok_out_mean": 7108.7,
+   "tok_total_mean": 8508.3,
+   "tool_hops_mean": 0.0,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": 0.0,
+   "final_compiles": 3,
+   "n": 3,
+   "self_check": true,
+   "lint_n": 1,
+   "lint_errors_mean": 0.0,
+   "lint_warnings_mean": 0.0,
+   "lint_clean": 1,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0,
+   "twin": "A0",
+   "check_rounds_mean": 1.0,
+   "check_rounds_median": 1,
+   "check_rounds_max": 2,
+   "checked_any": 2,
+   "last_check_ok": 2,
+   "final_public_ok": 3,
+   "final_public_n": 3,
+   "rounds_mean": 2.0,
+   "other_tool_calls": 0
+  }
+ },
+ "per_arm_uncontaminated": {
+  "A0": {
+   "attempted_pairs": 4,
+   "scored": 4,
+   "passed": 3,
+   "rate": 0.75,
+   "lo": 0.3006360524426366,
+   "hi": 0.9544139373553637,
+   "stack_error_rows": 0,
+   "stack_error_kinds": {},
+   "pairs_still_stack_error": 0,
+   "fail_stages": {
+    "compile": 1
+   },
+   "median_seconds": 289.8,
+   "median_prompt_tokens": 168.0,
+   "median_completion_tokens": 1373.0,
+   "median_hops": 1.0,
+   "median_reasoning_chars": 3770.0,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    97934,
+    98057,
+    98115,
+    98131
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 3,
+    "extract": 0,
+    "compile": 1,
+    "test": 0
+   },
+   "mean_s": 382.1,
+   "median_s": 289.8,
+   "tok_in_mean": 208.0,
+   "tok_out_mean": 2224.0,
+   "tok_total_mean": 2432.0,
+   "tool_hops_mean": 0.0,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": 0.0,
+   "final_compiles": 3,
+   "n": 4,
+   "self_check": false,
+   "lint_n": 1,
+   "lint_errors_mean": 1.0,
+   "lint_warnings_mean": 0.0,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0
+  },
+  "A6": {
+   "attempted_pairs": 2,
+   "scored": 2,
+   "passed": 2,
+   "rate": 1.0,
+   "lo": 0.34237195288961925,
+   "hi": 1.0,
+   "stack_error_rows": 0,
+   "stack_error_kinds": {},
+   "pairs_still_stack_error": 0,
+   "fail_stages": {},
+   "median_seconds": 854.0,
+   "median_prompt_tokens": 8015.5,
+   "median_completion_tokens": 1467.5,
+   "median_hops": 2.0,
+   "median_reasoning_chars": 2151.0,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    91914,
+    93947
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 2,
+    "extract": 0,
+    "compile": 0,
+    "test": 0
+   },
+   "mean_s": 854.0,
+   "median_s": 854.0,
+   "tok_in_mean": 8015.5,
+   "tok_out_mean": 1467.5,
+   "tok_total_mean": 9483.0,
+   "tool_hops_mean": 1.0,
+   "tool_hops_rows": 1,
+   "investigate_hops_mean": 2.0,
+   "final_compiles": 2,
+   "n": 2,
+   "self_check": false,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0
+  },
+  "S0": {
+   "attempted_pairs": 3,
+   "scored": 3,
+   "passed": 2,
+   "rate": 0.6666666666666666,
+   "lo": 0.2076549551264879,
+   "hi": 0.9385096847238394,
+   "stack_error_rows": 0,
+   "stack_error_kinds": {},
+   "pairs_still_stack_error": 0,
+   "fail_stages": {
+    "test": 1
+   },
+   "median_seconds": 1529.6,
+   "median_prompt_tokens": 1285,
+   "median_completion_tokens": 1192,
+   "median_hops": 2,
+   "median_reasoning_chars": 3618,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    97175,
+    97565,
+    97843
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 2,
+    "extract": 0,
+    "compile": 0,
+    "test": 1
+   },
+   "mean_s": 1825.4,
+   "median_s": 1529.6,
+   "tok_in_mean": 1399.7,
+   "tok_out_mean": 7108.7,
+   "tok_total_mean": 8508.3,
+   "tool_hops_mean": 0.0,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": 0.0,
+   "final_compiles": 3,
+   "n": 3,
+   "self_check": true,
+   "lint_n": 1,
+   "lint_errors_mean": 0.0,
+   "lint_warnings_mean": 0.0,
+   "lint_clean": 1,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0,
+   "twin": "A0",
+   "check_rounds_mean": 1.0,
+   "check_rounds_median": 1,
+   "check_rounds_max": 2,
+   "checked_any": 2,
+   "last_check_ok": 2,
+   "final_public_ok": 3,
+   "final_public_n": 3,
+   "rounds_mean": 2.0,
+   "other_tool_calls": 0
+  }
+ },
+ "self_check_twins_uncontaminated": [
+  {
+   "s": "S0",
+   "one_shot": "A0",
+   "n_paired": 3,
+   "s_pass": 2,
+   "one_shot_pass": 2,
+   "s_only": 0,
+   "one_shot_only": 0,
+   "discordant": 0,
+   "p": 1.0,
+   "fixed_by_checking": 0,
+   "compile_to_test": 1,
+   "extract_to_pass": 0,
+   "test_to_pass": 0,
+   "one_shot_compile_fail": 1,
+   "s_compile_fail": 0,
+   "one_shot_compiles": 2,
+   "s_compiles": 3
+  }
+ ],
+ "by_domain": {
+  "rust_wasm": {
+   "contaminated": false,
+   "tasks": 3,
+   "by_arm": {
+    "A0": {
+     "k": 3,
+     "n": 3,
+     "rate": 1.0,
+     "lo": 0.43849391955098227,
+     "hi": 1.0,
+     "stages": {
+      "extract": 0,
+      "compile": 0,
+      "test": 0
+     },
+     "stack_errors": 0
+    },
+    "A6": {
+     "k": 2,
+     "n": 2,
+     "rate": 1.0,
+     "lo": 0.34237195288961925,
+     "hi": 1.0,
+     "stages": {
+      "extract": 0,
+      "compile": 0,
+      "test": 0
+     },
+     "stack_errors": 0
+    },
+    "S0": {
+     "k": 2,
+     "n": 2,
+     "rate": 1.0,
+     "lo": 0.34237195288961925,
+     "hi": 1.0,
+     "stages": {
+      "extract": 0,
+      "compile": 0,
+      "test": 0
+     },
+     "stack_errors": 0
+    }
+   },
+   "vs_A0": [
+    {
+     "a": "A0",
+     "b": "A6",
+     "n_paired": 2,
+     "a_pass": 2,
+     "b_pass": 2,
+     "b_only": 0,
+     "a_only": 0,
+     "discordant": 0,
+     "both_solved": 2,
+     "p": 1.0
+    },
+    {
+     "a": "A0",
+     "b": "S0",
+     "n_paired": 2,
+     "a_pass": 2,
+     "b_pass": 2,
+     "b_only": 0,
+     "a_only": 0,
+     "discordant": 0,
+     "both_solved": 2,
+     "p": 1.0
+    }
+   ],
+   "vs_twin": [
+    {
+     "s": "S0",
+     "one_shot": "A0",
+     "n_paired": 2,
+     "s_pass": 2,
+     "one_shot_pass": 2,
+     "s_only": 0,
+     "one_shot_only": 0,
+     "discordant": 0,
+     "p": 1.0,
+     "fixed_by_checking": 0,
+     "compile_to_test": 0,
+     "extract_to_pass": 0,
+     "test_to_pass": 0,
+     "one_shot_compile_fail": 0,
+     "s_compile_fail": 0,
+     "one_shot_compiles": 2,
+     "s_compiles": 2
+    }
+   ]
+  },
+  "typescript": {
+   "contaminated": false,
+   "tasks": 1,
+   "by_arm": {
+    "A0": {
+     "k": 0,
+     "n": 1,
+     "rate": 0.0,
+     "lo": 0.0,
+     "hi": 0.7934567085261071,
+     "stages": {
+      "extract": 0,
+      "compile": 1,
+      "test": 0
+     },
+     "stack_errors": 0
+    },
+    "A6": {
+     "k": 0,
+     "n": 0,
+     "rate": null,
+     "lo": 0.0,
+     "hi": 0.0,
+     "stages": {
+      "extract": 0,
+      "compile": 0,
+      "test": 0
+     },
+     "stack_errors": 0
+    },
+    "S0": {
+     "k": 0,
+     "n": 1,
+     "rate": 0.0,
+     "lo": 0.0,
+     "hi": 0.7934567085261071,
+     "stages": {
+      "extract": 0,
+      "compile": 0,
+      "test": 1
+     },
+     "stack_errors": 0
+    }
+   },
+   "vs_A0": [
+    {
+     "a": "A0",
+     "b": "A6",
+     "n_paired": 0,
+     "a_pass": 0,
+     "b_pass": 0,
+     "b_only": 0,
+     "a_only": 0,
+     "discordant": 0,
+     "both_solved": 0,
+     "p": 1.0
+    },
+    {
+     "a": "A0",
+     "b": "S0",
+     "n_paired": 1,
+     "a_pass": 0,
+     "b_pass": 0,
+     "b_only": 0,
+     "a_only": 0,
+     "discordant": 0,
+     "both_solved": 0,
+     "p": 1.0
+    }
+   ],
+   "vs_twin": [
+    {
+     "s": "S0",
+     "one_shot": "A0",
+     "n_paired": 1,
+     "s_pass": 0,
+     "one_shot_pass": 0,
+     "s_only": 0,
+     "one_shot_only": 0,
+     "discordant": 0,
+     "p": 1.0,
+     "fixed_by_checking": 0,
+     "compile_to_test": 1,
+     "extract_to_pass": 0,
+     "test_to_pass": 0,
+     "one_shot_compile_fail": 1,
+     "s_compile_fail": 0,
+     "one_shot_compiles": 0,
+     "s_compiles": 1
+    }
+   ]
+  }
+ },
+ "triggers": {
+  "A0": {
+   "n": 4,
+   "tools_offered": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   },
+   "hints_selected": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   },
+   "hints_emitted": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   },
+   "investigate_chosen": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   },
+   "investigate_searched": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   },
+   "investigate_injected": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   },
+   "fanned_out": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   },
+   "main_hops_gt1": {
+    "k": 0,
+    "n": 4,
+    "rate": 0.0
+   }
+  },
+  "A6": {
+   "n": 2,
+   "tools_offered": {
+    "k": 2,
+    "n": 2,
+    "rate": 1.0
+   },
+   "hints_selected": {
+    "k": 2,
+    "n": 2,
+    "rate": 1.0
+   },
+   "hints_emitted": {
+    "k": 0,
+    "n": 2,
+    "rate": 0.0
+   },
+   "investigate_chosen": {
+    "k": 2,
+    "n": 2,
+    "rate": 1.0
+   },
+   "investigate_searched": {
+    "k": 2,
+    "n": 2,
+    "rate": 1.0
+   },
+   "investigate_injected": {
+    "k": 2,
+    "n": 2,
+    "rate": 1.0
+   },
+   "fanned_out": {
+    "k": 2,
+    "n": 2,
+    "rate": 1.0
+   },
+   "main_hops_gt1": {
+    "k": 1,
+    "n": 2,
+    "rate": 0.5
+   }
+  },
+  "S0": {
+   "n": 3,
+   "tools_offered": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   },
+   "hints_selected": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   },
+   "hints_emitted": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   },
+   "investigate_chosen": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   },
+   "investigate_searched": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   },
+   "investigate_injected": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   },
+   "fanned_out": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   },
+   "main_hops_gt1": {
+    "k": 0,
+    "n": 3,
+    "rate": 0.0
+   }
+  }
+ },
+ "dashboard": {
+  "state": "ready",
+  "file": "bench/domain/results/overnight-0923b/rows.jsonl",
+  "exists": true,
+  "file_age_s": 2826,
+  "bad_lines": 0,
+  "how": "run  python bench/domain/run.py --key-file KEY --run-id ID",
+  "arms": [
+   "A0",
+   "A6",
+   "S0"
+  ],
+  "suspect": {
+   "identical_across_arms": true,
+   "extreme": [
+    "A0",
+    "A6",
+    "S0"
+   ]
+  },
+  "progress": {
+   "rows": 9,
+   "attempted": 4,
+   "scored_rows": 9,
+   "errors": 0,
+   "complete_all_arms": 2,
+   "errors_by_arm": {
+    "A0": {},
+    "A6": {},
+    "S0": {}
+   }
+  },
+  "power": {
+   "n_paired": 2,
+   "min_discordant_for_sig": 6,
+   "max_possible_discordant": 2,
+   "alpha": 0.05,
+   "comparison_possible": false
+  },
+  "arm_table": [
+   {
+    "arm": "A0",
+    "k": 2,
+    "n": 2,
+    "rate": 1.0,
+    "lo": 0.34237195288961925,
+    "hi": 1.0,
+    "mean_s": 215.4,
+    "tok_in": 141,
+    "tok_in_reported": 2,
+    "tok_out": 1028,
+    "tok_out_reported": 2,
+    "empty": 0,
+    "len_cut": 0,
+    "errors": 0,
+    "stages": {
+     "pass": 2,
+     "extract": 0,
+     "compile": 0,
+     "test": 0
+    },
+    "median_s": 215.4,
+    "tok_total": 1170,
+    "tool_hops": 0.0,
+    "investigate_hops": 0.0,
+    "final_compiles": 2,
+    "self_check": false,
+    "lint_n": 0,
+    "lint_errors_mean": null,
+    "lint_warnings_mean": null,
+    "lint_clean": 0,
+    "modern_flags": {},
+    "modern_credits": {}
+   },
+   {
+    "arm": "A6",
+    "k": 2,
+    "n": 2,
+    "rate": 1.0,
+    "lo": 0.34237195288961925,
+    "hi": 1.0,
+    "mean_s": 854.0,
+    "tok_in": 8016,
+    "tok_in_reported": 2,
+    "tok_out": 1468,
+    "tok_out_reported": 2,
+    "empty": 0,
+    "len_cut": 0,
+    "errors": 0,
+    "stages": {
+     "pass": 2,
+     "extract": 0,
+     "compile": 0,
+     "test": 0
+    },
+    "median_s": 854.0,
+    "tok_total": 9483,
+    "tool_hops": 1.0,
+    "investigate_hops": 2.0,
+    "final_compiles": 2,
+    "self_check": false,
+    "lint_n": 0,
+    "lint_errors_mean": null,
+    "lint_warnings_mean": null,
+    "lint_clean": 0,
+    "modern_flags": {},
+    "modern_credits": {}
+   },
+   {
+    "arm": "S0",
+    "k": 2,
+    "n": 2,
+    "rate": 1.0,
+    "lo": 0.34237195288961925,
+    "hi": 1.0,
+    "mean_s": 1004.5,
+    "tok_in": 908,
+    "tok_in_reported": 2,
+    "tok_out": 1126,
+    "tok_out_reported": 2,
+    "empty": 0,
+    "len_cut": 0,
+    "errors": 0,
+    "stages": {
+     "pass": 2,
+     "extract": 0,
+     "compile": 0,
+     "test": 0
+    },
+    "median_s": 1004.5,
+    "tok_total": 2034,
+    "tool_hops": 0.0,
+    "investigate_hops": 0.0,
+    "final_compiles": 2,
+    "self_check": true,
+    "lint_n": 0,
+    "lint_errors_mean": null,
+    "lint_warnings_mean": null,
+    "lint_clean": 0,
+    "modern_flags": {},
+    "modern_credits": {},
+    "twin": "A0",
+    "check_rounds_mean": 0.5,
+    "check_rounds_median": 0.5,
+    "check_rounds_max": 1,
+    "checked_any": 1,
+    "last_check_ok": 1,
+    "final_public_ok": 2,
+    "final_public_n": 2,
+    "rounds_mean": 1.5
+   }
+  ],
+  "raw": [
+   {
+    "arm": "A0",
+    "attempts": 4,
+    "passed": 3,
+    "rate": 0.75,
+    "lo": 0.3006360524426366,
+    "hi": 0.9544139373553637
+   },
+   {
+    "arm": "A6",
+    "attempts": 2,
+    "passed": 2,
+    "rate": 1.0,
+    "lo": 0.34237195288961925,
+    "hi": 1.0
+   },
+   {
+    "arm": "S0",
+    "attempts": 3,
+    "passed": 2,
+    "rate": 0.6666666666666666,
+    "lo": 0.2076549551264879,
+    "hi": 0.9385096847238394
+   }
+  ],
+  "pairs": [
+   {
+    "a": "A0",
+    "b": "A6",
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "p": 1.0,
+    "verdict": null,
+    "family": "augmentation",
+    "underpowered": true,
+    "both_solved": 2,
+    "signs": []
+   },
+   {
+    "a": "A0",
+    "b": "S0",
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "p": 1.0,
+    "verdict": null,
+    "family": "self_check",
+    "underpowered": true,
+    "both_solved": 2,
+    "signs": []
+   }
+  ],
+  "difficulty": [
+   {
+    "difficulty": "rust_wasm",
+    "n": 2,
+    "by_arm": {
+     "A0": {
+      "k": 2,
+      "n": 2,
+      "stages": {
+       "extract": 0,
+       "compile": 0,
+       "test": 0
+      },
+      "rate": 1.0,
+      "lo": 0.34237195288961925,
+      "hi": 1.0
+     },
+     "A6": {
+      "k": 2,
+      "n": 2,
+      "stages": {
+       "extract": 0,
+       "compile": 0,
+       "test": 0
+      },
+      "rate": 1.0,
+      "lo": 0.34237195288961925,
+      "hi": 1.0
+     },
+     "S0": {
+      "k": 2,
+      "n": 2,
+      "stages": {
+       "extract": 0,
+       "compile": 0,
+       "test": 0
+      },
+      "rate": 1.0,
+      "lo": 0.34237195288961925,
+      "hi": 1.0
+     }
+    }
+   }
+  ],
+  "failures": {
+   "A0": {
+    "passed": 3,
+    "failed": 1,
+    "buckets": [
+     {
+      "bucket": "failed at compile",
+      "n": 1,
+      "scaffolding": false
+     }
+    ]
+   },
+   "A6": {
+    "passed": 2,
+    "failed": 0,
+    "buckets": []
+   },
+   "S0": {
+    "passed": 2,
+    "failed": 1,
+    "buckets": [
+     {
+      "bucket": "failed at test",
+      "n": 1,
+      "scaffolding": false
+     }
+    ]
+   }
+  },
+  "scaffolding_total": 0,
+  "twins": [
+   {
+    "s": "S0",
+    "one_shot": "A0",
+    "n_paired": 2,
+    "s_pass": 2,
+    "one_shot_pass": 2,
+    "s_only": 0,
+    "one_shot_only": 0,
+    "discordant": 0,
+    "p": 1.0,
+    "fixed_by_checking": 0,
+    "compile_to_test": 0,
+    "extract_to_pass": 0,
+    "test_to_pass": 0,
+    "one_shot_compile_fail": 0,
+    "s_compile_fail": 0,
+    "one_shot_compiles": 2,
+    "s_compiles": 2,
+    "p_bonferroni": 1.0
+   }
+  ],
+  "domain_pairs": [
+   {
+    "domain": "rust_wasm",
+    "a": "A0",
+    "b": "A6",
+    "n_paired": 2,
+    "b_only": 0,
+    "a_only": 0,
+    "p_uncorrected": 1.0
+   },
+   {
+    "domain": "rust_wasm",
+    "a": "A0",
+    "b": "S0",
+    "n_paired": 2,
+    "b_only": 0,
+    "a_only": 0,
+    "p_uncorrected": 1.0
+   }
+  ],
+  "excluded_contaminated": {
+   "tasks": 0,
+   "domains": []
+  },
+  "timing": {
+   "concurrent_with": [
+    "livebench",
+    "swebench"
+   ],
+   "clean": false,
+   "label": "CONCURRENT"
+  },
+  "note": "uncontaminated domains only; McNemar p on this page is Bonferroni-corrected over the comparisons shown"
+ }
+}

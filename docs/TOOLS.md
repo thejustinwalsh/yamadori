@@ -45,6 +45,7 @@ reason under the table.
 | `read_rings`           | Y | Y | Y (empty log) | n/a | Y | Y | Y (session scoping) | n/a |
 | `bind_project_context` | Y | Y | Y (unindexed pkg) | n/a | Y | n/a | n/a | n/a |
 | `delegate_investigation` | n/a | Y (stubbed) | n/a | Y (HELPER_BUSY) | —³ | n/a | Y (no recursion) | **live** |
+| `check_code`           | n/a (no index) | Y | Y (clean code) | Y (formatter missing / cannot start) | Y | Y (TOO_LARGE) | Y (sentinel + audit hook) | — (§5) |
 
 ¹ These read sqlite directly and have no retriever layer. Their equivalent
 outage — a database missing a table — is covered by
@@ -588,3 +589,318 @@ Nothing here writes to `index/code.sqlite3`, `index/corpus.sqlite3` or the real
 rings database: `CODE_INDEX_DB`, `YAMADORI_CORPUS_DB` and `RINGS_DB` are all
 pointed at temporary files before `code_search` is imported, and
 `test_the_fixture_is_not_the_real_index` asserts it.
+
+---
+
+## 5. `check_code` and the repair pass (added 2026-09-23)
+
+> **SUPERSEDED 2026-09-24 (operator, "one model, one cache").** The
+> `check_code` TOOL is no longer offered to the model at any tier, and the
+> repair pass no longer adds turns to the conversation. The proxy checks code
+> itself: client writes (`mcp/tool_code.py`) at `medium` and up, with a note;
+> at `high` and up the second brain's fixup job (`shomen.run("fixup")`)
+> repairs what does not parse -- in client writes and in a final answer's
+> fenced code -- getting only the code, its errors and the user's request.
+> "When it is offered" and "The repair pass" below describe the design that
+> was replaced; `code_check.py` itself (the checker, and the tool contract
+> an MCP caller could still use) is unchanged. `bind_project_context`
+> (§1, R1) is deleted. See AGENTS.md "The second brain".
+
+**Needs a proxy restart to take effect.** Nothing below is live until
+`mcp/server.py` is restarted. A proxy started earlier drops the header keys
+`check_code` and `repair` without saying so (see "Proving an arm" below).
+
+### Why
+
+LiveBench coding, bare model, run `lb-20260923` (bonsai arm): of 5
+`coding_completion` misses, the operator classed 4 as mechanical. Writing
+from scratch (`LCB_generation`) scored 10/11. The four:
+
+| row | what went wrong |
+|---|---|
+| `3cd8c16a` | continuation dedented out of `while left <= right:` → loop body never updates → infinite loop |
+| `45d51d09` | continuation dedented out of the method → `return` in the class body → SyntaxError |
+| `5c9d7ade` | prefix ends inside an open `"""` docstring; the continuation never closes it |
+| `eae49210` | prefix ends on `while ...:`; the continuation's first line is not indented under it |
+
+This is n=5 misses from one run. It motivates the tool. It is not evidence
+that the tool changes a score, and nothing here claims that it does. The
+`bonsai+check` arms are the measurement.
+
+### Offline check against the archived answers
+
+`review_answer` (the repair verdict) was run against all 21 archived
+bonsai-arm coding answers (`results/lb-20260923/answers/`). The files were
+read, not modified.
+
+| answers | flagged |
+|---|---|
+| the 4 mechanical completion misses | **4/4** |
+| correct answers: 5 completions + 10 LCB | **0/15** |
+| logic misses: 1 completion, 1 LCB | 0/2 (expected: they parse and fit) |
+
+n=21, one run, and the checker was written with these 4 failure shapes in
+view. The 0/15 is the more useful number, because a false alarm makes the
+model "fix" correct code. It is still only 15 answers.
+
+### The contract
+
+- **Code arrives only as text**: a tool argument, or a fenced block in the
+  conversation. Nothing takes a path, and the server never reads the user's
+  disk.
+- **Nothing is executed.** Python is checked with `compile()`, which builds a
+  code object and discards it. Every language is also parsed with tree-sitter.
+  JSON, TOML and YAML go through `json.loads`, `tomllib` and
+  `yaml.safe_load`.
+- **Formatters run in a subprocess on a temp file**, with cwd, HOME, APPDATA
+  and XDG_CONFIG_HOME all pointing into a fresh temp dir, a 20 s timeout
+  (`YAMADORI_FORMAT_TIMEOUT`), and project-config lookup switched off:
+  `ruff --isolated`, `prettier --no-config --no-editorconfig --ignore-path
+  <tmp>`, `rustfmt --config-path <our file>` and `clang-format --style={...}`.
+  The only style any formatter sees is `config_text` or what was inferred from
+  `context`. None of these formatters has a network feature, and nothing here
+  opens a socket.
+- **The model's code is never changed silently.** A formatted version is
+  *offered* in the result. With repair on, the model receives the errors and
+  writes the fix itself.
+
+`test_no_user_code_runs_and_nothing_outside_temp_is_opened` asserts all of
+this. Payloads that are valid code and would create sentinel files are checked
+in every language and mode, under a Python audit hook. The hook requires every
+file opened to be in a temp dir or the interpreter's own library. It requires
+no `os.system`, exec or spawn, and it allows only formatter executables, each
+with a temp cwd and its isolation flags. The code never appears on a command
+line. The hook found one real defect: `compile(code, "<check_code>")`. On a
+compile-stage error, CPython tries to open the named file to quote the line.
+That was a read attempt in the server's cwd. The name now points into a temp
+directory that is never created.
+
+### The tool
+
+`check_code {code, language, mode?: "whole"|"continuation", prefix?, context?, config_text?}`
+
+- **Languages**: python, typescript, tsx, javascript, jsx, rust, c, cpp. json,
+  toml and yaml are syntax-only. Aliases such as `py`, `ts`, `rs`, `c++` and
+  `yml` are accepted.
+- **Syntax**: the language's own parser decides where one exists (Python
+  `compile()`, json, tomllib, yaml). A lagging tree-sitter grammar therefore
+  cannot report correct code as broken, and tree-sitter adds positions on
+  other lines. For the brace languages, tree-sitter's ERROR and MISSING nodes
+  are the parser. Results give 1-based line and character column.
+- **Style**: `config_text` wins, then `context`, then the code itself, then
+  the formatter's default. `config_text` can be `.editorconfig`,
+  `.prettierrc` (JSON or YAML), `rustfmt.toml` or pyproject `[tool.ruff]`.
+  Each key in the result says which of these it came from.
+  - The indent unit is the most common positive leading-whitespace delta.
+    Tabs win if more lines start with a tab. JSDoc ` *` lines are skipped.
+  - Quotes, semicolons and trailing commas are counted from tree-sitter nodes
+    (tokens for Python).
+  - Width is the smallest of 80/88/100/120 that holds the longest line. It
+    needs at least 10 lines of context and never comes from the snippet
+    itself.
+- **Continuation mode** joins `prefix + "\n" + code`, which is how LiveBench
+  joins a completion. It reads the prefix with Python's own tokenizer and
+  reports four things:
+  - which blocks are still open, and each block's body column
+  - whether the prefix ends on a header waiting for a body
+  - any string or bracket left open
+  - which of those your first line closes
+  
+  Defects, each with the exact column to use:
+  - `body_not_indented`
+  - `indent_matches_no_block`
+  - `unclosed_string_from_prefix`, with the exact closing line
+  - `redeclares_signature`, which is caught even though it compiles
+  - `loop_cannot_end`: a `while` loop, left open by the prefix, whose body can
+    never change its condition. This check is deliberately narrow; the
+    docstring of `code_check.loops_that_cannot_end` lists its conditions, and
+    8 correct loops are asserted not to trip it.
+  
+  Brace languages get syntax on the joined text, plus how many braces the
+  prefix leaves open.
+- **Formatters**, pinned:
+
+  | formatter | version | source |
+  |---|---|---|
+  | ruff | 0.16.8 | the stack interpreter's own copy |
+  | prettier | 3.9.9 | `tools/format/package.json` + `package-lock.json`; install with `npm ci` in `tools/format`; `node_modules` is not committed |
+  | rustfmt | 1.9.0 | rustup |
+  | clang-format | — | **not installed on this machine**; C/C++ are syntax-only here until it is |
+
+  A missing formatter is reported with an operator remedy, and the syntax
+  check still stands. Formatting is not attempted on code that does not
+  parse, and is not offered in continuation mode, because it would reflow the
+  prefix.
+- **Failures** carry the next step. `BAD_ARGUMENTS`, `UNSUPPORTED_LANGUAGE`
+  (which lists the supported names) and `TOO_LARGE` (200k chars) are
+  retryable and fixable by the agent. `CHECK_FAILED` is fixable by the
+  operator.
+
+### When it is offered
+
+| request | check_code offered? |
+|---|---|
+| tier `minimal` | no |
+| tier `medium` and up, code tools offered by the gate | yes (with them) |
+| tier `medium` and up, code tools **withheld** (e.g. a LiveCodeBench puzzle) | yes, alone. Like `generate_image`, it reads no index |
+| header turns `retrieval` off (the `bonsai` arm) | no. The bare arm stays bare |
+| header `{"check_code": true}` | yes, whatever `retrieval` says |
+| header `{"check_code": false}` | no |
+| client sends its own `check_code` | the client's wins; ours is not offered |
+| deep thinking | never |
+
+The rule is `tiers.check_code_offered`: forced by the header, it is exactly
+what the header says; otherwise it is allowed by the tier and follows
+`retrieval`. The capability block's router table was **not** changed. The
+tool description carries the trigger, and changing the block would change the
+prompt of every other arm mid-series.
+
+### The repair pass
+
+The pass is off in every tier. `X-Yamadori-Features: {"repair": true}` turns
+it on.
+
+When the final answer, with no pending tool calls and `finish_reason: stop`,
+has fenced code in a code language that fails to parse, the proxy appends
+the answer and one user turn with the exact errors, and the tool loop
+continues. The same applies when the question carried starter code and the
+answer continues it but does not fit.
+
+A block is treated as a continuation when all of these hold:
+- the last user message has a fenced block
+- the answer does not already start with that block
+- either the answer cannot stand alone (Python whose first line is indented),
+  or it only parses when joined to the block
+
+The loop has no round cap. It stops when:
+- the code is clean
+- another round would not fit this request's KV share (`context_full`)
+- the model returns code byte-identical to code it already had feedback on
+
+JSON, YAML and TOML blocks are not repaired: in chat they are usually
+illustrations. On the streamed path the first answer has already gone out, so
+the correction follows it under a visible marker (`proxy.REPAIR_MARK`).
+
+### Header keys and the proof field
+
+| key | type | meaning |
+|---|---|---|
+| `check_code` | bool | force the tool on or off, independent of `retrieval` |
+| `repair` | bool | turn the repair pass on or off |
+
+Every response carries:
+
+```
+x_yamadori.check_code = {"offered": bool, "calls": int,
+                         "results": [{"language", "mode", "ok", "errors"}, ...]}
+x_yamadori.repair     = null                                  # pass off
+                      | {"enabled": true, "rounds": int,
+                         "errors_before": int, "errors_after": int,
+                         "blocks_checked": int,
+                         "stopped": "clean" | "no_code" | "repeated_answer"
+                                  | "context_full" | "finish_<reason>" | "tool_calls"}
+```
+
+`errors_before` counts the problems in the first answer. `errors_after`
+counts them in the answer delivered. `rounds` can be 0 when the first answer
+was clean.
+
+### LiveBench arms (`bench/livebench/drive.py:ARMS`)
+
+Each arm is the `bonsai` header plus the forced keys, and nothing else. Run
+each with `--paired-with bonsai` so the comparison uses the same questions.
+Display names are in `patches/yamadori_local.yml`. Copy that file into
+LiveBench's `model_configs` again before running.
+
+| arm | display name | `X-Yamadori-Features` | proof on every answer |
+|---|---|---|---|
+| `bonsai+check` | `yamadori-bonsai-check-arm` | `{"retrieval": false, "hints": false, "investigate": false, "fanout": 1, "effort": "medium", "check_code": true, "repair": true}` | `check_code.offered == true` and `repair.enabled == true` |
+| `bonsai+check-tool` | `yamadori-bonsai-checktool-arm` | same, `"check_code": true` only | `check_code.offered == true`, `repair == null` |
+| `bonsai+repair` | `yamadori-bonsai-repair-arm` | same, `"repair": true` only | `check_code.offered == false`, `repair.enabled == true` |
+
+There are three arms, not one, because of PROTOCOL rule 10. The tool (the
+model chooses to check) and the repair pass (the proxy insists) are different
+mechanisms. A single bundled arm could not say which one helped.
+
+**Proving an arm.** A proxy that has not been restarted parses the header,
+drops the keys it does not know, and runs these arms as plain `bonsai`.
+`drive.check_arm` therefore asserts the proof column: `check_code.offered`
+when the arm forces `check_code`, and `repair.enabled` when it forces
+`repair`. An answer from a stale proxy stops the run.
+
+**Power (rule 4).** Coding has 50 completion questions in the 2024-11-25
+release. The bonsai arm answered 10 of them tonight. At that n, only a very
+large paired effect is detectable. The comparison should run the completion
+task in full, and state its discordant pairs and exact McNemar p.
+
+### What it does not catch
+
+- **Logic errors.** Code that parses, fits, and is wrong.
+- **Undefined names.** No lint is run: LeetCode harnesses inject imports such
+  as `List` and `collections`, so a lint would flag correct answers.
+- **A full rewrite that does not start byte-for-byte with the prefix.** It is
+  judged as a whole program. LiveBench's grader would prepend the prefix and
+  break it.
+- **Brace-language redeclaration** in continuation mode.
+- **An untagged code fence** is checked only when the question's starter
+  code has a language.
+
+### Tests
+
+`python mcp/test_code_check.py` passes: **235/235 checks passed**. It needs no
+GPU and no network. What it covers:
+- positions for every language
+- valid code in every language comes back clean
+- style inference and config precedence
+- the four LiveBench shapes plus re-declaration, each with its correct version
+- brace continuations
+- 8 no-false-alarm loops
+- fences and the review verdict
+- all three formatters producing the inferred style
+- missing and broken formatters
+- the contract
+- tool arguments
+- gating through `prepare()`
+- repair against a fake upstream: fix delivered untouched, repair off, a
+  repeated answer, `context_full`, a clean first answer, no code, a budget
+  event, the tool called in the loop, and the streamed path
+
+Mutation-tested (§4's rule). Each fix was reverted and the suite re-run:
+
+| reverted | red |
+|---|---|
+| `compile()` filename back to `<check_code>` | 1 |
+| `compile()` → `exec()` (user code runs) | 3 |
+| ruff without `--isolated` | 2 |
+| `loop_cannot_end` off | 4 |
+| unclosed-string defect off | 2 |
+| redeclaration defect off | 1 |
+| header override ignored (`check_code` follows `retrieval` only) | 5 |
+| repair reads the loop's aliased `convo` instead of a snapshot of the question | 1 (raised) |
+| repeated-answer stop off | 1 (raised) |
+| pure builtins' arguments counted as mutated | 1 |
+
+Two of these started at **0**. The Python sentinel payload contained a
+Windows path in a plain string literal, so it was a SyntaxError that could
+never have run. That also meant ruff never ran under the audit. The payloads
+are now asserted to be valid code, and each formatter is asserted to have run.
+
+Existing suites changed on purpose:
+- `test_tools.py`: 14 tools, `check_code` cases, and the withheld-gate check
+  now expects only `check_code`.
+- `test_domains.py`: a puzzle gets none of our *index* tools, only
+  `check_code`.
+
+---
+
+## 6. Changes in the same deploy (2026-09-23)
+
+These shipped in the same proxy restart as §5.
+
+| what | where | tested by |
+|---|---|---|
+| **Fan-out delivers its winner.** The original answer is candidate 0 alongside the variants, and `fanout.selection_record` is merged into `x_yamadori.fanout`. A code answer picked by `code_medoid` whose winner is not the original *replaces* the answer on the blocking path; the original is kept in `d["_fanout"]["original"]`. On the streamed path the winner is *appended* under `proxy.FANOUT_MARK`. Prose chosen by the path vote keeps the original. `x_yamadori.fanout.replaced` and `.appended` say which happened. | `proxy._fan_out`, `_delivers_winner` | `mcp/test_fanout_delivery.py` (4 red when delivery is disabled), `test_fanout.py`, `test_stream.py` |
+| **Vendor sampling is enforced.** `tiers.VENDOR_SAMPLING` (temperature 1.0, top_p 0.95, top_k 20, min_p 0, presence_penalty 0, repeat_penalty 1.0: the Bonsai 2 / Qwen thinking-mode card) is written by `tiers.apply` over the client's values, on every client *and* internal request. A non-thinking request gets the card's instruct values. `x_yamadori.sampling = {enforced, client_overridden}`. The fan-out variants no longer carry their own temperatures. | `tiers.enforce_sampling`, `fanout.VARIANTS` | `test_tiers.py`, `test_fanout.py` |
+| **`X-Yamadori-Session: <token>`** (at most 64 chars of `[A-Za-z0-9_-]`; anything malformed is ignored) is folded into the session key, so benchmark rows whose opening messages are identical get independent sessions. Without the header, keys are unchanged. | `nebari.session_token`, `nebari.key_of`; read in `proxy.Handler` and `server.py` | `test_nebari.py` |
+| **`x_yamadori.tools`**: one `{name, empty, error, chars}` per proxy-executed tool call in the conversation's own loop, on both paths. It carries no argument or result text. Deep thinking has its own record, and fan-out variants are not included. | `proxy._tool_evidence` | `test_code_check.py` |
+| **`repeats._empty` reads the proxy's own no-result wordings** ("None matched.", ": no match ==") and the structured envelopes (`ok: true, matches: 0`; `ok: false, retryable: false`). The repeat breaker never fired for callers with no repository. It also fixes a fallback branch that headed a *hit* "None matched." | `repeats._empty`, `proxy._search_packages_without_repo` | `test_repeats.py`, `test_tools.py` |

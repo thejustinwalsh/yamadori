@@ -1,0 +1,84 @@
+# [yamadori patch] Local Yamadori proxy (OpenAI-compatible, model name `yamadori`).
+# One display name per arm = one answer file per arm. bench/livebench/drive.py:ARMS
+# is the source of truth for what each arm sends; every answer's
+# api_info.x_yamadori is checked against it and a mismatch stops the run.
+# Sampling mirrors LiveBench's own qwen3.8-27b entry (qwen.yml: temperature 1.0,
+# top_p 0.95 -- Qwen's thinking-mode card values, also the served defaults).
+# max_tokens is NOT set: the harness default (4096) is sent, and the proxy treats
+# it as the ANSWER allowance and adds the thinking budget on top.
+#
+# Header arm (X-Yamadori-Features set by drive.py from LB_EXTRA_HEADERS):
+display_name: yamadori-bonsai-arm
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95
+---
+# Retired 07:30 2026-09-23 (pre fan-out-fix header arm); kept so its archived answers stay loadable.
+display_name: yamadori-full-arm
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95
+---
+# Product tier arms: body reasoning_effort exactly as a client sends it, NO header.
+display_name: yamadori-tier-max
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95
+    reasoning_effort: max
+---
+display_name: yamadori-tier-xhigh
+# tier xhigh = every augmentation at MEDIUM effort (the all-on arm matched to bare @ medium)
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95
+    reasoning_effort: xhigh
+---
+# tier minimal: REDEFINED 2026-09-23 ~11:30 as thinking OFF (the proxy sets enable_thinking=false and
+# the vendor's instruct sampling); the sampling below is overridden by the proxy's enforcement.
+display_name: yamadori-tier-minimal
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95
+    reasoning_effort: minimal
+---
+# check_code arms (bench/livebench/drive.py ARMS: bonsai+check,
+# bonsai+check-tool, bonsai+repair). Same sampling as the bonsai arm; the arm
+# itself is the X-Yamadori-Features header drive.py sends.
+display_name: yamadori-bonsai-check-arm
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95
+---
+display_name: yamadori-bonsai-checktool-arm
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95
+---
+display_name: yamadori-bonsai-repair-arm
+api_name:
+  local: yamadori
+api_kwargs:
+  default:
+    temperature: 1.0
+    top_p: 0.95

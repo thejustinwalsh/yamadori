@@ -285,6 +285,20 @@ function Slab({ traces, alarm }: { traces: { name: string; ok: boolean }[]; alar
   );
 }
 
+// ---------------------------------------------------------- moss, leaves
+
+/** Moss (index staleness) and leaf light (recall) are scene-wide: two
+ *  uniforms, set when their channels change and drawn on the next frame. */
+function Growth({ moss, leaf }: { moss: number; leaf: number }) {
+  const invalidate = useThree((st) => st.invalidate);
+  useEffect(() => {
+    U.moss.value = moss;
+    U.leaf.value = leaf;
+    invalidate();
+  }, [moss, leaf, invalidate]);
+  return null;
+}
+
 // -------------------------------------------------------- lights, camera
 
 function Stage({ haze }: { haze: number }) {
@@ -457,6 +471,7 @@ export function BonsaiCanvas({
       }}
     >
       <Stage haze={scene.haze} />
+      <Growth moss={scene.moss} leaf={scene.foliageLive * (0.3 + 0.7 * scene.foliageDensity)} />
       <Bloom />
       <Shafts />
       <Stats />

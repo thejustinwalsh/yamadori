@@ -1,0 +1,21 @@
+<think>
+The source is about TypeScript strictness. I will list the practices.
+</think>
+**TypeScript Strictness**
+applies when: TypeScript projects
+- DO: Turn on strict mode so null and undefined are checked and implicit any is an error.
+  source: "Turn on `strict` in tsconfig.json so that null and undefined are checked everywhere and implicit any is an error."
+- WHEN arrays or records are indexed by computed keys: enable noUncheckedIndexedAccess so indexed reads include undefined.
+  source: "Enable `noUncheckedIndexedAccess` when a codebase indexes arrays or records by computed keys"
+- WHEN a value can take one of several shapes: model it as a discriminated union with a literal kind field and switch on it.
+  source: "Model a value that can take one of several shapes as a discriminated union with a literal `kind` field"
+- DO NOT: use any to silence a type error.
+  source: "You must never use the `any` type to silence an error, because it disables checking"
+- DO NOT: use enums in libraries.
+  source: "Avoid enums in libraries that other packages consume; prefer a union of string literals."
+- DO: Use satisfies to check a literal against a type while keeping its narrow type.
+  source: "satisfies keeps everything perfectly typed in all cases whatsoever"
+- DO: Read the handbook at https://www.typescriptlang.org/docs/ before starting.
+  source: "These notes collect the habits that keep a TypeScript codebase honest."
+- WHEN input comes from outside the program: validate it at the boundary instead of trusting a type assertion.
+  source: "validate untrusted input at the boundary instead of trusting a type assertion"

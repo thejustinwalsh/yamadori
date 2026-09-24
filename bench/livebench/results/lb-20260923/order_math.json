@@ -1,0 +1,1167 @@
+{
+"release": "2024-11-25",
+"seed": 20260923,
+"category": "math",
+"order": [
+{
+"question_id": "76a560baa3e4a778f321033854ff4e1c22333fce2942359c7534950ad6e38e38",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "1709fd106660c9c52870fe7a91a8307224d3b45a4d42002967b99dc87f2c11de",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "527d5f9f9cf27824b84109a495eeced7c7c097fb324b872212f6813a660e5ee4",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "bf83a69a4bcec53ac5c3e39bcb45141b6f26f076429dfab05b222abf86f17ed1",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "ce3ea859fc950bc8fe9b762bcdffd4e6d56e92d22c8962f9e9d2fc69833d687d",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "0d3a48049dc5da31531654f59e7866832579f812b892610bd1b178fc4d010d0c",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "557da318a2322b7ad3c40053ccd03ce2375e469c47a1b6e86ea3de5cee15e2be",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "a3042049ff38a26d648871118b2e6411e0df7fd80e18ae27a6488453702e7f70",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "e5b72d9cdb39c6e5f8798a557f119fff35d98fd165f55659e71bf6ac38b5f178",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "cebece7f5ebd4d85c947382382416dc710ded67276de6f96ab9b4d5d242c9dc4",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "b3f83f6c5460f4ba9a21779bc314df3c18cdbd2c4b0c75bbb22d40859f8a6420",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "2a82215ea19fcbded36fa95df35b6e7c5f6ed28b0b5f6c3460b4223f1904a536",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "27a247790a1521877d1745861da74cb99a7d8e430be4a237b95140453b9c2eeb",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "19241950caa11abbd7605583764dae33694742389a8b602cb553bc8276c63e55",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "6d9bd0806e27f34ff88209075cad638ca0ed6662f499c74bdd3a256d3511b9fe",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "d7eadc915dae28172fffa71b7504b7ffa2409b09783cc8cf6b7fd3e1d829af3f",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "58a7cb59a3183f7cf4223b926070e9a2e0059d16ec8d897348047ac743877c8f",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "9a199388f2e2bd43deac789cd248363bdcb32611480ac27cf62420b4c351759e",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "0850642fb0e65819176317438122e4ae23fee2ed44f3758ce653cdb944b947c3",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "ab5fc6bd9234378b673d27db7059cdd7fc728ca444ea738812097763534bfe63",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "2191e02b65ac78dd0d28bc13f41786d2596dbaa560ad9d0658a27ae2814faef3",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "16fc1a491a2f9711a014f639c65a78c4cb5c7a568da179d4ccbccfb1fcfc2d24",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "dcd453878def23546849af1ff2d3d6e538acf2d233f9106753e15f1ed3f4f4b6",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "56155e5b8c1dc430cc262691aea0a75d71f7dee78b6e15304607caf0b56ecfbd",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "e7fe73646b2d1c6d260553e1a717cc32785e3167f8cc4ab68a3607e5cb643514",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "a55a888455f193f6d48204519cb0568e01dbc30d23e76cb2f2392de6ff2d0a4a",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "6df4693c156b7581ffb9a1267a84c055bc9edd8170681b9021bb837f1e9d1167",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "9aba49ea3701ec6cfe753dc8071b5e487d575b5f04e236e6cba9aecedf271f11",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "c3dde5118315216fd90a1639953dbb90d4d3fe3a4ec88f390d0eefb07502328f",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "c03217423ccb2181ef9e3106b4c116aaf1bcdbd45b3a97e04110665690177eca",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "1f7c4e8e641d24e76abfa03615726236aada72f878a08014c9fa4f4cc3142cd9",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "017a695f2234c3e36c6fc73d6764b0f713ec9bdedb07f021d63f59a5d2c07181",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "3649fb05ed87c2f3ed8a933e7c8f032b54a5d6f0d23504cdd578541dd60c0f08",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "a1cccb6363eb69b14be1666c10b4e6f3626d7f7f39d101222b9d1c50a8fe50ed",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "dc035306b43327d85c2c54dbf8d32fc1feb4addb472030e59bed020722b48d02",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "11f95734f602e7d1481f9887ca7fc8bed83258e22fd5c443449ac159a4732115",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "54bd80737f1e5f1e0c43af7101b66ad883ed48c79dd719d75f082791a64dadc5",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "f3634e7baefda6df6a7a764876d0eaecef9b590d59f0ae1207fb3a99f68c51b2",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "a908da1d873928f9f872dddd33c29620dfa0a54646b79bfde672bd15e6986ec9",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "c604405c61a4af20f0b0fd128848d4a0aef09d9678fa7da71c576c5dfe66a6bb",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "5140fc51893cf05f9f03842e4b318fdafeb6e4636afb6a03bb79165bb153e100",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "95b0921a4de64f6e510ac36b5426ecea550c4d3a6033dfbd0d93dd2213fea714",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "ed177c35997892fd28292df42bfa69dcdb449cc62a89e42c45db24495a39283a",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "c1739e8996cf285676df61bd290b2c1633d5d87423c56f95c172a3294980a988",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "d805a5c9f398cf5126ee84e6899cc9a3d34444a7e2337d15cdf9cc2a949649ba",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "22a38bfb413b5947af60a90709f4612bd09fc3701d4051e0fcc8fb004efa642d",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "6fe242309c5794ae07287ed143fc9597ab6a0287ddefa54dfdc336a851ca91f3",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "f4fdca7e355eaf9362449ebf7df78a366e239091bdb4c4a34b9dfcf9882f23de",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "c3043e58df607cf3448404c3f21bcf3540afc3283eb31bf9903b9b4dadef2921",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "2cd412daa3383147d43cd0151c66909377d6c8fbe3b2909e82a59079eb255bb2",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "ef6c6830ebf0e71d74e7ceb45a242f2b87228933eebfe47db8d798d5738cdaeb",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "f72373f17cf3de3624c8c102bf428e0bb9ea662b5dab86f19ddf03d92913c83f",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "4dc5a69ba4f2038bd73182b69e13d3669a77bfdc5fdaf8e41e615fafc51eb359",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "2c5982946e20e2a85531ac00121697b263591e055ac19586db59a890fdaf98b1",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "c3f6b7718cc440106b768588cd530da88a34d226ee584cc356d1d9e9cd769e3a",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "fa4e47d5ff4bd1342911076839d96ba67b0f72552ec574f17b7574ec7ef28fed",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "c6675bf6647188f84ee445590a494a8d516635bad77ace98ec61d28746839a8d",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "9e69bcbbbfdd17229a4b0897e20d66f4f4f22452efc9dcca75ba21c03b90ec09",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "8f3f8e01ff3c82ee28cf0f4b69df5b662d0bd40b4350c7faea3555096072ae19",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "749116060528890530a40d111c5506f4cdec004a7c52a87ef0a4a01206c187ec",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "172a3ebc82eb26ef5ab3602c34d632265b608c43ae971768486b66f2c79cbf13",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "39d0bd6f9071f74e309c574b960c68c26f23da6b18baf7ae8715dff59903a061",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "3f55db366e970e1965bbba20e9958a4c0ea52e4224d11d875d390983485dd32b",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "cee97a8a3330c9c407b3cbf8ee4b3bab06d4294e08a7e6b9a7d64d7f07ed97ca",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "d0c980aebcd77906165ddd14c8257261266bdf444378f3e881f7d8ed76ad2a56",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "bc3551b5f643d8920f428909104fe2640a50f6b8a17fff6196aa78f25df28bb6",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "390df766dea6530de723fbfa348d43441128d2e03e39d75591791c7d39186120",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "a84e6c888591b8182c32e6ed18291d6eaf9eee366fa818b014e9da41028f9576",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "5b9c56e9392dd999162474f10addf1a3a72f1d8b1c8bafc999ccec6f22194c18",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "28614eb08dedcefd241feeccc171f294b886d1a1fe4253e0b047d5b5e3214dda",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "daec5ea23568cb5d9550d9dfcef80efe375961a47c197ac4be5cee9612d364f9",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "aba8388e52d25b4006e78d4010c26cf8848c3e3145b0c050b9d55c8aff211fe8",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "fabb6a2496aa51e1205bc454945ca80b2bc1e99ebb9e21d746c3f124db4e2e82",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "f4942a722c5d82b6a6c0cf8122d600af4c88105f3f7416e48c2c99ebdeecaed5",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "e56e4d8ed64cb6d0e43ce3c8edda0a77d769b4bda5230c1aba57442e27214694",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "2c8d111408d8f116bcf5b2994c2ea2d810e9810363943c385594d1ab8668b78e",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "2f5063d47738992b33fd36c78ebfa8d3e35932b4fe30dcd8207fb811756d15e1",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "6dfb6aade6429e2cca0718a497a442299a57199dfd547813471f4cf30ed6c7c7",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "059c609b46f7c681782c32d9a97514b357d3f468ab9cdffab45631e18aac9059",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "9c9e8d0f97ae449d799793e32347eb83ef6a743e2935bac5e4458b58d79d09f4",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "2dd75e080f3e276f3dcf304d970e6a03973ddf777537422c9aba59559ddc9594",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "ba4e9d1ab1f79dee69a26796cf701e83a97433ad08814b30191bbd4600860edc",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "517cd7f7578a66ffb1db890e4e9eb82575bba1846237331117874aae1b144f1f",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "0499deda2f068008d488551abf96b4b758c6ed6b79cd2ec6a204d1250b140421",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "799e4b2652eeb01424079c0e1e272609e0e564794c7a6af0ebd81ce075c3fc68",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "01fa9af2dad55a3be29d1fe93f385ad2acade52ed71c6af3dd6f65c9da7ba142",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "558c3c463860fcaa2b08edd9d5f0f11071944bf7d9229574862a92e6d91f1a21",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "2753cfaab5930d988ddbd7846c8d52031dd16dbd0fea15986bca800b2166711f",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "d74dda135d0f1fbb88406de8b061f894145b75db1304a46c4e707ea2939caed1",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "698d9bd9ad134096358dad82317dae610d9f265255aeee52c644871b83eb7a85",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "fd34b7ecb0caa3bd511967093b5d7946b2d0206e1496d021ea7b1a4d908ad557",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "4ef450191d74d0e7622b24ba12392d8ed0846a502cef3d4db5992d19f8789eaf",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "2c17f46f8323e8e692a1827bb18c9a9a43fcff9860b72372cb9551b7cdd532f5",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "080b4d03294a1de52d81d69ceeb61a54cb510da3eab70a73721faf32e0406ff3",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "a191e799d6ca2258faa9f4cfe3d9a55317c96d32c92ab8eba638a888b809b6be",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "1f6132e867a52e5c7b084011484f7fcfec9195f407c9bfb06a3f13f5b709d333",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "2cf0c39a1a6c55addb52232a77e7f714f0b1bac731c614f48baeb9cebde726c5",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "0ff747e5b47f102114bc785df90ad4fa752ee1b1bf74cbd17c7b580755cb56c1",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "e81b96eed50d6b9b43f041d6a36ad0d9a4d00038c42c47a16efd4465d79d08a4",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "30c13a445ddafa6093c665706fd6ad713b94a2bc07bd580b9b2c97b259da2d4b",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "d2e46052124df23ea64a74362089be543ca644852b3e84f474d216efb9283c3c",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "fc903ff1f1f66a6096c9dea58c278b48f54c80a606b65f82af1730559d73755f",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "402e56855bea7ba7f63c4dfd700c95432efeb626c6d303e4e51d5d4c9557db6a",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "ec4e575eda90934117c3df1fb803a6d506b8a237d95a9b03cae83cb01e8ac67c",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "f22ff1f6c067d0e085eb79fe5c2e35df01f9edb2bcc73e59e1e15eefd32b8f07",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "237893b70dd8ba741a256b14f5e8557e23f38643a12c3ffd29e9e9af3136f737",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "590f9e1b299283409cdf91f81529eb0d2325aa9ec4fbe3272740af99620f0024",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "6e12ab2219a4051c396de5afc4228be52c2d8617c7f5621be8c364f50016c80d",
+"task": "olympiad",
+"category": "math"
+},
+{
+"question_id": "f86c7ae3888bbc4c3432d00f89c63dd74eb5764332a64cabe37184c0ca435965",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "dc1e7754534de44adc73fb52a5bb8669fe2828e61e0069b834a8a6942ad952c5",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "6b236c5d2b140ad4f5f89a7bab66558f544ca5dbc56712657c189ea0d3596c19",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "7d8149053aebcd8e8ee2e06aa1e0c51f7c3a8ae895e149a026dc7595c7a1ef35",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "457dc1ce3126f4707cd06e29114df0625a4fc69051c5c41c1dd2d2853198d078",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "88c92057225041e6576c2a623b893421869db554dd671ce57e984c4ab8fa2c88",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "6dc64d3890685a662e59cf870fff36f265f15e46d189d3c4feafb0f76d2ba224",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "4eeb28570e1ce09b67dc97b80060ba084ed524eab3f6356911288cfd3833682b",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "c743a39ae96d6e3df5c219804d77c75c4d04e58acd9e2db4c26e9952ebdab48d",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "9d3119b26b6fbbfe9e367826c2b397fbd42833e9c242e88f9ca06f4d5dbc3240",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "94364865e2a3f0a22e639bc212a0241386415cc60e5fd2106d029ca23f997bf4",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "c2845f454270252a71d8fb42910485cbfb1ff5e3c53a077ed877736d8d231547",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "3cdee33a05b94777870a69289db8a289e4ac5e7da79c4b6c915f0eed46e5ab59",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "1876935a385c9070d25204e4cca86829fc15d6a5ab602b1dc48d4bd33988ac11",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "40c680dba7c76b7fc953156dc915d0a9d82582dd66bb8ba5f68f42d1ddd4e486",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "b241aac6ed7f653107d3c9bb1e5cad42495fcaf7dc530316c4fff751471a4d65",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "4b65576e7570cec86d6abb988889fb71304f60a49ae08de443410b0aaa44f55b",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "07a0d7af7b149f35d0441e3b732fc4706ac286fca96748d7c3e4ceb95af46558",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "3c2d7a838127de586313c63d7867224a677249a9576b957152ce609124de23d4",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "aa2010ecad86adbae918da3d5e90d8ad452b30dc2e32bde8dd6d0d4a6b02b667",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "f0fe71ed7935e959c2478d1790e02cd8dfd981f12506795f4b33ef44ec1b40ff",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "b55ba6dec9689e5631c3556f81602a87536358c5c2213a682dc5714213291d16",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "9de987b7e2739f333b5225cee7b799461bc4697f2db715601a5f4cf5bd9af7cc",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "75c1c68d2a38e7013b562fd74dd91a1d2b8d8e83303fdd6f7dc55686487101e6",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "a9e574313b614eec19bcc03d6c3f8e44deaf5b866cee7080bb239e415a189d15",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "da8d8cf796bb05ab165bf9cf4843a9fd569a1ef0b25d600450b0c9835c906fd6",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "c976648d528b54097ea84178f265a6efb5ba941f1b8cd00008235675f1e9bcf2",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "96bf60de6944396a3ac549a25a2c5cb2cbcd1f30eec8203fb96e29622e14b711",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "aa2a15208cad319abd3738bee4e9f7ceaffbf4d56dd7eeff090c442a584ee1f4",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "7d14894064f8fd94e49541576e5e5ab0a230448d6b73a32aff68d1e9eee4f297",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "0eda6ea2c51124fa08ba73dd0ca455efc1cd3be03e7a374d0a5f03982ef6c47b",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "3fa2ad109d9ea27936ac3c09c9fefb055d67ca3598f2cce1889aa6bdd4f33691",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "d4ce3d47e23c8133ed3b42d683e0f6a2c60c574b408e6747431c9a0b199ff733",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "b33a5450070dc69e175a6f058b544e2428b76a649cccc819957796b5fe5ec1d2",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "237421810b6e6cbfebd1d5fa853413e0e881261cd64991667eddb01996caea7a",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "d27740f4621f3330ab94b3070798bb5ef0b242a6c41f476ca8033806b979411d",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "a7076c4f5c58e9e81f7ef76e3fbf6ec7dd28f5fd9d644500f0d007cca4fd3367",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "a981ef21419542b41e091619ed3e00ee415d35dd446880c3388bb90d7e4b213d",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "79fa8737d5b95f45c35b0c8a87b20c5a1eb73095eb32fee208e13de824d59d76",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "0ae7ae87b394fd2199a6d3979637650610c73f74767bd64fc58acaf711efe061",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "141446ec0e41f16e627c8e9ec237758d981866c0c39f89cbe41903d9dd1aadac",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "f132f302743f83ae7ce9ed1be6017917173ca431c52abc6336fa41b1e027cd59",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "f67b8e330359c94e96643623af08f9eed551375f8306b54d32104614c0906716",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "646be9b27b686ec9bbe24c575292a653b8ed6dddde0ea5d79a462c314fe960c7",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "5cd9dc2d52b79df23bf9cd005a95ab484acd67e31e9c38266bdc863278d64cc9",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "2370040c3005560207aa682a15bde323546a34f9d273d60660200a714f485d0d",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "253a180a13ca7208af286f9fbc80295acf290ce1606af1b4e19a5e304467c967",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "131be4afa5e50134e9e973c493b0d96aa5dfff42dc646735cd7f5ae8c87afbc7",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "63608f487c9f22541c1f8778ae6771658425d60d1c0819e1713d9bd3b0ce9252",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "227147e198205bb2e251c982a389c7f3e7c1bedc81feec84913b53c7a89cbd44",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "81f6df2fcbefbd9da4e06e0f7923194607cc834fd584b061f083af99342b8376",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "356fa940d354284f3dcac45220910cdec99046131b8e3123de91f43ed2839bbf",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "4342367db683238b220484295aef67f84b6b4f0eb4df000be5c0519cac77698b",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "4a5621dd33128bb13772ee6bdca2d9530fb02792b4955121d175129fb86cf456",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "76513dc871c41174e02fa4e936b79b7f3293298423aca222ac96ed78db049e31",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "75ee28de242ec3fdb73c28ba2b23ada96c865764210fee43dc68a0667295effe",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "09dc173d887e37c39cef2242d0da8491e0c566db012ff8af6ec5443924a03f8e",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "fb45eb5248b632b5e95637a9aa380d23f7d164472ade18daac4efa033cabd512",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "813a2590ad5565a94924a64f20b51eb7b718954a970f422929df7bed73238167",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "5f206ce247321fab33b6c1674a9ad5f9e1955b7dc6ae5104f40b56274e412593",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "a430c98bb36dc61f96279cb541bc7a20fe3843f9d057c53e2291ea80e19ebd23",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "268674b22729dc42a7408372d3f94c8a587ac01171fb9164f2a5ebd589a2b4b9",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "c71563a982aa8ce77ac79c1dfe087c1d70c2dea295bd70d5f80e56ca033ddf64",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "504e4f0317a2bb481c7878ee625c1686135211da8df19744d2b78c9598f13761",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "7994355f8431622faebca90825423f38be418071bf1e859aaafd76f2a3dddaf2",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "8a2553a1a9daf028d7deb9f86f4d3b1542e8ab957bcc5de58b5b1c3ccefa4f7b",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "0a3e062e9ac1b71fa3e72e0ebbcbbe15ba5a998827697b2ac9663753ae931aac",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "ec421cd9de8107d72307827e97465550257618ab34db921537de47081cbd04b6",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "05db4067b068c41f0b33744b96818a21b35eacdbd3ea11d3bbc77fa36aa93b6f",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "2ae5b0882dde3115733d179aebc05ae4c0578d11ab777cd71bd05714f6a11a9b",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "1ce71e5cf0fa5fd2055d0a786be91fc4a6edccb4f9114ea29ff90563a35dd2dc",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "9e1b5216a0818236ba2bc9f821e73756937dcc0af19c8ae9316e17932b393c4e",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "f45d8f033ea698bc50ee73e2dd0358b58d81cbd8ecf3011299dc88254dc8ae21",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "632d64289534539bfb811186505d301b98fb6d8ff9bbe03fa753c6e0b38a58ea",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "ef48e542b5544e5ad49c167983055b8eebd48b77d94dd19a8c408c3fb894bc10",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "e7d9d06a0c8d6f0d8d219e3f265499f52077dd8a15b8eb240664939059392777",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "f1c378262aa31437185bd52189bc9793ba5ea6774789a34c9e658e85ee4ebf6a",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "452ffe5dc1dc74b9e127fafd38ebf90413015d35c3daa19fbb50687cd6596382",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "a9822a81de53b287b11ccab159be018e1085c75e8cf61640d5384e471451ee0f",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "7597e564b5c500bd2979e29e6b130437d089570148a8d5a5a4c2cf70e283964b",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "5d047d1a07c96163a9341d6be658de0183ceb8299d34818607da21323eab41d9",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "c16e1e2d181fc4d4bb9b88a1b32d44b3ab54aaeb1b76ac46951920f501c087e4",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "b790b0092a39d1144336e52e36c156e7b6c2c08f41facad3cc5cbfc63c509422",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "417aea0ce42cf632c66302e700bfda3c37d791f16befa6d8f26ef5656c9add75",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "cda8b1de7e358a20f72671af0b08098086afb6e3392ea273350d9bae22bbd87c",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "dc61514611f3e66224bed21b2c53594e61057805ea6a429bad3b0f903ea8aad0",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "fa4ac43f853aecd189647b25fa4a1b9098d759579ed39202c46d0c835e96cf0b",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "ed72fb1ead284e7f16d6ba2547f69a7ce33fff6e47ab8ce2e8b4236e4beced6f",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "57cffb227c0ea9275cbe8eb7a8287b2cf77c79591c79c4d67be5efae0fdeb480",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "63caf58f2145fb688623de0d064c3d8e52cb22f78ba7ab73fea9a83119475845",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "ef02cc70ee34067fc52e0f36c57b5509ac4ea3c659fd2463f08f1e101f252ea6",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "01540b9b0b068942c8adeec17f825f0a9a3b9f52a1f61704bfebbb4c406064a7",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "16e7a9bacba52188ecc9251cfe08ada7754088e00d8b9c099626ed84e41b3cda",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "88ea82c0cdb3a6657c995d2b096c55272cba856acd2951f7cb92ef8ea533d1cf",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "b90d2cf2c33dcc9405168eeeebc3107d721faa3140dbd890aab6d1f2afd2cef8",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "ef0483f5de00f8c7f9e0a79d2f1cc8958478ba06e1163792d37fe2e12f14f6ae",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "a357d96731893796391aec9a4daafc89c857d94e72f7217eaeb820e2a9bd6a47",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "7d5ba47cbb56e55a6e8f4c4e5363ff5dba943dde5bbe9a9e700457c573a16ede",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "2c6778f2b9ecdbdab786f603148424b35498ae3096f7e8118d23a5327130416e",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "071c68cbb1afef46565f2dcfad6df4a077cb7c54fb22322c8ff65057657d2017",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "e2c09b2eba4ab690712f893f5f85ae6b4fe4848bfed07119b4280ccab1e36068",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "579954efa118b0ee176cc7f051b7cf31e567dc89fe10db5267324c579cb701bb",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "da81a32c7c15ff1ee6bef20eb354066a9a873277131c5ec065cb5082e03c71bc",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "bd36e8c846ae88f3171a68d56c4ea599d7805f138db7b0e26835cf1ab8f6dee1",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "bca7b428abb8631a21dfc630b7582b7b048e87391ba46463726340fc91198561",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "2876cd43144425ac3d7dc1c282eca9f3a4ce2b69e9de2612293d1c2f0c6d4fb1",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "08c98c31097ac2d060c40d72045738c275e9feaab86974666e87557c1b86fb30",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "c75db27aae25088504b3f787d14189b555110a78bad9f8cd5c988b2dedbeb13b",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "389abb8f40fc2e68f379348af87c9abfd506bfcf506bdcbc18f0c0ad3b238e85",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "b40b266b5cc010ecdcc65fe95c3c708e3290e86e7380680ec31100af394c7065",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "613bcfa8be07fa28ab064d1b9a1ecf1940630e36ec1574868c1d44ea6901fb93",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "d7e67139dfed277636eb60654fc567dbc62de91c53317909b8c7f5e8f1e03f68",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "c43fa2cd286b9fde666f0805ea1ad8fcc46667e629c88af962357ffb6b35de50",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "43e8654538256cb8a54b6d623fef6fde3fc1ac280506897419151da8ed65e9a4",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "c22aba3cd3d168560febcd042f56de61f6d02d593d74c77b5beecb89791f1268",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "a622715b01d26810c6bcd92e4055d376024f1e4906e5809bb45b90eedbe483fa",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "0036922c19213c53a71203a1c4f9b42892eaf0a545e85899771a98142732d7bc",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "9073c880145cdc8bdab42242c95f737da35c6479240b8de28b61a9b37faed10d",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "9f1e08e09cb153db9c348cb9b42b199b076f70ab6725140389ab1947e2134c16",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "0dfb5bb59ec267ceecdc0eef5c7c51f3e929bc4ef373c01f864857123a41e737",
+"task": "math_comp",
+"category": "math"
+},
+{
+"question_id": "2bf39d2a017c631acb9635c4dcf9666dd4ae647119d877deab34a5b3ff94b869",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "4ea921ae2fc435b17335f485b3dac0f53555130d876c862cf52c560476418f3c",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "3e852f69528aa2be018ee0d76461a3afcdfe5dcab74b9f2abf93bd1342c6f52d",
+"task": "AMPS_Hard",
+"category": "math"
+},
+{
+"question_id": "27f1402e1642836d12b3b5ed58678f9874dca9d71ceca421302bd5e1d940658f",
+"task": "AMPS_Hard",
+"category": "math"
+}
+]
+}

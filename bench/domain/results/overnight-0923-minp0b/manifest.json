@@ -1,0 +1,427 @@
+{
+ "effort": "medium",
+ "max_tokens": 4096,
+ "temperature": 0.0,
+ "body_tier": "max",
+ "proxy": "http://127.0.0.1:1234",
+ "suite": "core,react",
+ "server_sampling": {
+  "model": "Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf",
+  "spec_type": "draft-mtp",
+  "reasoning_budget": "32768",
+  "temp": "1.0",
+  "top_p": "0.95",
+  "top_k": "20",
+  "min_p": "0.0",
+  "presence_penalty": "0",
+  "repeat_penalty": "1.0"
+ },
+ "run_id": "overnight-0923-minp0b",
+ "created": 1790162274.9206634,
+ "runs": [
+  {
+   "started": 1790162274.9349384,
+   "arms": [
+    "A0",
+    "S0",
+    "A6"
+   ],
+   "concurrent_with": [
+    "livebench",
+    "swebench"
+   ],
+   "hints_corpus": {
+    "states": {
+     "edited": 344,
+     "keep": 1215,
+     "reject": 179,
+     "unreviewed": 113
+    },
+    "rows": 1851,
+    "recipes_sha256": "c7607c32bd71e46589d85f9c101b4ad40df4c572c25d754b9504fef0e614b1c2",
+    "hint_buckets_sha256": "9d4140f1ab1b460849e3281ca28caaeee291968697e511a73f06fb3e5e32d7c9",
+    "read_at": 1790162274.9349356
+   },
+   "tasks": [
+    "rs01",
+    "rs03",
+    "rs07",
+    "rs08",
+    "rs12",
+    "rs20",
+    "rs24",
+    "rs25",
+    "tsl01",
+    "tsl06",
+    "tsl07",
+    "tsl10",
+    "tsl11",
+    "tsl12",
+    "tsl16",
+    "tsl17"
+   ],
+   "preflight": [
+    {
+     "ok": true,
+     "name": "one_listener",
+     "detail": "1 process(es) on :1234: pid 26552"
+    },
+    {
+     "ok": true,
+     "name": "proxy_fresh",
+     "detail": "pid 26552 (server.py) started 02:08:59; all 36 modules it imports are older"
+    },
+    {
+     "ok": true,
+     "name": "laya_route_in",
+     "detail": "route_in loaded=True kind=logistic_cls_logits"
+    },
+    {
+     "ok": true,
+     "name": "hints_cache",
+     "detail": "1639 vectors, 0 zero-norm, min norm 1.0000"
+    },
+    {
+     "ok": true,
+     "name": "package_vectors",
+     "detail": "typegpu@0.12.5: 3729 chunks, 0 zero, norm_ok=True; three@0.185.1: 14990 chunks, 3 zero, norm_ok=True"
+    },
+    {
+     "ok": true,
+     "name": "task_leak",
+     "detail": "323 task prompts + 323 reference solutions vs the hints corpus: 1 reviewed as shared idiom; no other shared 8-word runs"
+    },
+    {
+     "ok": false,
+     "name": "run_tests",
+     "detail": "SKIPPED, not run: run_tests: full suite passed 41/41 at 02:24; since then only bench/domain run.py, analyse.py, test_run.py changed (test_run 173/173, ruff clean, 07:2x); parallel runners must not run fixed-temp-path suites at once. live_stack: fails only on 429 while concurrent benchmarks hold every main lane; a direct request through :1234 returned finish=stop at 07:2x after the min_p restart"
+    },
+    {
+     "ok": false,
+     "name": "live_stack",
+     "detail": "SKIPPED, not run: run_tests: full suite passed 41/41 at 02:24; since then only bench/domain run.py, analyse.py, test_run.py changed (test_run 173/173, ruff clean, 07:2x); parallel runners must not run fixed-temp-path suites at once. live_stack: fails only on 429 while concurrent benchmarks hold every main lane; a direct request through :1234 returned finish=stop at 07:2x after the min_p restart"
+    },
+    {
+     "ok": true,
+     "name": "worker_quiet",
+     "detail": "gpu lane paused and idle (waited 0s)"
+    }
+   ],
+   "preflight_overridden": [
+    "run_tests",
+    "live_stack"
+   ]
+  },
+  {
+   "started": 1790163574.272667,
+   "arms": [
+    "A0",
+    "S0"
+   ],
+   "concurrent_with": [
+    "livebench",
+    "swebench"
+   ],
+   "hints_corpus": {
+    "states": {
+     "edited": 344,
+     "keep": 1215,
+     "reject": 179,
+     "unreviewed": 113
+    },
+    "rows": 1851,
+    "recipes_sha256": "c7607c32bd71e46589d85f9c101b4ad40df4c572c25d754b9504fef0e614b1c2",
+    "hint_buckets_sha256": "9d4140f1ab1b460849e3281ca28caaeee291968697e511a73f06fb3e5e32d7c9",
+    "read_at": 1790163574.2726634
+   },
+   "tasks": [
+    "rs01",
+    "rs03",
+    "rs07",
+    "rs08",
+    "rs12",
+    "rs20",
+    "rs24",
+    "rs25",
+    "tsl01",
+    "tsl06",
+    "tsl07",
+    "tsl10",
+    "tsl11",
+    "tsl12",
+    "tsl16",
+    "tsl17"
+   ],
+   "preflight": [
+    {
+     "ok": true,
+     "name": "one_listener",
+     "detail": "1 process(es) on :1234: pid 26552"
+    },
+    {
+     "ok": false,
+     "name": "proxy_fresh",
+     "detail": "pid 26552 (server.py) started 02:08:59; stale: proxy.py modified 07:38:14, code_check.py modified 07:37:59, tiers.py modified 07:37:49, fanout.py modified 07:34:39"
+    },
+    {
+     "ok": true,
+     "name": "laya_route_in",
+     "detail": "route_in loaded=True kind=logistic_cls_logits"
+    },
+    {
+     "ok": true,
+     "name": "hints_cache",
+     "detail": "1672 vectors, 0 zero-norm, min norm 1.0000"
+    },
+    {
+     "ok": true,
+     "name": "package_vectors",
+     "detail": "typegpu@0.12.5: 3729 chunks, 0 zero, norm_ok=True; three@0.185.1: 14990 chunks, 3 zero, norm_ok=True"
+    },
+    {
+     "ok": true,
+     "name": "task_leak",
+     "detail": "323 task prompts + 323 reference solutions vs the hints corpus: 1 reviewed as shared idiom; no other shared 8-word runs"
+    },
+    {
+     "ok": false,
+     "name": "run_tests",
+     "detail": "SKIPPED, not run: run_tests: full suite passed 41/41 at 02:24; since then only bench/domain run.py, analyse.py, test_run.py changed (test_run 173/173, ruff clean, 07:2x); parallel runners must not run fixed-temp-path suites at once. live_stack: fails only on 429 while concurrent benchmarks hold every main lane; a direct request through :1234 returned finish=stop at 07:2x after the min_p restart"
+    },
+    {
+     "ok": false,
+     "name": "live_stack",
+     "detail": "SKIPPED, not run: run_tests: full suite passed 41/41 at 02:24; since then only bench/domain run.py, analyse.py, test_run.py changed (test_run 173/173, ruff clean, 07:2x); parallel runners must not run fixed-temp-path suites at once. live_stack: fails only on 429 while concurrent benchmarks hold every main lane; a direct request through :1234 returned finish=stop at 07:2x after the min_p restart"
+    },
+    {
+     "ok": true,
+     "name": "worker_quiet",
+     "detail": "gpu lane paused and idle (waited 0s)"
+    }
+   ],
+   "preflight_overridden": [
+    "proxy_fresh",
+    "run_tests",
+    "live_stack"
+   ]
+  }
+ ],
+ "arms": {
+  "A0": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "everything off (the model as it ships)"
+  },
+  "A1": {
+   "features": {
+    "retrieval": true,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "retrieval only"
+  },
+  "A2": {
+   "features": {
+    "retrieval": false,
+    "hints": true,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "hints only"
+  },
+  "A3": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": true,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "deep thinking only (retrieval off)"
+  },
+  "A4": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 3,
+    "effort": "medium"
+   },
+   "note": "fan-out only (N=3)"
+  },
+  "A5": {
+   "features": {
+    "effort": "medium"
+   },
+   "note": "all allowed, fired by the selection engine"
+  },
+  "A6": {
+   "features": {
+    "retrieval": true,
+    "hints": true,
+    "investigate": true,
+    "fanout": 3,
+    "effort": "medium"
+   },
+   "note": "all forced on"
+  },
+  "C8": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "reasoning_cap": 8192,
+    "effort": "medium"
+   },
+   "note": "A0, thinking cap 8192"
+  },
+  "C32": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "reasoning_cap": 32768,
+    "effort": "medium"
+   },
+   "note": "A0, thinking cap 32768 (reference)"
+  },
+  "C128": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "reasoning_cap": 131072,
+    "effort": "medium"
+   },
+   "note": "A0, thinking cap 131072 (effectively unlimited)"
+  },
+  "S0": {
+   "features": {
+    "retrieval": false,
+    "hints": false,
+    "investigate": false,
+    "fanout": 1,
+    "effort": "medium"
+   },
+   "note": "A0 + check_solution (compile only; hidden tests never run)",
+   "twin": "A0",
+   "client_tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "check_solution",
+      "description": "Does my code compile? Call this before answering to typecheck your complete solution: it runs the task's real compiler (tsc --strict against the pinned packages, or cargo for Rust) on exactly the code you pass and returns the compiler errors, or says it compiles. Answering without it means answering with code no compiler has seen. Use it for: 'does this compile', 'check my solution', 'fix the type errors', and again after each fix. Pass the whole solution, not a fragment. It does NOT run the hidden tests: a clean result means the code compiles, not that it is correct.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "description": "The complete solution source, exactly as it would appear in your final answer's code block."
+        }
+       },
+       "required": [
+        "code"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "S5": {
+   "features": {
+    "effort": "medium"
+   },
+   "note": "A5 + check_solution (compile only; hidden tests never run)",
+   "twin": "A5",
+   "client_tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "check_solution",
+      "description": "Does my code compile? Call this before answering to typecheck your complete solution: it runs the task's real compiler (tsc --strict against the pinned packages, or cargo for Rust) on exactly the code you pass and returns the compiler errors, or says it compiles. Answering without it means answering with code no compiler has seen. Use it for: 'does this compile', 'check my solution', 'fix the type errors', and again after each fix. Pass the whole solution, not a fragment. It does NOT run the hidden tests: a clean result means the code compiles, not that it is correct.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "description": "The complete solution source, exactly as it would appear in your final answer's code block."
+        }
+       },
+       "required": [
+        "code"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "S6": {
+   "features": {
+    "retrieval": true,
+    "hints": true,
+    "investigate": true,
+    "fanout": 3,
+    "effort": "medium"
+   },
+   "note": "A6 + check_solution (compile only; hidden tests never run)",
+   "twin": "A6",
+   "client_tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "check_solution",
+      "description": "Does my code compile? Call this before answering to typecheck your complete solution: it runs the task's real compiler (tsc --strict against the pinned packages, or cargo for Rust) on exactly the code you pass and returns the compiler errors, or says it compiles. Answering without it means answering with code no compiler has seen. Use it for: 'does this compile', 'check my solution', 'fix the type errors', and again after each fix. Pass the whole solution, not a fragment. It does NOT run the hidden tests: a clean result means the code compiles, not that it is correct.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "code": {
+         "type": "string",
+         "description": "The complete solution source, exactly as it would appear in your final answer's code block."
+        }
+       },
+       "required": [
+        "code"
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "group": "overnight-0923-minp0",
+ "sample": {
+  "per_domain": 8,
+  "seed": 20260923,
+  "domains": [
+   "rust_wasm",
+   "three_tsl"
+  ]
+ },
+ "concurrent_with": [
+  "livebench",
+  "swebench"
+ ],
+ "hints_corpus": {
+  "states": {
+   "edited": 344,
+   "keep": 1215,
+   "reject": 179,
+   "unreviewed": 113
+  },
+  "rows": 1851,
+  "recipes_sha256": "c7607c32bd71e46589d85f9c101b4ad40df4c572c25d754b9504fef0e614b1c2",
+  "hint_buckets_sha256": "9d4140f1ab1b460849e3281ca28caaeee291968697e511a73f06fb3e5e32d7c9",
+  "read_at": 1790163574.2726634
+ }
+}

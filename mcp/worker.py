@@ -992,6 +992,38 @@ HANDLERS = {
 }
 
 
+def _register_skills() -> None:
+    """The skill pipeline's stages (mcp/skill_pipeline.py) run in this same
+    worker, on the same lanes. Imported here, not at the top: skill_pipeline
+    never imports this module, so the two cannot load each other twice."""
+    import skill_pipeline
+    HANDLERS.update(skill_pipeline.HANDLERS)
+
+
+_register_skills()
+
+
+def _register_prices() -> None:
+    """The hosted-API price snapshot (mcp/prices.py): one net-lane job,
+    enqueued by the loop below at most once a day."""
+    import prices
+    HANDLERS[prices.QUEUE] = prices.handle_refresh
+
+
+_register_prices()
+
+
+def _register_deep() -> None:
+    """Deep thinking's idle-time learner (mcp/deep_learn.py, Phase 0.6):
+    one cpu-lane job, enqueued by the loop below only when the stack is
+    idle and labelled rows are pending."""
+    import deep_learn
+    HANDLERS[deep_learn.LEARN[0]] = deep_learn.handle_learn
+
+
+_register_deep()
+
+
 # ---------------------------------------------------------------------------
 # The loop.
 # ---------------------------------------------------------------------------
@@ -1010,6 +1042,11 @@ def advance_after(job: dict) -> str | None:
     fetch, `clarify` may still have unanswered questions, which is the
     operator's turn, not a failure.
     """
+    if str(job.get("queue") or "").startswith("skill."):
+        # A skill stage: the version records where it is, and the next
+        # stage is enqueued only now that this one's job is done.
+        import skill_pipeline
+        return skill_pipeline.advance_after(job)
     ds = datasets.get(job.get("dataset") or "") if job.get("dataset") else None
     if ds is None:
         return None
@@ -1147,6 +1184,42 @@ def run(once: bool = False, lanes: dict | None = None) -> int:
             except Exception as e:                               # noqa: BLE001
                 print(f"[worker] reclaim failed: {e}", file=sys.stderr,
                       flush=True)
+            # Watched skills whose re-fetch is due, and -- only when the
+            # stack is idle -- learning from skill-selection fallbacks
+            # (skill_learn.idle_state). jobs.py has no cron.
+            try:
+                import skill_learn
+                import skill_pipeline
+                w = skill_pipeline.schedule_watches()
+                if w:
+                    print(f"[worker] enqueued {len(w)} skill watch job(s)",
+                          flush=True)
+                if skill_learn.schedule():
+                    print("[worker] idle: enqueued a skill learn job",
+                          flush=True)
+            except Exception as e:                               # noqa: BLE001
+                print(f"[worker] skill scheduling failed: {e}",
+                      file=sys.stderr, flush=True)
+            # Deep thinking's learner (Phase 0.6): thresholds within bounds
+            # and description proposals from labelled outcomes, when idle.
+            try:
+                import deep_learn
+                if deep_learn.schedule():
+                    print("[worker] idle: enqueued a deep learn job",
+                          flush=True)
+            except Exception as e:                               # noqa: BLE001
+                print(f"[worker] deep learn scheduling failed: {e}",
+                      file=sys.stderr, flush=True)
+            # The hosted-API price snapshot for the dashboard's savings
+            # estimate (mcp/prices.py): at most one fetch job a day.
+            try:
+                import prices
+                jid = prices.schedule()
+                if jid:
+                    print(f"[worker] enqueued {prices.QUEUE} {jid}", flush=True)
+            except Exception as e:                               # noqa: BLE001
+                print(f"[worker] price scheduling failed: {e}",
+                      file=sys.stderr, flush=True)
     # Running handlers are not interrupted: their jobs stay `running` with a
     # heartbeat that stops, and reclaim() on the next start returns them.
     return sum(counts)
@@ -1157,4 +1230,9 @@ if __name__ == "__main__":
     ap.add_argument("--once", action="store_true",
                     help="drain what is queued, then exit")
     a = ap.parse_args()
+    # Generations the worker runs through mcp/model.py are counted in the
+    # token ledger (mcp/token_ledger.py). Here, not on import: tests import
+    # this module and must not write the real ledger.
+    import token_ledger
+    token_ledger.enable()
     print(f"[worker] ran {run(once=a.once)} job(s)")

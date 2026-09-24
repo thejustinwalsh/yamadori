@@ -320,6 +320,17 @@ def main(argv=None) -> int:
             check("scored ONE AT A TIME the reranker puts the Paris document "
                   "first", max(solo, key=solo.get) == 0,
                   f"{ {i: f'{s:.2e}' for i, s in solo.items()} }")
+            # LEFT AS IT IS, FAILING (2026-09-24, #15d in
+            # docs/SELF-IMPROVEMENT-LOG.md). On the live gate the batched
+            # Paris probe put index 0 first, so this check fails -- while the
+            # 89-probe self-retrieval check below still measured the batch
+            # contamination (16/89 batched vs 66/89 solo). One four-document
+            # probe flipping is one data point (PROTOCOL rule 10), and
+            # docs/FINDINGS.md #20 says the reranker is neither cut nor
+            # defended until its rank path is fixed and re-measured. So the
+            # probe is not rewritten to pass: its failure is reported as "this
+            # probe no longer discriminates", and the decision belongs to the
+            # #20 re-measurement, not to a test edit.
             check("scored AS A BATCH it does not -- the batch contaminates the "
                   "scores, which is why arm_rerank sends one document per call",
                   max(batched, key=batched.get) != 0,

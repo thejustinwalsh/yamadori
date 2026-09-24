@@ -1,0 +1,85 @@
+{
+ "props": {
+  "model_path": "C:/Users/jwals/textgen/user_data/models/tev1-4b/Tev1-4B-experimental-Q4_K_M.gguf",
+  "n_ctx": 4096,
+  "build": "b1-9a9394a"
+ },
+ "sizes": {
+  "200": {
+   "n": 20,
+   "state_tokens": [
+    200,
+    228
+   ],
+   "prompt_tokens": [
+    435,
+    464
+   ],
+   "p50_ms": 313.1,
+   "p95_ms": 327.8,
+   "max_ms": 328.6,
+   "server_prompt_ms_p50": 206.2,
+   "valid": 20,
+   "cached_tokens_max": 37,
+   "card": {
+    "n": 20,
+    "max_used": 7923,
+    "min_free": 8244
+   }
+  },
+  "600": {
+   "n": 20,
+   "state_tokens": [
+    600,
+    611
+   ],
+   "prompt_tokens": [
+    834,
+    847
+   ],
+   "p50_ms": 463.4,
+   "p95_ms": 689.7,
+   "max_ms": 708.0,
+   "server_prompt_ms_p50": 326.7,
+   "valid": 20,
+   "cached_tokens_max": 37,
+   "card": {
+    "n": 31,
+    "max_used": 7923,
+    "min_free": 8244
+   }
+  },
+  "2000": {
+   "n": 20,
+   "state_tokens": [
+    2000,
+    2007
+   ],
+   "prompt_tokens": [
+    2237,
+    2249
+   ],
+   "p50_ms": 898.3,
+   "p95_ms": 919.2,
+   "max_ms": 931.2,
+   "server_prompt_ms_p50": 750.7,
+   "valid": 20,
+   "cached_tokens_max": 37,
+   "card": {
+    "n": 58,
+    "max_used": 7923,
+    "min_free": 8244
+   }
+  }
+ },
+ "card_before": {
+  "used": 7923,
+  "free": 8244,
+  "total": 16376
+ },
+ "card_after": {
+  "used": 7923,
+  "free": 8244,
+  "total": 16376
+ }
+}

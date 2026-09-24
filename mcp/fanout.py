@@ -1,67 +1,128 @@
 #!/usr/bin/env python
-"""Answer a question several ways at once and keep what they agree on.
+"""Fan-out: one main brain, one second brain, candidates graded in sequence.
 
-WHY THIS IS AFFORDABLE
+THE DESIGN (operator decision, 2026-09-23)
 
-Measured on this box, concurrent completions against one model instance:
+"One main brain, one second brain; sequential; grade after two; tie-breaker
+with both candidates' details." At most TWO contexts are live at once: the
+conversation (main role, 5/8 of the KV pool) and ONE helper (3/8, the
+second brain deep thinking also uses -- mcp/budget.py). Fan-out work is
+handed to the second brain one step at a time:
 
-    N=1   5.5s   36.6 tok/s
-    N=2   8.8s   45.3 tok/s
-    N=4  14.9s   53.8 tok/s    <- best throughput
-    N=8  32.5s   49.2 tok/s    <- batch saturates
+  A  the original answer. Main role, full 5/8. It already exists when
+     fan-out runs (proxy._fan_out), and it is always candidate 0.
+  B  one more answer, generated in the HELPER role with the helper's whole
+     3/8 (tiers.rebudget(role="helper", share_n=1)), as the one
+     second-brain runner's `alternative` job (shomen.run, on the helper
+     lane). The "direct" variant plus a concept seed.
+     Vendor sampling is what the shaped payload carries (tiers.apply).
+  GRADE after two, with the code check (never execution):
+     - exactly one parses                      -> it wins, stop
+       ("clear: only one parses")
+     - both parse, similarity >= AGREE          -> A wins, stop
+       ("clear: agreement")
+     - otherwise (both parse and disagree, or neither parses) -> C
+  C  the TIE-BREAKER, helper role, the runner's `tiebreak` job. Its
+     prompt is the task plus BOTH candidates' code and each one's check
+     result (parses? which syntax errors, on which lines), and it asks for
+     the single best final solution, fixing what is wrong. Then consensus
+     over [A, B, C]: the code medoid among the parsing candidates, C
+     preferred on a tie (see "HOW THE WINNER IS PICKED" below).
 
-Four answers cost 2.7x the wall clock of one, not 4x, because batching
-recovers memory bandwidth a single stream leaves idle. A metered model cannot
-do this at any price; a local one pays only in latency.
+A prose answer (no fenced block in a code language in A) keeps today's
+behaviour: B runs, sequentially in the helper role, the path/symbol vote over
+[A, B] is RECORDED, and the original is delivered. No tie-breaker for prose.
+
+NOTHING THE SECOND BRAIN WROTE IS THROWN AWAY (operator decision,
+2026-09-23). `handback()` returns what the other candidates say that the
+delivered answer does not: for prose, B's differing points (an "alternative
+view"); for code, one line naming the APIs each loser used that the winner
+does not. proxy._fan_out decides where that crosses -- see its docstring.
+
+The tier's `fanout` value (3 at high and max) is the MOST candidates, A
+included: A + B + an optional C. fanout:1 is off; a forced 3 always runs the
+adaptive procedure; 2 allows A + B and no tie-breaker.
+
+WHY (what it replaced)
+
+Until 2026-09-23 fan-out ran n variants CONCURRENTLY in a thread pool on the
+MAIN role, with main's 5/8 split n ways (tiers.rebudget(share_n=n)). So each
+variant thought with about a third of the room the original had, and up to n
+extra contexts were live beside the conversation and any deep thinking --
+the "two consumers on one card" condition AGENTS.md warns about, inside one
+request. The batching throughput that justified it (N=4 at 2.7x the wall
+clock of one, measured) bought candidates that each had less room to think.
+The sequential design gives every extra candidate the helper's whole 3/8 and
+stops after two when the check already separates them.
+
+AGREE is 0.80, a CHOICE, not a measurement: nothing in this repo has graded
+how often two parsing candidates at >= 0.80 similarity are both right. Measure
+it on benchmark data (bench/domain grades every candidate) before citing it,
+PROTOCOL rule 10.
 
 WHY AGREEMENT AND NOT A SCORER
 
-The obvious design is to train something to pick the best answer. Published
-results say do not bother yet: on MATH500 at 16 generations, plain
-self-consistency scored 86.00 against 85.00 for best-of-N with an external
-reward model, and 82.80 for beam search. Majority voting beat the trained
-scorer. So consensus ships first and a learned selector is an upgrade, not a
-prerequisite.
-
-WHY DIVERSE VARIANTS AND NOT JUST TEMPERATURE
-
-Sampling the same prompt four times explores one region of the space. Asking
-four genuinely different ways -- with retrieval and without, terse and
-thorough -- produces disagreement that means something. When four different
-approaches land on the same file, that is evidence. When four samples of one
-prompt agree, that is mostly temperature being low.
+Published results say a trained picker does not beat agreement yet: on
+MATH500 at 16 generations, plain self-consistency scored 86.00 against 85.00
+for best-of-N with an external reward model. So the grade is a code check and
+a similarity, and a learned selector is an upgrade, not a prerequisite.
 
 MEASURED -- WHEN NOT TO USE THIS
 
 On eight file-location questions against koota, four-way consensus scored 7/8
 against 7/8 for a single answer, with ZERO discordant pairs, at 3.2x the wall
-clock. That is a null result on a task class where it could not have won:
-"where is X defined" has one right answer and retrieval either finds it or
-does not, so there is no quality variance for diversity to exploit and both
-arms sit at the ceiling.
+clock (the old concurrent design). "Where is X defined" has one right answer,
+so there is no quality variance for a second candidate to exploit. The gate
+is in mcp/selection.py (`fanout_n`): lookups answer once; design questions and
+code-writing tasks may fan out at high and max.
 
-The cost is also higher than raw sampling suggested -- 3.2x rather than the
-2.7x measured for generation alone -- because each variant runs its own tool
-loop, so tool calls multiply too.
+HOW THE WINNER IS PICKED AMONG CODE CANDIDATES (2026-09-23)
 
-So this is gated on the task having room for a better answer:
+The old vote was over file paths and backticked symbols with the SHORTEST
+answer winning a tie. A coding answer names no path, so every candidate scored
+0 and the tersest won (5 of 6 fan-out records in bench/**/*.jsonl on
+2026-09-23 were decided by length alone -- a count, not a graded cost). So a
+code answer is picked by `consensus()` in three steps, and only when most
+candidates carry a fenced block in a code language (code_check.CODE_LANGS):
 
-  lookup, definition, reference, "where is"   -> N=1, always
-  design, approach, refactor, "how should I"  -> N=4
+  1. EXTRACT each candidate's code: the largest fenced block in the dominant
+     language (ties to the later block), as bench/domain/grade.py reads a
+     reply. An untagged block counts only when some candidate tagged the
+     language; it is never guessed.
+  2. VALIDITY: keep candidates whose code parses -- code_check.check(...,
+     run_format=False) (Python's compile(), which builds a code object and
+     runs nothing, plus tree-sitter), else tree-sitter directly. A truncated
+     candidate (unclosed fence or finish_reason "length") is set aside
+     whenever a complete one parses. Nothing here ever EXECUTES candidate
+     code. When the question carries fenced code (code_check.prompt_code),
+     a candidate PARSES if it parses on its own OR appended directly after
+     one of those blocks (code_check.check_against_prompt, the general
+     rule; operator decision 2026-09-23). Checked on its own only, every
+     continuation of starter code fails, and the grade could never separate
+     two (lb-20260923-minp0, yamadori-xhigh: 10 of 10 completion rows graded
+     A and B "neither parses"). No phrasing is read. Per candidate,
+     check_mode records which form parsed: "standalone", "appended",
+     "neither", or None when the question carries no code.
+  3. CONSENSUS: the medoid of the valid pool -- highest mean similarity to
+     the others. Similarity is the multiset Jaccard of token trigrams over
+     tree-sitter leaves, comments and whitespace dropped, string literals
+     collapsed, and every name the candidate binds collapsed to one token, so
+     a renamed variable still agrees. Ties (within SIM_TIE) go to the
+     preferred candidate when there is one (the tie-breaker C), then fewer
+     checker warnings, a complete answer, and the length nearest the median
+     -- never the shortest.
 
-Fanning out on a lookup is pure latency, which is now measured rather than
-assumed.
-
-That rule is IMPLEMENTED in mcp/selection.py (`fanout_n`), as words at n=0
-labels until build step 7 calibrates it; the tier's `fanout` is the most it
-may use, not what it always uses.
+If nothing parses, the path vote runs with ties to the LONGEST answer and the
+result says `selection: "fallback"`; a fallback is recorded, never delivered.
+SIM_TIE, NGRAM and AGREE are choices, not measurements.
 """
 from __future__ import annotations
 
-import concurrent.futures as cf
 import json
 import os
 import re
+import statistics
+import textwrap
 from collections import Counter
 
 # The MODEL SERVER, not the proxy. Port 1234 is the proxy now, and fan-out
@@ -74,15 +135,26 @@ UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 
 # Each variant is a different way of approaching the same question, not a
 # different random seed. `nudge` is appended to the system message.
+#
+# NO PER-VARIANT TEMPERATURE (2026-09-23). These carried 0.3/0.3/0.7/0.2,
+# off-spec for a thinking model whose vendor sampling is temperature 1.0
+# (tiers.VENDOR_SAMPLING, which tiers.apply enforces on every request). Every
+# variant now samples at the vendor settings the shaped payload already
+# carries; diversity comes from the nudge and the concept seed, which is the
+# stated intent ("diverse variants and not just temperature").
+#
+# SEQUENTIAL (2026-09-23): only VARIANTS[0], "direct", is generated now -- it
+# is candidate B, and its diversity from the original comes from the concept
+# seed. The others are kept, named, for a benchmark arm that wants them.
 VARIANTS = [
-    {"name": "direct", "temperature": 0.3, "nudge": ""},
-    {"name": "evidence", "temperature": 0.3,
+    {"name": "direct", "nudge": ""},
+    {"name": "evidence",
      "nudge": "\n\nGround every claim in a file you have actually read. "
               "Name the path and line."},
-    {"name": "skeptical", "temperature": 0.7,
+    {"name": "skeptical",
      "nudge": "\n\nConsider the obvious answer, then check whether a second "
               "place in the codebase is a better fit before committing."},
-    {"name": "terse", "temperature": 0.2,
+    {"name": "terse",
      "nudge": "\n\nAnswer in as few words as the question allows. No preamble."},
 ]
 
@@ -118,15 +190,20 @@ def _one(payload: dict, variant: dict, timeout: int) -> dict:
                 break
         else:
             msgs.insert(0, {"role": "system", "content": variant["nudge"].strip()})
-    body["temperature"] = variant["temperature"]
     body.pop("stream", None)
-    if variant.get("seed"):
+    seed = variant.get("seed")
+    word = seed.get("word") if isinstance(seed, dict) else seed
+    if word:
         # USER message, not system. The originating project tested both and
         # found the model would ignore a system-message seed and fall back to
-        # its default approach; in the user turn it cannot.
+        # its default approach; in the user turn it cannot. phrase() also
+        # records it (concept_seed.record), which the dashboard's last-seed
+        # panel reads.
+        import shomen
         for m in reversed(body["messages"]):
             if m.get("role") == "user" and isinstance(m.get("content"), str):
-                m["content"] += concept_seed.phrase(variant["seed"])
+                m["content"] += shomen.seed_phrase(
+                    word, where=f"fanout:{variant['name']}")
                 break
 
     # Each variant must run the WHOLE tool loop. Doing a single completion
@@ -135,10 +212,69 @@ def _one(payload: dict, variant: dict, timeout: int) -> dict:
     # than anything about consensus.
     d = _tool_loop(body, timeout)
     msg = d["choices"][0]["message"]
+    content, echoed = strip_seed_echo(msg.get("content") or "", word)
+    if echoed:
+        print(f"  fan-out {variant['name']}: removed {echoed} line(s) that "
+              f"only repeated the seed word {word!r}", flush=True)
     return {"variant": variant["name"],
-            "seed": variant.get("seed"),
-            "content": msg.get("content") or "",
+            "seed": word or None,
+            "seed_info": (concept_seed.summary(seed) if isinstance(seed, dict)
+                          else ({"word": word, "token_id": None,
+                                 "u32": concept_seed.encode(word)}
+                                if word else None)),
+            "content": content,
+            "seed_echo_stripped": echoed,
             "raw": d}
+
+
+# THE SEED ECHO (#13, docs/SELF-IMPROVEMENT-LOG.md). Live gate 2026-09-24:
+# the tie-breaker C's seed was `humanidad`, and the delivered `is_balanced`
+# opened with the line `# humanidad` -- the model copied the seed into its
+# code as a comment. The seed's wording now says what it is for
+# (shomen.seed_phrase); this removes what still leaks: a LEADING line --
+# the first line of the answer, or the first line of a fenced block -- that
+# is nothing but a comment (or a markdown heading) whose text is the seed
+# word. Only that exact shape: a comment that says anything more is the
+# model's, and stays. Counted per candidate (x_yamadori.fanout candidates
+# `seed_echo_stripped`) and per fix-up unit.
+_ECHO_LINE = re.compile(r"^\s*(?:#+|//+|--|;+|/\*+|\*+|<!--)\s*(.*?)\s*"
+                        r"(?:\*+/|-->)?\s*$")
+
+
+def _is_seed_echo(line: str, word: str) -> bool:
+    m = _ECHO_LINE.match(line)
+    if not m:
+        return False
+    body = re.sub(r"[\W_]+", "", m.group(1)).lower()
+    return bool(body) and body == re.sub(r"[\W_]+", "", word).lower()
+
+
+def strip_seed_echo(text: str, word: str | None) -> tuple[str, int]:
+    """(`text` without leading lines that only repeat the seed word, how
+    many were removed). See THE SEED ECHO."""
+    if not text or not word:
+        return text or "", 0
+    lines = text.split("\n")
+    drop: set[int] = set()
+    first = next((i for i, x in enumerate(lines) if x.strip()), None)
+    if first is not None and _is_seed_echo(lines[first], word):
+        drop.add(first)
+    in_block = False
+    for i, line in enumerate(lines):
+        if _FENCE.match(line) and not in_block:
+            in_block = True
+            j = next((k for k in range(i + 1, len(lines))
+                      if lines[k].strip()), None)
+            if j is not None and not _FENCE.match(lines[j]) \
+                    and _is_seed_echo(lines[j], word):
+                drop.add(j)
+            continue
+        if in_block and line.strip() and set(line.strip()) <= {"`", "~"}:
+            in_block = False
+    if not drop:
+        return text, 0
+    return "\n".join(x for i, x in enumerate(lines) if i not in drop), \
+        len(drop)
 
 
 def _tool_loop(body: dict, timeout: int) -> dict:
@@ -148,11 +284,13 @@ def _tool_loop(body: dict, timeout: int) -> dict:
                 if t.get("function", {}).get("name") in _p.OUR_NAMES}
     convo = body["messages"]
     # No hop count (removed 2026-09-22). The loop ends when the variant stops
-    # calling tools, or when its conversation no longer fits its 1/n of the
-    # main share -- then the tools are withdrawn and it answers.
+    # calling tools, or when its conversation no longer fits its share -- the
+    # helper's 3/8 for a second-brain candidate -- then the tools are
+    # withdrawn and it answers.
     share_n = body.get("_share_n") or 1
+    role = body.get("_role") or "main"
     while True:
-        if _p.context_full(body, convo, role="main", share_n=share_n):
+        if _p.context_full(body, convo, role=role, share_n=share_n):
             body = _p._land(body, convo)
         # Through the proxy's own reader, not a bare urlopen: it streams, so
         # `timeout` bounds the gap between tokens rather than the whole
@@ -179,57 +317,359 @@ def _tool_loop(body: dict, timeout: int) -> dict:
         body["messages"] = convo
 
 
-def _seeds(payload: dict, n: int) -> list[str]:
-    """One concept word per sample, mutually orthogonal and far from the
-    prompt in the model's own space. Empty -- never an exception -- when the
-    matrix is not extracted: a missing seed must not cost the request."""
+def _seeds(payload: dict, n: int) -> list[dict]:
+    """n concept seeds ({word, token_id, u32, hex}), mutually orthogonal and
+    far from the prompt in the model's own space. Empty -- never an exception
+    -- when the matrix is not extracted: a missing seed must not cost the
+    request."""
+    prompt = _task_text(payload.get("messages") or [])
+    return concept_seed.seed_for(prompt or None, n)
+
+
+# Candidate names. A is the answer already on its way to the client; B is the
+# second brain's answer (VARIANTS[0]); C is the second brain's tie-breaker.
+ORIGINAL = "original"
+TIEBREAK = "tiebreak"
+
+# Two candidates whose code parses and whose similarity (code_similarity, the
+# same measure the medoid uses) is at least this count as AGREEING, and the
+# original is kept without a tie-breaker. 0.80 is an UNMEASURED choice
+# (operator, 2026-09-23): nothing here has graded how often two parsing
+# candidates this similar are both right. bench/domain grades every candidate
+# and can measure it; until then do not cite it (PROTOCOL rule 10).
+AGREE = 0.80
+
+# The most steps the procedure runs: A, B and the tie-breaker C. A tier's
+# fanout above 3 allows nothing more.
+MAX_STEPS = 3
+
+# How long fan-out waits for the helper lane (admission.helper_lane) before it
+# is recorded as skipped: "helper busy". Generous, because the lane is held by
+# another request's deep thinking or fan-out for minutes, and the answer is
+# already written -- waiting costs latency, not correctness. A choice.
+LANE_WAIT = float(os.environ.get("YAMADORI_FANOUT_LANE_WAIT", "1200"))
+
+# What the tie-breaker is asked. The task comes first (Laya is not reading
+# this, but the model reads a long prompt better with the question up front),
+# then both candidates with their check results, then the one request.
+TIEBREAK_PROMPT = (
+    "{task}\n\n---\n\nTwo candidate solutions to the task above were written "
+    "independently. {verdict}\n\n"
+    "Candidate 1:\n{code_a}\nCheck: {check_a}\n\n"
+    "Candidate 2:\n{code_b}\nCheck: {check_b}\n\n"
+    "Write the single best final solution to the task. Start from whichever "
+    "candidate is closer to correct, fix what is wrong in it (the syntax "
+    "errors listed above, and any logic error you find), and give the "
+    "complete {lang} code in one fenced block.")
+
+
+def _helper_body(payload: dict, messages: list | None = None) -> dict:
+    """A payload for ONE second-brain generation: no tools, the helper's whole
+    3/8 of the pool (share_n=1), re-derived from its own prompt. The shaped
+    payload's effort and vendor sampling (tiers.apply) are kept."""
+    import tiers
+    body = dict(payload, tools=[])
+    body.pop("tool_choice", None)
+    if messages is not None:
+        body["messages"] = messages
+    body = tiers.rebudget(body, role="helper", share_n=1)
+    body["_role"] = "helper"
+    body["_share_n"] = 1
+    return body
+
+
+def _generate(body: dict, variant: dict, timeout: int) -> dict:
+    """One candidate; a failure is a candidate with no content and the error
+    recorded, never an exception out of fan-out."""
     try:
-        if not concept_seed.available():
-            return []
-        prompt = next((m.get("content") for m in
-                       reversed(payload.get("messages") or [])
-                       if m.get("role") == "user"
-                       and isinstance(m.get("content"), str)), "")
-        return concept_seed.draw(n, away_from=prompt or None)
+        r = _one(body, variant, timeout)
+    except Exception as e:                                       # noqa: BLE001
+        r = {"variant": variant["name"], "seed": variant.get("seed"),
+             "content": "", "error": f"{type(e).__name__}: {e}"}
+    r["role"] = body.get("_role") or "main"
+    return r
+
+
+def _task_text(messages: list) -> str:
+    """The task as the user wrote it: the last user message's text."""
+    for m in reversed(messages or []):
+        if m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if isinstance(c, str):
+            return c
+        if isinstance(c, list):
+            return "\n".join(p.get("text") or "" for p in c
+                             if isinstance(p, dict) and p.get("type") == "text")
+    return ""
+
+
+def _prompt_code(messages: list) -> list[dict]:
+    """The fenced code blocks of the question's latest user message
+    (code_check.prompt_code); [] when it has none or the checker is absent,
+    and then every candidate is checked on its own, exactly as before."""
+    cc = _code_check()
+    if cc is None or not hasattr(cc, "prompt_code"):
+        return []
+    try:
+        return cc.prompt_code(messages or [])
     except Exception:                                            # noqa: BLE001
         return []
 
 
-def run(payload: dict, n: int = 4, timeout: int = 3600,
-        variants: list | None = None) -> dict:
-    """Run n variants concurrently and report what they agreed on.
+def analyse(r: dict, lang: str, prompt: list | None = None) -> dict:
+    """One candidate's code in `lang`, graded by the checker. Never executed.
 
-    `timeout` is 3600 s. Under the one budget rule each variant may think for
-    up to its 1/n of main's 5/8 of the pool before answering (tiers.budget,
-    mcp/budget.py -- let it cook within its share), at 16-40 tok/s on decode that the
-    main lanes share, and n variants run at once. 900 s was sized against the
-    old 3000/6000 floors (docs/CONSTRAINTS.md item 13). It bounds the gap
-    between streamed tokens (see `_tool_loop`), and 3600 matches every other
-    generation timeout in the stack and llama-server's own `-to`.
+    {code, parses, errors, error_lines, warnings, truncated, ok, check_mode}:
+    `ok` is what the grade uses -- it parses AND it was not cut off (a
+    truncated answer that happens to parse is still missing its tail).
+    `prompt` is the question's code blocks (_prompt_code); see check_code."""
+    blocks = [dict(b, lang=_language(b["tag"])) for b in
+              _blocks(r.get("content") or "") if b["code"].strip()]
+    for b in blocks:
+        if b["lang"] is None and not b["tag"]:
+            b["lang"] = lang
+    mine = [b for b in blocks if b["lang"] == lang]
+    if not mine:
+        other = sorted({b["lang"] for b in blocks if b["lang"]})
+        why = (f"no {lang} code block"
+               + (f" (answered in {', '.join(other)})" if other else ""))
+        return {"code": "", "parses": False, "errors": None,
+                "error_lines": [why], "warnings": 0, "truncated": False,
+                "ok": False, "check_mode": None}
+    _, b = max(enumerate(mine), key=lambda kb: (len(kb[1]["code"].strip()),
+                                                 kb[0]))
+    chk = check_code(b["code"], lang, prompt)
+    truncated = not b["closed"] or _finish_reason(r) == "length"
+    return {"code": b["code"], "parses": chk["parses"],
+            "errors": chk["errors"], "error_lines": chk.get("error_lines") or [],
+            "warnings": chk["warnings"], "truncated": truncated,
+            "ok": bool(chk["parses"]) and not truncated,
+            "check_mode": chk.get("check_mode")}
+
+
+def _check_text(g: dict) -> str:
+    """A candidate's check result, in words, for the tie-breaker prompt."""
+    if g["parses"] is None:
+        return "not checked: no syntax checker could run."
+    if g["parses"] and g["truncated"]:
+        return "parses, but the answer was cut off before it finished."
+    if g["parses"]:
+        return "parses; no syntax errors."
+    lines = "; ".join(g["error_lines"][:5]) or "a syntax error"
+    return f"does NOT parse: {lines}."
+
+
+def _fenced(code: str, lang: str) -> str:
+    if not code.strip():
+        return "(no code)"
+    fence = "````" if "```" in code else "```"
+    return f"{fence}{lang}\n{code.rstrip()}\n{fence}"
+
+
+def tiebreak_messages(messages: list, lang: str, a: dict, b: dict,
+                      verdict: str) -> list:
+    """C's conversation: the original one, with the last user turn replaced by
+    the task plus both candidates and their check results (appended as a new
+    user turn when the last message is not a plain-text user message)."""
+    prompt = TIEBREAK_PROMPT.format(
+        task=_task_text(messages).strip(), verdict=verdict, lang=lang,
+        code_a=_fenced(a["code"], lang), check_a=_check_text(a),
+        code_b=_fenced(b["code"], lang), check_b=_check_text(b))
+    msgs = json.loads(json.dumps(messages or []))
+    if msgs and msgs[-1].get("role") == "user" \
+            and isinstance(msgs[-1].get("content"), str):
+        msgs[-1] = dict(msgs[-1], content=prompt)
+    else:
+        msgs.append({"role": "user", "content": prompt})
+    return msgs
+
+
+def _row(i: int, r: dict, g: dict | None, similarity) -> dict:
+    row = {"index": i, "variant": r.get("variant"), "role": r.get("role"),
+           "seed": r.get("seed_info"), "length": len(r.get("content") or ""),
+           "seed_echo_stripped": int(r.get("seed_echo_stripped") or 0)}
+    if r.get("error") or not r.get("content"):
+        row["error"] = bool(r.get("error")) or "empty"
+    if g is None:
+        row.update(parses=None, errors=None, similarity=None,
+                   check_mode=None)
+    else:
+        row.update(parses=g["parses"], errors=g["errors"],
+                   truncated=g["truncated"], warnings=g["warnings"],
+                   similarity=similarity, check_mode=g.get("check_mode"))
+    return row
+
+
+def _decided(results: list, winner: int, selection: str, why: str,
+             rows: list, lang: str | None) -> dict:
+    return {"n": sum(1 for r in results if r.get("content")),
+            "agreement": None, "votes": 0, "consensus_path": None,
+            "path_votes": {}, "winner": results[winner], "results": results,
+            "selection": selection, "fallback": False, "code_language": lang,
+            "winner_index": winner, "winner_reason": why,
+            "candidates": rows}
+
+
+def _out(base: dict, v: dict, **kw) -> dict:
+    """A run() result: the selection `v`, the procedure's `base` (mode,
+    steps, similarity_ab ...) over it, and `kw` over both."""
+    return {**v, **base, **kw}
+
+
+def run(payload: dict, original: dict | None = None, n: int = MAX_STEPS,
+        timeout: int = 3600, lane_timeout: float | None = None,
+        seed_for=None) -> dict:
+    """The sequential fan-out: A (given), B, grade, and C only when needed.
+
+    `original` is candidate A, {"content", "raw"?}; when None (a script
+    calling this directly) it is generated first, in the main role, from
+    `payload` as shaped. `n` is the most candidates including A. B and C run
+    one after the other in the HELPER role, each a job of shomen.run on the
+    helper lane, so at most one second-brain context is live. Returns the consensus()
+    shape plus mode, steps, stop_reason, similarity_ab and, when the lane
+    never came free, skipped: "helper busy".
+
+    `timeout` is 3600 s and bounds the gap between streamed tokens (see
+    `_tool_loop`), matching every other generation timeout in the stack and
+    llama-server's own `-to`; decode runs at 16-40 tok/s on this card.
+
+    B and C are jobs of the ONE second-brain runner (shomen.run, jobs
+    `alternative` and `tiebreak`), each on the helper lane. `seed_for(job,
+    prompt)` supplies each job's concept seed -- the proxy's ledger, so a
+    replay of the request draws the same word; without it a fresh one is
+    drawn per job (a script calling this directly).
     """
-    pool = variants if variants is not None else VARIANTS
-    use = [dict(v) for v in pool[:max(1, min(n, len(pool)))]]
-    if len(use) > 1:
-        for v, seed in zip(use, _seeds(payload, len(use))):
-            v.setdefault("seed", seed)
-    # n samples run at once in the conversation's 5/8 of the pool, so each
-    # gets 1/n of it -- a fan-out must not overflow the share it came from.
-    import tiers
-    payload = tiers.rebudget(payload, role="main", share_n=len(use))
-    payload["_share_n"] = len(use)
-    with cf.ThreadPoolExecutor(max_workers=len(use)) as ex:
-        futs = [ex.submit(_one, payload, v, timeout) for v in use]
-        results = []
-        for f in futs:
-            try:
-                results.append(f.result())
-            except Exception as e:                               # noqa: BLE001
-                results.append({"variant": "?", "content": "",
-                                "error": f"{type(e).__name__}: {e}"})
+    import admission
+    import shomen
+    n_max = max(1, min(int(n or 1), MAX_STEPS))
+    if original is None:
+        a = _generate(dict(payload, _role="main"),
+                      {"name": ORIGINAL, "nudge": ""}, timeout)
+    else:
+        a = dict(original, variant=ORIGINAL, role="main")
+    a.setdefault("seed", None)
+    results = [a]
+    base = {"mode": "sequential", "asked": n_max, "steps": 1,
+            "stop_reason": None, "similarity_ab": None}
+    if n_max < 2:
+        return _out(base, _decided(results, 0, None, "fan-out of 1: "
+                                     "nothing to compare", [], None),
+                    stop_reason="n=1")
+    code = _code_selection([a]) if a.get("content") else None
+    lang = code["language"] if code else None
+    # The question's own code, if it carries any: a candidate parses on its
+    # own OR appended after it (code_check.check_against_prompt). Checked on
+    # its own only, every continuation of starter code "does not parse" and
+    # the grade can never separate two of them.
+    pre = _prompt_code(payload.get("messages") or []) if lang else []
+    wait = LANE_WAIT if lane_timeout is None else lane_timeout
 
+    def seed(job: str):
+        prompt = _task_text(payload.get("messages") or [])
+        if seed_for is not None:
+            return seed_for(job, prompt)
+        return (concept_seed.seed_for(prompt or None, 1) or [None])[0]
+
+    # ONE LANE HOLD FOR B AND C: one fan-out's candidates are never split by
+    # another request's second-brain job. Each is still a job of the one
+    # runner (shomen.run, held=True).
+    with admission.helper_lane(timeout=wait, what="fan-out") as got:
+        if not got:
+            out = _decided(results, 0, None, "the helper lane stayed busy; "
+                           "the original is kept", [], lang)
+            return _out(base, out, skipped="helper busy",
+                        stop_reason="skipped: helper busy")
+        # A fresh concept seed for EVERY second-brain run (operator,
+        # 2026-09-23): one for B and, drawn separately so it differs, one for the
+        # tie-breaker C.
+        b = shomen.run("alternative", body=_helper_body(payload),
+                       variant=VARIANTS[0], seed=seed("alternative"),
+                       timeout=timeout, held=True)
+        results.append(b)
+        base["steps"] = 2
+
+        if lang is None:
+            # PROSE: the path/symbol vote over [A, B], recorded only.
+            v = consensus(results)
+            return _out(base, v, stop_reason="prose: recorded only; the "
+                        "original is delivered")
+
+        ga, gb = analyse(a, lang, pre), analyse(b, lang, pre)
+        sim = (code_similarity(ga["code"], gb["code"], lang)
+               if ga["ok"] and gb["ok"] else None)
+        base["similarity_ab"] = sim
+        rows = [_row(0, a, ga, sim), _row(1, b, gb, sim)]
+        if not b.get("content"):
+            return _out(base, _decided(
+                results, 0, "code_grade", "the second candidate returned "
+                "nothing; the original is kept", rows, lang),
+                stop_reason="second candidate failed")
+        if ga["parses"] is None and gb["parses"] is None:
+            return _out(base, _decided(
+                results, 0, "code_grade", "no syntax checker could run; the "
+                "original is kept", rows, lang),
+                stop_reason="unchecked: no syntax checker")
+        if ga["ok"] != gb["ok"]:
+            w = 0 if ga["ok"] else 1
+            return _out(base, _decided(
+                results, w, "code_grade", f"clear: only candidate {w + 1}'s "
+                f"{lang} code parses (and is complete)", rows, lang),
+                stop_reason="clear: only one parses")
+        if ga["ok"] and sim is not None and sim >= AGREE:
+            return _out(base, _decided(
+                results, 0, "code_grade", f"clear: both parse and agree "
+                f"(similarity {sim:.2f} >= {AGREE}); the main brain's answer "
+                f"is kept", rows, lang),
+                stop_reason="clear: agreement")
+
+        verdict = (("Both parse but they disagree"
+                    + (f" (similarity {sim:.2f})." if sim is not None
+                       else "."))
+                   if ga["ok"] else "Neither one is a complete solution that "
+                   "parses as written.")
+        why_c = ("both parse but disagree" if ga["ok"]
+                 else "neither parses")
+        if n_max < 3:
+            return _out(base, _decided(
+                results, 0, "code_grade", f"unresolved ({why_c}) and fan-out "
+                f"{n_max} leaves no room for a tie-breaker; the original is "
+                f"kept", rows, lang),
+                stop_reason=f"unresolved: {why_c}, no tie-breaker allowed")
+
+        msgs = tiebreak_messages(payload.get("messages") or [], lang, ga, gb,
+                                 verdict)
+        c = shomen.run("tiebreak", body=_helper_body(payload, msgs),
+                       variant={"name": TIEBREAK, "nudge": ""},
+                       seed=seed("tiebreak"), timeout=timeout, held=True)
+        results.append(c)
+        base["steps"] = 3
+
+    v = consensus(results, prefer=2, prompt=pre)
+    return _out(base, v, stop_reason=f"tie-breaker: {why_c}")
+
+
+def consensus(results: list[dict], prefer: int | None = None,
+              prompt: list | None = None) -> dict:
+    """Pick the winner among the candidates' answers and report the vote.
+
+    `prefer` is the index that wins a code-medoid tie (the tie-breaker C in
+    the sequential fan-out). `prompt` is the question's code blocks
+    (_prompt_code): a candidate then parses on its own or appended after
+    one of them (check_code).
+
+    Code answers go to the code medoid (see the module docstring); answers
+    without code keep the path/symbol vote. Every return names how the
+    winner was chosen (`selection`), the winner's index into `results`, why
+    it won, and per candidate whether its code parses, its similarity to the
+    others and its length.
+    """
     good = [r for r in results if r.get("content")]
     if not good:
-        return {"results": results, "agreement": None, "winner": None}
+        return {"results": results, "agreement": None, "winner": None,
+                "selection": None, "winner_index": None,
+                "winner_reason": "no variant returned an answer",
+                "candidates": _candidate_rows(results, {})}
 
     path_votes: Counter = Counter()
     sym_votes: Counter = Counter()
@@ -254,11 +694,37 @@ def run(payload: dict, n: int = 4, timeout: int = 3600,
 
     # The winning ANSWER is the one that best represents the consensus, not the
     # first or the longest: the answer that names the most agreed-upon claims.
-    def score(r):
+    def claim_score(r):
         p, s = claims(r["content"])
-        return (sum(path_votes[x] for x in p) + sum(sym_votes[x] for x in s),
-                -len(r["content"]))
-    winner = max(good, key=score)
+        return sum(path_votes[x] for x in p) + sum(sym_votes[x] for x in s)
+
+    code = _code_selection(results, prefer=prefer, prompt=prompt)
+    if code is None:
+        # No code to judge: the path/symbol vote, exactly as before. Its
+        # shortest-on-tie is kept for prose; it is what the file-location
+        # measurement above ran with.
+        winner = max(good, key=lambda r: (claim_score(r), -len(r["content"])))
+        selection = "path_consensus"
+        info: dict = {}
+        top = claim_score(winner)
+        why = (f"names the most agreed-upon paths/symbols ({top} votes)" if top
+               else "no path or symbol votes were cast; the shortest answer "
+                    "(the path vote's tie-break)")
+    elif code["winner"] is not None:
+        winner = results[code["winner"]]
+        selection = "code_medoid"
+        info = code["info"]
+        why = code["why"]
+    else:
+        # Nothing parses. The vote, but a tie goes to the LONGEST answer: the
+        # shortest broken answer is the likeliest to be a truncated one.
+        winner = max(good, key=lambda r: (claim_score(r), len(r["content"])))
+        selection = "fallback"
+        info = code["info"]
+        why = (f"no candidate's {code['language']} code parses "
+               f"({code['why']}); fell back to the path/symbol vote with "
+               f"ties to the longest answer")
+        print(f"  fan-out: FALLBACK selection -- {why}", flush=True)
 
     return {
         "n": len(good),
@@ -268,7 +734,438 @@ def run(payload: dict, n: int = 4, timeout: int = 3600,
         "path_votes": dict(path_votes.most_common(5)),
         "winner": winner,
         "results": results,
+        "selection": selection,
+        "fallback": selection == "fallback",
+        "code_language": code["language"] if code else None,
+        "winner_index": next(i for i, r in enumerate(results) if r is winner),
+        "winner_reason": why,
+        "candidates": _candidate_rows(results, info),
     }
+
+
+def _candidate_rows(results: list[dict], info: dict) -> list[dict]:
+    rows = []
+    for i, r in enumerate(results):
+        row = {"index": i, "variant": r.get("variant"), "role": r.get("role"),
+               "seed": r.get("seed_info"),
+               "length": len(r.get("content") or ""),
+               "seed_echo_stripped": int(r.get("seed_echo_stripped") or 0)}
+        if r.get("error") or not r.get("content"):
+            row["error"] = bool(r.get("error")) or "empty"
+        c = info.get(i)
+        if c is not None:
+            row.update(parses=c["parses"], errors=c.get("errors"),
+                       similarity=c["similarity"],
+                       code_length=len(c["code"]), truncated=c["truncated"],
+                       warnings=c["warnings"],
+                       check_mode=c.get("check_mode"))
+        else:
+            row.update(parses=None, errors=None, similarity=None,
+                       check_mode=None)
+        rows.append(row)
+    return rows
+
+
+def selection_record(v: dict) -> dict:
+    """The compact part of a `run()` result for x_yamadori.fanout: the mode,
+    the steps run and why it stopped, the A-B similarity, how the winner was
+    chosen, its index and why, and per candidate its role, seed, parses,
+    error count, similarity and length. Carries no answer text. The keys the
+    benchmark harnesses read (selection, candidates[].parses) are kept.
+
+    Per candidate, `check_mode` says which form made `parses` true
+    (code_check.check_against_prompt): "standalone" (on its own),
+    "appended" (only after one of the question's code blocks), "neither";
+    None when the question carries no code, or the answer is prose."""
+    if not v:
+        return {}
+    out = {"mode": v.get("mode"), "steps": v.get("steps"),
+           "stop_reason": v.get("stop_reason"),
+           "similarity_ab": v.get("similarity_ab"),
+           "selection": v.get("selection"),
+           "winner_index": v.get("winner_index"),
+           "why": v.get("winner_reason"),
+           "candidates": [{"variant": c.get("variant"),
+                           "role": c.get("role"),
+                           "seed": c.get("seed"),
+                           "parses": c.get("parses"),
+                           "check_mode": c.get("check_mode"),
+                           "errors": c.get("errors"),
+                           "similarity": c.get("similarity"),
+                           "length": c.get("length"),
+                           "seed_echo_stripped": c.get("seed_echo_stripped")}
+                          for c in v.get("candidates") or []]}
+    if v.get("skipped"):
+        out["skipped"] = v["skipped"]
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Code-aware selection. See "HOW THE WINNER IS PICKED FOR A CODE ANSWER" above.
+# ---------------------------------------------------------------------------
+
+# Mean similarities this close count as a tie and go to the tie-breaks. A
+# choice, not a measurement (module docstring, last paragraph).
+SIM_TIE = 0.01
+# Token n-gram width for the similarity. Trigrams keep local order, so the
+# same tokens in a different structure do not agree. Also a choice.
+NGRAM = 3
+# Bounded work per candidate: a pathological answer must not stall selection.
+MAX_TOKENS = 20000
+
+# Used only when mcp/code_check.py cannot be imported.
+_CODE_LANGS = {"python", "typescript", "tsx", "javascript", "jsx", "rust",
+               "c", "cpp"}
+_GRAMMAR = {"python": "python", "typescript": "typescript", "tsx": "tsx",
+            "javascript": "javascript", "jsx": "javascript", "rust": "rust",
+            "c": "c", "cpp": "cpp"}
+_ALIASES = {"py": "python", "python3": "python", "py3": "python",
+            "ts": "typescript", "mts": "typescript", "cts": "typescript",
+            "js": "javascript", "mjs": "javascript", "cjs": "javascript",
+            "node": "javascript", "rs": "rust", "h": "c", "c++": "cpp",
+            "cc": "cpp", "cxx": "cpp", "hpp": "cpp", "hh": "cpp", "hxx": "cpp"}
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})\s*([^\s`{]*)")
+
+
+def _code_check():
+    """mcp/code_check.py when it imports, else None. It is being built
+    concurrently; selection must survive it being absent or mid-edit."""
+    try:
+        import code_check
+        if all(hasattr(code_check, a) for a in ("check", "fenced_blocks",
+                                                 "normalize_language")):
+            return code_check
+    except Exception:                                            # noqa: BLE001
+        pass
+    return None
+
+
+def _language(tag: str) -> str | None:
+    cc = _code_check()
+    if cc is not None:
+        lang = cc.normalize_language(tag)
+        return lang if lang in cc.CODE_LANGS else None
+    k = (tag or "").strip().lower().lstrip(".")
+    k = _ALIASES.get(k, k)
+    return k if k in _CODE_LANGS else None
+
+
+def _blocks(text: str) -> list[dict]:
+    """[{tag, code, closed}] for every fenced block, in order."""
+    cc = _code_check()
+    if cc is not None:
+        return [{"tag": b["lang"], "code": b["code"], "closed": b["closed"]}
+                for b in cc.fenced_blocks(text or "")]
+    # The same reading as bench/domain/grade.py code_blocks(): markdown fences
+    # are flat text, so this is a line scanner, not a parser (PROTOCOL rule 8).
+    out, cur = [], None
+    for line in (text or "").splitlines():
+        if cur is None:
+            m = _FENCE.match(line)
+            if m:
+                cur = {"fence": m.group(1),
+                       "tag": m.group(2).strip().lower().lstrip("."),
+                       "lines": []}
+            continue
+        s = line.strip()
+        if s and set(s) == {cur["fence"][0]} and len(s) >= len(cur["fence"]):
+            out.append({"tag": cur["tag"], "code": "\n".join(cur["lines"]),
+                        "closed": True})
+            cur = None
+        else:
+            cur["lines"].append(line)
+    if cur is not None and cur["lines"]:
+        out.append({"tag": cur["tag"], "code": "\n".join(cur["lines"]),
+                    "closed": False})
+    return out
+
+
+_ts_parsers: dict = {}
+
+
+def _tree(code: str, lang: str):
+    """Tree-sitter root node, or None when no parser is available."""
+    cc = _code_check()
+    try:
+        if cc is not None and hasattr(cc, "parse_tree"):
+            return cc.parse_tree(code, lang)
+        g = _GRAMMAR[lang]
+        if g not in _ts_parsers:
+            from tree_sitter_language_pack import get_parser
+            _ts_parsers[g] = get_parser(g)
+        return _ts_parsers[g].parse(code.encode("utf-8")).root_node
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _prepared(code: str, lang: str) -> str:
+    # A method excerpt is valid Python once its common indent is removed;
+    # code_check.check() does the same before it parses.
+    return textwrap.dedent(code) if lang == "python" else code
+
+
+def check_code(code: str, lang: str, prompt: list | None = None) -> dict:
+    """{parses, errors, error_lines, warnings, checker, check_mode}. `parses`
+    is None when no checker could run -- unknown is not the same as broken.
+    Never executes `code`: code_check uses compile() and tree-sitter, and
+    run_format=False keeps its formatter subprocess off.
+
+    `prompt` is the question's code blocks (_prompt_code). The general rule
+    (code_check.check_against_prompt): the code parses if it parses on its
+    own OR appended directly after one of them. `check_mode` records which
+    ("standalone", "appended", "neither"); None when `prompt` is empty, and
+    then this is exactly the standalone check it always was. The errors and
+    warnings are those of the form that parsed; for "neither", the
+    standalone form's, as before."""
+    cc = _code_check()
+    if cc is not None:
+        try:
+            if hasattr(cc, "check_against_prompt"):
+                g = cc.check_against_prompt(code, lang, prompt or [])
+                res, mode = g["result"], g["check_mode"]
+            else:
+                res, mode = cc.check(code, lang, run_format=False), None
+            se = res.get("syntax_errors") or []
+            errs = len(se)
+            return {"parses": errs == 0, "errors": errs,
+                    "error_lines": [f"line {e.get('line')}: "
+                                    f"{str(e.get('message') or '')[:160]}"
+                                    for e in se[:5]],
+                    "warnings": len(res.get("defects") or []),
+                    "checker": "code_check", "check_mode": mode}
+        except Exception:                                        # noqa: BLE001
+            pass
+    root = _tree(_prepared(code, lang), lang)
+    if root is None:
+        return {"parses": None, "errors": None, "warnings": 0,
+                "checker": None, "check_mode": None}
+    return {"parses": not root.has_error, "errors": int(root.has_error),
+            "error_lines": (["tree-sitter reports a syntax error"]
+                            if root.has_error else []),
+            "warnings": 0, "checker": "tree-sitter", "check_mode": None}
+
+
+_ID_TYPES = {"identifier", "type_identifier", "property_identifier",
+             "field_identifier", "shorthand_property_identifier",
+             "shorthand_property_identifier_pattern",
+             "private_property_identifier", "statement_identifier"}
+_STRING_TYPES = {"string", "template_string", "string_literal",
+                 "raw_string_literal", "char_literal", "concatenated_string",
+                 "character_literal"}
+# Fields whose subtree binds a name: definitions, parameters, assignment
+# targets, patterns and declarators across the tree-sitter grammars in use.
+_BIND_FIELDS = ("name", "left", "parameters", "parameter", "pattern",
+                "declarator", "alias")
+
+
+def _walk(node):
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        yield n
+        stack.extend(reversed(n.children))
+
+
+def _bound_names(root) -> set[str]:
+    names: set[str] = set()
+    for n in _walk(root):
+        for f in _BIND_FIELDS:
+            c = n.child_by_field_name(f)
+            if c is None:
+                continue
+            for x in _walk(c):
+                if x.type in _ID_TYPES and x.text:
+                    names.add(x.text.decode("utf-8", "replace"))
+    return names
+
+
+def code_tokens(code: str, lang: str) -> list[str] | None:
+    """The normalized token sequence the similarity is taken over.
+
+    Tree-sitter leaves in order; comments and whitespace dropped; a string
+    literal is one token; a name the code binds itself becomes `$id`, so
+    renaming a variable changes nothing, while a name it only USES (a
+    builtin, an imported API, a method) keeps its spelling, so `sorted` and
+    `min` still disagree. Python blocks get open/close tokens, because there
+    the indentation IS the structure.
+    """
+    root = _tree(_prepared(code, lang), lang)
+    if root is None:
+        return None
+    bound = _bound_names(root)
+    out: list[str] = []
+    stack: list = [root]
+    while stack and len(out) < MAX_TOKENS:
+        n = stack.pop()
+        if isinstance(n, str):
+            out.append(n)
+            continue
+        t = n.type
+        if "comment" in t:
+            continue
+        if t in _STRING_TYPES:
+            out.append("$str")
+            continue
+        if n.child_count == 0:
+            text = (n.text or b"").decode("utf-8", "replace")
+            if t in _ID_TYPES and text in bound:
+                out.append("$id")
+            elif text.strip():
+                out.append(text)
+            continue
+        if t == "block":
+            stack.append("}")
+        stack.extend(reversed(n.children))
+        if t == "block":
+            stack.append("{")
+    return out
+
+
+def _ngrams(tokens: list[str]) -> Counter:
+    if len(tokens) < NGRAM:
+        return Counter([tuple(tokens)]) if tokens else Counter()
+    return Counter(tuple(tokens[i:i + NGRAM])
+                   for i in range(len(tokens) - NGRAM + 1))
+
+
+def _jaccard(a: Counter, b: Counter) -> float:
+    if not a and not b:
+        return 1.0
+    inter = sum((a & b).values())
+    union = sum((a | b).values())
+    return inter / union if union else 0.0
+
+
+def code_similarity(a: str, b: str, lang: str) -> float | None:
+    """Similarity in [0, 1] of two pieces of code in `lang`; None when either
+    cannot be tokenized."""
+    ta, tb = code_tokens(a, lang), code_tokens(b, lang)
+    if ta is None or tb is None:
+        return None
+    return round(_jaccard(_ngrams(ta), _ngrams(tb)), 4)
+
+
+def _finish_reason(r: dict) -> str | None:
+    try:
+        return ((r.get("raw") or {}).get("choices") or [{}])[0].get(
+            "finish_reason")
+    except (AttributeError, IndexError, TypeError):
+        return None
+
+
+def _code_selection(results: list[dict],
+                    prefer: int | None = None,
+                    prompt: list | None = None) -> dict | None:
+    """The code medoid among `results`, or None when this is not a code
+    answer (fewer than half the answers carry a code-language block).
+
+    Returns {language, winner (index into results, or None when nothing
+    parses), why, info: {index: {code, parses, similarity, truncated,
+    warnings, length, check_mode}}}. `prompt`: see check_code. The
+    similarity is always taken over each candidate's own code.
+    """
+    good = [(i, r) for i, r in enumerate(results) if r.get("content")]
+    blocks = {i: [dict(b, lang=_language(b["tag"]))
+                  for b in _blocks(r["content"]) if b["code"].strip()]
+              for i, r in good}
+    tagged = Counter(b["lang"] for bs in blocks.values() for b in bs
+                     if b["lang"])
+    if not tagged:
+        return None
+    lang = tagged.most_common(1)[0][0]
+    # An untagged block is read as the dominant language -- someone tagged
+    # it, so that is what the question was answered in. Never guessed alone.
+    for bs in blocks.values():
+        for b in bs:
+            if b["lang"] is None and not b["tag"]:
+                b["lang"] = lang
+    with_code = [i for i, _ in good if any(b["lang"] for b in blocks[i])]
+    if len(with_code) * 2 <= len(good):
+        return None
+
+    info: dict = {}
+    for i in with_code:
+        r = results[i]
+        mine = [b for b in blocks[i] if b["lang"] == lang]
+        cand_lang = lang
+        if not mine:                      # answered in another language
+            mine = [b for b in blocks[i] if b["lang"]]
+            cand_lang = mine[-1]["lang"]
+        # The largest block; a tie goes to the later one (a corrected version
+        # usually follows the first attempt).
+        k, b = max(enumerate(mine),
+                   key=lambda kb: (len(kb[1]["code"].strip()), kb[0]))
+        chk = (check_code(b["code"], cand_lang, prompt) if cand_lang == lang
+               else {"parses": False, "warnings": 0, "errors": None,
+                     "check_mode": None})
+        info[i] = {"code": b["code"], "language": cand_lang,
+                   "parses": chk["parses"], "warnings": chk["warnings"],
+                   "errors": chk.get("errors"),
+                   "check_mode": chk.get("check_mode"),
+                   "truncated": (not b["closed"]
+                                 or _finish_reason(r) == "length"),
+                   "length": len(r["content"]), "similarity": None}
+
+    valid = [i for i in info if info[i]["parses"]]
+    if not valid:
+        unchecked = all(info[i]["parses"] is None for i in info)
+        return {"language": lang, "winner": None, "info": info,
+                "why": ("no syntax checker could run: tree-sitter is "
+                        "unavailable" if unchecked
+                        else f"{len(info)} of {len(info)} have syntax errors "
+                             f"or are in another language")}
+    complete = [i for i in valid if not info[i]["truncated"]]
+    set_aside = [i for i in valid if i not in complete] if complete else []
+    pool = complete or valid
+
+    toks = {i: _ngrams(code_tokens(info[i]["code"], lang) or []) for i in pool}
+    for i in pool:
+        others = [_jaccard(toks[i], toks[j]) for j in pool if j != i]
+        info[i]["similarity"] = (round(sum(others) / len(others), 4)
+                                 if others else None)
+
+    excluded = len(info) - len(valid)
+    notes = []
+    if excluded:
+        notes.append(f"{excluded} excluded for syntax errors or another "
+                     f"language")
+    if set_aside:
+        notes.append(f"{len(set_aside)} set aside as truncated")
+    tail = f" ({'; '.join(notes)})" if notes else ""
+
+    if len(pool) == 1:
+        w = pool[0]
+        return {"language": lang, "winner": w, "info": info,
+                "why": f"the only candidate left whose {lang} code "
+                       f"parses{tail}"}
+
+    best = max(info[i]["similarity"] for i in pool)
+    tied = [i for i in pool if info[i]["similarity"] >= best - SIM_TIE]
+    median = statistics.median(len(info[i]["code"]) for i in pool)
+
+    def tie_key(i):
+        c = info[i]
+        return (c["warnings"], c["truncated"],
+                abs(len(c["code"]) - median), -len(c["code"]), i)
+
+    w = (prefer if prefer in tied and len(tied) > 1
+         else min(tied, key=tie_key))
+    why = (f"medoid: highest mean similarity "
+           f"({info[w]['similarity']:.2f}) to the other {len(pool) - 1} "
+           f"candidates whose {lang} code parses{tail}")
+    if len(tied) > 1:
+        rest = [info[i] for i in tied if i != w]
+        if w == prefer:
+            by = "preferring the tie-breaker's answer"
+        elif any(c["warnings"] > info[w]["warnings"] for c in rest):
+            by = "fewer checker warnings"
+        elif any(c["truncated"] and not info[w]["truncated"] for c in rest):
+            by = "a complete answer"
+        else:
+            by = "code length nearest the median"
+        why += (f"; tied within {SIM_TIE} with {len(tied) - 1} other(s), "
+                f"broken by {by}")
+    return {"language": lang, "winner": w, "info": info, "why": why}
 
 
 def _choice_averaged(state: str, instructions: str, criteria: dict,
@@ -289,8 +1186,12 @@ def _choice_averaged(state: str, instructions: str, criteria: dict,
     the correct outcome and what the margin gate is then able to catch.
 
     Costs two calls instead of one, about 100ms at this model's latency.
+    None without a call when YAMADORI_E1=1 (Laya is off the request path).
     """
     import code_search as cs
+    import e1
+    if not e1.laya_allowed():
+        return None
     keys = list(criteria)
     if len(keys) < 2:
         return None
@@ -373,3 +1274,175 @@ def dissent_note(v: dict) -> str:
     if alts:
         note += " Other candidates: " + ", ".join(alts[:3]) + "."
     return note
+
+
+# ---------------------------------------------------------------------------
+# THE HAND-BACK (operator decision, 2026-09-23): the second brain's work is
+# never thrown away. Until then a prose B was recorded as a vote and dropped,
+# and a code loser's different approach was dropped with it.
+#
+#   PROSE  B's (or C's) points that the original does not make -- a named
+#          path or `symbol` the original lacks, or a sentence whose content
+#          words are mostly absent from the original -- as an "alternative
+#          view". proxy._fan_out decides where it crosses.
+#   CODE   the winner is still what is delivered; one line names what each
+#          loser did differently: the APIs it USES that the delivered code
+#          does not (names the code binds itself are ignored, so a renamed
+#          variable is not a difference). Material = at least one such name,
+#          in a loser whose code parses (a broken tree cannot say which
+#          names it binds).
+#
+# Every threshold here is a CHOICE, not a measurement (PROTOCOL rule 10):
+# nothing in the repo has graded whether a handed-back point improves an
+# answer. bench/domain can.
+# ---------------------------------------------------------------------------
+ALT_MIN_WORDS = 4        # a sentence shorter than this is never "a point"
+ALT_NOVELTY = 0.5        # share of its content words absent from the original
+ALT_MAX_POINTS = 6
+ALT_MAX_CHARS = 1200
+CODE_NOTE_NAMES = 5      # names listed per loser in the one-line code note
+
+_LETTERS = "ABCDEFGH"
+_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_STOPWORDS = {
+    "the", "and", "for", "that", "this", "with", "are", "was", "were", "not",
+    "but", "you", "your", "can", "will", "would", "should", "could", "from",
+    "have", "has", "had", "its", "it's", "they", "them", "their", "there",
+    "then", "than", "which", "what", "when", "where", "who", "how", "why",
+    "into", "onto", "also", "just", "use", "used", "uses", "using", "one",
+    "all", "any", "each", "other", "some", "such", "these", "those", "only",
+    "more", "most", "very", "here", "does", "did", "done", "been", "being",
+    "may", "might", "must", "about", "over", "under", "out", "because"}
+_SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z`(\[])")
+
+
+def _content_words(text: str) -> set[str]:
+    return {w.lower() for w in _WORD.findall(text or "")} - _STOPWORDS
+
+
+def _prose_points(text: str) -> list[str]:
+    """The answer as points: each bullet or line, each sentence of a
+    paragraph. Fenced code is left out -- a prose hand-back carries prose."""
+    out, fence = [], False
+    for raw in (text or "").splitlines():
+        s = raw.strip()
+        if s.startswith(("```", "~~~")):
+            fence = not fence
+            continue
+        if fence or not s:
+            continue
+        s = re.sub(r"^(?:[-*•]|\d+[.)]|#+)\s+", "", s)
+        out += [p.strip() for p in _SENTENCE.split(s) if p.strip()]
+    return out
+
+
+def differing_points(original: str, other: str) -> list[str]:
+    """The points in `other` that `original` does not make."""
+    a_words = _content_words(original)
+    a_paths, a_syms = claims(original)
+    out = []
+    for p in _prose_points(other):
+        paths, syms = claims(p)
+        words = _content_words(p)
+        new_claim = (paths - a_paths) or (syms - a_syms)
+        novel = (len(words) >= ALT_MIN_WORDS
+                 and len(words - a_words) / len(words) >= ALT_NOVELTY)
+        if new_claim or novel:
+            out.append(p)
+    return out
+
+
+def _used_names(code: str, lang: str) -> tuple[set[str], set[str]] | None:
+    """(identifiers the code uses, identifiers it binds), from tree-sitter;
+    None when no parser is available."""
+    root = _tree(_prepared(code, lang), lang)
+    if root is None:
+        return None
+    used = set()
+    for n in _walk(root):
+        if n.child_count == 0 and n.type in _ID_TYPES and n.text:
+            used.add(n.text.decode("utf-8", "replace"))
+    return used, _bound_names(root)
+
+
+def handback(v: dict) -> dict | None:
+    """What the second brain's candidates hand back beyond the winner.
+
+    {"kind": "prose"|"code", "text", "from": [letters], "points": n}, or
+    None when nothing differs materially. `text` is bare (points as "- "
+    lines, or the code note's one sentence); proxy._fan_out frames it.
+    """
+    results = list((v or {}).get("results") or [])
+    if len(results) < 2 or not (results[0].get("content") or "").strip():
+        return None
+    lang = v.get("code_language")
+    if lang is None:
+        return _prose_handback(results)
+    return _code_handback(results, v.get("winner_index"), lang)
+
+
+def _prose_handback(results: list[dict]) -> dict | None:
+    original = results[0].get("content") or ""
+    labelled = len([r for r in results[1:] if r.get("content")]) > 1
+    points, sources = [], []
+    for i, r in enumerate(results[1:], start=1):
+        pts = differing_points(original, r.get("content") or "")
+        if pts:
+            sources.append(_LETTERS[i])
+            points += [(f"({_LETTERS[i]}) " if labelled else "") + p
+                       for p in pts]
+    if not points:
+        return None
+    lines, used = [], 0
+    for p in points[:ALT_MAX_POINTS]:
+        line = f"- {p}"
+        if used + len(line) > ALT_MAX_CHARS:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if len(lines) < len(points):
+        lines.append(f"- (+{len(points) - len(lines)} more points not shown; "
+                     f"the limit is {ALT_MAX_POINTS} points or "
+                     f"{ALT_MAX_CHARS} characters)")
+    return {"kind": "prose", "text": "\n".join(lines), "from": sources,
+            "points": len(points)}
+
+
+def _code_handback(results: list[dict], winner: int | None,
+                   lang: str) -> dict | None:
+    if winner is None or not 0 <= winner < len(results):
+        return None
+    w_code = analyse(results[winner], lang)["code"]
+    w_names = _used_names(w_code, lang) if w_code.strip() else None
+    if w_names is None:
+        return None
+    parts, sources = [], []
+    for i, r in enumerate(results):
+        if i == winner or not (r.get("content") or "").strip():
+            continue
+        g = analyse(r, lang)
+        # Only a loser whose code PARSES. In a broken tree the binding sites
+        # are error nodes, so its own parameters read as "used" names -- the
+        # first version reported `x` as an API the original used, for
+        # `def add_one(x:` (mcp/test_fanout_delivery.py).
+        if g["parses"] is not True:
+            continue
+        names = _used_names(g["code"], lang) if g["code"].strip() else None
+        if names is None:
+            continue
+        diff = sorted(names[0] - w_names[0] - w_names[1] - names[1])
+        if not diff:
+            continue
+        who = "the original" if i == 0 else f"candidate {_LETTERS[i]}"
+        shown = ", ".join(f"`{d}`" for d in diff[:CODE_NOTE_NAMES])
+        more = (f" and {len(diff) - CODE_NOTE_NAMES} more"
+                if len(diff) > CODE_NOTE_NAMES else "")
+        state = " (cut off before it finished)" if g["truncated"] else ""
+        parts.append(f"{who} used {shown}{more}{state}")
+        sources.append(_LETTERS[i])
+    if not parts:
+        return None
+    text = ("The other candidates differed: " + "; ".join(parts)
+            + ". The delivered code uses none of these.")
+    return {"kind": "code", "text": text, "from": sources,
+            "points": len(parts)}

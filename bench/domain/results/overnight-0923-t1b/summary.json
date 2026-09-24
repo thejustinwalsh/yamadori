@@ -1,0 +1,638 @@
+{
+ "run_id": "overnight-0923-t1",
+ "run_dir": "C:\\Users\\jwals\\llama-stack\\bench\\domain\\results\\overnight-0923-t1b",
+ "analysed_at": 1790196023.6677754,
+ "merged_run_dirs": [
+  "overnight-0923-t1a",
+  "overnight-0923-t1b"
+ ],
+ "conditions": {
+  "effort": "medium",
+  "max_tokens": 4096,
+  "temperature": 1.0,
+  "body_tier": "max",
+  "suite": "core,react",
+  "server_sampling": {
+   "model": "Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf",
+   "spec_type": "draft-mtp",
+   "reasoning_budget": "32768",
+   "temp": "1.0",
+   "top_p": "0.95",
+   "top_k": "20",
+   "min_p": "0.0",
+   "presence_penalty": "0",
+   "repeat_penalty": "1.0"
+  },
+  "tool_turns_limit": [
+   20
+  ]
+ },
+ "rows": 6,
+ "stale_rows": 12,
+ "bad_lines": 0,
+ "annotated_server_reasoning_cap": 0,
+ "condition_epochs": [
+  1790192597.0
+ ],
+ "rows_before_newest_epoch": 0,
+ "arms": [
+  "A6"
+ ],
+ "tasks": {
+  "all": 6,
+  "uncontaminated": 6,
+  "contaminated": 0,
+  "contaminated_domains": []
+ },
+ "caveats": [
+  "12 stale_code rows excluded (measured a stack since fixed): condition epoch 2026-09-23 15:43:17: ran on an earlier stack (no generate_image/describe_image, no tool-turn cap); redone under one condition (operator); pre-sequential-fanout (A6 made under parallel fan-out, 2026-09-23)",
+  "preflight checks were OVERRIDDEN for part of this run: live_stack, proxy_fresh, run_tests",
+  "the hints corpus changed between invocations of this run (manifest runs[].hints_corpus): hint rows before and after measured different corpora",
+  "timing is CONCURRENT with livebench, swebench: every seconds and tokens/s figure shared the GPU with them and is not a clean measurement"
+ ],
+ "timing": {
+  "concurrent_with": [
+   "livebench",
+   "swebench"
+  ],
+  "clean": false,
+  "label": "CONCURRENT"
+ },
+ "headline_uncontaminated": {
+  "label": "uncontaminated domains (headline)",
+  "tasks": 6,
+  "families": {},
+  "comparisons": []
+ },
+ "contaminated_three_tsl": {
+  "label": "contaminated only (none in this run) -- CONTAMINATED",
+  "tasks": 0,
+  "families": {},
+  "comparisons": []
+ },
+ "all_domains": {
+  "label": "all domains -- includes contaminated (none in this run)",
+  "tasks": 6,
+  "families": {},
+  "comparisons": []
+ },
+ "per_arm": {
+  "A6": {
+   "attempted_pairs": 6,
+   "scored": 5,
+   "passed": 3,
+   "rate": 0.6,
+   "lo": 0.23071993220883708,
+   "hi": 0.8823817688407467,
+   "stack_error_rows": 1,
+   "stack_error_kinds": {
+    "http": 1
+   },
+   "pairs_still_stack_error": 1,
+   "fail_stages": {
+    "compile": 2
+   },
+   "median_seconds": 181.0,
+   "median_prompt_tokens": 13910,
+   "median_completion_tokens": 2861,
+   "median_hops": 3,
+   "median_reasoning_chars": 516,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    90598,
+    91261,
+    91973,
+    92323,
+    92648
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 3,
+    "extract": 0,
+    "compile": 2,
+    "test": 0
+   },
+   "mean_s": 370.5,
+   "median_s": 181.0,
+   "tok_in_mean": 13564.8,
+   "tok_out_mean": 5493.2,
+   "tok_total_mean": 19058.0,
+   "tool_hops_mean": 1.8,
+   "tool_hops_rows": 4,
+   "investigate_hops_mean": 2.2,
+   "final_compiles": 3,
+   "n": 5,
+   "self_check": false,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0,
+   "mechanism_health": {
+    "tool_turns": {
+     "rows": 5,
+     "recorded": 5,
+     "hit": 0,
+     "limit": [
+      20
+     ],
+     "turns_max": 3
+    },
+    "retrieval": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": 0,
+     "allowed_pct": 100.0,
+     "ran": 3,
+     "ran_pct": 60.0,
+     "data": 2,
+     "data_pct": 40.0
+    },
+    "hints": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 5,
+     "ran_pct": 100.0,
+     "data": 1,
+     "data_pct": 20.0
+    },
+    "deep_thinking": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 5,
+     "ran_pct": 100.0,
+     "data": 2,
+     "data_pct": 40.0
+    },
+    "fanout": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 5,
+     "ran_pct": 100.0,
+     "data": 5,
+     "data_pct": 100.0
+    },
+    "self_check": {
+     "rows": 5,
+     "allowed": 0,
+     "tool_errors": null,
+     "allowed_pct": 0.0,
+     "ran": 0,
+     "ran_pct": null,
+     "data": 0,
+     "data_pct": null
+    },
+    "check_code": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 4,
+     "ran_pct": 80.0,
+     "data": 4,
+     "data_pct": 80.0
+    }
+   },
+   "timing_rows": {
+    "clean": 5,
+    "concurrent": 0
+   },
+   "mean_s_clean": 370.5,
+   "median_s_clean": 181.0,
+   "mean_s_concurrent": null,
+   "timing_label": "clean",
+   "hint_rows": 1,
+   "hint_rate": 0.2,
+   "hint_rows_paired": 0,
+   "hint_rows_pass": 0,
+   "hint_rows_a0_pass": 0
+  }
+ },
+ "per_arm_uncontaminated": {
+  "A6": {
+   "attempted_pairs": 6,
+   "scored": 5,
+   "passed": 3,
+   "rate": 0.6,
+   "lo": 0.23071993220883708,
+   "hi": 0.8823817688407467,
+   "stack_error_rows": 1,
+   "stack_error_kinds": {
+    "http": 1
+   },
+   "pairs_still_stack_error": 1,
+   "fail_stages": {
+    "compile": 2
+   },
+   "median_seconds": 181.0,
+   "median_prompt_tokens": 13910,
+   "median_completion_tokens": 2861,
+   "median_hops": 3,
+   "median_reasoning_chars": 516,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [
+    90598,
+    91261,
+    91973,
+    92323,
+    92648
+   ],
+   "empty_content": 0,
+   "stages": {
+    "pass": 3,
+    "extract": 0,
+    "compile": 2,
+    "test": 0
+   },
+   "mean_s": 370.5,
+   "median_s": 181.0,
+   "tok_in_mean": 13564.8,
+   "tok_out_mean": 5493.2,
+   "tok_total_mean": 19058.0,
+   "tool_hops_mean": 1.8,
+   "tool_hops_rows": 4,
+   "investigate_hops_mean": 2.2,
+   "final_compiles": 3,
+   "n": 5,
+   "self_check": false,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0,
+   "mechanism_health": {
+    "tool_turns": {
+     "rows": 5,
+     "recorded": 5,
+     "hit": 0,
+     "limit": [
+      20
+     ],
+     "turns_max": 3
+    },
+    "retrieval": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": 0,
+     "allowed_pct": 100.0,
+     "ran": 3,
+     "ran_pct": 60.0,
+     "data": 2,
+     "data_pct": 40.0
+    },
+    "hints": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 5,
+     "ran_pct": 100.0,
+     "data": 1,
+     "data_pct": 20.0
+    },
+    "deep_thinking": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 5,
+     "ran_pct": 100.0,
+     "data": 2,
+     "data_pct": 40.0
+    },
+    "fanout": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 5,
+     "ran_pct": 100.0,
+     "data": 5,
+     "data_pct": 100.0
+    },
+    "self_check": {
+     "rows": 5,
+     "allowed": 0,
+     "tool_errors": null,
+     "allowed_pct": 0.0,
+     "ran": 0,
+     "ran_pct": null,
+     "data": 0,
+     "data_pct": null
+    },
+    "check_code": {
+     "rows": 5,
+     "allowed": 5,
+     "tool_errors": null,
+     "allowed_pct": 100.0,
+     "ran": 4,
+     "ran_pct": 80.0,
+     "data": 4,
+     "data_pct": 80.0
+    }
+   },
+   "timing_rows": {
+    "clean": 5,
+    "concurrent": 0
+   },
+   "mean_s_clean": 370.5,
+   "median_s_clean": 181.0,
+   "mean_s_concurrent": null,
+   "timing_label": "clean",
+   "hint_rows": 1,
+   "hint_rate": 0.2,
+   "hint_rows_paired": 0,
+   "hint_rows_pass": 0,
+   "hint_rows_a0_pass": 0
+  }
+ },
+ "self_check_twins_uncontaminated": [],
+ "by_domain": {
+  "rust_wasm": {
+   "contaminated": false,
+   "tasks": 6,
+   "by_arm": {
+    "A6": {
+     "k": 3,
+     "n": 5,
+     "rate": 0.6,
+     "lo": 0.23071993220883708,
+     "hi": 0.8823817688407467,
+     "stages": {
+      "extract": 0,
+      "compile": 2,
+      "test": 0
+     },
+     "stack_errors": 1
+    }
+   },
+   "vs_A0": [],
+   "vs_twin": []
+  }
+ },
+ "triggers": {
+  "A6": {
+   "n": 5,
+   "tools_offered": {
+    "k": 5,
+    "n": 5,
+    "rate": 1.0
+   },
+   "hints_selected": {
+    "k": 5,
+    "n": 5,
+    "rate": 1.0
+   },
+   "hints_emitted": {
+    "k": 1,
+    "n": 5,
+    "rate": 0.2
+   },
+   "investigate_chosen": {
+    "k": 5,
+    "n": 5,
+    "rate": 1.0
+   },
+   "investigate_searched": {
+    "k": 2,
+    "n": 5,
+    "rate": 0.4
+   },
+   "investigate_injected": {
+    "k": 2,
+    "n": 5,
+    "rate": 0.4
+   },
+   "fanned_out": {
+    "k": 5,
+    "n": 5,
+    "rate": 1.0
+   },
+   "main_hops_gt1": {
+    "k": 4,
+    "n": 5,
+    "rate": 0.8
+   }
+  }
+ },
+ "dashboard": {
+  "state": "ready",
+  "file": "bench/domain/results/overnight-0923-t1b/rows.jsonl",
+  "exists": true,
+  "file_age_s": 0,
+  "bad_lines": 0,
+  "how": "run  python bench/domain/run.py --key-file KEY --run-id ID",
+  "arms": [
+   "A6"
+  ],
+  "suspect": {
+   "identical_across_arms": false,
+   "extreme": []
+  },
+  "progress": {
+   "rows": 6,
+   "attempted": 6,
+   "scored_rows": 5,
+   "errors": 1,
+   "complete_all_arms": 5,
+   "errors_by_arm": {
+    "A6": {
+     "http": 1
+    }
+   }
+  },
+  "power": {
+   "n_paired": 5,
+   "min_discordant_for_sig": 6,
+   "max_possible_discordant": 5,
+   "alpha": 0.05,
+   "comparison_possible": false
+  },
+  "arm_table": [
+   {
+    "arm": "A6",
+    "k": 3,
+    "n": 5,
+    "rate": 0.6,
+    "lo": 0.23071993220883708,
+    "hi": 0.8823817688407467,
+    "mean_s": 370.5,
+    "tok_in": 13565,
+    "tok_in_reported": 5,
+    "tok_out": 5493,
+    "tok_out_reported": 5,
+    "empty": 0,
+    "len_cut": 0,
+    "errors": 1,
+    "stages": {
+     "pass": 3,
+     "extract": 0,
+     "compile": 2,
+     "test": 0
+    },
+    "median_s": 181.0,
+    "tok_total": 19058,
+    "tool_hops": 1.8,
+    "investigate_hops": 2.2,
+    "final_compiles": 3,
+    "self_check": false,
+    "lint_n": 0,
+    "lint_errors_mean": null,
+    "lint_warnings_mean": null,
+    "lint_clean": 0,
+    "modern_flags": {},
+    "modern_credits": {},
+    "mechanism_health": {
+     "tool_turns": {
+      "rows": 5,
+      "recorded": 5,
+      "hit": 0,
+      "limit": [
+       20
+      ],
+      "turns_max": 3
+     },
+     "retrieval": {
+      "rows": 5,
+      "allowed": 5,
+      "tool_errors": 0,
+      "allowed_pct": 100.0,
+      "ran": 3,
+      "ran_pct": 60.0,
+      "data": 2,
+      "data_pct": 40.0
+     },
+     "hints": {
+      "rows": 5,
+      "allowed": 5,
+      "tool_errors": null,
+      "allowed_pct": 100.0,
+      "ran": 5,
+      "ran_pct": 100.0,
+      "data": 1,
+      "data_pct": 20.0
+     },
+     "deep_thinking": {
+      "rows": 5,
+      "allowed": 5,
+      "tool_errors": null,
+      "allowed_pct": 100.0,
+      "ran": 5,
+      "ran_pct": 100.0,
+      "data": 2,
+      "data_pct": 40.0
+     },
+     "fanout": {
+      "rows": 5,
+      "allowed": 5,
+      "tool_errors": null,
+      "allowed_pct": 100.0,
+      "ran": 5,
+      "ran_pct": 100.0,
+      "data": 5,
+      "data_pct": 100.0
+     },
+     "self_check": {
+      "rows": 5,
+      "allowed": 0,
+      "tool_errors": null,
+      "allowed_pct": 0.0,
+      "ran": 0,
+      "ran_pct": null,
+      "data": 0,
+      "data_pct": null
+     },
+     "check_code": {
+      "rows": 5,
+      "allowed": 5,
+      "tool_errors": null,
+      "allowed_pct": 100.0,
+      "ran": 4,
+      "ran_pct": 80.0,
+      "data": 4,
+      "data_pct": 80.0
+     }
+    },
+    "timing_rows": {
+     "clean": 5,
+     "concurrent": 0
+    },
+    "mean_s_clean": 370.5,
+    "median_s_clean": 181.0,
+    "timing_label": "clean"
+   }
+  ],
+  "raw": [
+   {
+    "arm": "A6",
+    "attempts": 5,
+    "passed": 3,
+    "rate": 0.6,
+    "lo": 0.23071993220883708,
+    "hi": 0.8823817688407467
+   }
+  ],
+  "pairs": [],
+  "difficulty": [
+   {
+    "difficulty": "rust_wasm",
+    "n": 5,
+    "by_arm": {
+     "A6": {
+      "k": 3,
+      "n": 5,
+      "stages": {
+       "extract": 0,
+       "compile": 2,
+       "test": 0
+      },
+      "rate": 0.6,
+      "lo": 0.23071993220883708,
+      "hi": 0.8823817688407467
+     }
+    }
+   }
+  ],
+  "failures": {
+   "A6": {
+    "passed": 3,
+    "failed": 2,
+    "buckets": [
+     {
+      "bucket": "failed at compile",
+      "n": 2,
+      "scaffolding": false
+     }
+    ]
+   }
+  },
+  "scaffolding_total": 0,
+  "twins": [],
+  "domain_pairs": [],
+  "excluded_contaminated": {
+   "tasks": 0,
+   "domains": []
+  },
+  "timing": {
+   "concurrent_with": [
+    "livebench",
+    "swebench"
+   ],
+   "clean": false,
+   "label": "CONCURRENT"
+  },
+  "note": "uncontaminated domains only; McNemar p on this page is Bonferroni-corrected over the comparisons shown"
+ }
+}

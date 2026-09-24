@@ -149,7 +149,11 @@ _helper_stats = {"granted": 0, "waited": 0, "timed_out": 0, "inflight": 0}
 
 
 class helper_lane:
-    """Hold a helper lane (one of HELPER_LANES) for the life of one investigation.
+    """Hold a helper lane (one of HELPER_LANES) for the life of one
+    second-brain job -- investigate, alternative, tiebreak or fixup, all run
+    by shomen.run -- or a fan-out's B and C together (fanout.run holds it
+    across both and passes it to the runner, `held`). In one request the jobs
+    run one after the other, never at once.
 
     Synchronous, so it can be used from the tool loop. Returns False from
     __enter__ if the lane never came free, which the caller reports rather
@@ -157,8 +161,10 @@ class helper_lane:
     one that says it was too busy.
     """
 
-    def __init__(self, timeout: float = WAIT_SECONDS):
+    def __init__(self, timeout: float = WAIT_SECONDS,
+                 what: str = "investigation"):
         self.timeout = timeout
+        self.what = what
         self.held = False
 
     def __enter__(self) -> bool:
@@ -174,7 +180,7 @@ class helper_lane:
         else:
             _helper_stats["timed_out"] += 1
             print(f"  helper lane busy after {time.time() - t0:.0f}s; "
-                  f"investigation skipped", flush=True)
+                  f"{self.what} skipped", flush=True)
         return self.held
 
     def __exit__(self, *exc) -> bool:
@@ -183,6 +189,14 @@ class helper_lane:
             _helper_sem.release()
             self.held = False
         return False
+
+
+def helper_active() -> int:
+    """Second-brain jobs holding a helper lane in THIS process right now. A
+    read, never a wait: a compaction asks it once to know whether the
+    helper's 3/8 of the pool is spare (tiers.compaction_budget). The worker's
+    calls run in their own process and are not counted here."""
+    return max(int(_helper_stats["inflight"]), 0)
 
 
 # ---------------------------------------------------------------------------

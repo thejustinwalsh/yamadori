@@ -1,0 +1,8 @@
+{
+  "name": "yamadori-format-tools",
+  "private": true,
+  "description": "Pinned formatters for mcp/code_check.py. Installed with `npm ci` here; node_modules is not committed.",
+  "dependencies": {
+    "prettier": "3.9.9"
+  }
+}

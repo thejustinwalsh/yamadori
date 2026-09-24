@@ -1,0 +1,203 @@
+{"id": 1, "second_label": "library_question", "second_why": "where is type defined in repo"}
+{"id": 46, "second_label": "library_question", "second_why": "where is helper defined, file path"}
+{"id": 64, "second_label": "library_question", "second_why": "where-is lookup in codebase"}
+{"id": 115, "second_label": "library_question", "second_why": "where is a type defined, file path"}
+{"id": 157, "second_label": "library_question", "second_why": "where-is lookup in codebase"}
+{"id": 163, "second_label": "library_question", "second_why": "where-is lookup in a codebase, answer not in prompt"}
+{"id": 177, "second_label": "library_question", "second_why": "where is a type defined, file path"}
+{"id": 181, "second_label": "library_question", "second_why": "where-is lookup in codebase"}
+{"id": 211, "second_label": "library_question", "second_why": "where is helper defined, file path"}
+{"id": 298, "second_label": "prose", "second_why": "rewrite a sentence"}
+{"id": 304, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools"}
+{"id": 308, "second_label": "agent_step", "second_why": "network-cut resume notice, ends on tool result"}
+{"id": 339, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 341, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 345, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 371, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 510, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 560, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 588, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 654, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 665, "second_label": "code_edit", "second_why": "complete-the-function format with starter (truncated; ambiguous)"}
+{"id": 765, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 882, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 884, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 889, "second_label": "code_generation", "second_why": "competitive programming, write full program from description"}
+{"id": 890, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 905, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 921, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 963, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 972, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 991, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1019, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 1055, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1103, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1104, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1124, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1213, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1215, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1289, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1318, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1350, "second_label": "code_generation", "second_why": "competitive programming, write full program from description"}
+{"id": 1351, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1352, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1353, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1360, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1419, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1441, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1449, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1455, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 1490, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1495, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1515, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1518, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 1529, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1576, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1577, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1620, "second_label": "code_edit", "second_why": "complete given starter code (signature only; ambiguous)"}
+{"id": 1624, "second_label": "prose", "second_why": "general explanation"}
+{"id": 1634, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1648, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1712, "second_label": "prose", "second_why": "readiness probe"}
+{"id": 1718, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1728, "second_label": "code_generation", "second_why": "competitive programming, write full program"}
+{"id": 1866, "second_label": "prose", "second_why": "short probe"}
+{"id": 1870, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 1886, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 1916, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 1920, "second_label": "library_question", "second_why": "which file defines class in indexed codebase"}
+{"id": 1938, "second_label": "library_question", "second_why": "three.js r185 API deprecation lookup"}
+{"id": 1990, "second_label": "prose", "second_why": "short probe"}
+{"id": 2006, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2010, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2014, "second_label": "prose", "second_why": "short probe"}
+{"id": 2018, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2024, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2026, "second_label": "code_generation", "second_why": "write new TS module from description"}
+{"id": 2030, "second_label": "code_generation", "second_why": "write new TS utility type from description"}
+{"id": 2134, "second_label": "code_generation", "second_why": "write new Rust struct; C struct is interface only; no tool loop"}
+{"id": 2146, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2194, "second_label": "library_question", "second_why": "which file defines a class in indexed codebase"}
+{"id": 2226, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2236, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2240, "second_label": "library_question", "second_why": "no client tools; search lookup over files (ambiguous probe)"}
+{"id": 2256, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2267, "second_label": "prose", "second_why": "arithmetic"}
+{"id": 2283, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2285, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2287, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2303, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2305, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2311, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2321, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2323, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2325, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2331, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2339, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2346, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2360, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2388, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2394, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2396, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2399, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2402, "second_label": "agent_step", "second_why": "client tools; harness task: issue bash commands to change files"}
+{"id": 2418, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2420, "second_label": "prose", "second_why": "general knowledge list"}
+{"id": 2422, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 2428, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2430, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2446, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2450, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2513, "second_label": "code_edit", "second_why": "substantial partial solution given; write remaining lines"}
+{"id": 2516, "second_label": "library_question", "second_why": "three.js r185 API behaviour lookup"}
+{"id": 2532, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2536, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2548, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2554, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2556, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2566, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2572, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2575, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2578, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2594, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2606, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2608, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2612, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2638, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2640, "second_label": "code_generation", "second_why": "stdin program from spec"}
+{"id": 2644, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2654, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2666, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 2670, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2674, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2682, "second_label": "agent_step", "second_why": "client tools, conversation ends on client tool result"}
+{"id": 2714, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2718, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2722, "second_label": "code_edit", "second_why": "starter code to complete (signature only; ambiguous)"}
+{"id": 2724, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2774, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2820, "second_label": "agent_step", "second_why": "client tools, ends on client tool result"}
+{"id": 2850, "second_label": "code_generation", "second_why": "write new Rust struct; C struct is interface only; no tool loop"}
+{"id": 2902, "second_label": "code_generation", "second_why": "write new wasm-bindgen function"}
+{"id": 2918, "second_label": "code_generation", "second_why": "stdin program from spec"}
+{"id": 2986, "second_label": "code_generation", "second_why": "stdin program from spec"}
+{"id": 3018, "second_label": "code_generation", "second_why": "write new TS module from description"}
+{"id": 3078, "second_label": "prose", "second_why": "story generation from article"}
+{"id": 3086, "second_label": "code_generation", "second_why": "write new TS module; no tool loop"}
+{"id": 3102, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 3111, "second_label": "code_edit", "second_why": "starter code to complete (signature only; ambiguous)"}
+{"id": 3128, "second_label": "prose", "second_why": "news-article writing task"}
+{"id": 3148, "second_label": "code_generation", "second_why": "write new TS module; no tool loop"}
+{"id": 3154, "second_label": "prose", "second_why": "explain article text in simpler terms"}
+{"id": 3160, "second_label": "code_generation", "second_why": "write new TS module from description"}
+{"id": 3162, "second_label": "code_generation", "second_why": "stdin program from spec; placeholder only"}
+{"id": 3170, "second_label": "code_edit", "second_why": "starter code to complete (signature only; ambiguous)"}
+{"id": 3178, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 3180, "second_label": "code_generation", "second_why": "write new wasm-bindgen function"}
+{"id": 3186, "second_label": "code_edit", "second_why": "starter code to complete (signature only; ambiguous)"}
+{"id": 3207, "second_label": "code_generation", "second_why": "stdin program from spec; placeholder only"}
+{"id": 3210, "second_label": "code_edit", "second_why": "starter code to complete (signature only; ambiguous)"}
+{"id": 3214, "second_label": "code_generation", "second_why": "stdin program from spec"}
+{"id": 3220, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 3222, "second_label": "code_generation", "second_why": "stdin program from spec"}
+{"id": 3224, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 3242, "second_label": "code_edit", "second_why": "starter code given; write the remaining lines"}
+{"id": 3281, "second_label": "code_edit", "second_why": "starter code to complete (signature only; ambiguous)"}
+{"id": 3288, "second_label": "agent_step", "second_why": "client tools and ends on client tool result (task is codegen)"}
+{"id": 3310, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 3314, "second_label": "code_edit", "second_why": "substantial partial solution given; write remaining lines"}
+{"id": 3328, "second_label": "code_generation", "second_why": "stdin program from spec, no starter code"}
+{"id": 3332, "second_label": "code_edit", "second_why": "write remaining lines of given starter"}
+{"id": 3334, "second_label": "code_generation", "second_why": "stdin program from spec, no starter code"}
+{"id": 3378, "second_label": "code_edit", "second_why": "port pasted C code to Rust"}
+{"id": 3392, "second_label": "code_generation", "second_why": "new Rust library; given struct is interface to implement against"}
+{"id": 3396, "second_label": "agent_step", "second_why": "client tools; start project in a folder on user's machine"}
+{"id": 3415, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3435, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3445, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3449, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3453, "second_label": "utility", "second_why": "security-reviewer approval classifier"}
+{"id": 3455, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3491, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3493, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3513, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3529, "second_label": "agent_step", "second_why": "network-cut resume notice, client tools, ends on tool result"}
+{"id": 3531, "second_label": "utility", "second_why": "security-reviewer approval classifier"}
+{"id": 3542, "second_label": "agent_step", "second_why": "interrupted-response notice plus push-to-GitHub instruction, client tools"}
+{"id": 3560, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3562, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3568, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3584, "second_label": "utility", "second_why": "security-reviewer approval classifier"}
+{"id": 3598, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3600, "second_label": "utility", "second_why": "security-reviewer approval classifier"}
+{"id": 3620, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3622, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3628, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3636, "second_label": "agent_step", "second_why": "client tools, ends on tool result, interrupted notice"}
+{"id": 3640, "second_label": "utility", "second_why": "compaction summarisation job"}
+{"id": 3701, "second_label": "utility", "second_why": "compaction summarisation job"}
+{"id": 3703, "second_label": "utility", "second_why": "security-reviewer approval classifier"}
+{"id": 3711, "second_label": "utility", "second_why": "session-title namer system prompt"}
+{"id": 3717, "second_label": "agent_step", "second_why": "client tools, ends on tool result; check commit/running"}
+{"id": 3723, "second_label": "agent_step", "second_why": "client tools, ends on tool result; check commit/running"}
+{"id": 3759, "second_label": "agent_step", "second_why": "client tools, ends on tool result; check commit/running"}

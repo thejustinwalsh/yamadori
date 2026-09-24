@@ -1,0 +1,11 @@
+live /route (trained) vs offline new-head argmax: 120/120 identical choices
+live engines: {'trained': 120}
+live abstain: 15/120  (gate 0.15)
+live head investigate-vs-not (argmax): 80/120
+round-trip ms: median 66, p90 86
+selection.decide, Laya absent: 89/120
+selection.decide, live Laya signal (disagreement escalates): 91/120
+  hard slice alone 18/28, with Laya 14/28
+  rows where Laya flipped the decision to investigate: 14
+  missed investigations (should investigate, did not): alone 18, with Laya 10
+  unneeded investigations: alone 13, with Laya 19

@@ -1,5 +1,28 @@
 # Known issues
 
+## OPEN (2026-09-23) — MTP build aborts a request under concurrency
+
+The main model runs the sudoingX bonsai2 MTP build (config.yaml `server_mtp`,
+`--spec-type draft-mtp --spec-draft-n-max 1`, `-np 4`). With several requests
+in flight, llama-server sometimes aborts ONE request mid-generation:
+
+    upstream reported an error mid-stream: got exception:
+    speculative batch index 6 is not inside the current sub-batch [0, 4)
+
+Seen twice in logs/proxy.out.log on 2026-09-23, after 560 s and 680 s of
+generation, with 0 characters of answer delivered. It voided domain row
+overnight-0923b rs07/S0. The server keeps running and the other slots are
+unaffected. The benchmark harnesses record it as stack_error and re-run the
+row, so it costs time, not correctness. Not seen single-stream: the staging
+measurements in docs/MTP-STAGING.md were mostly one request at a time, with
+one 4-slot run.
+
+Suspected cause: the MTP draft path indexing the batched verification when
+several sequences share a ubatch. That is unconfirmed until reproduced on a
+test instance. Workarounds to measure, not assume: `--spec-draft-n-max 1` is
+already minimal; fewer parallel slots; or MTP off at the cost of about 1.3x
+decode. It needs a reproduction on the A4000 with 4 concurrent streams.
+
 ## RESOLVED — degenerate output and broken tool calls
 
 **Cause: the wrong llama.cpp build. Fixed by using the official PrismML fork.**

@@ -1,0 +1,642 @@
+{
+ "run_id": "selfcheck-probe",
+ "run_dir": "results/selfcheck-probe",
+ "analysed_at": 1790157662.6304355,
+ "merged_run_dirs": [
+  "selfcheck-probe"
+ ],
+ "conditions": {
+  "effort": "medium",
+  "max_tokens": 4096,
+  "temperature": 0.0,
+  "body_tier": "max",
+  "suite": "core"
+ },
+ "rows": 3,
+ "stale_rows": 0,
+ "bad_lines": 0,
+ "reclassified_server_reasoning_cap": 1,
+ "arms": [
+  "A0",
+  "S0"
+ ],
+ "tasks": {
+  "all": 1,
+  "uncontaminated": 1,
+  "contaminated": 0,
+  "contaminated_domains": []
+ },
+ "caveats": [
+  "preflight checks were OVERRIDDEN for part of this run: live_stack",
+  "1 row(s) reclassified stack_error/server_reasoning_cap: no answer, finish stop, ~32,768 reasoning tokens and no budget message -- the server's launch --reasoning-budget cut the model off (resume regenerates them)",
+  "timing is CONCURRENT with livebench, swebench: every seconds and tokens/s figure shared the GPU with them and is not a clean measurement"
+ ],
+ "timing": {
+  "concurrent_with": [
+   "livebench",
+   "swebench"
+  ],
+  "clean": false,
+  "label": "CONCURRENT"
+ },
+ "headline_uncontaminated": {
+  "label": "uncontaminated domains (headline)",
+  "tasks": 1,
+  "families": {
+   "self_check": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   }
+  },
+  "comparisons": [
+   {
+    "a": "A0",
+    "b": "S0",
+    "n_paired": 0,
+    "a_pass": 0,
+    "b_pass": 0,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 0,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "self_check",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   }
+  ]
+ },
+ "contaminated_three_tsl": {
+  "label": "contaminated only (none in this run) -- CONTAMINATED",
+  "tasks": 0,
+  "families": {
+   "self_check": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   }
+  },
+  "comparisons": [
+   {
+    "a": "A0",
+    "b": "S0",
+    "n_paired": 0,
+    "a_pass": 0,
+    "b_pass": 0,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 0,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "self_check",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   }
+  ]
+ },
+ "all_domains": {
+  "label": "all domains -- includes contaminated (none in this run)",
+  "tasks": 1,
+  "families": {
+   "self_check": {
+    "size": 1,
+    "alpha_corrected": 0.05,
+    "min_discordant_for_sig": 6
+   }
+  },
+  "comparisons": [
+   {
+    "a": "A0",
+    "b": "S0",
+    "n_paired": 0,
+    "a_pass": 0,
+    "b_pass": 0,
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "both_solved": 0,
+    "p": 1.0,
+    "p_bonferroni": 1.0,
+    "family": "self_check",
+    "family_size": 1,
+    "could_reach_significance": false,
+    "verdict": null
+   }
+  ]
+ },
+ "per_arm": {
+  "A0": {
+   "attempted_pairs": 1,
+   "scored": 0,
+   "passed": 0,
+   "rate": null,
+   "lo": 0.0,
+   "hi": 0.0,
+   "stack_error_rows": 1,
+   "stack_error_kinds": {
+    "server_reasoning_cap": 1
+   },
+   "pairs_still_stack_error": 1,
+   "fail_stages": {},
+   "median_seconds": null,
+   "median_prompt_tokens": null,
+   "median_completion_tokens": null,
+   "median_hops": null,
+   "median_reasoning_chars": null,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [],
+   "empty_content": 0,
+   "stages": {
+    "pass": 0,
+    "extract": 0,
+    "compile": 0,
+    "test": 0
+   },
+   "mean_s": null,
+   "median_s": null,
+   "tok_in_mean": null,
+   "tok_out_mean": null,
+   "tok_total_mean": null,
+   "tool_hops_mean": null,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": null,
+   "final_compiles": 0,
+   "n": 0,
+   "self_check": false,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0
+  },
+  "S0": {
+   "attempted_pairs": 1,
+   "scored": 0,
+   "passed": 0,
+   "rate": null,
+   "lo": 0.0,
+   "hi": 0.0,
+   "stack_error_rows": 2,
+   "stack_error_kinds": {
+    "exception": 2
+   },
+   "pairs_still_stack_error": 1,
+   "fail_stages": {},
+   "median_seconds": null,
+   "median_prompt_tokens": null,
+   "median_completion_tokens": null,
+   "median_hops": null,
+   "median_reasoning_chars": null,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [],
+   "empty_content": 0,
+   "stages": {
+    "pass": 0,
+    "extract": 0,
+    "compile": 0,
+    "test": 0
+   },
+   "mean_s": null,
+   "median_s": null,
+   "tok_in_mean": null,
+   "tok_out_mean": null,
+   "tok_total_mean": null,
+   "tool_hops_mean": null,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": null,
+   "final_compiles": 0,
+   "n": 0,
+   "self_check": true,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0,
+   "twin": "A0",
+   "check_rounds_mean": null,
+   "check_rounds_median": null,
+   "check_rounds_max": null,
+   "checked_any": 0,
+   "last_check_ok": 0,
+   "final_public_ok": 0,
+   "final_public_n": 0,
+   "rounds_mean": null,
+   "other_tool_calls": 0
+  }
+ },
+ "per_arm_uncontaminated": {
+  "A0": {
+   "attempted_pairs": 1,
+   "scored": 0,
+   "passed": 0,
+   "rate": null,
+   "lo": 0.0,
+   "hi": 0.0,
+   "stack_error_rows": 1,
+   "stack_error_kinds": {
+    "server_reasoning_cap": 1
+   },
+   "pairs_still_stack_error": 1,
+   "fail_stages": {},
+   "median_seconds": null,
+   "median_prompt_tokens": null,
+   "median_completion_tokens": null,
+   "median_hops": null,
+   "median_reasoning_chars": null,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [],
+   "empty_content": 0,
+   "stages": {
+    "pass": 0,
+    "extract": 0,
+    "compile": 0,
+    "test": 0
+   },
+   "mean_s": null,
+   "median_s": null,
+   "tok_in_mean": null,
+   "tok_out_mean": null,
+   "tok_total_mean": null,
+   "tool_hops_mean": null,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": null,
+   "final_compiles": 0,
+   "n": 0,
+   "self_check": false,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0
+  },
+  "S0": {
+   "attempted_pairs": 1,
+   "scored": 0,
+   "passed": 0,
+   "rate": null,
+   "lo": 0.0,
+   "hi": 0.0,
+   "stack_error_rows": 2,
+   "stack_error_kinds": {
+    "exception": 2
+   },
+   "pairs_still_stack_error": 1,
+   "fail_stages": {},
+   "median_seconds": null,
+   "median_prompt_tokens": null,
+   "median_completion_tokens": null,
+   "median_hops": null,
+   "median_reasoning_chars": null,
+   "median_reasoning_tokens": null,
+   "hit_thinking_cap": 0,
+   "reasoning_cap_sent": [],
+   "empty_content": 0,
+   "stages": {
+    "pass": 0,
+    "extract": 0,
+    "compile": 0,
+    "test": 0
+   },
+   "mean_s": null,
+   "median_s": null,
+   "tok_in_mean": null,
+   "tok_out_mean": null,
+   "tok_total_mean": null,
+   "tool_hops_mean": null,
+   "tool_hops_rows": 0,
+   "investigate_hops_mean": null,
+   "final_compiles": 0,
+   "n": 0,
+   "self_check": true,
+   "lint_n": 0,
+   "lint_errors_mean": null,
+   "lint_warnings_mean": null,
+   "lint_clean": 0,
+   "modern_flags": {},
+   "modern_credits": {},
+   "style_errors": 0,
+   "twin": "A0",
+   "check_rounds_mean": null,
+   "check_rounds_median": null,
+   "check_rounds_max": null,
+   "checked_any": 0,
+   "last_check_ok": 0,
+   "final_public_ok": 0,
+   "final_public_n": 0,
+   "rounds_mean": null,
+   "other_tool_calls": 0
+  }
+ },
+ "self_check_twins_uncontaminated": [
+  {
+   "s": "S0",
+   "one_shot": "A0",
+   "n_paired": 0,
+   "s_pass": 0,
+   "one_shot_pass": 0,
+   "s_only": 0,
+   "one_shot_only": 0,
+   "discordant": 0,
+   "p": 1.0,
+   "fixed_by_checking": 0,
+   "compile_to_test": 0,
+   "extract_to_pass": 0,
+   "test_to_pass": 0,
+   "one_shot_compile_fail": 0,
+   "s_compile_fail": 0,
+   "one_shot_compiles": 0,
+   "s_compiles": 0
+  }
+ ],
+ "by_domain": {
+  "typescript": {
+   "contaminated": false,
+   "tasks": 1,
+   "by_arm": {
+    "A0": {
+     "k": 0,
+     "n": 0,
+     "rate": null,
+     "lo": 0.0,
+     "hi": 0.0,
+     "stages": {
+      "extract": 0,
+      "compile": 0,
+      "test": 0
+     },
+     "stack_errors": 1
+    },
+    "S0": {
+     "k": 0,
+     "n": 0,
+     "rate": null,
+     "lo": 0.0,
+     "hi": 0.0,
+     "stages": {
+      "extract": 0,
+      "compile": 0,
+      "test": 0
+     },
+     "stack_errors": 1
+    }
+   },
+   "vs_A0": [
+    {
+     "a": "A0",
+     "b": "S0",
+     "n_paired": 0,
+     "a_pass": 0,
+     "b_pass": 0,
+     "b_only": 0,
+     "a_only": 0,
+     "discordant": 0,
+     "both_solved": 0,
+     "p": 1.0
+    }
+   ],
+   "vs_twin": [
+    {
+     "s": "S0",
+     "one_shot": "A0",
+     "n_paired": 0,
+     "s_pass": 0,
+     "one_shot_pass": 0,
+     "s_only": 0,
+     "one_shot_only": 0,
+     "discordant": 0,
+     "p": 1.0,
+     "fixed_by_checking": 0,
+     "compile_to_test": 0,
+     "extract_to_pass": 0,
+     "test_to_pass": 0,
+     "one_shot_compile_fail": 0,
+     "s_compile_fail": 0,
+     "one_shot_compiles": 0,
+     "s_compiles": 0
+    }
+   ]
+  }
+ },
+ "triggers": {
+  "A0": {
+   "n": 0
+  },
+  "S0": {
+   "n": 0
+  }
+ },
+ "dashboard": {
+  "state": "ready",
+  "file": "bench/domain/results/selfcheck-probe/rows.jsonl",
+  "exists": true,
+  "file_age_s": 13923,
+  "bad_lines": 0,
+  "how": "run  python bench/domain/run.py --key-file KEY --run-id ID",
+  "arms": [
+   "A0",
+   "S0"
+  ],
+  "suspect": {
+   "identical_across_arms": false,
+   "extreme": []
+  },
+  "progress": {
+   "rows": 3,
+   "attempted": 1,
+   "scored_rows": 0,
+   "errors": 3,
+   "complete_all_arms": 0,
+   "errors_by_arm": {
+    "A0": {
+     "server_reasoning_cap": 1
+    },
+    "S0": {
+     "exception": 2
+    }
+   }
+  },
+  "power": {
+   "n_paired": 0,
+   "min_discordant_for_sig": 6,
+   "max_possible_discordant": 0,
+   "alpha": 0.05,
+   "comparison_possible": false
+  },
+  "arm_table": [
+   {
+    "arm": "A0",
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "lo": 0.0,
+    "hi": 0.0,
+    "mean_s": null,
+    "tok_in": null,
+    "tok_in_reported": 0,
+    "tok_out": null,
+    "tok_out_reported": 0,
+    "empty": 0,
+    "len_cut": 0,
+    "errors": 1,
+    "stages": {
+     "pass": 0,
+     "extract": 0,
+     "compile": 0,
+     "test": 0
+    },
+    "median_s": null,
+    "tok_total": null,
+    "tool_hops": null,
+    "investigate_hops": null,
+    "final_compiles": 0,
+    "self_check": false,
+    "lint_n": 0,
+    "lint_errors_mean": null,
+    "lint_warnings_mean": null,
+    "lint_clean": 0,
+    "modern_flags": {},
+    "modern_credits": {}
+   },
+   {
+    "arm": "S0",
+    "k": 0,
+    "n": 0,
+    "rate": null,
+    "lo": 0.0,
+    "hi": 0.0,
+    "mean_s": null,
+    "tok_in": null,
+    "tok_in_reported": 0,
+    "tok_out": null,
+    "tok_out_reported": 0,
+    "empty": 0,
+    "len_cut": 0,
+    "errors": 2,
+    "stages": {
+     "pass": 0,
+     "extract": 0,
+     "compile": 0,
+     "test": 0
+    },
+    "median_s": null,
+    "tok_total": null,
+    "tool_hops": null,
+    "investigate_hops": null,
+    "final_compiles": 0,
+    "self_check": true,
+    "lint_n": 0,
+    "lint_errors_mean": null,
+    "lint_warnings_mean": null,
+    "lint_clean": 0,
+    "modern_flags": {},
+    "modern_credits": {},
+    "twin": "A0",
+    "check_rounds_mean": null,
+    "check_rounds_median": null,
+    "check_rounds_max": null,
+    "checked_any": 0,
+    "last_check_ok": 0,
+    "final_public_ok": 0,
+    "final_public_n": 0,
+    "rounds_mean": null
+   }
+  ],
+  "raw": [
+   {
+    "arm": "A0",
+    "attempts": 0,
+    "passed": 0,
+    "rate": null,
+    "lo": 0.0,
+    "hi": 0.0
+   },
+   {
+    "arm": "S0",
+    "attempts": 0,
+    "passed": 0,
+    "rate": null,
+    "lo": 0.0,
+    "hi": 0.0
+   }
+  ],
+  "pairs": [
+   {
+    "a": "A0",
+    "b": "S0",
+    "b_only": 0,
+    "a_only": 0,
+    "discordant": 0,
+    "p": 1.0,
+    "verdict": null,
+    "family": "self_check",
+    "underpowered": true,
+    "both_solved": 0,
+    "signs": []
+   }
+  ],
+  "difficulty": [],
+  "failures": {
+   "A0": {
+    "passed": 0,
+    "failed": 0,
+    "buckets": []
+   },
+   "S0": {
+    "passed": 0,
+    "failed": 0,
+    "buckets": []
+   }
+  },
+  "scaffolding_total": 0,
+  "twins": [
+   {
+    "s": "S0",
+    "one_shot": "A0",
+    "n_paired": 0,
+    "s_pass": 0,
+    "one_shot_pass": 0,
+    "s_only": 0,
+    "one_shot_only": 0,
+    "discordant": 0,
+    "p": 1.0,
+    "fixed_by_checking": 0,
+    "compile_to_test": 0,
+    "extract_to_pass": 0,
+    "test_to_pass": 0,
+    "one_shot_compile_fail": 0,
+    "s_compile_fail": 0,
+    "one_shot_compiles": 0,
+    "s_compiles": 0,
+    "p_bonferroni": 1.0
+   }
+  ],
+  "domain_pairs": [],
+  "excluded_contaminated": {
+   "tasks": 0,
+   "domains": []
+  },
+  "timing": {
+   "concurrent_with": [
+    "livebench",
+    "swebench"
+   ],
+   "clean": false,
+   "label": "CONCURRENT"
+  },
+  "note": "uncontaminated domains only; McNemar p on this page is Bonferroni-corrected over the comparisons shown"
+ }
+}

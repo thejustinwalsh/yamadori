@@ -19,12 +19,14 @@ Transport is stdio, the standard for local MCP clients.
 """
 from __future__ import annotations
 
+import contextlib
 import difflib
 import json
 import os
 import re
 import sqlite3
 import sys
+import threading
 from dataclasses import dataclass
 
 import numpy as np
@@ -34,6 +36,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import symbols as sym
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fusion
+import gpu_room
 import rings
 
 # The MODEL SERVER, not the proxy. These are different ports and confusing
@@ -45,6 +48,35 @@ STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 INDEX_DB = os.environ.get("CODE_INDEX_DB",
                           os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                        "..", "index", "code.sqlite3"))
+
+# WHICH INDEX A CALL READS (pre-deploy review, 2026-09-24). The proxy used to
+# save, mutate and restore the process-wide INDEX_DB (and CODE_INDEX_DB) around
+# each package or repository call, with no lock. Two requests -- or a request
+# and its own deep-thinking thread -- interleaved, and account A's prompt got
+# account B's repository source, which the ledger then recorded and replayed.
+# Now a caller PASSES the database: handle(req, db=path) binds it for this
+# thread for the length of the call, and every read in this module goes
+# through index_db(). INDEX_DB itself is never mutated by the proxy.
+_BOUND = threading.local()
+
+
+def index_db() -> str:
+    """The index this thread's call reads: the one `handle(..., db=)` bound,
+    else the process default INDEX_DB."""
+    return getattr(_BOUND, "db", None) or INDEX_DB
+
+
+@contextlib.contextmanager
+def bound_index(db: str | None):
+    """Bind `db` as this thread's index for the block (None: the default)."""
+    prev = getattr(_BOUND, "db", None)
+    _BOUND.db = db
+    try:
+        yield
+    finally:
+        _BOUND.db = prev
+
+
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "embeddings")
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "reranker")
 
@@ -110,8 +142,12 @@ def _post(path: str, payload: dict, timeout: int = 120) -> dict:
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+    # THE A4000'S ROOM (mcp/gpu_room.py): embeddings and the reranker live on
+    # the A4000 beside the image and vision models. A loaded model only takes
+    # a lease; an unloaded one gets room made first. Raises gpu_room.NoRoom.
+    with gpu_room.use(payload.get("model"), upstream=STACK):
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r)
 
 
 # Qwen3-Embedding is asymmetric: QUERIES must carry an instruction prefix,
@@ -164,8 +200,9 @@ def _inside(root: str, path: str) -> bool:
 
 
 def _db() -> sqlite3.Connection:
-    os.makedirs(os.path.dirname(os.path.abspath(INDEX_DB)), exist_ok=True)
-    con = sqlite3.connect(INDEX_DB)
+    db = index_db()
+    os.makedirs(os.path.dirname(os.path.abspath(db)), exist_ok=True)
+    con = sqlite3.connect(db)
     con.execute("""CREATE TABLE IF NOT EXISTS chunks(
         id INTEGER PRIMARY KEY, path TEXT, start INT, end INT,
         text TEXT, vec BLOB)""")
@@ -202,16 +239,19 @@ def _db() -> sqlite3.Connection:
 # Keyed on (path, mtime, size) so re-indexing invalidates it without anyone
 # having to remember to. Only one index is held: the alternative is unbounded
 # memory across every dependency a caller mentions, and a swap costs 119 ms.
-_INDEX_CACHE: tuple = ()
-_INDEX_DATA: tuple = ([], None)
+#
+# ONE tuple, (signature, data), read and replaced in one step: two threads on
+# two databases must never see one's signature with the other's data.
+_INDEX: tuple = ((), ([], None))
 
 
 def _index_signature() -> tuple:
+    db = index_db()
     try:
-        st = os.stat(INDEX_DB)
-        return (os.path.abspath(INDEX_DB), st.st_mtime_ns, st.st_size)
+        st = os.stat(db)
+        return (os.path.abspath(db), st.st_mtime_ns, st.st_size)
     except OSError:
-        return (os.path.abspath(INDEX_DB), 0, 0)
+        return (os.path.abspath(db), 0, 0)
 
 
 def has_index() -> bool:
@@ -236,11 +276,11 @@ def index_state() -> dict:
         return {"exists": mat is not None and len(chunks) > 0,
                 "chunks": len(chunks),
                 "files": len({c.path for c in chunks}),
-                "database": os.path.abspath(INDEX_DB),
+                "database": os.path.abspath(index_db()),
                 "readable": True}
     except Exception as e:                                       # noqa: BLE001
         return {"exists": False, "chunks": 0, "files": 0,
-                "database": os.path.abspath(INDEX_DB),
+                "database": os.path.abspath(index_db()),
                 "readable": False, "read_error": f"{type(e).__name__}: {e}"}
 
 
@@ -290,8 +330,25 @@ def error_result(tool: str, code: str, reason: str, retryable: bool,
                       default=str)
 
 
-def no_index_error(tool: str) -> str:
-    """No corpus is bound to this conversation.
+def no_index_error(tool: str, held: list[str] | None = None) -> str:
+    """Nothing this remote service holds covers the request.
+
+    REWRITTEN 2026-09-23 in the remote-service framing (see REMOTE_READ_ONLY
+    below). Through the proxy this is reached in three ways, and in the first
+    two the model was looking for the USER's files: read_file_range on a path
+    that names no held library ("src/main.rs"), a search when no library index
+    is held at all, and an empty result. The corpus has find_by_pattern for
+    "Cargo.toml" and four greps of glob="package.json" in a row. So the first
+    remedy is the client's own file tools, owned by the agent -- not "the user
+    pastes it in", which sent a job the agent can do to someone else.
+
+    `held` is the library list ("three@0.186.0", ...) when the caller knows
+    it. With libraries held, a request that NAMES one does run, so the
+    "every tool in `affects` fails regardless of arguments" note is only true
+    when nothing is held, and is only said then. The list is named because a
+    failure return names what IS available (AGENTS.md); the earlier worry
+    that a list invites picking from it is answered by the first remedy,
+    which sends the user's-own-code case elsewhere.
 
     Carries THREE things, and the third is the one that was missing:
 
@@ -299,44 +356,62 @@ def no_index_error(tool: str) -> str:
       the data        what the index actually contains right now
       the remedy      what would change it, and WHO can do it
 
-    The remedy is a fact about this server, not a guess: the catalogue is read
-    off disk, and binding a package the server holds genuinely makes search
-    work through packages.search_discovered. That is different in kind from
-    the sentence this replaced -- "Try find_by_pattern with a literal you
-    expect" -- which was a guess about a tool that fails identically, and
-    which a model followed twelve times over 842 seconds.
+    Each remedy is a fact, not a guess: naming a held library genuinely routes
+    the call to its index (proxy._route_package_glob). That is different in
+    kind from the sentence this replaced long ago -- "Try find_by_pattern with
+    a literal you expect" -- which was a guess about a tool that fails
+    identically, and which a model followed twelve times over 842 seconds.
 
-    `fixable_by` matters because most remedies are not the agent's to apply.
+    `fixable_by` matters because some remedies are not the agent's to apply.
     An agent that knows the operator must act can say so instead of retrying.
     """
-    # The remedies NAME the tool and stop. They do not list what this server
-    # holds: we do not know which source the caller wants, the inventory is
-    # ours rather than theirs, and a list invites the agent to pick from it
-    # instead of asking about the code in front of it. bind_project_context
-    # carries its own description; that is where "what it needs" belongs.
+    held = list(held or [])
     remedies = [
         {"fixable_by": "agent",
-         "applies_when": "the question involves a library the project imports",
-         "action": "call bind_project_context with the versions from the manifest",
-         "effect": ("if this server holds that library's source, search is "
-                    "then served from it")},
-        {"fixable_by": "user",
-         "applies_when": "the question is about the user's own code",
-         "action": "the user pastes the relevant code into the conversation",
-         "effect": "the code is then in context and needs no index",
-         "why_not_the_agent": ("this server cannot see the user's filesystem; "
-                               "no tool call can reach it")},
+         "applies_when": "the request is about the user's own project files",
+         "action": ("read, search, create or run them with your client's own "
+                    "file and terminal tools"),
+         "effect": "the files are then in context",
+         "why_not_this_tool": ("this service is remote and read-only, and "
+                               "indexes library source only")},
     ]
+    if held:
+        remedies.append(
+            {"fixable_by": "agent",
+             "applies_when": "the request is about a library in `libraries_held`",
+             "action": ("name the library: glob=\"typegpu\" for a search, or "
+                        "a path that starts with it, e.g. "
+                        "read_file_range path=\"typegpu/src/index.ts\""),
+             "effect": "the call runs against that library's source"})
+    else:
+        remedies.append(
+            {"fixable_by": "operator",
+             "applies_when": "the request is about a library",
+             "action": ("index it into the service's package store "
+                        "(python mcp/deps.py index name@version)"),
+             "effect": "the code tools can then search it",
+             "why_not_the_agent": ("what the service holds is set on the "
+                                   "service side")})
+    facts: dict = {}
+    if held:
+        facts["libraries_held"] = held
+    else:
+        facts["affects"] = ["find_by_meaning", "find_by_pattern",
+                            "find_definition_opt", "find_references",
+                            "read_file_range", "describe_index"]
+        facts["note"] = ("No library index is held, so every tool in "
+                         "`affects` returns this for any arguments.")
+    # The index facts without `database`: an absolute path on the service's
+    # disk tells the agent nothing it can use.
+    state = {k: v for k, v in index_state().items() if k != "database"}
     return error_result(
         tool, "NO_INDEX",
-        ("No code index is bound to this conversation, so the search did not "
-         "run. This is not an empty result set."),
+        ("Nothing was searched. This remote, read-only service indexes "
+         "library source only, and nothing it holds matches this request. It "
+         "has no access to the user's files. This is not an empty result."),
         retryable=False,
-        index=index_state(),
-        affects=["find_by_meaning", "find_by_pattern", "find_definition_opt",
-                 "find_references", "read_file_range"],
-        note=("Every tool in `affects` returns this error regardless of "
-              "arguments, until a remedy below is applied."),
+        index=state,
+        **facts,
         remedies=remedies)
 
 
@@ -518,10 +593,11 @@ def validate_args(name: str, args: dict) -> str | None:
 
 
 def load_index() -> tuple[list[Chunk], np.ndarray | None]:
-    global _INDEX_CACHE, _INDEX_DATA
+    global _INDEX
     sig = _index_signature()
-    if sig == _INDEX_CACHE:
-        return _INDEX_DATA
+    cached_sig, cached = _INDEX
+    if sig == cached_sig:
+        return cached
 
     con = _db()
     rows = con.execute("SELECT path,start,end,text,vec FROM chunks").fetchall()
@@ -534,22 +610,23 @@ def load_index() -> tuple[list[Chunk], np.ndarray | None]:
     dim = len(rows[0][4]) // 4
     mat = np.frombuffer(b"".join(r[4] for r in rows),
                         dtype=np.float32).reshape(len(rows), dim)
-    _INDEX_CACHE, _INDEX_DATA = sig, (chunks, mat)
+    _INDEX = (sig, (chunks, mat))
     return chunks, mat
 
 
-_LEX: "fusion.Lexical | None" = None
-_LEX_SIG: tuple = ()
+# (signature, Lexical), one tuple for the same reason as _INDEX.
+_LEX: tuple = ((), None)
 
 
 def _lexical(chunks: list[Chunk]) -> "fusion.Lexical":
     """Build the BM25 side once per index, not once per query."""
-    global _LEX, _LEX_SIG
-    sig = (len(chunks), chunks[0].path if chunks else "", INDEX_DB)
-    if _LEX is None or _LEX_SIG != sig:
-        _LEX = fusion.Lexical([(c.path, c.text) for c in chunks])
-        _LEX_SIG = sig
-    return _LEX
+    global _LEX
+    sig = (len(chunks), chunks[0].path if chunks else "", index_db())
+    cached_sig, lex = _LEX
+    if lex is None or cached_sig != sig:
+        lex = fusion.Lexical([(c.path, c.text) for c in chunks])
+        _LEX = (sig, lex)
+    return lex
 
 
 def search_fused(query: str, top_k: int = DEFAULT_TOP_K,
@@ -789,14 +866,39 @@ TOOLS_DISABLED_JUDGE = """
     },
 """
 
+# WHAT THESE TOOLS ARE, SAID THE SAME WAY IN EVERY CODE TOOL.
+#
+# Operator report, 2026-09-23: a Hermes user pasted a spec and asked to "start
+# this project in ~/Develop...". The model spent its turns on these tools
+# instead of the harness's own file tools, and the corpus shows the same
+# confusion on benchmark rows: find_by_pattern({"pattern": "Cargo.toml"})
+# looking for a local project, find_by_pattern(glob="package.json") four times
+# in a row, bind_project_context on puzzles. Every description here used to say
+# "the indexed codebase", which reads as the user's codebase.
+#
+# So each code tool ends with the same short sentence. (Since 2026-09-24
+# these tools are the second brain's only -- proxy.deep_thinking_tools; main
+# gets the client's tools and the addendum, proxy.ADDENDUM.) Positive wording: a
+# negative instruction fires attention on the thing it forbids (AGENTS.md,
+# "Prompting this model"). test_tools.test_descriptions_say_remote_read_only
+# pins it.
+REMOTE_READ_ONLY = ("Remote and read-only: it searches indexed library "
+                    "source. For the user's own files, use your client's own "
+                    "file tools.")
+
 TOOLS = [
     {
         "name": "find_by_meaning",
         "description": (
-            "Search the indexed codebase for snippets relevant to a natural-language "
-            "query. Returns file path, line range and source text, best match first. "
-            "Use it to locate definitions, call sites, and usage examples before "
-            "editing code."
+            "Answers 'where in this library does it do X?' when you do not "
+            "know the name. Returns library source snippets -- path, line "
+            "range and text -- best match first. When you know the "
+            "identifier, find_definition_opt is exact and instant; for text "
+            "that appears verbatim, find_by_pattern.\n"
+            "Reach for this when the request says: how does three.js compute "
+            "X, where does typegpu handle Y, which function in a library does "
+            "Z, show an example of this library API in use.\n"
+            + REMOTE_READ_ONLY
         ),
         "inputSchema": {
             "type": "object",
@@ -813,10 +915,15 @@ TOOLS = [
     {
         "name": "find_definition_opt",
         "description": (
-            "Find where a symbol is DEFINED. Exact name match, instant, no embeddings. "
-            "Use this whenever you know the identifier -- a function, struct, class, "
-            "trait, type or method name -- instead of search_code, which is for "
-            "fuzzy questions where you do not know the name."
+            "Answers 'where is this library symbol DEFINED, and what is its "
+            "signature?'. Exact name match, instant. Use it whenever you know "
+            "the identifier -- a function, class, type, struct, trait or "
+            "method in a library -- instead of find_by_meaning, which is for "
+            "questions where you do not know the name.\n"
+            "Reach for this when the request says: where is Object3D defined, "
+            "what does X take and return, show me the class Y, what fields "
+            "does Z have.\n"
+            + REMOTE_READ_ONLY
         ),
         "inputSchema": {
             "type": "object",
@@ -828,17 +935,17 @@ TOOLS = [
     {
         "name": "find_references",
         "description": (
-            "Answer 'what depends on this?'. Returns every place a symbol is "
-            "USED -- call sites, imports, mentions -- which is the opposite of "
+            "Answers 'what inside this library depends on this symbol?'. "
+            "Returns every place a library symbol is USED -- call sites, "
+            "imports, mentions -- which is the opposite of "
             "find_definition_opt, which returns the ONE place it is declared.\n"
-            "Reach for this when the request says: what uses X, what calls X, "
-            "what breaks if I rename or delete X, is X dead code, which files "
-            "import X, what depends on X.\n"
-            "A request about renaming, removing, or the blast radius of a "
-            "change is this tool, not a definition lookup and not a text "
-            "search: it also reports a symbol that IS declared but has no "
-            "users, which is the answer to 'is this dead code'.\n"
-            "Set calls_only to list only actual invocations."
+            "Reach for this when the request says: what in three.js uses X, "
+            "which library functions call X, which library modules import X, "
+            "is X still used anywhere in the library, how is X meant to be "
+            "called.\n"
+            "It also reports a symbol that IS declared but has no users. Set "
+            "calls_only to list only actual invocations.\n"
+            + REMOTE_READ_ONLY
         ),
         "inputSchema": {
             "type": "object",
@@ -852,12 +959,15 @@ TOOLS = [
     {
         "name": "find_by_pattern",
         "description": (
-            "Literal / regex search across the indexed files. FAST and EXACT. "
-            "Try this BEFORE search_code whenever the thing you want probably "
-            "appears verbatim somewhere -- a function name, an error string, a "
-            "config key, an import, a TODO. Most code questions have a literal "
-            "anchor and this finds it precisely; search_code is for when the "
-            "codebase uses different words than you would."
+            "Answers 'where does this exact text appear in a library's "
+            "source?'. Literal / regex, fast and exact. Try it before "
+            "find_by_meaning whenever the thing probably appears verbatim -- "
+            "a function name, an error string, an option key, an import; "
+            "find_by_meaning is for when the library uses different words "
+            "than you would.\n"
+            "To search one library, pass its name as `glob` (glob=\"typegpu\" "
+            "or \"typegpu/src/data\").\n"
+            + REMOTE_READ_ONLY
         ),
         "inputSchema": {
             "type": "object",
@@ -874,10 +984,13 @@ TOOLS = [
     {
         "name": "read_file_range",
         "description": (
-            "Read exact lines from an indexed file. Use this immediately after "
-            "find_definition or search_code, which return a path and line range -- "
-            "do NOT search again for something you already have the location of. "
-            "Reads the real file on disk, not the index, so it reflects edits."
+            "Answers 'show me these lines of this library file'. Use it right "
+            "after find_definition_opt, find_references, find_by_pattern or "
+            "find_by_meaning, which return a path and a line range: read that "
+            "location rather than searching again. Pass the path as the "
+            "result showed it, starting with the library name from the "
+            "result's heading, e.g. \"three/src/core/Object3D.js\".\n"
+            + REMOTE_READ_ONLY
         ),
         "inputSchema": {
             "type": "object",
@@ -893,10 +1006,13 @@ TOOLS = [
     {
         "name": "summarize_text",
         "description": (
-            "Compress long text -- a conversation, a log, a large file -- down to the "
-            "parts that matter, keeping identifiers, numbers, file paths and errors "
-            "verbatim. Use when context is filling up or before feeding a long "
-            "artefact into further reasoning. Returns prose, not the original."
+            "Answers 'what in this long text matters?'. Compresses the text "
+            "you pass -- a conversation, a log, file contents already in your "
+            "context -- keeping identifiers, numbers, paths and errors "
+            "verbatim. Use when context is filling up or before feeding a "
+            "long artefact into further reasoning. It works on the `text` "
+            "argument only; to summarise a file, read it with your client's "
+            "own file tools first. Returns prose, not the original."
         ),
         "inputSchema": {
             "type": "object",
@@ -912,18 +1028,24 @@ TOOLS = [
     },
     {
         "name": "describe_index",
-        "description": "Report how many code chunks are indexed and which files are covered.",
+        "description": (
+            "Answers 'which libraries, at which versions, can the code tools "
+            "search?'. Lists the library source held, so you know whether a "
+            "library is covered before searching it, and which name to pass "
+            "as `glob`.\n"
+            + REMOTE_READ_ONLY
+        ),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "run_check",
         "description": (
-            "Run a project check and return its output. THIS IS THE POINT OF THE LOOP: "
-            "you are not done when the edit looks right, you are done when a check "
-            "passes. Run `lint` after any edit (seconds), and `test` when behaviour "
-            "changed (minutes). Call with no arguments to list what this project "
-            "offers. If a check fails, read the error, fix the code with your "
-            "own editing tools, and run it again."
+            "Answers 'does the project set up on the code-intelligence "
+            "service pass lint, test or build?'. It runs a named check only "
+            "in a project the operator has set up on the service side. For "
+            "the user's own project, run its linter, tests and build with "
+            "your client's own terminal tool. Call with no arguments to list "
+            "the checks and whether a project is set up."
         ),
         "inputSchema": {
             "type": "object",
@@ -1050,13 +1172,24 @@ def _near_miss(symbol: str, names: list[str], kind: str) -> str:
     if near:
         out += "\nClosest indexed names:\n" + "\n".join(f"  {n}" for n in near)
     else:
-        out += ("\nNo similar name is indexed either, so this symbol is probably "
-                "defined outside the indexed roots, or comes from a dependency. "
-                "grep for it as a literal to find usages.")
+        out += ("\nNo similar name is indexed either, so this symbol is "
+                "probably defined outside this library, or in the user's own "
+                "code, which this remote service does not index. For the "
+                "user's code, search with your client's own tools; for "
+                "another library, find_by_pattern with the name as a literal.")
     return out
 
 
-def handle(req: dict) -> dict | None:
+def handle(req: dict, db: str | None = None) -> dict | None:
+    """One JSON-RPC request. `db`: the index this call reads (a package's or
+    a repository's), bound for this thread only; None reads INDEX_DB."""
+    if db:
+        with bound_index(db):
+            return _handle(req)
+    return _handle(req)
+
+
+def _handle(req: dict) -> dict | None:
     mid, method = req.get("id"), req.get("method")
 
     def ok(result):
@@ -1381,7 +1514,10 @@ def handle(req: dict) -> dict | None:
                     if near:
                         text += "\nDid you mean:\n" + "\n".join(f"  {p}" for p in near)
                     elif not roots:
-                        text += "\nNothing is indexed — run scripts/index_code.py first."
+                        text += ("\nNothing is indexed on this remote service "
+                                 "(the operator adds source with "
+                                 "scripts/index_code.py). For the user's own "
+                                 "files, use your client's own file tools.")
                 else:
                     with open(target, encoding="utf-8", errors="replace") as fh:
                         lines = fh.read().splitlines()
@@ -1529,21 +1665,25 @@ def handle(req: dict) -> dict | None:
                             + "\n".join(f"  {k:<8} {' '.join(v)}"
                                         for k, v in VERIFY_CHECKS.items())
                             + (f"\nproject root: {cwd}" if cwd else
-                               "\nNo indexed project root, so none of these "
-                               "can be run yet."))
+                               "\nNo project is set up on the service, so "
+                               "none of these can be run. For the user's own "
+                               "project, run checks with your client's own "
+                               "terminal tool."))
                 elif not cwd:
                     text = error_result(
                         "run_check", "NO_PROJECT_ROOT",
-                        ("The index names no project root, so there is no "
-                         "directory to run this check in. Nothing was run."),
+                        ("No project is set up on the code-intelligence "
+                         "service, so there is no directory to run this "
+                         "check in. Nothing was run. The service is remote "
+                         "and holds library source only; it has no copy of "
+                         "the user's project."),
                         retryable=False,
-                        remedies=[{"fixable_by": "user",
-                                   "action": ("run the check locally and "
-                                              "paste the output in"),
-                                   "effect": "the result is then in context",
-                                   "why_not_the_agent": ("this server has no "
-                                                         "copy of the project "
-                                                         "to run it in")}])
+                        remedies=[{"fixable_by": "agent",
+                                   "applies_when": ("the check is for the "
+                                                    "user's own project"),
+                                   "action": ("run it with your client's own "
+                                              "terminal tool"),
+                                   "effect": "the output is then in context"}])
                 elif check not in VERIFY_CHECKS:
                     text = (f"unknown check {check!r}. Available: "
                             f"{', '.join(VERIFY_CHECKS)}.")
@@ -1571,6 +1711,13 @@ def handle(req: dict) -> dict | None:
                     return {"jsonrpc": "2.0", "id": mid,
                             "error": {"code": -32601, "message": f"unknown tool {name}"}}
             return ok({"content": [{"type": "text", "text": text}]})
+        except gpu_room.NoRoom as e:
+            # The A4000 could not take the search model now: busy
+            # (retryable) or no room at all, with a remedy (mcp/gpu_room.py).
+            return ok({"content": [{"type": "text", "text": error_result(
+                name, e.code, e.reason + " The search did not run.",
+                e.retryable, remedies=e.remedies, **e.facts)}],
+                       "isError": True})
         except Exception as e:                                   # noqa: BLE001
             # Structured, not "search failed: OperationalError: no such table:
             # roots". A raw exception string is our bug arriving in someone's

@@ -1,0 +1,40 @@
+{
+ "note": "(Both streams: the grader's stdin AND its captured stdout are io.StringIO\nobjects without `.buffer`. The shim below gives each one a `.buffer`.)",
+ "rows": [
+  {
+   "arm": "bonsai",
+   "id": "e1e226d29b9ab59fc2de2d719a0e7117572f7bd9dc375709a92a673987c1b29d",
+   "task": "LCB_generation",
+   "official": 0,
+   "with_stdin_buffer": 1
+  },
+  {
+   "arm": "yamadori-xhigh",
+   "id": "388e39eefc4d3950ad99966e9c8dfbf64b59991d7e6cc2d9fb0a617f4025475e",
+   "task": "LCB_generation",
+   "official": 0,
+   "with_stdin_buffer": 1
+  },
+  {
+   "arm": "yamadori-xhigh",
+   "id": "cf932b62f91764e164fa14f8b4f50ad8346b1b653765fb9fdec13d372b10be73",
+   "task": "LCB_generation",
+   "official": 0,
+   "with_stdin_buffer": 1
+  },
+  {
+   "arm": "yamadori-xhigh",
+   "id": "df00a4688e96b001f32ffd39913ae151bfa14034bdca636193c96974529f7cf9",
+   "task": "LCB_generation",
+   "official": 0,
+   "with_stdin_buffer": 1
+  },
+  {
+   "arm": "yamadori-xhigh",
+   "id": "e1e226d29b9ab59fc2de2d719a0e7117572f7bd9dc375709a92a673987c1b29d",
+   "task": "LCB_generation",
+   "official": 0,
+   "with_stdin_buffer": 1
+  }
+ ]
+}

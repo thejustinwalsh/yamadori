@@ -59,7 +59,9 @@ reserve argument still holds for the current split: reserve is 0.
 
 EVERY TOKEN BUDGET DERIVES FROM THIS. tiers.budget() gives a request its
 role's share minus its prompt and its answer allowance as THINKING room; a
-fan-out of n samples shares main's 5/8 n ways. There is no free-floating
+fan-out's extra candidates are written one at a time by the second brain,
+each with the helper's whole 3/8 (mcp/fanout.py, 2026-09-23; until then n
+concurrent samples split main's 5/8 n ways). There is no free-floating
 thinking number.
 
 WHAT IT COSTS TO RAISE THE POOL
@@ -112,6 +114,9 @@ MAIN_FLOOR = float(os.environ.get("YAMADORI_MAIN_FLOOR", "0.50"))
 KV_KIB_PER_TOKEN = float(os.environ.get("YAMADORI_KV_KIB", "44"))
 
 _POOL: int | None = None
+# llama-server's slot count, from the same /props answer (`total_slots`), for
+# mcp/slots.py. None until pool_size() has asked, or when it could not.
+_SLOTS: int | None = None
 
 
 def pool_size(refresh: bool = False) -> int:
@@ -129,7 +134,7 @@ def pool_size(refresh: bool = False) -> int:
     ambiguity in the UI (it notes that a pool of exactly 131072 may be this
     fallback rather than a measurement).
     """
-    global _POOL
+    global _POOL, _SLOTS
     if _POOL is not None and not refresh:
         return _POOL
     for url in (f"{DIRECT}/props", f"{UPSTREAM}/props"):
@@ -140,6 +145,8 @@ def pool_size(refresh: bool = False) -> int:
                  or d.get("n_ctx"))
             if n:
                 _POOL = int(n)
+                if isinstance(d.get("total_slots"), int) and d["total_slots"] > 0:
+                    _SLOTS = d["total_slots"]
                 return _POOL
         except Exception:                                        # noqa: BLE001
             continue

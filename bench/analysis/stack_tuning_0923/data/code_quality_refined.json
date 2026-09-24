@@ -1,0 +1,620 @@
+[
+ {
+  "arm": "bonsai",
+  "id": "27c31c63ff778ef9594589756be22b75959369914a5b4fae17fa3255927e1dc4",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "3375d42f6db384f62b159eb89a85d715736790fd1abb380760ffbd12339fd4d5",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 5,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "N806",
+   "N806",
+   "N806",
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "388e39eefc4d3950ad99966e9c8dfbf64b59991d7e6cc2d9fb0a617f4025475e",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "6afe4974569ffea0733fb153fa9bc6ea75c6ada73e3095b7a3efb65fabbfae06",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 5,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "N806",
+   "N806",
+   "N806",
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "87871f3ecdda8c4583b2834741bb312a3917c9035cd21d151902b9eae123e17c",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 3,
+  "idiom": 3,
+  "correctness_class": 0,
+  "codes": [
+   "UP035",
+   "UP006",
+   "UP006"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "89101e97bd95e50c1d5d9db784d73f2894a20e4c2ed3e67cf124c7959f8ab4dd",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "E741"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "cf932b62f91764e164fa14f8b4f50ad8346b1b653765fb9fdec13d372b10be73",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 8,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "N806",
+   "E741",
+   "N806",
+   "N806",
+   "N806",
+   "E741",
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "d414f7768eb066f524236800aa2dbb8a4554f2e4abc22a99ef88fe30cbcc308e",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "d5213885ecf30ec0d5b6fa5e53af31eb5ed207d3257b2ae8843b1eed735ac7a5",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 6,
+  "idiom": 0,
+  "correctness_class": 1,
+  "codes": [
+   "F401",
+   "N806",
+   "N806",
+   "N806",
+   "PLR2004",
+   "PLR2004"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "df00a4688e96b001f32ffd39913ae151bfa14034bdca636193c96974529f7cf9",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 4,
+  "idiom": 0,
+  "correctness_class": 1,
+  "codes": [
+   "N806",
+   "F841",
+   "N806",
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "e1e226d29b9ab59fc2de2d719a0e7117572f7bd9dc375709a92a673987c1b29d",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 4,
+  "idiom": 1,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "RUF059",
+   "N806",
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "bonsai",
+  "id": "3cd8c16a338ab1b2d081add09e47c05cd4bad6c4ddd20c12356d911502fc54a0",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N803"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "45d51d0927f37783772c554d860a9c17db83a3e8e31dd02abeb93150acdaba55",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 7,
+  "idiom": 1,
+  "correctness_class": 0,
+  "codes": [
+   "SIM118",
+   "PLR2004",
+   "PLW2901",
+   "PLW2901",
+   "E741",
+   "PLW2901",
+   "E741"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "4952a5d420fa195e7b041251e85bce64c87b95e8f1cec05d7e16ce149e88c967",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "E731"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "5c9d7ade302709f4bdcf6e3b64127d1e67a3a3078b3a03ef241329547cf320c6",
+  "task": "coding_completion",
+  "compiles": "SyntaxError: unterminated triple-quoted string literal (detected at line 10)",
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 1,
+  "codes": [
+   "invalid-syntax"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "786432ddcf555d879432b906560955b9d464831f713946ce0210dcba478becd2",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "7878539e8dd4fe1d4bc66a440e16c102d66f158fed7828a84f3765505ba8f1d3",
+  "task": "coding_completion",
+  "compiles": "SyntaxError: 'return' outside function",
+  "attrib": 2,
+  "idiom": 1,
+  "correctness_class": 1,
+  "codes": [
+   "RET503",
+   "F706"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "9e895f817a6a867671d8735578f058a34a19dde837957b1a9c9347d7e13a8e38",
+  "task": "coding_completion",
+  "compiles": "SyntaxError: 'return' outside function",
+  "attrib": 3,
+  "idiom": 0,
+  "correctness_class": 2,
+  "codes": [
+   "PLW0120",
+   "F706",
+   "F821"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "e25750fd4c8fae19856e77a875093ab90a6333a680ccbd45dbabdaddb205bf2a",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 3,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "PLR2004",
+   "PLR2004"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "eae492105162057ac07f4920749d2125f86b5a335557c61d328d49f198af3343",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": false
+ },
+ {
+  "arm": "bonsai",
+  "id": "ebde77f9af990a37740871b38788987a907d4ab08556978324a42c3293bb68a9",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 1,
+  "correctness_class": 1,
+  "codes": [
+   "B905"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "27c31c63ff778ef9594589756be22b75959369914a5b4fae17fa3255927e1dc4",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "3375d42f6db384f62b159eb89a85d715736790fd1abb380760ffbd12339fd4d5",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 2,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "PLR5501"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "388e39eefc4d3950ad99966e9c8dfbf64b59991d7e6cc2d9fb0a617f4025475e",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 2,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "PLR1730"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "6afe4974569ffea0733fb153fa9bc6ea75c6ada73e3095b7a3efb65fabbfae06",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 5,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "N806",
+   "N806",
+   "N806",
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "87871f3ecdda8c4583b2834741bb312a3917c9035cd21d151902b9eae123e17c",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 3,
+  "idiom": 3,
+  "correctness_class": 0,
+  "codes": [
+   "UP035",
+   "UP006",
+   "UP006"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "89101e97bd95e50c1d5d9db784d73f2894a20e4c2ed3e67cf124c7959f8ab4dd",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 2,
+  "idiom": 2,
+  "correctness_class": 0,
+  "codes": [
+   "UP035",
+   "UP006"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "cf932b62f91764e164fa14f8b4f50ad8346b1b653765fb9fdec13d372b10be73",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 16,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "E702",
+   "N806",
+   "E702",
+   "E741",
+   "E702",
+   "E702",
+   "E702",
+   "E702",
+   "N806",
+   "E702",
+   "N806",
+   "E702",
+   "N806",
+   "E741",
+   "PLR1730"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "d414f7768eb066f524236800aa2dbb8a4554f2e4abc22a99ef88fe30cbcc308e",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 4,
+  "idiom": 4,
+  "correctness_class": 0,
+  "codes": [
+   "UP035",
+   "UP006",
+   "UP006",
+   "UP006"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "d5213885ecf30ec0d5b6fa5e53af31eb5ed207d3257b2ae8843b1eed735ac7a5",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 3,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806",
+   "N806",
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "df00a4688e96b001f32ffd39913ae151bfa14034bdca636193c96974529f7cf9",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "PLR2004"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "e1e226d29b9ab59fc2de2d719a0e7117572f7bd9dc375709a92a673987c1b29d",
+  "task": "LCB_generation",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "N806"
+  ],
+  "reemits_starter": null
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "3cd8c16a338ab1b2d081add09e47c05cd4bad6c4ddd20c12356d911502fc54a0",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 4,
+  "idiom": 0,
+  "correctness_class": 2,
+  "codes": [
+   "N803",
+   "F841",
+   "F811",
+   "N803"
+  ],
+  "reemits_starter": true
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "45d51d0927f37783772c554d860a9c17db83a3e8e31dd02abeb93150acdaba55",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 13,
+  "idiom": 2,
+  "correctness_class": 2,
+  "codes": [
+   "SIM118",
+   "PLR2004",
+   "PLW2901",
+   "PLW2901",
+   "E741",
+   "F841",
+   "E402",
+   "F811",
+   "SIM118",
+   "PLR2004",
+   "PLW2901",
+   "PLW2901",
+   "E741"
+  ],
+  "reemits_starter": true
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "4952a5d420fa195e7b041251e85bce64c87b95e8f1cec05d7e16ce149e88c967",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "E731"
+  ],
+  "reemits_starter": true
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "5c9d7ade302709f4bdcf6e3b64127d1e67a3a3078b3a03ef241329547cf320c6",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": true
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "786432ddcf555d879432b906560955b9d464831f713946ce0210dcba478becd2",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": false
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "7878539e8dd4fe1d4bc66a440e16c102d66f158fed7828a84f3765505ba8f1d3",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [
+   "PLW3301"
+  ],
+  "reemits_starter": false
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "9e895f817a6a867671d8735578f058a34a19dde837957b1a9c9347d7e13a8e38",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": true
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "e25750fd4c8fae19856e77a875093ab90a6333a680ccbd45dbabdaddb205bf2a",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 8,
+  "idiom": 0,
+  "correctness_class": 1,
+  "codes": [
+   "N806",
+   "PLR2004",
+   "PLR2004",
+   "E402",
+   "F811",
+   "N806",
+   "PLR2004",
+   "PLR2004"
+  ],
+  "reemits_starter": true
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "eae492105162057ac07f4920749d2125f86b5a335557c61d328d49f198af3343",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 0,
+  "idiom": 0,
+  "correctness_class": 0,
+  "codes": [],
+  "reemits_starter": false
+ },
+ {
+  "arm": "yamadori-xhigh",
+  "id": "ebde77f9af990a37740871b38788987a907d4ab08556978324a42c3293bb68a9",
+  "task": "coding_completion",
+  "compiles": true,
+  "attrib": 1,
+  "idiom": 1,
+  "correctness_class": 1,
+  "codes": [
+   "B905"
+  ],
+  "reemits_starter": false
+ }
+]

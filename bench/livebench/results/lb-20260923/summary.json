@@ -1,0 +1,86 @@
+{
+ "run_id": "lb-20260923",
+ "generated_at": "2026-09-23T07:18:22-0400",
+ "release": [
+  "2024-11-25"
+ ],
+ "population": {
+  "coding": 128,
+  "data_analysis": 150,
+  "instruction_following": 200,
+  "language": 140,
+  "math": 232,
+  "reasoning": 150
+ },
+ "method": {
+  "bootstrap_B": 2000,
+  "seed": 20260923,
+  "ci": "percentile, stratified by task",
+  "aggregation": "LiveBench: mean(task) -> mean(tasks) per category -> mean(categories)"
+ },
+ "arms": {
+  "bonsai": {
+   "overall": {
+    "score": 70.45454545454545,
+    "ci95": [
+     51.36363636363637,
+     85.9090909090909
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 70.45454545454545,
+     "ci95": [
+      51.36363636363637,
+      85.9090909090909
+     ],
+     "n": 21,
+     "tasks": {
+      "LCB_generation": {
+       "score": 90.9090909090909,
+       "ci95": [
+        72.72727272727273,
+        100.0
+       ],
+       "n": 11
+      },
+      "coding_completion": {
+       "score": 50.0,
+       "ci95": [
+        20.0,
+        80.0
+       ],
+       "n": 10
+      }
+     },
+     "finish_reason": {
+      "stop": 21
+     },
+     "seconds": {
+      "n": 21,
+      "median": 356.84,
+      "p90": 1630.2,
+      "max": 2296.77,
+      "total": 13889.82
+     },
+     "output_tokens": {
+      "n": 21,
+      "median": 2375.0,
+      "p90": 10511.0,
+      "max": 13355,
+      "total": 96372
+     }
+    }
+   },
+   "status": {
+    "ok": 21
+   },
+   "finish_reason": {
+    "stop": 21
+   }
+  }
+ }
+}

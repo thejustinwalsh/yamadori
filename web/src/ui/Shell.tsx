@@ -206,6 +206,8 @@ const TABS: { route: Route['name']; kanji: string; label: string; to: string; id
   { route: 'nebari', kanji: '根張り', label: 'NEBARI', to: href.nebari, idx: '02' },
   { route: 'naedoko', kanji: '苗床', label: 'NAEDOKO', to: href.naedoko, idx: '03' },
   { route: 'sentei', kanji: '剪定', label: 'SENTEI', to: href.sentei, idx: '04' },
+  { route: 'settings', kanji: '設定', label: 'SETTINGS', to: href.settings, idx: '05' },
+  { route: 'skills', kanji: '技', label: 'SKILLS', to: href.skills, idx: '06' },
 ];
 
 /** The model actually being served: the gguf on the bonsai listener's port. */

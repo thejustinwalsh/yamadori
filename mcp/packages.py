@@ -65,33 +65,26 @@ def search(root: str, query: str, tool: str, args: dict) -> str | None:
     """Re-run a tool against dependency indexes. None if nothing was found."""
     import code_search as cs
 
-    prev_db = cs.INDEX_DB
-    prev_env = os.environ.get("CODE_INDEX_DB")
+    # Each package's database is PASSED to the call (bound for this thread
+    # only), never swapped into the process: concurrent requests swapped each
+    # other's index (pre-deploy review, 2026-09-24).
     out = []
-    try:
-        for name, version in relevant(root, query):
-            db = deps.db_path(name, version)
-            os.environ["CODE_INDEX_DB"] = db
-            cs.INDEX_DB = db
-            try:
-                resp = cs.handle({"jsonrpc": "2.0", "id": 1,
-                                  "method": "tools/call",
-                                  "params": {"name": tool, "arguments": args}})
-                text = resp["result"]["content"][0]["text"]
-            except Exception:                                    # noqa: BLE001
-                continue
-            if _is_empty(text):
-                continue
-            out.append(f"== projected from {name}@{version} source ==\n"
-                       f"{_PAIRING}\n{text[:2500]}")
-            if out:
-                break      # one good source is enough; more is noise
-    finally:
-        cs.INDEX_DB = prev_db
-        if prev_env is not None:
-            os.environ["CODE_INDEX_DB"] = prev_env
-        else:
-            os.environ.pop("CODE_INDEX_DB", None)
+    for name, version in relevant(root, query):
+        db = deps.db_path(name, version)
+        try:
+            resp = cs.handle({"jsonrpc": "2.0", "id": 1,
+                              "method": "tools/call",
+                              "params": {"name": tool, "arguments": args}},
+                             db=db)
+            text = resp["result"]["content"][0]["text"]
+        except Exception:                                        # noqa: BLE001
+            continue
+        if _is_empty(text):
+            continue
+        out.append(f"== projected from {name}@{version} source ==\n"
+                   f"{_pairing(name)}\n{text[:2500]}")
+        if out:
+            break      # one good source is enough; more is noise
     return "\n\n".join(out) if out else None
 
 
@@ -281,12 +274,16 @@ def resolve(packages: list[str], versions: dict) -> list[dict]:
 # you are not. The pairing is stated in the RESULT, not only in the tool
 # description, because the result is what the model is reading at the moment
 # it decides what to do next.
-_PAIRING = ("This is a source map for a dependency: the user has the built "
-            "bundle, the server has the original source, and these paths are "
-            "the server's. The user's node_modules has no file at this path "
-            "and its line numbers are different. Read these with "
-            "read_file_range, never with your own file tools, and name the "
-            "library when you quote one.")
+# Remote-service wording (2026-09-23, with code_search.REMOTE_READ_ONLY): no
+# "server", and the read instruction carries the library-name prefix, because
+# a bare "src/..." path read with read_file_range and no repository bound
+# names no held library and returns NO_INDEX (proxy._route_package_glob).
+def _pairing(name: str) -> str:
+    return ("This is the library's original source, held by the remote "
+            "code-intelligence service; the user has the built package, with "
+            "different files and line numbers. Read these paths with "
+            f"read_file_range, starting the path with \"{name}/\", and name "
+            "the library when you quote one.")
 
 
 def banner_for(pick: dict) -> str:
@@ -302,7 +299,7 @@ def banner_for(pick: dict) -> str:
                 "answer depends on it.")
     else:
         note = ""
-    return "\n".join(x for x in (head, note, _PAIRING) if x)
+    return "\n".join(x for x in (head, note, _pairing(pick["name"])) if x)
 
 
 def search_discovered(state: dict, query: str, tool: str,
@@ -319,28 +316,20 @@ def search_discovered(state: dict, query: str, tool: str,
     words = {w.lower() for w in query.replace("/", " ").replace(".", " ").split()}
     picks.sort(key=lambda p: p["name"].split("/")[-1].lower() not in words)
 
-    prev_db, prev_env = cs.INDEX_DB, os.environ.get("CODE_INDEX_DB")
-    try:
-        for pick in picks:
-            db = deps.db_path(pick["name"], pick["version"])
-            if not os.path.exists(db):
-                continue
-            os.environ["CODE_INDEX_DB"] = db
-            cs.INDEX_DB = db
-            try:
-                resp = cs.handle({"jsonrpc": "2.0", "id": 1,
-                                  "method": "tools/call",
-                                  "params": {"name": tool, "arguments": args}})
-                text = resp["result"]["content"][0]["text"]
-            except Exception:                                    # noqa: BLE001
-                continue
-            if _is_empty(text):
-                continue
-            return f"{banner_for(pick)}\n{text[:3000]}"
-    finally:
-        cs.INDEX_DB = prev_db
-        if prev_env is not None:
-            os.environ["CODE_INDEX_DB"] = prev_env
-        else:
-            os.environ.pop("CODE_INDEX_DB", None)
+    # PASSED per call, never swapped into the process (as in search()).
+    for pick in picks:
+        db = deps.db_path(pick["name"], pick["version"])
+        if not os.path.exists(db):
+            continue
+        try:
+            resp = cs.handle({"jsonrpc": "2.0", "id": 1,
+                              "method": "tools/call",
+                              "params": {"name": tool, "arguments": args}},
+                             db=db)
+            text = resp["result"]["content"][0]["text"]
+        except Exception:                                        # noqa: BLE001
+            continue
+        if _is_empty(text):
+            continue
+        return f"{banner_for(pick)}\n{text[:3000]}"
     return None

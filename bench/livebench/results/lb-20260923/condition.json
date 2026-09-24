@@ -1,0 +1,5 @@
+{"run_id": "lb-20260923", "server_sampling": "--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.05 --presence-penalty 0 --repeat-penalty 1.0",
+ "request_sampling": {"temperature": 1.0, "top_p": 0.95, "max_tokens": 4096},
+ "min_p": 0.05, "note": "RECORD, min_p 0.05 (llama.cpp default, unmeasured). Superseded by lb-20260923-minp0. Coding n=21 kept; the IF answers are in discarded_if_minp005/ and are not reported.",
+ "question_release": "2024-11-25", "arms": ["bonsai"], "requests_in_flight": 1,
+ "shared_with": "SWE-bench and domain suite (4/4 slots busy most of the night)"}

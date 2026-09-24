@@ -1,0 +1,127 @@
+[
+ {
+  "task": "ts01",
+  "arm": "A0",
+  "outcome": "pass",
+  "lint_errors": 1,
+  "lint_warnings": 0,
+  "rules": {
+   "@typescript-eslint/restrict-template-expressions": 1
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": []
+ },
+ {
+  "task": "ts01",
+  "arm": "A5",
+  "outcome": "pass",
+  "lint_errors": 1,
+  "lint_warnings": 0,
+  "rules": {
+   "@typescript-eslint/restrict-template-expressions": 1
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": []
+ },
+ {
+  "task": "ts02",
+  "arm": "A0",
+  "outcome": "fail",
+  "lint_errors": 1,
+  "lint_warnings": 0,
+  "rules": {
+   "parse": 1
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": []
+ },
+ {
+  "task": "ts02",
+  "arm": "A5",
+  "outcome": "fail",
+  "lint_errors": 1,
+  "lint_warnings": 0,
+  "rules": {
+   "@typescript-eslint/no-unused-vars": 1
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": [
+   [
+    0.5616,
+    "TypeScript 4.1 Release Notes"
+   ],
+   [
+    0.5554,
+    "Announcing TypeScript 4.4"
+   ]
+  ]
+ },
+ {
+  "task": "tg01",
+  "arm": "A0",
+  "outcome": "fail",
+  "lint_errors": 7,
+  "lint_warnings": 0,
+  "rules": {
+   "@typescript-eslint/no-unsafe-assignment": 5,
+   "@typescript-eslint/no-unsafe-call": 2
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": []
+ },
+ {
+  "task": "tg01",
+  "arm": "A5",
+  "outcome": "fail",
+  "lint_errors": 1,
+  "lint_warnings": 0,
+  "rules": {
+   "@typescript-eslint/no-unused-vars": 1
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": [
+   [
+    0.6535,
+    "TypeGPU docs: Data Schemas"
+   ]
+  ]
+ },
+ {
+  "task": "tg02",
+  "arm": "A0",
+  "outcome": "fail",
+  "lint_errors": 8,
+  "lint_warnings": 0,
+  "rules": {
+   "@typescript-eslint/no-unsafe-assignment": 6,
+   "@typescript-eslint/no-unsafe-call": 2
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": []
+ },
+ {
+  "task": "tg02",
+  "arm": "A5",
+  "outcome": "pass",
+  "lint_errors": 1,
+  "lint_warnings": 0,
+  "rules": {
+   "@typescript-eslint/no-unused-vars": 1
+  },
+  "skipped": null,
+  "style_error": "",
+  "hints": [
+   [
+    0.5806,
+    "TypeGPU docs: Data Schemas"
+   ]
+  ]
+ }
+]
