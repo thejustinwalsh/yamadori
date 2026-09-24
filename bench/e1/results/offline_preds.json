@@ -1,0 +1,2617 @@
+{
+ "head": "route_in",
+ "version": 1,
+ "n": 289,
+ "rows": [
+  {
+   "set": "set1",
+   "id": 0,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.984388,
+    "answer_directly": 0.002018,
+    "clarify": 0.013594
+   }
+  },
+  {
+   "set": "set1",
+   "id": 1,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.992643,
+    "answer_directly": 0.002996,
+    "clarify": 0.004361
+   }
+  },
+  {
+   "set": "set1",
+   "id": 2,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.8348,
+    "answer_directly": 0.031942,
+    "clarify": 0.133259
+   }
+  },
+  {
+   "set": "set1",
+   "id": 3,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.995889,
+    "answer_directly": 0.00103,
+    "clarify": 0.00308
+   }
+  },
+  {
+   "set": "set1",
+   "id": 4,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.317235,
+    "answer_directly": 0.662081,
+    "clarify": 0.020683
+   }
+  },
+  {
+   "set": "set1",
+   "id": 5,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.963434,
+    "answer_directly": 0.008309,
+    "clarify": 0.028257
+   }
+  },
+  {
+   "set": "set1",
+   "id": 6,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.997873,
+    "answer_directly": 0.001864,
+    "clarify": 0.000263
+   }
+  },
+  {
+   "set": "set1",
+   "id": 7,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.996604,
+    "answer_directly": 0.000278,
+    "clarify": 0.003119
+   }
+  },
+  {
+   "set": "set1",
+   "id": 8,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.983136,
+    "answer_directly": 0.012191,
+    "clarify": 0.004673
+   }
+  },
+  {
+   "set": "set1",
+   "id": 9,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.984254,
+    "answer_directly": 0.007012,
+    "clarify": 0.008734
+   }
+  },
+  {
+   "set": "set1",
+   "id": 10,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.998628,
+    "answer_directly": 0.000196,
+    "clarify": 0.001176
+   }
+  },
+  {
+   "set": "set1",
+   "id": 11,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.995933,
+    "answer_directly": 0.001227,
+    "clarify": 0.00284
+   }
+  },
+  {
+   "set": "set1",
+   "id": 12,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.656778,
+    "answer_directly": 0.305773,
+    "clarify": 0.037449
+   }
+  },
+  {
+   "set": "set1",
+   "id": 13,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.44083,
+    "answer_directly": 0.534601,
+    "clarify": 0.024568
+   }
+  },
+  {
+   "set": "set1",
+   "id": 14,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.143139,
+    "answer_directly": 0.856086,
+    "clarify": 0.000775
+   }
+  },
+  {
+   "set": "set1",
+   "id": 15,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.14395,
+    "answer_directly": 0.42377,
+    "clarify": 0.43228
+   }
+  },
+  {
+   "set": "set1",
+   "id": 16,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.957708,
+    "answer_directly": 0.024232,
+    "clarify": 0.018061
+   }
+  },
+  {
+   "set": "set1",
+   "id": 17,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.998066,
+    "answer_directly": 0.00013,
+    "clarify": 0.001805
+   }
+  },
+  {
+   "set": "set1",
+   "id": 18,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999148,
+    "answer_directly": 0.000533,
+    "clarify": 0.000319
+   }
+  },
+  {
+   "set": "set1",
+   "id": 19,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.92177,
+    "answer_directly": 0.006334,
+    "clarify": 0.071896
+   }
+  },
+  {
+   "set": "set1",
+   "id": 20,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.978938,
+    "answer_directly": 0.003018,
+    "clarify": 0.018044
+   }
+  },
+  {
+   "set": "set1",
+   "id": 21,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.004707,
+    "answer_directly": 0.176973,
+    "clarify": 0.81832
+   }
+  },
+  {
+   "set": "set1",
+   "id": 22,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.810938,
+    "answer_directly": 0.174749,
+    "clarify": 0.014313
+   }
+  },
+  {
+   "set": "set1",
+   "id": 23,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.006493,
+    "answer_directly": 0.992467,
+    "clarify": 0.00104
+   }
+  },
+  {
+   "set": "set1",
+   "id": 24,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.893031,
+    "answer_directly": 0.102592,
+    "clarify": 0.004377
+   }
+  },
+  {
+   "set": "set1",
+   "id": 25,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999874,
+    "answer_directly": 2e-06,
+    "clarify": 0.000124
+   }
+  },
+  {
+   "set": "set1",
+   "id": 26,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.591641,
+    "answer_directly": 0.233471,
+    "clarify": 0.174888
+   }
+  },
+  {
+   "set": "set1",
+   "id": 27,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999778,
+    "answer_directly": 4.5e-05,
+    "clarify": 0.000177
+   }
+  },
+  {
+   "set": "set1",
+   "id": 28,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.984368,
+    "answer_directly": 0.001413,
+    "clarify": 0.01422
+   }
+  },
+  {
+   "set": "set1",
+   "id": 29,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.077752,
+    "answer_directly": 0.91289,
+    "clarify": 0.009358
+   }
+  },
+  {
+   "set": "set1",
+   "id": 30,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.169027,
+    "answer_directly": 0.640712,
+    "clarify": 0.19026
+   }
+  },
+  {
+   "set": "set1",
+   "id": 31,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.99449,
+    "answer_directly": 0.002673,
+    "clarify": 0.002837
+   }
+  },
+  {
+   "set": "set1",
+   "id": 32,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.417503,
+    "answer_directly": 0.341885,
+    "clarify": 0.240612
+   }
+  },
+  {
+   "set": "set1",
+   "id": 33,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.66391,
+    "answer_directly": 0.005527,
+    "clarify": 0.330563
+   }
+  },
+  {
+   "set": "set1",
+   "id": 34,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.974791,
+    "answer_directly": 0.018374,
+    "clarify": 0.006835
+   }
+  },
+  {
+   "set": "set1",
+   "id": 35,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.997687,
+    "answer_directly": 0.001143,
+    "clarify": 0.00117
+   }
+  },
+  {
+   "set": "set1",
+   "id": 36,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999714,
+    "answer_directly": 7.7e-05,
+    "clarify": 0.000209
+   }
+  },
+  {
+   "set": "set1",
+   "id": 37,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.175058,
+    "answer_directly": 0.771971,
+    "clarify": 0.052972
+   }
+  },
+  {
+   "set": "set1",
+   "id": 38,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.102751,
+    "answer_directly": 0.047609,
+    "clarify": 0.84964
+   }
+  },
+  {
+   "set": "set1",
+   "id": 39,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.987175,
+    "answer_directly": 0.01215,
+    "clarify": 0.000675
+   }
+  },
+  {
+   "set": "set1",
+   "id": 40,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.99889,
+    "answer_directly": 0.000333,
+    "clarify": 0.000776
+   }
+  },
+  {
+   "set": "set1",
+   "id": 41,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999624,
+    "answer_directly": 5.1e-05,
+    "clarify": 0.000325
+   }
+  },
+  {
+   "set": "set1",
+   "id": 42,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.997337,
+    "answer_directly": 0.000341,
+    "clarify": 0.002322
+   }
+  },
+  {
+   "set": "set1",
+   "id": 43,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.985063,
+    "answer_directly": 0.001346,
+    "clarify": 0.013591
+   }
+  },
+  {
+   "set": "set1",
+   "id": 44,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.831865,
+    "answer_directly": 0.145967,
+    "clarify": 0.022168
+   }
+  },
+  {
+   "set": "set1",
+   "id": 45,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000369,
+    "answer_directly": 0.99948,
+    "clarify": 0.000152
+   }
+  },
+  {
+   "set": "set1",
+   "id": 46,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 9e-06,
+    "answer_directly": 0.997039,
+    "clarify": 0.002953
+   }
+  },
+  {
+   "set": "set1",
+   "id": 47,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000339,
+    "answer_directly": 0.999596,
+    "clarify": 6.4e-05
+   }
+  },
+  {
+   "set": "set1",
+   "id": 48,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 3.6e-05,
+    "answer_directly": 0.999847,
+    "clarify": 0.000117
+   }
+  },
+  {
+   "set": "set1",
+   "id": 49,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000628,
+    "answer_directly": 0.991632,
+    "clarify": 0.00774
+   }
+  },
+  {
+   "set": "set1",
+   "id": 50,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.044055,
+    "answer_directly": 0.012802,
+    "clarify": 0.943143
+   }
+  },
+  {
+   "set": "set1",
+   "id": 51,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.008541,
+    "answer_directly": 0.987192,
+    "clarify": 0.004267
+   }
+  },
+  {
+   "set": "set1",
+   "id": 52,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.028679,
+    "answer_directly": 0.966139,
+    "clarify": 0.005182
+   }
+  },
+  {
+   "set": "set1",
+   "id": 53,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.013639,
+    "answer_directly": 0.986271,
+    "clarify": 9e-05
+   }
+  },
+  {
+   "set": "set1",
+   "id": 54,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000252,
+    "answer_directly": 0.994348,
+    "clarify": 0.0054
+   }
+  },
+  {
+   "set": "set1",
+   "id": 55,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 2.6e-05,
+    "answer_directly": 0.999847,
+    "clarify": 0.000127
+   }
+  },
+  {
+   "set": "set1",
+   "id": 56,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.014755,
+    "answer_directly": 0.952845,
+    "clarify": 0.032399
+   }
+  },
+  {
+   "set": "set1",
+   "id": 57,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.01889,
+    "answer_directly": 0.971234,
+    "clarify": 0.009876
+   }
+  },
+  {
+   "set": "set1",
+   "id": 58,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 5.8e-05,
+    "answer_directly": 0.999673,
+    "clarify": 0.00027
+   }
+  },
+  {
+   "set": "set1",
+   "id": 59,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.143195,
+    "answer_directly": 0.830809,
+    "clarify": 0.025996
+   }
+  },
+  {
+   "set": "set1",
+   "id": 60,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.643868,
+    "answer_directly": 0.32999,
+    "clarify": 0.026141
+   }
+  },
+  {
+   "set": "set1",
+   "id": 61,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000459,
+    "answer_directly": 0.99407,
+    "clarify": 0.005471
+   }
+  },
+  {
+   "set": "set1",
+   "id": 62,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.127158,
+    "answer_directly": 0.841493,
+    "clarify": 0.031349
+   }
+  },
+  {
+   "set": "set1",
+   "id": 63,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.351924,
+    "answer_directly": 0.639723,
+    "clarify": 0.008354
+   }
+  },
+  {
+   "set": "set1",
+   "id": 64,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 4.7e-05,
+    "answer_directly": 0.999429,
+    "clarify": 0.000524
+   }
+  },
+  {
+   "set": "set1",
+   "id": 65,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.03313,
+    "answer_directly": 0.282682,
+    "clarify": 0.684188
+   }
+  },
+  {
+   "set": "set1",
+   "id": 66,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000137,
+    "answer_directly": 0.999698,
+    "clarify": 0.000165
+   }
+  },
+  {
+   "set": "set1",
+   "id": 67,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.108228,
+    "answer_directly": 0.847736,
+    "clarify": 0.044036
+   }
+  },
+  {
+   "set": "set1",
+   "id": 68,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.818526,
+    "answer_directly": 0.120259,
+    "clarify": 0.061215
+   }
+  },
+  {
+   "set": "set1",
+   "id": 69,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000287,
+    "answer_directly": 0.995879,
+    "clarify": 0.003834
+   }
+  },
+  {
+   "set": "set1",
+   "id": 70,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.019465,
+    "answer_directly": 0.974581,
+    "clarify": 0.005954
+   }
+  },
+  {
+   "set": "set1",
+   "id": 71,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.027889,
+    "answer_directly": 0.971273,
+    "clarify": 0.000838
+   }
+  },
+  {
+   "set": "set1",
+   "id": 72,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 4e-05,
+    "answer_directly": 0.643601,
+    "clarify": 0.356359
+   }
+  },
+  {
+   "set": "set1",
+   "id": 73,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 3.4e-05,
+    "answer_directly": 0.998799,
+    "clarify": 0.001167
+   }
+  },
+  {
+   "set": "set1",
+   "id": 74,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.101035,
+    "answer_directly": 0.766275,
+    "clarify": 0.13269
+   }
+  },
+  {
+   "set": "set1",
+   "id": 75,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.211018,
+    "answer_directly": 0.787893,
+    "clarify": 0.001089
+   }
+  },
+  {
+   "set": "set1",
+   "id": 76,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.002685,
+    "answer_directly": 0.992675,
+    "clarify": 0.00464
+   }
+  },
+  {
+   "set": "set1",
+   "id": 77,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.874589,
+    "answer_directly": 0.044932,
+    "clarify": 0.080479
+   }
+  },
+  {
+   "set": "set1",
+   "id": 78,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.001795,
+    "answer_directly": 0.99817,
+    "clarify": 3.5e-05
+   }
+  },
+  {
+   "set": "set1",
+   "id": 79,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.001168,
+    "answer_directly": 0.997669,
+    "clarify": 0.001163
+   }
+  },
+  {
+   "set": "set1",
+   "id": 80,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.176089,
+    "answer_directly": 0.795829,
+    "clarify": 0.028083
+   }
+  },
+  {
+   "set": "set1",
+   "id": 81,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.093791,
+    "answer_directly": 0.903547,
+    "clarify": 0.002662
+   }
+  },
+  {
+   "set": "set1",
+   "id": 82,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.01126,
+    "answer_directly": 0.987037,
+    "clarify": 0.001702
+   }
+  },
+  {
+   "set": "set1",
+   "id": 83,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.001087,
+    "answer_directly": 0.010279,
+    "clarify": 0.988634
+   }
+  },
+  {
+   "set": "set1",
+   "id": 84,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000184,
+    "answer_directly": 0.997231,
+    "clarify": 0.002585
+   }
+  },
+  {
+   "set": "set1",
+   "id": 85,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.027425,
+    "answer_directly": 0.864761,
+    "clarify": 0.107814
+   }
+  },
+  {
+   "set": "set1",
+   "id": 86,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.99636,
+    "answer_directly": 0.002518,
+    "clarify": 0.001122
+   }
+  },
+  {
+   "set": "set1",
+   "id": 87,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.036693,
+    "answer_directly": 0.959492,
+    "clarify": 0.003815
+   }
+  },
+  {
+   "set": "set1",
+   "id": 88,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.012953,
+    "answer_directly": 0.751376,
+    "clarify": 0.23567
+   }
+  },
+  {
+   "set": "set1",
+   "id": 89,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.080629,
+    "answer_directly": 0.90259,
+    "clarify": 0.016781
+   }
+  },
+  {
+   "set": "set1",
+   "id": 90,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.119064,
+    "answer_directly": 0.004589,
+    "clarify": 0.876347
+   }
+  },
+  {
+   "set": "set1",
+   "id": 91,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.00049,
+    "answer_directly": 0.002335,
+    "clarify": 0.997174
+   }
+  },
+  {
+   "set": "set1",
+   "id": 92,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.137427,
+    "answer_directly": 0.002928,
+    "clarify": 0.859645
+   }
+  },
+  {
+   "set": "set1",
+   "id": 93,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.000198,
+    "answer_directly": 8e-06,
+    "clarify": 0.999794
+   }
+  },
+  {
+   "set": "set1",
+   "id": 94,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 1.7e-05,
+    "answer_directly": 0.0,
+    "clarify": 0.999982
+   }
+  },
+  {
+   "set": "set1",
+   "id": 95,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.013054,
+    "answer_directly": 1.8e-05,
+    "clarify": 0.986928
+   }
+  },
+  {
+   "set": "set1",
+   "id": 96,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.100167,
+    "answer_directly": 0.000184,
+    "clarify": 0.899649
+   }
+  },
+  {
+   "set": "set1",
+   "id": 97,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.001861,
+    "answer_directly": 0.008863,
+    "clarify": 0.989276
+   }
+  },
+  {
+   "set": "set1",
+   "id": 98,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.064328,
+    "answer_directly": 0.006759,
+    "clarify": 0.928913
+   }
+  },
+  {
+   "set": "set1",
+   "id": 99,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 2.9e-05,
+    "answer_directly": 0.004932,
+    "clarify": 0.995039
+   }
+  },
+  {
+   "set": "set1",
+   "id": 100,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.000762,
+    "answer_directly": 0.005189,
+    "clarify": 0.994049
+   }
+  },
+  {
+   "set": "set1",
+   "id": 101,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.000107,
+    "answer_directly": 0.161843,
+    "clarify": 0.83805
+   }
+  },
+  {
+   "set": "set1",
+   "id": 102,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.005878,
+    "answer_directly": 0.013839,
+    "clarify": 0.980283
+   }
+  },
+  {
+   "set": "set1",
+   "id": 103,
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 3.9e-05,
+    "answer_directly": 0.647722,
+    "clarify": 0.352239
+   }
+  },
+  {
+   "set": "set1",
+   "id": 104,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 2e-06,
+    "answer_directly": 0.000606,
+    "clarify": 0.999392
+   }
+  },
+  {
+   "set": "set1",
+   "id": 105,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.925066,
+    "answer_directly": 0.001691,
+    "clarify": 0.073243
+   }
+  },
+  {
+   "set": "set1",
+   "id": 106,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.160692,
+    "answer_directly": 0.182449,
+    "clarify": 0.656859
+   }
+  },
+  {
+   "set": "set1",
+   "id": 107,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.020609,
+    "answer_directly": 5e-06,
+    "clarify": 0.979386
+   }
+  },
+  {
+   "set": "set1",
+   "id": 108,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.000811,
+    "answer_directly": 0.000271,
+    "clarify": 0.998919
+   }
+  },
+  {
+   "set": "set1",
+   "id": 109,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.032387,
+    "answer_directly": 0.000821,
+    "clarify": 0.966792
+   }
+  },
+  {
+   "set": "set1",
+   "id": 110,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 3e-06,
+    "answer_directly": 2.6e-05,
+    "clarify": 0.999971
+   }
+  },
+  {
+   "set": "set1",
+   "id": 111,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 2e-05,
+    "answer_directly": 0.000167,
+    "clarify": 0.999814
+   }
+  },
+  {
+   "set": "set1",
+   "id": 112,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.050419,
+    "answer_directly": 0.115726,
+    "clarify": 0.833855
+   }
+  },
+  {
+   "set": "set1",
+   "id": 113,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.009577,
+    "answer_directly": 0.103288,
+    "clarify": 0.887135
+   }
+  },
+  {
+   "set": "set1",
+   "id": 114,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.03161,
+    "answer_directly": 0.000511,
+    "clarify": 0.96788
+   }
+  },
+  {
+   "set": "set1",
+   "id": 115,
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.797931,
+    "answer_directly": 0.047339,
+    "clarify": 0.15473
+   }
+  },
+  {
+   "set": "set1",
+   "id": 116,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.035965,
+    "answer_directly": 0.422546,
+    "clarify": 0.54149
+   }
+  },
+  {
+   "set": "set1",
+   "id": 117,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.025273,
+    "answer_directly": 0.00017,
+    "clarify": 0.974557
+   }
+  },
+  {
+   "set": "set1",
+   "id": 118,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.047356,
+    "answer_directly": 0.029628,
+    "clarify": 0.923017
+   }
+  },
+  {
+   "set": "set1",
+   "id": 119,
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.024673,
+    "answer_directly": 0.070618,
+    "clarify": 0.904709
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-000",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.262821,
+    "answer_directly": 0.002651,
+    "clarify": 0.734527
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-001",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.779101,
+    "answer_directly": 0.011374,
+    "clarify": 0.209524
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-002",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.793363,
+    "answer_directly": 0.000941,
+    "clarify": 0.205695
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-003",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.879241,
+    "answer_directly": 0.000795,
+    "clarify": 0.119964
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-004",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.798374,
+    "answer_directly": 0.011048,
+    "clarify": 0.190578
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-005",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.788566,
+    "answer_directly": 0.069028,
+    "clarify": 0.142405
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-006",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.075688,
+    "answer_directly": 0.005114,
+    "clarify": 0.919198
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-007",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.611873,
+    "answer_directly": 0.047039,
+    "clarify": 0.341088
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-008",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.525393,
+    "answer_directly": 0.088123,
+    "clarify": 0.386484
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-009",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.994438,
+    "answer_directly": 0.000855,
+    "clarify": 0.004706
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-010",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 2.7e-05,
+    "answer_directly": 5.1e-05,
+    "clarify": 0.999921
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-011",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.018208,
+    "answer_directly": 0.005376,
+    "clarify": 0.976417
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-012",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.498785,
+    "answer_directly": 0.449385,
+    "clarify": 0.05183
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-013",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.011149,
+    "answer_directly": 0.071594,
+    "clarify": 0.917257
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-014",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.011052,
+    "answer_directly": 0.078854,
+    "clarify": 0.910094
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-015",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.463854,
+    "answer_directly": 0.000242,
+    "clarify": 0.535904
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-016",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.52823,
+    "answer_directly": 0.000465,
+    "clarify": 0.471306
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-017",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000422,
+    "answer_directly": 0.979684,
+    "clarify": 0.019894
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-018",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.00086,
+    "answer_directly": 0.979288,
+    "clarify": 0.019852
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-019",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.00434,
+    "answer_directly": 0.99559,
+    "clarify": 7e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-020",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.504888,
+    "answer_directly": 0.001529,
+    "clarify": 0.493583
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-021",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.989252,
+    "answer_directly": 0.000809,
+    "clarify": 0.009939
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-022",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.890914,
+    "answer_directly": 0.037839,
+    "clarify": 0.071247
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-023",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 1.5e-05,
+    "answer_directly": 0.994551,
+    "clarify": 0.005434
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-024",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.025349,
+    "answer_directly": 0.750101,
+    "clarify": 0.22455
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-025",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.004122,
+    "answer_directly": 0.011957,
+    "clarify": 0.983921
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-026",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.025909,
+    "answer_directly": 0.952825,
+    "clarify": 0.021266
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-027",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.059488,
+    "answer_directly": 0.925067,
+    "clarify": 0.015445
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-028",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.995069,
+    "answer_directly": 0.000294,
+    "clarify": 0.004637
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-029",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.028145,
+    "answer_directly": 0.923311,
+    "clarify": 0.048545
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-030",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.006375,
+    "answer_directly": 0.991618,
+    "clarify": 0.002006
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-031",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999987,
+    "answer_directly": 1e-06,
+    "clarify": 1.2e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-032",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.090329,
+    "answer_directly": 0.90941,
+    "clarify": 0.000261
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-033",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.407409,
+    "answer_directly": 0.592525,
+    "clarify": 6.6e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-034",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.552379,
+    "answer_directly": 0.240422,
+    "clarify": 0.207199
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-035",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.048549,
+    "answer_directly": 0.94698,
+    "clarify": 0.00447
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-036",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.335799,
+    "answer_directly": 0.644944,
+    "clarify": 0.019257
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-037",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.017505,
+    "answer_directly": 0.957383,
+    "clarify": 0.025112
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-038",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.986154,
+    "answer_directly": 0.011425,
+    "clarify": 0.002421
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-039",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.330571,
+    "answer_directly": 0.001239,
+    "clarify": 0.66819
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-040",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000158,
+    "answer_directly": 0.998869,
+    "clarify": 0.000973
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-041",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.041495,
+    "answer_directly": 0.896336,
+    "clarify": 0.062169
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-042",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000125,
+    "answer_directly": 0.690147,
+    "clarify": 0.309729
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-043",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.009538,
+    "answer_directly": 0.990447,
+    "clarify": 1.5e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-044",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.002293,
+    "answer_directly": 0.99262,
+    "clarify": 0.005087
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-045",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.124727,
+    "answer_directly": 0.874143,
+    "clarify": 0.001131
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-046",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.109521,
+    "answer_directly": 0.887385,
+    "clarify": 0.003094
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-047",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.011664,
+    "answer_directly": 0.000575,
+    "clarify": 0.98776
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-048",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.526253,
+    "answer_directly": 0.268139,
+    "clarify": 0.205607
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-049",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.01954,
+    "answer_directly": 0.980349,
+    "clarify": 0.000111
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-050",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.38964,
+    "answer_directly": 0.297263,
+    "clarify": 0.313096
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-051",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.028339,
+    "answer_directly": 0.968201,
+    "clarify": 0.00346
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-052",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.000887,
+    "answer_directly": 3.5e-05,
+    "clarify": 0.999079
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-053",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 2.9e-05,
+    "answer_directly": 0.999775,
+    "clarify": 0.000196
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-054",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 1.3e-05,
+    "answer_directly": 0.999766,
+    "clarify": 0.000222
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-056",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.062572,
+    "answer_directly": 0.368052,
+    "clarify": 0.569376
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-057",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.006478,
+    "answer_directly": 0.160053,
+    "clarify": 0.833469
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-058",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.732242,
+    "answer_directly": 0.266864,
+    "clarify": 0.000894
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-059",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.343938,
+    "answer_directly": 0.140766,
+    "clarify": 0.515297
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-060",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.281618,
+    "answer_directly": 0.705733,
+    "clarify": 0.012649
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-061",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.914744,
+    "answer_directly": 0.000302,
+    "clarify": 0.084953
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-062",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.001042,
+    "answer_directly": 0.000535,
+    "clarify": 0.998423
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-063",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 6.2e-05,
+    "answer_directly": 0.666679,
+    "clarify": 0.333259
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-064",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000148,
+    "answer_directly": 0.715841,
+    "clarify": 0.284011
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-065",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.00343,
+    "answer_directly": 0.996548,
+    "clarify": 2.1e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-066",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.039335,
+    "answer_directly": 0.728125,
+    "clarify": 0.232539
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-067",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.0,
+    "answer_directly": 0.999925,
+    "clarify": 7.5e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-068",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.560122,
+    "answer_directly": 0.082005,
+    "clarify": 0.357873
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-069",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.004697,
+    "answer_directly": 0.993918,
+    "clarify": 0.001385
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-070",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.270333,
+    "answer_directly": 0.026041,
+    "clarify": 0.703626
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-071",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.180133,
+    "answer_directly": 0.359614,
+    "clarify": 0.460254
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-072",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.020961,
+    "answer_directly": 0.034715,
+    "clarify": 0.944324
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-073",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.608445,
+    "answer_directly": 0.390564,
+    "clarify": 0.000991
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-074",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.010689,
+    "answer_directly": 0.988063,
+    "clarify": 0.001248
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-075",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.019148,
+    "answer_directly": 0.980793,
+    "clarify": 5.8e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-076",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.007756,
+    "answer_directly": 0.992231,
+    "clarify": 1.3e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-077",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.004339,
+    "answer_directly": 0.995646,
+    "clarify": 1.6e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-078",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.17677,
+    "answer_directly": 0.821559,
+    "clarify": 0.001671
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-079",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.225186,
+    "answer_directly": 0.772977,
+    "clarify": 0.001836
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-080",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.015576,
+    "answer_directly": 0.98435,
+    "clarify": 7.5e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-081",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.029484,
+    "answer_directly": 0.970244,
+    "clarify": 0.000272
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-082",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.086538,
+    "answer_directly": 0.907419,
+    "clarify": 0.006043
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-083",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.009366,
+    "answer_directly": 0.990628,
+    "clarify": 6e-06
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-084",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.025226,
+    "answer_directly": 0.974556,
+    "clarify": 0.000218
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-085",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.344444,
+    "answer_directly": 0.275159,
+    "clarify": 0.380397
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-086",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.002076,
+    "answer_directly": 0.033623,
+    "clarify": 0.964301
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-087",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.099599,
+    "answer_directly": 0.003513,
+    "clarify": 0.896888
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-088",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.235797,
+    "answer_directly": 0.097655,
+    "clarify": 0.666548
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-089",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.094198,
+    "answer_directly": 0.714701,
+    "clarify": 0.191101
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-090",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.499455,
+    "answer_directly": 0.463809,
+    "clarify": 0.036736
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-091",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.008021,
+    "answer_directly": 0.977101,
+    "clarify": 0.014878
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-092",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999966,
+    "answer_directly": 2e-06,
+    "clarify": 3.2e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-093",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.998609,
+    "answer_directly": 2.2e-05,
+    "clarify": 0.00137
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-094",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999967,
+    "answer_directly": 3e-06,
+    "clarify": 3e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-095",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.992272,
+    "answer_directly": 0.000988,
+    "clarify": 0.00674
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-096",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.357052,
+    "answer_directly": 0.004754,
+    "clarify": 0.638194
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-097",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.985503,
+    "answer_directly": 0.000322,
+    "clarify": 0.014175
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-098",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.945713,
+    "answer_directly": 7e-05,
+    "clarify": 0.054217
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-099",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.997195,
+    "answer_directly": 0.000483,
+    "clarify": 0.002322
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-100",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.998997,
+    "answer_directly": 0.000279,
+    "clarify": 0.000724
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-101",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.820119,
+    "answer_directly": 0.002433,
+    "clarify": 0.177448
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-102",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.857793,
+    "answer_directly": 0.012662,
+    "clarify": 0.129545
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-103",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.994249,
+    "answer_directly": 2.1e-05,
+    "clarify": 0.00573
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-104",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999757,
+    "answer_directly": 0.000137,
+    "clarify": 0.000106
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-105",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.999458,
+    "answer_directly": 0.000339,
+    "clarify": 0.000204
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-106",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.005054,
+    "answer_directly": 0.994768,
+    "clarify": 0.000178
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-107",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.871075,
+    "answer_directly": 0.123065,
+    "clarify": 0.005861
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-108",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000418,
+    "answer_directly": 0.999531,
+    "clarify": 5.2e-05
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-109",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.245096,
+    "answer_directly": 0.727012,
+    "clarify": 0.027892
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-110",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.990742,
+    "answer_directly": 0.009043,
+    "clarify": 0.000215
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-111",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.113255,
+    "answer_directly": 0.864292,
+    "clarify": 0.022453
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-112",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.966992,
+    "answer_directly": 0.023093,
+    "clarify": 0.009915
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-113",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.88469,
+    "answer_directly": 0.110245,
+    "clarify": 0.005064
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-114",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.899498,
+    "answer_directly": 0.003459,
+    "clarify": 0.097043
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-115",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.963809,
+    "answer_directly": 0.03609,
+    "clarify": 0.000101
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-116",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.966103,
+    "answer_directly": 0.017014,
+    "clarify": 0.016883
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-117",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.991144,
+    "answer_directly": 0.003177,
+    "clarify": 0.005679
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-118",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.469639,
+    "answer_directly": 0.228307,
+    "clarify": 0.302054
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-119",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.001667,
+    "answer_directly": 0.256659,
+    "clarify": 0.741674
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-120",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.717082,
+    "answer_directly": 0.215105,
+    "clarify": 0.067814
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-121",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.000655,
+    "answer_directly": 0.996216,
+    "clarify": 0.00313
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-122",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.383355,
+    "answer_directly": 0.051374,
+    "clarify": 0.565271
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-123",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.03377,
+    "answer_directly": 0.444594,
+    "clarify": 0.521636
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-124",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.017054,
+    "answer_directly": 0.823712,
+    "clarify": 0.159234
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-125",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.027626,
+    "answer_directly": 0.134317,
+    "clarify": 0.838056
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-126",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.316181,
+    "answer_directly": 0.345948,
+    "clarify": 0.33787
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-127",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.027955,
+    "answer_directly": 0.654064,
+    "clarify": 0.317981
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-128",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.01044,
+    "answer_directly": 0.774494,
+    "clarify": 0.215066
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-129",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.013899,
+    "answer_directly": 0.007362,
+    "clarify": 0.978739
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-130",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.006549,
+    "answer_directly": 0.021057,
+    "clarify": 0.972394
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-131",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.060508,
+    "answer_directly": 0.02687,
+    "clarify": 0.912621
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-132",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.002065,
+    "answer_directly": 0.922123,
+    "clarify": 0.075812
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-133",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.004188,
+    "answer_directly": 0.002159,
+    "clarify": 0.993653
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-134",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.842184,
+    "answer_directly": 0.131375,
+    "clarify": 0.026441
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-135",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.002634,
+    "answer_directly": 0.923679,
+    "clarify": 0.073687
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-136",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.390141,
+    "answer_directly": 0.524783,
+    "clarify": 0.085076
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-137",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.002989,
+    "answer_directly": 0.550083,
+    "clarify": 0.446928
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-138",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.02544,
+    "answer_directly": 0.014959,
+    "clarify": 0.959601
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-139",
+   "choice": "clarify",
+   "probabilities": {
+    "investigate": 0.017033,
+    "answer_directly": 0.004542,
+    "clarify": 0.978425
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-140",
+   "choice": "answer_directly",
+   "probabilities": {
+    "investigate": 0.218113,
+    "answer_directly": 0.617967,
+    "clarify": 0.16392
+   }
+  },
+  {
+   "set": "set2",
+   "id": "h2-141",
+   "choice": "investigate",
+   "probabilities": {
+    "investigate": 0.500778,
+    "answer_directly": 0.313331,
+    "clarify": 0.185891
+   }
+  }
+ ]
+}

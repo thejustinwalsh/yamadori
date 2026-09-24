@@ -1,0 +1,155 @@
+diff --git a/livebench/gen_ground_truth_judgment.py b/livebench/gen_ground_truth_judgment.py
+index b36561d..a700e49 100644
+--- a/livebench/gen_ground_truth_judgment.py
++++ b/livebench/gen_ground_truth_judgment.py
+@@ -476,9 +476,15 @@ def gen_judgments(
+         nltk.download('punkt_tab')
+         nltk.download('averaged_perceptron_tagger')
+         
+-        # Get questions for this category
+-        if_questions = list(set([m.question for m in old_instruction_following_matches]))
+-        task_name = if_questions[0]['task']
++        # [yamadori patch] questions are dicts, so set() raised
++        # "TypeError: unhashable type: 'dict'" and killed the whole judgment
++        # run. De-duplicate by question_id instead, and score each task on its
++        # own so every result row carries its own task (task_name was taken
++        # from the first question and stamped on all of them).
++        _if_by_id = {}
++        for m in old_instruction_following_matches:
++            _if_by_id.setdefault(m.question['question_id'], m.question)
++        if_questions_all = list(_if_by_id.values())
+ 
+         # Build a qid-keyed answer view from the matches themselves so colliding
+         # question_ids from other tasks can't leak in (model_answers may be keyed
+@@ -491,7 +497,8 @@ def gen_judgments(
+             for q in if_answers[m]:
+                 if_answers[m][q]['choices'][0]['turns'][0] = re.sub(f"<think>.*?<\/think>", "", if_answers[m][q]['choices'][0]['turns'][0], flags=re.DOTALL).strip()
+ 
+-        for model_id in models:
++        for task_name, model_id in [(t, m) for t in sorted({q['task'] for q in if_questions_all}) for m in models]:  # [yamadori patch]
++            if_questions = [q for q in if_questions_all if q['task'] == task_name]  # [yamadori patch]
+             scores = instruction_following_process_results(if_questions, if_answers, task_name, model_id, debug)
+             for item in scores:
+                 question_id = item["question_id"]
+diff --git a/livebench/model/completions.py b/livebench/model/completions.py
+index 2186a9d..2a7ba77 100644
+--- a/livebench/model/completions.py
++++ b/livebench/model/completions.py
+@@ -24,6 +24,13 @@ API_RETRY_SLEEP_MIN = 10
+ API_RETRY_SLEEP_MAX = 60
+ API_ERROR_OUTPUT = "$ERROR$"
+ TIMEOUT = 1800
++# [yamadori patch] a thinking model on one local GPU can exceed 30 min on one
++# answer; the timeout is raised from the environment, never lowered.
++TIMEOUT = max(TIMEOUT, int(os.environ.get("LB_TIMEOUT", "0") or 0))
++# [yamadori patch] extra request headers (JSON object) for every OpenAI-compatible
++# call, e.g. {"X-Yamadori-Features": "{...}"}. Empty when unset: upstream behaviour.
++import json as _json
++LB_EXTRA_HEADERS = _json.loads(os.environ.get("LB_EXTRA_HEADERS", "") or "{}")
+ 
+ # Models gated on 30-day retention (Fable/Mythos tier): the org-default
+ # ANTHROPIC_API_KEY is ZDR and gets 400 model_not_available for them, so they
+@@ -72,14 +79,32 @@ def chat_completion_openai(
+ ) -> tuple[str, int, dict[str, Any] | None]:
+     from openai import NOT_GIVEN, OpenAI
+ 
++    # [yamadori patch] a fresh X-Yamadori-Session nonce per call (= per answer:
++    # LiveBench questions are single-turn), so every question and every arm
++    # gets an independent proxy session. Sent whenever the local proxy is the
++    # target (LB_EXTRA_HEADERS or LB_NO_SDK_RETRY set by drive.py).
++    _headers = dict(LB_EXTRA_HEADERS)
++    _session = None
++    if LB_EXTRA_HEADERS or os.environ.get("LB_NO_SDK_RETRY"):
++        import uuid as _uuid
++        _session = _uuid.uuid4().hex
++        _headers["X-Yamadori-Session"] = _session
+     if api_dict is not None:
+         client = OpenAI(
+-            api_key=api_dict["api_key"], base_url=api_dict["api_base"], timeout=httpx.Timeout(timeout=TIMEOUT, connect=10.0)
++            api_key=api_dict["api_key"], base_url=api_dict["api_base"], timeout=httpx.Timeout(timeout=TIMEOUT, connect=10.0),
++            default_headers=_headers or None,  # [yamadori patch]
++            # [yamadori patch] no SDK-level retries when a local proxy is used:
++            # the 429 loop below is the only retry policy, so it is fair and visible
++            **({"max_retries": 0} if (LB_EXTRA_HEADERS or os.environ.get("LB_NO_SDK_RETRY")) else {}),
+         )
+ 
+     else:
+         client = OpenAI(timeout=1000)
+ 
++    finish_reason = None  # [yamadori patch]
++    x_yamadori = None  # [yamadori patch]
++    _n429 = 0  # [yamadori patch]
++
+     api_kwargs: API_Kwargs = {
+         'temperature': temperature
+     }
+@@ -138,12 +163,28 @@ def chat_completion_openai(
+                     print(message)
+                 raise
+         else:
+-            response: ChatCompletion = client.chat.completions.create(
+-                model=model,
+-                messages=messages,
+-                stream=False,
+-                **actual_api_kwargs
+-            )
++            # [yamadori patch] a 429 ("all N main lanes busy") means another
++            # client holds the lanes. Retry after 1-2 s with jitter so we queue
++            # fairly for the next free lane, instead of failing the question and
++            # losing the lane to a client that retries sooner. Capped by
++            # LB_429_RETRY_S (default 3600 s), after which the 429 surfaces.
++            import random as _random
++            from openai import RateLimitError as _RateLimitError
++            _deadline_429 = time.time() + float(os.environ.get("LB_429_RETRY_S", "3600"))
++            while True:
++                try:
++                    response: ChatCompletion = client.chat.completions.create(
++                        model=model,
++                        messages=messages,
++                        stream=False,
++                        **actual_api_kwargs
++                    )
++                    break
++                except _RateLimitError:
++                    _n429 += 1
++                    if time.time() > _deadline_429:
++                        raise
++                    time.sleep(1.0 + _random.random())
+             if response is None:
+                 raise Exception("No response returned from OpenAI")
+             elif response.choices is None:
+@@ -154,6 +195,8 @@ def chat_completion_openai(
+             else:
+                 message = response.choices[0].message.content
+                 reasoning_text = getattr(response.choices[0].message, 'reasoning_content', None) or ''
++                finish_reason = response.choices[0].finish_reason  # [yamadori patch]
++                x_yamadori = (response.model_extra or {}).get('x_yamadori')  # [yamadori patch]
+             input_tokens = None
+             cached_tokens = None
+             if response.usage is not None:
+@@ -177,7 +220,9 @@ def chat_completion_openai(
+                 print(response)
+ 
+         if message is None or message == '':
+-            raise Exception("No message returned from OpenAI")
++            # [yamadori patch] name the finish_reason: an empty answer after
++            # finish_reason=length is a budget event, not a transport error
++            raise Exception(f"No message returned from OpenAI (finish_reason={finish_reason})")
+         if num_tokens is None:
+             num_tokens = -1
+         output = message
+@@ -188,6 +233,14 @@ def chat_completion_openai(
+             if cached_tokens is not None:
+                 metadata['cached_tokens'] = cached_tokens
+ 
++        # [yamadori patch] keep finish_reason and the proxy's decision record
++        if finish_reason is not None or x_yamadori is not None:
++            metadata = metadata if metadata is not None else {}
++            metadata['finish_reason'] = finish_reason
++            metadata['x_yamadori'] = x_yamadori
++            metadata['retries_429'] = _n429
++            metadata['session_nonce'] = _session
++
+         if reasoning_text:
+             metadata = metadata if metadata is not None else {}
+             metadata['reasoning_content'] = reasoning_text

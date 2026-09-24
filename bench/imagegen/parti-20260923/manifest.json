@@ -1,0 +1,82 @@
+[
+ {
+  "i": 0,
+  "category": "Animals",
+  "challenge": "Imagination",
+  "prompt": "a panda bear with aviator glasses on its head",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\00.png",
+  "seconds": 111.0
+ },
+ {
+  "i": 1,
+  "category": "Artifacts",
+  "challenge": "Linguistic Structures",
+  "prompt": "a shoe rack without any pairs of shoes on it",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\01.png",
+  "seconds": 105.2
+ },
+ {
+  "i": 2,
+  "category": "World Knowledge",
+  "challenge": "Fine-grained Detail",
+  "prompt": "Golden Gate bridge on the surface of Mars",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\02.png",
+  "seconds": 105.8
+ },
+ {
+  "i": 3,
+  "category": "People",
+  "challenge": "Linguistic Structures",
+  "prompt": "a concert without any fans",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\03.png",
+  "seconds": 106.1
+ },
+ {
+  "i": 4,
+  "category": "Outdoor Scenes",
+  "challenge": "Imagination",
+  "prompt": "A large city fountain that has milk instead of water. Several cats are leaning into the fountain.",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\04.png",
+  "seconds": 106.5
+ },
+ {
+  "i": 5,
+  "category": "Illustrations",
+  "challenge": "Properties & Positioning",
+  "prompt": "a white background with a large blue circle and a small green square",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\05.png",
+  "seconds": 106.4
+ },
+ {
+  "i": 6,
+  "category": "Vehicles",
+  "challenge": "Imagination",
+  "prompt": "a flying boat gliding past the Parthenon",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\06.png",
+  "seconds": 106.9
+ },
+ {
+  "i": 7,
+  "category": "Food & Beverage",
+  "challenge": "Fine-grained Detail",
+  "prompt": "a can of Spam on an elegant plate",
+  "ok": true,
+  "error": null,
+  "file": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\parti\\07.png",
+  "seconds": 106.9
+ }
+]

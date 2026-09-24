@@ -1,0 +1,1007 @@
+{
+"release": "2024-11-25",
+"seed": 20260923,
+"category": "instruction_following",
+"order": [
+{
+"question_id": "6d106383360988b0f4a661ed2b5ca6bb4aa0282d19a3b5a5a495823a77302d9d",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "e1677c9b0ea080b3b209ddc602ce6df1c1cc6e44ced22c1dc17264e85a2b67b5",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "1b09cc8158b5a64a86811f45c389ae6517d798b89640ad6c6059e98c7dd83b83",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "97b8d476070e441ae3cbf21a3b76a0fae697cf5c42b39821a7c288ae5a5ca4a9",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "0cf5814b25d7aa0420a7d6d8f03e0ccd977c61fb996be04f8c3221153ba1f005",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "441c3b0f98847106a2fccc55234d20485223e87f95fe9887ea6e0e6b978b2d39",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "3c582f6d13ac1cf0b33aa6e3cdc0a1baf42f1cd1da7080f96b0fadebb5a8b71d",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "9b3d5fef87fc68026f614821c663fa8a3079863cd2d764079b1dec871dc1fce1",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "ff7a17eb1dba0fc66f092f90004874e629b2efc6ec5a1203b66a46d9ae749fba",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "98d51917bb7b2376c67b86ff0178116684b878a254c72dab20d2382566ae4ab3",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "e2c7a0f0938892d93840717da56911ccad14da745ca461fb38c32215e0a77696",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "7b7a30a9a020f334521b2a1aa2a96a6bfb3fef0d12e55ea2967842a5139d1871",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "2e1fca49ccefcb602c916a6302c061d32aa0eda95112e7cd2ed2506d50811caf",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "0503923535fbd8badfb2ccf38989b36a8ecaa2eda332a4b515bb13932421fecd",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "d7607dec42363e3828a0c31e98bb99fb6e58ce05b8cbeee4414a520f693948d2",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "6a1fff311d0d39fef27617abe6b809814913a11884d20e04c682a549e6503d38",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "410213754fe7db03895021fa4febcc863e254349b5d67646e92beb22ced4150b",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "7061c2d96c6d115e38c8bfb9188b26288a1abfd7f445797f4787fb1520661541",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "649f08464328ecc126391dc2f7bd95015a497abf5983cb3fd543617c6ec188e7",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "c39904f20dfdd5f63c9260a65d2b8e9c7b5b189a1ee9609f92faccaf27ed99ab",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "9d4cec7f4f8538857423ef9a58757d7cd17a4d83d8e113ae5f7a5c788ba6463e",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "3e0515a9b104bc3a165c1fd6eddb70f56449a08b3336eaea4d954674a24e448d",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "42df65283184c31527f8de3add005c74c25e06ee43dc24ac9ba69b3c2d38bc9b",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "9b13bd6ec24b6d26838c0a27178a5ed74299275f5518b3ee9e5ea26a03ffd2a1",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "804a762a881c117a97334d4c0b60bf44632cc14f93310a4af6588e8fa71fd1ae",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "a98ad49f679ca8bdc79c031eb582b25bb761814698c9538dffe01d0cf46efd98",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "dbb381035a3f08c31a59c46c5018491c18641e970e12dbde471a00afcff6ca26",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "f78e08310e88c279b1a01f6e2287b69174786bffa80754ffa5221a3538ccd53e",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "e0d7b854424266401aea4f8c4081861b5424fc4aa0548e83579229ebfcd859d7",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "7816bff85a425b431910e7d25ecf58e84b16d7dc1f149480923b88a8932d2089",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "699d35c9bc63c9ef5eaa6a7ec032f096ebfa1af8cc61b66312a95938c041e2ab",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "984ab3f5d20d4bb9694a47dc794da39c1e7a59adaf39585b9c8ffb0d5111ae3c",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "290ddccaf7a24527b8bcc08ea3e07ca14d86f7224c9ccbb03442da4efac0840b",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "7f4a16efda30d81dc7a58992cfcc1bfb0054967387b3d7cbaf382bb4bda1e002",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "97c9703d0bf7f996429f32b52bfa704e1908d411488a8ef76d151e7b6d5702ad",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "86e77df574c229f5015ab227531f11742074933160fbd8284cb7a3b0768f7b71",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "0a0385df33f3d95602ab7f1a78de0bfc276cd8067d27336188e84341cdd02032",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "b20533225ebe74930e1e91660add78af4196fcc13f2352ec713b60ab999800e7",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "71d079525c95cd874224f0f3f5d0c2604b37c9acc7ba57e340e3af95c5abc9f9",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "2c3f86f578e93981bec447960c57fc27daf35b6fd9eaeb6cbf1ca1611853b6e1",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "7625b93a9f4aaa0c746ab2698b8adbc66ce263a95f1035654b881c81f8083160",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "5300030a849d07c65c205b019f44006fd005c433dd06ac2f00e4acf9284b56c2",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "425a0c3acd761293fc3d925177333f91e9652fb1ff91b22258f14b086624c838",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "8350d5bcdf58307739a0842fe34bb74b33d5e300ef685062af53f0b5d487e813",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "4a1477836cc454a1cc8b3a9a0e383c3abd8ce837dc670f7e396561b1cdf84f56",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "6a2e3c538be99a7326b31726d64718c23256a828a904999ee00974a9c95c5677",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "98938243da14035b7618c295f52e20341880db15918c8ee19b16475bf7a0767f",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "329f04c43b93f6b787a2ef8a8e23519bc113196e6affc837dd6badb51cd17145",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "804067a46a36538721b46a001cb1a39167aeac890889c84c4a3ec8946df855d1",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "9c6d263815e379f0b48bfb113f67f3e2c0b2ab27485b76ae19e4e9f32cbf07ab",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "78324955c8a77181942b601b73d8fb7767cd55e3d28e040d2f97375f69976667",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "7d8d20235ccf9386317255362c8ceb92a6f68c87a9fab3b346fcb45af731d2a9",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "d5fbbb49de002618754cf40e38a38597778be9b7270db18aec5312ab3626646e",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "83abd879ba285c5f33f0d8d5eef70f098ab054a37c856c9d138026d7cb9ab403",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "d7b934711b98d115e78266febd8c9caba4a3e99f5de3246a7b36171a5d37ba93",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "eefd7562fb00c75f1c032054480f823ac688a51107058c6c70baca63bc74b053",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "cac27bd258fe503db270cac5f1b5b7e67a16a603323a4c87118290815224ba8a",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "1d5e9498696d690af72db04177e8469a9fc8adb1b85228735878a9650abd8ae7",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "3d384d57ad1d293a7747beb55353c83c03472cfc5d03d90acbf2c0f37e6b84c3",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "d17e20f53e46befedb93ee30550a5e5a7d2e708aa1d8fe6d41d29f29c9d12ef7",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "15c6b7596ca96c40d0c142303178478af8d3f9d0f780d2fbad65e0fa411970b7",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "a8ff1f46c588f8dab171556261ff33a9785e49f73156ea77a387c53068511608",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "a5648e44dd117cadfafdbdccd2543ff9d80ac5e48e5022efcc7a8345ef364250",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "1fb8a9d0877b746f95e08dc3e108563fc01d3248e8bb5000fabe88e1f6feaddd",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "693c559e842aadf93ddcaba5f140c97aac1419c23fda3c1038c7a690c13b1213",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "8d3db0e8713de5992e009f42809bfa864b4eb7cd6a8f6d4d86f4fa0f21024617",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "681e0647847abfb10f13da61b27f8347e1e16242d8662f16cb6465ca85018f31",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "65f0b561647e5d1bccd78b101ab6fb2ba861d05683c1a808000b83dd9e603b1b",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "2ff571574542a8b55e3f5f6dde84aaae82a7f75ef56b61fe7f4a09bce170546d",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "62db016c84cdff5830988079bd3618801e6d929f3eac7b99b73fbb250e17a0ce",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "c0ad0a8be5febc0ce0e92f38925d9985a04cff53495c61be3c978e8c3076d7fd",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "ac21b975232ecbcbf0a37170b6f5a7255b8fd633c2b24e97654401d106e585c0",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "480806ded46fba8711fafa728041b8e2fd0a40d9f8e4be4ea7c77ec7101e1a50",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "77b0d92b8c174846eb6e247732cf556425226986a552b208ec107a5e8faeaba8",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "dbf2644a22244d678a05dab31e931414656027ac2b4ca9095efc1ebf0903048d",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "9abae9301cde986f568f3574cc06eda36c8600cfbef988bd6336899468ee98f4",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "55b713ae1b78dff614707df952ea42548f543397307c164fccd65561c2a0941e",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "3738904100c2bdedbff71d56c62b8f08227983077affc498f848087138c6bfff",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "17854a4f3ee38888982a95aa5b240ed428714943c35b4ad185f754cebb5b29af",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "5a6864d656004973677f4ddef001d352f07fa88a69eb555546c5a052ee1b24bc",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "da578f206820d6be4519d710c3872a4c217f97f111b1f09c89b8e9ad675ce88d",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "40040515aecaa05f9c4c3bc8c647d6c972bcfe8e364996bf9a2979e788bd129a",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "afb9acd72d96db629195ec7761134e39ab5d39cfc03486ec91b6e1582f1be20d",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "2f6354487148a4a2641e5ed1e0983603374a1f8c66f1d2eebe5892dd9735d1d6",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "64567c0d3c90ccc2c9a6a8c49461f039236f2cb2932ac452dcb237c51560ab3b",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "1b5fe52ce32803fee6244bb9f3af341e20f4ba1d91f7563d4ae906ef6edd51ce",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "76699c7eabb6e93d7f83e8dada4634091be60af3d52ad4e3d41881bd1633cda1",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "35f0f1ed2343d39d4b33f4da26d7c7a0eb846d974a59bcf275cbaf70a12536cd",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "f4cbfc58a683894a66b028420969bb75a35fe4acda1bd3dce0024062c11b2041",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "4b88c81df93686c39275ffe3bf73852240a06ec4c92f89b8a530f738a3830b87",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "60190416f20733f1307b983eddd6ef349f1273324e6049ac6e9cfb5a8986b355",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "6fa2d259825104c3019420951a6e630d73677c5c1aabab666248e863d120403b",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "a365e843fd014371b5de486fb1f161db1a3497dd3338268d33d5569f5f4d7185",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "89cceb226ce254c226614e2ef6d0416a2a90a43b8e37de1b98fe5dc55f0c4452",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "8e2cdce6c9acca68e148d560e76df9a9acd652ce2e3f2fab7cad89f7bf2aeb05",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "2a31c6e6b5ec6b4327e64720d10df1cb390535a102652285ee32e2f07266835c",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "bee240a0fddbbecbd89c9ec02ac8e412c0b219609cc876eb5cf6f8e58f71a0c6",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "efc8c16d4a45788d0442b788832999dd0221714858f134de2039bd594e084af5",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "b53b8c4094b8d3c178658afd22b9b52650a67ca59abe7d3fa0e0d79ca2169b05",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "7f6e3623888be18ab716eff34ca80323a3f170c281796f64d4774fa9374d950d",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "c7b94d923f84984a887cad0ea46b22f7ea0088c10ec6e9e6b11ba8f9f18ea669",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "0996be1780ea1ac0e68d98e0bed513b23ec11b212c3461884e28c3a752a00efc",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "c0e4dc6b1c4cca07e408c5952ee4013a46a8663f0fc7684453ed5ce56b87e0c9",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "abdb9b2d6ffcdd4cb4cab63b383b0fa5fbd401ec089428ac786c8f6ec7ab6139",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "be9fa970fb432051a4cd4a7ebe9a820b24efbc8a450ddfd1963cdd0b87748fe4",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "987dd3cb27ad2493e13a14329797817bf9d8843d3abcf8ff6ca2fe94983901ac",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "d3919fa302f33fe30caae89da7722915f88e27d6ba44fbac6db24c3ec4f067c2",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "1a06f223c7988766f6c876404f04df808915b4bb08d1fca784eadec17e502973",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "e7981d47a1a5a7e8c80a6d59399b198d940ef3a0ca33f5e5205e39a0836759cc",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "c6835e10ecd1dbbb3fd81e29e389366511a23ad5f59d6d3a1c107e38c09aee63",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "d994e90dbdaa211f30c77fc72b4915c28f7e91ad57bec4b13af8b55582c68075",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "e82f3903e07a703bc0a123ce7c33fdb48ed0392424e78fee0838fbdf04a4df89",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "1597a46fa20861cb667a3233363762f3f6df6f4a51fd205fd6b496cfc3f47c09",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "13387ce0db59d53e6fad49b8356fcb3cb58cb4582bd299efd90b5eedbadb0f04",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "21f4f5c292c5f8ce8c12f0c04b8919ea81af86717e6f03740e21437acf602bfc",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "d4c0187b436a03f645e0ef2bd4e72c1583ebb3b8b1ca03bd84be3e16a6e9c223",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "9f43f64520ead693ff0e6f05c139423ce1509a8f7e8ca8a43184fdda5100cb80",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "640ff19c6b75d95b263deb3cc7654347e36a362fa8e2c21331bd82c7ea25306b",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "c20b82f04aa9a5c4deb8722352aa0d8297f2245973109556abbe50e5b756c96e",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "126dc38dc54c62e924d47a259e4236e596583c91d33ef6b22af272e9819c8201",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "35df8fcec24c52c406addabcc9af0ac0b7aef329efb29c4384f53e4ea7a89fb7",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "ae0ffd84f8b9b97d2f8fdaf8c1f9c659a79e07d265f8be0af277fd3b557da7f5",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "a55b1054b1b76ae59f5dbbeb178c7033831aa356529c641c51436d702f11388b",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "0b041d87e0bba1a5db140a69ef8fd4e844f1f0f0b86be7a6ceba5f9edf36d584",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "f1425aa8a7be412d92d033667c5b37e2ca3e56b2a051e94f8381105bc6d4ad78",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "257f9f71d60e6b2cd95f6b59d14a0fb876b74ff85708c64a3d95fe6eb7b41eaf",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "309f90f2b74f7916a6a280e64232fe19b870f699133ed3f81449870672867fa7",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "1f2f5fc2ab5a7a257d29e9cf4ddfee43ad6bc343122e11423f1f522912f940ff",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "12511f1ecaf9b43b03990406cbc2634eb438a570f7083526de0a4ca894d64371",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "a97937243fae41814bc4eb5f8fdf69d00bf48880fa8fb1f9a7306332a8f7effb",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "97b5ba44d119ec4e50f122198f9049b4c2de8ec6191488dc69654f34eb5a54e3",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "e743373c521ba048e978ac6eaa78c203838a40f8220f1c5014e01d0a5daf3442",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "4c0c2eb1a759ded986ddfbba277e6ac4d0eec9853a8871ae843dffd8c7829a9b",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "55c905c1118b25e2f93a98d860be0c3c1735f467d8d2919c982553a564331bac",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "0f7d9c4e9e52b68d21b2c8a04f685bc992ea144fbf9b9e5441339ef29c40610f",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "e29beb219634e4a62b3f73e853caa1b0e33244b1440359606b6f3daa4206e003",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "91b1079c3dd6f0c003bb20f34f3783141cbc55926e6e3001ba18eaba3acc169e",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "763023d40a0647379be587c1027fcbcaf3197bbb03b2ce63b6e63abab0dd4ab3",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "05dd93ecefb22fdd5d3a5d396616c472436ffcebfa9c0d95fedda3ff661a11fa",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "469c2a921e910fce7859e4c351f41c9a4cda6b028386904aa22afa09cbba5351",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "28225eb304ee633f078b9fb205f678e689ec92b0112d3d5f4f9c5d3391f5a67b",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "7207f8bdfd39e9d5a0f4576eaed8a1c78752bf92c2d499cff300abf94a86955d",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "7b2da96656605701102e0600b1fba272a630422f6a5858276c1ee8d4373cce97",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "39b9b97d7dc68b98be2609ea101b96cbd2743f69d1264ea5f36783a153a6e5f3",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "9fc4e446b51db65ab044d7c682934237c6d7f5d95ce42deccaac467cdc3e59c1",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "44cf13ee8de6e43308289a3df719f2b4dccb2060c4259597ba67c9c29623e41d",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "f1d80363e45e3d74ff216f632ef51639f3eb73ce57aed2d46251119466716220",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "3bde3f0d0cc7481da49d15758f8c32dbfff6eb2184c2cbd3fbbd15665ec8102d",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "f3472a74bc480a915c2a3875c505fd5b3ebe475d25cefdae9447002ed88b0106",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "74a083fdb825626889f5c081409f89ff5a2ec2a7a3052650ab207ebd5721a072",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "e02faeeb797678cda7c1f9a4777f029750063f4b33732791fc6f9fc91762ff65",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "96a85977383a63cf50e74a23ebc0f70f933c9235d3fbbe875627dbe02891e4a7",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "a2e9e6dfb13c827230a83fedd2c9cc0c2aad8faafda399486a48d606f7589b92",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "32355cb46ac48786a2c6cf9a092531598565f62f7933e06f77b2bcd464cd2ba6",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "15a04d320c993aaedd8e2e9918e71683f331884c84b5816719236f373f831e05",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "cf121245e24dce51fbdf1d60d037dfc056e3972738f923b254c7abc284c4d8e1",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "6bf63f504a4aec3fcd329841b5eb5346c2655dfd877d7eb1546214ff1bb44442",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "e065313a7cdd2a0bf8f5c970a24928aa7fb8d199a4747df99215aec0f4f51d58",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "1ed6a0a2c7b4b879b3f6b6bdc77f297735aae9c255fbd5210fb4b7bafce80aac",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "8fc1c5c49e21ae211841962d87b332743f571538fcecf0bc44108598842df7ee",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "8c22986a688217ccbcb012c0e5b95acf6b0f6464501e0df4a0cf50c3526767d5",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "3cd2799b94d44aa465eaf78457ad34451b6e6d881809e6cf961ac6ba0ce41d70",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "45b2b49b7d512ce1d39340eb8ccea81d4ae11d237f25eb3c9599c3e99d0d5e8c",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "ea77eae86c3ed7f4d23bd01b7890e281f98d7ab6c2ea49311db5494eafa2015f",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "dab0e3e74f8e31526d20c92dd0167e7825b547fa664110e5c674ab3e5407c448",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "d8c3162824625c25d1ec1f4d2d1a3e48e0e0a268d5fe4bf8786ac892e9365bdb",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "d215f136dd28c2a6025790c860970c60e5b06184c62a05dbf343512be0e0a366",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "90b9c26ea6ed97a9a32086f78b0e85cc09ad9578eff9cb2eff8dc272a1c798c1",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "58a355a7c63a2be44b6181016d32db1d9f209f6d0d82d71f900f4bb5971e42f3",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "dcacfcb88597163556905d4a6aad0e337b4fcc88014b91ca8ee779389e2e5761",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "c193be57467a07b1c3a90271673cda9a5828906902e0e8c3aa0b25fb3d46d5a8",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "affff79c4cf07a359064bf13493146f9f7ff0c000d66c252edf680cb0e5f48a1",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "0f90f3ed7d95e22249b1376b7f31afddcf5f6de2f813cd91d64f4f3c47bfb129",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "1e722a1c202524599d7ba345986b4709bf662b6f8d7f54f9c018e9d9086c1830",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "006d27d0a338a42a35e7d50e01bfd5b8e502897097c15ab7a4b01a6e38c6bf4b",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "4c41685c0bb5f593ea74fedee931ebb02dad4867184729ca36c036e0f3df0781",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "d2adc0a1fad83dc359b9b10550d05c3b551685dbd85ca6f9f68721a7ecdc4785",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "ab93699af24f729ee26d853c8885b8abb2e4f3e5fec9727d46ffb27f67174b6c",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "beaa0bcfabc7fb0ef9be7afd46b33c1eeae56168a65423a1104d7b5e0042c019",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "02b82146fcd90e18dad8f8ef85bd5566a2c7540429fc8e03c73b98dac3f58cf4",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "badbda157954ea39f1e24095f70d4f69ad8b72786e80775265de7272018e6b31",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "0e3720b5a1a1a2c62bbdf378ec61629fe6c93938afd69454e92e6b87ed9e9823",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "f7b6ab7fff6e44155779dcb52205e5fa8d61701005b32e6b0cc527e681549acb",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "9af81c3651e6dd1c32e5dd02d05afbf258fa3b471b4f4894cb4d257e496a8242",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "4671725af24cc8ec52ea8f7424c951274b68cefdb18564131d5938060c77dc56",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "73a7f4da7e81307cbddd2abe3a518b95d422623abf64567430aee4c4113a4673",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "ce85ea09bd1b45d602a41bdf37410fa01280217d3c187e360101931d2353bae7",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "63ae6008ffc825bf4aabb6b2969197dec9e87f199c6aedcc76c54d3b113ff17a",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "919a86065fcd3fe76a70621045b367724ac71f00ac156f0397fafa84b99230ca",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "7bd166b01a70c8f1b498aaabd7bcf1e308d35a82ad44a405339784be520c9635",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "30813a0174cef54c60bb121f95e328f69c750cc63a764b93fdbe26b4c41e5c3e",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "b94af60f1bbcdd0bee763a97ff20433dedd06d297164e2f58afc05436d29f813",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "4d4a99c7e19822bf77a525e715685d2113afa6b704b2dd4d80e579ad291f75bb",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "8df1306760bf9fefc9413a262714e95558af3d823bc7171331830db33ba10728",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "35429a8692dc7256b27f4c45abb36b4b33f86bb982c0c29965faaa6c8cc34d66",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "cae6b835d8aefac4f354d30676962129b3b08095f75897ba18bd7a403fe0d8ea",
+"task": "summarize",
+"category": "instruction_following"
+},
+{
+"question_id": "8fd92857688597d5e95a553331eb23c2020540c9cb6fb93ce9d6c0f13197aea9",
+"task": "paraphrase",
+"category": "instruction_following"
+},
+{
+"question_id": "e06b6e253b633911d84214cf18e27eeae06fb5f75e5508c243bb603e4be1ce8e",
+"task": "simplify",
+"category": "instruction_following"
+},
+{
+"question_id": "177ccbc243d5867c5dfda52a0dde4585016747ec63e1d3bf8511f109258212ca",
+"task": "story_generation",
+"category": "instruction_following"
+},
+{
+"question_id": "979c5d0c754222c9d9757fddb9564cc5c7876173edf233f69b5462a712466694",
+"task": "summarize",
+"category": "instruction_following"
+}
+]
+}

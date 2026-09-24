@@ -1,5 +1,5 @@
 // 根張り NEBARI — the root flare. What the model can draw on: the recipe
-// corpus behind hints, and the source trees indexed for retrieval. Every
+// corpus behind hints (now skills, mcp/skills.py), and the source trees indexed for retrieval. Every
 // root drawn here is a counted row in a real payload.
 import * as stylex from '@stylexjs/stylex';
 import { PATHS, useShared } from '../api/data';

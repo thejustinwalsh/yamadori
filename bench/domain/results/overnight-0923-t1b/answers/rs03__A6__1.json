@@ -1,0 +1,9 @@
+{
+ "task": "rs03",
+ "arm": "A6",
+ "attempt": 1,
+ "content": "```rust\nuse wasm_bindgen::prelude::*;\n\n/// Normalize a vector to unit Euclidean length.\n///\n/// Returns a new array scaled so that its Euclidean norm is 1.0.\n/// A zero vector (including an empty one) is returned unchanged.\n#[wasm_bindgen]\npub fn normalize(v: &[f32]) -> Vec<f32> {\n    let norm_sq: f32 = v.iter().map(|&x| x * x).sum();\n    let norm = norm_sq.sqrt();\n\n    if norm == 0.0 {\n        v.to_vec()\n    } else {\n        v.iter().map(|&x| x / norm).collect()\n    }\n}\n```",
+ "reasoning_content": "I need to check if the code I have is actually compilable and correct. Let me examine it more closely.\n\nActually, let me just verify the code is syntactically valid Rust by looking at it carefully:\n\n```rust\nuse wasm_bindgen::prelude::*;\n\n/// Normalize a vector to unit Euclidean length.\n///\n/// Returns a new array scaled so that its Euclidean norm is 1.0.\n/// A zero vector (including an empty one) is returned unchanged.\n#[wasm_bindgen]\npub fn normalize(v: &[f32]) -> Vec<f32> {\n    let norm_sq: f32 = v.iter().map(|&x| x * x).sum();\n    let norm = norm_sq.sqrt();\n\n    if norm == 0.0 {\n        v.to_vec()\n    } else {\n        v.iter().map(|&x| x / norm).collect()\n    }\n}\n```\n\nThis looks correct:\n1. `#[wasm_bindgen]` attribute on the function\n2. Takes `&[f32]` and returns `Vec<f32>`\n3. Computes squared norm by summing squares of all elements\n4. Takes square root\n5. If norm is zero (handles both empty vector and all-zeros case since sum() returns 0.0), returns the original\n6. Otherwise, divides each element by norm\n7. The `wasm_bindgen` macro will convert `Float32Array` from JS to `&[f32]` in Rust and `Vec<f32>` back to `Float32Array`\n\nThis matches the requirements perfectly. Let me write the final answer.\n",
+ "fanout": null,
+ "error": null
+}

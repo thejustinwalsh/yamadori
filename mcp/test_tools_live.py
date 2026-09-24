@@ -60,9 +60,35 @@ sys.path.insert(0, HERE)
 import test_tools as T  # noqa: E402
 
 import code_search as cs  # noqa: E402
+import model as _model  # noqa: E402
 import shomen  # noqa: E402
 
 check, indexed, as_json = T.check, T.indexed, T.as_json
+
+# THE REAL DOOR (#15c, docs/SELF-IMPROVEMENT-LOG.md). The gate suite points
+# every door at a port that REFUSES (model.UPSTREAM = proxy.UPSTREAM =
+# http://127.0.0.1:9), so no offline test can reach the card -- and this file
+# inherited that on import: in the live gate of 2026-09-24 summarize_text got
+# MODEL_UNAVAILABLE and the delegate checks passed with no model behind
+# them. Internal generation's one door is mcp/model.py to llama-swap (AGENTS.md
+# "One door to the model"), so that is where these point, exactly as the
+# tools API process does; `real_door()` below fails the run if they do not.
+STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
+
+
+def point_at_the_real_door() -> None:
+    _model.UPSTREAM = STACK
+    T.proxy.UPSTREAM = STACK
+    cs.STACK = STACK
+
+
+def real_door() -> bool:
+    doors = {"model.UPSTREAM": _model.UPSTREAM,
+             "proxy.UPSTREAM": T.proxy.UPSTREAM, "code_search.STACK": cs.STACK}
+    return check(all(v == STACK and not v.endswith(":9")
+                     for v in doors.values()),
+                 f"every door this suite uses is the real stack ({STACK}), "
+                 f"not the offline suite's refusing port", json.dumps(doors))
 
 
 def enabled(argv: list[str]) -> bool:
@@ -257,6 +283,13 @@ def test_delegate_investigation_live():
     # It really ran, rather than returning a canned line.
     for field in ("tool call", "tokens spent there"):
         check(field in out, f"the cost line reports {field}", out[-300:])
+    # ... and a MODEL was behind it: a run against a refusing port also
+    # printed a cost line (#15c). Tokens spent there must be more than none.
+    import re
+    m = re.search(r"([\d,]+) tokens spent there", out)
+    spent = int(m.group(1).replace(",", "")) if m else 0
+    check(spent > 0, "the second context really generated (tokens spent > 0)",
+          out[-300:])
 
 
 def main(argv: list[str]) -> int:
@@ -269,8 +302,12 @@ def main(argv: list[str]) -> int:
               "needs no GPU.")
         return 0
 
+    point_at_the_real_door()
     print(f"LIVE. stack={cs.STACK}  index={cs.INDEX_DB}")
     print("This uses the card. Nothing else should be using it.\n")
+    if not real_door():
+        print("  FAIL  the doors are not the real stack; nothing below ran")
+        return 1
 
     for fn in (test_summarize_text_live,
                test_summarize_text_live_handles_a_trivial_input,

@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -36,9 +37,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import arms  # noqa: E402
 
-VENV = os.path.expanduser("~/swebench-yamadori/.venv")
-MINI = os.path.join(VENV, "bin", "mini-extra")
-PY = os.path.join(VENV, "bin", "python")
+NATIVE = os.name == "nt"
+if NATIVE:
+    # Windows-native since 2026-09-23: see dockerfix.py for why (Docker
+    # Desktop's WSL integration failed after the crash; its read cache is
+    # stale). mini-swe-agent and the harness run through dockerfix.py.
+    VENV = os.environ.get("SWEBENCH_VENV",
+                          r"C:\Users\jwals\swebench-yamadori\venv-win")
+    PY = os.path.join(VENV, "Scripts", "python.exe")
+    MINI_CMD = [PY, os.path.join(HERE, "dockerfix.py"), "mini"]
+    EVAL_CMD = [PY, os.path.join(HERE, "dockerfix.py"), "eval"]
+else:
+    VENV = os.path.expanduser("~/swebench-yamadori/.venv")
+    PY = os.path.join(VENV, "bin", "python")
+    MINI_CMD = [os.path.join(VENV, "bin", "mini-extra"), "swebench"]
+    EVAL_CMD = [PY, "-m", "swebench.harness.run_evaluation"]
 
 # Every key the overlay sets, and why it is required. Nothing else in the
 # leaderboard config is touched: not the prompts, not step_limit (250), not
@@ -169,7 +182,28 @@ def cmd_check(_a) -> int:
     return 0
 
 
+def apply_override(a) -> None:
+    """<run-dir>/arm_override.json, e.g. {"yamadori": "yamadori-auto"}, sends
+    every job still queued for one arm to another arm, in that arm's own
+    directory, without restarting the runner (this file is re-read per job).
+    The switch and its reason are the operator's decision, recorded in the
+    file itself and in docs/SWE-BENCH.md."""
+    run_dir = os.path.dirname(os.path.abspath(a.out))
+    p = os.path.join(run_dir, "arm_override.json")
+    if not os.path.exists(p):
+        return
+    with open(p, encoding="utf-8") as f:
+        m = json.load(f).get("map") or {}
+    arm = getattr(a, "arm", None) or os.path.basename(os.path.abspath(a.out))
+    new = m.get(arm)
+    if new and new in arms.ARMS:
+        a.arm = new
+        a.out = os.path.join(run_dir, new)
+        os.makedirs(a.out, exist_ok=True)
+
+
 def cmd_agent(a) -> int:
+    apply_override(a)
     if a.arm not in arms.ARMS:
         sys.exit(f"unknown arm {a.arm!r}; known: {sorted(arms.ARMS)}")
     os.makedirs(a.out, exist_ok=True)
@@ -180,7 +214,15 @@ def cmd_agent(a) -> int:
     if code != 200 or arms.PUBLIC_MODEL.encode() not in body:
         sys.exit(f"GET {api_base}/models -> {code}; expected 200 listing "
                  f"{arms.PUBLIC_MODEL!r} (check the key file and the proxy)")
-    overlay = write_overlay(a.out, a.arm, api_base)
+    # Each agent run writes into its OWN directory and is merged into the
+    # arm's preds.json / <instance>/ under a lock afterwards: two workers on
+    # the same arm would otherwise race on mini's read-modify-write of
+    # preds.json (its lock is per process).
+    work = os.path.join(a.out, "_work", a.instance)
+    if os.path.isdir(work):
+        shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work, exist_ok=True)
+    overlay = write_overlay(work, a.arm, api_base)
     cfg = default_config()
     meta_path = os.path.join(a.out, "run.json")
     if not os.path.exists(meta_path):
@@ -202,11 +244,18 @@ def cmd_agent(a) -> int:
     # (a model name, a cost limit) can leak into the benchmark.
     env["MSWEA_GLOBAL_CONFIG_DIR"] = os.path.join(os.path.dirname(VENV), "mswea-global")
     env["MSWEA_SILENT_STARTUP"] = "1"
-    cmd = [MINI, "swebench", "--subset", arms.DATASETS[a.subset],
-           "--split", "test", "--filter", f"^{a.instance}$", "-o", a.out,
-           "-w", "1", "-c", cfg, "-c", overlay]
-    if a.redo:
-        cmd.append("--redo-existing")
+    env["PYTHONUTF8"] = "1"
+    env["SWEBENCH_PROGRESS"] = os.path.join(a.out, "progress.log")
+    env["SWEBENCH_INSTANCE"] = a.instance
+    # A 429 from the proxy ("all main lanes busy") is admission, not a model
+    # result: the request never ran (AGENTS.md: treat a 429 as "not run").
+    # mini's default of 10 attempts (~6 min of backoff) is shorter than a
+    # shared card's queue, and exhausting it fails the instance on plumbing.
+    # Retries happen inside one model query, so they never add a step.
+    env["MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT"] = "5000"
+    cmd = [*MINI_CMD, "--subset", arms.DATASETS[a.subset],
+           "--split", "test", "--filter", f"^{a.instance}$", "-o", work,
+           "-w", "1", "-c", cfg, "-c", overlay, "--redo-existing"]
     # Pull the image first, outside the timed agent run: a first-time pull of
     # a multi-GB image is network time, not model time, and mini-swe-agent's
     # own pull_timeout (120 s) would fail the instance on a slow link.
@@ -218,7 +267,9 @@ def cmd_agent(a) -> int:
     if not have:
         subprocess.run(["docker", "pull", "-q", image], capture_output=True)
     pull_secs = round(time.time() - tp, 1)
-    log = os.path.join(a.out, "mini_stdout.log")
+    # Per instance (two workers would interleave one shared file); merge()
+    # moves it next to the trajectory.
+    log = os.path.join(work, "mini_stdout.log")
     t0 = time.time()
     with open(log, "a", encoding="utf-8") as lf:
         lf.write(f"\n=== {a.instance} {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -226,6 +277,7 @@ def cmd_agent(a) -> int:
         rc = subprocess.run(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT,
                             stdin=subprocess.DEVNULL).returncode
     secs = time.time() - t0
+    merge(a.out, work, a.instance)
     traj = os.path.join(a.out, a.instance, f"{a.instance}.traj.json")
     rec = {"instance": a.instance, "arm": a.arm, "rc": rc,
            "seconds": round(secs, 1), "pull_seconds": pull_secs,
@@ -241,14 +293,81 @@ def cmd_agent(a) -> int:
     return 0 if rc == 0 else rc
 
 
+class _Lock:
+    """A cross-process lock on one arm directory (O_EXCL lock file)."""
+
+    def __init__(self, d: str):
+        self.p = os.path.join(d, ".merge.lock")
+
+    def __enter__(self):
+        t0 = time.time()
+        while True:
+            try:
+                self.fd = os.open(self.p, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                return self
+            except FileExistsError:
+                if time.time() - t0 > 120:     # a crashed holder: take it over
+                    try:
+                        os.remove(self.p)
+                    except OSError:
+                        pass
+                time.sleep(0.2)
+
+    def __exit__(self, *exc):
+        os.close(self.fd)
+        try:
+            os.remove(self.p)
+        except OSError:
+            pass
+
+
+def merge(out: str, work: str, iid: str) -> None:
+    """Move one finished run from its work dir into the arm directory."""
+    with _Lock(out):
+        wp = os.path.join(work, "preds.json")
+        entry = None
+        if os.path.exists(wp):
+            with open(wp, encoding="utf-8") as f:
+                entry = json.load(f).get(iid)
+        pp = os.path.join(out, "preds.json")
+        preds = {}
+        if os.path.exists(pp):
+            with open(pp, encoding="utf-8") as f:
+                preds = json.load(f)
+        if entry is not None:
+            preds[iid] = entry
+        else:
+            preds.pop(iid, None)
+        tmp = pp + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(preds, f, indent=2)
+        os.replace(tmp, pp)
+        src, dst = os.path.join(work, iid), os.path.join(out, iid)
+        if os.path.isdir(src):
+            if os.path.isdir(dst):
+                shutil.rmtree(dst, ignore_errors=True)
+            shutil.move(src, dst)
+            for name in ("minisweagent.log", "mini_stdout.log"):
+                log = os.path.join(work, name)
+                if os.path.exists(log):
+                    shutil.copy(log, os.path.join(dst, name))
+
+
 def cmd_evaluate(a) -> int:
+    apply_override(a)
     preds = os.path.join(a.out, "preds.json")
     if not os.path.exists(preds):
         sys.exit(f"no predictions at {preds}")
     with open(preds, encoding="utf-8") as f:
         ids = sorted(json.load(f))
-    cmd = [PY, "-m", "swebench.harness.run_evaluation",
-           "--dataset_name", arms.DATASETS[a.subset], "--split", "test",
+    if a.instances:
+        want = set(a.instances.split(","))
+        ids = [i for i in ids if i in want]
+    if not ids:
+        print(json.dumps({"evaluate_rc": 0, "instances": 0}), flush=True)
+        return 0
+    cmd = [*EVAL_CMD,
+           "--dataset_name", arms.EVAL_DATASETS[a.subset], "--split", "test",
            "--predictions_path", preds, "--instance_ids", *ids,
            "--max_workers", str(a.workers), "--run_id", a.run_id,
            "--report_dir", a.out,
@@ -257,8 +376,11 @@ def cmd_evaluate(a) -> int:
            "--cache_level", "instance"]
     log = os.path.join(a.out, "eval_stdout.log")
     with open(log, "a", encoding="utf-8") as lf:
+        lf.write(f"\n=== evaluate {a.run_id} {ids} {time.strftime('%H:%M:%S')}\n")
+        lf.flush()
         rc = subprocess.run(cmd, cwd=a.out, stdout=lf, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL).returncode
+                            stdin=subprocess.DEVNULL,
+                            env=dict(os.environ, PYTHONUTF8="1")).returncode
     print(json.dumps({"evaluate_rc": rc, "instances": len(ids), "log": log}),
           flush=True)
     return rc
@@ -283,6 +405,7 @@ def main() -> int:
     e.add_argument("--run-id", required=True)
     e.add_argument("--subset", default="verified", choices=sorted(arms.DATASETS))
     e.add_argument("--workers", type=int, default=4)
+    e.add_argument("--instances", default="", help="comma-separated subset")
     a = ap.parse_args()
     return {"check": cmd_check, "ids": cmd_ids, "agent": cmd_agent,
             "evaluate": cmd_evaluate}[a.cmd](a)

@@ -433,7 +433,10 @@ function writeRoot(
       uv[v * 2 + 1] = t * Math.max(len, 1e-3) * 4;
       state[v * 4] = p.emissive;
       state[v * 4 + 1] = p.bleach;
-      state[v * 4 + 2] = p.inert;
+      // The weld carries the trunk's own inert value out through the morph,
+      // so a root whose channel differs from the trunk's blends into it
+      // instead of meeting the flare at a seam.
+      state[v * 4 + 2] = state[fv * 4 + 2]! * (1 - w) + p.inert * w;
       state[v * 4 + 3] = depth;
     }
   }

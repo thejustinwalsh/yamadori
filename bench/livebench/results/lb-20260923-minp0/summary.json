@@ -1,0 +1,556 @@
+{
+ "run_id": "lb-20260923-minp0",
+ "generated_at": "2026-09-23T13:45:17-0400",
+ "release": [
+  "2024-11-25"
+ ],
+ "population": {
+  "coding": 128,
+  "data_analysis": 150,
+  "instruction_following": 200,
+  "language": 140,
+  "math": 232,
+  "reasoning": 150
+ },
+ "method": {
+  "bootstrap_B": 2000,
+  "seed": 20260923,
+  "ci": "percentile, stratified by task",
+  "aggregation": "LiveBench: mean(task) -> mean(tasks) per category -> mean(categories)"
+ },
+ "arms": {
+  "bonsai": {
+   "overall": {
+    "score": 70.9090909090909,
+    "ci95": [
+     51.36363636363637,
+     90.0
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 70.9090909090909,
+     "ci95": [
+      51.36363636363637,
+      90.0
+     ],
+     "n": 21,
+     "tasks": {
+      "LCB_generation": {
+       "score": 81.81818181818183,
+       "ci95": [
+        54.54545454545454,
+        100.0
+       ],
+       "n": 11
+      },
+      "coding_completion": {
+       "score": 60.0,
+       "ci95": [
+        30.0,
+        90.0
+       ],
+       "n": 10
+      }
+     },
+     "finish_reason": {
+      "stop": 21
+     },
+     "seconds": {
+      "n": 21,
+      "median": 184.18,
+      "p90": 461.4,
+      "max": 655.58,
+      "total": 4758.4400000000005
+     },
+     "output_tokens": {
+      "n": 21,
+      "median": 2457.0,
+      "p90": 8098.0,
+      "max": 12050,
+      "total": 74748
+     }
+    }
+   },
+   "status": {
+    "ok": 21,
+    "not_run": 1
+   },
+   "finish_reason": {
+    "stop": 21,
+    "None": 1
+   },
+   "mechanism_health": {
+    "answers": 21,
+    "stack_errors": 0,
+    "tool_turn_cap": null,
+    "mechanisms": {
+     "retrieval": {
+      "allowed": 0,
+      "ran": 0,
+      "produced": 0,
+      "calls_total": 0,
+      "nonempty_total": 0
+     },
+     "hints": {
+      "allowed": 0,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0,
+      "injected_total": 0
+     },
+     "deep_thinking": {
+      "allowed": 0,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0
+     },
+     "fanout": {
+      "allowed": 0,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0,
+      "winner_replaced": 0
+     },
+     "check_code": {
+      "allowed": 0,
+      "ran": 0,
+      "produced": 0,
+      "calls_total": 0
+     },
+     "repair": {
+      "allowed": 0,
+      "ran": 0,
+      "produced": 0
+     }
+    }
+   }
+  },
+  "bonsai+check": {
+   "overall": {
+    "score": 100.0,
+    "ci95": [
+     100.0,
+     100.0
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 100.0,
+     "ci95": [
+      100.0,
+      100.0
+     ],
+     "n": 2,
+     "tasks": {
+      "LCB_generation": {
+       "score": 100.0,
+       "ci95": [
+        100.0,
+        100.0
+       ],
+       "n": 1
+      },
+      "coding_completion": {
+       "score": 100.0,
+       "ci95": [
+        100.0,
+        100.0
+       ],
+       "n": 1
+      }
+     },
+     "finish_reason": {
+      "stop": 2
+     },
+     "seconds": {
+      "n": 2,
+      "median": 167.755,
+      "p90": 176.655,
+      "max": 178.88,
+      "total": 335.51
+     },
+     "output_tokens": {
+      "n": 2,
+      "median": 2795.5,
+      "p90": 4917.5,
+      "max": 5448,
+      "total": 5591
+     }
+    }
+   },
+   "status": {
+    "ok": 2
+   },
+   "finish_reason": {
+    "stop": 2
+   },
+   "mechanism_health": {
+    "answers": 2,
+    "stack_errors": 0,
+    "tool_turn_cap": null,
+    "mechanisms": {
+     "retrieval": {
+      "allowed": 0,
+      "ran": 0,
+      "produced": 0,
+      "calls_total": 0,
+      "nonempty_total": 0
+     },
+     "hints": {
+      "allowed": 0,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0,
+      "injected_total": 0
+     },
+     "deep_thinking": {
+      "allowed": 0,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0
+     },
+     "fanout": {
+      "allowed": 0,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0,
+      "winner_replaced": 0
+     },
+     "check_code": {
+      "allowed": 2,
+      "ran": 0,
+      "produced": 0,
+      "calls_total": 0
+     },
+     "repair": {
+      "allowed": 2,
+      "ran": 0,
+      "produced": 0,
+      "stopped:clean": 2
+     }
+    }
+   }
+  },
+  "yamadori": {
+   "overall": {
+    "score": 100.0,
+    "ci95": [
+     100.0,
+     100.0
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 100.0,
+     "ci95": [
+      100.0,
+      100.0
+     ],
+     "n": 2,
+     "tasks": {
+      "LCB_generation": {
+       "score": 100.0,
+       "ci95": [
+        100.0,
+        100.0
+       ],
+       "n": 2
+      }
+     },
+     "finish_reason": {
+      "stop": 2
+     },
+     "seconds": {
+      "n": 2,
+      "median": 2339.3550000000005,
+      "p90": 4162.783,
+      "max": 4618.64,
+      "total": 4678.71
+     },
+     "output_tokens": {
+      "n": 2,
+      "median": 34589.0,
+      "p90": 61857.8,
+      "max": 68675,
+      "total": 69178
+     }
+    }
+   },
+   "status": {
+    "ok": 2
+   },
+   "finish_reason": {
+    "stop": 2
+   },
+   "mechanism_health": {
+    "answers": 2,
+    "stack_errors": 0,
+    "tool_turn_cap": null,
+    "mechanisms": {
+     "retrieval": {
+      "allowed": 0,
+      "ran": 0,
+      "produced": 0,
+      "calls_total": 0,
+      "nonempty_total": 0
+     },
+     "hints": {
+      "allowed": 2,
+      "decided": 2,
+      "ran": 2,
+      "produced": 0,
+      "injected_total": 0
+     },
+     "deep_thinking": {
+      "allowed": 2,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0
+     },
+     "fanout": {
+      "allowed": 2,
+      "decided": 2,
+      "ran": 2,
+      "produced": 2,
+      "winner_replaced": 1,
+      "method:code_medoid": 2,
+      "mode:sequential": 2,
+      "steps:3": 2
+     },
+     "check_code": {
+      "allowed": 2,
+      "ran": 0,
+      "produced": 0,
+      "calls_total": 0
+     },
+     "repair": {
+      "allowed": 2,
+      "ran": 0,
+      "produced": 0,
+      "stopped:clean": 2
+     }
+    }
+   }
+  },
+  "yamadori-xhigh": {
+   "overall": {
+    "score": 72.27272727272727,
+    "ci95": [
+     54.07954545454546,
+     90.45454545454545
+    ],
+    "categories_included": [
+     "coding"
+    ]
+   },
+   "categories": {
+    "coding": {
+     "score": 72.27272727272727,
+     "ci95": [
+      54.07954545454546,
+      90.45454545454545
+     ],
+     "n": 21,
+     "tasks": {
+      "LCB_generation": {
+       "score": 54.54545454545454,
+       "ci95": [
+        27.27272727272727,
+        81.81818181818183
+       ],
+       "n": 11
+      },
+      "coding_completion": {
+       "score": 90.0,
+       "ci95": [
+        70.0,
+        100.0
+       ],
+       "n": 10
+      }
+     },
+     "finish_reason": {
+      "stop": 21
+     },
+     "seconds": {
+      "n": 21,
+      "median": 279.34,
+      "p90": 471.81,
+      "max": 1766.24,
+      "total": 6484.97
+     },
+     "output_tokens": {
+      "n": 21,
+      "median": 10342.0,
+      "p90": 19761.0,
+      "max": 58465,
+      "total": 227380
+     }
+    }
+   },
+   "status": {
+    "ok": 21
+   },
+   "finish_reason": {
+    "stop": 21
+   },
+   "mechanism_health": {
+    "answers": 21,
+    "stack_errors": 0,
+    "tool_turn_cap": {
+     "answers_with_record": 21,
+     "hit": 0,
+     "limits": [
+      10
+     ],
+     "max_turns": 3
+    },
+    "mechanisms": {
+     "retrieval": {
+      "allowed": 0,
+      "ran": 4,
+      "produced": 4,
+      "calls_total": 6,
+      "nonempty_total": 6
+     },
+     "hints": {
+      "allowed": 21,
+      "decided": 21,
+      "ran": 21,
+      "produced": 0,
+      "injected_total": 0
+     },
+     "deep_thinking": {
+      "allowed": 21,
+      "decided": 0,
+      "ran": 0,
+      "produced": 0
+     },
+     "fanout": {
+      "allowed": 21,
+      "decided": 21,
+      "ran": 21,
+      "produced": 21,
+      "winner_replaced": 11,
+      "method:code_medoid": 12,
+      "mode:sequential": 21,
+      "steps:3": 16,
+      "method:fallback": 4,
+      "method:code_grade": 5,
+      "steps:2": 5
+     },
+     "check_code": {
+      "allowed": 21,
+      "ran": 4,
+      "produced": 4,
+      "calls_total": 6
+     },
+     "repair": {
+      "allowed": 21,
+      "ran": 3,
+      "produced": 3,
+      "stopped:clean": 20,
+      "stopped:repeated_answer": 1
+     }
+    }
+   }
+  }
+ },
+ "arm_labels": {
+  "bonsai+check": "bonsai+check",
+  "bonsai": "bare @ medium (all augmentation forced off, effort medium)",
+  "yamadori-xhigh": "tier xhigh (reasoning_effort xhigh -> MEDIUM upstream; every augmentation allowed: retrieval, hints, fan-out 3, deep thinking, check_code, repair, 10-turn tool cap) -- the all-on arm, effort-matched to bonsai",
+  "yamadori": "tier max (reasoning_effort max -> xhigh upstream; selection decides fan-out/deep thinking)"
+ },
+ "paired_bonsai+check_minus_bonsai": {
+  "n_pairs": 2,
+  "diff_overall": 0.0,
+  "ci95_overall": [
+   0.0,
+   0.0
+  ],
+  "categories_included": [
+   "coding"
+  ],
+  "categories": {
+   "coding": {
+    "n_pairs": 2,
+    "a_score": 100.0,
+    "b_score": 100.0,
+    "diff": 0.0,
+    "ci95": [
+     0.0,
+     0.0
+    ],
+    "binary": true,
+    "b_only_correct": 0,
+    "a_only_correct": 0,
+    "mcnemar_p": null
+   }
+  }
+ },
+ "paired_yamadori_minus_bonsai": {
+  "n_pairs": 2,
+  "diff_overall": 50.0,
+  "ci95_overall": [
+   0.0,
+   100.0
+  ],
+  "categories_included": [
+   "coding"
+  ],
+  "categories": {
+   "coding": {
+    "n_pairs": 2,
+    "a_score": 50.0,
+    "b_score": 100.0,
+    "diff": 50.0,
+    "ci95": [
+     0.0,
+     100.0
+    ],
+    "binary": true,
+    "b_only_correct": 1,
+    "a_only_correct": 0,
+    "mcnemar_p": 1.0
+   }
+  }
+ },
+ "paired_yamadori-xhigh_minus_bonsai": {
+  "n_pairs": 21,
+  "diff_overall": 1.3636363636363598,
+  "ci95_overall": [
+   -17.727272727272734,
+   20.45454545454546
+  ],
+  "categories_included": [
+   "coding"
+  ],
+  "categories": {
+   "coding": {
+    "n_pairs": 21,
+    "a_score": 70.9090909090909,
+    "b_score": 72.27272727272727,
+    "diff": 1.3636363636363598,
+    "ci95": [
+     -17.727272727272734,
+     20.45454545454546
+    ],
+    "binary": true,
+    "b_only_correct": 3,
+    "a_only_correct": 3,
+    "mcnemar_p": 1.0
+   }
+  }
+ }
+}

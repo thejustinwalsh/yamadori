@@ -50,12 +50,26 @@ export function barkMaterial() {
   const grain = mx_noise_float(positionWorld.mul(vec3(9, 2.2, 9))).mul(0.5).add(0.5);
   const fissure = smoothstep(0.35, 0.05, abs(fract(u.x.mul(5).add(grain.mul(0.6))).sub(0.5)));
   const bark = mix(color(token.surfaceContainerHighest), color(token.surfaceBright), grain).mul(float(1).sub(fissure.mul(0.45)));
-  const inertGrey = color(token.outline).mul(0.55);
+  // INERT (a channel with no data) is DORMANT BARK: the same grain and
+  // fissures, desaturated and a shade darker. It used to mix 55% toward a
+  // flat outline-grey, which erased the grain and read as a missing texture
+  // (the roots, 2026-09-24).
+  const lum = bark.dot(vec3(0.2126, 0.7152, 0.0722));
+  const dormant = mix(bark, vec3(lum, lum, lum), 0.75).mul(0.8);
+  const wood = mix(bark, dormant, st.z);
+  // Moss: index staleness (U.moss) on the up-facing bark low on the tree,
+  // in patches. Fresh indexes: bare bark. Inert: U.moss is 0, no moss.
+  const mossN = mx_noise_float(positionWorld.mul(vec3(13, 13, 13))).mul(0.5).add(0.5);
+  const up = smoothstep(0.05, 0.7, normalWorld.y);
+  const low = smoothstep(1.6, 0.15, positionWorld.y);
+  const edge = float(1).sub(U.moss.mul(0.85));
+  const mossMask = smoothstep(edge, edge.add(0.12), mossN).mul(up.max(low.mul(0.35))).mul(low).mul(smoothstep(0.0, 0.06, U.moss));
+  const mossColor = mix(color(token.onPrimaryFixedVariant), color(token.outlineVariant), grain);
   // Shari: bleach by pulling albedo to bone and raising roughness, never by
   // tinting (BONSAI-VIZ §5: tinting reads as plastic).
   const bone = color(token.inverseSurface).mul(float(0.82).add(grain.mul(0.18)));
-  m.colorNode = mix(mix(bark, inertGrey, st.z.mul(0.55)), bone, st.y);
-  m.roughnessNode = mix(float(0.78), float(1.0), st.y);
+  m.colorNode = mix(mix(wood, mossColor, mossMask), bone, st.y);
+  m.roughnessNode = mix(mix(float(0.78), float(0.86), st.z).max(mossMask), float(1.0), st.y);
   m.metalnessNode = float(0.0);
   // Circuit threads: three longitudinal traces and sparse rings, lit only by
   // the measured activity channel.
@@ -75,9 +89,11 @@ export function barkMaterial() {
 export function foliageMaterial() {
   const m = new THREE.MeshStandardNodeMaterial();
   const n = mx_noise_float(positionWorld.mul(7)).mul(0.5).add(0.5);
-  // INERT foliage (no hint signal exists): matte moss, unlit. When a hint
-  // channel exists it will drive `foliageLive` toward primaryContainer.
-  const leaf = mix(color(token.onPrimaryFixedVariant), color(token.outlineVariant), n);
+  // INERT foliage (no recall record): matte moss, unlit. Live foliage (the
+  // foliage channel, mapping.ts) is lit toward the primary green by U.leaf,
+  // which grows with what recall injected lately.
+  const matte = mix(color(token.onPrimaryFixedVariant), color(token.outlineVariant), n);
+  const leaf = mix(matte, color(token.primaryContainer).mul(0.5), U.leaf.mul(0.4));
   // Sun-side tops read lighter, undersides fall into shadow: form, not glow.
   const top = smoothstep(-0.2, 0.9, normalWorld.y);
   m.colorNode = mix(leaf.mul(0.55), leaf.mul(1.55), top);

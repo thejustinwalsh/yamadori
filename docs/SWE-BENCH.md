@@ -5,9 +5,22 @@ compared to each other online". This file covers five things:
 
 - what that benchmark is today, with sources
 - how it is set up here, and every deviation from the published setup
-- the pilot and what it showed
+- the overnight run and what it showed
 - how long a full run would take
 - the published scores we compare against, and which of them are like for like
+
+**The result so far (2026-09-23).** The harness runs on the official SWE-bench
+Verified Mini with the bash-only leaderboard scaffold (mini-swe-agent 2.1.0,
+its unmodified `swebench.yaml`).
+
+- **bonsai (everything off) resolved 2 of 2 graded instances.** The 95% Wilson
+  interval is [34.2, 100]%. That is a working pipeline, not a leaderboard
+  position.
+- **Cost:** about 100 min per instance. A real run needs the GPU to itself: 3.5
+  days per arm for the Mini (50) on one card.
+- **Not run:** the full-stack `yamadori` arm (section 5 says why).
+
+Details are in section 6.
 
 Runner and results: [bench/swebench/](../bench/swebench/README.md).
 
@@ -108,20 +121,62 @@ No layer of this lineage has a SWE-bench Verified number.
 |---|---|
 | mini-swe-agent | 2.1.0 |
 | swebench | 4.1.0 |
-| litellm | 1.102.0 |
+| litellm | 1.102.1 (1.102.0 in the WSL venv) |
 | datasets | 5.0.1 |
-| Python | 3.11, uv venv `~/swebench-yamadori/.venv` in WSL Ubuntu |
-| Docker | 28.1.1 (Docker Desktop, WSL2 backend) |
+| Python | 3.13 venv `C:\Users\jwals\swebench-yamadori\venv-win` (what the overnight run uses); 3.11 uv venv `~/swebench-yamadori/.venv` in WSL Ubuntu (the original setup) |
+| Docker | 28.1.1 (Docker Desktop 4.41.2, WSL2 backend) |
 
-Installed with `uv pip install "mini-swe-agent==2.1.0" "swebench==4.1.0"`.
-`wsl_side.py check` prints the versions and the config hash.
+Both venvs were installed with `pip install "mini-swe-agent==2.1.0"
+"swebench==4.1.0"`. `wsl_side.py check` prints the versions and the config
+hash. On both, the hash is `4f0492bb…7778c`, the leaderboard yaml.
+
+**Why the overnight run is Windows-native (2026-09-23).** The machine crashed
+at 23:42. When it came back, Docker Desktop had two faults:
+
+- **Its WSL integration for Ubuntu had failed.** There is no `docker` and no
+  `/var/run/docker.sock` in the distro. Its dialog offers "Restart the WSL
+  integration" and is waiting for a human.
+- **Its API cache serves stale container reads.** In
+  `com.docker.backend.exe.apicache`, `GET /containers/<id>/json` returns 404
+  for a running container, and `GET /containers/json` returns `[]`. Every write
+  works: create, start, exec, put_archive, stop and remove.
+
+`docker exec` and the SDK's `containers.create()` both inspect first, so both
+fail. Restarting Docker Desktop was ruled out (operator constraint: restart
+nothing). So `bench/swebench/dockerfix.py` runs both tools natively on
+Windows:
+
+- **mini-swe-agent.** Its `docker` environment is swapped for
+  `LowLevelDockerEnvironment`, which uses the Engine API and never inspects.
+  It keeps everything else the same: the container, `bash -c <command>`, the
+  env vars, cwd `/testbed`, stdout and stderr merged, and the 60 s timeout with
+  the same `TimeoutExpired` text.
+- **The harness.** `containers.create()` and `images.list()` build their
+  models from the write responses, not from the stale cache.
+- **Line endings.** Windows `Path.write_text` would turn `\n` into `\r\n` in
+  `patch.diff` and `eval.sh`, which the harness then copies into the Linux
+  container. `write_text` is pinned to `\n` in that process.
+
+**Proof, before scoring anything:**
+
+- `dockerfix.py selftest` passes 12/12 against the real image: quotes,
+  backslashes, heredocs, unicode, merged stderr, exit codes, cwd, no CRLF, the
+  timeout text and the submit signal.
+- The gold patches for `sympy__sympy-17655` and `django__django-11999`,
+  graded by the patched harness, come back resolved 2/2.
+- A mock-model patch (a README edit), graded in WSL on 2026-09-22, came back
+  unresolved.
+
+The clean fix is to click "Restart the WSL integration" in Docker Desktop.
+After that, `SWEBENCH_SIDE=wsl` restores the WSL path.
 
 **The model.** litellm's OpenAI-compatible provider, `openai/yamadori`, is
 pointed at the proxy.
 
-- **Address.** From WSL (NAT networking) that is the Windows host at the
-  default gateway, `http://172.29.32.1:1234/v1`. `127.0.0.1` does not reach it.
-  `wsl_side.resolve_api_base` tries localhost first and then the gateway.
+- **Address.** Natively on Windows this is `http://127.0.0.1:1234/v1`. From WSL
+  (NAT networking) it is the Windows host at the default gateway,
+  `http://172.29.32.1:1234/v1`. `wsl_side.resolve_api_base` tries loopback
+  first, then the gateway.
 - **Key.** Read from the key file into `OPENAI_API_KEY` in the mini-extra
   child's environment only. It never appears on a command line, in a config
   file, in a trajectory or in a log. After the pilot, a grep of every result
@@ -141,6 +196,18 @@ recorded in each arm's `run.json`.
 | `model.model_kwargs.temperature` | `null` (was `0.0`) | Matches what all 13 v2 submissions actually ran. The server's own sampling then applies (`--temp 1.0 --top-p 0.95 --top-k 20`, Qwen's recommendation). |
 | `model.litellm_model_registry` | cost 0 per token | a free local model |
 | `model.cost_tracking` | `ignore_errors` | mini raises on a cost of 0. **Consequence: the $3 cost limit never binds for us; only the 250-step limit does.** |
+
+**A known quirk of the leaderboard config, kept on purpose.** The config uses
+`interpreter: ["bash", "-c"]`, which is not a login shell, so the image's
+`~/.bashrc` (`conda activate testbed`) never runs. Every command runs in the
+base conda env, not the task's `testbed` env.
+
+- mini-swe-agent fixed this after the leaderboard runs: v2.4.6 adds
+  `BASH_ENV: /root/.bashrc` with that comment.
+- The v2 leaderboard entries all ran 2.1.0 without the fix, so every model on
+  that board faced the same environment. It stays here for comparability.
+- It shows in trajectories. On `sphinx-doc__sphinx-8269` our model wrote stub
+  modules (`/tmp/stub/roman.py`) to import sphinx.
 
 **Unchanged:** `step_limit: 250`, `cost_limit: 3`, the system prompt, the
 instance prompt, the observation and format-error templates, the 60 s command
@@ -235,7 +302,196 @@ trajectories (every raw response, with `usage` and `x_yamadori`),
 `bench/swebench/test_parse_results.py` proves the parser keeps these apart. It
 runs in `scripts/run_tests.py`.
 
-PILOT_AND_PROJECTION_PLACEHOLDER
+## 5. The overnight run (2026-09-23): Verified Mini, two arms
+
+**Subset: SWE-bench Verified Mini** (`MariusHobbhahn/swe-bench-verified-mini`,
+50 test instances). It was checked here against Verified before use:
+
+- All 50 ids are in `princeton-nlp/SWE-bench_Verified`.
+- Every row is identical to Verified on `base_commit`, `patch`,
+  `FAIL_TO_PASS` and `PASS_TO_PASS`, so it is graded against Verified itself
+  (`arms.EVAL_DATASETS`).
+
+**How it was chosen.** Marius Hobbhahn built it
+(https://github.com/mariushobbhahn/SWEBench-verified-mini; MIT in the repo; no
+licence field on the HF card; created 2025-01-08):
+
+1. k-means over per-instance pass rates of 16 models' full-Verified runs.
+2. A linear program keeps the cluster proportions while minimising Docker
+   storage (130 GB → 5 GB).
+
+**It is NOT matched on repository.** It holds django 25 and sphinx 25. Its
+difficulty mix is close to Verified's:
+
+| difficulty | Mini | Verified (scaled to 50) |
+|---|---|---|
+| <15 min | 19 | 19.4 |
+| 15 min–1 h | 23 | 26.1 |
+| 1–4 h | 7 | 4.2 |
+| >4 h | 1 | 0.3 |
+
+So the Mini is slightly harder than Verified, and it covers two repositories
+only.
+
+**Order.** The 50 ids, sorted, were shuffled with `random.Random(20260923)`
+(`results/mini50-20260923/instances.json` records the order and the seed), so
+any prefix is a random sample. The schedule is in `schedule.json`:
+
+1. Arm `bonsai` on instances 1–20.
+2. Arm `yamadori` on the same 20.
+3. From instance 21 on, the arms alternate per instance (bonsai #21, yamadori
+   #21, …) until the run is stopped.
+
+Two agent runs are in flight at once (`--workers 2`). The model is shared on
+purpose with two other benchmarks (LiveBench and the domain suite), each at one
+request. **Wall times from this run are measured under that sharing; they are
+not the stack's unloaded speed.**
+
+The `yamadori` arm's fan-out (N=3) makes more than one upstream generation per
+agent step, inside the proxy.
+
+Each instance is graded the moment its patch exists (its own harness run id,
+`<run>.<arm>.<instance>`). `results.jsonl` is rewritten after every agent run
+and every grade.
+
+```powershell
+& $PY bench/swebench/run.py --run-id mini50-20260923 --arms bonsai,yamadori `
+    --subset verified-mini --all --seed 20260923 --shared --workers 2 --block 20 `
+    --key-file K
+```
+
+`--shared` means the runner does not wait for the card and does not own the
+gpu lane. It checks that `jobs.paused('gpu')` is set, and sets it as
+`swebench overnight` (TTL 3600 s, refreshed every 20 min) only if nobody holds
+it. At the end it resumes only its own pause.
+
+Transient failures:
+
+- An agent run that ends on a connection or server error
+  (`APIConnectionError`, `InternalServerError`, a 502 from the proxy restart…)
+  is re-run once at the end of the queue. It is never scored.
+- A context-window or step-limit ending is a real outcome and is kept.
+
+**What was actually run, and why the plan changed (2026-09-23).**
+
+1. **01:26: two workers, bonsai then yamadori.** Both workers started on the
+   schedule above.
+2. **About 01:30: the workers starved.** The proxy admitted 2 main lanes
+   against 4 clients, and mini's log filled with 429s ("all 2 main lanes busy
+   after 20s"). The operator raised `YAMADORI_MAIN_LANES` to 4, one per
+   llama-server slot.
+   - A 429 is admission, not a model result. The request never ran, and its
+     retries happen inside one model query, so they add no step.
+   - mini's retry ceiling was raised from 10 to 200 attempts
+     (`MSWEA_MODEL_RETRY_STOP_AFTER_ATTEMPT`) so that a queue cannot fail an
+     instance.
+3. **03:10: the first instance finished.** bonsai took 103 min on
+   `django__django-11999` (80 steps). All four llama-server slots were busy
+   with three benchmarks, and nvidia-smi showed 99%.
+   - At that rate the 20-instance bonsai block would end in the evening.
+   - The yamadori block would not start before the presentation.
+4. **Operator decision, 03:12: no yamadori arm tonight.** The GPU is needed for
+   the domain suite, which is tonight's statistical backbone, and five pairs at
+   103 min each would be anecdote. The two bonsai agents already running
+   finished; then **one** worker ran bonsai sequentially (#5, #6, …) until
+   about 08:00, grading each instance as it finished.
+   - The `yamadori` and `yamadori-auto` arms are wired and tested but have
+     **no SWE-bench results**.
+   - Also untested: whether forced deep thinking makes each agent step
+     minutes long. The operator's fallback, if it exceeds 3× bonsai's time per
+     step, is to run the stack as `yamadori-auto`.
+     `results/<run>/arm_override.json` makes that switch without a restart.
+
+5. **About 04:00: the run starved again.** Even with 4 lanes, the other two
+   benchmarks held all four llama-server slots with generations of 18k–48k
+   tokens. A lane came free only every several minutes. Operator decision
+   (b), 04:05: retry a 429 after 1–2 s with jitter instead of mini's
+   exponential backoff (`dockerfix._patch_retry`), so SWE-bench queues as one
+   fair client. The two starved in-flight runs, #3 and #4, were discarded
+   and restarted.
+6. **04:37: stopped by the operator.** From 04:06 to 04:37 bonsai #3 made 1
+   action, so no further instance could finish before the presentation.
+   **Why no more instances were run: one card shared by three benchmarks.**
+   The GPU went to the domain suite. Every graded result was kept; the
+   unfinished #3 was discarded. The full timeline is in
+   `results/mini50-20260923/run.log`.
+
+**What a real run needs.** It needs the GPU to itself, at about 100 min per
+instance:
+
+- **Verified Mini (50):** about 83 h, or **3.5 days per arm on one card**.
+- **Verified (500):** about 35 days per arm.
+
+The 100 minutes were measured on a shared card, so they overstate the cost for
+a card running only SWE-bench. How much they overstate it has not been
+measured. The first instance's median step gap was 20 s; its long gaps were
+waits for a lane.
+
+A two-arm comparison doubles these figures. The `yamadori` arm will cost more
+per step if forced deep thinking fires on every step; that has not been
+measured either.
+
+## 6. Results
+
+Run `mini50-20260923`, arm `bonsai` (everything off). The subset is Verified
+Mini in seeded order; grading is by the swebench 4.1.0 harness against
+`princeton-nlp/SWE-bench_Verified`. Regenerate this table with
+`parse_results.py bench/swebench/results/mini50-20260923 --markdown`.
+
+| arm | instance | verdict | exit | steps | wall s | prompt tok (sum over steps) | completion tok | format err |
+|---|---|---|---|---|---|---|---|---|
+| bonsai | django__django-11999 | **resolved** | Submitted | 80 | 6,174 | 1,097,012 | 40,103 | 0 |
+| bonsai | sphinx-doc__sphinx-8269 | **resolved** | Submitted | 66 | 6,264 | 1,414,691 | 27,695 | 0 |
+
+| arm | resolved / scored | % | 95% Wilson |
+|---|---|---|---|
+| bonsai | 2 / 2 | 100 | [34.2, 100] |
+
+- **Two instances are not a rate.** The interval is [34.2, 100]%, so all it
+  excludes is a model below about a third. **It says nothing about where
+  bonsai sits among the leaderboard models** (56–77% in table A below).
+- **Harness checks.** The patched Windows harness was verified in both
+  directions before these verdicts:
+  - Gold patches: 2/2 resolved.
+  - A comment-only patch on django-11999: unresolved.
+- **Plumbing.** Neither trajectory had a format error or a `length` event.
+  Every model turn ended in a parsed `bash` tool call, so the model's thinking
+  output and the tool-call format work with mini-swe-agent as they are.
+
+**The trajectory to show: `django__django-11999`.** The task: Django 2.2 stopped
+letting a model override `get_FOO_display()`.
+
+1. **Steps 1–16 (5 min).** The agent explores the repo and the git history.
+2. **Steps 17–40.** It builds a standalone reproduction settings module and
+   confirms the bug.
+3. **Step 41 (48 min).** It verifies a fix, then runs `tests/runtests.py` for
+   `model_regress`, `admin`, `forms_tests` and `admin_widgets`.
+4. **Steps 65–73.** It reads the metaclass to explain why 2.1 worked.
+5. **Step 80 (103 min).** It submits a 5-line patch to
+   `Field.contribute_to_class`: only install the default `get_%s_display` if
+   the class does not already define one. That is the upstream fix, and the
+   harness confirms it: FAIL_TO_PASS passes, PASS_TO_PASS holds.
+
+About 30 of the 103 minutes were spent waiting for a lane on the shared card,
+not generating.
+
+**Width of a 50-instance interval.** Even the full Mini is not the 500:
+
+| resolved of 50 | % | 95% Wilson | width |
+|---|---|---|---|
+| 25 | 50 | [36.6, 63.4] | ±13.4 pts |
+| 30 | 60 | [46.2, 72.4] | ±13 pts |
+| 35 | 70 | [56.2, 80.9] | ±12 pts |
+
+The same rates on 500 instances give about ±4 points. So a Mini score can
+place a model in a band of roughly 25 points. That separates GPT-5 mini (56.2)
+from Claude Opus 4.5 (76.8), but not neighbours 2–3 points apart. The Mini is
+also django and sphinx only, and slightly harder than Verified (section 5), so
+it is an estimate of Verified, not a substitute for it.
+
+**Not run tonight.** The `yamadori` arm (the full stack) and `yamadori-auto`.
+Both are wired and unit-tested but have no SWE-bench numbers. Section 5 gives
+the reason.
 
 ## 7. Published scores
 

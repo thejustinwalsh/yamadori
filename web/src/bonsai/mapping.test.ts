@@ -23,7 +23,11 @@ import { ParamSprings, stepSpring } from './spring';
 // vitals.live.json: a live /dash/api/vitals snapshot (2026-09-22, seed
 // "inicialmente"), with `context` and `strata` replaced by what the new
 // mcp/budget.py budgets(147456) and mcp/vitals.py strata() return, because the
-// running proxy predates both fields. The seed is the live one.
+// running proxy predates both fields. The seed is the live one. `tree` is
+// mcp/tree_sources.py snapshot() as read on this machine on 2026-09-24 (19
+// package indexes, the code index and 2 repo indexes; 162,107 chunks + defs;
+// no request since the reading process started, so recent.fanout and
+// recent.foliage are null), added because the running proxy predates it.
 const VITALS = liveVitals as unknown as Vitals;
 const SEED = VITALS.seed!;
 const DATASETS = liveDatasets as unknown as DatasetsOverview;
@@ -128,6 +132,7 @@ describe('inert channels emit inert values, never noise (§1, §7)', () => {
     expect(st).toEqual({
       seed: null, mainShare: null, thinkingShare: null, reserveShare: null, activity: null,
       memPressure: null, anyTight: null, endpoints: null, alarms: null, errored: null, fanout: null,
+      rootSpread: null, foliage: null, moss: null,
     } satisfies TreeState);
     const p = treeParams(st, SK);
     const main = p.branches.filter((_, i) => SK.branches[i]!.limb === LIMB.main);
@@ -140,10 +145,14 @@ describe('inert channels emit inert values, never noise (§1, §7)', () => {
     expect(p.scene.activity).toBe(INERT.activity);
   });
 
-  it('foliage has no source, so it is never lit', () => {
+  it('foliage is never lit without a recall record', () => {
     for (const v of ADVERSARIAL) {
-      for (const b of treeParams(treeState(v as Vitals), SK).branches) expect(b.foliageLive).toBe(0);
+      const t = (v as Vitals | null)?.tree;
+      const live = !!(t && (t as { recent?: unknown }).recent);
+      for (const b of treeParams(treeState(v as Vitals), SK).branches) expect(b.foliageLive).toBe(live ? 1 : 0);
     }
+    const { tree: _t, ...noTree } = VITALS;
+    for (const b of treeParams(treeState(noTree as Vitals), SK).branches) expect(b.foliageLive).toBe(0);
   });
 
   it('inertChannels() names every sourceless channel', () => {
@@ -239,5 +248,128 @@ describe('springs', () => {
     while (sp.step(b, 1 / 60) && frames < 60 * 30) frames++;
     expect(frames).toBeLessThan(60 * 30);
     b.forEach((t, i) => expect(sp.get(i).girth).toBeCloseTo(t.girth, 2));
+  });
+});
+
+// ------------------------------------------------ the four tree sources
+
+const withTree = (tree: unknown): Vitals => ({ ...VITALS, tree: tree as Vitals['tree'] });
+const { tree: _dropped, ...BARE } = VITALS;
+const NO_TREE = BARE as Vitals;
+const roots = (p: ReturnType<typeof treeParams>) => p.branches.filter((_, i) => SK.branches[i]!.kind === 'root');
+const limbIdx = (limb: number) => SK.branches.findIndex((b) => b.kind === 'limb' && b.limb === limb);
+
+describe('nebari.spread <- index breadth (vitals.tree.nebari.spread)', () => {
+  it('the live fixture spreads and thickens the roots, and they are not inert', () => {
+    const st = treeState(VITALS);
+    expect(st.rootSpread).toBeCloseTo(0.7366, 3);
+    for (const r of roots(treeParams(st, SK))) {
+      expect(r.inert).toBe(0);
+      expect(r.growth).toBeCloseTo(0.55 + 0.45 * 0.7366, 3);
+      expect(r.girth).toBeCloseTo(0.8 + 0.5 * 0.7366, 3);
+    }
+    expect(inertChannels(st)).not.toContain('nebari.spread');
+  });
+  it('more breadth, longer and thicker roots', () => {
+    const lo = roots(treeParams(treeState(withTree({ nebari: { spread: 0.1 } })), SK))[0]!;
+    const hi = roots(treeParams(treeState(withTree({ nebari: { spread: 0.9 } })), SK))[0]!;
+    expect(hi.growth).toBeGreaterThan(lo.growth);
+    expect(hi.girth).toBeGreaterThan(lo.girth);
+  });
+  it('absent: the old fixed roots, inert (dormant bark), and named inert', () => {
+    for (const st of [treeState(NO_TREE), treeState(withTree({ nebari: { spread: null } }))]) {
+      expect(st.rootSpread).toBeNull();
+      for (const r of roots(treeParams(st, SK))) {
+        expect(r.inert).toBe(1);
+        expect(r.growth).toBe(1);
+        expect(r.girth).toBe(INERT.girth + 0.3);
+      }
+      expect(inertChannels(st)).toContain('nebari.spread');
+    }
+  });
+});
+
+describe('fanout <- the last x_yamadori.fanout (vitals.tree.recent.fanout)', () => {
+  const tree = (fanout: unknown) => withTree({ ...VITALS.tree, recent: { fanout, foliage: null } });
+  it('arity 3, candidate 2 delivered: three limbs, the other two bleached', () => {
+    const st = treeState(tree({ arity: 3, chosen: 2, culled: [0, 1], age_s: 5, fade: 1 }));
+    expect(st.fanout).toEqual({ arity: 3, chosen: 2, fade: 1 });
+    const p = treeParams(st, SK);
+    expect(p.branches[limbIdx(LIMB.fanout2)]!.bleach).toBe(0);
+    expect(p.branches[limbIdx(LIMB.fanout1)]!.bleach).toBe(1);
+    expect(p.branches[limbIdx(LIMB.main)]!.bleach).toBe(1);
+    expect(p.branches[limbIdx(LIMB.fanout2)]!.growth).toBe(1);
+  });
+  it('after the hold the fork retracts with the fade, then is arity 1', () => {
+    const half = treeParams(treeState(tree({ arity: 2, chosen: 0, fade: 0.5 })), SK);
+    expect(half.branches[limbIdx(LIMB.fanout1)]!.growth).toBe(0.5);
+    const gone = treeState(tree({ arity: 2, chosen: 0, fade: 0 }));
+    expect(gone.fanout).toBeNull();
+    expect(treeParams(gone, SK).branches[limbIdx(LIMB.fanout1)]!.growth).toBe(0);
+  });
+  it('no recent fan-out is measured arity 1, not inert; no recent block is inert', () => {
+    expect(treeState(VITALS).fanout).toBeNull();
+    expect(inertChannels(treeState(VITALS))).not.toContain('fanout');
+    expect(inertChannels(treeState(NO_TREE))).toContain('fanout');
+  });
+});
+
+describe('foliage <- recall injected lately (vitals.tree.recent.foliage)', () => {
+  const tree = (foliage: unknown) => withTree({ ...VITALS.tree, recent: { fanout: null, foliage } });
+  const pads = (p: ReturnType<typeof treeParams>) => p.branches.filter((b) => b.foliage > 0);
+  it('density sizes the pads and lights them; the recall path is kept', () => {
+    const full = treeParams(treeState(tree({ density: 1, path: 'skills' })), SK);
+    const bare = treeParams(treeState(tree({ density: 0, path: 'hints' })), SK);
+    expect(pads(full)[0]!.foliage).toBeCloseTo(1, 6);
+    expect(pads(bare)[0]!.foliage).toBeCloseTo(0.35, 6);
+    expect(full.scene.foliageLive).toBe(1);
+    expect(full.scene.foliageDensity).toBe(1);
+    expect(treeState(tree({ density: 0.4, path: 'skills' })).foliage).toEqual({ density: 0.4, path: 'skills' });
+  });
+  it('a recent block with no turns in the window is sparse and live, not inert', () => {
+    const st = treeState(VITALS);
+    expect(st.foliage).toEqual({ density: 0, path: 'hints' }); // the live YAMADORI_RECALL, from tree.moss.recall
+    expect(inertChannels(st)).not.toContain('foliage');
+  });
+  it('absent: full matte pads, unlit, named inert', () => {
+    const st = treeState(NO_TREE);
+    expect(st.foliage).toBeNull();
+    const p = treeParams(st, SK);
+    expect(pads(p)[0]!.foliage).toBe(INERT.foliage);
+    expect(p.scene.foliageLive).toBe(0);
+    expect(inertChannels(st)).toContain('foliage');
+  });
+});
+
+describe('moss <- index staleness (vitals.tree.moss.value)', () => {
+  it('the live fixture carries its value to the scene', () => {
+    const p = treeParams(treeState(VITALS), SK);
+    expect(p.scene.moss).toBeCloseTo(0.2921, 3);
+  });
+  it('clamped into [0, 1]', () => {
+    expect(treeState(withTree({ moss: { value: 7 } })).moss).toBe(1);
+    expect(treeState(withTree({ moss: { value: -1 } })).moss).toBe(0);
+  });
+  it('absent: no moss drawn (0), named inert', () => {
+    const st = treeState(NO_TREE);
+    expect(st.moss).toBeNull();
+    expect(treeParams(st, SK).scene.moss).toBe(0);
+    expect(inertChannels(st)).toContain('moss');
+    expect(inertChannels(treeState(withTree({ moss: { value: 'stale' } })))).toContain('moss');
+  });
+});
+
+describe('the model card is chosen by the main flag, not by index', () => {
+  const gpu = (index: number, util: number, main?: boolean) => ({
+    index, name: `gpu${index}`, used_mib: 1, total_mib: 2, free_mib: 1, pct: 50, tight: false, util,
+    ...(main === undefined ? {} : { main }),
+  });
+  it('reads the flagged card even when it is not index 0', () => {
+    const v = { ...(VITALS as Vitals), gpus: [gpu(0, 0, false), gpu(1, 80, true)] } as Vitals;
+    expect(treeState(v, DATASETS).activity).toBeCloseTo(0.8);
+  });
+  it('falls back to index 0 only when the server sends no flag', () => {
+    const v = { ...(VITALS as Vitals), gpus: [gpu(0, 40), gpu(1, 90)] } as Vitals;
+    expect(treeState(v, DATASETS).activity).toBeCloseTo(0.4);
   });
 });

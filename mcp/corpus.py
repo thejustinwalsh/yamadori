@@ -87,13 +87,82 @@ def log(turn: str, kind: str, repo: str | None = None,
         pass
 
 
+# TEST TRAFFIC IS NOT PRODUCER EVIDENCE (coordinator, 2026-09-24). The live
+# suite (mcp/test_live_stack.py) sends requests shaped like a real harness's --
+# Hermes' reviewer, its compaction summariser -- and they landed in this log
+# beside the real ones. The offline replays that treat this log as what the
+# producers actually send (mcp/test_utility.py: "12 Hermes compactions") then
+# counted the live gate's copy as a 13th. So each turn records its ACCOUNT
+# (the proxy's 16-hex id, never the key) and `traffic`: "test" when that
+# account's label marks the live suite's dev keys, else "client". Dogfood
+# harness traffic (hermes-dogfood) is a real producer and stays "client",
+# labelled by its account. Readers exclude test traffic with test_turns().
+TEST_ACCOUNT_LABELS = ("live-test", "claude-dogfood")
+# Logged BEFORE turns recorded an account: the live gate of 2026-09-24,
+# 12:13:03-13:01:43, under the live-test account (created 12:12:57), is event
+# ids 3787-3916 of index/corpus.sqlite3 -- read off the log, with the Hermes
+# dogfood rows on either side (3783-3785 at 10:36; 3917 on, from 13:10). The
+# span applies only to the file whose rows at both ends carry these turns.
+LEGACY_TEST_SPANS = ({"from_id": 3787, "from_turn": "fa48a951d3164db7",
+                      "to_id": 3916, "to_turn": "b8810ebe686347df",
+                      "why": "live gate 2026-09-24, live-test account, "
+                             "before log_turn recorded accounts"},)
+
+
+def account_traffic(account: str | None) -> str:
+    """"test" when `account` (a 16-hex id) is one of the live suite's dev
+    accounts, by its label in the account registry; else "client". The
+    dogfood harness account (`hermes-dogfood`) is a real producer: client.
+
+    FAILS CLOSED (pre-deploy review, 2026-09-24): when the registry cannot
+    be read, the row is "test" -- an unknown source is never learned from
+    (mcp/deep_learn.py reads client rows only)."""
+    if not account:
+        return "client"
+    try:
+        import accounts
+        reg = accounts._load()
+    except Exception:                                            # noqa: BLE001
+        return "test"
+    for h, meta in (reg or {}).items():
+        if h.startswith(account):
+            label = str((meta or {}).get("label") or "").lower()
+            return ("test" if label.startswith(TEST_ACCOUNT_LABELS)
+                    else "client")
+    return "client"
+
+
+def test_turns(con: sqlite3.Connection) -> set[str]:
+    """The turn ids in an open corpus that are TEST traffic: rows recorded as
+    such, and the legacy spans (LEGACY_TEST_SPANS) when this is their file."""
+    out: set[str] = set()
+    for turn, raw in con.execute(
+            "SELECT turn, payload FROM events WHERE kind='turn' AND "
+            "payload LIKE '%\"traffic\": \"test\"%'"):
+        out.add(turn)
+    for s in LEGACY_TEST_SPANS:
+        ends = dict(con.execute("SELECT id, turn FROM events WHERE id IN "
+                                "(?, ?)", (s["from_id"], s["to_id"])))
+        if ends.get(s["from_id"]) == s["from_turn"] and \
+                ends.get(s["to_id"]) == s["to_turn"]:
+            out.update(t for (t,) in con.execute(
+                "SELECT DISTINCT turn FROM events WHERE id BETWEEN ? AND ?",
+                (s["from_id"], s["to_id"])))
+    return out
+
+
 def log_turn(turn: str, repo: str | None, messages: list[dict],
-             tools_offered: list[str], first_turn: bool) -> None:
+             tools_offered: list[str], first_turn: bool,
+             utility: bool | None = None, route: dict | None = None,
+             account: str | None = None,
+             client_tools: list[str] | None = None) -> None:
     """The request as it arrived.
 
     Only the last user message is kept, not the whole conversation. The full
     history is the user's code and belongs to them; what the routing dataset
     needs is the request and which tools were on offer when it was made.
+    `account` is the proxy's account id; with it, `traffic` says whether the
+    row is a producer's or the live suite's (TEST TRAFFIC above).
     """
     last_user = ""
     for m in reversed(messages):
@@ -115,8 +184,26 @@ def log_turn(turn: str, repo: str | None, messages: list[dict],
         "request": last_user,
         "system_head": system_head,
         "tools_offered": sorted(tools_offered),
+        # The tools the CLIENT sent, apart from the upstream list above: a
+        # compaction rewritten onto its conversation goes up with THAT
+        # conversation's tools, so tools_offered is not what the client sent
+        # (turn 11c0be7eff30, 2026-09-24). None: not recorded (older rows).
+        **({"client_tools": sorted(client_tools)}
+           if client_tools is not None else {}),
         "n_messages": len(messages),
         "first_turn": first_turn,
+        # A client's own side call (selection.utility_call): answered by the
+        # bare model, so its row is not a routing example for a task.
+        "utility": utility,
+        # mcp/route.py's class, and the role the conversation ends on. The
+        # labelled set (bench/route/labels.jsonl) had to RECONSTRUCT whether
+        # a turn ended on a client tool result from repeated requests; rows
+        # from 2026-09-24 on record it.
+        "route": ((route or {}).get("class") if route else None),
+        "ends_on": (((route or {}).get("signals") or {}).get("ends_on")
+                    if route else None),
+        "account": (account or "")[:16] or None,
+        "traffic": account_traffic(account),
     })
 
 
@@ -218,7 +305,8 @@ def log_tool_result(turn: str, repo: str | None, name: str, result: str,
 
 
 def log_answer(turn: str, repo: str | None, content: str, hops: int,
-               ms: float) -> None:
+               ms: float, finish: str | None = None,
+               tool_calls: int | None = None) -> None:
     """Which paths the final answer cited is the relevance label.
 
     A path that was returned by a search and then named in the answer was
@@ -233,6 +321,12 @@ def log_answer(turn: str, repo: str | None, content: str, hops: int,
         "cited_paths": sorted(set(cited))[:20],
         "hops": hops,
         "ms": round(ms, 1),
+        # `chars` counts content only. A turn that hands the client a tool
+        # call with no preface text has chars 0 and is NOT an empty answer:
+        # 28 Hermes rows were misread that way (2026-09-23). These two say
+        # which it was.
+        "finish": finish,
+        "tool_calls": tool_calls,
     })
 
 

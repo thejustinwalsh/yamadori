@@ -312,13 +312,38 @@ def test_serving() -> None:
         check(h["tasks"]["route_in"]["default_engine"] == "trained",
               "route_in defaults to the trained engine (it beats zero-shot)",
               str(h["tasks"]["route_in"]["default_engine"]))
-        # The head loses to the regex, and the service must say so rather than
-        # let a caller assume the default engine is the best router available.
-        check(h["tasks"]["route_in"]["beats_rule_baseline"] is False,
-              "route_in head is reported as losing to the regex baseline",
+        # The service reports the comparison THE ARTEFACT RECORDS, whichever
+        # way it goes. Until 2026-09-24 this asserted the head LOSES to the
+        # regex (0.726 vs 0.841), which was the head before the retrain. The
+        # head was retrained on 2026-09-22 on 289 labels
+        # (index/laya/route_in.json, AGENTS.md "route_in head"): it records
+        # held-out 0.728 against the rule's 0.608 on its own splits, so the
+        # service must now say it beats that baseline and carry no
+        # loses-to-the-regex note (#15b, SELF-IMPROVEMENT-LOG). It still
+        # never decides alone: selection's rule with its symbol lookup scores
+        # 89/120 to the head's 80/120 (bench/eval_route_heldout.py) -- a
+        # fact about selection.py, not something /heads reports.
+        with open(os.path.join(h.get("index_dir") or os.path.join(
+                ROOT, "index", "laya"), "route_in.json"),
+                  encoding="utf-8") as f:
+            art = json.load(f).get("metrics") or {}
+        rb = (art.get("rule_baseline") or {}).get("mean")
+        after = ((art.get("held_out_after") or {}).get("accuracy")
+                 or {}).get("mean")
+        served = h["tasks"]["route_in"].get("metrics") or {}
+        check(served.get("rule_baseline") == art.get("rule_baseline")
+              and served.get("held_out_after") == art.get("held_out_after"),
+              "the service serves the artefact's recorded metrics",
+              f"served rule {served.get('rule_baseline')} vs artefact {rb}")
+        want = bool(after is not None and rb is not None and after > rb)
+        check(h["tasks"]["route_in"]["beats_rule_baseline"] is want,
+              f"route_in: beats_rule_baseline is {want}, as recorded (head "
+              f"{after} vs rule {rb})",
               str(h["tasks"]["route_in"].get("beats_rule_baseline")))
-        check("note" in h["tasks"]["route_in"],
-              "service carries the regex-beats-head caveat")
+        check(("note" in h["tasks"]["route_in"]) is (not want),
+              "the loses-to-the-regex note is carried exactly when the "
+              "recorded comparison says so",
+              str(h["tasks"]["route_in"].get("note")))
 
         q = {"task": "route_in",
              "question": "What does mcp/laya_service.py do with a request "

@@ -11,4 +11,8 @@ export const U = {
   request: uniform(-100),
   tool: uniform(-100),
   seed: uniform(-100),
+  /** moss cover on the bark: index staleness, [0, 1]; 0 when inert (mapping.ts) */
+  moss: uniform(0),
+  /** how far live foliage is lit toward the primary green: 0 when inert */
+  leaf: uniform(0),
 };

@@ -10,8 +10,8 @@ REM   dashboard  http://10.242.120.152:1234/dash   (Python pages: /dash/classic)
 REM   tools API  http://10.242.120.152:1235
 REM
 REM llama-swap starts every model listed in config.yaml via its preload hook.
-REM This script also starts tools_api, Caddy (if configured), Laya and the job
-REM worker, then runs the proxy in the foreground.
+REM This script also starts tools_api, Caddy (if configured), Laya, the job
+REM worker and SearXNG, then runs the proxy in the foreground.
 
 cd /D "%~dp0\.."
 
@@ -65,6 +65,15 @@ REM Job worker: claims dataset pipeline jobs from index\jobs.sqlite3 (fetch,
 REM extract, index). Without it a submitted dataset sits in `queued` forever.
 start "" /B "%PY%" "%CD%\mcp\worker.py" >> "logs\worker.log" 2>&1
 
+REM SearXNG web search (loopback 8888, docs/SEARCH.md). Its own venv and
+REM source tree in C:\Users\jwals\searxng, outside the repo; the settings file
+REM there holds its secret key. Skipped if that venv is missing.
+set "SEARXNG_PY=C:\Users\jwals\searxng\.venv\Scripts\python.exe"
+if exist "%SEARXNG_PY%" (
+  set "SEARXNG_SETTINGS_PATH=C:\Users\jwals\searxng\etc\settings.yml"
+  start "" /B "%SEARXNG_PY%" -m searx.webapp >> "logs\searxng.log" 2>&1
+)
+
 echo [%date% %time%] starting llama-swap >> "logs\stack.log"
 REM llama-swap binds to LOOPBACK ONLY. It has no authentication of its own, so
 REM exposing it is a complete bypass of the proxy: no API key, no tools, no
@@ -84,6 +93,16 @@ REM checkers got 501), no real keep-alive, no graceful drain on restart. Every
 REM run that worked did so because someone had started server.py by hand.
 set "LLAMA_STACK_URL=http://127.0.0.1:11434"
 set "YAMADORI_PROXY_PORT=1234"
+REM Image generation (docs/IMAGEGEN.md): llama-swap starts `imagegen` on
+REM demand; signed /media links use the public name, not 127.0.0.1.
+set "YAMADORI_IMAGEGEN_URL=http://127.0.0.1:11434"
+set "YAMADORI_PUBLIC_BASE=https://ai.thejustinwalsh.me"
+REM Turbo is the default image model (operator, 2026-09-23): 23.6 s vs ~108 s
+REM per 1024x1024 (n=1 vs n=10). Quality vs base not yet compared
+REM (bench/imagegen/compare_turbo.py). Users can pick base on /settings.
+set "YAMADORI_IMAGEGEN_DEFAULT=turbo"
+REM Web search for deep thinking: the SearXNG started above (docs/SEARCH.md).
+set "YAMADORI_SEARCH_URL=http://127.0.0.1:8888"
 "%PY%" "%CD%\mcp\server.py" >> "logs\proxy.log" 2>&1
 set EXITCODE=%errorlevel%
 echo [%date% %time%] llama-swap exited with %EXITCODE% >> "logs\stack.log"

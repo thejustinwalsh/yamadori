@@ -115,8 +115,9 @@ class Turn:
 def _forward_hint(name: str, untried: list[str]) -> str:
     """One concrete next step, phrased as an action that progresses."""
     if name == "find_by_pattern":
-        return ("Searching without a glob covers every indexed file; "
-                "describe_index lists which directories exist.")
+        return ("Searching without a glob covers every indexed library; "
+                "describe_index lists them. The user's own files are "
+                "searched with your client's own tools.")
     if name == "find_definition_opt":
         return ("find_by_pattern locates the name as a literal, including "
                 "places it is imported or re-exported rather than declared.")
@@ -124,16 +125,44 @@ def _forward_hint(name: str, untried: list[str]) -> str:
         return ("find_by_pattern matches an exact string the code would "
                 "contain; describe_index shows what is covered.")
     if name == "read_file_range":
-        return "describe_index lists the paths that exist."
+        return ("describe_index lists the libraries held; a path starts with "
+                "one of them. The user's own files are read with your "
+                "client's own file tools.")
     return ""
 
 
 def _empty(text: str) -> bool:
-    head = (text or "")[:140].lower()
-    return (not text or "no matches" in head or "not found" in head
+    """Did this call come back with nothing?
+
+    It MISSED the proxy's own wording for a caller with no repository (the
+    normal remote case): "... the package indexes were searched instead.
+    None matched." and "== searched pkg@ver: no match ==". So an identical
+    miss was re-run every time and the repeat breaker never fired for exactly
+    the callers it exists for (docs/TRANSCRIPT-REVIEW-2026-09-23.md). It also
+    missed the structured envelopes: {"ok": true, "matches": 0} for a clean
+    miss, and {"ok": false, "retryable": false} for a call that cannot
+    succeed with these arguments, whose answer will not change either.
+    Structure first, as in packages._is_empty; prose as the fallback.
+    """
+    if not text:
+        return True
+    stripped = text.lstrip()
+    if stripped.startswith("{"):
+        try:
+            d = json.loads(stripped)
+        except ValueError:
+            d = None
+        if isinstance(d, dict):
+            if d.get("ok") is False:
+                return d.get("retryable") is False
+            if "matches" in d:
+                return int(d.get("matches") or 0) == 0
+    head = stripped[:140].lower()
+    return ("no matches" in head or "not found" in head
             or "no definition" in head or "no references" in head
             or "matched 0 of" in head or "no results" in head
-            or "has no index" in head)
+            or "has no index" in head or "none matched" in head
+            or ": no match ==" in head)
 
 
 # THE TOOL-RESULT BREAKER.

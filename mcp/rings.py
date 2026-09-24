@@ -152,23 +152,42 @@ def read(session: str | None = None, limit: int = 60, kind: str = "") -> str:
 TOOLS = [
     {
         "name": "record_step",
+        # A TRIGGER CONDITION, not a definition (AGENTS.md, "Tool descriptions
+        # are prompts"): the question it answers, when to call it, and the
+        # phrasings that should reach for it. Rewritten 2026-09-23 as working
+        # memory: the Hermes session read the same game files again after
+        # every compaction and called record_step once in 132 turns, while
+        # the client shortened old tool outputs and the model's thinking was
+        # never carried from one turn to the next.
         "description": (
-            "Write one line into the durable work log. Do this after anything you "
-            "would be annoyed to discover you had done twice: a file changed, a "
-            "check run, a dead end ruled out, a decision made.\n"
-            "The log lives outside the conversation, so it survives compaction. "
-            "Anything you do not record here can be summarised away, and the work "
-            "will look undone to whoever reads next -- including you.\n"
-            "kind: 'did' for an action, 'check' for a verification and its result, "
-            "'learned' for a fact worth not rediscovering, 'decided' for a choice "
-            "and its reason."
+            "Answers 'what will I need from this later?'. Call it right after "
+            "you read files or run commands for a task that takes more than "
+            "one turn, and record the facts you will need again: exact API "
+            "names and signatures, where something is defined, a mismatch "
+            "between the spec and the code, a decision and its reason, a check "
+            "and whether it passed. Your client may shorten earlier tool "
+            "outputs, and your thinking is not kept from one turn to the "
+            "next, so a fact you only thought about is gone by the next turn; "
+            "one recorded here stays, and read_rings brings it back.\n"
+            "Reach for it when you think: 'I will need this signature later', "
+            "'this differs from what the spec says', 'I chose X because Y', "
+            "'the tests passed'. One entry per fact, specific enough to act on "
+            "without rereading the file.\n"
+            "The log is kept by the remote code-intelligence service, outside "
+            "the conversation, so it survives compaction. It holds your notes "
+            "only: the user's files are read and written with your client's "
+            "own tools.\n"
+            "kind: 'learned' for a fact (a name, a signature, a mismatch), "
+            "'decided' for a choice and its reason, 'did' for an action, "
+            "'check' for a verification and its result."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "kind": {"type": "string", "enum": list(KINDS)},
                 "summary": {"type": "string",
-                            "description": "One line, specific. Name files and symbols."},
+                            "description": ("One line, specific. Name files, "
+                                            "symbols and signatures exactly.")},
                 "detail": {"type": "string", "description": "Optional. Diff, error, reasoning."},
                 "outcome": {"type": "string",
                             "description": "For a check: pass or fail. Otherwise a short result."},
@@ -179,10 +198,12 @@ TOOLS = [
     {
         "name": "read_rings",
         "description": (
-            "Read the durable work log for this session: everything already done, "
-            "every check run and whether it passed.\n"
-            "Read this BEFORE planning, and always immediately after the "
-            "conversation has been summarised or compacted. A summary keeps the "
+            "Read this conversation's durable work log, kept by the "
+            "code-intelligence service: everything already done, every check "
+            "run and whether it passed.\n"
+            "Read this BEFORE planning, always immediately after the "
+            "conversation has been summarised or compacted, and whenever a "
+            "fact you recorded is no longer in view. A summary keeps the "
             "gist and drops the specifics, so it cannot tell you whether a change "
             "actually landed -- this can. Work listed here is done; redoing it is "
             "the failure this tool exists to prevent."

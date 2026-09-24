@@ -168,3 +168,29 @@ describe('nebari weld', () => {
     }
   });
 });
+
+// Dormant roots on a live trunk: the root's inert value (aState.z) used to
+// start at 1 on its first ring, so the shader's inert look began exactly at
+// the flare and drew a seam round the base. The weld now carries the trunk's
+// value out and reaches the root's own at the end of the morph.
+describe('nebari weld: inert blends from the trunk', () => {
+  it('ring 0 matches the trunk, the far rings are the root, and it never jumps back', () => {
+    const { tree: _t, ...noTree } = liveVitals as unknown as Vitals;
+    const sk = growSkeleton(limbSeeds(fnv1a32('harbor')));
+    const p = treeParams(treeState(noTree as Vitals), sk);
+    const buf = allocateBark(sk);
+    writeBark(buf, sk, poseFrames(sk, p.branches), p.branches);
+    const VPB = buf.position.length / 3 / sk.branches.length;
+    const RING = 11;
+    const rings = VPB / RING;
+    const trunk = sk.branches.find((b) => b.kind === 'trunk' && b.parent === -1)!;
+    expect(p.branches[trunk.id]!.inert).toBe(0);
+    for (const r of sk.branches.filter((b) => b.kind === 'root')) {
+      expect(p.branches[r.id]!.inert).toBe(1);
+      const z = (ring: number) => buf.state[(r.id * VPB + ring * RING + 3) * 4 + 2]!;
+      expect(z(0)).toBeCloseTo(0, 6);
+      expect(z(rings - 1)).toBeCloseTo(1, 6);
+      for (let k = 1; k < rings; k++) expect(z(k)).toBeGreaterThanOrEqual(z(k - 1) - 1e-9);
+    }
+  });
+});

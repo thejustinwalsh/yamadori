@@ -615,6 +615,31 @@ def handle_get(path: str):
                 {"error": f"vitals.pulse() raised {type(e).__name__}: {e}"}
             ).encode()
         return 200, "application/json", json.dumps(snap).encode()
+    if p == "/dash/api/power":
+        # mcp/power.py live(): GPU watts, the DTE D1.11 rate period and
+        # price, $/h at the current draw, today's and the last 7 days' kWh
+        # and cents from the ledger. In-memory reads only.
+        try:
+            import power
+            snap = power.live()
+        except Exception as e:                                   # noqa: BLE001
+            return 500, "application/json", json.dumps(
+                {"error": f"power.live() raised {type(e).__name__}: {e}"}
+            ).encode()
+        return 200, "application/json", json.dumps(snap).encode()
+    if p == "/dash/api/power/series":
+        # mcp/power.py series(): the last 10 minutes of per-card watts beside
+        # the main model's tokens per second (its /slots counters), with the
+        # idle baseline, J/token and the correlation. The sampler's ring,
+        # in memory; no nvidia-smi and no model request on this path.
+        try:
+            import power
+            snap = power.series()
+        except Exception as e:                                   # noqa: BLE001
+            return 500, "application/json", json.dumps(
+                {"error": f"power.series() raised {type(e).__name__}: {e}"}
+            ).encode()
+        return 200, "application/json", json.dumps(snap).encode()
     return None
 
 

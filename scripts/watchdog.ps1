@@ -89,13 +89,27 @@ $Services = @(
        Process = 'llama-swap' }
     @{ Name = 'proxy';      Url = 'http://127.0.0.1:1234/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\server.py"); Log = "$root\logs\proxy.log"
-       Match = 'mcp[\\/]server\.py' }
+       Match = 'mcp[\\/]server\.py'
+       # start-stack.bat's `set` lines never reach a watchdog restart, which
+       # inherits the watchdog's own environment. docs/IMAGEGEN.md.
+       Env = @{ YAMADORI_IMAGEGEN_URL = 'http://127.0.0.1:11434'
+                YAMADORI_PUBLIC_BASE  = 'https://ai.thejustinwalsh.me'
+                # Turbo default (operator, 2026-09-23); see start-stack.bat.
+                YAMADORI_IMAGEGEN_DEFAULT = 'turbo'
+                # SearXNG, the searxng entry below; docs/SEARCH.md.
+                YAMADORI_SEARCH_URL = 'http://127.0.0.1:8888' } }
     @{ Name = 'tools-api';  Url = 'http://127.0.0.1:1235/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\tools_api.py"); Log = "$root\logs\tools-api.log"
        Match = 'tools_api\.py' }
     @{ Name = 'laya';       Url = 'http://127.0.0.1:1237/health';  Kind = 'process'
        Exe = "$root\.venv-laya\Scripts\python.exe"; Args = @("$root\mcp\laya_service.py")
        Log = "$root\logs\laya.log"; Match = 'laya_service\.py' }
+    # SearXNG web search (docs/SEARCH.md). Its own venv and source tree outside
+    # the repo; the config path is the only thing it needs from the environment.
+    @{ Name = 'searxng';    Url = 'http://127.0.0.1:8888/healthz';  Kind = 'process'
+       Exe = 'C:\Users\jwals\searxng\.venv\Scripts\python.exe'; Args = @('-m', 'searx.webapp')
+       Log = "$root\logs\searxng.log"; Match = 'searx\.webapp'
+       Env = @{ SEARXNG_SETTINGS_PATH = 'C:\Users\jwals\searxng\etc\settings.yml' } }
     # The job worker has no port: it claims rows from index/jobs.sqlite3. Alive
     # means its process exists. A worker that is alive but stuck is not this
     # script's business -- jobs.reclaim() hands a stale job to the next worker.
@@ -153,6 +167,27 @@ function Test-UpstreamsAlive {
                 -UseBasicParsing -TimeoutSec $TimeoutSec | Out-Null
         } catch {
             if (((Get-Date) - $t0).TotalSeconds -ge ($TimeoutSec - 1)) {
+                # AN ON-DEMAND MODEL IS NEVER A REASON TO RESTART THE STACK.
+                # 2026-09-23 16:21: bonsai-vision (ttl 300) stopped answering
+                # its health route; this returned WEDGED, and the whole stack
+                # was restarted -- killing a domain-benchmark row 1,429 s into
+                # generation on the healthy main model, which was idle only
+                # because it was waiting on the image tool (so the slot-progress
+                # check below saw nothing move). A model llama-swap loads on
+                # demand (ttl > 0 in /running) is unloaded on its own; the next
+                # request reloads it. Only an always-resident model (ttl 0)
+                # goes through the two-strike restart path.
+                if ([int]$m.ttl -gt 0) {
+                    Write-Log "  on-demand upstream '$id' (ttl $($m.ttl)) did not answer its health route in ${TimeoutSec}s; unloading it alone, not restarting the stack"
+                    try {
+                        Invoke-WebRequest -Method Post -UseBasicParsing -TimeoutSec 30 `
+                            -Uri "http://127.0.0.1:11434/api/models/unload/$id" | Out-Null
+                        Write-Log "  '$id' unloaded"
+                    } catch {
+                        Write-Log "  unloading '$id' failed: $($_.Exception.Message); leaving it (next run retries)"
+                    }
+                    continue
+                }
                 return "upstream '$id' did not answer its health route in ${TimeoutSec}s"
             }
             Write-Log "  upstream '$id' health route answered non-2xx; not acting on it"
@@ -268,6 +303,11 @@ function Restart-Service($svc) {
         return
     }
     Write-Log "restarting $($svc.Name)"
+    if ($svc.Env) {
+        foreach ($k in $svc.Env.Keys) {
+            [Environment]::SetEnvironmentVariable($k, $svc.Env[$k], 'Process')
+        }
+    }
     Start-Process -FilePath $svc.Exe -ArgumentList $svc.Args `
         -WorkingDirectory $root -WindowStyle Hidden `
         -RedirectStandardOutput $svc.Log -RedirectStandardError "$($svc.Log).err"

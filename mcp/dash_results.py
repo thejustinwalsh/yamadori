@@ -55,6 +55,7 @@ model failure until someone read a traceback.
 """
 from __future__ import annotations
 
+import glob
 import importlib
 import json
 import os
@@ -519,21 +520,862 @@ def recipe_summary() -> dict:
                        "rate": (oracle / n) if n else None}}
 
 
-def domain_summary() -> dict:
-    """The newest bench/domain run, in the lcb shape. bench/domain/analyse.py
-    owns the statistics; this only imports it, so the page and the markdown
-    report can never disagree."""
+def _bench_sub(sub: str, name: str):
+    """Import `name` out of bench/<sub>/ (analyse.py exists in two of them, so
+    the module is loaded under its own path, never a cached namesake)."""
+    import importlib.util
+    path = os.path.join(BENCH, sub, name + ".py")
+    key = f"_dash_{sub}_{name}"
+    if key in sys.modules:
+        return sys.modules[key]
+    d = os.path.join(BENCH, sub)
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    spec = importlib.util.spec_from_file_location(key, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[key] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop(key, None)
+        raise
+    return mod
+
+
+def _wilson(k: int, n: int) -> tuple[float | None, float | None]:
+    """The harness's own Wilson interval; None bounds when nothing was scored
+    (livecodebench.wilson returns (0, 0) at n=0, which would draw as a
+    measured zero)."""
+    if not n:
+        return None, None
+    return _bench("livecodebench").wilson(k, n)
+
+
+def _load_json(path: str):
+    """A json file, or None when it is absent or half-written. A benchmark
+    rewriting its summary mid-poll must cost one poll, not the section."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _age(path: str) -> int | None:
+    return round(time.time() - os.path.getmtime(path)) if os.path.exists(path) else None
+
+
+def _rel(path: str) -> str:
+    return os.path.relpath(path, os.path.dirname(BENCH)).replace("\\", "/")
+
+
+def _median(xs: list) -> float | None:
+    xs = [x for x in xs if isinstance(x, (int, float))]
+    return statistics.median(xs) if xs else None
+
+
+# --------------------------------------------------------------------------
+# The arms legend: one row per arm, in the columns of README "Effort tiers"
+# (thinking sent, retrieval, hints, fan-out, deep thinking) plus check_code.
+# A value is "on", "off" or "auto" (the tier allows it and mcp/selection.py
+# decides per request). Built from each harness's own arm table, never typed
+# here, so a renamed or re-specified arm cannot drift from its legend.
+# --------------------------------------------------------------------------
+
+def _tiers_table() -> dict:
+    return importlib.import_module("tiers").TIERS
+
+
+def legend_from_features(arm: str, feats: dict, note: str = "",
+                         client_tool: str | None = None) -> dict:
+    """An arm forced by X-Yamadori-Features. A key the header leaves out is
+    left to the selection engine ("auto")."""
+    def onoff(key):
+        if key not in feats:
+            return "auto"
+        return "on" if feats[key] else "off"
+    fan = feats.get("fanout")
+    return {"arm": arm, "kind": "features", "note": note,
+            "thinking_sent": feats.get("effort"),
+            "retrieval": onoff("retrieval"), "hints": onoff("hints"),
+            "fanout": ("auto" if fan is None else str(fan)),
+            "deep_thinking": onoff("investigate"),
+            "check": ("on" if feats.get("check_code") or client_tool else "off"),
+            "repair": "on" if feats.get("repair") else "off",
+            "client_tool": client_tool}
+
+
+def legend_from_tier(arm: str, tier: str, effort_sent: str | None,
+                     note: str = "") -> dict:
+    """A product arm: the tier says what is ALLOWED; fan-out and deep
+    thinking are then chosen per request, so an allowed one reads "auto"."""
+    t = _tiers_table().get(tier) or {}
+    fan = int(t.get("fanout") or 1)
+    return {"arm": arm, "kind": "tier", "tier": tier, "note": note,
+            "thinking_sent": effort_sent,
+            "retrieval": "on" if t.get("retrieval") else "off",
+            "hints": "on" if t.get("hints") else "off",
+            "fanout": f"auto, up to {fan}" if fan > 1 else "1",
+            "deep_thinking": "auto" if t.get("investigate") else "off",
+            "check": "on" if t.get("check_code") else "off",
+            "repair": "on" if t.get("repair") else "off",
+            "client_tool": None}
+
+
+# --------------------------------------------------------------------------
+# LiveBench
+# --------------------------------------------------------------------------
+
+LIVEBENCH_RESULTS = os.path.join(BENCH, "livebench", "results")
+_PROGRESS = re.compile(r"^\[(\d\d:\d\d:\d\d)\].*?answered (\d+)/(\d+)\s+err_rows (\d+)")
+
+
+def _livebench_legend(arms: list[str]) -> list[dict]:
+    try:
+        drive = _bench_sub("livebench", "drive")
+        spec = drive.ARMS
+    except Exception:                                            # noqa: BLE001
+        spec = {}
+    try:
+        labels = _bench_sub("livebench", "summarize").ARM_LABELS
+    except Exception:                                            # noqa: BLE001
+        labels = {}
+    out = []
+    for a in arms:
+        s = spec.get(a) or {}
+        note = labels.get(a, "")
+        if "tier" in s:
+            out.append(legend_from_tier(a, s["tier"], s.get("effort_sent"), note))
+        elif "features" in s:
+            out.append(legend_from_features(a, s["features"], note))
+        else:
+            out.append({"arm": a, "kind": "unknown", "note": note or
+                        "not in bench/livebench/drive.py ARMS"})
+    return out
+
+
+def _livebench_progress(run_dir: str) -> list[dict]:
+    out = []
+    for p in sorted(glob.glob(os.path.join(run_dir, "logs", "progress_*.log"))):
+        base = os.path.basename(p)[len("progress_"):-len(".log")]
+        last = None
+        try:
+            with open(p, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    m = _PROGRESS.search(line)
+                    if m:
+                        last = m
+        except OSError:
+            continue
+        arm, _, cat = base.partition("_")
+        # arm names contain no underscore except the retired prefix arm
+        out.append({"arm": arm, "category": cat, "log": _rel(p), "log_age_s": _age(p),
+                    "at": last.group(1) if last else None,
+                    "answered": int(last.group(2)) if last else 0,
+                    "of": int(last.group(3)) if last else None,
+                    "err_rows": int(last.group(4)) if last else 0})
+    return out
+
+
+def _livebench_rows(run_dir: str) -> dict[str, list[dict]]:
+    by: dict[str, list[dict]] = {}
+    for p in sorted(glob.glob(os.path.join(run_dir, "rows_*_*.jsonl"))):
+        rows, _ = _read(p)
+        for r in rows:
+            if isinstance(r, dict) and r.get("arm"):
+                by.setdefault(r["arm"], []).append(r)
+    return by
+
+
+def _livebench_health(rows: list[dict]) -> dict:
+    """Mechanism health over one arm's answers, by bench/livebench/mechanisms.py
+    `health` -- the harness's own counter, not a second one. Rows scored
+    before score.py recorded `mechanisms` are counted as unrecorded."""
+    recs = [r["mechanisms"] for r in rows if isinstance(r.get("mechanisms"), dict)]
+    out = {"answers": len(rows), "recorded": len(recs)}
+    if recs:
+        out.update(_bench_sub("livebench", "mechanisms").health(recs))
+        out["answers"] = len(rows)
+    return out
+
+
+def _livebench_electricity(cats: dict, rows: list[dict]) -> dict | None:
+    """Electricity per question for one arm: wall seconds per answered
+    question x the measured generating draw (mcp/power.py
+    benchmark_estimate). An ESTIMATE -- nothing was metered during the run.
+    Seconds come from summary.json (each category's seconds.total and n);
+    an arm with no summary seconds falls back to its rows' `seconds`."""
+    try:
+        import power
+    except Exception:                                            # noqa: BLE001
+        return None
+    total, n = 0.0, 0
+    for v in cats.values():
+        sec = v.get("seconds") if isinstance(v, dict) else None
+        if isinstance(sec, dict) and isinstance(sec.get("total"), (int, float))                 and sec.get("n"):
+            total += float(sec["total"])
+            n += int(sec["n"])
+    source = "summary"
+    if not n:
+        secs = [float(r["seconds"]) for r in rows
+                if r.get("status") == "ok"
+                and isinstance(r.get("seconds"), (int, float))]
+        total, n, source = sum(secs), len(secs), "rows"
+    est = power.benchmark_estimate(total, n)
+    if est is not None:
+        est["seconds_from"] = source
+    return est
+
+
+def _livebench_run(run_dir: str) -> dict:
+    run_id = os.path.basename(os.path.normpath(run_dir))
+    summ = _load_json(os.path.join(run_dir, "summary.json")) or {}
+    comp = _load_json(os.path.join(run_dir, "comparison.json")) or {}
+    cond = _load_json(os.path.join(run_dir, "condition.json")) or {}
+    frozen_p = os.path.join(run_dir, "FROZEN")
+    frozen = None
+    if os.path.exists(frozen_p):
+        try:
+            frozen = open(frozen_p, encoding="utf-8").read().strip()[:400]
+        except OSError:
+            frozen = "FROZEN"
+    rows = _livebench_rows(run_dir)
+    progress = _livebench_progress(run_dir)
+    arms_s = summ.get("arms") if isinstance(summ.get("arms"), dict) else {}
+    # A frozen run is a record: nothing in it is running, so a progress log
+    # (e.g. the smoke answers moved out of its summary) adds no arm to it.
+    names = list(arms_s) + [a for a in rows if a not in arms_s] + \
+        ([] if frozen else [p["arm"] for p in progress
+                            if p["arm"] not in arms_s and p["arm"] not in rows])
+    names = list(dict.fromkeys(names))
+    # The retired pre-fix arm is excluded from every summary (its README says
+    # so); a progress log for it must not re-introduce it here.
+    names = [a for a in names if not a.startswith("yamadori_features")]
+    arms = []
+    for a in names:
+        s = arms_s.get(a) or {}
+        cats = {}
+        for c, v in (s.get("categories") or {}).items():
+            if not isinstance(v, dict):
+                continue
+            cats[c] = {"score": v.get("score"), "ci95": v.get("ci95"), "n": v.get("n"),
+                       "tasks": {t: {"score": x.get("score"), "ci95": x.get("ci95"),
+                                     "n": x.get("n")}
+                                 for t, x in (v.get("tasks") or {}).items()
+                                 if isinstance(x, dict)},
+                       "finish_reason": v.get("finish_reason") or {},
+                       "seconds": v.get("seconds"), "output_tokens": v.get("output_tokens")}
+        ov = s.get("overall") or {}
+        health = s.get("mechanism_health")
+        if isinstance(health, dict):
+            # summarize.py's health() counts the answers that carry a record;
+            # the page states that n beside the answers scored.
+            health = dict(health)
+            health.setdefault("recorded", health.get("answers") or 0)
+            health["answers"] = max(len(rows.get(a, [])), health["recorded"])
+        else:
+            health = _livebench_health(rows.get(a, []))
+        arms.append({"arm": a, "label": (summ.get("arm_labels") or {}).get(a),
+                     "overall": {"score": ov.get("score"), "ci95": ov.get("ci95"),
+                                 "categories_included": ov.get("categories_included") or []},
+                     "categories": cats, "status": s.get("status") or {},
+                     "finish_reason": s.get("finish_reason") or {},
+                     "rows": len(rows.get(a, [])),
+                     "mechanism_health": health,
+                     "electricity": _livebench_electricity(cats, rows.get(a, []))})
+    paired = []
+    for k, v in summ.items():
+        if not (k.startswith("paired_") and isinstance(v, dict)):
+            continue
+        arm = k[len("paired_"):].rsplit("_minus_", 1)
+        paired.append({"b": arm[0], "a": arm[1] if len(arm) > 1 else "bonsai",
+                       "n_pairs": v.get("n_pairs"), "diff": v.get("diff_overall"),
+                       "ci95": v.get("ci95_overall"),
+                       "categories": {c: {kk: x.get(kk) for kk in (
+                           "n_pairs", "a_score", "b_score", "diff", "ci95", "binary",
+                           "b_only_correct", "a_only_correct", "mcnemar_p")}
+                           for c, x in (v.get("categories") or {}).items()
+                           if isinstance(x, dict)}})
+    same = comp.get("same_questions") if isinstance(comp.get("same_questions"), dict) else {}
+    refs = {}
+    for arm, models in same.items():
+        if isinstance(models, dict):
+            refs[arm] = sorted(
+                ({"model": m, "overall": x.get("overall"), "n": x.get("n"),
+                  "missing": x.get("missing"), "categories": x.get("categories") or {}}
+                 for m, x in models.items() if isinstance(x, dict)),
+                key=lambda r: -(r["overall"] if isinstance(r["overall"], (int, float)) else -1))
+    cur = comp.get("current_leaderboard") or {}
+    base = {m: v for m, v in (cur.get("models") or {}).items()
+            if isinstance(v, dict) and m.lower().startswith("qwen3.8 27b")}
+    state = "ready" if any(a["overall"]["score"] is not None for a in arms) else (
+        "running" if (progress or rows) else "empty")
+    return {"run_id": run_id, "dir": _rel(run_dir), "state": state,
+            "frozen": frozen, "condition": cond,
+            "generated_at": summ.get("generated_at"),
+            "summary_age_s": _age(os.path.join(run_dir, "summary.json")),
+            "release": summ.get("release") or cond.get("question_release"),
+            "population": summ.get("population") or {},
+            "method": summ.get("method") or {},
+            "arms": arms, "legend": _livebench_legend([a["arm"] for a in arms]),
+            "paired": paired, "progress": progress,
+            "same_question_refs": refs,
+            "electricity_basis": _electricity_basis(),
+            "published_2024_11_25": comp.get("published_2024_11_25") or {},
+            "current_leaderboard_base": {
+                "date": cur.get("leaderboard_date"), "models": base,
+                "comparable": False} if base else None}
+
+
+def _electricity_basis() -> dict | None:
+    try:
+        import power
+        return power.benchmark_basis()
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def livebench_summary(root: str = LIVEBENCH_RESULTS) -> dict:
+    """Every run under bench/livebench/results. The current run is the newest
+    one without a FROZEN marker; frozen runs are records, shown as such."""
+    dirs = [d for d in sorted(glob.glob(os.path.join(root, "*"))) if os.path.isdir(d)]
+    if not dirs:
+        return {"state": "empty", "file": _rel(root), "exists": os.path.exists(root),
+                "file_age_s": None, "bad_lines": 0,
+                "how": "run  bench/livebench/run_arm.sh, then score.py and summarize.py",
+                "note": "no run directory under bench/livebench/results"}
+    runs = [_livebench_run(d) for d in dirs]
+    live = [r for r in runs if not r["frozen"]]
+    cur = max(live, key=lambda r: os.path.getmtime(os.path.join(root, r["run_id"])),
+              default=None)
+    return {"state": "ready", "file": _rel(root), "exists": True,
+            "file_age_s": None, "bad_lines": 0,
+            "current": cur["run_id"] if cur else None,
+            "runs": runs}
+
+
+# --------------------------------------------------------------------------
+# SWE-bench Verified (Mini)
+# --------------------------------------------------------------------------
+
+SWEBENCH_RESULTS = os.path.join(BENCH, "swebench", "results")
+SWEBENCH_DOC = os.path.join(os.path.dirname(BENCH), "docs", "SWE-BENCH.md")
+_SCORED_SWE = ("resolved", "unresolved", "empty_patch")
+_XY_SUM = ("turns", "hint_turns", "hints_injected", "investigate_ran",
+           "investigate_injected", "fanout_turns", "internal_tool_turns",
+           "tools_offered_turns")
+
+
+def md_tables(text: str) -> list[dict]:
+    """Every pipe table in a markdown document, with the heading and the
+    bold caption line it sits under. Cells keep their text; `num()` reads
+    a number out of one."""
+    out, heading, caption, cur = [], "", "", None
+    para: list[str] = []            # a bold-led paragraph, which may wrap
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("#"):
+            heading, caption, para = s.lstrip("#").strip(), "", []
+        elif s.startswith("|") and s.endswith("|"):
+            if para:
+                caption, para = " ".join(para), []
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if cur is None:
+                cur = {"heading": heading, "caption": caption, "header": cells, "rows": []}
+            elif all(re.fullmatch(r":?-{2,}:?", c) for c in cells if c):
+                continue
+            else:
+                cur["rows"].append(cells)
+            continue
+        elif s.startswith("**"):
+            para = [s]
+        elif s and para:
+            para.append(s)
+        elif not s and para:
+            caption, para = " ".join(para), []
+        if cur is not None:
+            out.append(cur)
+            cur = None
+    if cur is not None:
+        out.append(cur)
+    return out
+
+
+def num(cell) -> float | None:
+    m = re.search(r"-?\d[\d,]*\.?\d*", str(cell or "").replace("**", ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def swebench_leaderboard(doc: str = SWEBENCH_DOC) -> dict:
+    """docs/SWE-BENCH.md section 7, tables A (same scaffold) and B (same agent
+    family, older version). Published by the SWE-bench leaderboard on the full
+    500 -- never measured here."""
+    try:
+        text = open(doc, encoding="utf-8").read()
+    except OSError:
+        return {"source": _rel(doc), "tables": []}
+    tabs = []
+    for t in md_tables(text):
+        if not t["heading"].startswith("7."):
+            continue
+        cap = t["caption"].replace("**", "")
+        key = cap[:2].rstrip(".") if cap[:2] in ("A.", "B.") else None
+        if key not in ("A", "B") or "Verified" not in t["header"]:
+            continue
+        h = [c.lower() for c in t["header"]]
+        vi = h.index("verified")
+        rows = [{"model": r[0], "verified": num(r[vi]),
+                 "detail": {t["header"][i]: r[i] for i in range(1, len(r))
+                            if i != vi and i < len(t["header"])}}
+                for r in t["rows"] if len(r) > vi]
+        tabs.append({"key": key, "caption": cap.split(".", 1)[-1].strip(),
+                     "same_scaffold": key == "A", "rows": rows})
+    return {"source": _rel(doc), "n_instances": 500, "tables": tabs}
+
+
+def _swe_arm_legend(arms: list[str]) -> list[dict]:
+    try:
+        m = _bench_sub("swebench", "arms")
+        out = [legend_from_features(a, m.ARMS[a], m.ARM_NOTES.get(a, ""))
+               for a in arms if a in m.ARMS]
+        for r in out:
+            r["body_effort"] = getattr(m, "BODY_EFFORT", None)
+        return out + [{"arm": a, "kind": "unknown", "note": "not in bench/swebench/arms.py"}
+                      for a in arms if a not in m.ARMS]
+    except Exception:                                            # noqa: BLE001
+        return [{"arm": a, "kind": "unknown", "note": ""} for a in arms]
+
+
+def swebench_summary(root: str = SWEBENCH_RESULTS, doc: str = SWEBENCH_DOC) -> dict:
+    runs = [d for d in glob.glob(os.path.join(root, "*"))
+            if os.path.exists(os.path.join(d, "results.jsonl"))]
+    board = swebench_leaderboard(doc)
+    if not runs:
+        return {"state": "empty", "file": _rel(root), "exists": os.path.exists(root),
+                "file_age_s": None, "bad_lines": 0, "leaderboard": board,
+                "how": "run  python bench/swebench/run.py --run-id ID --arms bonsai "
+                       "--subset verified-mini --all --key-file K",
+                "note": "no results.jsonl under bench/swebench/results"}
+    run_dir = max(runs, key=lambda d: os.path.getmtime(os.path.join(d, "results.jsonl")))
+    rows, meta = _read(os.path.join(run_dir, "results.jsonl"))
+    inst = _load_json(os.path.join(run_dir, "instances.json")) or {}
+    planned = len(inst.get("order") or []) or None
+    last: dict[tuple, dict] = {}
+    for r in rows:
+        if isinstance(r, dict) and r.get("instance") and r.get("arm"):
+            last[(r["arm"], r["instance"])] = r
+    arm_names = list(dict.fromkeys(a for a, _ in last))
+    arms = []
+    for a in arm_names:
+        rs = [r for (x, _), r in last.items() if x == a]
+        outcome: dict[str, int] = {}
+        for r in rs:
+            k = r.get("eval_status") or "unknown"
+            outcome[k] = outcome.get(k, 0) + 1
+        sc = [r for r in rs if r.get("eval_status") in _SCORED_SWE]
+        k = sum(1 for r in sc if r.get("eval_status") == "resolved")
+        lo, hi = _wilson(k, len(sc))
+        fin: dict[str, int] = {}
+        xy: dict[str, int] = {x: 0 for x in _XY_SUM}
+        tiers_seen: dict[str, int] = {}
+        for r in rs:
+            for f, c in (r.get("finish_reasons") or {}).items():
+                fin[f] = fin.get(f, 0) + int(c or 0)
+            x = r.get("x_yamadori") or {}
+            for key in _XY_SUM:
+                if isinstance(x.get(key), (int, float)):
+                    xy[key] += x[key]
+            for t, c in (x.get("tiers") or {}).items():
+                tiers_seen[t] = tiers_seen.get(t, 0) + int(c or 0)
+        arms.append({
+            "arm": a, "attempted": len(rs), "scored": len(sc), "resolved": k,
+            "rate": (k / len(sc)) if sc else None, "lo": lo, "hi": hi,
+            "outcomes": outcome,
+            "exit_status": {s: sum(1 for r in rs if r.get("exit_status") == s)
+                            for s in sorted({str(r.get("exit_status")) for r in rs})},
+            "median_steps": _median([r.get("steps") for r in rs]),
+            "median_seconds": _median([r.get("seconds") for r in rs]),
+            "median_prompt_tokens": _median([r.get("prompt_tokens") for r in rs]),
+            "median_completion_tokens": _median([r.get("completion_tokens") for r in rs]),
+            "format_errors": sum(int(r.get("format_errors") or 0) for r in rs),
+            "length_events": sum(int(r.get("length_events") or 0) for r in rs),
+            "proxy_error_lines": sum(int(r.get("proxy_error_lines") or 0) for r in rs),
+            "finish_reasons": fin, "mechanisms": xy, "tiers_reported": tiers_seen,
+            "instances": [{"instance": r.get("instance"), "eval_status": r.get("eval_status"),
+                           "exit_status": r.get("exit_status"), "steps": r.get("steps"),
+                           "seconds": r.get("seconds"),
+                           "prompt_tokens": r.get("prompt_tokens"),
+                           "completion_tokens": r.get("completion_tokens")} for r in rs],
+        })
+    stopped = None
+    log = os.path.join(run_dir, "run.log")
+    if os.path.exists(log):
+        try:
+            for line in open(log, encoding="utf-8", errors="replace"):
+                if "STOPPED" in line:
+                    stopped = line.strip()[:400]
+        except OSError:
+            pass
+    return {"state": "ready" if arms else "running", **meta,
+            "run_id": os.path.basename(run_dir), "subset": inst.get("subset"),
+            "dataset": inst.get("dataset"), "planned": planned,
+            "stopped": stopped, "arms": arms,
+            "legend": _swe_arm_legend(arm_names or ["bonsai", "yamadori"]),
+            "leaderboard": board}
+
+
+# --------------------------------------------------------------------------
+# Speed: the MTP staging measurements, and bench/longctx if it has run
+# --------------------------------------------------------------------------
+
+MTP_DOC = os.path.join(os.path.dirname(BENCH), "docs", "MTP-STAGING.md")
+LONGCTX_RESULTS = os.path.join(BENCH, "longctx", "results")
+_FRAC = re.compile(r"\((\d[\d,]*)/(\d[\d,]*)\)")
+
+
+def mtp_tables(doc: str = MTP_DOC) -> dict:
+    """Sections 6 (decode tok/s per build) and 7 (draft acceptance by content)
+    of docs/MTP-STAGING.md, cell for cell. The heading goes with each table,
+    because it names the card the numbers were taken on."""
+    try:
+        text = open(doc, encoding="utf-8").read()
+    except OSError:
+        return {"source": _rel(doc), "builds": None, "acceptance": []}
+    builds, acc = None, []
+    for t in md_tables(text):
+        h = [c.lower() for c in t["header"]]
+        if t["heading"].startswith("6.") and "mean" in h and builds is None:
+            i = {k: h.index(k) for k in ("run", "head", "bi", "mean") if k in h}
+            content = [c for c in ("ts", "bash", "prose") if c in h]
+            rows = []
+            for r in t["rows"]:
+                if len(r) != len(h):
+                    continue
+                rows.append({"run": r[i["run"]].replace("**", ""),
+                             "build": r[1].replace("**", ""),
+                             "head": r[i.get("head", 2)], "bi": r[i.get("bi", 3)],
+                             "mean_tps": num(r[i["mean"]]),
+                             "by_content": {c: num(r[h.index(c)]) for c in content},
+                             "acceptance": r[-1] if "acceptance" in h[-1] else None})
+            builds = {"heading": t["heading"], "rows": rows,
+                      "method": "median of 3 reps per cell; server timings.predicted_per_second"}
+        elif t["heading"].startswith(("Lean file", "Abliterated graft")) and "acceptance" in h:
+            rows = []
+            for r in t["rows"]:
+                if len(r) != len(h):
+                    continue
+                a = r[h.index("acceptance")]
+                m = _FRAC.search(a)
+                rows.append({"content": r[0], "n_prompts": num(r[h.index("n prompts")])
+                             if "n prompts" in h else None,
+                             "acceptance": num(a.split("(")[0]),
+                             "accepted": num(m.group(1)) if m else None,
+                             "drafted": num(m.group(2)) if m else None,
+                             "tps_on": num(r[h.index("tok/s head on")]) if "tok/s head on" in h else None,
+                             "tps_off": num(r[h.index("tok/s head off")]) if "tok/s head off" in h else None})
+            acc.append({"file": t["heading"], "rows": rows})
+    card = None
+    m = re.search(r"^## 6\. (.+)$", text, re.M)
+    if m:
+        card = m.group(1).strip()
+    return {"source": _rel(doc), "section6": card, "builds": builds,
+            "acceptance": acc, "file_age_s": _age(doc)}
+
+
+def longctx_summary(root: str = LONGCTX_RESULTS) -> dict:
+    dirs = sorted(d for d in glob.glob(os.path.join(root, "*"))
+                  if os.path.exists(os.path.join(d, "rows.jsonl")))
+    if not dirs:
+        return {"state": "empty", "file": _rel(root), "exists": os.path.exists(root),
+                "file_age_s": None, "bad_lines": 0,
+                "how": "run  python bench/longctx/run.py --url URL --run-id ID",
+                "note": "no run directory under bench/longctx/results holds rows"}
+    lc = _bench_sub("longctx", "analyse")
+    runs = [lc.load_run(d) for d in dirs]
+    sums = [lc.summarise(r) for r in runs]
+    return lc.dashboard_block(sums, [], os.path.join(root, "_compare", "summary.json"))
+
+
+def speed_summary() -> dict:
+    return {"state": "ready", "mtp": mtp_tables(), "longctx": longctx_summary()}
+
+
+# --------------------------------------------------------------------------
+# Image generation
+# --------------------------------------------------------------------------
+
+IMAGEGEN_RESULTS = os.path.join(BENCH, "imagegen", "results.jsonl")
+
+
+def _img_status(r: dict) -> str:
+    if r.get("skipped"):
+        return "skipped"
+    if r.get("killed"):
+        return "killed"
+    if r.get("rc") not in (0, None) or not r.get("image"):
+        return "failed"
+    return "errors_logged" if r.get("errors") else "ok"
+
+
+def imagegen_summary(path: str = IMAGEGEN_RESULTS) -> dict:
+    rows, meta = _read(path)
+    if not meta["exists"] or not rows:
+        return {"state": "empty", **meta,
+                "how": "run  python bench/imagegen/measure.py --config CONFIG",
+                "note": "" if meta["exists"] else "results.jsonl not found"}
+    groups: dict[tuple, list[dict]] = {}
+    probes, servers = [], []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        if r.get("probe"):
+            probes.append(r)
+        elif isinstance(r.get("images"), list):
+            servers.append(r)
+        elif r.get("config"):
+            groups.setdefault((r["config"], r.get("size") or "?"), []).append(r)
+    configs = []
+    for (cfg, size), rs in groups.items():
+        st: dict[str, int] = {}
+        for r in rs:
+            s = _img_status(r)
+            st[s] = st.get(s, 0) + 1
+        ok = [r for r in rs if _img_status(r) in ("ok", "errors_logged")]
+        ran = [r for r in rs if not r.get("skipped")]
+        configs.append({
+            "config": cfg, "size": size, "rows": len(rs), "status": st,
+            "images": len(ok), "steps": _median([r.get("steps") for r in ok]),
+            "median_wall_s": _median([r.get("wall_s") for r in ok]),
+            "min_wall_s": min((r["wall_s"] for r in ok if isinstance(r.get("wall_s"), (int, float))), default=None),
+            "max_wall_s": max((r["wall_s"] for r in ok if isinstance(r.get("wall_s"), (int, float))), default=None),
+            "median_sample_s": _median([r.get("sample_s") for r in ok]),
+            "median_sec_per_step": _median([r.get("sec_per_step") for r in ok]),
+            "median_decode_s": _median([r.get("decode_s") for r in ok]),
+            "median_encode_s": _median([r.get("encode_s") for r in ok]),
+            # What an image costs is read off the images that were made; a
+            # killed run's peak can include a second consumer on the card
+            # (docs/IMAGEGEN.md "Incidents") and is listed with its kill.
+            "max_delta_peak_mib": max((r["delta_peak_mib"] for r in ok
+                                       if isinstance(r.get("delta_peak_mib"), (int, float))), default=None),
+            "min_free_mib": min((r["min_free_mib"] for r in ok
+                                 if isinstance(r.get("min_free_mib"), (int, float))), default=None),
+            "max_temp_c": max((r["peak_temp_c"] for r in ok
+                               if isinstance(r.get("peak_temp_c"), (int, float))), default=None),
+            "attempts_run": len(ran),
+            "kills": [{"why": r.get("kill_why") or "", "min_free_mib": r.get("min_free_mib"),
+                       "delta_peak_mib": r.get("delta_peak_mib")} for r in rs if r.get("killed")],
+            "skips": [r.get("why") or "skipped" for r in rs if r.get("skipped")],
+            "errors": sorted({e for r in rs for e in (r.get("errors") or [])})[:6],
+        })
+    srv = []
+    for r in servers:
+        ims = [i for i in r["images"] if isinstance(i, dict)]
+        srv.append({"config": r.get("config"), "images": len(ims),
+                    "ok": sum(1 for i in ims if i.get("ok")),
+                    "median_seconds": _median([i.get("seconds_client") for i in ims]),
+                    "delta_peak_mib": r.get("delta_peak_mib"),
+                    "min_free_mib": r.get("min_free_mib"), "killed": r.get("killed")})
+    parti = sorted(glob.glob(os.path.join(os.path.dirname(path), "**", "*parti*"),
+                             recursive=True))
+    parti_meta = None
+    for p in parti:
+        d = _load_json(p) if p.endswith(".json") else None
+        if d is not None:
+            items = d if isinstance(d, list) else (d.get("prompts") or d.get("items") or [])
+            cats: dict[str, int] = {}
+            for it in items if isinstance(items, list) else []:
+                c = it.get("category") if isinstance(it, dict) else None
+                if c:
+                    cats[c] = cats.get(c, 0) + 1
+            parti_meta = {"file": _rel(p), "prompts": len(items) if isinstance(items, list) else None,
+                          "categories": cats}
+            break
+    return {"state": "ready", **meta, "configs": configs, "server": srv,
+            "idle_probes": [{"base_used_mib": p.get("base_used_mib"),
+                             "idle_after_mib": _median(p.get("idle_after_mib") or []),
+                             "after_kill_mib": p.get("after_kill_mib"),
+                             "gen_512_s": p.get("gen_512_s"), "at": p.get("at")}
+                            for p in probes],
+            "partiprompts": parti_meta}
+
+
+# --------------------------------------------------------------------------
+# Published by PrismML. Not measured here, and labelled so wherever shown.
+# --------------------------------------------------------------------------
+
+MODEL_CARD = {
+    "state": "ready",
+    "publisher": "PrismML",
+    "source": "https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf",
+    "measured_here": False,
+    "columns": ["Ternary Bonsai 2 27B", "Qwen3.8 27B FP16"],
+    "rows": [
+        {"bench": "LiveCodeBench", "values": [90.05, 90.07]},
+        {"bench": "HumanEval+", "values": [93.29, 95.12]},
+        {"bench": "MBPP+", "values": [83.86, 83.07]},
+        {"bench": "IFEval", "values": [91.50, 91.31]},
+        {"bench": "BFCL v3", "values": [76.74, 74.92]},
+        {"bench": "AIME25", "values": [96.67, 95.00]},
+        {"bench": "20-benchmark mean", "values": [85.4, 83.9]},
+    ],
+}
+
+
+def model_card_summary() -> dict:
+    return MODEL_CARD
+
+
+# --------------------------------------------------------------------------
+# Domain suite
+# --------------------------------------------------------------------------
+
+# Unset: the newest group (the one running now). A group name pins one.
+DOMAIN_GROUP = os.environ.get("YAMADORI_DOMAIN_GROUP") or None
+DOMAIN_RESULTS = os.path.join(BENCH, "domain", "results")
+
+
+def _domain_groups(root: str, an) -> dict[str, dict]:
+    """Every bench/domain run, merged by its manifest `group` (a dir without
+    one is its own group): what it planned, what it holds, what was excluded
+    as stale and why. Uses analyse.py's own load/split_stale/scored."""
+    groups: dict[str, dict] = {}
+    for d in sorted(glob.glob(os.path.join(root, "*"))):
+        mp, rp = os.path.join(d, "manifest.json"), os.path.join(d, "rows.jsonl")
+        if not os.path.isdir(d) or not (os.path.exists(mp) or os.path.exists(rp)):
+            continue
+        man = _load_json(mp) or {}
+        key = man.get("group") or os.path.basename(d)
+        g = groups.setdefault(key, {"group": key, "dirs": [], "mtime": 0.0, "rows": 0,
+                                    "stale_rows": 0, "stale": {}, "planned": set(),
+                                    "done": set(), "arms": set(), "conditions": {}})
+        g["dirs"].append(os.path.basename(d))
+        g["mtime"] = max([g["mtime"]] + [os.path.getmtime(x) for x in (mp, rp) if os.path.exists(x)])
+        ss = man.get("server_sampling") or {}
+        for k, v in (("temperature", man.get("temperature")), ("effort", man.get("effort")),
+                     ("min_p", ss.get("min_p")), ("suite", man.get("suite"))):
+            if v is not None:
+                g["conditions"][k] = v
+        for run in man.get("runs") or []:
+            for a in run.get("arms") or []:
+                g["arms"].add(a)
+                for t in run.get("tasks") or []:
+                    g["planned"].add((t, a))
+        rows, _ = an.load(d)
+        cur, stale = an.split_stale(rows)
+        g["rows"] += len(cur)
+        g["stale_rows"] += len(stale)
+        for r in stale:
+            sc = r.get("stale_code")
+            why = (sc.get("reason") if isinstance(sc, dict) else str(sc)) or "?"
+            e = g["stale"].setdefault(why, {"reason": why, "rows": 0, "arms": {}})
+            e["rows"] += 1
+            e["arms"][r.get("arm") or "?"] = e["arms"].get(r.get("arm") or "?", 0) + 1
+        for (t, a), r in an.last_by_pair(getattr(an, "reclassify", list)(cur)).items():
+            g["arms"].add(a)
+            if an.scored(r):
+                g["done"].add((t, a))
+    return groups
+
+
+def _group_view(g: dict) -> dict:
+    return {"group": g["group"], "dirs": g["dirs"], "age_s": round(time.time() - g["mtime"]),
+            "rows": g["rows"], "stale_rows": g["stale_rows"],
+            "stale": sorted(g["stale"].values(), key=lambda e: -e["rows"]),
+            "planned_pairs": len(g["planned"]) or None, "scored_pairs": len(g["done"]),
+            "arms": sorted(g["arms"]), "conditions": g["conditions"]}
+
+
+def _domain_legend(arms: list[str], conditions: dict) -> list[dict]:
+    try:
+        run = _bench_sub("domain", "run")
+        spec, notes, twin = run.ARMS, run.ARM_NOTES, run.SELF_CHECK
+    except Exception:                                            # noqa: BLE001
+        return [{"arm": a, "kind": "unknown", "note": ""} for a in arms]
+    out = []
+    for a in arms:
+        if a not in spec:
+            out.append({"arm": a, "kind": "unknown", "note": "not in bench/domain/run.py ARMS"})
+            continue
+        f = dict(spec[a])
+        f.setdefault("effort", conditions.get("effort"))
+        row = legend_from_features(a, f, notes.get(a, ""),
+                                   client_tool="check_solution" if a in twin else None)
+        if f.get("reasoning_cap"):
+            row["reasoning_cap"] = f["reasoning_cap"]
+        out.append(row)
+    return out
+
+
+def domain_summary(root: str = DOMAIN_RESULTS, group: str | None = DOMAIN_GROUP) -> dict:
+    """The newest bench/domain group (or the one named), analysed by
+    bench/domain/analyse.py -- which owns every statistic, so the page and
+    the markdown report cannot disagree. Its lcb-shaped `dashboard` block is
+    kept and the rest of the analysis rides beside it: every domain
+    (contaminated ones flagged, not dropped), the per-arm headline, mechanism
+    triggers and caveats. `groups` lists every group with what it planned,
+    what it holds and what was excluded as stale, with the reason."""
     d = os.path.join(BENCH, "domain")
     if d not in sys.path:
         sys.path.insert(0, d)
-    return importlib.import_module("analyse").dashboard_section()
+    an = _bench_sub("domain", "analyse")
+    groups = _domain_groups(root, an)
+    if not groups:
+        return an.dashboard_section(root)
+    key = group if group in groups else max(groups, key=lambda k: groups[k]["mtime"])
+    g = groups[key]
+    views = sorted((_group_view(x) for x in groups.values()), key=lambda v: v["age_s"])
+    first = os.path.join(root, g["dirs"][0])
+    legend_conditions = {"effort": g["conditions"].get("effort")}
+    if not g["rows"]:
+        # Planned or running, nothing scorable yet (or every row stale).
+        return {"state": "running", "file": _rel(first), "exists": True,
+                "file_age_s": round(time.time() - g["mtime"]), "bad_lines": 0,
+                "how": "run  python bench/domain/run.py --key-file KEY --run-id ID",
+                "run_id": key, "group": key, "merged_run_dirs": g["dirs"],
+                "current": _group_view(g), "groups": views,
+                "legend": _domain_legend(sorted(g["arms"]), legend_conditions)}
+    s = an.analyse(first)
+    out = dict(s["dashboard"])
+
+    def strip(block):
+        return {**block, "comparisons": [{k: v for k, v in c.items() if k != "verdict"}
+                                         for c in block.get("comparisons") or []]}
+    out.update({
+        "run_id": s.get("run_id"), "group": key,
+        "merged_run_dirs": s.get("merged_run_dirs"),
+        "conditions": s.get("conditions"),
+        "rows_total": s.get("rows"), "stale_rows": s.get("stale_rows"),
+        "stale": _group_view(g)["stale"],
+        "current": _group_view(g), "groups": views,
+        "reclassified_server_reasoning_cap": s.get("reclassified_server_reasoning_cap"),
+        "task_counts": s.get("tasks"),
+        "caveats": s.get("caveats") or [],
+        "headline": strip(s.get("headline_uncontaminated") or {}),
+        "contaminated_block": strip(s.get("contaminated_three_tsl") or {}),
+        "per_arm_headline": s.get("per_arm_uncontaminated") or {},
+        "by_domain": s.get("by_domain") or {},
+        "triggers": s.get("triggers") or {},
+        "legend": _domain_legend(s.get("arms") or [], s.get("conditions") or {}),
+    })
+    out["pairs"] = [{k: v for k, v in p.items() if k != "verdict"} for p in out.get("pairs") or []]
+    return out
+
+
+SECTIONS = (("domain", domain_summary), ("livebench", livebench_summary),
+            ("swebench", swebench_summary), ("speed", speed_summary),
+            ("imagegen", imagegen_summary), ("model_card", model_card_summary),
+            ("lcb", lcb_summary), ("retrieval", retrieval_summary),
+            ("recipe", recipe_summary))
 
 
 def results() -> dict:
     out: dict = {"served_at": time.time(), "sections": {}}
-    for name, fn in (("domain", domain_summary), ("lcb", lcb_summary),
-                     ("retrieval", retrieval_summary),
-                     ("recipe", recipe_summary)):
+    for name, fn in SECTIONS:
         try:
             out["sections"][name] = fn()
         except Exception as e:                                   # noqa: BLE001
@@ -542,8 +1384,8 @@ def results() -> dict:
                 "state": "error",
                 "component": f"mcp/dash_results.py {fn.__name__}",
                 "error": f"{type(e).__name__}: {e}",
-                "check": "the jsonl under bench/ and that bench/ imports "
-                         "(livecodebench, quality, retrieval) resolve"}
+                "check": "the result files under bench/ for this section and "
+                         "that its bench/ imports resolve"}
     return out
 
 

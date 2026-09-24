@@ -11,6 +11,8 @@ export type Route =
   | { name: 'naedoko' }
   | { name: 'dataset'; id: string }
   | { name: 'sentei' }
+  | { name: 'settings' }
+  | { name: 'skills' }
   | { name: 'phase0' }
   | { name: 'notfound'; path: string };
 
@@ -21,11 +23,13 @@ export const PATTERNS = {
   naedoko: '/data',
   dataset: '/data/:id',
   sentei: '/results',
+  settings: '/settings',
+  skills: '/skills',
   phase0: '/phase0',
 } as const;
 
 export function resolve(parser: Parser, pathname: string): Route {
-  for (const name of ['tokonoma', 'nebari', 'naedoko', 'sentei', 'phase0'] as const) {
+  for (const name of ['tokonoma', 'nebari', 'naedoko', 'sentei', 'settings', 'skills', 'phase0'] as const) {
     if (matchRoute(parser, PATTERNS[name], pathname)[0]) return { name };
   }
   const [hit, params] = matchRoute(parser, PATTERNS.dataset, pathname);
@@ -39,6 +43,8 @@ export const href = {
   naedoko: '/data',
   dataset: (id: string) => `/data/${encodeURIComponent(id)}`,
   sentei: '/results',
+  settings: '/settings',
+  skills: '/skills',
 };
 
 export function useRoute(): Route {

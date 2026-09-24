@@ -1,10 +1,12 @@
-// 剪定 SENTEI — pruning. The benchmark results that decide what is cut, and
-// the power each comparison actually has. Nothing here is cut on a number
-// that could not have detected the effect (docs/PROTOCOL.md).
+// 剪定 SENTEI — pruning. Every benchmark this stack has run, as evidence:
+// each number with its n and interval, each arm with what it switches on,
+// each mechanism with whether it actually ran. No verdicts: a comparison
+// shows its discordant pairs and its exact p, and the reader decides
+// (docs/PROTOCOL.md). The sections live in ./sentei/.
 import * as stylex from '@stylexjs/stylex';
-import { PATHS } from '../api/data';
+import { PATHS, useShared } from '../api/data';
 import { KNOWN_VOID } from '../api/provenance';
-import type { EmptySection, ErrorSection, LcbArm, LcbSection, Pair, Power, RecipeSection, Results, RetrievalSection } from '../api/types';
+import type { EmptySection, ErrorSection, LcbSection, Pair, Power, RecipeSection, Results, RetrievalSection } from '../api/types';
 import { usePoll } from '../api/usePoll';
 import { ago, n, pct, pValue } from '../format';
 import { colors, space } from '../tokens/tokens.stylex';
@@ -12,19 +14,18 @@ import { Bento, Cell } from '../ui/Bento';
 import { MQ } from '../ui/breakpoints.stylex';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { Panel } from '../ui/Panel';
-import { Chip, Label, layout, SplitBar, Stat } from '../ui/primitives';
+import { Chip, Label, layout, Stat } from '../ui/primitives';
 import { RateBar } from '../ui/RateBar';
 import { PollState, StateView } from '../ui/StateView';
 import { Table } from '../ui/Table';
 import { text } from '../ui/text';
+import { Domain } from './sentei/Domain';
+import { LiveBench } from './sentei/LiveBench';
+import { summaryTiles } from './sentei/model';
+import { Images, ModelCard, Speed, TierLadder } from './sentei/Other';
+import { SweBench } from './sentei/SweBench';
 
 const s = stylex.create({
-  grid: {
-    display: 'grid',
-    gap: space.gutter,
-    gridTemplateColumns: { default: 'minmax(0, 1fr)', '@media (min-width: 1100px)': 'repeat(2, minmax(0, 1fr))' },
-    alignItems: 'start',
-  },
   note: { margin: 0, color: colors.onSurfaceVariant },
   warn: { margin: 0, color: colors.secondary },
   void: {
@@ -34,7 +35,6 @@ const s = stylex.create({
     borderColor: colors.secondaryContainer,
     backgroundImage: `repeating-linear-gradient(-45deg, color-mix(in srgb, ${colors.secondaryContainer} 10%, transparent), color-mix(in srgb, ${colors.secondaryContainer} 10%, transparent) 6px, transparent 6px, transparent 12px)`,
   },
-  wide: { gridColumn: { default: 'auto', '@media (min-width: 1100px)': '1 / -1' } },
 });
 
 type Sec<T> = T | EmptySection | ErrorSection | undefined;
@@ -89,17 +89,13 @@ function Pairs({ pairs }: { pairs: Pair[] }) {
         { key: 'p', head: 'p (McNemar)', num: true, cell: (p) => pValue(p.p) },
         {
           key: 'v',
-          head: 'verdict',
+          head: 'status',
           cell: (p) =>
             KNOWN_VOID[p.a] || KNOWN_VOID[p.b] ? (
               <Chip tone="crimson">VOID ARM</Chip>
-            ) : p.verdict ? (
-              <Chip tone="moss">{p.verdict}</Chip>
             ) : p.underpowered ? (
               <Chip tone="muted">UNDERPOWERED</Chip>
-            ) : (
-              <Chip tone="muted">NO DIFFERENCE SHOWN</Chip>
-            ),
+            ) : null,
         },
       ]}
     />
@@ -122,159 +118,6 @@ function Lcb({ sec }: { sec: Sec<LcbSection> }) {
         st.node
       ) : (
         <LcbBody l={st.ready} />
-      )}
-    </Panel>
-  );
-}
-
-function ByDomain({ l }: { l: LcbSection }) {
-  if (!l.difficulty?.length) return null;
-  return (
-    <Table
-      rows={l.difficulty}
-      rowKey={(d) => d.difficulty}
-      columns={[
-        { key: 'd', head: 'domain', cell: (d) => d.difficulty },
-        { key: 'n', head: 'n', num: true, cell: (d) => d.n },
-        ...l.arms.map((a) => ({
-          key: a,
-          head: a,
-          num: true,
-          cell: (d: LcbSection['difficulty'][number]) => {
-            const c = d.by_arm[a];
-            if (!c) return '—';
-            const st = c.stages;
-            return (
-              <span
-                title={
-                  c.lo !== undefined && c.hi !== undefined
-                    ? `${pct(c.rate, 0)} [${pct(c.lo, 0)}–${pct(c.hi, 0)}]` +
-                      (st ? ` · extract ${st.extract} · compile ${st.compile} · test ${st.test}` : '')
-                    : undefined
-                }
-              >
-                {c.k}/{c.n}
-              </span>
-            );
-          },
-        })),
-      ]}
-    />
-  );
-}
-
-const STAGE_TONE = { pass: 'moss', test: 'cyan', compile: 'crimson', extract: 'muted' } as const;
-
-function StageSplit({ a }: { a: LcbArm }) {
-  const st = a.stages;
-  if (!st) return <>—</>;
-  const parts = (['pass', 'test', 'compile', 'extract'] as const).map((k) => ({ value: st[k] ?? 0, tone: STAGE_TONE[k] }));
-  return (
-    <SplitBar
-      parts={parts}
-      label={`${a.arm}: pass ${st.pass ?? 0}, failed at test ${st.test}, compile ${st.compile}, extract ${st.extract}`}
-    />
-  );
-}
-
-const fixed = (x: number | null | undefined, d = 1): string => (x === null || x === undefined ? '—' : x.toFixed(d));
-
-function DomainCost({ l }: { l: LcbSection }) {
-  const anyCheck = l.arm_table.some((a) => a.self_check);
-  const ex = l.excluded_contaminated;
-  return (
-    <>
-      {ex && ex.tasks > 0 && (
-        <div {...stylex.props(layout.rowWrap)}>
-          <Chip tone="rose">CONTAMINATED EXCLUDED · {n(ex.tasks)} · {ex.domains.join(' · ')}</Chip>
-        </div>
-      )}
-      <Table
-        rows={l.arm_table}
-        rowKey={(a) => a.arm}
-        caption="stages, cost and checks per arm"
-        columns={[
-          { key: 'arm', head: 'arm', cell: (a) => a.arm },
-          { key: 'split', head: 'pass · test · compile · extract', cell: (a) => <StageSplit a={a} /> },
-          { key: 'p', head: 'pass', num: true, cell: (a) => a.stages?.pass ?? a.k },
-          { key: 't', head: 'test', num: true, cell: (a) => a.stages?.test ?? '—' },
-          { key: 'c', head: 'compile', num: true, cell: (a) => a.stages?.compile ?? '—' },
-          { key: 'x', head: 'extract', num: true, cell: (a) => a.stages?.extract ?? '—' },
-          { key: 'fc', head: 'compiles', num: true, cell: (a) => (a.final_compiles === undefined ? '—' : `${a.final_compiles}/${a.n}`) },
-          { key: 'ms', head: 'mean s', num: true, cell: (a) => fixed(a.mean_s) },
-          { key: 'md', head: 'median s', num: true, cell: (a) => fixed(a.median_s) },
-          { key: 'ti', head: 'tok in', num: true, cell: (a) => n(a.tok_in) },
-          { key: 'to', head: 'tok out', num: true, cell: (a) => n(a.tok_out) },
-          { key: 'th', head: 'tool hops', num: true, cell: (a) => fixed(a.tool_hops, 2) },
-          ...(anyCheck
-            ? [
-                {
-                  key: 'cr',
-                  head: 'checks mean / max',
-                  num: true,
-                  cell: (a: LcbArm) => (a.self_check ? `${fixed(a.check_rounds_mean)} / ${a.check_rounds_max ?? '—'}` : '—'),
-                },
-                {
-                  key: 'ca',
-                  head: 'checked',
-                  num: true,
-                  cell: (a: LcbArm) => (a.self_check ? `${a.checked_any ?? 0}/${a.n}` : '—'),
-                },
-                {
-                  key: 'fp',
-                  head: 'answer compiles (public check)',
-                  num: true,
-                  cell: (a: LcbArm) => (a.self_check ? `${a.final_public_ok ?? 0}/${a.final_public_n ?? 0}` : '—'),
-                },
-              ]
-            : []),
-        ]}
-      />
-    </>
-  );
-}
-
-function Twins({ l }: { l: LcbSection }) {
-  if (!l.twins?.length) return null;
-  return (
-    <Table
-      rows={l.twins}
-      rowKey={(t) => `${t.one_shot}|${t.s}`}
-      caption="self-check arm against its one-shot twin"
-      columns={[
-        { key: 'ab', head: 'self-check vs one-shot', cell: (t) => `${t.s} vs ${t.one_shot}` },
-        { key: 'n', head: 'paired', num: true, cell: (t) => t.n_paired },
-        { key: 'pp', head: 'pass one-shot / S', num: true, cell: (t) => `${t.one_shot_pass} / ${t.s_pass}` },
-        { key: 'so', head: 'S only', num: true, cell: (t) => t.s_only },
-        { key: 'oo', head: 'one-shot only', num: true, cell: (t) => t.one_shot_only },
-        { key: 'p', head: 'p (McNemar, family)', num: true, cell: (t) => (t.p_bonferroni === null ? pValue(t.p) : pValue(t.p_bonferroni)) },
-        {
-          key: 'fx',
-          head: 'fixed by checking',
-          num: true,
-          cell: (t) => <Chip tone={t.fixed_by_checking ? 'moss' : 'muted'}>{t.fixed_by_checking}</Chip>,
-        },
-        { key: 'ct', head: 'compile → test', num: true, cell: (t) => t.compile_to_test },
-        { key: 'tp', head: 'test → pass', num: true, cell: (t) => t.test_to_pass },
-        { key: 'cf', head: 'compile fails one-shot / S', num: true, cell: (t) => `${t.one_shot_compile_fail} / ${t.s_compile_fail}` },
-      ]}
-    />
-  );
-}
-
-function Domain({ sec }: { sec: Sec<LcbSection> }) {
-  const st = sectionState(sec);
-  return (
-    <Panel kanji="盆" title="DOMAIN TASKS · SYSTEMS ON / OFF" tag="PASS@1" tagTone="cyan" fill>
-      {'node' in st ? (
-        st.node
-      ) : (
-        <>
-          <LcbBody l={st.ready} />
-          <DomainCost l={st.ready} />
-          <Twins l={st.ready} />
-          <ByDomain l={st.ready} />
-        </>
       )}
     </Panel>
   );
@@ -409,26 +252,125 @@ function RetrievalNotes({ sec }: { sec: Sec<RetrievalSection> }) {
   );
 }
 
+// ---------------------------------------------------------------- summary --
+
+const sum = stylex.create({
+  strip: {
+    display: 'grid',
+    gap: space.spaceXs,
+    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
+  },
+  tile: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    padding: space.spaceSm,
+    minHeight: '44px',
+    backgroundColor: colors.surfaceContainerLowest,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.outlineVariant,
+    textDecoration: 'none',
+    color: 'inherit',
+    minWidth: 0,
+    ':hover': { borderColor: colors.outline },
+    ':focus-visible': { outline: `2px solid ${colors.primaryContainer}`, outlineOffset: '2px' },
+  },
+  published: { borderStyle: 'dashed' },
+  line: { display: 'flex', justifyContent: 'space-between', gap: space.spaceSm, alignItems: 'baseline', minWidth: 0 },
+  lineLabel: { color: colors.onSurfaceVariant, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  value: { color: colors.primary, whiteSpace: 'nowrap' },
+  sub: { color: colors.outline, margin: 0, overflowWrap: 'anywhere' },
+  note: { color: colors.onSurfaceVariant, margin: 0, overflowWrap: 'anywhere' },
+});
+
+function SummaryStrip({ r }: { r: Results }) {
+  const tiles = summaryTiles(r);
+  return (
+    <Panel kanji="総" title="BENCHMARKS" tag={`${tiles.length} SOURCES`} tagTone="muted" fill>
+      <div {...stylex.props(sum.strip)}>
+        {tiles.map((t) => (
+          <a key={t.key} href={`#${t.anchor}`} {...stylex.props(sum.tile, t.published && sum.published)}>
+            <Label>{t.title}</Label>
+            {t.lines.length ? (
+              t.lines.map((l) => (
+                <div key={l.label} {...stylex.props(layout.stack)}>
+                  <div {...stylex.props(sum.line)}>
+                    <span {...stylex.props(text.bodySm, sum.lineLabel)}>{l.label}</span>
+                    <span {...stylex.props(text.titleMd, text.num, sum.value)}>{l.value}</span>
+                  </div>
+                  {l.sub && <p {...stylex.props(text.labelXs, sum.sub)}>{l.sub}</p>}
+                </div>
+              ))
+            ) : (
+              <span {...stylex.props(text.bodySm, sum.note)}>{t.state === 'error' ? 'section error' : t.state === 'running' ? 'running · not yet scored' : 'no results yet'}</span>
+            )}
+            {t.note && <p {...stylex.props(text.labelXs, t.published ? sum.note : sum.sub)}>{t.note}</p>}
+          </a>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 const senteiAreas = stylex.create({
   sentei: {
     gridTemplateAreas: {
-      default: '"dom" "lcb" "ret" "side"',
-      [MQ.tablet]: '"dom dom dom dom dom dom" "lcb lcb lcb lcb lcb lcb" "ret ret ret ret ret ret" "side side side side side side"',
-      [MQ.desktop]: '"dom dom dom dom dom dom dom dom dom dom dom dom" "lcb lcb lcb lcb lcb lcb lcb lcb lcb lcb lcb lcb" "ret ret ret ret ret ret ret side side side side side"',
+      default: '"sum" "tier" "card" "lb" "swe" "dom" "spd" "img" "lcb" "ret" "side"',
+      [MQ.tablet]:
+        '"sum sum sum sum sum sum" "tier tier tier tier tier tier" "card card card card card card" "lb lb lb lb lb lb" "swe swe swe swe swe swe" "dom dom dom dom dom dom" "spd spd spd spd spd spd" "img img img img img img" "lcb lcb lcb lcb lcb lcb" "ret ret ret ret ret ret" "side side side side side side"',
+      [MQ.desktop]:
+        '"sum sum sum sum sum sum sum sum sum sum sum sum" "tier tier tier tier tier tier tier card card card card card" "lb lb lb lb lb lb lb lb lb lb lb lb" "swe swe swe swe swe swe swe swe swe swe swe swe" "dom dom dom dom dom dom dom dom dom dom dom dom" "spd spd spd spd spd spd spd img img img img img" "lcb lcb lcb lcb lcb lcb lcb lcb lcb lcb lcb lcb" "ret ret ret ret ret ret ret side side side side side"',
     },
   },
 });
 
 export function Sentei() {
   const r = usePoll<Results>(PATHS.results, 30000);
+  const { tiers } = useShared();
   if (!r.data) return <PollState path={PATHS.results} failure={r.failure} />;
   const sec = r.data.sections ?? {};
   const R = PATHS.results;
   return (
     <Bento areas={senteiAreas.sentei}>
+      <Cell area="sum">
+        <ErrorBoundary what="BENCHMARKS" source={R} fill>
+          <SummaryStrip r={r.data} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="tier">
+        <ErrorBoundary what="EFFORT TIERS" source={PATHS.tiers} fill>
+          <TierLadder tiers={tiers} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="lb">
+        <ErrorBoundary what="LIVEBENCH" source={`${R} · sections.livebench`} fill>
+          <LiveBench sec={sec.livebench} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="card">
+        <ErrorBoundary what="MODEL CARD" source={`${R} · sections.model_card`} fill>
+          <ModelCard sec={sec.model_card} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="swe">
+        <ErrorBoundary what="SWE-BENCH VERIFIED" source={`${R} · sections.swebench`} fill>
+          <SweBench sec={sec.swebench} />
+        </ErrorBoundary>
+      </Cell>
       <Cell area="dom">
         <ErrorBoundary what="DOMAIN TASKS" source={`${R} · sections.domain`} fill>
           <Domain sec={sec.domain} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="spd">
+        <ErrorBoundary what="SPEED" source={`${R} · sections.speed`} fill>
+          <Speed sec={sec.speed} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="img">
+        <ErrorBoundary what="IMAGES" source={`${R} · sections.imagegen`} fill>
+          <Images sec={sec.imagegen} />
         </ErrorBoundary>
       </Cell>
       <Cell area="lcb">

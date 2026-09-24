@@ -57,6 +57,13 @@ DATASETS = {
     "multilingual": "SWE-bench/SWE-bench_Multilingual",   # 300, test split
 }
 
+# What the harness grades against. Verified Mini's rows are byte-identical to
+# Verified's on base_commit, patch, FAIL_TO_PASS and PASS_TO_PASS (checked
+# 2026-09-22, all 50), so it is graded against the canonical dataset.
+EVAL_DATASETS = {"verified": DATASETS["verified"],
+                 "verified-mini": DATASETS["verified"],
+                 "multilingual": DATASETS["multilingual"]}
+
 # Pilot: random.Random(20260922).sample(sorted(Verified ids), 5).
 PILOT = ["sympy__sympy-17655", "scikit-learn__scikit-learn-14629",
          "pytest-dev__pytest-7490", "scikit-learn__scikit-learn-15100",

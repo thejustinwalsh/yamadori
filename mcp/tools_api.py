@@ -248,6 +248,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    # summarize_text generates through mcp/model.py in THIS process; its
+    # tokens go to the token ledger (mcp/token_ledger.py) like every other.
+    import token_ledger
+    token_ledger.enable()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"tools API on http://{HOST}:{PORT}  (spec at /openapi.json)", flush=True)
     srv.serve_forever()

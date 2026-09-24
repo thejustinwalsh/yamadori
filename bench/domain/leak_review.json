@@ -18,5 +18,13 @@
   "tc-00223-isany|2e11e8c17660": {
     "verdict": "leak",
     "why": "IsAny<T> = 0 extends (1 & T) is the whole answer; task excluded"
+  },
+  "tc-08767-combination|32caebb5d1c2": {
+    "verdict": "idiom",
+    "why": "the only shared 8-word runs are the URL prefix 'https developer mozilla org en us docs web api' (an MDN link); no prompt or solution text is shared. Reviewed 2026-09-23 15:5x by the domain-bench agent; tc-08767 is not in the core+react sample being run"
+  },
+  "tc-08767-combination|3805c461037c": {
+    "verdict": "idiom",
+    "why": "the only shared 8-word runs are the URL prefix 'https developer mozilla org en us docs web api' (an MDN link); no prompt or solution text is shared. Reviewed 2026-09-23 15:5x by the domain-bench agent; tc-08767 is not in the core+react sample being run"
   }
 }

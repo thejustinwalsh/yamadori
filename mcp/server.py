@@ -54,11 +54,15 @@ import accounts  # noqa: E402
 import admission  # noqa: E402
 import catalog  # noqa: E402
 import dash_data  # noqa: E402
+import dash_skills  # noqa: E402
+import dash_deep  # noqa: E402
+import dash_tokens  # noqa: E402
 import dash_results  # noqa: E402
 import dash_static  # noqa: E402
 import dash_vitals  # noqa: E402
 import dashboard  # noqa: E402
 import images  # noqa: E402
+import nebari  # noqa: E402
 import proxy  # noqa: E402
 
 app = FastAPI(title="yamadori", version="1", docs_url=None, redoc_url=None)
@@ -109,7 +113,7 @@ async def root(request: Request) -> Response:
     ui = "/" if DASH_UI != "python" else "/dash"
     return JSONResponse({
         "service": "yamadori",
-        "endpoints": ["/v1/models", "/v1/chat/completions",
+        "endpoints": ["/v1/models", "/v1/models/{id}", "/v1/chat/completions",
                       "/v1/images/generations", "/health", ui,
                       f"/dash{_PY}/data", f"/dash{_PY}/vitals", f"/dash{_PY}/results"],
         "dashboard": DASH_UI,
@@ -158,7 +162,20 @@ async def health() -> JSONResponse:
 
 @app.get("/v1/models")
 async def models() -> JSONResponse:
-    return JSONResponse(catalog.public_list())
+    # In a thread: the context window reads the pool size from llama-server
+    # (/props, once, then cached -- mcp/budget.py), which must not stall the
+    # event loop on the first call.
+    return JSONResponse(await run_in_threadpool(catalog.public_list))
+
+
+@app.get("/v1/models/{model_id:path}")
+async def model_detail(model_id: str) -> JSONResponse:
+    # OpenAI's retrieve-model route; harnesses probe it for one model's
+    # window. Never a 404: see catalog.model_card. There is deliberately no
+    # llama.cpp /props, Ollama /api/show or LM Studio route beside it -- this
+    # is an OpenAI-compatible proxy, and those would describe the raw server
+    # (the whole KV pool, the model path) rather than a conversation's share.
+    return JSONResponse(await run_in_threadpool(catalog.model_card, model_id))
 
 
 @app.get(f"/dash{_PY}")
@@ -194,6 +211,32 @@ async def dash_results_page() -> Response:
     return Response(content=payload, status_code=code, media_type=ctype)
 
 
+# The caller's own settings. Declared BEFORE the /dash/api catch-all, which
+# would otherwise own the GET (Starlette matches in registration order). The
+# account is the one the caller's key resolves to -- never a field of the
+# body or the path -- so a key reads and writes only its own account.
+@app.get("/dash/api/settings/image")
+async def settings_image_get(request: Request) -> Response:
+    who, why = accounts.identify(request.headers.get("authorization"))
+    if who is None:
+        return _unauthorised(why)
+    return JSONResponse(await run_in_threadpool(images.settings, who))
+
+
+@app.put("/dash/api/settings/image")
+async def settings_image_put(request: Request) -> Response:
+    who, why = accounts.identify(request.headers.get("authorization"))
+    if who is None:
+        return _unauthorised(why)
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except (ValueError, json.JSONDecodeError) as e:
+        return JSONResponse(status_code=400, content={"ok": False,
+                                                      "error": f"bad request: {e}"})
+    code, out = await run_in_threadpool(images.set_setting, who, body)
+    return JSONResponse(status_code=code, content=out)
+
+
 @app.get("/dash/api/{rest:path}")
 async def dash_get(rest: str, request: Request) -> Response:
     who, why = accounts.identify(request.headers.get("authorization"))
@@ -210,6 +253,14 @@ async def dash_get(rest: str, request: Request) -> Response:
         hit = await run_in_threadpool(dash_results.handle_get, path)
     if not hit:
         hit = await run_in_threadpool(dash_data.handle_get, path)
+    if not hit:
+        hit = await run_in_threadpool(dash_skills.handle_get, path)
+    if not hit:
+        # Tokens, electricity and the hosted-API comparison (mcp/dash_tokens.py).
+        hit = await run_in_threadpool(dash_tokens.handle_get, path)
+    if not hit:
+        # Deep thinking's triggers and learner (mcp/dash_deep.py, Phase 0.6).
+        hit = await run_in_threadpool(dash_deep.handle_get, path)
     if not hit:
         return JSONResponse(status_code=404, content={"error": "not found"})
     code, ctype, payload = hit
@@ -233,6 +284,12 @@ async def dash_post(rest: str, request: Request) -> Response:
     if not hit:
         hit = await run_in_threadpool(dash_data.handle_post, path, body)
     if not hit:
+        # The skills API records the caller's account (a hash prefix, never
+        # the key) as the author of an edit or a disable.
+        hit = await run_in_threadpool(dash_skills.handle_post, path, body, who)
+    if not hit:
+        hit = await run_in_threadpool(dash_deep.handle_post, path, body, who)
+    if not hit:
         return JSONResponse(status_code=404, content={"error": "not found"})
     code, ctype, payload = hit
     return Response(content=payload, status_code=code, media_type=ctype)
@@ -253,6 +310,10 @@ async def chat(request: Request) -> Response:
     feats = request.headers.get("x-yamadori-features")
     if feats:
         body["_features"] = feats
+    # An explicit session token (nebari.key_of): benchmark rows whose first
+    # messages are identical get independent sessions. Malformed -> ignored.
+    body["_session_token"] = nebari.session_token(
+        request.headers.get("x-yamadori-session"))
     client = request.client
     body["_client_ip"] = client.host if client else ""
     # Sessions are per account: the key feeds nebari.key_of, which otherwise
@@ -286,6 +347,12 @@ async def chat(request: Request) -> Response:
             d = await run_in_threadpool(proxy.complete, body)
     except admission.Full as e:
         return _too_many(e)
+    except proxy.TurnRefused as e:
+        # A turn that could not start (the vision copy with no room on the
+        # A4000): its status and a structured error, never a bare 502.
+        return JSONResponse(status_code=e.status, content=e.body(),
+                            headers={"Retry-After": "60"}
+                            if e.retryable else None)
     except Exception as e:                                       # noqa: BLE001
         return JSONResponse(status_code=502,
                             content={"error": f"{type(e).__name__}: {e}"})
@@ -352,7 +419,11 @@ def _image_error(e: "images.ImageError") -> JSONResponse:
 
 @app.post("/v1/images/generations")
 async def images_generations(request: Request) -> Response:
-    """OpenAI Images API: {prompt, n?, size?, response_format?, seed?}.
+    """OpenAI Images API: {prompt, n?, size?, response_format?, seed?, model?}.
+
+    `model` "yamadori-image" or "yamadori-image-turbo" picks the image model
+    for this request; otherwise the caller's saved choice (GET/PUT
+    /dash/api/settings/image), else YAMADORI_IMAGEGEN_DEFAULT.
 
     Authenticated like every /v1 route. It holds the IMAGE lane, never a chat
     lane: generation runs on CUDA1 and must not make a conversation wait
@@ -378,10 +449,15 @@ async def images_generations(request: Request) -> Response:
             f"response_format {fmt!r} is not supported.",
             "send response_format 'url' or 'b64_json'"))
     n = body.get("n", 1)
+    # Which image model: `model` naming one of ours (catalog.IMAGE_MODELS)
+    # overrides for this request; anything else -- an SDK's own default such
+    # as "dall-e-3" -- is not a choice, and the caller's preference applies.
+    choice, source = images.resolve_model(
+        account, catalog.resolve_image(body.get("model")))
     try:
         recs = await run_in_threadpool(
             images.generate, body.get("prompt"), size=body.get("size"),
-            seed=body.get("seed"), n=n if n is not None else 1)
+            seed=body.get("seed"), n=n if n is not None else 1, model=choice)
     except images.ImageError as e:
         return _image_error(e)
     base = _public_base(request)
@@ -395,12 +471,13 @@ async def images_generations(request: Request) -> Response:
         else:
             data.append({"url": images.signed_url(r["id"], base),
                          "revised_prompt": r["prompt"]})
-    print(f"/v1/images/generations {len(recs)} image(s) "
+    print(f"/v1/images/generations {len(recs)} image(s) {choice} "
           f"{recs[0]['size']} {recs[0]['seconds']}s", flush=True)
     return JSONResponse({"created": int(time.time()), "data": data,
                          "x_yamadori": {"images": [
                              {"id": r["id"][:16], "size": r["size"],
                               "seed": r["seed"], "steps": r["steps"],
+                              "model": r["image_model"], "model_source": source,
                               "seconds": r["seconds"]} for r in recs]}})
 
 
@@ -454,6 +531,25 @@ def main() -> None:
         # Loud, not fatal: a stale bundle still serves, and
         # mcp/test_dash_static.py is what fails.
         print(f"  WARNING dashboard bundle is STALE: {problem}", flush=True)
+    # GPU power, sampled every second in THIS process (mcp/power.py): the
+    # dashboard's electricity panel and x_yamadori.energy read its samples,
+    # and it keeps the daily ledger in index/power_ledger.json. Started here,
+    # not on import, so tests that import the app start no thread.
+    try:
+        import power
+        power.start()
+        print(f"  power sampler: every {power.SAMPLE_SECONDS:g}s, ledger "
+              f"{power.LEDGER_PATH}", flush=True)
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  WARNING power sampler not started: {type(e).__name__}: {e}",
+              flush=True)
+    # Token ledger (mcp/token_ledger.py): every generation this process runs
+    # -- client turns, fan-out, deep thinking, internal calls -- is added to
+    # index/token_ledger.sqlite3. Enabled here, not on import, so test suites
+    # that import the proxy never write it.
+    import token_ledger
+    token_ledger.enable()
+    print(f"  token ledger: {token_ledger.DB}", flush=True)
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning",
                 # A generation runs for minutes. The default 5s keep-alive
                 # would drop idle sockets between problems, which is the exact

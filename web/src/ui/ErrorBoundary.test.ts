@@ -48,18 +48,20 @@ describe('the effort ladder that blanked the app', () => {
     expect(out).toContain('no tier order');
   });
 
-  it('shows the effort the proxy SENDS when the server reports it', () => {
-    const t = { order: ['high'], tiers: { high: { ...TIER, sent_effort: 'xhigh' } }, default: 'medium' } as unknown as Tiers;
+  // Operator, 2026-09-23: the ladder shows tier names, not the effort string
+  // mapped under the hood. Only thinking OFF gets a chip.
+  it('never shows the effort mapped under the hood', () => {
+    const t = { order: ['xhigh'], tiers: { xhigh: { ...TIER, effort: 'medium', sent_effort: 'medium' } }, default: 'medium' } as unknown as Tiers;
     const out = mount(createElement(TiersPanel, { t, failure: null }));
-    expect(out).toContain('EFFORT XHIGH');
-    expect(out).not.toContain('EFFORT HIGH');
+    expect(out).toContain('xhigh');
+    expect(out).not.toMatch(/EFFORT (MEDIUM|XHIGH|HIGH)/);
+    expect(out).not.toContain('SENT');
   });
 
-  it('never presents the requested effort as the sent one', () => {
-    const t = { order: ['high'], tiers: { high: TIER }, default: 'medium' } as unknown as Tiers;
+  it('marks a tier whose thinking is off', () => {
+    const t = { order: ['minimal'], tiers: { minimal: { ...TIER, thinks: false } }, default: 'medium' } as unknown as Tiers;
     const out = mount(createElement(TiersPanel, { t, failure: null }));
-    expect(out).toContain('ASKS HIGH · SENT —');
-    expect(out).not.toMatch(/EFFORT HIGH/);
+    expect(out).toContain('THINKING OFF');
   });
 });
 

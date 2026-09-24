@@ -28,11 +28,21 @@ export type Channel = {
 
 /**
  * Deviations from BONSAI-VIZ §2, stated rather than hidden:
- *  - "Bioluminescent arcs <- token throughput": tok/s is not in any payload.
- *    The arcs read GPU0 utilisation instead -- the card the model runs on is
- *    computing or it is not. Real, and named as what it is.
- *  - "Foliage density <- hints above the floor": no payload carries hint
- *    counts, so foliage is INERT: matte moss, unlit.
+ *  - "Bioluminescent arcs <- token throughput": tok/s is not in the vitals
+ *    payload. The arcs read GPU0 utilisation instead -- the card the model
+ *    runs on is computing or it is not. Real, and named as what it is.
+ *  - "Foliage density <- hints above the floor": the floor is applied before
+ *    anything reaches the payload, so foliage reads what recall actually
+ *    INJECTED: items per task turn over the last 30 min (x_yamadori.skills
+ *    on YAMADORI_RECALL=skills, x_yamadori.hints on =hints; the path is
+ *    labelled). 3 items per turn is full foliage -- a choice, not a measure.
+ *  - "Nebari <- corpus breadth": the breadth is the indexes the server
+ *    holds (package indexes, the bound code index, repository indexes:
+ *    chunks + defs), on a log scale, not the corpus log.
+ *  - fanout, foliage, nebari and moss come from vitals.tree
+ *    (mcp/tree_sources.py), which the proxy fills from its own per-request
+ *    records (mcp/recent_turns.py) and index counts cached for a minute.
+ *    Absent on a server that predates it: those channels are INERT.
  */
 export const CHANNELS: Channel[] = [
   { name: 'genome', source: 'seed.u32', api: 'vitals', reads: 'the concept seed word, as the PRNG seed of every limb' },
@@ -46,15 +56,15 @@ export const CHANNELS: Channel[] = [
   { name: 'traces.ports', source: 'listeners.conflict', api: 'vitals', reads: 'one ground trace per watched port; crimson on a conflict' },
   { name: 'caps.crimson', source: 'warnings', api: 'vitals', reads: 'warnings, endpoints down, port conflicts' },
   { name: 'shari.errored', source: 'queue.states.errored', api: 'datasets', reads: 'errored jobs, bleached to deadwood' },
-  { name: 'fanout', source: null, api: null, reads: 'fan-out arity, chosen and culled samples' },
-  { name: 'foliage', source: null, api: null, reads: 'hints above the similarity floor' },
-  { name: 'nebari.spread', source: null, api: null, reads: 'corpus breadth (chunks, defs, roots)' },
+  { name: 'fanout', source: 'tree.recent.fanout', api: 'vitals', reads: 'the last fan-out (x_yamadori.fanout): arity, delivered, culled; held 120 s, retracts over 60 s' },
+  { name: 'foliage', source: 'tree.recent.foliage', api: 'vitals', reads: 'recall injected per task turn, last 30 min (x_yamadori.skills / .hints, per YAMADORI_RECALL): pad density' },
+  { name: 'nebari.spread', source: 'tree.nebari.spread', api: 'vitals', reads: 'index breadth: package + code + repo indexes, log10(chunks + defs): root reach and girth' },
   { name: 'sway', source: 'slots.slots.state', api: 'pulse', reads: 'busy llama-server slots (main and deep thinking): wind and gusts' },
   { name: 'ground.glow', source: 'slots.slots.tps', api: 'pulse', reads: 'decode tokens/s across slots: slab rings and traces brighten' },
   { name: 'rings.request', source: 'tools.last_turn.id', api: 'pulse', reads: 'a request arrived (or a slot woke): a green pulse' },
   { name: 'rings.tool', source: 'tools.last.id', api: 'pulse', reads: 'a tool was called: a cyan pulse' },
   { name: 'rings.seed', source: 'seed.at', api: 'pulse', reads: 'a concept seed was drawn: a pale pulse' },
-  { name: 'moss', source: null, api: null, reads: 'index freshness' },
+  { name: 'moss', source: 'tree.moss.value', api: 'vitals', reads: 'index staleness: package indexes, code index, last skill arm (recipes on the hints path); fresh = bare bark' },
 ];
 
 // ------------------------------------------------------------------- state
@@ -71,7 +81,14 @@ export type TreeState = {
   endpoints: { name: string; ok: boolean }[] | null;
   alarms: number | null;
   errored: number | null;
-  fanout: { arity: number; chosen: number } | null;
+  /** fade: 1 while held, falling to 0 as the fork retracts to arity 1 */
+  fanout: { arity: number; chosen: number; fade?: number } | null;
+  /** index breadth, [0, 1] (log scale) */
+  rootSpread: number | null;
+  /** recall injected per recent task turn, [0, 1]; path is YAMADORI_RECALL */
+  foliage: { density: number; path: string } | null;
+  /** index staleness, [0, 1] */
+  moss: number | null;
 };
 
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
@@ -85,7 +102,9 @@ export function treeState(vitals: Vitals | null | undefined, datasets?: Datasets
   const lis = Array.isArray(v.listeners) ? v.listeners : [];
   const warnings = Array.isArray(v.warnings) ? v.warnings.length : null;
   const share = (x: unknown) => (ctx && finite(x) ? clamp01(x / ctx.pool) : null);
-  const gpu0 = gpus.find((g) => g.index === 0) ?? null;
+  // The model's card by UUID (vitals marks it `main`); index 0 only for an
+  // older server that does not send the flag.
+  const gpu0 = gpus.find((g) => g.main === true) ?? gpus.find((g) => g.main === undefined && g.index === 0) ?? null;
   const errored = datasets?.queue?.states?.errored;
   return {
     seed: v.seed && finite(v.seed.u32) ? v.seed.u32 >>> 0 : null,
@@ -106,8 +125,38 @@ export function treeState(vitals: Vitals | null | undefined, datasets?: Datasets
         ? null
         : (warnings ?? 0) + (eps ? eps.filter((e) => e?.ok !== true).length : 0) + lis.filter((l) => l?.conflict).length,
     errored: finite(errored) ? Math.max(0, Math.floor(errored)) : null,
-    // No payload carries fan-out yet. INERT: a single trunk, no fork.
-    fanout: null,
+    ...treeSources(v.tree),
+  };
+}
+
+const pick = (o: unknown, ...keys: string[]): unknown => {
+  let cur: unknown = o;
+  for (const k of keys) cur = cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[k] : undefined;
+  return cur;
+};
+
+/** The vitals.tree fields (mcp/tree_sources.py). An absent tree, or a field
+ *  without a number: that channel is null, so INERT. */
+function treeSources(tree: unknown): Pick<TreeState, 'fanout' | 'rootSpread' | 'foliage' | 'moss'> {
+  const spread = pick(tree, 'nebari', 'spread');
+  const moss = pick(tree, 'moss', 'value');
+  const recent = pick(tree, 'recent');
+  const live = !!recent && typeof recent === 'object' && !('error' in (recent as object));
+  const f = live ? pick(recent, 'fanout') : null;
+  const arity = pick(f, 'arity');
+  const chosen = pick(f, 'chosen');
+  const fadeRaw = pick(f, 'fade');
+  const fade = finite(fadeRaw) ? clamp01(fadeRaw) : 1;
+  const density = live ? pick(recent, 'foliage', 'density') : null;
+  // The recall path: the turns' own, else the live YAMADORI_RECALL (moss reads it).
+  const path = live ? (pick(recent, 'foliage', 'path') ?? pick(tree, 'moss', 'recall')) : null;
+  return {
+    fanout: finite(arity) && arity >= 2 && fade > 0 ? { arity: Math.floor(arity), chosen: finite(chosen) ? Math.floor(chosen) : 0, fade } : null,
+    rootSpread: finite(spread) ? clamp01(spread) : null,
+    // A recent block with no task turn in the window is measured: nothing
+    // was recalled, so the pads are sparse, not inert.
+    foliage: live ? { density: finite(density) ? clamp01(density) : 0, path: typeof path === 'string' ? path : '—' } : null,
+    moss: finite(moss) ? clamp01(moss) : null,
   };
 }
 
@@ -138,6 +187,12 @@ export type SceneParams = {
   alarm: number;
   activity: number;
   traces: { name: string; ok: boolean }[];
+  /** index staleness in [0, 1]; 0 when inert (no moss is drawn for unknown) */
+  moss: number;
+  /** foliage is driven by recall (1) or inert (0) */
+  foliageLive: number;
+  /** recall density, [0, 1]; 0 when inert */
+  foliageDensity: number;
 };
 
 export type TreeParams = { branches: BranchParams[]; scene: SceneParams };
@@ -160,6 +215,11 @@ const girthOf = (share: number | null, lo = 0.55, span = 1.0) =>
 export function treeParams(state: TreeState, sk: Skeleton): TreeParams {
   const fan = state.fanout;
   const arity = fan ? Math.max(1, Math.min(3, Math.floor(fan.arity))) : 1;
+  // A held fork is full grown; a retracting one shrinks toward arity 1.
+  const fade = fan ? clamp01(fan.fade ?? 1) : 1;
+  const fol = state.foliage;
+  // Live pads: sparse at no recall, full at 3 items per turn.
+  const padSize = fol ? 0.35 + 0.65 * fol.density : INERT.foliage;
   const chosen = fan ? Math.max(0, Math.min(arity - 1, Math.floor(fan.chosen))) : 0;
   const activity = state.activity ?? INERT.activity;
   const alarms = state.alarms ?? 0;
@@ -184,7 +244,10 @@ export function treeParams(state: TreeState, sk: Skeleton): TreeParams {
     const sample = b.limb === LIMB.main ? 0 : b.limb === LIMB.fanout1 ? 1 : b.limb === LIMB.fanout2 ? 2 : -1;
     if (sample > 0) {
       if (sample >= arity) growth = 0; // slot unused at this arity: retracted
-      else if (sample !== chosen) bleach = 1; // culled: bleached, stays
+      else {
+        growth = fade;
+        if (sample !== chosen) bleach = 1; // culled: bleached, stays
+      }
     } else if (sample === 0 && arity > 1 && chosen !== 0) {
       bleach = 1;
     }
@@ -200,16 +263,23 @@ export function treeParams(state: TreeState, sk: Skeleton): TreeParams {
       girth = state.reserveShare === null ? INERT.girth : 1.15 - 0.5 * state.reserveShare;
       if (state.reserveShare === null) inert = 1;
     } else if (b.kind === 'root') {
-      inert = 1; // nebari.spread has no source
-      girth = INERT.girth + 0.3;
+      // Nebari: the breadth of what the server knows spreads and thickens
+      // the roots. Unknown: the fixed roots, drawn as dormant bark.
+      if (state.rootSpread === null) {
+        inert = 1;
+        girth = INERT.girth + 0.3;
+      } else {
+        growth = 0.55 + 0.45 * state.rootSpread;
+        girth = 0.8 + 0.5 * state.rootSpread;
+      }
     }
     if (shari.has(b.id)) bleach = 1;
 
     return {
       growth: clamp01(growth),
       girth: Math.min(GIRTH_MAX, Math.max(GIRTH_MIN, girth)),
-      foliage: b.pad && growth > 0 && bleach < 1 ? INERT.foliage : 0,
-      foliageLive: 0, // foliage has no source yet
+      foliage: b.pad && growth > 0 && bleach < 1 ? padSize : 0,
+      foliageLive: fol ? 1 : 0,
       // Arcs thread the limbs, branches and twigs; never the trunk or roots.
       emissive: bleach >= 1 ? 0 : clamp01(activity * (b.kind === 'twig' ? 1 : b.kind === 'branch' ? 0.6 : b.kind === 'limb' ? 0.35 : 0)),
       bleach: clamp01(bleach),
@@ -225,6 +295,9 @@ export function treeParams(state: TreeState, sk: Skeleton): TreeParams {
       alarm: state.anyTight ? 1 : 0,
       activity,
       traces: state.endpoints ?? [],
+      moss: state.moss ?? 0,
+      foliageLive: fol ? 1 : 0,
+      foliageDensity: fol ? fol.density : 0,
     },
   };
 }
@@ -255,5 +328,11 @@ export function inertChannels(state: TreeState): string[] {
   if (state.activity === null) out.push('arcs.activity');
   if (state.memPressure === null) out.push('slab.haze');
   if (state.errored === null) out.push('shari.errored');
+  if (state.rootSpread === null) out.push('nebari.spread');
+  if (state.foliage === null) out.push('foliage');
+  if (state.moss === null) out.push('moss');
+  // fanout: null both when nothing fanned out lately (measured: arity 1)
+  // and when the recent block is absent (foliage null too); only that is inert.
+  if (state.foliage === null) out.push('fanout');
   return out;
 }

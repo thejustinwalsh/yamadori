@@ -13,6 +13,7 @@ numbers, see [docs/SWE-BENCH.md](../../docs/SWE-BENCH.md).
 | `arms.py` | Defines the three arms (`bonsai`, `yamadori-auto`, `yamadori`) and their `X-Yamadori-Features` headers. Also holds the pinned versions, the datasets and the pilot ids. |
 | `run.py` | The Windows side and the entry point. It waits for the card and holds the worker's gpu lane. It runs each instance through WSL, evaluates, and writes `results.jsonl`. |
 | `wsl_side.py` | The WSL side. It runs `check`, `ids`, `agent` (one instance with mini-swe-agent) and `evaluate` (the swebench harness). |
+| `dockerfix.py` | Runs mini-swe-agent and the harness natively on Windows, around Docker Desktop's broken WSL integration and stale inspect cache (2026-09-23). This is the default path; `SWEBENCH_SIDE=wsl` switches back. It also retries a 429 after 1–2 s. `dockerfix.py selftest` proves the environment matches the stock one. |
 | `parse_results.py` | Turns the trajectories and the harness reports into `results/<run-id>/results.jsonl`. |
 | `test_parse_results.py` | Proves the parser keeps resolved, unresolved, empty-patch and agent-error apart. It runs in `scripts/run_tests.py`. |
 

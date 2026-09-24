@@ -54,6 +54,7 @@ RESULTS = os.path.join(HERE, "results")
 WSL_PY = "~/swebench-yamadori/.venv/bin/python"
 LANE = "gpu"
 BY = "bench/swebench/run.py"
+SHARED_BY = "swebench overnight"
 # Command-line fragments of the other GPU consumers this repo runs. A match on
 # any live process other than ourselves means: wait.
 OTHER_CONSUMERS = ("bench\\domain\\run.py", "bench/domain/run.py",
@@ -63,6 +64,8 @@ OTHER_CONSUMERS = ("bench\\domain\\run.py", "bench/domain/run.py",
 
 
 def to_wsl(path: str) -> str:
+    if os.environ.get("SWEBENCH_SIDE", "native") != "wsl":
+        return os.path.abspath(path)
     p = os.path.abspath(path).replace("\\", "/")
     if len(p) > 1 and p[1] == ":":
         p = f"/mnt/{p[0].lower()}{p[2:]}"
@@ -158,7 +161,125 @@ class Lane:
         self.held = False
 
 
+class SharedLane:
+    """--shared: the card is shared on purpose with other benchmarks, each
+    holding ONE request in flight (the operator's overnight plan). Another
+    runner owns the worker's gpu lane pause; this only makes sure SOME pause
+    is in force -- setting one as SHARED_BY if none is, refreshed every 20
+    minutes while it is ours -- and removes only its own at the end."""
+
+    def __init__(self, why: str):
+        import jobs
+        self.jobs = jobs
+        self.why = why
+        self._stop = threading.Event()
+
+    def _ensure(self) -> None:
+        rec = self.jobs.paused(LANE)
+        if rec is None or rec.get("by") == SHARED_BY:
+            self.jobs.pause(LANE, by=SHARED_BY, why=self.why, ttl_seconds=3600)
+            if rec is None:
+                print(f"  gpu lane was not paused; paused as {SHARED_BY!r}",
+                      flush=True)
+        else:
+            print(f"  gpu lane already paused by {rec.get('by')!r}", flush=True)
+
+    def acquire(self) -> None:
+        self._ensure()
+        threading.Thread(target=self._refresh, daemon=True).start()
+
+    def _refresh(self) -> None:
+        while not self._stop.wait(1200):
+            try:
+                self._ensure()
+            except Exception as e:                               # noqa: BLE001
+                print(f"  lane refresh failed: {e}", flush=True)
+
+    def release(self) -> None:
+        self._stop.set()
+        rec = self.jobs.paused(LANE)
+        if rec and rec.get("by") == SHARED_BY:
+            self.jobs.resume(LANE)
+            print("  gpu lane resumed (our pause)", flush=True)
+
+
+class Evaluator:
+    """Grades each instance as soon as its agent run finishes, in a thread,
+    so partial results exist at any moment. CPU and Docker only. One harness
+    run per (arm, instance), each with its own run id -- reports never
+    overwrite each other -- and results.jsonl is rewritten after each."""
+
+    def __init__(self, run_dir: str, run_id: str, subset: str):
+        import queue
+        self.q: "queue.Queue" = queue.Queue()
+        self.run_dir, self.run_id, self.subset = run_dir, run_id, subset
+        self.lock = threading.Lock()
+        self.t = threading.Thread(target=self._work, daemon=True)
+        self.t.start()
+
+    def submit(self, arm: str, iid: str) -> None:
+        self.q.put((arm, iid))
+
+    def _work(self) -> None:
+        while True:
+            item = self.q.get()
+            if item is None:
+                return
+            arm, iid = item
+            out = os.path.join(self.run_dir, arm)
+            try:
+                code, text = wsl(["evaluate", "--out", to_wsl(out), "--subset",
+                                  self.subset, "--instances", iid, "--run-id",
+                                  f"{self.run_id}.{arm}.{iid}", "--workers", "1"],
+                                 timeout=3600)
+                print(f"  graded {arm:<14} {iid:<40} rc={code}", flush=True)
+            except Exception as e:                               # noqa: BLE001
+                print(f"  grading {arm} {iid} failed: {e}", flush=True)
+            self.write()
+
+    def write(self) -> list[dict]:
+        with self.lock:
+            rows = parse_results.parse_run(self.run_dir)
+            tmp = os.path.join(self.run_dir, "results.jsonl.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                for r in rows:
+                    f.write(json.dumps(r) + "\n")
+            os.replace(tmp, os.path.join(self.run_dir, "results.jsonl"))
+            return rows
+
+    def finish(self) -> None:
+        self.q.put(None)
+        self.t.join()
+
+
+def graded(out: str, iid: str) -> bool:
+    import glob as _g
+    return bool(_g.glob(os.path.join(out, f"*.{iid}.json")))
+
+
+def done(out: str, iid: str) -> bool:
+    p = os.path.join(out, "preds.json")
+    if not os.path.exists(p):
+        return False
+    with open(p, encoding="utf-8") as f:
+        return iid in json.load(f)
+
+
+# Where the agent and the harness run. Native Windows since 2026-09-23
+# (dockerfix.py explains why); SWEBENCH_SIDE=wsl restores the WSL path.
+NATIVE = os.environ.get("SWEBENCH_SIDE", "native") != "wsl"
+WIN_PY = os.environ.get(
+    "SWEBENCH_WIN_PY", r"C:\Users\jwals\swebench-yamadori\venv-win\Scripts\python.exe")
+
+
 def wsl(args: list[str], timeout: float | None = None) -> tuple[int, str]:
+    if NATIVE:
+        cmd = [WIN_PY, os.path.join(HERE, "wsl_side.py"), *args]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           encoding="utf-8", errors="replace",
+                           env=dict(os.environ, PYTHONUTF8="1",
+                                    MSWEA_SILENT_STARTUP="1"))
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
     cmd = ["wsl", "-d", "Ubuntu", "--", "bash", "-lc",
            " ".join([WSL_PY, to_wsl(os.path.join(HERE, "wsl_side.py"))]
                     + [_q(a) for a in args])]
@@ -180,8 +301,116 @@ def instance_ids(a) -> list[str]:
         code, out = wsl(["ids", "--subset", a.subset])
         if code != 0:
             sys.exit(f"could not list {a.subset}: {out[-500:]}")
-        return json.loads(out.strip().splitlines()[-1])
+        # stderr (HF warnings) is appended after stdout: take the JSON line.
+        ids = json.loads([ln for ln in out.splitlines() if ln.startswith("[")][-1])
+        if a.seed is not None:
+            import random
+            ids = sorted(ids)
+            random.Random(a.seed).shuffle(ids)
+        return ids
     sys.exit("name instances: --instances, --pilot or --all")
+
+
+# An agent run that ended on one of these never reached an answer: the
+# connection or the server failed (a proxy restart, a 502). It is rerun once,
+# never scored as unresolved. A full context or the step limit is a real
+# outcome and is kept.
+TRANSIENT = ("APIConnectionError", "InternalServerError", "ServiceUnavailableError",
+             "BadGatewayError", "Timeout", "APIError", "RateLimitError",
+             "ConnectionError", "RemoteDisconnected")
+
+
+def transient_failure(out: str, iid: str) -> str | None:
+    p = os.path.join(out, iid, f"{iid}.traj.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            st = (json.load(f).get("info") or {}).get("exit_status") or ""
+    except (OSError, ValueError):
+        return None
+    return st if any(t in st for t in TRANSIENT) else None
+
+
+def schedule(arm_list: list[str], ids: list[str], block: int) -> list[tuple[str, str]]:
+    """The order of (arm, instance) jobs: every arm on the first `block`
+    instances, arm-major (so a comparable block of each arm exists early),
+    then the rest interleaved per instance (arm 1 on #21, arm 2 on #21, ...),
+    so wherever the run is stopped the arms are paired."""
+    jobs = [(arm, i) for arm in arm_list for i in ids[:block]]
+    jobs += [(arm, i) for i in ids[block:] for arm in arm_list]
+    return jobs
+
+
+def run_shared(a, arm_list: list[str], ids: list[str], run_dir: str) -> int:
+    lane = SharedLane(why=f"SWE-bench {a.run_id}")
+    ev = Evaluator(run_dir, a.run_id, a.subset)
+    jobs = schedule(arm_list, ids, a.block)
+    skip = {tuple(x.split(":", 1)) for x in a.skip.split(",") if ":" in x}
+    if skip:
+        # Jobs still running in an orphaned agent process from a previous
+        # runner: they finish and merge on their own; --evaluate-only grades
+        # them afterwards.
+        jobs = [j for j in jobs if j not in skip]
+        print(f"  skipping in-flight jobs: {sorted(skip)}", flush=True)
+    with open(os.path.join(run_dir, "schedule.json"), "w", encoding="utf-8") as f:
+        json.dump({"workers": a.workers, "block": a.block, "jobs": jobs}, f, indent=0)
+    qlock = threading.Lock()
+    retried: set[tuple[str, str]] = set()
+
+    def next_job():
+        with qlock:
+            return jobs.pop(0) if jobs else None
+
+    def worker(n: int) -> None:
+        while True:
+            job = next_job()
+            if job is None:
+                return
+            arm, iid = job
+            out = os.path.join(run_dir, arm)
+            redo = False
+            if done(out, iid):
+                why = transient_failure(out, iid)
+                if why and job not in retried:
+                    print(f"  {arm} {iid}: ended on {why}; rerunning once",
+                          flush=True)
+                    retried.add(job)
+                    redo = True
+                    import glob as _g
+                    for old in _g.glob(os.path.join(out, f"*.{iid}.json")):
+                        os.replace(old, old + f".superseded-{int(time.time())}")
+                else:
+                    if not graded(out, iid) and not a.no_evaluate:
+                        ev.submit(arm, iid)
+                    continue
+            code, text = wsl(["agent", "--arm", arm, "--instance", iid,
+                              "--out", to_wsl(out), "--subset", a.subset,
+                              "--key-file", to_wsl(a.key_file)]
+                             + (["--redo"] if redo else []))
+            last = (text.strip().splitlines() or [""])[-1]
+            print(f"  {time.strftime('%H:%M:%S')} w{n} {arm:<14} {iid:<36} "
+                  f"rc={code} {last[:220]}", flush=True)
+            if transient_failure(out, iid) and job not in retried:
+                with qlock:
+                    jobs.append(job)            # once more, at the end
+            elif not a.no_evaluate:
+                ev.submit(arm, iid)
+            ev.write()
+
+    try:
+        lane.acquire()
+        threads = []
+        for n in range(a.workers):
+            t = threading.Thread(target=worker, args=(n,), daemon=True)
+            t.start()
+            threads.append(t)
+            time.sleep(5)       # stagger container starts
+        for t in threads:
+            t.join()
+    finally:
+        lane.release()
+        ev.finish()
+    print(json.dumps(parse_results.summarize(ev.write()), indent=1))
+    return 0
 
 
 def main() -> int:
@@ -197,6 +426,20 @@ def main() -> int:
     ap.add_argument("--evaluate-only", action="store_true")
     ap.add_argument("--no-evaluate", action="store_true")
     ap.add_argument("--eval-workers", type=int, default=4)
+    ap.add_argument("--seed", type=int, default=None,
+                    help="with --all: run the instances in this seeded order, so "
+                         "a partial run is a random sample, not one repo")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="--shared: agent runs in flight at once")
+    ap.add_argument("--block", type=int, default=10**6,
+                    help="--shared: run every arm on the first BLOCK instances "
+                         "arm-major, then interleave the arms per instance")
+    ap.add_argument("--skip", default="",
+                    help="--shared: arm:instance,... jobs to leave alone")
+    ap.add_argument("--shared", action="store_true",
+                    help="the card is shared on purpose (one request in flight "
+                         "from us); do not wait for other consumers; grade "
+                         "each instance as it finishes")
     a = ap.parse_args()
     arm_list = [x.strip() for x in a.arms.split(",") if x.strip()]
     bad = [x for x in arm_list if x not in arms.ARMS]
@@ -212,6 +455,13 @@ def main() -> int:
         ids = instance_ids(a)
         print(f"  run {a.run_id}: arms {arm_list}, {len(ids)} instances, "
               f"subset {a.subset}", flush=True)
+        with open(os.path.join(run_dir, "instances.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"subset": a.subset, "dataset": arms.DATASETS[a.subset],
+                       "seed": a.seed, "order": ids, "arms": arm_list}, f,
+                      indent=1)
+        if a.shared:
+            return run_shared(a, arm_list, ids, run_dir)
         lane = Lane(why=f"SWE-bench {a.run_id}")
         try:
             lane.acquire()

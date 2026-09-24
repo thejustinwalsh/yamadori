@@ -54,6 +54,32 @@ Everything in the left column is real today, with its source named.
 | **Ground circuit traces** | per-service health | `vitals.endpoints[]`, the four routes |
 | **Sway amplitude** | request concurrency | `admission` semaphore occupancy |
 
+**As built, 2026-09-24** (`web/src/bonsai/mapping.ts` CHANNELS is the
+authority; these four had `source: null` until then). All four read
+`vitals.tree`, filled by `mcp/tree_sources.py`: index counts cached one
+minute, and the proxy's own per-request `x_yamadori` records kept in memory
+by `mcp/recent_turns.py`. No model call feeds any of them.
+
+| channel | source | formula |
+|---|---|---|
+| `nebari.spread` | `tree.nebari.spread`: every `index/packages/*.sqlite3`, the bound code index, each registered repo index | `s = clamp((log10(chunks + defs) - 3) / 3)`; root reach `0.55 + 0.45 s`, girth `0.8 + 0.5 s` |
+| `fanout` | `tree.recent.fanout`: the last request that fanned out | arity, delivered index (`winner_index`), the rest culled (bleached); held 120 s, retracts over 60 s |
+| `foliage` | `tree.recent.foliage`: items recall INJECTED per task turn, last 30 min (x_yamadori.skills on `YAMADORI_RECALL=skills`, .hints on `=hints`; labelled) | density `min(1, mean / 3)`; pad size `0.35 + 0.65 d`, lit toward primary by `0.3 + 0.7 d` |
+| `moss` | `tree.moss.value`: package index age (median), code index age, last skill arm, and recipes (`hints.npz`) on the hints path | mean over present ages of `clamp(log2(1 + days) / log2(31))` |
+
+"Hints above the floor" became "what was injected": the floor is applied
+before anything reaches a payload. The thresholds (3 items, 120 s, 30 days)
+are choices, not measurements.
+
+**The inert look.** An inert channel used to mix 55% toward flat
+outline-grey, which erased the bark grain; the operator read the roots as an
+untextured bug. Inert is now DORMANT BARK: the same grain and fissures,
+desaturated 75% and darkened 20%, a touch rougher. A root's inert value
+blends from the trunk's through the weld, so there is no seam at the flare.
+Moss is drawn in the bark shader (noise patches on up-facing bark low on the
+tree, cover growing with the value), not by the shell texturing in §5; an
+inert moss channel draws no moss rather than guessing.
+
 Two deliberate absences.
 
 **"Mood" and "emotion" have no source.** There is no measured affect in this

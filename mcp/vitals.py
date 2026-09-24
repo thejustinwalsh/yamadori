@@ -58,9 +58,23 @@ def _sh(cmd: list[str], timeout: int = 25) -> str:
         return ""
 
 
+def _float_or_none(x: str) -> float | None:
+    """nvidia-smi prints "[N/A]" or "[Not Supported]" for a field a card
+    cannot report; that is None, never 0 W."""
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def gpus(timeout: int = 25) -> list[dict]:
+    """One row per card. `watts` is power.draw (board power, W) and
+    `watts_limit` power.limit; mcp/power.py integrates `watts` into energy.
+    The three power-era fields are appended after the original five, so a
+    five-column answer still parses (and reports watts None)."""
     out = _sh(["nvidia-smi",
-               "--query-gpu=index,name,memory.used,memory.total,utilization.gpu",
+               "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,"
+               "uuid,power.draw,power.limit",
                "--format=csv,noheader,nounits"], timeout=timeout)
     rows = []
     for line in out.strip().splitlines():
@@ -72,8 +86,40 @@ def gpus(timeout: int = 25) -> list[dict]:
                      "total_mib": total, "free_mib": total - used,
                      "pct": round(100 * used / max(total, 1)),
                      "tight": (total - used) < TIGHT_MIB,
-                     "util": int(p[4] or 0)})
+                     "util": int(p[4] or 0),
+                     "uuid": p[5] if len(p) > 5 and p[5] else None,
+                     "watts": _float_or_none(p[6]) if len(p) > 6 else None,
+                     "watts_limit": _float_or_none(p[7]) if len(p) > 7 else None})
+    # The card the main model runs on, by UUID (config.yaml pins `bonsai` by
+    # UUID; mcp/power.py uses the same constant). Index order is PCI order and
+    # would silently name the wrong card if the cards ever changed slots.
+    main_uuid = os.environ.get("YAMADORI_MAIN_GPU_UUID",
+                               "GPU-de660e90-0e9c-d465-b389-6df63021b920")
+    for r in rows:
+        r["main"] = r.get("uuid") == main_uuid
     return rows
+
+
+def power_live() -> dict | None:
+    """mcp/power.py live(): watts, the rate period, today's and the last 7
+    days' kWh and cents. Real only inside the proxy process, where the
+    sampler runs; elsewhere it says the sampler is not running."""
+    try:
+        import power
+        return power.live()
+    except Exception as e:                                       # noqa: BLE001
+        return {"running": False, "last_error": f"{type(e).__name__}: {e}"[:200]}
+
+
+def _sampled_gpus(max_age: float) -> list[dict] | None:
+    """The power sampler's newest nvidia-smi rows, if fresh: the sampler
+    already reads the cards every second in the proxy, so the pulse reuses
+    that read instead of starting a second nvidia-smi."""
+    try:
+        import power
+        return power.fresh_gpus(max_age)
+    except Exception:                                            # noqa: BLE001
+        return None
 
 
 def processes() -> list[dict]:
@@ -207,7 +253,9 @@ def context_pool() -> dict:
 # read in it is bounded:
 #
 #   slots()   llama-server /slots, 1 s timeout, last good answer kept
-#   gpus()    nvidia-smi, cached for PULSE_GPU_TTL, 3 s timeout
+#   gpus()    nvidia-smi, cached for PULSE_GPU_TTL, 3 s timeout; in the
+#             proxy, the power sampler's own 1 s read is reused instead
+#   power     mcp/power.py live(): in-memory samples and the ledger, no I/O
 #   tools()   the corpus log, read-only, 0.5 s busy timeout, newest rows only
 #   queue()   job counts, read-only
 #   lanes()   admission's in-process counters (only real inside the proxy)
@@ -401,7 +449,9 @@ def pulse() -> dict:
         fresh_gpu = now - _gpu_cache[0] < PULSE_GPU_TTL
         fresh_strata = now - _strata_cache[0] < 10
     if not fresh_gpu:
-        g = gpus(timeout=3)
+        g = _sampled_gpus(2 * PULSE_GPU_TTL)
+        if g is None:
+            g = gpus(timeout=3)
         with _lock:
             _gpu_cache = (now, g)
     if not fresh_strata:
@@ -415,11 +465,13 @@ def pulse() -> dict:
         ctx = {"error": f"{type(e).__name__}: {e}"}
     return {"at": now, "gpus": _gpu_cache[1], "slots": slots(),
             "lanes": lanes(), "tools": tools(), "queue": queue(),
-            "seed": seed(), "strata": _strata_cache[1], "context": ctx}
+            "seed": seed(), "strata": _strata_cache[1], "context": ctx,
+            "power": power_live()}
 
 
 def snapshot() -> dict:
-    procs, g, lis = processes(), gpus(), listeners()
+    g = _sampled_gpus(2 * PULSE_GPU_TTL)
+    procs, g, lis = processes(), (g if g is not None else gpus()), listeners()
     dups, eps = duplicates(procs), endpoints()
     warnings = []
     for x in g:
@@ -441,7 +493,19 @@ def snapshot() -> dict:
             "listeners": lis, "duplicates": dups, "endpoints": eps,
             "context": context_pool(), "seed": seed(), "strata": strata(),
             "slots": slots(), "lanes": lanes(), "tools": tools(),
-            "queue": queue(), "warnings": warnings}
+            "queue": queue(), "power": power_live(), "tree": tree(),
+            "warnings": warnings}
+
+
+def tree() -> dict | None:
+    """What the tokonoma's roots, moss and foliage read (mcp/tree_sources.py):
+    index breadth and freshness, cached a minute, and the last requests'
+    fan-out and recall (in memory, proxy process only). None if unreadable."""
+    try:
+        import tree_sources
+        return tree_sources.snapshot()
+    except Exception:                                            # noqa: BLE001
+        return None
 
 
 def strata() -> dict | None:

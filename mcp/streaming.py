@@ -66,6 +66,15 @@ def text_chunk(cid: str, model: str, text: str) -> bytes:
     return chunk(cid, model, {"content": text})
 
 
+def reasoning_chunk(cid: str, model: str, text: str) -> bytes:
+    """Process text (tool activity, a hop's preface to a tool call) on the
+    thinking channel. Clients close their thinking block at the first
+    `content` delta; anything of ours sent as content mid-stream and followed
+    by more reasoning reopened that block and rendered the real answer as
+    thinking (live diagnostic, 2026-09-24)."""
+    return chunk(cid, model, {"reasoning_content": text})
+
+
 def forward_delta(cid: str, model: str, delta: dict) -> bytes | None:
     """An upstream delta re-issued under OUR id: reasoning and content only.
 

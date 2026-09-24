@@ -1,0 +1,26 @@
+{
+ "0.001": {
+  "argmax_agree_f32_f64": 120,
+  "n": 120,
+  "argmax_agree_numpy_torch": 120,
+  "max_prob_diff_numpy_torch": 6.738901129788033e-06
+ },
+ "0.01": {
+  "argmax_agree_f32_f64": 120,
+  "n": 120,
+  "argmax_agree_numpy_torch": 120,
+  "max_prob_diff_numpy_torch": 1.0810179759124239e-06
+ },
+ "0.1": {
+  "argmax_agree_f32_f64": 89,
+  "n": 120,
+  "argmax_agree_numpy_torch": 98,
+  "max_prob_diff_numpy_torch": 0.8941539646274335
+ },
+ "1.0": {
+  "argmax_agree_f32_f64": 109,
+  "n": 120,
+  "argmax_agree_numpy_torch": 109,
+  "max_prob_diff_numpy_torch": 0.25109654200690656
+ }
+}

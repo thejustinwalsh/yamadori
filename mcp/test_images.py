@@ -20,14 +20,24 @@ and GET /media/<sha>.png. The promises, each asserted below:
      header (a browser rendering `![](url)` sends none); a tampered sig, an
      expired exp and a sig moved to another sha are each 403; `../` and
      non-hex ids never touch the filesystem.
-  6. generate_image is offered only when an image server is configured, and
-     at tier `low` and up even when the code tools are withheld; never at
-     `minimal`, never to deep thinking.
+  6. generate_image is offered whenever an image server is configured, on
+     every tier (minimal included) even when the code tools are withheld,
+     and to deep thinking (mockups and designs while it investigates).
   7. A chat turn that calls it gets a result carrying the signed URL on the
      client's public base and a markdown line, and x_yamadori records it.
   8. The markdown the tool hands the model is what a markdown renderer turns
      into an <img> whose src is that URL, and the URL's path ends in `.png`
      before the query string (docs/IMAGEGEN.md, "How Hermes shows it").
+  9. Two image models, base and turbo: each sends its own llama-swap name and
+     its own steps (20 / 4), and the metadata records both.
+ 10. The model is resolved per request: an explicit `model` on the Images API,
+     else the caller's account preference, else YAMADORI_IMAGEGEN_DEFAULT
+     (base). x_yamadori.images records the model, steps and where the choice
+     came from, on both the Images API and the chat tool.
+ 11. GET/PUT /dash/api/settings/image read and write only the caller's own
+     account: a PUT naming another account id writes the caller's.
+ 12. Image-model names never resolve as chat models, and are not advertised
+     in /v1/models.
 
 ISOLATION
 
@@ -81,7 +91,8 @@ os.environ.update({
     "YAMADORI_IMAGE_WAIT": "0.3",
 })
 for k in ("YAMADORI_IMAGEGEN_URL", "YAMADORI_PUBLIC_BASE",
-          "YAMADORI_IMAGEGEN_TIMEOUT"):
+          "YAMADORI_IMAGEGEN_TIMEOUT", "YAMADORI_IMAGEGEN_DEFAULT",
+          "YAMADORI_IMAGEGEN_MODEL", "YAMADORI_IMAGEGEN_TURBO_MODEL"):
     os.environ.pop(k, None)
 
 import accounts  # noqa: E402
@@ -204,7 +215,9 @@ def test_the_fixture_is_not_the_real_store():
 
 def test_generate_sends_the_documented_request_and_stores_metadata():
     SEEN.clear()
-    with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
+    # The base model's request shape: base configured explicitly (the built-in
+    # default is turbo since 2026-09-24).
+    with use(YAMADORI_IMAGEGEN_URL=IMG_URL, YAMADORI_IMAGEGEN_DEFAULT="base"):
         recs = images.generate("a red fox, flat vector", size="1024x768",
                                seed=42)
     check(len(recs) == 1, "one image", str(len(recs)))
@@ -309,6 +322,7 @@ def test_every_failure_names_itself_and_the_next_step():
         for bad, why in ((("",), "empty prompt"), ((5,), "prompt is a number"),
                          (("x", "1000x1000"), "size not a multiple of 32"),
                          (("x", "4096x4096"), "size over the measured ceiling"),
+                         (("x", "1536x1536"), "edges fit but pixels over 1344x1344"),
                          (("x", "big"), "size is a word"),
                          (("x", None, "abc"), "seed is a word")):
             e = err_of(images.generate, *bad)
@@ -318,6 +332,19 @@ def test_every_failure_names_itself_and_the_next_step():
 # --------------------------------------------------------------------------
 # 5: signing
 # --------------------------------------------------------------------------
+def test_sizes_hermes_sends_are_accepted():
+    """Hermes's own image_generate sends OpenAI sizes
+    (plugins/image_gen/_common.py:18 at 1a90fad): all three must pass."""
+    for size in ("1024x1024", "1536x1024", "1024x1536"):
+        try:
+            ok = images.parse_size(size) == tuple(int(x) for x in size.split("x"))
+        except images.ImageError as e:
+            ok = False
+            size += f" -> {e.code}"
+        check(ok, f"{size} is accepted")
+    check(images.parse_size(None) == (1024, 1024), "no size means 1024x1024")
+
+
 def test_signatures():
     sha = "a" * 64
     exp = int(time.time()) + 60
@@ -510,7 +537,8 @@ def test_tool_is_offered_only_when_configured_and_allowed():
     for url, effort, want, why in (
             (None, "low", False, "unconfigured, tier low"),
             (IMG_URL, "low", True, "configured, tier low, code tools withheld"),
-            (IMG_URL, "minimal", False, "configured, tier minimal"),
+            (IMG_URL, "minimal", True, "configured, tier minimal (a capability, "
+                                        "offered everywhere)"),
             (IMG_URL, "high", True, "configured, tier high")):
         with use(YAMADORI_IMAGEGEN_URL=url):
             out = proxy.prepare({"model": "yamadori", "messages": msgs,
@@ -531,7 +559,8 @@ def test_tool_is_offered_only_when_configured_and_allowed():
               == "the client's own", "a client's own generate_image wins")
     d = images.TOOL["function"]["description"]
     for phrase in ("draw", "logo", "icon", "illustration", "picture",
-                   "markdown image line"):
+                   "markdown image line", "It makes images only",
+                   "client's own file tools"):
         check(phrase in d, f"the description triggers on / says {phrase!r}")
 
 
@@ -651,16 +680,21 @@ def test_a_chat_turn_that_draws():
     threading.Thread(target=llm.serve_forever, daemon=True).start()
     old = proxy.UPSTREAM
     proxy.UPSTREAM = f"http://127.0.0.1:{llm.server_address[1]}"
+    # The chat route sets _account (server.chat); this caller chose turbo.
+    accounts.set_pref("chat-draw-acct", images.PREF_KEY, "turbo")
     try:
-        with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
+        with use(YAMADORI_IMAGEGEN_URL=IMG_URL, YAMADORI_IMAGEGEN_DEFAULT=None):
             d = proxy.complete({"model": "yamadori", "reasoning_effort": "low",
                                 "messages": [{"role": "user",
                                               "content": "draw me a fox"}],
-                                "_public_base": "https://ai.example.test"})
+                                "_public_base": "https://ai.example.test",
+                                "_account": "chat-draw-acct"})
+        img_body = SEEN[-1]["body"] if SEEN else {}
     finally:
         proxy.UPSTREAM = old
         llm.shutdown()
         llm.server_close()
+        accounts.set_pref("chat-draw-acct", images.PREF_KEY, None)
     first_tools = [t["function"]["name"] for t in (sent[0].get("tools") or [])] if sent else []
     check("generate_image" in first_tools, "the model was offered generate_image",
           str(first_tools))
@@ -678,14 +712,329 @@ def test_a_chat_turn_that_draws():
     im = x.get("images") or []
     check(len(im) == 1 and im[0].get("ok") and im[0].get("seed") == 21,
           "x_yamadori.images records the call", json.dumps(im))
+    check(img_body.get("model") == "imagegen-turbo" and img_body.get("steps") == 4,
+          "the chat turn drew with the caller's account preference (turbo)",
+          json.dumps(img_body)[:160])
+    check(im and im[0].get("model") == "yamadori-image-turbo"
+          and im[0].get("steps") == 4 and im[0].get("model_source") == "account",
+          "x_yamadori.images records the model and steps used", json.dumps(im))
     check(d["choices"][0]["message"]["content"] == "Here it is.",
           "the answer comes back")
 
 
+# --------------------------------------------------------------------------
+# 9-12: two image models, chosen per request, per account, or by default
+# --------------------------------------------------------------------------
+def _second_key() -> str:
+    if "key2" not in _KEY:
+        _KEY["key2"] = accounts.create("image-tests-b")
+    return _KEY["key2"]
+
+
+def _id_of(key: str) -> str:
+    who, _ = accounts.identify(f"Bearer {key}")
+    return who
+
+
+def test_each_model_sends_its_own_name_and_steps():
+    SEEN.clear()
+    with use(YAMADORI_IMAGEGEN_URL=IMG_URL, YAMADORI_IMAGEGEN_DEFAULT="base"):
+        base = images.generate("steps probe", seed=500)[0]
+        b_body = SEEN[-1]["body"]
+        turbo = images.generate("steps probe", seed=501, model="turbo")[0]
+        t_body = SEEN[-1]["body"]
+        forced = images.generate("steps probe", seed=502, model="turbo", steps=6)[0]
+        f_body = SEEN[-1]["body"]
+        bad = err_of(images.generate, "x", model="sdxl")
+    check(b_body.get("model") == "imagegen" and b_body.get("steps") == 20,
+          "no model, base configured: sent as `imagegen`, 20 steps",
+          json.dumps(b_body)[:160])
+    check(t_body.get("model") == "imagegen-turbo" and t_body.get("steps") == 4,
+          "turbo: sent as `imagegen-turbo`, 4 steps (not DEFAULT_STEPS)",
+          json.dumps(t_body)[:160])
+    check(f_body.get("steps") == 6, "an explicit steps still wins over the model's")
+    mb = images.metadata(base["id"]) or {}
+    mt = images.metadata(turbo["id"]) or {}
+    check(mb.get("model") == "imagegen" and mb.get("image_model") == "yamadori-image"
+          and mb.get("steps") == 20, "base metadata: model, image_model, steps",
+          json.dumps(mb)[:200])
+    check(mt.get("model") == "imagegen-turbo"
+          and mt.get("image_model") == "yamadori-image-turbo"
+          and mt.get("steps") == 4, "turbo metadata: model, image_model, steps",
+          json.dumps(mt)[:200])
+    check(forced["steps"] == 6, "the record carries the steps actually sent")
+    check(bad is not None and bad.code == "BAD_ARGUMENTS" and bad.status == 400,
+          "an unknown image model is BAD_ARGUMENTS", getattr(bad, "code", None))
+    with use(YAMADORI_IMAGEGEN_URL=IMG_URL,
+             YAMADORI_IMAGEGEN_TURBO_MODEL="qwen-turbo-renamed"):
+        images.generate("rename", seed=503, model="turbo")
+    check(SEEN[-1]["body"].get("model") == "qwen-turbo-renamed",
+          "YAMADORI_IMAGEGEN_TURBO_MODEL renames the llama-swap model")
+    check(images.MODELS["turbo"]["steps"] == 4 and images.MODELS["base"]["steps"] == 20,
+          "steps are per model: base 20, turbo 4")
+
+
+def test_preference_resolution():
+    import catalog
+    a, b = "pref-acct-a", "pref-acct-b"
+    accounts.set_pref(a, images.PREF_KEY, None)
+    accounts.set_pref(b, images.PREF_KEY, None)
+    with use(YAMADORI_IMAGEGEN_DEFAULT=None):
+        check(images.resolve_model(a) == ("turbo", "default"),
+              "no preference, no setting: turbo, the built-in default (operator)")
+        check(images.resolve_model(None) == ("turbo", "default"),
+              "no account at all: the default")
+    with use(YAMADORI_IMAGEGEN_DEFAULT="base"):
+        check(images.resolve_model(a) == ("base", "default"),
+              "YAMADORI_IMAGEGEN_DEFAULT=base changes the default")
+    with use(YAMADORI_IMAGEGEN_DEFAULT="turbo"):
+        check(images.resolve_model(a) == ("turbo", "default"),
+              "YAMADORI_IMAGEGEN_DEFAULT=turbo changes the default")
+    with use(YAMADORI_IMAGEGEN_DEFAULT="flux"):
+        check(images.default_model() == "turbo",
+              "an unknown YAMADORI_IMAGEGEN_DEFAULT falls back to turbo")
+    accounts.set_pref(a, images.PREF_KEY, "turbo")
+    with use(YAMADORI_IMAGEGEN_DEFAULT="base"):
+        check(images.resolve_model(a) == ("turbo", "account"),
+              "an account's preference beats the default")
+        check(images.resolve_model(b) == ("base", "default"),
+              "another account's preference does not leak")
+        check(images.resolve_model(a, "base") == ("base", "request"),
+              "an explicit per-request model beats the preference")
+    accounts.set_pref(b, images.PREF_KEY, "sdxl")
+    check(images.resolve_model(b)[0] == images.default_model(),
+          "a stored value that is not a model is ignored")
+    accounts.set_pref(b, images.PREF_KEY, None)
+    check(catalog.resolve_image("yamadori-image-turbo") == "turbo"
+          and catalog.resolve_image("yamadori-image") == "base",
+          "catalog names the two image models")
+    check(all(catalog.resolve_image(m["name"]) == mid
+              for mid, m in images.MODELS.items()),
+          "catalog.IMAGE_MODELS and images.MODELS agree on every public name")
+    check(catalog.resolve_image("dall-e-3") is None
+          and catalog.resolve_image(None) is None
+          and catalog.resolve_image("yamadori") is None,
+          "an SDK default or a chat name is not an image-model choice")
+    internal, _tier, known = catalog.resolve("yamadori-image-turbo")
+    check(internal == "bonsai" and not known,
+          "a chat request naming an image model does not route to it")
+    check("yamadori-image" not in json.dumps(catalog.public_list()),
+          "image models are not advertised as chat models")
+
+
+def test_settings_api():
+    client, auth = _client()
+    k2 = _second_key()
+    auth2 = {"Authorization": f"Bearer {k2}"}
+    a_id, b_id = _id_of(_KEY["key"]), _id_of(k2)
+    accounts.set_pref(a_id, images.PREF_KEY, None)
+    accounts.set_pref(b_id, images.PREF_KEY, None)
+    P = "/dash/api/settings/image"
+    check(client.get(P).status_code == 401, "GET without a key: 401")
+    check(client.put(P, json={"choice": "turbo"}).status_code == 401,
+          "PUT without a key: 401")
+    check(client.put(P, json={"choice": "turbo"},
+                     headers={"Authorization": "Bearer nope"}).status_code == 401,
+          "PUT with a wrong key: 401")
+    with use(YAMADORI_IMAGEGEN_DEFAULT=None):
+        d0 = client.get(P, headers=auth).json()
+        check(d0.get("default") == "turbo" and d0.get("effective") == "turbo",
+              "nothing configured: the default is turbo", json.dumps(d0)[:200])
+    with use(YAMADORI_IMAGEGEN_DEFAULT="base"):
+        r = client.get(P, headers=auth)
+        d = r.json()
+        opts = {o["id"]: o for o in d.get("options") or []}
+        check(r.status_code == 200 and d.get("choice") is None
+              and d.get("default") == "base" and d.get("effective") == "base",
+              "GET: {choice: null, default: base, effective: base}", r.text[:200])
+        check(set(opts) == {"base", "turbo"} and opts["base"]["steps"] == 20
+              and opts["turbo"]["steps"] == 4,
+              "options: base 20 steps, turbo 4 steps", json.dumps(opts)[:200])
+        check(all(isinstance(o.get("est_seconds"), (int, float)) and o.get("licence")
+                  and o.get("est_basis") and o.get("label") for o in opts.values()),
+              "each option carries est_seconds, its basis, a label and a licence")
+        check("n=1" in opts["turbo"]["est_basis"],
+              "the turbo time is labelled n=1", opts["turbo"]["est_basis"])
+
+        r = client.put(P, headers=auth, json={"choice": "turbo"})
+        check(r.status_code == 200 and r.json().get("ok") is True
+              and r.json().get("choice") == "turbo"
+              and r.json().get("effective") == "turbo",
+              "PUT turbo: saved, and it is now effective", r.text[:200])
+        check(client.get(P, headers=auth).json().get("choice") == "turbo",
+              "GET reads it back")
+        check(client.get(P, headers=auth2).json().get("choice") is None,
+              "another key's account is untouched")
+
+        r = client.put(P, headers=auth2, json={"choice": "base", "account": a_id})
+        check(r.status_code == 200 and r.json().get("choice") == "base",
+              "B's PUT naming A's account id writes B", r.text[:160])
+        check(images.preference(a_id) == "turbo",
+              "A's choice is unchanged by B's PUT naming A",
+              str(images.preference(a_id)))
+        check(images.preference(b_id) == "base", "B's own choice was written")
+
+        for bad, why in (({"choice": "sdxl"}, "an unknown model"),
+                         ({}, "no choice field"), (["turbo"], "not an object")):
+            r = client.put(P, headers=auth, json=bad)
+            check(r.status_code == 400 and r.json().get("ok") is False
+                  and r.json().get("error"), f"PUT {why}: 400 with the reason",
+                  r.text[:160])
+        check(images.preference(a_id) == "turbo", "a refused PUT changes nothing")
+        r = client.put(P, headers=auth, json={"choice": None})
+        check(r.status_code == 200 and r.json().get("choice") is None
+              and r.json().get("effective") == "base",
+              "PUT null clears back to the default", r.text[:160])
+    with use(YAMADORI_IMAGEGEN_DEFAULT="turbo"):
+        d = client.get(P, headers=auth).json()
+        check(d.get("default") == "turbo" and d.get("effective") == "turbo",
+              "GET reports the server default from YAMADORI_IMAGEGEN_DEFAULT")
+
+
+def test_images_route_picks_the_model():
+    client, auth = _client()
+    a_id = _id_of(_KEY["key"])
+    accounts.set_pref(a_id, images.PREF_KEY, None)
+    with use(YAMADORI_IMAGEGEN_URL=IMG_URL, YAMADORI_IMAGEGEN_DEFAULT="base"):
+        def post(**body):
+            r = client.post("/v1/images/generations", headers=auth,
+                            json=dict({"prompt": "route model"}, **body))
+            x = ((r.json().get("x_yamadori") or {}).get("images") or [{}])[0]
+            return r.status_code, SEEN[-1]["body"], x
+
+        code, sent, x = post(seed=600)
+        check(code == 200 and sent["model"] == "imagegen" and sent["steps"] == 20
+              and x.get("model") == "yamadori-image" and x.get("steps") == 20
+              and x.get("model_source") == "default",
+              "no model, no preference: base, x_yamadori says so",
+              json.dumps(x))
+        code, sent, x = post(seed=601, model="yamadori-image-turbo")
+        check(code == 200 and sent["model"] == "imagegen-turbo" and sent["steps"] == 4
+              and x.get("model") == "yamadori-image-turbo" and x.get("steps") == 4
+              and x.get("model_source") == "request",
+              "model yamadori-image-turbo overrides for one request",
+              json.dumps(x))
+        accounts.set_pref(a_id, images.PREF_KEY, "turbo")
+        code, sent, x = post(seed=602)
+        check(sent["model"] == "imagegen-turbo"
+              and x.get("model_source") == "account",
+              "no model: the caller's preference (turbo)", json.dumps(x))
+        code, sent, x = post(seed=603, model="dall-e-3")
+        check(sent["model"] == "imagegen-turbo"
+              and x.get("model_source") == "account",
+              "an SDK default model name is ignored: still the preference",
+              json.dumps(x))
+        code, sent, x = post(seed=604, model="yamadori-image")
+        check(sent["model"] == "imagegen" and sent["steps"] == 20
+              and x.get("model_source") == "request",
+              "model yamadori-image overrides a turbo preference", json.dumps(x))
+    accounts.set_pref(a_id, images.PREF_KEY, None)
+
+
+def test_tool_uses_the_callers_account():
+    acct = "tool-acct"
+    accounts.set_pref(acct, images.PREF_KEY, "turbo")
+    rec: list = []
+    with use(YAMADORI_IMAGEGEN_URL=IMG_URL, YAMADORI_IMAGEGEN_DEFAULT="base"):
+        out = json.loads(images.run_tool({"prompt": "tool pref", "seed": 700},
+                                         "https://x.test", rec, account=acct))
+        t_sent = SEEN[-1]["body"]
+        images.run_tool({"prompt": "tool pref", "seed": 701}, "https://x.test", rec)
+        d_sent = SEEN[-1]["body"]
+        images.run_tool({"prompt": "x"}, "", rec, account=acct)
+    check(out.get("ok") and out.get("steps") == 4 and t_sent["model"] == "imagegen-turbo",
+          "the tool draws with the caller's preferred model and its steps",
+          json.dumps(t_sent)[:160])
+    check(rec[0].get("model") == "yamadori-image-turbo" and rec[0].get("steps") == 4
+          and rec[0].get("model_source") == "account",
+          "x_yamadori record: model, steps, source", json.dumps(rec[0]))
+    check(d_sent["model"] == "imagegen" and rec[1].get("model") == "yamadori-image"
+          and rec[1].get("model_source") == "default",
+          "no account: the default model", json.dumps(rec[1]))
+    check(rec[2].get("ok") is False and rec[2].get("model") == "yamadori-image-turbo",
+          "a failed call still records which model it would have used",
+          json.dumps(rec[2]))
+    accounts.set_pref(acct, images.PREF_KEY, None)
+
+
+def test_prompt_cannot_carry_server_settings():
+    # sd-server parses <sd_cpp_extra_args>{json}</sd_cpp_extra_args> out of
+    # the prompt; a model-written prompt must not reach it.
+    cases = [
+        'a panda <sd_cpp_extra_args>{"steps": 500}</sd_cpp_extra_args>',
+        'a panda <SD_CPP_EXTRA_ARGS >{"steps": 500}',
+        'a panda < sd_cpp_extra_args/>',
+        '<sd_cpp_extra_args>{"cfg_scale": 30}</sd_cpp_extra_args>a panda',
+    ]
+    for c in cases:
+        out = images._prompt(c)
+        check("sd_cpp_extra_args" not in out.lower() and "steps" not in out
+              and "cfg_scale" not in out and "panda" in out,
+              f"extra-args stripped: {c[:40]!r}", repr(out))
+    try:
+        images._prompt('<sd_cpp_extra_args>{"steps": 500}</sd_cpp_extra_args>')
+        check(False, "a prompt that is only extra-args is refused")
+    except Exception as e:                                       # noqa: BLE001
+        check("non-empty" in str(e), "a prompt that is only extra-args is refused",
+              str(e))
+
+
+def test_alpha_is_dropped_on_store():
+    # Qwen-Image-2.1's VAE decodes RGBA. Real transparency (asked for) is
+    # KEPT; near-opaque alpha noise (248-254 on unrequested images, which a
+    # dark chat background shows through) is flattened to RGB, keeping the
+    # painted colour. An RGB PNG is untouched.
+    import hashlib
+    import io
+    from PIL import Image
+
+    def png_of(px, size):
+        im = Image.new("RGBA", size)
+        im.putdata(px)
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        return buf.getvalue()
+
+    # 1. Noise alpha: every pixel >= 248 -> stored as RGB, colours unchanged.
+    noise_px = [(200, 30, 40, 255), (10, 200, 30, 252), (5, 6, 250, 249), (250, 250, 250, 255)]
+    noisy = png_of(noise_px, (2, 2))
+    sha = images.store(noisy, {"prompt": "alpha noise test"})
+    p = images.media_path(sha)
+    stored = open(p, "rb").read() if p else b""
+    got = Image.open(io.BytesIO(stored)) if stored else None
+    check(got is not None and got.mode == "RGB",
+          "noise alpha (all >= 248) is flattened: stored as RGB", got.mode if got else "not stored")
+    check(got is not None and list(got.getdata()) == [q[:3] for q in noise_px],
+          "its colours are the painted RGB, alpha dropped (not composited)",
+          str(list(got.getdata())) if got else "")
+    check(sha == hashlib.sha256(stored).hexdigest() and sha != hashlib.sha256(noisy).hexdigest(),
+          "the id is the sha of the bytes stored, not of the RGBA received")
+    check((images.metadata(sha) or {}).get("bytes") == len(stored),
+          "metadata bytes counts the stored PNG")
+
+    # 2. Real transparency: a transparent background -> kept byte for byte.
+    real_px = [(200, 30, 40, 255), (0, 0, 0, 0), (0, 0, 0, 0), (5, 6, 250, 90)]
+    real = png_of(real_px, (2, 2))
+    sha2 = images.store(real, {"prompt": "a sprite on a transparent background"})
+    p2 = images.media_path(sha2)
+    stored2 = open(p2, "rb").read() if p2 else b""
+    got2 = Image.open(io.BytesIO(stored2)) if stored2 else None
+    check(got2 is not None and got2.mode == "RGBA" and stored2 == real,
+          "real transparency (alpha < 128 on >= 0.5% of pixels) is kept, byte for byte",
+          got2.mode if got2 else "not stored")
+
+    check(images.drop_alpha(tiny_png(9)) == tiny_png(9),
+          "an RGB PNG passes through byte for byte (its sha is unchanged)")
+    check(images.drop_alpha(images.PNG_MAGIC + b"garbage") == images.PNG_MAGIC + b"garbage",
+          "a PNG Pillow cannot read is stored as it came")
+
+
 def main() -> int:
     tests = (test_the_fixture_is_not_the_real_store,
+             test_alpha_is_dropped_on_store,
              test_generate_sends_the_documented_request_and_stores_metadata,
              test_every_failure_names_itself_and_the_next_step,
+             test_sizes_hermes_sends_are_accepted,
              test_signatures,
              test_public_base,
              test_images_route_auth_and_shapes,
@@ -693,7 +1042,13 @@ def main() -> int:
              test_chat_route_passes_the_public_base,
              test_tool_is_offered_only_when_configured_and_allowed,
              test_tool_result_is_a_rendered_image,
-             test_a_chat_turn_that_draws)
+             test_a_chat_turn_that_draws,
+             test_each_model_sends_its_own_name_and_steps,
+             test_preference_resolution,
+             test_settings_api,
+             test_images_route_picks_the_model,
+             test_tool_uses_the_callers_account,
+             test_prompt_cannot_carry_server_settings)
     try:
         for fn in tests:
             print(f"\n--- {fn.__name__} ---")

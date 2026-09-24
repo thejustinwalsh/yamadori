@@ -1,0 +1,128 @@
+
+## held-out route_in, n=120 (45 investigate), hard n=28
+
+investigate-vs-not:
+  laya_head                                        80/120 (0.667, 95% CI 0.575-0.750)   hard 11/28
+  rule                                             73/120 (0.608, 95% CI 0.515-0.696)   hard 18/28
+  selection                                        91/120 (0.758, 95% CI 0.672-0.832)   hard 19/28
+  selection+laya                                   92/120 (0.767, 95% CI 0.681-0.839)   hard 14/28
+  selection_recorded_0922                          89/120 (0.742, 95% CI 0.654-0.817)   hard 18/28
+  E1_embed_head                                    104/120 (0.867, 95% CI 0.793-0.922)   hard 22/28
+  selection+E1_embed_head                          99/120 (0.825, 95% CI 0.745-0.888)   hard 17/28
+  tev1_Q4_K_M_laya                                 104/120 (0.867, 95% CI 0.793-0.922)   hard 21/28
+  selection+tev1_Q4_K_M_laya                       96/120 (0.800, 95% CI 0.717-0.867)   hard 16/28
+  tev1_Q4_K_M_laya_constrained                     104/120 (0.867, 95% CI 0.793-0.922)   hard 21/28
+  tev1_Q4_K_M_held                                 108/120 (0.900, 95% CI 0.832-0.947)   hard 18/28
+  selection+tev1_Q4_K_M_held                       97/120 (0.808, 95% CI 0.726-0.874)   hard 14/28
+  tev1_Q4_K_M_held_constrained                     108/120 (0.900, 95% CI 0.832-0.947)   hard 18/28
+  tev1_Q4_K_M_laya_reversed                        90/120 (0.750, 95% CI 0.663-0.825)   hard 18/28
+  selection+tev1_Q4_K_M_laya_reversed              94/120 (0.783, 95% CI 0.699-0.853)   hard 15/28
+  tev1_Q4_K_M_laya_reversed_constrained            90/120 (0.750, 95% CI 0.663-0.825)   hard 18/28
+  tev1_Q8_0_laya                                   105/120 (0.875, 95% CI 0.802-0.928)   hard 21/28
+  selection+tev1_Q8_0_laya                         96/120 (0.800, 95% CI 0.717-0.867)   hard 16/28
+  tev1_Q8_0_laya_constrained                       105/120 (0.875, 95% CI 0.802-0.928)   hard 21/28
+  tev1_Q8_0_held                                   110/120 (0.917, 95% CI 0.852-0.959)   hard 20/28
+  selection+tev1_Q8_0_held                         99/120 (0.825, 95% CI 0.745-0.888)   hard 15/28
+  tev1_Q8_0_held_constrained                       110/120 (0.917, 95% CI 0.852-0.959)   hard 20/28
+  tev1_Q8_0_laya_reversed                          83/120 (0.692, 95% CI 0.601-0.773)   hard 16/28
+  selection+tev1_Q8_0_laya_reversed                92/120 (0.767, 95% CI 0.681-0.839)   hard 14/28
+  tev1_Q8_0_laya_reversed_constrained              83/120 (0.692, 95% CI 0.601-0.773)   hard 16/28
+
+3-way:
+  laya_head                                        66/120 (0.550, 95% CI 0.457-0.641)
+  rule                                             61/120 (0.508, 95% CI 0.416-0.601)
+  E1_embed_head                                    100/120 (0.833, 95% CI 0.754-0.895)
+  tev1_Q4_K_M_laya                                 104/120 (0.867, 95% CI 0.793-0.922)
+  tev1_Q4_K_M_laya_constrained                     104/120 (0.867, 95% CI 0.793-0.922)
+  tev1_Q4_K_M_held                                 106/120 (0.883, 95% CI 0.812-0.935)
+  tev1_Q4_K_M_held_constrained                     106/120 (0.883, 95% CI 0.812-0.935)
+  tev1_Q4_K_M_laya_reversed                        90/120 (0.750, 95% CI 0.663-0.825)
+  tev1_Q4_K_M_laya_reversed_constrained            90/120 (0.750, 95% CI 0.663-0.825)
+  tev1_Q8_0_laya                                   105/120 (0.875, 95% CI 0.802-0.928)
+  tev1_Q8_0_laya_constrained                       105/120 (0.875, 95% CI 0.802-0.928)
+  tev1_Q8_0_held                                   106/120 (0.883, 95% CI 0.812-0.935)
+  tev1_Q8_0_held_constrained                       106/120 (0.883, 95% CI 0.812-0.935)
+  tev1_Q8_0_laya_reversed                          83/120 (0.692, 95% CI 0.601-0.773)
+  tev1_Q8_0_laya_reversed_constrained              83/120 (0.692, 95% CI 0.601-0.773)
+  tev1_Q4_K_M_laya: invalid 0, dist {'investigate': 55, 'answer_directly': 42, 'clarify': 23}, missed 3, unneeded 13
+  tev1_Q4_K_M_held: invalid 0, dist {'investigate': 57, 'answer_directly': 37, 'clarify': 26}, missed 0, unneeded 12
+  tev1_Q4_K_M_laya_reversed: invalid 0, dist {'investigate': 73, 'answer_directly': 37, 'clarify': 10}, missed 1, unneeded 29
+  tev1_Q8_0_laya: invalid 0, dist {'investigate': 54, 'answer_directly': 43, 'clarify': 23}, missed 3, unneeded 12
+  tev1_Q8_0_held: invalid 0, dist {'investigate': 55, 'answer_directly': 37, 'clarify': 28}, missed 0, unneeded 10
+  tev1_Q8_0_laya_reversed: invalid 0, dist {'investigate': 82, 'answer_directly': 35, 'clarify': 3}, missed 0, unneeded 37
+
+selection + second signal (disagreement escalates):
+  selection+laya                           92/120  missed 10  unneeded 18  flipped-to-investigate 17
+  selection+E1_embed_head                  99/120  missed 8  unneeded 13  flipped-to-investigate 14
+  selection+tev1_Q4_K_M_laya               96/120  missed 8  unneeded 16  flipped-to-investigate 17
+  selection+tev1_Q4_K_M_held               97/120  missed 7  unneeded 16  flipped-to-investigate 18
+  selection+tev1_Q4_K_M_laya_reversed      94/120  missed 7  unneeded 19  flipped-to-investigate 21
+  selection+tev1_Q8_0_laya                 96/120  missed 8  unneeded 16  flipped-to-investigate 17
+  selection+tev1_Q8_0_held                 99/120  missed 7  unneeded 14  flipped-to-investigate 16
+  selection+tev1_Q8_0_laya_reversed        92/120  missed 7  unneeded 21  flipped-to-investigate 23
+
+paired exact McNemar, investigate-vs-not (a_only = first right, second wrong):
+  laya_head      vs tev1_Q4_K_M_laya                     laya_head-only  10  tev1-only  34  n_disc  44  p = 0.0003881
+  rule           vs tev1_Q4_K_M_laya                     rule-only  13  tev1-only  44  n_disc  57  p = 4.71e-05
+  selection      vs tev1_Q4_K_M_laya                     selection-only  12  tev1-only  25  n_disc  37  p = 0.04703
+  E1_embed_head  vs tev1_Q4_K_M_laya                     E1_embed_head-only  13  tev1-only  13  n_disc  26  p = 1
+  selection+laya vs selection+tev1_Q4_K_M_laya           a-only   4  b-only   8  p = 0.3877
+  laya_head      vs tev1_Q4_K_M_held                     laya_head-only   6  tev1-only  34  n_disc  40  p = 8.365e-06
+  rule           vs tev1_Q4_K_M_held                     rule-only  12  tev1-only  47  n_disc  59  p = 5.126e-06
+  selection      vs tev1_Q4_K_M_held                     selection-only   9  tev1-only  26  n_disc  35  p = 0.005988
+  E1_embed_head  vs tev1_Q4_K_M_held                     E1_embed_head-only  10  tev1-only  14  n_disc  24  p = 0.5413
+  selection+laya vs selection+tev1_Q4_K_M_held           a-only   1  b-only   6  p = 0.125
+  laya_head      vs tev1_Q4_K_M_laya_reversed            laya_head-only  20  tev1-only  30  n_disc  50  p = 0.2026
+  rule           vs tev1_Q4_K_M_laya_reversed            rule-only  29  tev1-only  46  n_disc  75  p = 0.06395
+  selection      vs tev1_Q4_K_M_laya_reversed            selection-only  27  tev1-only  26  n_disc  53  p = 1
+  E1_embed_head  vs tev1_Q4_K_M_laya_reversed            E1_embed_head-only  26  tev1-only  12  n_disc  38  p = 0.03355
+  selection+laya vs selection+tev1_Q4_K_M_laya_reversed  a-only   3  b-only   5  p = 0.7266
+  laya_head      vs tev1_Q8_0_laya                       laya_head-only   8  tev1-only  33  n_disc  41  p = 0.0001122
+  rule           vs tev1_Q8_0_laya                       rule-only  12  tev1-only  44  n_disc  56  p = 2.088e-05
+  selection      vs tev1_Q8_0_laya                       selection-only  12  tev1-only  26  n_disc  38  p = 0.03355
+  E1_embed_head  vs tev1_Q8_0_laya                       E1_embed_head-only  13  tev1-only  14  n_disc  27  p = 1
+  selection+laya vs selection+tev1_Q8_0_laya             a-only   3  b-only   7  p = 0.3438
+  laya_head      vs tev1_Q8_0_held                       laya_head-only   6  tev1-only  36  n_disc  42  p = 2.829e-06
+  rule           vs tev1_Q8_0_held                       rule-only  10  tev1-only  47  n_disc  57  p = 7.513e-07
+  selection      vs tev1_Q8_0_held                       selection-only   8  tev1-only  27  n_disc  35  p = 0.001878
+  E1_embed_head  vs tev1_Q8_0_held                       E1_embed_head-only   8  tev1-only  14  n_disc  22  p = 0.2863
+  selection+laya vs selection+tev1_Q8_0_held             a-only   1  b-only   8  p = 0.03906
+  laya_head      vs tev1_Q8_0_laya_reversed              laya_head-only  27  tev1-only  30  n_disc  57  p = 0.7914
+  rule           vs tev1_Q8_0_laya_reversed              rule-only  37  tev1-only  47  n_disc  84  p = 0.3261
+  selection      vs tev1_Q8_0_laya_reversed              selection-only  34  tev1-only  26  n_disc  60  p = 0.3663
+  E1_embed_head  vs tev1_Q8_0_laya_reversed              E1_embed_head-only  33  tev1-only  12  n_disc  45  p = 0.002459
+  selection+laya vs selection+tev1_Q8_0_laya_reversed    a-only   4  b-only   4  p = 1
+  laya_head vs E1_embed_head: laya-only 7 e1-only 31 p = 0.0001162
+
+option-order spread (investigate-vs-not per order; six orders):
+  Q4_K_M laya: orders 6  binary per order [104, 102, 107, 79, 94, 90]  (min 79, mean 96.0, max 107)  3-way [104, 98, 107, 79, 93, 90]  all orders agree on 83/120  majority vote 99/120 [vs laya p=0.00794 (14/33), vs E1 p=0.473 (18/13)]
+      worst order (laya_order3) vs laya_head: p=1 (30/29)
+  Q4_K_M held: orders 6  binary per order [108, 104, 113, 82, 102, 86]  (min 82, mean 99.2, max 113)  3-way [106, 103, 110, 82, 102, 86]  all orders agree on 84/120  majority vote 105/120 [vs laya p=0.00017 (9/34), vs E1 p=1 (13/14)]
+      worst order (held_order3) vs laya_head: p=0.899 (30/32)
+  Q8_0 laya: orders 6  binary per order [105, 100, 105, 79, 92, 83]  (min 79, mean 94.0, max 105)  3-way [105, 99, 105, 79, 92, 83]  all orders agree on 82/120  majority vote 98/120 [vs laya p=0.0114 (14/32), vs E1 p=0.377 (19/13)]
+      worst order (laya_order3) vs laya_head: p=1 (28/27)
+  Q8_0 held: orders 6  binary per order [110, 108, 115, 83, 100, 84]  (min 83, mean 100.0, max 115)  3-way [106, 107, 111, 83, 100, 84]  all orders agree on 82/120  majority vote 105/120 [vs laya p=0.00017 (9/34), vs E1 p=1 (13/14)]
+      worst order (held_order3) vs laya_head: p=0.798 (29/32)
+  quant agreement laya: Q4_K_M vs Q8_0 same key 115/120
+  quant agreement held: Q4_K_M vs Q8_0 same key 112/120
+  quant agreement laya_reversed: Q4_K_M vs Q8_0 same key 111/120
+  quant agreement laya_order1: Q4_K_M vs Q8_0 same key 112/120
+  quant agreement laya_order2: Q4_K_M vs Q8_0 same key 116/120
+  quant agreement laya_order3: Q4_K_M vs Q8_0 same key 114/120
+  quant agreement laya_order4: Q4_K_M vs Q8_0 same key 115/120
+  quant agreement held_order1: Q4_K_M vs Q8_0 same key 116/120
+  quant agreement held_order2: Q4_K_M vs Q8_0 same key 115/120
+  quant agreement held_order3: Q4_K_M vs Q8_0 same key 119/120
+  quant agreement held_order4: Q4_K_M vs Q8_0 same key 116/120
+  quant agreement held_order5: Q4_K_M vs Q8_0 same key 116/120
+
+## route classes Q4_K_M, n=1024 (in-sample for the router's rules, not for Tev1)
+  router (mcp/route.py)            981/1024 (0.958, 95% CI 0.944-0.969)
+  tev1 text   722/1024 (0.705, 95% CI 0.676-0.733)  invalid 4  misroutes->code 105  code missed 2  McNemar router-only 271 tev1-only 12 p=5.85e-65
+    {'utility': 'R 8/43 P 8/8', 'agent_step': 'R 273/377 P 273/305', 'code_edit': 'R 15/160 P 15/105', 'code_generation': 'R 223/225 P 223/386', 'library_question': 'R 51/60 P 51/51', 'prose': 'R 152/159 P 152/165'}
+    by producer: {'bench_or_probe': '440/620 (router 580)', 'hermes': '155/196 (router 194)', 'other_agent': '2/8 (router 7)', 'swe_agent': '125/200 (router 200)'}
+    user-speaking only: tev1 463/677, router 634/677
+  tev1 facts  781/1024 (0.763, 95% CI 0.735-0.788)  invalid 8  misroutes->code 43  code missed 2  McNemar router-only 212 tev1-only 12 p=1.94e-48
+    {'utility': 'R 4/43 P 4/4', 'agent_step': 'R 338/377 P 338/371', 'code_edit': 'R 11/160 P 11/39', 'code_generation': 'R 223/225 P 223/390', 'library_question': 'R 57/60 P 57/57', 'prose': 'R 148/159 P 148/155'}
+    by producer: {'bench_or_probe': '438/620 (router 580)', 'hermes': '151/196 (router 194)', 'other_agent': '2/8 (router 7)', 'swe_agent': '190/200 (router 200)'}
+    user-speaking only: tev1 457/677, router 634/677

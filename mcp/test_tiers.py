@@ -64,8 +64,8 @@ def test_the_fixture_uses_the_shipped_settings():
 def test_every_spelling_resolves():
     cases = {"none": "minimal", "off": "minimal", "minimal": "minimal",
              "low": "low", "LO": "low", " medium ": "medium", "": "medium",
-             "default": "medium", "High": "high", "xhigh": "max",
-             "x-high": "max", "ultra": "max", "max": "max",
+             "default": "medium", "High": "high", "xhigh": "xhigh",
+             "x-high": "xhigh", "ultra": "max", "max": "max",
              "banana": "medium", None: "medium", 7: "medium"}
     for sent, want in cases.items():
         got = tiers.resolve({"reasoning_effort": sent})["name"]
@@ -134,6 +134,11 @@ def test_the_template_never_sees_an_effort_it_rejects():
     ok = set(tiers.FALLBACK_EFFORTS)
     for n in tiers.ORDER:
         body = tiers.apply({}, tiers.resolve({"reasoning_effort": n}))
+        if not tiers.TIERS[n]["thinks"]:
+            check("reasoning_effort" not in body,
+                  f"tier {n} (thinking off) sends no effort at all",
+                  str(body.get("reasoning_effort")))
+            continue
         check(body.get("reasoning_effort") in ok,
               f"tier {n} sends an accepted effort", str(body.get("reasoning_effort")))
     # `high` was an instant 500 on the served template; it rounds UP.
@@ -267,6 +272,8 @@ def test_the_answer_allowance_is_added_to_the_thinking_breaker():
 
     # --- apply(): every tier, its own prompt, role and share -------------
     for name in tiers.ORDER:
+        if not tiers.TIERS[name]["thinks"]:
+            continue    # thinking off: the answer allowance only, tested below
         out = tiers.apply({}, tiers.resolve({"reasoning_effort": name}))
         check(out["max_tokens"] == MAIN
               and out.get("reasoning_budget_tokens") == MAIN - A
@@ -356,10 +363,35 @@ def test_apply_does_not_mutate_its_input():
           json.dumps(body))
 
 
-def test_thinking_is_on_in_every_tier_and_off_only_by_override():
-    check(all(tiers.TIERS[n]["thinks"] for n in tiers.ORDER),
-          "no tier switches the model's own thinking off (the baseline is the "
-          "model as it ships)")
+def test_thinking_is_off_only_at_minimal():
+    # Operator, 2026-09-23: `minimal` is thinking off with the vendor's
+    # instruct sampling; every other tier thinks. `low` is the baseline.
+    check([n for n in tiers.ORDER if not tiers.TIERS[n]["thinks"]] == ["minimal"],
+          "only `minimal` switches thinking off",
+          str([n for n in tiers.ORDER if not tiers.TIERS[n]["thinks"]]))
+    m = tiers.apply({"max_tokens": 500, "temperature": 1.0},
+                    tiers.resolve({"reasoning_effort": "minimal"}))
+    check(m.get("chat_template_kwargs", {}).get("enable_thinking") is False
+          and m["enable_thinking"] is False and "reasoning_effort" not in m
+          and "reasoning_budget_tokens" not in m and m["max_tokens"] == tiers.A_MIN,
+          "minimal: the TEMPLATE is told thinking is off (chat_template_kwargs), "
+          "no effort, no thinking budget, the answer allowance only",
+          json.dumps({k: m.get(k) for k in ("chat_template_kwargs",
+                      "enable_thinking", "max_tokens")}))
+    check(all(m.get(k) == v for k, v in tiers.VENDOR_SAMPLING_INSTRUCT.items()),
+          "minimal: the vendor's instruct sampling, overriding the client's",
+          json.dumps({k: m.get(k) for k in tiers.VENDOR_SAMPLING_INSTRUCT}))
+    lo = tiers.apply({}, tiers.resolve({"reasoning_effort": "low"}))
+    check(lo.get("chat_template_kwargs", {}).get("enable_thinking") is True
+          and lo.get("reasoning_effort") == "medium",
+          "low: thinking on at medium, told to the template",
+          json.dumps({k: lo.get(k) for k in ("chat_template_kwargs",
+                      "reasoning_effort")}))
+    t = tiers.TIERS["low"]
+    check(not any(t[k] for k in ("retrieval", "hints", "investigate",
+                                 "check_code", "repair")) and t["fanout"] == 1
+          and tiers.TIERS["minimal"]["fanout"] == 1,
+          "low: none of our augmentation; neither low nor minimal fans out")
     t = tiers.resolve({"reasoning_effort": "low"}, overrides={"thinks": False})
     body = tiers.apply({"reasoning_effort": "low"}, t)
     check(body["enable_thinking"] is False and "reasoning_effort" not in body,
@@ -376,7 +408,7 @@ def test_resolve_returns_a_copy():
 
 def test_overrides_break_the_bundle_and_say_so():
     t = tiers.resolve({"reasoning_effort": "high"}, overrides={"fanout": 1})
-    check(t["fanout"] == 1 and t["hints"] is True and t["effort"] == "high",
+    check(t["fanout"] == 1 and t["hints"] is True and t["effort"] == "medium",
           "only the overridden field changes", json.dumps(t)[:160])
     check(t["overridden"] == ["fanout"], "and the tier records what was overridden")
     check("overridden" not in tiers.resolve({"reasoning_effort": "high"}),
@@ -434,8 +466,65 @@ def test_the_self_test_runs():
     check("factorial arm" in r.stdout, "and prints its last line")
 
 
+def test_vendor_sampling_is_enforced():
+    """2026-09-23: the vendor's sampling is written by apply() for every
+    request, over whatever the client sent, and recorded."""
+    t = tiers.resolve({"reasoning_effort": "medium"})
+    for client_temp in (0.0, 0.3):
+        out = tiers.apply({"messages": [], "temperature": client_temp,
+                           "top_p": 0.95}, t)
+        check(out["temperature"] == 1.0 and out["top_p"] == 0.95
+              and out["top_k"] == 20 and out["min_p"] == 0.0
+              and out["presence_penalty"] == 0.0
+              and out["repeat_penalty"] == 1.0,
+              f"client temperature {client_temp} -> the vendor's 1.0 and "
+              f"the rest of the thinking-mode card",
+              json.dumps({k: out.get(k) for k in tiers.VENDOR_SAMPLING}))
+        rec = out.get("_sampling") or {}
+        check(rec.get("client_overridden") == {"temperature": client_temp},
+              "the client's value is reported in client_overridden, and a "
+              "value that already matched is not", json.dumps(rec))
+        check(rec.get("enforced") == tiers.VENDOR_SAMPLING,
+              "and what was enforced is recorded", json.dumps(rec))
+    out = tiers.apply({"messages": []}, t)
+    check(out["_sampling"]["client_overridden"] == {},
+          "a client that sent nothing has nothing overridden")
+    off = dict(t, thinks=False)
+    out = tiers.apply({"messages": [], "temperature": 1.0}, off)
+    check(out["temperature"] == 0.7 and out["top_p"] == 0.80
+          and out["presence_penalty"] == 1.5,
+          "a non-thinking request gets the card's instruct values",
+          json.dumps({k: out.get(k) for k in tiers.VENDOR_SAMPLING}))
+    import model
+    shaped = model.shape({"messages": [], "temperature": 0.2}, "low")
+    check(all(shaped[k] == v for k, v in tiers.VENDOR_SAMPLING.items())
+          and shaped["_sampling"]["client_overridden"] == {"temperature": 0.2},
+          "internal model.ask/chat calls get the same values (one door)",
+          json.dumps({k: shaped.get(k) for k in tiers.VENDOR_SAMPLING}))
+    body = {"messages": [], "temperature": 0.0}
+    tiers.apply(body, t)
+    check(body == {"messages": [], "temperature": 0.0},
+          "the caller's body is not mutated")
+
+
+def test_generic_client_spellings():
+    # OpenRouter's object form picks the tier like reasoning_effort.
+    check(tiers.resolve({"reasoning": {"effort": "high"}})["name"] == "high",
+          "reasoning.effort picks the tier")
+    check(tiers.resolve({"reasoning_effort": "low",
+                         "reasoning": {"effort": "max"}})["name"] == "low",
+          "an explicit reasoning_effort wins over the object form")
+    # max_completion_tokens is read as the answer allowance and never passed on.
+    t = tiers.resolve({"reasoning_effort": "low"})
+    a = tiers.apply({"max_completion_tokens": 5000}, t)
+    b = tiers.apply({"max_tokens": 5000}, t)
+    check("max_completion_tokens" not in a and a["max_tokens"] == b["max_tokens"],
+          "max_completion_tokens is the answer allowance and is not sent upstream",
+          json.dumps({k: a.get(k) for k in ("max_tokens", "max_completion_tokens")}))
+
 def main() -> int:
-    for fn in (test_the_fixture_uses_the_shipped_settings,
+    for fn in (test_generic_client_spellings, test_vendor_sampling_is_enforced,
+               test_the_fixture_uses_the_shipped_settings,
                test_every_spelling_resolves,
                test_every_alias_lands_on_a_real_tier,
                test_the_ceiling_caps_the_request,
@@ -443,7 +532,7 @@ def main() -> int:
                test_the_template_never_sees_an_effort_it_rejects,
                test_the_answer_allowance_is_added_to_the_thinking_breaker,
                test_apply_does_not_mutate_its_input,
-               test_thinking_is_on_in_every_tier_and_off_only_by_override,
+               test_thinking_is_off_only_at_minimal,
                test_resolve_returns_a_copy,
                test_overrides_break_the_bundle_and_say_so,
                test_the_feature_header_is_parsed_defensively,

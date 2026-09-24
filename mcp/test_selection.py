@@ -8,9 +8,14 @@ WHAT THIS IS GATING -- docs/SELECTION-BUILD.md section 4, steps 3-5
      (bench/data/rule_baseline_golden.json), are reproduced exactly, and no
      second definition exists anywhere.
   2. REAL INPUT (PROTOCOL rule 7). Deep thinking is withheld on all 342
-     LiveCodeBench prompts and fires on all 26 hand-written three.js
-     questions in bench/context_economy_tasks.jsonl -- decided against the
-     real package store, the way the proxy decides.
+     LiveCodeBench prompts and fires on 25 of the 26 hand-written three.js
+     questions in bench/context_economy_tasks.jsonl (ce05 names no symbol;
+     see test_real_prompts) -- decided against the real package store, the
+     way the proxy decides.
+  5. AN AGENT HARNESS ACTING LOCALLY (2026-09-23). A Hermes-shaped request
+     -- the client's own tools, "start this project in ~/Developer/x", a
+     pasted spec -- gets neither deep thinking nor fan-out, and plain
+     English words (API, MOUSE, POINT, Event) are not held symbols.
   3. TWO SIGNALS, DISAGREEMENT ESCALATES. The 2x2 of rule x Laya, through a
      stub /route over real HTTP; Laya down is None, never a guess.
   4. THE TIER BOUNDS, THE HEADER FORCES. Nothing fires above the tier; a
@@ -215,7 +220,9 @@ def test_real_prompts():
     check(n == 342 and fired == 0,
           f"deep thinking withheld on all {n} LiveCodeBench prompts at max",
           ", ".join(wrong[:6]))
-    check(fanned == 0, "and none of them is fanned out", str(fanned))
+    # Operator decision 2026-09-23: code-writing tasks fan out at high/max.
+    check(fanned == n, f"and all {n} are fanned out as code-writing tasks",
+          str(fanned))
 
     n = fired = 0
     wrong = []
@@ -230,9 +237,19 @@ def test_real_prompts():
             fired += d["investigate"]
             if not d["investigate"]:
                 wrong.append(f"{row['id']}: {d['because']['investigate'][:60]}")
-    check(n == 26 and fired == 26,
-          f"deep thinking fires on all {n} context-economy three.js questions "
-          f"(rule alone, Laya absent)", "; ".join(wrong[:3]))
+    # CHANGED 2026-09-23, 26 -> 25, and reported rather than hidden: ce05
+    # ("Two functions in the TSL packing utilities were renamed...") names no
+    # symbol at all. It fired only because the ALLCAPS word "TSL" matched a
+    # `TSL` namespace declaration -- the package's NAME read as a symbol --
+    # which is the same mechanism that sent "MOUSE" and "API" into deep
+    # thinking. Without that, the rule alone says answer_directly; the gate
+    # still offers the tools (NAMES_HELD_SOURCE), and a live Laya that says
+    # investigate still escalates it.
+    check(n == 26 and fired == 25 and len(wrong) == 1
+          and wrong[0].startswith("ce05"),
+          f"deep thinking fires on 25 of {n} context-economy three.js "
+          f"questions (rule alone, Laya absent); ce05 names no symbol",
+          "; ".join(wrong[:3]))
 
 
 def test_backticked_words_count_against_the_named_package_only():
@@ -299,18 +316,223 @@ def test_the_symbol_lookup_is_the_hard_slice_check():
         "Where is it. For each item the renderer's Pipelines module and "
         "`label()` use REVISION and PMREMGenerator, into a Zero Array")
     check({"label", "PMREMGenerator"} <= set(code)
-          and {"Pipelines", "REVISION"} <= set(words),
+          and {"Pipelines"} <= set(words),
           "probe: backticks and internal capitals are code-shaped; a "
-          "capitalised code noun and ALLCAPS are English-shaped",
+          "capitalised code noun is English-shaped",
           f"{code} / {words}")
-    check(not {"Where", "For", "Zero", "Array"} & set(code + words),
-          "sentence-initial words and a capitalised word that is not used "
-          "as a code noun are not probed", f"{code} / {words}")
+    # CHANGED 2026-09-23: a bare ALLCAPS word is no longer probed. It was,
+    # and "MOUSE" / "API" in a pasted spec matched three and wgpu-matrix.
+    check(not {"Where", "For", "Zero", "Array", "REVISION"} & set(code + words),
+          "sentence-initial words, a capitalised word not used as a code "
+          "noun, and a bare ALLCAPS word are not probed", f"{code} / {words}")
+    code, words = selection.split_probe_tokens(
+        "What is `REVISION`, and what does THREE.MOUSE.LEFT map to?")
+    plain = selection.backticked_plain_words(
+        "What is `REVISION`, and what does THREE.MOUSE.LEFT map to?")
+    check("REVISION" in code and {"MOUSE", "LEFT"} <= set(plain),
+          "ALLCAPS in code context still counts: backticked (every table), "
+          "in identifier syntax (the named package only)",
+          f"{code} / {words} / {plain}")
     q = "Return true if nums can become a Zero Array after the Group step"
     d = selection.decide(user(q), t, OPEN, dbs=dbs)
     check(not d["signals"]["held_symbols"],
           "prose capitals from a puzzle match nothing (typegpu defines Array, "
           "three defines Group)", str(d["signals"]["held_symbols"]))
+
+
+# ---------------------------------------------------------------------------
+# THE HARNESS REPLAY (2026-09-23). Built from what Hermes actually sent:
+# index/corpus.sqlite3 events 3396 and 3398 (system-prompt head, tool list,
+# the first 2,000 characters of the user turn). The logged turn is cut at
+# 2,000 characters, so the spec below is the captured head plus a short
+# tail written in the same style carrying the words the live log matched
+# (MOUSE, API) and two more of the same kind (POINT, Event).
+# ---------------------------------------------------------------------------
+HERMES_SYSTEM = (
+    "You are Hermes Agent, built by Nous Research. Be direct: match the "
+    "length of your reply to the weight of the ask. ... The `hermes-agent` "
+    "skill has the actual commands and proven workflows -- load it with "
+    "skill_view(name='hermes-agent') before configuring, modifying, or ...")
+# Hermes's own tools from the logged list (ours removed, as proxy.prepare
+# removes them before selection sees the list).
+HERMES_TOOLS = ["browser_exec", "clarify", "delegate_task", "execute_code",
+                "memory", "patch", "read_file", "search_files", "skill_view",
+                "skills_list", "terminal", "web_extract", "web_search",
+                "write_file"]
+HERMES_SPEC = (
+    "```\n"
+    "build a space shooter game with vanilla JavaScript and canvas. no "
+    "libraries. no frameworks. multi-file project structure.\n\n"
+    "PROJECT STRUCTURE:\nspace-shooter/\n"
+    "  index.html          -- entry point, canvas setup, script imports\n"
+    "  js/\n    config.js         -- color palette, speeds, enemy stats\n"
+    "    game.js           -- main game loop, state machine, collision "
+    "detection, screen shake\n"
+    "    player.js         -- ship rendering, mouse tracking with lerp\n"
+    "    background.js     -- 4-layer parallax, a shader glow on the "
+    "nebula layer, render targets for bloom\n"
+    "    audio.js          -- Web Audio API procedural sounds (laser, "
+    "explosions, boss music)\n\n"
+    "CRITICAL IMPLEMENTATION DETAILS (do not skip these):\n\n"
+    "CANVAS SETUP:\n- in game.js init(), explicitly set canvas.width = "
+    "window.innerWidth\n- set ctx.imageSmoothingEnabled = false\n\n"
+    "MOUSE CONTROLS:\n- ship follows the MOUSE with lerp; left click fires; "
+    "each Event is read once per frame\n\n"
+    "SCORING:\n- every POINT popup floats up and fades\n```")
+
+
+def hermes_turn(instruction: str, attachment: str = HERMES_SPEC,
+                label: str = "Pasted content (8.8 KB)") -> list[dict]:
+    """A user turn in the exact layout event 3396 logged."""
+    head = f"@file:`.hermes/attachments/{label}`\n\n{instruction}"
+    body = (f"{head}\n\n--- Attached Context ---\n\n"
+            f"\U0001F4C4 @file:`.hermes/attachments/{label}` (2246 tokens)\n"
+            f"{attachment}")
+    return [{"role": "system", "content": HERMES_SYSTEM},
+            {"role": "user", "content": body}]
+
+
+def test_an_agent_harness_acting_locally():
+    import discover
+    cases = [
+        ("I want to start this project in ~/Developer/octopus-invaders", True),
+        ("Let's create octopus-invaders here in this local documents folder "
+         "in a subfolder called octopus-invaders.", True),
+        ("set up a vite + three.js app in ./demo", True),
+        ("Please scaffold a new Rust workspace", True),
+        ("install dependencies in ./demo and run the dev server", True),
+        ("How do I set up a vite + three.js app?", False),
+        ("In ~/work/scene/main.ts, why does renderAsync warn?", False),
+        ("Write a function that reads a file and returns its lines", False),
+        ("Why does `npm run build` fail in ./demo?", False),
+        ("Can you explain how to create a project with typegpu?", False),
+    ]
+    wrong = [f"{t!r} -> {selection.acts_locally(t)!r}" for t, want in cases
+             if bool(selection.acts_locally(t)) is not want]
+    check(not wrong, f"acts_locally: {len(cases)} requests and questions "
+          "classified", "; ".join(wrong))
+
+    whole = hermes_turn("I want to start this project in "
+                        "~/Developer/octopus-invaders")[1]["content"]
+    inst, att = selection.instruction_of(whole)
+    check(inst.rstrip().endswith("octopus-invaders") and "MOUSE" in att
+          and "MOUSE" not in inst,
+          "instruction_of splits the user's words from Hermes's attachment",
+          repr(inst[-60:]))
+    check(selection.instruction_of("plain question")[1] == "",
+          "a turn with no delimiter is read whole")
+
+    if not _real_store_ready():
+        return
+    t = tier("max")
+    dbs = selection.symbol_dbs()
+
+    def run(msgs, client_tools):
+        gate = domains.tool_admission(
+            msgs, None, discovered=discover.scan(msgs)["packages"])
+        return gate, selection.decide(msgs, t, gate, dbs=dbs,
+                                      laya_status="not consulted: offline test",
+                                      client_tools=client_tools)
+
+    # THE LIVE CASE.
+    msgs = hermes_turn("I want to start this project in "
+                       "~/Developer/octopus-invaders")
+    gate, d = run(msgs, HERMES_TOOLS)
+    check(d["investigate"] is False and d["fanout_n"] == 1,
+          "the live Hermes request: no deep thinking, no fan-out",
+          json.dumps(d["because"])[:300])
+    check("act on the user's machine" in d["because"]["investigate"]
+          and "act on the user's machine" in d["because"]["fanout"],
+          "and `because` says why, for both", d["because"]["investigate"][:200])
+    check(gate["offer"] and gate["situation"] == "DOMAIN_MATCHES_HELD_SOURCE",
+          "our tools stay offered (read-only, remote), for the reason the "
+          "live log gave", gate["situation"])
+    check(selection._CODE_TASK.search(msgs[1]["content"])
+          and not selection._CODE_TASK.search(
+              selection.instruction_of(msgs[1]["content"])[0]),
+          "the ``` Hermes wraps an attachment in is a code task only if the "
+          "attachment is read; the instruction is not one")
+    held = json.dumps(d["signals"]["held_symbols"])
+    check(not any(w in held for w in ("MOUSE", "API", "POINT", "Event")),
+          "no plain English word from the paste is a held symbol", held)
+
+    # FIX 1 ON ITS OWN: the same turn from a client with NO tools (a chat UI)
+    # is not an agent loop, so acts_locally does not apply -- and the paste's
+    # words still do not make it "about" a held library.
+    gate, d = run(msgs, None)
+    held = json.dumps(d["signals"]["held_symbols"])
+    check(d["signals"]["acts_locally"] is None and not d["investigate"],
+          "without client tools: no act-locally rule, and still no deep "
+          "thinking -- nothing in the instruction names a held symbol",
+          d["because"]["investigate"][:200] + " " + held)
+
+    # The whole spec as the instruction (no delimiter): the paste's words
+    # are read, and still none is a symbol, because none is in code context.
+    code, words = selection.split_probe_tokens(HERMES_SPEC)
+    plain = selection.backticked_plain_words(HERMES_SPEC)
+    probed = set(code) | set(words) | set(plain)
+    check(not {"MOUSE", "API", "POINT", "Event", "CANVAS", "SCORING"} & probed,
+          "a pasted spec's ALLCAPS headings and English words are not probed",
+          ", ".join(sorted(probed))[:200])
+    gate_syms = json.dumps(domains._symbols(
+        HERMES_SPEC, domains.held_sources(REAL_STORE)))
+    check(not any(w in gate_syms for w in ("MOUSE", "API", "POINT", "Event")),
+          "the tool gate's symbol probe does not match them either", gate_syms)
+
+    # Event 3398: a folder listing attached, "create ... in this folder".
+    msgs = hermes_turn("Let's create octopus-invaders here in this local "
+                       "documents folder in a subfolder called "
+                       "octopus-invaders.",
+                       attachment="Documents/\n- Codex/\n- Oaink/\n"
+                                  "  - package.json (28 lines)\n",
+                       label="Pasted content (8-2.8 KB)")
+    gate, d = run(msgs, HERMES_TOOLS)
+    check(not d["investigate"] and d["fanout_n"] == 1
+          and d["signals"]["acts_locally"],
+          "event 3398 (create a subfolder here): no deep thinking, no fan-out",
+          json.dumps(d["because"])[:200])
+
+    # A scaffold request that NAMES a held library, no attachment at all.
+    msgs = [{"role": "system", "content": HERMES_SYSTEM},
+            {"role": "user", "content": "set up a vite + three.js app in ./demo"}]
+    gate, d = run(msgs, HERMES_TOOLS)
+    check(gate["offer"] and gate["situation"] == "NAMES_HELD_SOURCE"
+          and not d["investigate"] and d["fanout_n"] == 1,
+          "'set up a vite + three.js app in ./demo': tools offered, no deep "
+          "thinking, no fan-out", gate["situation"] + " "
+          + d["because"]["investigate"][:160])
+
+    # A GENUINE library question that carries a local path: still a
+    # question, so the rule stays out of the way.
+    q = ("In ~/work/scene/main.ts I call `renderer.renderAsync()` on three "
+         "r185. What does the deprecation warning tell me to do instead?")
+    msgs = [{"role": "system", "content": HERMES_SYSTEM},
+            {"role": "user", "content": q}]
+    gate, d = run(msgs, HERMES_TOOLS)
+    check(d["signals"]["acts_locally"] is None and d["investigate"],
+          "a library question with a local path still investigates",
+          d["because"]["investigate"][:200])
+
+    # The header still forces: a benchmark arm that says "deep thinking on"
+    # means it, even for a local action.
+    msgs = hermes_turn("I want to start this project in ~/Developer/x")
+    d = selection.decide(msgs, tier("max", '{"investigate": true, "fanout": 3}'),
+                         domains.tool_admission(msgs, None), dbs=dbs,
+                         client_tools=HERMES_TOOLS)
+    check(d["investigate"] and d["fanout_n"] == 3,
+          "X-Yamadori-Features still forces both on (the experiment arm)",
+          json.dumps(d["because"])[:200])
+
+    # Laya is not asked when the act-locally rule decided.
+    ROUTE.clear()
+    _route_seen.clear()
+    msgs = hermes_turn("I want to start this project in ~/Developer/x")
+    d = selection.select(msgs, t, {"offer": True,
+                                   "situation": "NAMES_HELD_SOURCE"},
+                         laya_url=LAYA, client_tools=HERMES_TOOLS)
+    check(not d["investigate"] and not _route_seen,
+          "select(): the act-locally rule decides without a Laya call",
+          str(len(_route_seen)))
 
 
 RULE_YES = "Which retry policy does our proxy apply when the upstream returns a 503?"
@@ -425,6 +647,20 @@ def test_the_tier_bounds_and_the_header_forces():
               "high + a lookup: one answer")
         check(selection.decide(user(design), tier("medium"), OPEN)["fanout_n"] == 1,
               "medium + a design question: the tier allows one")
+        code = "Write a TypeScript function chunk<T>(xs: T[], n: number): T[][]."
+        fenced = "Fix this:\n```ts\nconst x: number = 'a'\n```"
+        prose = "Why is calling setState inside useFrame every frame a bad idea?"
+        check(selection.decide(user(code), tier("high"), OPEN)["fanout_n"] == 3,
+              "high + a code-writing task: fanned out to the tier's 3")
+        check(selection.decide(user(fenced), tier("max"), OPEN)["fanout_n"] == 3,
+              "max + a fenced snippet to fix: fanned out")
+        check(selection.decide(user(code), tier("medium"), OPEN)["fanout_n"] == 1,
+              "medium + a code-writing task: the tier allows one")
+        check(selection.decide(user(prose), tier("max"), OPEN)["fanout_n"] == 1,
+              "max + a conceptual question with API names: one answer")
+        check(selection.decide(user(code), tier("max", '{"fanout": 1}'),
+                               OPEN)["fanout_n"] == 1,
+              "the header still forces fan-out off on a code task")
         check(selection.decide(user(lookup), tier("high", '{"fanout": 3}'),
                                OPEN)["fanout_n"] == 3,
               "the header forces fan-out on a lookup")
@@ -456,6 +692,51 @@ def test_the_tier_bounds_and_the_header_forces():
                     worst.append(f"{effort}:{q[:20]}")
         check(not worst, "no decision exceeds its tier, any tier, any question",
               ", ".join(worst))
+    finally:
+        domains.PACKAGE_STORE = prev
+
+
+def test_the_proxy_path_decides_by_trigger_and_never_asks_laya():
+    """Phase 0.6 (docs/SELF-IMPROVEMENT-PLAN.md; operator, 2026-09-24): on
+    the proxy's path -- a route, and mcp/deep.py's trigger -- deep thinking
+    runs exactly when a trigger fired, on ANY route class, and Laya is not
+    consulted (a separate evaluation decides Laya vs Tev1). Every check
+    above is the LEGACY path (no route, no trigger), unchanged, which the
+    offline evaluators replay."""
+    prev = domains.PACKAGE_STORE
+    domains.PACKAGE_STORE = tempfile.mkdtemp(prefix="yamadori_sel_empty_")
+    try:
+        ROUTE.clear()
+        _route_seen.clear()
+        lib = {"class": "library_question", "because": "a question"}
+        none = {"fire": False, "kind": None, "because": "no trigger fired: "
+                "struggle 0/3; the model may call think_deeply"}
+        d = selection.select(user(RULE_YES), tier("max"), BOUND,
+                             laya_url=LAYA, route=lib, trigger=none)
+        check(d["investigate"] is False and not _route_seen
+              and d["because"]["investigate"].startswith("no trigger fired"),
+              "a library question the rule says investigate, with no "
+              "trigger: no deep thinking, and Laya is not asked",
+              d["because"]["investigate"])
+        kick = {"fire": True, "kind": "kickoff", "job": "plan",
+                "because": "task kickoff: spec ~2246 tokens (threshold 1500)"}
+        step = {"class": "agent_step", "because": "acts locally"}
+        d = selection.select(user("I want to start this project in "
+                                  "~/Developer/octopus-invaders"),
+                             tier("max"), None, laya_url=LAYA, route=step,
+                             trigger=kick,
+                             client_tools=["write_file", "terminal"])
+        check(d["investigate"] is True and not _route_seen
+              and d["signals"]["trigger"] == "kickoff",
+              "a kickoff on the agent path (acting locally, no gate) runs: "
+              "the old rule kept deep thinking off it",
+              d["because"]["investigate"])
+        d = selection.decide(user("go"), tier("xhigh"), None, route=step,
+                             trigger=dict(kick, kind="struggle"))
+        check(d["investigate"] is True,
+              "a fired trigger runs even on a turn too short to be a "
+              "question (the trigger states its own question)",
+              d["because"]["investigate"])
     finally:
         domains.PACKAGE_STORE = prev
 
@@ -501,8 +782,10 @@ def main() -> int:
                test_real_prompts,
                test_backticked_words_count_against_the_named_package_only,
                test_the_symbol_lookup_is_the_hard_slice_check,
+               test_an_agent_harness_acting_locally,
                test_two_signals_and_disagreement_escalates,
                test_the_tier_bounds_and_the_header_forces,
+               test_the_proxy_path_decides_by_trigger_and_never_asks_laya,
                test_held_out_package_labels_are_reported_not_tuned):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

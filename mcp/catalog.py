@@ -85,6 +85,7 @@ RESERVED = {
 # Resolvable, deliberately unadvertised.
 INTERNAL = {
     "yamadori-fast": ("bonsai", "low"),
+    "yamadori-xhigh": ("bonsai", "xhigh"),
     "yamadori-max": ("bonsai", "max"),
     "yamadori-vision": ("bonsai-vision", None),
     "yamadori-embed": ("embeddings", None),
@@ -101,14 +102,208 @@ OWNER = os.environ.get("YAMADORI_OWNER", "yamadori")
 LEGACY = {"bonsai": ("bonsai", None), "bonsai-agent": ("bonsai", None)}
 
 
+# IMAGE MODELS, by the name a client may send in `model` on
+# POST /v1/images/generations. Kept apart from CATALOG on purpose: a chat
+# request naming `yamadori-image` must not resolve to an image server, and an
+# image request naming `yamadori` must not pick a chat model. The value is the
+# image-model id in mcp/images.py MODELS. Not advertised in /v1/models, which
+# lists chat models; GET /dash/api/settings/image lists these.
+IMAGE_MODELS = {
+    "yamadori-image": "base",
+    "yamadori-image-turbo": "turbo",
+}
+
+
+def resolve_image(name) -> str | None:
+    """The image-model id a request names, or None when it names none of ours.
+
+    None means "use the caller's preference". OpenAI SDKs fill `model` with
+    their own default (`dall-e-3`, `gpt-image-1`); that is not a choice, so it
+    is ignored exactly as it was before there were two image models.
+    """
+    if not isinstance(name, str):
+        return None
+    return IMAGE_MODELS.get(name.strip())
+
+
+def context_window() -> int:
+    """The conversation window a client may plan for: the MAIN share of the
+    KV pool (mcp/budget.py, 5/8 -- 102,400 at -c 163840), read at runtime so
+    it follows the pool when `-c` changes.
+
+    Not the pool: the other 3/8 is the second brain's, and a conversation
+    that grows past its share is landed (proxy.context_full). Not the
+    per-slot n_ctx either, which is a ceiling four slots share. A harness
+    reads this to decide when to compact; advertising nothing left Hermes to
+    guess."""
+    import budget
+    return int(budget.budgets()["main"])
+
+
+# The field names clients read for a model's window: OpenRouter and most
+# harnesses (Hermes among them) `context_length`; vLLM `max_model_len`; some
+# UIs `context_window`. All three carry the same number.
+CONTEXT_FIELDS = ("context_length", "max_model_len", "context_window")
+
+# The names clients read for the output ceiling, at the top level of a model
+# row (OpenRouter nests the same number under top_provider, which is also
+# written). NOT `max_tokens`: Hermes Agent reads a top-level `max_tokens` as a
+# last-resort CONTEXT length (agent/model_metadata.py
+# _context_length_from_model_payload, L859-870 at 35b14ad), so a field by that
+# name would be mistaken for the window by the one harness that looks hardest.
+OUTPUT_FIELDS = ("max_completion_tokens", "max_output_tokens")
+
+# THE OUTPUT CEILING WE ADVERTISE: 1/5 of the conversation window.
+#
+# What a client may send as max_tokens is not capped by the proxy: it is the
+# ANSWER allowance (tiers.budget: answer = max(client, A_MIN)), and thinking
+# gets the window less the prompt and that answer. So the true ceiling is
+# the window less MIN_THINKING and the prompt -- a number that depends on
+# the prompt, which no model list can state.
+#
+# Advertising that near-window figure would hurt twice. Harnesses send the
+# advertised ceiling back as max_tokens, which would floor thinking at
+# MIN_THINKING on every turn; and harnesses reserve it out of the window
+# before compacting (input room = window - output), which would leave them
+# no room at all. A fifth is the figure OpenRouter-style clients already
+# derive when a provider states none (Roo-Code src/api/providers/fetchers/
+# openrouter.ts L121-123 at b867ec9: `max_completion_tokens ||
+# Math.ceil(context_length * 0.2)`), so stating it changes nothing for them
+# and gives the rest a number. NOT MEASURED: no run here says a fifth is
+# better than a quarter. It follows the pool (20,480 at -c 163840) and never
+# drops below A_MIN, the smallest answer allowance the proxy sends.
+OUTPUT_FRACTION = 5
+
+
+def max_output(window: int | None = None) -> int:
+    """The advertised output ceiling (see OUTPUT_FRACTION): the window / 5,
+    never below tiers.A_MIN."""
+    import tiers
+    w = int(window if window is not None else context_window())
+    return max(w // OUTPUT_FRACTION, tiers.A_MIN)
+
+
+# Request fields the proxy honours, in OpenRouter's `supported_parameters`
+# vocabulary where one exists. Only what is TRUE end to end:
+#   max_tokens        the answer allowance (tiers.budget), thinking added
+#   tools, tool_choice the client's own tools are merged with ours (proxy)
+#   reasoning_effort  picks the tier (tiers.resolve; values in EFFORTS)
+#   response_format, stop  passed to the model server unchanged
+#   stream            SSE (server._stream)
+# Left out on purpose: temperature, top_p, top_k, presence_penalty -- the
+# vendor sampling is ENFORCED and a client's values are recorded as
+# overridden (tiers.enforce_sampling); seed -- fan-out may deliver another
+# candidate than the seeded one.
+#   max_completion_tokens  read as max_tokens when that is absent, never
+#                          passed upstream (tiers.apply)
+#   reasoning              OpenRouter's object form; `reasoning.effort` picks
+#                          the tier like reasoning_effort (tiers.resolve)
+SUPPORTED_PARAMETERS = ("max_tokens", "max_completion_tokens", "tools",
+                        "tool_choice", "reasoning", "reasoning_effort",
+                        "response_format", "stop", "stream")
+
+
+def image_input() -> bool:
+    """Do chat requests accept image parts? Yes while vision is on
+    (mcp/vision.py: each image is held for this request and the text model
+    reads it through describe_image). Read per call, like vision.enabled."""
+    try:
+        import vision
+        return bool(vision.enabled())
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+def _chat_card(window: int | None) -> dict:
+    """The metadata of the chat product, computed now. Empty without a
+    window: an unknown window is left out, never guessed, and every other
+    number here derives from it."""
+    import tiers
+    if not window:
+        return {}
+    out = max_output(window)
+    inputs = ["text", "image"] if image_input() else ["text"]
+    desc = ("Local 27B coding model with a code-intelligence tool layer "
+            "(TypeScript, Rust/WASM, three.js TSL, TypeGPU). The proxy runs "
+            "its own tools; a client needs no tool configuration. "
+            f"reasoning_effort {'/'.join(tiers.ORDER)} picks how hard it "
+            f"works (default {tiers.DEFAULT}).")
+    if "image" in inputs:
+        desc += (" Images are accepted as base64 data URIs and read by a "
+                 "vision pass; http(s) image URLs are not fetched.")
+    card = {"name": "Yamadori", "description": desc}
+    # Window fields first: Hermes takes the FIRST context key it meets in
+    # the row's own order, nested dicts included (model_metadata.py
+    # _extract_first_int, L458-461 at 35b14ad). Every one carries the same
+    # number anyway.
+    card.update({f: window for f in CONTEXT_FIELDS})
+    card.update({f: out for f in OUTPUT_FIELDS})
+    card["architecture"] = {
+        "modality": "+".join(inputs) + "->text",
+        "input_modalities": inputs,
+        "output_modalities": ["text"],
+    }
+    card["top_provider"] = {"context_length": window,
+                            "max_completion_tokens": out}
+    # Local, so free. OpenRouter-shaped clients compute cost from these.
+    card["pricing"] = {"prompt": "0", "completion": "0"}
+    card["supported_parameters"] = list(SUPPORTED_PARAMETERS)
+    # Our extension, in the same `x_yamadori` block responses carry. No
+    # key in it is named like a window or an output field, so a client
+    # walking the row for one cannot pick up a number from here.
+    card["x_yamadori"] = {
+        "reasoning_effort": {"values": list(tiers.ORDER),
+                             "default": tiers.DEFAULT,
+                             "ceiling": tiers.normalise(tiers.CEILING)},
+        "answer_allowance_floor": tiers.A_MIN,
+    }
+    return card
+
+
+def _is_chat(name: str) -> bool:
+    """Does this name serve the chat model? The vision copy, embeddings and
+    reranker have windows and parameters of their own, so the chat card
+    would be false of them."""
+    return CATALOG.get(name, LEGACY.get(name, (None,)))[0] == "bonsai"
+
+
+def _row(name: str, created: int, window: int | None) -> dict:
+    row = {"id": name, "object": "model", "created": created,
+           "owned_by": OWNER}
+    if _is_chat(name):
+        row.update(_chat_card(window))
+    return row
+
+
+def _window_or_none() -> int | None:
+    try:
+        return context_window()
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
 def public_list() -> dict:
-    """The OpenAI `/v1/models` payload, product names only."""
+    """The OpenAI `/v1/models` payload, product names only, each chat model
+    with its full card (`_chat_card`): window, output ceiling, modalities,
+    supported parameters -- enough that a harness needs no configuration."""
     created = int(time.time())
     names = list(CATALOG) if EXPOSE_INTERNAL else list(PUBLIC)
-    data = [{"id": name, "object": "model", "created": created,
-             "owned_by": OWNER}
-            for name in names]
-    return {"object": "list", "data": data}
+    window = _window_or_none()
+    return {"object": "list",
+            "data": [_row(name, created, window) for name in names]}
+
+
+def model_card(name: str | None) -> dict:
+    """`GET /v1/models/{id}`: one row, never a 404.
+
+    An advertised name gets its own row. Anything else gets the product's
+    row: an unknown name, because that is what a chat request naming it
+    reaches (`resolve`); an internal name not exposed, because a distinct
+    answer -- a 404 or a card of its own -- would advertise that it exists."""
+    key = (name or "").strip()
+    advertised = CATALOG if EXPOSE_INTERNAL else PUBLIC
+    return _row(key if key in advertised else "yamadori",
+                int(time.time()), _window_or_none())
 
 
 def resolve(name: str | None) -> tuple[str | None, str | None, bool]:

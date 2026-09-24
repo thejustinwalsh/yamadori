@@ -271,6 +271,111 @@ def test_plain_words_are_not_symbols_and_numerals_are_not_names():
           d["situation"])
 
 
+def test_english_words_are_not_symbols_even_where_defined():
+    """Live 2026-09-23: `held=three:MOUSE;wgpu-matrix:API` on a pasted game
+    spec. A package that DEFINES a plain English word is not named by it."""
+    s = store_with(("three", "0.185.1", 2,
+                    ("MOUSE", "Event", "POINT", "Object3D", "WeakMap")),
+                   ("wgpu-matrix", "3.4.2", 1, ("API",)))
+    text = ("MOUSE CONTROLS: the ship follows the MOUSE. Web Audio API sounds. "
+            "Each Event is read once; every POINT popup fades. A WeakMap "
+            "caches sprites.")
+    got = domains._symbols(text, domains.held_sources(s))
+    check(got == {}, "API, MOUSE, POINT, Event as prose, and a platform name "
+          "(WeakMap), match nothing", json.dumps(got))
+    got = domains._symbols("Where is Object3D.DEFAULT_UP set?",
+                           domains.held_sources(s))
+    check(got.get("three") == ["Object3D"],
+          "a code-shaped name still does", json.dumps(got))
+    names = domains.code_context_names(
+        "THREE.MOUSE.LEFT, Loop(), class A extends Pipelines, the Web Audio "
+        "API (see API docs), Node.js, Three.js, Array.from(xs), new Event('x')")
+    check({"THREE", "MOUSE", "LEFT", "Loop", "Pipelines"} <= set(names)
+          and not {"API", "Node", "Three", "Array", "Event"} & set(names),
+          "code_context_names: identifier syntax yes; prose, product "
+          "spellings and platform names no", json.dumps(names))
+
+
+def test_a_package_is_not_named_by_an_ordinary_word():
+    s = store_with(("postprocessing", "6.39.5", 1), ("three", "0.185.1", 1))
+    held = domains.held_sources(s)
+    check(domains._named("add a bloom postprocessing pass to my shader", held)
+          == [], "the word 'postprocessing' does not name the pmndrs package",
+          json.dumps(domains._named("a postprocessing pass", held)))
+    for text in ("import { EffectComposer } from 'postprocessing'",
+                 "pmndrs/postprocessing v6", "postprocessing@6.39.5"):
+        check("postprocessing" in domains._named(text, held),
+              f"but a module spelling does: {text!r}")
+
+
+def test_a_word_counts_only_in_its_domain_sense():
+    """bench/domain/tasks/rs12, a Rust C-ABI point parser, was classified
+    `visual-design` on "after trimming ASCII whitespace"."""
+    rs12 = os.path.join(REPO, "bench", "domain", "tasks", "rs12", "task.json")
+    if os.path.exists(rs12):
+        with open(rs12, encoding="utf-8") as fh:
+            prompt = json.load(fh)["prompt"]
+        got = domains.detect(user(prompt))
+        check("visual-design" not in got,
+              "the real rs12 prompt is not visual-design", json.dumps(sorted(got)))
+    else:
+        _skipped.append("rs12 replay: " + rs12 + " missing")
+    for text, want in (("trim leading whitespace from the token", False),
+                       ("in contrast to the old parser, this one streams", False),
+                       ("flatten the class hierarchy into one struct", False),
+                       ("the card needs more whitespace between rows", True),
+                       ("the visual hierarchy of the page is flat", True),
+                       ("the text contrast is too low in dark mode", True),
+                       ("pick a palette for the charts", True)):
+        got = "visual-design" in domains.detect(user(text))
+        check(got is want, f"{text!r}: visual-design is {want}",
+              json.dumps(sorted(domains.detect(user(text)))))
+
+
+def test_prepare_hands_the_clients_tools_to_selection():
+    """A Hermes-shaped request through proxy.prepare at max: the client's
+    own tools reach selection, and a request to act locally gets neither
+    deep thinking nor fan-out -- while our tools stay offered."""
+    import selection
+    prev, prev_laya = domains.PACKAGE_STORE, selection.LAYA_URL
+    domains.PACKAGE_STORE = HELD
+    selection.LAYA_URL = "http://127.0.0.1:1"     # never a real Laya
+    try:
+        b = {"model": "yamadori", "reasoning_effort": "max",
+             "_client_ip": "127.0.0.1",
+             "_features": '{"retrieval": true, "hints": false}',
+             "messages": [
+                 {"role": "system", "content": "You are Hermes Agent."},
+                 {"role": "user", "content":
+                  "@file:`.hermes/attachments/Pasted content (8.8 KB)`\n\n"
+                  "I want to start this project in ~/Developer/octopus-invaders"
+                  "\n\n--- Attached Context ---\n\n```\nbuild a three.js "
+                  "shooter. MOUSE CONTROLS: Object3D per enemy.\n```"}],
+             "tools": [{"type": "function", "function": {
+                 "name": n, "description": "x", "parameters": {}}}
+                 for n in ("write_file", "terminal", "find_by_meaning")]}
+        out = proxy.prepare(b)
+        sel = out["_selection"]
+        check(sel["signals"]["client_tools"] == 2,
+              "the client's tools reach selection, ours (re-sent by name) "
+              "excluded", json.dumps(sel["signals"].get("client_tools")))
+        check(sel["investigate"] is False and sel["fanout_n"] == 1
+              and sel["signals"]["acts_locally"],
+              "act locally: no deep thinking, no fan-out at max",
+              json.dumps(sel["because"])[:240])
+        # Since Phase 0.6 (2026-09-24) one tool of ours rides at max, after
+        # the client's: think_deeply, the model-chosen deep-thinking trigger.
+        check(out["_ours"] == ["think_deeply"]
+              and [t["function"]["name"] for t in out["tools"]]
+              == ["write_file", "terminal", "find_by_meaning", "think_deeply"],
+              "main gets the client's tools untouched and first -- its own "
+              "find_by_meaning included -- and of ours only think_deeply at "
+              "max (the code tools are the second brain's since 2026-09-24)",
+              json.dumps([t["function"]["name"] for t in out["tools"]]))
+    finally:
+        domains.PACKAGE_STORE, selection.LAYA_URL = prev, prev_laya
+
+
 def test_an_unmapped_held_package_turns_domain_off():
     s = store_with(("three", "0.185.1", 1), ("zod", "3.23.8", 1))
     d = decide(LCB_PROMPT, store=s)
@@ -278,6 +383,72 @@ def test_an_unmapped_held_package_turns_domain_off():
           "a held package with no domain mapping cannot be ruled out",
           d["situation"])
     check("zod" in d["because"], "and the reason names it", d["because"])
+
+
+def _with_sources(store: str, name: str, version: str,
+                  files: dict[str, str]) -> None:
+    """Give a fixture package its indexed file list and source files, in the
+    store's _src cache, as deps.index_package leaves them."""
+    import deps
+    stem = deps.slug(name, version)
+    db = os.path.join(store, f"{stem}.sqlite3")
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE IF NOT EXISTS package_files(path TEXT PRIMARY KEY)")
+    con.executemany("INSERT OR IGNORE INTO package_files VALUES(?)",
+                    [(p,) for p in files])
+    con.commit()
+    con.close()
+    for p, text in files.items():
+        full = os.path.join(store, "_src", stem, p)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(text)
+
+
+def test_a_new_package_is_mapped_from_its_own_imports():
+    """#20 (docs/SELF-IMPROVEMENT-LOG.md): the Octopus pilot indexed
+    @pmndrs/glyph and three-flatland, neither in PACKAGE_DOMAINS, and the
+    gate offered library help to every request again (HELD_SOURCE_UNMAPPED,
+    all 342 LiveCodeBench prompts). A held package's domains are now derived
+    from its own imports: the hand-mapped domains of what it imports in at
+    least DERIVE_MIN_FILES files."""
+    s = store_with(("three", "0.185.1", 1), ("@acme/glyphs", "0.1.0", 1),
+                   ("lonely", "1.0.0", 1))
+    _with_sources(s, "@acme/glyphs", "0.1.0", {
+        "src/text.ts": "import { Mesh } from 'three';\nexport class Text {}\n",
+        "src/atlas.ts": "import * as THREE from 'three/webgpu';\n"
+                        "import { local } from './text';\nexport const a = 1;\n",
+        "src/util.ts": "import { thing } from 'some-unmapped-lib';\n"
+                       "import { other } from 'some-unmapped-lib';\n"})
+    _with_sources(s, "lonely", "1.0.0", {
+        "index.js": "const t = require('three');\nmodule.exports = t;\n"})
+    held = domains.held_sources(s)
+    g = domains.derived_domains("@acme/glyphs", held["@acme/glyphs"][0][1])
+    check(g["domains"] == ["gpu", "web-frontend"]
+          and g["imports"] == {"three": 2},
+          "a package importing three in 2 files derives three's domains; an "
+          "unmapped import and a relative one add nothing", json.dumps(g))
+    lone = domains.derived_domains("lonely", held["lonely"][0][1])
+    check(lone["domains"] == [],
+          f"one importing file is below DERIVE_MIN_FILES "
+          f"({domains.DERIVE_MIN_FILES}): no domain", json.dumps(lone))
+    d = decide(LCB_PROMPT, store=s)
+    check(d["offer"] and d["situation"] == "HELD_SOURCE_UNMAPPED"
+          and "lonely" in d["because"] and "@acme/glyphs" not in d["because"],
+          "the gate counts the derived package as mapped; only the one that "
+          "derives nothing is still unmapped", d["because"])
+    s2 = store_with(("three", "0.185.1", 1), ("@acme/glyphs", "0.1.0", 1))
+    _with_sources(s2, "@acme/glyphs", "0.1.0", {
+        "src/text.ts": "import { Mesh } from 'three';\n",
+        "src/atlas.ts": "import { Scene } from 'three';\n"})
+    d2 = decide(LCB_PROMPT, store=s2)
+    check(not d2["offer"] and d2["situation"] == "DOMAIN_OUTSIDE_HELD_SOURCES"
+          and (d2.get("evidence") or {}).get("derived", {}).get(
+              "@acme/glyphs", {}).get("domains") == ["gpu", "web-frontend"],
+          "with every held package mapped or derived, a puzzle is withheld "
+          "again, and the record shows the derivation",
+          json.dumps({"situation": d2["situation"],
+                      "derived": (d2.get("evidence") or {}).get("derived")}))
 
 
 def test_a_puzzle_is_withheld_with_a_structured_reason():
@@ -344,10 +515,14 @@ def test_prepare_withholds_offers_and_keeps():
     domains.PACKAGE_STORE = HELD
     try:
         out = proxy.prepare(body(user(LCB_PROMPT)))
-        check(not our_tool_names(out), "prepare(): a puzzle gets none of our tools",
+        # CHANGED 2026-09-24: no tool of ours reaches main at all; the gate
+        # decides whether library help (definitions, deep thinking) can have
+        # anything to read.
+        check(our_tool_names(out) == set(),
+              "prepare(): a puzzle gets none of our tools on main",
               json.dumps(sorted(our_tool_names(out))))
         check(not [m for m in out["messages"] if m.get("role") == "system"],
-              "and no capability block")
+              "and no system text added at medium")
         check((out.get("_tools_gate") or {}).get("situation")
               == "DOMAIN_OUTSIDE_HELD_SOURCES",
               "and the decision rides along for the log",
@@ -357,17 +532,20 @@ def test_prepare_withholds_offers_and_keeps():
         b = body(user(LCB_PROMPT))
         b["tools"] = [client_tool]
         out = proxy.prepare(b)
-        check([t["function"]["name"] for t in out["tools"]] == ["read_file"],
-              "a client's own tools pass through untouched when ours are withheld")
+        check([t["function"]["name"] for t in out["tools"]]
+              == ["read_file"],
+              "a client's own tools pass through untouched",
+              json.dumps([t["function"]["name"] for t in out["tools"]]))
 
         convo = user("In three.js, where is Object3D defined?")
         out = proxy.prepare(body(convo))
         names = our_tool_names(out)
-        check({"find_definition_opt", "find_references", "bind_project_context"}
-              <= names, "prepare(): a three.js question gets the tools",
-              json.dumps(sorted(names)))
-        check(any(m.get("role") == "system" and "code-intelligence" in m["content"]
-                  for m in out["messages"]), "and the capability block")
+        check(out["_tools_gate"]["offer"] and not names,
+              "prepare(): a three.js question: the gate offers library help, "
+              "and no tool of ours goes to main", json.dumps(sorted(names)))
+        check(out["_route"]["class"] == "library_question",
+              "and it is routed as a library question (definitions / deep "
+              "thinking read that)", json.dumps(out["_route"])[:200])
 
         # The flip this rule exists for: a first turn with no evidence is
         # offered (nothing inferred from an absence), and a later turn adds
@@ -381,7 +559,7 @@ def test_prepare_withholds_offers_and_keeps():
         opening += user("hello, I have a question coming")
         out = proxy.prepare(body(opening))
         check(out["_tools_gate"]["situation"] == "NO_DOMAIN_EVIDENCE"
-              and bool(our_tool_names(out)),
+              and out["_tools_gate"]["offer"],
               "an opening with no evidence is offered",
               out["_tools_gate"]["situation"])
         later = opening + [{"role": "assistant", "content": "Go ahead."},
@@ -389,9 +567,9 @@ def test_prepare_withholds_offers_and_keeps():
         check(not domains.tool_admission(later, None, store=HELD)["offer"],
               "(the later conversation, judged cold, would be withheld)")
         out = proxy.prepare(body(later))
-        check(bool(our_tool_names(out))
+        check(out["_tools_gate"]["offer"]
               and out["_tools_gate"]["situation"] == "OFFERED_EARLIER_THIS_SESSION",
-              "a session that had the tools keeps them on a later turn",
+              "a session the gate offered keeps the offer on a later turn",
               (out.get("_tools_gate") or {}).get("situation", ""))
 
         # A retrieval-off tier is not gated at all: no decision, no tools.
@@ -472,7 +650,12 @@ def main() -> int:
                test_nothing_held_is_withheld_and_not_retryable,
                test_each_route_to_offering,
                test_plain_words_are_not_symbols_and_numerals_are_not_names,
+               test_english_words_are_not_symbols_even_where_defined,
+               test_a_package_is_not_named_by_an_ordinary_word,
+               test_a_word_counts_only_in_its_domain_sense,
+               test_prepare_hands_the_clients_tools_to_selection,
                test_an_unmapped_held_package_turns_domain_off,
+               test_a_new_package_is_mapped_from_its_own_imports,
                test_a_puzzle_is_withheld_with_a_structured_reason,
                test_boilerplate_cannot_withhold_but_can_offer,
                test_the_word_stems_now_match_their_words,

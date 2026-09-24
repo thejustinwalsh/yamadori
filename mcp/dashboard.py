@@ -558,10 +558,15 @@ def handle_get(path: str):
         # `xhigh` and `minimal` as `low` (tiers.safe_effort, read from the
         # live template). Showing the requested value implied a setting the
         # model never receives.
-        view = {n: dict(t, sent_effort=tiers.safe_effort(t["effort"]))
+        # `features`: what RUNS at the tier (tiers.features, the one
+        # feature matrix the docs and mcp/test_tier_docs.py also read); the
+        # ladder renders these cells rather than deriving its own.
+        view = {n: dict(t, sent_effort=tiers.safe_effort(t["effort"]),
+                        features=tiers.features(n, "README.md"))
                 for n, t in tiers.TIERS.items()}
         return 200, "application/json", json.dumps(
             {"order": tiers.ORDER, "tiers": view,
+             "feature_columns": list(tiers.FEATURE_COLUMNS),
              "default": tiers.DEFAULT, "ceiling": tiers.CEILING}).encode()
     return None
 

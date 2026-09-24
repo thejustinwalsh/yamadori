@@ -1,0 +1,10 @@
+tokens per preamble line: 10
+preamble   0 lines  state_tokens   21/  19  rust->{"rust": 0.8001, "typescript": 0.1999}  ts->{"rust": 0.5288, "typescript": 0.4712}  identical=False
+preamble  10 lines  state_tokens  121/ 119  rust->{"rust": 0.9191, "typescript": 0.0809}  ts->{"rust": 0.5739, "typescript": 0.4261}  identical=False
+preamble  20 lines  state_tokens  221/ 219  rust->{"rust": 0.8658, "typescript": 0.1342}  ts->{"rust": 0.5662, "typescript": 0.4338}  identical=False
+preamble  30 lines  state_tokens  321/ 319  rust->{"rust": 0.8608, "typescript": 0.1392}  ts->{"rust": 0.5992, "typescript": 0.4008}  identical=False
+preamble  40 lines  state_tokens  421/ 419  rust->{"rust": 0.7526, "typescript": 0.2474}  ts->{"rust": 0.6006, "typescript": 0.3994}  identical=False
+preamble  60 lines  state_tokens  621/ 619  rust->{"rust": 0.5832, "typescript": 0.4168}  ts->{"rust": 0.5832, "typescript": 0.4168}  identical=True
+preamble  80 lines  state_tokens  821/ 819  rust->{"rust": 0.5832, "typescript": 0.4168}  ts->{"rust": 0.5832, "typescript": 0.4168}  identical=True
+preamble 120 lines  state_tokens 1221/1219  rust->{"rust": 0.5832, "typescript": 0.4168}  ts->{"rust": 0.5832, "typescript": 0.4168}  identical=True
+thing FIRST, 120 lines after: rust-> {"rust": 0.6983, "typescript": 0.3017}  ts-> {"rust": 0.5441, "typescript": 0.4559}

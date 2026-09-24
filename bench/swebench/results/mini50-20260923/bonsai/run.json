@@ -1,0 +1,34 @@
+{
+ "arm": "bonsai",
+ "features": {
+  "retrieval": false,
+  "hints": false,
+  "investigate": false,
+  "fanout": 1,
+  "effort": "medium"
+ },
+ "body_reasoning_effort": "max",
+ "dataset": "MariusHobbhahn/swe-bench-verified-mini",
+ "split": "test",
+ "api_base": "http://127.0.0.1:1234/v1",
+ "versions": {
+  "mini-swe-agent": "2.1.0",
+  "swebench": "4.1.0",
+  "litellm": "1.102.1",
+  "datasets": "5.0.1"
+ },
+ "leaderboard_config": "C:\\Users\\jwals\\swebench-yamadori\\venv-win\\Lib\\site-packages\\minisweagent\\config\\benchmarks\\swebench.yaml",
+ "leaderboard_config_sha256": "4f0492bb3dd77e21b287014eb077f22ac4a932a46087cf82f053a195f3e7778c",
+ "overlay": "C:\\Users\\jwals\\llama-stack\\bench\\swebench\\results\\mini50-20260923\\bonsai\\_work\\django__django-11999\\config_overlay.yaml",
+ "deviations": {
+  "model.model_name": "openai/yamadori -- our model, through litellm's OpenAI-compatible provider",
+  "model.model_kwargs.api_base": "the proxy on :1234 as seen from WSL",
+  "model.model_kwargs.extra_headers": "X-Yamadori-Features: the arm",
+  "model.model_kwargs.extra_body": "reasoning_effort=max so the tier allows what the header decides (bench/domain)",
+  "model.model_kwargs.timeout": "3600 s: litellm's 600 s default is shorter than one deep-thinking turn here, and a timed-out call is RETRIED, doubling GPU load",
+  "model.model_kwargs.temperature": "None instead of the yaml's 0.0: all 13 mini v2 submissions on the leaderboard (trajectories on swe-bench-submissions S3) ran with temperature None, i.e. the provider default",
+  "model.litellm_model_registry": "cost 0 per token for openai/yamadori",
+  "model.cost_tracking": "ignore_errors: mini raises on a cost of 0, which a free local model always has. Consequence: the $3 cost_limit can never bind; only step_limit does"
+ },
+ "created": 1790141228.6722193
+}

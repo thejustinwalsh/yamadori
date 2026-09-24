@@ -211,5 +211,46 @@
     "searches": 0,
     "window_seconds": 86400
   },
-  "warnings": []
+  "warnings": [],
+  "tree": {
+    "nebari": {
+      "packages": {
+        "indexes": 19,
+        "chunks": 64449,
+        "defs": 59035
+      },
+      "code": {
+        "chunks": 7742,
+        "defs": 5874
+      },
+      "repos": {
+        "indexes": 2,
+        "chunks": 13849,
+        "defs": 11158
+      },
+      "items": 162107,
+      "spread": 0.7366005895592836
+    },
+    "moss": {
+      "ages_s": {
+        "packages": 151375,
+        "code": 303839,
+        "skills_last_arm": null,
+        "recipes": 54503
+      },
+      "value": 0.2920991923300157,
+      "recall": "hints",
+      "full_days": 30.0
+    },
+    "measured_at": 1790268664.6954672,
+    "recent": {
+      "turns": 0,
+      "fanout": null,
+      "foliage": null,
+      "hold_s": 120.0,
+      "decay_s": 60.0,
+      "foliage_window_s": 1800.0,
+      "foliage_full": 3.0
+    }
+  }
 }

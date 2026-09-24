@@ -67,7 +67,9 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import accounts  # noqa: E402
 import admission  # noqa: E402
+import gpu_room  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.abspath(os.path.join(HERE, "..", "index"))
@@ -76,13 +78,57 @@ INDEX = os.path.abspath(os.path.join(HERE, "..", "index"))
 # card's setting and the one every sample in bench/imagegen/samples used.
 DEFAULT_SIZE = (1024, 1024)
 DEFAULT_STEPS = 20
+
+# THE TWO IMAGE MODELS. Each is its own llama-swap model (config.yaml, group
+# `imagegen`, swap:true: one of the two is loaded at a time, beside
+# retrieval). Steps are PER MODEL because the proxy sends `steps` on every
+# request, so the server's own --steps never applies: the turbo run at 20
+# steps would be a 4-step student sampled off its schedule, 5x slower.
+#
+#   base   Qwen-Image-2.1 Q5_K_M (unsloth), 20 steps, cfg 6. 105.2-111.0 s
+#          end to end at 1024x1024: n=2 sd-server (docs/IMAGEGEN.md) + n=8
+#          through the live proxy (bench/imagegen/parti-20260923).
+#   turbo  Viggle's DMD-distilled 4-step student, Q5_K_M (Abiray GGUF),
+#          cfg 1, schedule fix base_shift=0.5,max_shift=0.69355
+#          (docs/IMAGEGEN-TURBO.md). Its seconds are ONE sd-cli run (n=1,
+#          23.6 s wall including model load, sampling 12.1 s, peak +5,527
+#          MiB); bench/imagegen/compare_turbo.py is the measurement that
+#          replaces it.
+#
+# `est_seconds` is shown to people choosing; it is not used to schedule
+# anything. `swap_env` lets an operator rename the llama-swap model.
+MODELS = {
+    "base": {
+        "id": "base", "name": "yamadori-image",
+        "label": "Qwen-Image-2.1", "steps": 20,
+        "swap_env": "YAMADORI_IMAGEGEN_MODEL", "swap_default": "imagegen",
+        "est_seconds": 107, "est_basis": "measured, n=10, 105-111 s",
+        "licence": "Qwen Research License (non-commercial)",
+    },
+    "turbo": {
+        "id": "turbo", "name": "yamadori-image-turbo",
+        "label": "Qwen-Image-2.1 turbo (Viggle, 4-step)", "steps": 4,
+        "swap_env": "YAMADORI_IMAGEGEN_TURBO_MODEL",
+        "swap_default": "imagegen-turbo",
+        # 23.6 s wall, sd-cli, 1024x1024, 2026-09-23 smoke test:
+        # bench/imagegen/samples/turbo-smoke-20260923/results.jsonl.
+        "est_seconds": 24, "est_basis": "n=1 smoke test, sd-cli",
+        "licence": "Qwen Research License (non-commercial)",
+    },
+}
+PREF_KEY = "image_model"
+
 # sd.cpp requires both edges divisible by 32 for Qwen-Image-2.1
-# (docs/qwen_image_2.1.md in the sd.cpp tree). The ceiling is what was
-# measured to fit on CUDA1 beside the resident rootstock and Laya; see
-# docs/IMAGEGEN.md before raising it.
+# (docs/qwen_image_2.1.md in the sd.cpp tree). The PIXEL ceiling is the
+# largest size measured on CUDA1 beside the resident rootstock and Laya:
+# 1344x1344, 220 s, peak +6,389 MiB under the 6 GiB --max-vram budget (n=1,
+# bench/imagegen/results.jsonl, docs/IMAGEGEN.md). The EDGE ceiling is 1536 so
+# the sizes OpenAI clients send -- Hermes's image_generate asks for 1536x1024
+# and 1024x1536 (plugins/image_gen/_common.py:18) -- are accepted; those are
+# 1.57 MP, under the measured 1.81 MP.
 SIZE_MULTIPLE = 32
 MIN_EDGE = 256
-MAX_EDGE = int(os.environ.get("YAMADORI_IMAGEGEN_MAX_EDGE", "1344"))
+MAX_EDGE = int(os.environ.get("YAMADORI_IMAGEGEN_MAX_EDGE", "1536"))
 MAX_PIXELS = int(os.environ.get("YAMADORI_IMAGEGEN_MAX_PIXELS",
                                 str(1344 * 1344)))
 MAX_N = 4
@@ -108,9 +154,80 @@ def configured() -> bool:
     return bool(url())
 
 
-def model_name() -> str:
-    """The llama-swap model name that routes to sd-server."""
-    return _env("YAMADORI_IMAGEGEN_MODEL", "imagegen")
+def model_name(model: str = "base") -> str:
+    """The llama-swap model name that routes to sd-server for `model`."""
+    m = MODELS.get(model) or MODELS["base"]
+    return _env(m["swap_env"], m["swap_default"])
+
+
+def default_model() -> str:
+    """The server-wide default image model: YAMADORI_IMAGEGEN_DEFAULT, else
+    `turbo` (operator, 2026-09-24: turbo is the default, not only in the
+    launch scripts -- a proxy started without the env must not fall back to
+    the ~108 s base model). An unknown value falls back to `turbo` rather
+    than failing every image request."""
+    v = _env("YAMADORI_IMAGEGEN_DEFAULT", "turbo").lower()
+    return v if v in MODELS else "turbo"
+
+
+def preference(account: str | None) -> str | None:
+    """The image model this account chose, or None if it chose none."""
+    if not account:
+        return None
+    try:
+        v = accounts.prefs(account).get(PREF_KEY)
+    except OSError:
+        return None
+    return v if v in MODELS else None
+
+
+def resolve_model(account: str | None = None,
+                  requested: str | None = None) -> tuple[str, str]:
+    """(model id, where the choice came from) for one request.
+
+    Order: an explicit per-request model (`yamadori-image-turbo` on the
+    Images API) > the caller's saved preference > the server default. The
+    source is recorded in x_yamadori so a surprising model can be traced.
+    """
+    if requested in MODELS:
+        return requested, "request"
+    p = preference(account)
+    if p:
+        return p, "account"
+    return default_model(), "default"
+
+
+def options() -> list[dict]:
+    """What a person chooses between: GET /dash/api/settings/image."""
+    return [{"id": m["id"], "name": m["name"], "label": m["label"],
+             "steps": m["steps"], "est_seconds": m["est_seconds"],
+             "est_basis": m["est_basis"], "licence": m["licence"]}
+            for m in MODELS.values()]
+
+
+def settings(account: str) -> dict:
+    """The caller's image setting. `choice` is null when they never chose
+    one, and `effective` is what their next image uses."""
+    return {"ok": True, "choice": preference(account),
+            "default": default_model(),
+            "effective": resolve_model(account)[0],
+            "options": options()}
+
+
+def set_setting(account: str, body) -> tuple[int, dict]:
+    """PUT /dash/api/settings/image {choice}. Writes ONLY `account`, the id
+    the caller's own key resolved to; an `account` field in the body is not
+    read. `choice: null` clears it back to the server default."""
+    if not isinstance(body, dict) or "choice" not in body:
+        return 400, {"ok": False, "error": "send {\"choice\": \"base\" | \"turbo\" | null}",
+                     "reasons": [{"field": "choice", "why": "missing"}]}
+    c = body.get("choice")
+    if c is not None and c not in MODELS:
+        return 400, {"ok": False,
+                     "error": f"choice {c!r} is not one of {sorted(MODELS)}",
+                     "reasons": [{"field": "choice", "why": "unknown model"}]}
+    accounts.set_pref(account, PREF_KEY, c)
+    return 200, settings(account)
 
 
 def timeout() -> float:
@@ -165,14 +282,14 @@ def not_configured() -> ImageError:
                    "action": ("set YAMADORI_IMAGEGEN_URL (llama-swap, "
                               "http://127.0.0.1:11434) with the `imagegen` "
                               "model in config.yaml, and restart the proxy -- "
-                              "docs/IMAGEGEN.md 'Going live'"),
+                              "docs/IMAGEGEN.md 'Go live'"),
                    "why_not_the_agent": "server configuration"},
                   {"fixable_by": "agent",
                    "action": "tell the user image generation is not available here",
                    "effect": "the user is not left waiting for an image"}])
 
 
-def _down(detail: str) -> ImageError:
+def _down(detail: str, model: str = "base") -> ImageError:
     return ImageError(
         "IMAGEGEN_DOWN",
         f"The image server at {url()} did not answer ({detail}). No image was "
@@ -180,7 +297,7 @@ def _down(detail: str) -> ImageError:
         retryable=False, status=503,
         remedies=[{"fixable_by": "operator",
                    "action": ("start it: llama-swap serves it as model "
-                              f"`{model_name()}` (scripts/start-stack.bat), or "
+                              f"`{model_name(model)}` (scripts/start-stack.bat), or "
                               "run sd-server by hand with the command in "
                               "docs/IMAGEGEN.md 'Running sd-server by hand'"),
                    "why_not_the_agent": "the agent cannot start processes on the server"},
@@ -217,6 +334,14 @@ def busy() -> ImageError:
                    "effect": "the lane frees when the other image finishes"}])
 
 
+def _no_room(e) -> ImageError:
+    """gpu_room.NoRoom as this module's failure: the A4000 cannot take the
+    image server now (A4000_BUSY, retryable) or at all (A4000_NO_ROOM)."""
+    return ImageError(e.code, e.reason + " No image was made.",
+                      retryable=e.retryable, remedies=e.remedies,
+                      status=429 if e.retryable else 507, **e.facts)
+
+
 def bad_args(reason: str, action: str) -> ImageError:
     return ImageError("BAD_ARGUMENTS", reason + " Nothing was generated.",
                       retryable=True, status=400,
@@ -245,11 +370,21 @@ def parse_size(size) -> tuple[int, int]:
             f"size {w}x{h} is not supported: both edges must be multiples of "
             f"{SIZE_MULTIPLE} between {MIN_EDGE} and {MAX_EDGE}, at most "
             f"{MAX_PIXELS:,} pixels.",
-            "call again with one of 1024x1024, 1344x768, 768x1344, 768x768")
+            "call again with one of 1024x1024, 1536x1024, 1024x1536, 768x768")
     return w, h
 
 
+# sd-server reads generation settings out of the prompt text itself
+# (routes_sdapi.cpp). A prompt is model-written, so the block and any stray
+# tag are removed before it leaves this process.
+_EXTRA_ARGS = re.compile(
+    r"<\s*sd_cpp_extra_args\s*>.*?(<\s*/\s*sd_cpp_extra_args\s*>|$)"
+    r"|<\s*/?\s*sd_cpp_extra_args\s*/?\s*>", re.I | re.S)
+
+
 def _prompt(prompt) -> str:
+    if isinstance(prompt, str):
+        prompt = _EXTRA_ARGS.sub(" ", prompt)
     if not isinstance(prompt, str) or not prompt.strip():
         raise bad_args("prompt must be a non-empty string describing the image.",
                        "call again with a prompt describing what to draw")
@@ -308,10 +443,53 @@ def metadata(sha: str) -> dict | None:
         return None
 
 
+# REAL ALPHA IS KEPT, NOISE ALPHA IS FLATTENED. Qwen-Image-2.1's VAE is RGBA
+# and the model does real transparency when asked ("This is an RGBA image with
+# transparency ... the background is transparent", its README; docs/
+# IMAGEGEN-COMMUNITY.md). In index/media on 2026-09-24 (n=55) the two cases
+# separate cleanly: the one image that asked (a sprite "on a transparent
+# background") had 53.9% of its pixels under alpha 128; every one of the 54
+# that did not had 0.00% under alpha 240 -- only near-opaque noise at 248-254
+# over up to ~41% of pixels, which a dark chat background shows through.
+# The cut below sits in that empty gap; it is chosen, not tuned (n=1 real).
+REAL_ALPHA_BELOW = 128          # an alpha this low is transparency, not noise
+REAL_ALPHA_MIN_FRACTION = 0.005  # ...on at least 0.5% of the pixels
+
+
+def drop_alpha(png: bytes) -> bytes:
+    """Flatten an alpha channel that is only noise; keep one that is real.
+
+    A PNG whose alpha is real transparency (>= REAL_ALPHA_MIN_FRACTION of its
+    pixels under REAL_ALPHA_BELOW) is returned byte-for-byte. Otherwise the
+    alpha is dropped (not composited: the colour under near-opaque pixels is
+    painted) and an RGB PNG is returned. A PNG without alpha, or one Pillow
+    cannot read, is returned as it came, so its sha is unchanged."""
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(png))
+        if im.mode not in ("RGBA", "LA", "PA") and not (
+                im.mode == "P" and "transparency" in im.info):
+            return png
+        rgba = im.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        hist = alpha.histogram()
+        low = sum(hist[:REAL_ALPHA_BELOW])
+        if low >= REAL_ALPHA_MIN_FRACTION * max(1, rgba.width * rgba.height):
+            return png                                   # real transparency
+        out = io.BytesIO()
+        rgba.convert("RGB").save(out, format="PNG")
+        return out.getvalue()
+    except Exception:                                                # noqa: BLE001
+        return png
+
+
 def store(png: bytes, meta: dict) -> str:
-    """Write the PNG and its metadata; return the sha. Idempotent."""
+    """Write the PNG (alpha dropped: drop_alpha) and its metadata; return the
+    sha of the bytes stored. Idempotent."""
     if not png.startswith(PNG_MAGIC):
         raise ValueError("not a PNG")
+    png = drop_alpha(png)
     sha = hashlib.sha256(png).hexdigest()
     root = media_dir()
     os.makedirs(root, exist_ok=True)
@@ -421,15 +599,23 @@ def _classify_http(code: int, body: str, w: int, h: int) -> ImageError:
                    "why_not_the_agent": "the agent cannot see the server's logs"}])
 
 
-def generate(prompt, size=None, seed=None, steps=None, n: int = 1) -> list[dict]:
-    """Generate `n` images. Returns one record per image:
-    {id, prompt, seed, size, steps, model, seconds}. Raises ImageError."""
+def generate(prompt, size=None, seed=None, steps=None, n: int = 1,
+             model: str | None = None) -> list[dict]:
+    """Generate `n` images with image model `model` (an id in MODELS; None
+    means the server default). Returns one record per image:
+    {id, prompt, seed, size, steps, model, image_model, seconds}. Raises
+    ImageError."""
     if not configured():
         raise not_configured()
+    if model is None:
+        model = default_model()
+    if model not in MODELS:
+        raise bad_args(f"image model {model!r} is not one of {sorted(MODELS)}.",
+                       "call again without a model")
     text = _prompt(prompt)
     w, h = parse_size(size)
     s = _seed(seed)
-    st = DEFAULT_STEPS if steps in (None, "") else steps
+    st = MODELS[model]["steps"] if steps in (None, "") else steps
     if isinstance(st, bool) or not isinstance(st, int) or not 1 <= st <= 50:
         raise bad_args("steps must be an integer from 1 to 50.",
                        "call again without steps")
@@ -437,7 +623,7 @@ def generate(prompt, size=None, seed=None, steps=None, n: int = 1) -> list[dict]
         raise bad_args(f"n must be an integer from 1 to {MAX_N}.",
                        "call again with n=1")
 
-    body = {"model": model_name(), "prompt": text, "width": w, "height": h,
+    body = {"model": model_name(model), "prompt": text, "width": w, "height": h,
             "steps": st, "seed": s, "batch_size": n}
     req = urllib.request.Request(
         url() + "/sdapi/v1/txt2img", data=json.dumps(body).encode(),
@@ -445,40 +631,44 @@ def generate(prompt, size=None, seed=None, steps=None, n: int = 1) -> list[dict]
     with admission.image_lane() as got:
         if not got:
             raise busy()
-        t0 = time.time()
-        try:
-            with urllib.request.urlopen(req, timeout=timeout()) as r:
-                raw = r.read()
-        except urllib.error.HTTPError as e:
+        # THE A4000'S ROOM (mcp/gpu_room.py): unload what must leave so this
+        # draw's peak fits with headroom, and hold the card until it ends.
+        with gpu_room.use(model_name(model), upstream=url(),
+                          on_no_room=_no_room):
+            t0 = time.time()
             try:
-                detail = e.read().decode("utf-8", "replace")
-            except Exception:                                    # noqa: BLE001
-                detail = ""
-            raise _classify_http(e.code, detail, w, h) from None
-        except (socket.timeout, TimeoutError):
-            raise ImageError(
-                "IMAGEGEN_TIMEOUT",
-                f"The image server did not finish within {timeout():.0f}s. No "
-                f"image was returned.",
-                retryable=False, status=504,
-                remedies=[{"fixable_by": "operator",
-                           "action": ("check the imagegen process: a stuck "
-                                      "generation holds the card"),
-                           "why_not_the_agent": "the agent cannot see the server"}]) from None
-        except urllib.error.URLError as e:
-            reason = e.reason
-            if isinstance(reason, (socket.timeout, TimeoutError)):
+                with urllib.request.urlopen(req, timeout=timeout()) as r:
+                    raw = r.read()
+            except urllib.error.HTTPError as e:
+                try:
+                    detail = e.read().decode("utf-8", "replace")
+                except Exception:                                    # noqa: BLE001
+                    detail = ""
+                raise _classify_http(e.code, detail, w, h) from None
+            except (socket.timeout, TimeoutError):
                 raise ImageError(
                     "IMAGEGEN_TIMEOUT",
-                    f"The image server did not finish within {timeout():.0f}s.",
+                    f"The image server did not finish within {timeout():.0f}s. No "
+                    f"image was returned.",
                     retryable=False, status=504,
                     remedies=[{"fixable_by": "operator",
-                               "action": "check the imagegen process",
+                               "action": ("check the imagegen process: a stuck "
+                                          "generation holds the card"),
                                "why_not_the_agent": "the agent cannot see the server"}]) from None
-            raise _down(str(reason)) from None
-        except (ConnectionError, OSError) as e:
-            raise _down(f"{type(e).__name__}: {e}") from None
-        seconds = round(time.time() - t0, 2)
+            except urllib.error.URLError as e:
+                reason = e.reason
+                if isinstance(reason, (socket.timeout, TimeoutError)):
+                    raise ImageError(
+                        "IMAGEGEN_TIMEOUT",
+                        f"The image server did not finish within {timeout():.0f}s.",
+                        retryable=False, status=504,
+                        remedies=[{"fixable_by": "operator",
+                                   "action": "check the imagegen process",
+                                   "why_not_the_agent": "the agent cannot see the server"}]) from None
+                raise _down(str(reason), model) from None
+            except (ConnectionError, OSError) as e:
+                raise _down(f"{type(e).__name__}: {e}", model) from None
+            seconds = round(time.time() - t0, 2)
 
     try:
         d = json.loads(raw)
@@ -493,8 +683,11 @@ def generate(prompt, size=None, seed=None, steps=None, n: int = 1) -> list[dict]
             continue
         if not png.startswith(PNG_MAGIC):
             continue
+        # `model` is the llama-swap name (what served it); `image_model` is
+        # the public name a client can send back to get the same model.
         meta = {"prompt": text, "seed": s + i, "size": f"{w}x{h}", "steps": st,
-                "model": model_name(), "seconds": seconds,
+                "model": model_name(model),
+                "image_model": MODELS[model]["name"], "seconds": seconds,
                 "created": int(time.time())}
         sha = store(png, meta)
         out.append(dict(meta, id=sha))
@@ -538,8 +731,11 @@ TOOL = {
             "like'. It can render short legible text inside the image, so put "
             "any words that must appear in quotes in the prompt. It does not "
             "look at or edit an image the user sent. The result gives a "
-            "markdown image line; put that line in your answer exactly as "
-            "given, because it is the only way the user sees the picture."),
+            "markdown image line linking to the picture on the image "
+            "service; put that line in your answer exactly as given, "
+            "because it is the only way the user sees the picture. It makes "
+            "images only: files in the user's project are written with your "
+            "client's own file tools."),
         "parameters": {
             "type": "object",
             "properties": {
@@ -553,8 +749,9 @@ TOOL = {
                 "size": {
                     "type": "string",
                     "description": (
-                        "WIDTHxHEIGHT, multiples of 32. 1024x1024 (default), "
-                        "1344x768 landscape, 768x1344 portrait."),
+                        "WIDTHxHEIGHT, multiples of 32. 1024x1024 (default, "
+                        "about 2 minutes), 1536x1024 landscape, 1024x1536 "
+                        "portrait (about 3-4 minutes)."),
                 },
                 "seed": {
                     "type": "integer",
@@ -574,12 +771,17 @@ def _alt(prompt: str) -> str:
     return (t[:80] + "...") if len(t) > 80 else t
 
 
-def run_tool(args, base: str, record: list | None = None) -> str:
+def run_tool(args, base: str, record: list | None = None,
+             account: str | None = None) -> str:
     """Execute generate_image for the model. Always returns a JSON envelope;
-    never raises. `record` collects one entry per call for x_yamadori."""
+    never raises. `record` collects one entry per call for x_yamadori.
+    `account` picks the image model (the caller's preference, else the
+    server default); the model being called has no say in it."""
     t0 = time.time()
     rec: dict = {"ok": False}
     try:
+        choice, source = resolve_model(account)
+        rec.update(model=MODELS[choice]["name"], model_source=source)
         if not isinstance(args, dict):
             raise bad_args("arguments must be an object with a prompt.",
                            "call again with {\"prompt\": \"...\"}")
@@ -595,12 +797,13 @@ def run_tool(args, base: str, record: list | None = None) -> str:
                            "action": "set YAMADORI_PUBLIC_BASE, e.g. https://ai.thejustinwalsh.me",
                            "why_not_the_agent": "server configuration"}])
         recs = generate(args.get("prompt"), size=args.get("size"),
-                        seed=args.get("seed"))
+                        seed=args.get("seed"), model=choice)
         r = recs[0]
         link = signed_url(r["id"], base)
         md = f"![{_alt(r['prompt'])}]({link})"
-        rec = {"ok": True, "id": r["id"][:16], "size": r["size"],
-               "seed": r["seed"], "steps": r["steps"], "seconds": r["seconds"]}
+        rec.update({"ok": True, "id": r["id"][:16], "size": r["size"],
+                    "seed": r["seed"], "steps": r["steps"],
+                    "seconds": r["seconds"]})
         return json.dumps({
             "tool": TOOL_NAME, "ok": True,
             "markdown": md, "url": link,
@@ -613,10 +816,10 @@ def run_tool(args, base: str, record: list | None = None) -> str:
                             "URL."),
         })
     except ImageError as e:
-        rec = {"ok": False, "error": e.code}
+        rec.update({"ok": False, "error": e.code})
         return json.dumps(e.envelope(), default=str)
     except Exception as e:                                       # noqa: BLE001
-        rec = {"ok": False, "error": "TOOL_RAISED"}
+        rec.update({"ok": False, "error": "TOOL_RAISED"})
         return json.dumps({
             "tool": TOOL_NAME, "ok": False, "error": "TOOL_RAISED",
             "reason": f"{type(e).__name__}: {e}", "retryable": False,
@@ -636,9 +839,11 @@ if __name__ == "__main__":
     ap.add_argument("prompt")
     ap.add_argument("--size", default=None)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--model", choices=sorted(MODELS), default=None,
+                    help="image model (default: YAMADORI_IMAGEGEN_DEFAULT, else base)")
     a = ap.parse_args()
     try:
-        for r in generate(a.prompt, size=a.size, seed=a.seed):
+        for r in generate(a.prompt, size=a.size, seed=a.seed, model=a.model):
             print(json.dumps(r, indent=2))
             print("  ", media_path(r["id"]))
     except ImageError as e:

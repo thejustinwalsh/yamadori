@@ -172,6 +172,45 @@ def watch(account_id: str, remote: str, note: str = "") -> None:
             json.dump(rows, f, indent=2)
 
 
+# --------------------------------------------------------------- preferences
+# Small per-account choices, such as which image model draws for this caller
+# (mcp/images.py). One JSON object per account, at <account_dir>/prefs.json.
+# The ACCOUNT ID is the only key: the HTTP layer passes the id that
+# identify() returned for the caller's own key, and nothing here takes an id
+# from a request body. So one key can read and change only its own
+# preferences. There is no admin role in this module, and so no cross-account
+# write either.
+PREFS_FILE = "prefs.json"
+
+
+def prefs(account_id: str) -> dict:
+    """This account's preferences, or {} when none are set or the file is
+    unreadable. A bad prefs file costs a preference, never a request."""
+    p = os.path.join(account_dir(account_id), PREFS_FILE)
+    try:
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def set_pref(account_id: str, key: str, value) -> dict:
+    """Set one preference (None removes it); return the whole object.
+    Written atomically, like the registry."""
+    d = prefs(account_id)
+    if value is None:
+        d.pop(key, None)
+    else:
+        d[key] = value
+    p = os.path.join(account_dir(account_id), PREFS_FILE)
+    tmp = p + f".{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=2)
+    os.replace(tmp, p)
+    return d
+
+
 def usage(account_id: str) -> dict:
     """Disk actually consumed, so quotas can be enforced on a real number."""
     d = account_dir(account_id)

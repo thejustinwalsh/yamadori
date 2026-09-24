@@ -210,6 +210,80 @@ def imports(text: str) -> list[str]:
     return found
 
 
+def _names_in(node, lang: str, out: dict[str, list[str]]) -> None:
+    """Walk a tree collecting {package: [imported names]} (see
+    imported_names)."""
+    if lang in ("typescript", "tsx", "javascript") and \
+            node.type in ("import_statement", "export_statement"):
+        src = node.child_by_field_name("source")
+        pkg = package_of(_text(src)) if src is not None else None
+        if pkg:
+            names = out.setdefault(pkg, [])
+            stack = list(node.named_children)
+            while stack:
+                c = stack.pop(0)
+                if c.type in ("import_specifier", "export_specifier"):
+                    n = c.child_by_field_name("name")
+                    if n is not None and _text(n) not in names:
+                        names.append(_text(n))
+                elif c.type in ("import_clause", "named_imports",
+                                "export_clause"):
+                    stack[:0] = list(c.named_children)
+            return
+    if lang in ("typescript", "tsx", "javascript") and \
+            node.type == "variable_declarator":
+        # const { a, b } = require('pkg')
+        val = node.child_by_field_name("value")
+        pat = node.child_by_field_name("name")
+        if val is not None and val.type == "call_expression" and \
+                pat is not None and pat.type == "object_pattern":
+            fn = val.child_by_field_name("function")
+            args = val.child_by_field_name("arguments")
+            strs = [a for a in (args.named_children if args is not None
+                                else []) if a.type == "string"]
+            if fn is not None and _text(fn) == "require" and strs:
+                pkg = package_of(_text(strs[0]))
+                if pkg:
+                    names = out.setdefault(pkg, [])
+                    for c in pat.named_children:
+                        if c.type == "shorthand_property_identifier_pattern" \
+                                and _text(c) not in names:
+                            names.append(_text(c))
+    if lang == "python" and node.type == "import_from_statement":
+        mod = node.child_by_field_name("module_name")
+        pkg = package_of(_text(mod).split(".")[0]) if mod is not None else None
+        if pkg:
+            names = out.setdefault(pkg, [])
+            for c in node.children_by_field_name("name"):
+                t = c.child_by_field_name("name") or c
+                if _text(t) not in names:
+                    names.append(_text(t))
+        return
+    for c in node.named_children:
+        _names_in(c, lang, out)
+
+
+def imported_names(text: str) -> dict[str, list[str]]:
+    """{package: [the names imported from it, in order]} for every import in
+    `text` -- `import { Text, Font } from '@pmndrs/glyph'` gives
+    {"@pmndrs/glyph": ["Text", "Font"]}. A default or namespace import names
+    the package with no names. Parsed like imports() (tree-sitter, fenced
+    blocks by their tag, an unfenced blob by each grammar); a failed parse
+    yields nothing rather than a guess. Used by the proxy's library-use
+    injection (#19, docs/SELF-IMPROVEMENT-LOG.md)."""
+    out: dict[str, list[str]] = {}
+    for lang, body in _blocks(text or ""):
+        root = _parse(body, lang)
+        if root is None:
+            continue
+        found: dict[str, list[str]] = {}
+        _names_in(root, lang, found)
+        for pkg, names in found.items():
+            cur = out.setdefault(pkg, [])
+            cur.extend(n for n in names if n not in cur)
+    return out
+
+
 def _text_of(message: dict) -> str:
     c = message.get("content")
     if isinstance(c, list):

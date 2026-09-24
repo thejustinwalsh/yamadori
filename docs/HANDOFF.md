@@ -3,6 +3,52 @@
 The state of Yamadori at a compaction boundary. Written so the next run starts
 from facts in files rather than from a summary of a summary.
 
+## Run queue (2026-09-23, operator's order: top runs first)
+
+Each run goes to completion. Nothing is stopped early; results are read at
+the transcript level (docs/TRANSCRIPT-REVIEW-*.md) before the next change.
+
+1. **Now:** bare arms, LiveBench (lb-20260923-minp0) and the domain suite
+   (group overnight-0923-minp0), min_p 0.0.
+2. **Next deploy, one proxy restart:** fan-out code-aware selection with the
+   winner DELIVERED, plus the check_code tool and repair pass. Then the stack
+   arms run to completion: LiveBench tier `max` (and `minimal`, `bonsai+check`),
+   and domain A6 (plus a deep-thinking-only arm on TypeGPU, TSL and React).
+3. **After the event, bug fixes only** (things that stop the machinery from
+   working as designed): the proxy cancelling work on client disconnect, and
+   the empty-answer root cause (task chips). **No behaviour change is made
+   because of a result.** Router over-escalation (a common API name like
+   `useFrame` sending a question to deep thinking, which then makes zero
+   searches) is REPORTED with its evidence, not changed. The operator's rule:
+   collect complete data in a working state first, show the evidence, decide
+   later.
+3b. **Sampling is owned by the proxy** (operator, 2026-09-23: "we don't let
+   people change our defaults here because this is a fine-tune"). tiers.apply
+   enforces the vendor's settings (PrismML Bonsai 2 card / Qwen thinking mode:
+   temp 1.0, top_p 0.95, top_k 20, min_p 0; instruct values when thinking is
+   off) on every request, client and internal alike. It overrides client
+   values and reports them in x_yamadori.sampling. Fan-out variants no longer
+   carry their own temperatures. The llama-swap `temperature?: 0.3` default
+   is removed from config.yaml; that takes effect at the next llama-swap
+   restart, though with the proxy always sending temperature it can't apply
+   anyway.
+4. **LAST, queued by the operator: KV-cache quantisation, max out the KV.**
+   This reverses the earlier "never quant KV lower" decision, so it's an
+   experiment with a gate, not a switch:
+   - measure q8_0 (today, -c 163840) against a quantised KV at the largest
+     context that keeps >= 1 GB free at peak on the 5060 Ti (the display is on
+     the iGPU now), up to the native 262,144
+   - bench/longctx sweep on both: tok/s and recall/reasoning accuracy vs
+     context length
+   - keep the larger context only where accuracy is not significantly below
+     the 8k baseline; otherwise stay at the smaller one
+5. **Then: bare-model SWE-bench with the GPU to itself, logged in full.**
+   Verified Mini (50 instances, seed 20260923, results/mini50-* resume),
+   arm bonsai, the leaderboard's mini-swe-agent config, trajectories and
+   evaluation logs kept. About 100 min per instance under load; alone it
+   should be faster, so measure it. At that rate the run takes days, and it
+   needs the card to itself.
+
 ## 2026-09-22 evening — what changed since the sections below
 
 Everything under this heading was checked against the code at about 19:30. The
@@ -38,7 +84,9 @@ the code is `mcp/selection.py`, wired in `proxy.prepare`. It works like this:
 - `delegate_investigation` is now OFF by default. Turn it on with
   `YAMADORI_DELEGATE_TOOL=1` or a tier's `delegate` flag, as a benchmark arm.
 - The model's surface is the 8 MCP tools plus `record_step`, `read_rings` and
-  `bind_project_context`.
+  `bind_project_context`. **Superseded 2026-09-24:** main gets only the
+  client's tools and the image tools; our tools are the second brain's, and
+  `bind_project_context` is deleted (AGENTS.md "One model, one cache").
 
 **Laya `route_in` was retrained.** It now uses 289 labels. The staging copy
 is in `index/laya_staging_20260922_191425`, and the old head is in

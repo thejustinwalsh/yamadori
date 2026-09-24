@@ -17,6 +17,8 @@ const Nebari = screens.nebari.Component;
 const Naedoko = screens.naedoko.Component;
 const DatasetDetail = screens.dataset.Component;
 const Sentei = screens.sentei.Component;
+const Settings = screens.settings.Component;
+const Skills = screens.skills.Component;
 
 // The page background is set on <body> from a token, so there is no white
 // flash and no hex outside src/tokens.
@@ -47,6 +49,10 @@ function Screen() {
         return <DatasetDetail id={route.id} />;
       case 'sentei':
         return <Sentei />;
+      case 'settings':
+        return <Settings />;
+      case 'skills':
+        return <Skills />;
       case 'notfound':
         return <StateView kind="empty" title={`no screen at ${route.path}`} />;
       default:

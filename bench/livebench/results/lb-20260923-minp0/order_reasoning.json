@@ -1,0 +1,757 @@
+{
+"release": "2024-11-25",
+"seed": 20260923,
+"category": "reasoning",
+"order": [
+{
+"question_id": "92e4b2cc3b6a16e3e4ad52e89731bd602cb5bf42c884c540981284b28a415929",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "d0c6606fd678d46f3c85f90f8f0fffb2ae42f6be32519be28b174edfd39cc328",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "930606531700715407d47b8b266765f6f2275e72730c5be078477fe6c666cca2",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "46c71f6c8010ba06139e2df649ad68b93d6386d40065301f33e9c3c6d04a81d0",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "bf76ecd31595c31196d59234d29719fc3c08cea5ab4c54afd4185ca0fc221636",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "d60075facb5ecdbc3618620e77f29db9dc5f24b11eb789c771b3180b48866fbf",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "1985f3a3dbdf7959e2992119cf87da6bce6322f5fc0cf02575aaed641793b72c",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "94b238d5f10aaad861dcf6f4320f9166c32c08a65e0766a89e67a70e59ed841d",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "763d6bf2ce815f919798705460bf9199302ffc581f1aec7031275ec60bdb36a3",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "caa1f15441c6447837f1d338425902b745a7181492776ebafd41b9a56ffbbfd7",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "3816c741d321f3da4ef83e083961932688dd0728e99c6cc335a06210ad1ea1d1",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "5dfee88d04c7497f9f4ee44138fed2f9298ed523ed05bde479293eb0cb06ee2f",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "0b02d4ab897f5f7eae1f5715f159ba9309ae8e91ce0403d8df960db77253e36c",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "41efe3791453a6fd4706e5962ad1c931c9ccf8dffafcadf52e0b3b75c3ba5e7c",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "9aafbce875263fd96f7bec10666dde3534e82b01bc2545cf9d4ade501ea943f0",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "a62d773cf471eb77fefc4ae5ad852b13bd561ef41bfd1d7260ca08e8ee67be6a",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "9ee37b9a04ab050936c86b2c5bb7abbaa0bc0e737d59a7bff9ba11e9b4069c1d",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "5c484e793c5fbab10f9d42025bd34db662a33f04ccf3f2157fad7fba1d3fe843",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "115ee3f4cecb92009f145dd6ec96e9d05ce0b255f8a8a4d8bb686253be96aafc",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "a228a34488b7f3bb08154ae677cf37ab7d4d64a82db87ed7c1b724ce28ce7399",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "1fdd436a43f1a7d242602871b37275ee09a69a64094f619b91bee96095846452",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "1836f6b0486252c504e3eb25ca060651488abc7952bb9cab58f8ce7c4fe2c5a2",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "fe79ba9e9256be6d93f0f14f5ae7d7775ede9ef542794584d3064dacc8a6253d",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "f615242a775befba0edf3bed427a71ec3fcf68313cb17992cedcdd58c2f78d37",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "fb970027cec594189294af351537cff1a9a860a8acad597f7f8854fc0ec8875e",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "52e3efe25269c0ace62eb00253aed9507aaf0daed7aff2000f4091d7c8572e7c",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "709c3cb6f68c39f7fac17d28cbfef62a41eb2ab52cb44d2b35c402395d0126c4",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "fd87ac63ae2222cc816095cc4f9cbecbdeb65eae64c9e92cccbae3514c7c7354",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "3e9ebe08c3bb501c205faa69057164a3b54e8f931eb0bbba835f9d0c7203de1c",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "320bb578a63d6412919fcb69b962e8419d8782f1a4ebe54758cac3cc2474c82b",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "484f9d95e130b527cf40c85b560fc70edf30efc56fd57750ad78ee81f64deb47",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "386473c227d36429eaa6b140bd1ebf709f3bcf397fac155f7bf120d30e04f6c8",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "56ecba920668f36eb6a07e04c7e8478344029034ff2b1034be54c3934e083329",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "a168a29cf1565ab72ef24b88e68655b3ef4320bba13fbd8be2cb947abf1a3159",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "73eb556585829561b07830556fd53e7c2b8c34c495e062eb68b9463e2e381c28",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "4d307a56c0beed06090c18b6a431f82f1292d895bdc3186452a36eb33bc6f095",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "a07f06973712c26654d728911aaef7046af825e1d449c731aa7af32a94d9cbd1",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "e7cc2a1e3d6d832fd458675051b2f0319e50619f7df73f1c2d680cceedc2e0e7",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "c24b803db62ad2d9d955c80d77e58682273b4ac70c9694af759ac319c0985dc2",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "d968c11d5c594e036b8cdcb02bfd1e3251d48d1b21d8a6f9ab86eb6926ac50f8",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "d7c4df37a14bc749741b0ad00369fbd6b1b88ee87155779c30915e4e81244cbf",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "f2a25baff529a325a0f93fcf29e64033e6948c329881365655b38d8f778cd21f",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "15a572d195b127489b50b0a4fc86c36a38fcfe6542ca3e2aa309e46f4d56edb5",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "148d00cc541abda49542bb0fe3e4573c1ed4f0d36570738b8d510b2d790b0054",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "743aa0ae2d518d95d45ab8b77a7e9ffde5a03c07da8a6af9e81a4e3689aeef0c",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "4f78225af2661b5b2f22f126fba54723cdbd02e16a8f89fe024f9f21fd54248b",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "84df2180fa0e999d23d30017d9e1f01bb99e58b280b35ecd8508881a8d31ed5d",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "bd14ba82d1fe813dcdf6c16f0f868e5f3fe92e4cee9cf5eb3fd5cb6f03d68517",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "36a9c56b72919f6ee03ed6e929a2e9abfb58b0084a8cab91119393f396faa26e",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "dd75a65a7ec80b500a1101da1c055e021df3aa8f9d594a3dd94e43eeb90ad2ee",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "d99123f5dae428ffc74487c853ff6a440a5d3f3ffdc47006175db53ff4a5054c",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "09719ca5e81c332df5d59ed37737c7351b5d68568933f4e7bbe08f0b22f2d030",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "3cba9b1cc31983abc6df354e887775b23962c63c79352faac086b1ec3bb10786",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "40a8ca9e0abcfe1a1ddcdcc44ca837131ed669f51eafcb1d27b361da7d8d1165",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "27eb08badf45383af3d99130de55ffe01e5723504d6d5fca8f9a7f672aad7e82",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "252a0ed99715f5dbff228b552bb5b63ddc900fd6de5c9e7e98a89869a5580960",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "b7b7e331df4614775210ef5e524ed7f20c5fec6655fb0dd179c94e4d71170862",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "f2a76bdd345c47700ec8b8df974d871d3f2102114c24933b6da249af92ee7f33",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "f0798c2c5aac98aa3467f2a9168c685b44450c70ced7a6ba84b9efeae0751b23",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "608656e6120f3941c236aa3291c9fe64a52a1fda70be7d0814a1104a88af33ff",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "3d118e7c265b1ddf3c22d8765dc0c224dec03fad27d51c9687b46d61b6c4d0e5",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "8e20b94937c6fd08a0047ed442b4d8ef570f572561387f574257df64d6d80fe2",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "b1b1678a4f290c8ab2b85f957a0cdbba93ef0c97d1e7ab4663e46e92ebac70e8",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "e8611ce738371fd1511c383176633a79942e685cf52cdf8a89b0daa138d28463",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "c4cb06e7b75e6427e5057e4c8ba3bdce9ce8f90268e01758aea1a07db5e40dbd",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "b1a413b03774b8811bb97c0b238c16c3c122217a11aa51425918bd5315b0935b",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "63c3148d263be7b923efb3780bb2a9b612643870ecbe7a84892d016a42b31fb4",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "0f6ad553bbe8ca60dfd629dccb15f12a4891830b6e5eec2cdf64ee2eccebce38",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "c833574b0ff6e8609bee19b36fabc48501cdcd9a64b99cd0422f54ada1acc53d",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "5b5d24ca717950268327ba8a8a14ebd116476e226be68ff3663d577df7fa3ed1",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "0f798486e95949a2e4b03b330f24fa5a77c232aa3d9549bb4233aed5ceccca89",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "fe37c4db2b25d85eb28bc39dc6c978c002216c9e26227d7a9389abad0dd230f0",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "407a91d3d4fa5ae79f9b36285582a7ad8738dcf8d9e2104faecb69fca08e07a6",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "45e0ba5954d21f3a14f9c43efbe27d4fcf5a045c8e74dfe8e455aee9b4d0259b",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "bd6776bfffbd81eaa021c33ffbd833e0c75ee50c5827094ccb469d421cd5b8ab",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "f32bae4c10c136c2e8c1180b6bd43c70aeb916935ff767779d95b3093354dd5b",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "5deed7101d85fa0bf4c4b81d62caae013591564e15f830a617ed2832b2bd11f2",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "95af6ecc707197ef62b26adf0f0b5eb0ac8a4335b304bc0b77b87feffc1b5fc3",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "95ef46b58759a1595006301bebb7be5edff15ad5fcaec453d3483c6d8d554b10",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "935a48da067c085a9f2b470cb54355c9fb7eb08e453823f31497f88b33f9d480",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "c29eb6b3c9fd3f67fba90afc62b89640ba6b6aa5f74bb2efd8d5650af6b78ff6",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "a0383235b91e3e448468d0764fedb901f39a8c7855b214ba364e6956722c89cf",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "949c26c188288bf6bf4bbadfa31155caea0b68c9184e5a20307460e0232b5449",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "db55a7cc2ceaa32778ecbb91aecaca4b905b0de218f9a2080a2b3548bbf507b0",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "6a4ca003d6cce2477e549d195b01bf093e37784a9566afc8239f5169e32e3818",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "7e2ec91d0edf778dd360bb1313467afb7650dca15ebe6a672a1f78b05759e292",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "afb99e750d3a60adef0795fffb10a9c7639d06be30c5119c1003238abc6f9b46",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "34efb95856af4045015f9d8f46390d1ca13ae96c4aa4098a62da4b4d4cda2049",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "f4c196c162168a1e61ae5c221501e6180534df45397961dca2650bb007a5c03c",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "7456b78b84937f3f7d137c1af263bfbb1987075e6d093f1bcaf89751e9d30b9c",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "1b317054fbe9c5448203b80b37b98eee6bf845143de64477ba2b8d6172168652",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "5fa39fa60e115287230eee6ee3e25dad52f3bc326ef122758248a33ffd482b8a",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "04207d46453963ade715fc168f3ef781edc3f5355fc03090911cb355fb73867c",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "7c59f01508ae8297658af14d0af57e4d1eaf95bed6fb729d27de2c45faf61eef",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "fb55278b773db7dc51dd37d7a921fef94906e3951355b6e64643183ee6812d9b",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "d977e70d05f737b3df36dbe997420820c43a0c43cfb0ff32290d45667b53987d",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "cc2313de96fe497b3d86c658a16621644ccc3549b3fad07dd885e13c32cc85fa",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "d19e22a567cbe9806dce04d60ec6506c4e823bb8b24f014ac428a012cf02647d",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "8701a5c0c217906a7982be7725249353ee02d5fad80c6f8fc9ad22241072b89d",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "6882b248e31a65f287a7a2ab617b31ebfed771511e730697ceb43f0b5a3dd067",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "a0df70c2c4fde83f42ad139f3a11870e725d1cad71e8920dc9570dc1308edc40",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "84650f1042abf3d267bb79b6d1e1d899d27327a11ab81f1079121734a68306b1",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "456279a44cb607b020cef649d614f567032f0f20376a7c1aac8ae8ca7c6216bc",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "d7071c9ff5d9779e7ab955366d0ae8db40f785aadfe7ff0b5a7ede98c05c44ea",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "9e3c878ffe6ee807e3b01746de0f4a8da254e96c865f7b518ddc1b16f564ce9c",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "1262fb6265c5ffb34ffe11179c38b9cb0f86e1f2483cd7b8bc9965fb809dfaf6",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "2bedd0fab658e0cd36dab3201be4488e3e0cc35b2a8481636fdf1880ef738aa1",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "977a0ea5fc1727ca664cd2af90b5c4a2f36648891e8f5b6ad047512df081a4d8",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "c8f81f9118ead46ae1d37dbfbecd6cbad05b5f2616aac56363cb16a283ab04c4",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "b183db3494f4b53e5c292683be85069129641ea43070f3e405884573b4d6cf7d",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "ed015ab9a9b9c84e1b5d45695a46f91880ced969877640ef9eafd4c231a8960a",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "4c6e9d7cd2f5506ef5d07f1545dad8d1ca31bfd74ad3ca3e1a6d34accac62db2",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "153598b23e138bc1754e3d5233601c0f816999074a46a6186a0bab2142474a96",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "0405cc3d80d24b05c54ae0284daac12f64b8ec440dfc3ab8e35b0970f414e91e",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "27780ecab68b99ba747722d3e536086049ba4a8fc768b1357c0e20871a92e41c",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "36febbb33b3d28b8f75e1a7f798fcff09903e94a50b89da2dbf1ed160508c02c",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "c89fdda34dcddd50a92fd79332f22c31b7f0fd94d3ce05062fd7a874bd36e224",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "a0f4b0be2055ef97c455771f2de3eb3f41c9018603d96c93225be734b70dcdce",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "448411c3001bf1a38e6b6a39a7f7e8a0b213247c667d2b8b1ddb8d1dc4ed73a9",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "ba951e86124110cf1c9d030b2dc025be31e42c1cf4fdf23558d2834937e956dc",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "f8e84ee53942b7e6881fd483a404f6d2c875e816fd79f07cf4181d5d0e3a5b31",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "0daa7ca38beec4441b9d5c04d0b98912322926f0a3ac28a5097889d4ed83506f",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "6bd178380f1808eadda3b1565ac385a0ed891cb438a611a8142e9002ac35bbe4",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "efb9d081389f7fe028eb9a801d6751ab5cc6a2f4d09e21e1ca6c893e9b8f2fc5",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "4f42c0eb489cf1f8a6d969935a02f430f2c4d28b26a29eb9393f34d2281be63e",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "87af7bdf47fa02d0fc18d13cf81cda012d1edb0c3458a2dd4ab4f9ca3113988c",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "5b17944d153f760cf4f5fe4aa39dd623740cc12a79e4bcbd37ca9fecb95661f6",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "92bb60ed8fe8f01ae8ed962c504f73b598e541a89fcb2d800685230220f44bd8",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "363d6a519f6ce7572b752357e5008d054f34fb01ff1e8864326889bd2b24f626",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "59979242f2437bc604ba87e9af3dd80878837a3ad01436d110fca1191f1dc0bb",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "d3cc53402d8956920f4b114654f3017d35345884ebfed700f32fd93c47838ffa",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "5089fbc10efdb431bffe2c78c406a442285ebf32fca0ccadc6898b7d2b9b5891",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "69f8b6614de6be6712544c2ee92e323be657baea3072e5d8fe2b61b3fde4b6d2",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "c008e3fd220239ea1a8345a59f5beea2510b132cc29b05893bb1d18b5f1acb44",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "20d48b97e524cd64f82b0e4fb3c597a37bae1d9357e9b2c93aad96b4c70e098e",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "bcb1f6fe1bb7acd221fff096a8c7158773496ea55c73c5cfd735bd0a8bacc6f1",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "bfcc5037c3e26c0f713b087a441e4c5d8432d49841d607001e7679dbb18ffd34",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "2102018493646d369865e04813606d3170a25f31f0fad3aece558969b56f97d0",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "9c7c693083342fc0622081516bebd935c7b1d08f3bea9969944d1ef2bf5864fc",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "5562c71e7b85254ac414378bbef6b77f2e7c35380c848f3c0a15d6697f8b3e28",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "51c63d38da594f139bba62f7fc0391fe5bfff81b15282260dba35e281d22ec38",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "1c6eda54001bf87aa1b9d833e89448168f0c3020a026b618ba346b18afa6ef26",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "ebae339b57ef00841b1d0a736c735414477f030debce11af33e67702f9dd3445",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "2a886a49a7c9afb9b30d299d6de0b67558ae1076da4178faaf08e8b24d4a2994",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "e0df6bab9a48ea72072778dc1f8a804810438529347c88b5028b15045b20a203",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "55e8bd39f4531d47ed94aad9a9dc1842e40b7da5b4915803d5a35cb6c30d0fc7",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "7f1b41d1cdf3a3cf65c6107f8bb29f112137dc875cff80dc667c4cab83c4037a",
+"task": "zebra_puzzle",
+"category": "reasoning"
+},
+{
+"question_id": "b7d1f1dff19c7a17f5bed438461607ab663b76b783a55ccdd2b5efb2236c4831",
+"task": "spatial",
+"category": "reasoning"
+},
+{
+"question_id": "6957dbbcf7065dee1051a20e454f74a8546be7cc930d5c8aeb549d542b750a37",
+"task": "web_of_lies_v2",
+"category": "reasoning"
+},
+{
+"question_id": "c2b235761e06ab22ef1bfba7fa61461b6f6536e5b2a7709674193c7cc96b192c",
+"task": "zebra_puzzle",
+"category": "reasoning"
+}
+]
+}

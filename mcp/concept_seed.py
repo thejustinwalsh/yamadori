@@ -251,6 +251,30 @@ def last() -> dict | None:
         return None
 
 
+def seed_for(prompt: str | None = None, n: int = 1) -> list[dict]:
+    """n fresh seeds for n second-brain runs, drawn away from `prompt`, each
+    {word, token_id, u32, hex}. Empty -- never an exception -- when the matrix
+    is not extracted: a missing seed must not cost the request.
+
+    Operator requirement (2026-09-23): EVERY second-brain run -- fan-out's
+    candidate B, its tie-breaker C, and deep thinking -- carries one, in the
+    user turn, via phrase()."""
+    try:
+        if not available():
+            return []
+        return draw_seeds(n, away_from=prompt or None)
+    except Exception:                                            # noqa: BLE001
+        return []
+
+
+def summary(seed: dict | None) -> dict | None:
+    """The part of a seed a record carries: the word and its numbers."""
+    if not seed:
+        return None
+    return {"word": seed.get("word"), "token_id": seed.get("token_id"),
+            "u32": seed.get("u32")}
+
+
 def phrase(concept: str, where: str = "fanout") -> str:
     """The seed as the original states it, for the USER message. Records use.
 
