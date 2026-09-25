@@ -147,9 +147,16 @@ THINK_TOOL = {"type": "function", "function": {
 # What main's reasoning says on the hop after a think_deeply result (the
 # visible content opens with shomen.opening). Ends on a letter (prefill rule
 # 4, docs/SELF-IMPROVEMENT-PLAN.md).
-THINK_REASONING = ("I thought this through deeply; the hand-off is in the "
-                   "think_deeply result above. I continue from its FACTS and "
-                   "its NEXT STEP.")
+# The reasoning prefilled on the hop after a think_deeply result. The user
+# sees neither the result (a hidden hop) nor this thinking, so it says the
+# answer carries the findings itself (live gate 2026-09-24: an answer that
+# pointed at "the hand-off above", which the user never saw).
+THINK_REASONING = ("I thought this through deeply; the hand-off came back "
+                   "as the think_deeply result. The user sees neither that "
+                   "result nor this thinking. So my answer stands on its "
+                   "own: it acts on the hand-off's NEXT STEP, and states the "
+                   "findings it relies on in full, each with its path:line "
+                   "and the source lines that show it.")
 PLAN_HEAD = ("I planned this task before acting: the plan below was written "
              "by a second model, which read what it cites. I carry it out "
              "step by step.\n\n")
@@ -1017,6 +1024,8 @@ def _db() -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=10, isolation_level=None)
     con.execute("PRAGMA busy_timeout=10000")
     if path not in _ENSURED:
+        # WAL: readers do not block this writer (see corpus._db).
+        con.execute("PRAGMA journal_mode=WAL")
         con.executescript(DDL)
         # Columns added after the first build (pre-deploy review): a table
         # created before them gains them here.
@@ -1254,22 +1263,40 @@ def observe_and_record(*, account: str, conversation: str,
         return
     msgs = [m for m in (messages or []) if isinstance(m, dict)]
     T = thresholds()["struggle_threshold"]["value"]
-    try:
-        with _LOCK:
-            con = _db()
-            try:
-                con.execute("BEGIN")
-                if conversation:
-                    _observe(con, account, conversation, msgs,
-                             int(rec.get("epoch") or 0), T)
-                _insert(con, rid, account=account, conversation=conversation,
-                        **row)
-                con.execute("COMMIT")
-            finally:
-                con.close()
-    except Exception as e:                                       # noqa: BLE001
-        print(f"  deep: recording failed ({type(e).__name__}: {e})",
-              flush=True)
+    last = None
+    for attempt in range(4):            # off the response path: retry, don't drop
+        try:
+            with _LOCK:
+                con = _db()
+                try:
+                    # IMMEDIATE takes the write lock up front, so the busy
+                    # timeout covers it instead of failing mid-transaction.
+                    con.execute("BEGIN IMMEDIATE")
+                    if conversation:
+                        _observe(con, account, conversation, msgs,
+                                 int(rec.get("epoch") or 0), T)
+                    _insert(con, rid, account=account, conversation=conversation,
+                            **row)
+                    con.execute("COMMIT")
+                    return
+                except Exception:
+                    try:
+                        con.execute("ROLLBACK")
+                    except Exception:                            # noqa: BLE001
+                        pass
+                    raise
+                finally:
+                    con.close()
+        except sqlite3.OperationalError as e:
+            last = e
+            if "locked" not in str(e) and "busy" not in str(e):
+                break
+            time.sleep(0.5 * (attempt + 1))
+        except Exception as e:                                   # noqa: BLE001
+            last = e
+            break
+    print(f"  deep: recording failed ({type(last).__name__}: {last})",
+          flush=True)
 
 
 # OFF THE RESPONSE PATH (pre-deploy review, 2026-09-24): observe + record ran

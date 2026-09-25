@@ -39,6 +39,7 @@ one turn both paths run.
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 import threading
@@ -1525,11 +1526,14 @@ def ledger_scope(payload: dict | None) -> tuple[str, str]:
     return sl.get("account") or "", sl.get("key") or ""
 
 
-def ledger_restore(messages: list[dict], account: str) -> tuple[list, dict]:
+def ledger_restore(messages: list[dict], account: str,
+                   skip: frozenset | set = frozenset()) -> tuple[list, dict]:
     """The client's messages with every recorded addition put back.
 
     Returns (messages, counts). Messages the ledger has nothing for are the
-    client's own objects, unchanged."""
+    client's own objects, unchanged. `skip`: message keys whose recorded
+    injection is NOT put back -- a retryable decision this request decides
+    again (_inject_retry)."""
     keys = chain_keys(messages)
     out: list = []
     n = {"inject": 0, "content": 0, "hops": 0, "echoed_reasoning": 0,
@@ -1540,7 +1544,8 @@ def ledger_restore(messages: list[dict], account: str) -> tuple[list, dict]:
             continue
         role = m.get("role")
         # A user turn's injection, or a tool result's (LIBRARY USE, #19).
-        if role in ("user", "tool") and isinstance(m.get("content"), str):
+        if role in ("user", "tool") and isinstance(m.get("content"), str) \
+                and keys[i] not in skip:
             add = nebari.ledger_get(account, keys[i], "inject")
             if add:
                 m = dict(m, content=m["content"] + add)
@@ -1744,10 +1749,16 @@ def prepare(body: dict) -> dict:
     # request's rendering EXTENDS what the pinned slot holds. A utility call
     # is not a conversation and gets the client's messages as sent.
     keys = chain_keys(raw)
+    # A RETRYABLE decision on the message this request ends on (a part came
+    # out empty because something was unavailable) is decided again below,
+    # so it is not put back here (_inject_retry).
+    retry_key, retry_meta = (None, {}) if utility else _inject_retry(
+        raw, keys, account)
     if utility:
         messages, restored = list(raw), {}
     else:
-        messages, restored = ledger_restore(raw, account)
+        messages, restored = ledger_restore(
+            raw, account, skip={retry_key} if retry_key else frozenset())
         nebari.ledger_touch(account, lineage)
     # ATTACHED IMAGES. The chat model is text-only, and llama-server refuses an
     # image part for a model without a projector, so the turn used to fail.
@@ -1904,20 +1915,48 @@ def prepare(body: dict) -> dict:
         "rings_reinjected")
     recorded = (None if li is None or utility else
                 nebari.ledger_get(account, keys[li], "inject"))
-    if recorded is not None:
-        inject_rec.update(replayed=True, chars=len(recorded))
+    # RETRYABLE DECISIONS (live gate 2026-09-24: a decision made while the
+    # embeddings were not loaded was replayed, forever, as final). A part
+    # that came out empty BECAUSE something was unavailable is recorded under
+    # `retry` in the decision's meta; the next request that ends on this
+    # same user turn -- nothing after it is cached -- decides again, keeping
+    # the parts that did not fail. Once the conversation has moved past the
+    # turn, the slot holds what was sent, and that is what replays.
+    retrying = (li is not None and retry_key is not None
+                and retry_key == keys[li])
+    replay_hints: list | None = None
+    if recorded is not None and not retrying:
+        rmeta = nebari.ledger_meta(account, keys[li], "inject")
+        inject_rec.update(replayed=True, chars=len(recorded),
+                          parts=list(rmeta.get("parts") or []))
         skills_rec = {"path": None, "on": False, "ids": [], "versions": [],
                       "why": "decided on the request this user turn arrived "
                              "with; replayed from the ledger"}
+        replay_hints = rmeta.get("hints")
     elif (li is not None and not utility and not inplace
           and isinstance(raw[li].get("content"), str)
           and (speaking or continued)):
-        parts: list[str] = []
+        keep = dict(retry_meta.get("texts") or {}) if retrying else {}
+        failed = set(retry_meta.get("retry") or {}) if retrying else set()
+        texts: dict[str, str] = {}
+        unavailable: dict[str, str] = {}
         if speaking:
-            tail, used_hints, skills_rec = _skills_tail(messages, sel, route)
-            if tail:
-                parts.append(tail)
-                inject_rec["parts"].append("skills")
+            if "skills" in keep and "skills" not in failed:
+                texts["skills"] = keep["skills"]
+                replay_hints = retry_meta.get("hints")
+                skills_rec = {"path": None, "on": False, "ids": [],
+                              "versions": [],
+                              "why": "kept from this turn's retryable "
+                                     "decision (skills did not fail)"}
+            else:
+                tail, used_hints, skills_rec = _skills_tail(messages, sel,
+                                                            route)
+                texts["skills"] = tail
+                # Retryable only when it came out EMPTY for that reason: a
+                # fallback that still chose is a decision.
+                why = None if tail else _skills_unavailable(skills_rec)
+                if why:
+                    unavailable["skills"] = why
             # A skill injected here that declares `escalate` (known-hard
             # area, Phase 0.6): deep thinking runs for it, once per skill per
             # conversation, when nothing else fired.
@@ -1931,31 +1970,58 @@ def prepare(body: dict) -> dict:
                     sel.setdefault("because", {})["investigate"] = \
                         trig["because"]
                     sel.setdefault("signals", {})["trigger"] = trig["kind"]
-            defs = _library_definitions(route, tier, gate, sel, messages,
-                                        route_dbs, state)
-            if defs:
-                parts.append(defs)
-                inject_rec["parts"].append("definitions")
+            if "definitions" in keep and "definitions" not in failed:
+                texts["definitions"] = keep["definitions"]
+            else:
+                why_defs: list[str] = []
+                texts["definitions"] = _library_definitions(
+                    route, tier, gate, sel, messages, route_dbs, state,
+                    unavailable=why_defs)
+                if why_defs:
+                    unavailable["definitions"] = "; ".join(why_defs)[:300]
             if tier.get("retrieval") and not sel.get("investigate"):
                 # LIBRARY USE (#19): whatever the class. Read from the
                 # client's own messages -- never from what this service
                 # injected, whose definitions carry imports of their own.
-                use, use_rec = _library_use(raw, account, lineage, state)
-                if use:
-                    parts.append(use)
-                    inject_rec["parts"].append("library_use")
+                if "library_use" in keep and "library_use" not in failed:
+                    texts["library_use"] = keep["library_use"]
+                else:
+                    use, use_rec = _library_use(raw, account, lineage, state)
+                    texts["library_use"] = use
+                    if use_rec.get("unavailable"):
+                        unavailable["library_use"] = "; ".join(
+                            use_rec["unavailable"])[:300]
         if continued:
-            log = _work_log_block(state)
-            if log:
-                parts.append(log)
-                inject_rec["parts"].append("work_log")
+            texts["work_log"] = _work_log_block(state)
             _mark_rings_reinjected(state)
-        text, n_scrub = scrub_markers("".join(parts))
-        _note_scrub(scrub_note, "injection", n_scrub)
-        # Never over a non-empty decision a duplicate request recorded
-        # meanwhile; what stands is what is sent (nebari.ledger_claim).
-        text = nebari.ledger_claim(account, lineage, keys[li], "inject", text)
-        inject_rec.update(decided=True, chars=len(text))
+        elif keep.get("work_log"):
+            texts["work_log"] = keep["work_log"]
+        order = [p for p in INJECT_PARTS if texts.get(p)]
+        clean: dict[str, str] = {}
+        for p in order:
+            clean[p], n_scrub = scrub_markers(texts[p])
+            _note_scrub(scrub_note, "injection", n_scrub)
+        text = "".join(clean[p] for p in order)
+        hint_view = _hints_view(used_hints) if replay_hints is None \
+            else replay_hints
+        meta = {"parts": order, "hints": hint_view}
+        if unavailable:
+            # The parts that did NOT fail are kept verbatim for the retry.
+            meta.update(retry=unavailable, texts=clean)
+        # What stands is what is sent: never over a final non-empty decision
+        # a duplicate request recorded meanwhile (nebari.ledger_decide).
+        text, meta = nebari.ledger_decide(account, lineage, keys[li],
+                                          "inject", text, meta)
+        inject_rec.update(decided=True, chars=len(text),
+                          parts=list(meta.get("parts") or []))
+        if retrying:
+            inject_rec["retried"] = sorted(failed)
+        if meta.get("retry"):
+            inject_rec["retryable"] = dict(meta["retry"])
+            print("  injection RETRYABLE (decided again on the next request "
+                  "that ends on this turn): "
+                  + "; ".join(f"{k}: {v}" for k, v in meta["retry"].items()),
+                  flush=True)
         if text:
             ai = _index_of_user(augmented, raw[li])
             if ai is not None:
@@ -1975,13 +2041,23 @@ def prepare(body: dict) -> dict:
             and augmented and isinstance(augmented[-1], dict)
             and augmented[-1].get("role") == "tool"):
         got = nebari.ledger_get(account, keys[-1], "inject")
-        if got is None:
+        # A retryable decision on this tool result is decided again (see
+        # RETRYABLE DECISIONS above); ledger_restore did not put it back.
+        if got is None or (retry_key is not None and retry_key == keys[-1]):
             use, use_rec = _library_use(raw, account, lineage, state)
             use, n_scrub = scrub_markers(use)
             _note_scrub(scrub_note, "injection", n_scrub)
-            use = nebari.ledger_claim(account, lineage, keys[-1], "inject",
-                                      use)
+            meta = {"parts": ["library_use"] if use else []}
+            if use_rec.get("unavailable"):
+                meta.update(retry={"library_use": "; ".join(
+                    use_rec["unavailable"])[:300]}, texts={})
+            use, meta = nebari.ledger_decide(account, lineage, keys[-1],
+                                             "inject", use, meta)
             use_rec["decided"] = True
+            if got is not None:
+                use_rec["retried"] = True
+            if meta.get("retry"):
+                use_rec["retryable"] = dict(meta["retry"])
             if use:
                 augmented = list(augmented)
                 augmented[-1] = dict(augmented[-1],
@@ -2008,15 +2084,12 @@ def prepare(body: dict) -> dict:
     out["_seen_messages"] = messages
     # 120 characters of each recipe and no more: this goes back to the client
     # in `x_yamadori`, and a recipe snippet is the only corpus text that may.
-    out["_hints"] = [{"score": h.get("_score"),
-                      "recipe": (h.get("recipe") or "")[:120],
-                      "source": h.get("source_name") or h.get("_file"),
-                      "bucket": h.get("_bucket")}
-                     for h in used_hints]
-    out["_suppressed_hints"] = [
-        {"score": x.get("score"), "recipe": (x.get("recipe") or "")[:120],
-         "bucket": h.get("_bucket"), "held_by": (h.get("recipe") or "")[:60]}
-        for h in used_hints for x in (h.get("_suppressed") or [])]
+    # A REPLAYED decision reports the hints it carries (recorded in its meta
+    # when it was decided): the prompt holds them, so the record says so.
+    view = (_hints_view(used_hints) if replay_hints is None
+            else replay_hints)
+    out["_hints"] = list(view.get("hints") or [])
+    out["_suppressed_hints"] = list(view.get("suppressed") or [])
     # x_yamadori.skills: path, ids, versions, why -- never text or a path.
     out["_skills"] = skills_rec
     out["_selection"] = sel
@@ -2143,6 +2216,77 @@ def _deep_trigger(raw: list[dict], tier: dict, route: dict, util: dict,
     return trig
 
 
+# The per-turn injection's parts, in the order they are appended.
+INJECT_PARTS = ("skills", "definitions", "library_use", "work_log")
+
+
+def _hints_view(used: list[dict]) -> dict:
+    """x_yamadori.hints / suppressed_hints for the hints a decision attached:
+    120 characters of each recipe and no more (this goes back to the
+    client, and a recipe snippet is the only corpus text that may)."""
+    return {
+        "hints": [{"score": h.get("_score"),
+                   "recipe": (h.get("recipe") or "")[:120],
+                   "source": h.get("source_name") or h.get("_file"),
+                   "bucket": h.get("_bucket")} for h in used or []],
+        "suppressed": [
+            {"score": x.get("score"), "recipe": (x.get("recipe") or "")[:120],
+             "bucket": h.get("_bucket"),
+             "held_by": (h.get("recipe") or "")[:60]}
+            for h in used or [] for x in (h.get("_suppressed") or [])]}
+
+
+def _skills_unavailable(rec: dict | None) -> str | None:
+    """Why the skills / hints part came out empty because something was
+    UNAVAILABLE (the embedder not loaded, the A4000 busy, a raise), or None
+    when it was a real decision -- nothing cleared the floor, recall not
+    allowed, no skill armed."""
+    rec = rec or {}
+    why = str(rec.get("why") or "")
+    if why.startswith("recall raised"):
+        return why[:200]
+    emb = rec.get("embedding") or {}
+    w = str(emb.get("why") or "")
+    if emb.get("ok") is False and w.startswith(("embedding failed",
+                                                "the query vector is zero")):
+        return w[:200]
+    return None
+
+
+def _tool_unavailable(out) -> str | None:
+    """A find_* result that failed for a reason that can pass (its envelope
+    says `retryable`: NoRoom, a busy lane, an unreadable card), or None --
+    a real answer, a real miss, or a failure retrying cannot fix."""
+    if not isinstance(out, str) or not out.lstrip().startswith("{"):
+        return None
+    try:
+        d = json.loads(out)
+    except ValueError:
+        return None
+    if isinstance(d, dict) and d.get("ok") is False and d.get("retryable"):
+        return (f"{d.get('error') or 'error'}: "
+                f"{str(d.get('reason') or '')[:160]}")
+    return None
+
+
+def _inject_retry(raw: list[dict], keys: list[str],
+                  account: str) -> tuple[str | None, dict]:
+    """(key, meta) of a RETRYABLE injection on the message this request ends
+    on -- the user turn it is speaking, or the tool result it ends on --
+    else (None, {}). Only there: nothing after that message is cached, so
+    deciding it again changes no prefix a slot holds."""
+    if not raw or not keys:
+        return None, {}
+    last = raw[-1] if isinstance(raw[-1], dict) else {}
+    if last.get("role") not in ("user", "tool"):
+        return None, {}
+    meta = nebari.ledger_meta(account, keys[-1], "inject")
+    if meta.get("retry") and nebari.ledger_get(account, keys[-1],
+                                               "inject") is not None:
+        return keys[-1], meta
+    return None, {}
+
+
 def _index_of_user(messages: list, original: dict) -> int | None:
     """Where the client's last user turn sits in `messages` (the addendum
     may have added a system message in front, and restored image hops add
@@ -2209,15 +2353,21 @@ DEFINITIONS_HEAD = ("\n\n---\nLibrary definitions for names in this message, "
 
 def _library_definitions(route: dict, tier: dict, gate: dict | None,
                          sel: dict, messages: list[dict], dbs: dict,
-                         state: dict | None) -> str:
+                         state: dict | None,
+                         unavailable: list | None = None) -> str:
+    """The definitions tail, or "". `unavailable` collects why a lookup that
+    should have run could not (a raise, a retryable failure envelope): the
+    caller then records the decision as RETRYABLE, never as final."""
     if (route or {}).get("class") != "library_question" \
             or not tier.get("retrieval") or not (gate or {}).get("offer") \
             or sel.get("investigate"):
         return ""
+    miss = unavailable if unavailable is not None else []
     try:
         q, _ctx, _speaking = selection.question_of(messages)
         held = selection.defined_symbols(q, dbs)
-    except Exception:                                            # noqa: BLE001
+    except Exception as e:                                       # noqa: BLE001
+        miss.append(f"symbol lookup raised {type(e).__name__}: {e}"[:200])
         return ""
     names: list[str] = []
     for ns in held.values():
@@ -2229,7 +2379,13 @@ def _library_definitions(route: dict, tier: dict, gate: dict | None,
         try:
             out = run_our_tool("find_definition_opt", {"symbol": n}, None,
                                None, None, state)
-        except Exception:                                        # noqa: BLE001
+        except Exception as e:                                   # noqa: BLE001
+            miss.append(f"find_definition_opt({n}) raised "
+                        f"{type(e).__name__}: {e}"[:200])
+            continue
+        why = _tool_unavailable(out)
+        if why:
+            miss.append(f"find_definition_opt({n}): {why}")
             continue
         if not out or out.lstrip().startswith("{") or packages._is_empty(out):
             continue
@@ -2392,6 +2548,8 @@ def _library_use(messages: list[dict], account: str, lineage: str,
         uses = library_uses(messages)
     except Exception as e:                                       # noqa: BLE001
         rec["error"] = f"{type(e).__name__}: {e}"[:200]
+        rec["unavailable"] = [f"reading the held packages raised "
+                              f"{rec['error']}"]
         return "", rec
     used = {p: u for p, u in uses.items() if p in held}
     rec["used_held"] = sorted(used)
@@ -2425,8 +2583,17 @@ def _library_use(messages: list[dict], account: str, lineage: str,
                 try:
                     out = _run_on_package(db, "find_definition_opt",
                                           {"symbol": n})
-                except Exception:                                # noqa: BLE001
+                except Exception as e:                           # noqa: BLE001
                     out = ""
+                    rec.setdefault("unavailable", []).append(
+                        f"find_definition_opt({pkg}:{n}) raised "
+                        f"{type(e).__name__}: {e}"[:200])
+                    continue          # not covered: decided again later
+                why = _tool_unavailable(out)
+                if why:
+                    rec.setdefault("unavailable", []).append(
+                        f"find_definition_opt({pkg}:{n}): {why}")
+                    continue
                 covered.append(n)
                 if not out or out.lstrip().startswith("{") \
                         or packages._is_empty(out):
@@ -2444,13 +2611,20 @@ def _library_use(messages: list[dict], account: str, lineage: str,
                 rec["overview"].append(pkg)
         if parts and pkg not in rec["packages"]:
             rec["packages"].append(pkg)
+    # A lookup that could not run (rec["unavailable"]) makes this decision
+    # RETRYABLE (prepare): nothing is marked covered and no characters are
+    # spent, so the retry decides the whole of it again.
+    commit = not rec.get("unavailable")
     if not parts:
-        nebari.ledger_put(account, lineage, key, "libuse", json.dumps(done))
+        if commit:
+            nebari.ledger_put(account, lineage, key, "libuse",
+                              json.dumps(done))
         return "", rec
     room = min(USE_MAX_CHARS, USE_CONVERSATION_MAX_CHARS - spent)
     text = (USE_HEAD + "\n\n".join(parts))[:room]
     done["_chars"] = spent + len(text)
-    nebari.ledger_put(account, lineage, key, "libuse", json.dumps(done))
+    if commit:
+        nebari.ledger_put(account, lineage, key, "libuse", json.dumps(done))
     rec["chars"] = len(text)
     return text, rec
 
@@ -2750,6 +2924,81 @@ FINDINGS_HEAD = ("I investigated this in the library source before "
 REASONING_HEAD = ("I thought this through before answering, without "
                   "searching: reasoning, no sources checked. Nothing below "
                   "was read from a file.\n\n")
+# THE HAND-OFF'S LAST LINE (live gate 2026-09-24). After a 28-search, 638 s
+# investigation the visible answer was one line -- "After thinking deeply,
+# the deprecation chain is pinned to r179 with the hand-off above." -- while
+# the hand-off sat in the prefilled REASONING, which the user never sees. So
+# the prefilled reasoning ends by saying who sees what, and that the answer
+# it leads into carries the findings itself. Positive wording on purpose
+# (AGENTS.md "Prompting this model"). Ends on a letter or a period, never a
+# space (rule 4). The wording is a choice, unmeasured beyond the live check.
+# REVISED after the second live run the same night: 1,337 characters of
+# findings, but opened "the answer below was assembled from the hand-off
+# facts" and repeated "**After thinking deeply,**" as a heading. The two
+# prohibitions name exactly those observed failures (AGENTS.md allows two).
+FOLD_BACK_TAIL = ("\n\nThe user sees only my answer, not this thinking and "
+                  "not this hand-off. So my answer stands on its own: it "
+                  "states the findings in full -- each fact it relies on "
+                  "with its path:line and the source lines that show it, "
+                  "what is still open, and the next step. It opens with "
+                  "\"After thinking deeply,\" and that same sentence goes "
+                  "straight on into the answer itself. It never mentions "
+                  "the hand-off, the investigation or anything \"above\", "
+                  "and it never writes the opening phrase a second time.")
+PLAN_TAIL = ("\n\nThe user sees only my answer, not this plan. So my answer "
+             "says in a sentence or two what I will do and in what order, "
+             "then starts on the first step.")
+# The check on what follows (x_yamadori.fold_back_answer; the live suite
+# asserts it): characters of answer after the opening phrase, and any
+# pointer at text the user never saw. 200 is a choice: the failing answer
+# had 72.
+FOLD_BACK_MIN_CHARS = 200
+_HIDDEN_REF = re.compile(r"\bhand-?offs?\b|\babove\b|\binvestigation\b|"
+                         r"\bmy (?:thinking|"
+                         r"reasoning)\b|\bthink_deeply\b", re.IGNORECASE)
+
+
+def _repeat_opening_re() -> "re.Pattern":
+    phrase = re.escape(shomen.PHRASES["investigate"].rstrip(","))
+    # A later line that is only the phrase, bold, italic or a heading:
+    # "**After thinking deeply,**", "## After thinking deeply", ...
+    return re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]*)?[*_]{0,3}[ \t]*" + phrase
+                      + r",?[ \t]*[*_]{0,3}[ \t]*:?[ \t]*\n?")
+
+
+def dedup_opening(text: str, payload: dict | None = None,
+                  count: bool = True) -> str:
+    """`text` with every LATER copy of the fold-back opening that stands on
+    its own line (bold, italic or a heading) removed -- the first one, the
+    prefilled opening, stays. A deterministic guard (live gate 2026-09-24,
+    second run: "... from the hand-off facts.\\n\\n**After thinking
+    deeply,**\\n\\nThe TSL node ..."). The removals are counted in
+    payload["_opening_repeats_removed"] (x_yamadori.fold_back_answer)."""
+    phrase = shomen.PHRASES["investigate"]
+    i = (text or "").find(phrase)
+    if i < 0:
+        return text
+    head, tail = text[:i + len(phrase)], text[i + len(phrase):]
+    new, n = _repeat_opening_re().subn("", tail)
+    if n and payload is not None and count:
+        payload["_opening_repeats_removed"] = int(
+            payload.get("_opening_repeats_removed") or 0) + n
+    if n:
+        new = re.sub(r"\n{3,}", "\n\n", new)
+    return head + new
+
+
+def fold_back_answer(content: str) -> dict:
+    """{chars_after_opening, refers_to_hidden} for an answer that opened with
+    the deep-thinking fold-back ("... After thinking deeply,")."""
+    phrase = shomen.PHRASES["investigate"]
+    text = content or ""
+    i = text.find(phrase)
+    after = text[i + len(phrase):] if i >= 0 else text
+    m = _HIDDEN_REF.search(after)
+    return {"chars_after_opening": len(after.strip()),
+            "refers_to_hidden": m.group(0) if m else None,
+            "opened": i >= 0}
 
 
 def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
@@ -2830,7 +3079,11 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
                 tier=tier.get("name") or "max",
                 effort=(tier.get("effort") if "effort" in
                         (tier.get("overridden") or []) else None),
-                seed=seed, lane_timeout=trig.get("lane_timeout"))
+                seed=seed, lane_timeout=trig.get("lane_timeout"),
+                # A citation of the bound repository's own file is read from
+                # it (shomen THE EVIDENCE); with none bound, held packages
+                # only.
+                **({"source_root": root} if root else {}))
         except Exception as e:                                   # noqa: BLE001
             box["err"] = f"{type(e).__name__}: {e}"
         finally:
@@ -2855,7 +3108,8 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
         rec["skipped"] = True
         print(f"  deep thinking skipped: {rec['why']}", flush=True)
         return rec
-    text, stats, searches = _handoff_of(res, q, box.get("err"), rec, seed)
+    text, stats, searches = _handoff_of(res, q, box.get("err"), rec, seed,
+                                        root)
     rec["web_refused"] = len(ctx_run.get("refused") or [])
     if searches == 0:
         rec.setdefault("why", "no search ran: handed off as reasoning, no "
@@ -2872,7 +3126,8 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
     # as ours, not mistaken for a role token.
     text = _screen_handoff(payload, text, ctx_run, rec)
     payload["_prefill"] = {"role": "assistant",
-                           "reasoning_content": head + text,
+                           "reasoning_content": head + text.rstrip() + (
+                               PLAN_TAIL if job == "plan" else FOLD_BACK_TAIL),
                            "content": shomen.opening(seeds)}
     payload.setdefault("_fold_back", []).append(
         {"job": job, "phrase": "investigate", "into": "prefill",
@@ -2902,11 +3157,16 @@ def _handoff_record(stats: dict | None) -> dict:
         "machine_built", "cut",
         # Did the helper write the four sections? The rate of this is how
         # well the format is followed -- measure it before relying on it.
-        "structured", "plan")}
+        "structured", "plan",
+        # THE EVIDENCE (shomen): excerpts inlined from the held source, and
+        # citations removed because the verifier could not read them.
+        "excerpts", "excerpt_chars", "excerpts_skipped",
+        "citations_removed")}
 
 
 def _handoff_of(res: dict, q: str, err: str | None, rec: dict,
-                seed: dict | None) -> tuple[str, dict | None, int]:
+                seed: dict | None, root: str | None = None
+                ) -> tuple[str, dict | None, int]:
     """(hand-off text, its stats, searches) from one second-brain run, the
     record `rec` updated. A raise, or a result carrying no hand-off, is
     rebuilt from the trace (a written `finding` is still used): an empty
@@ -2929,7 +3189,7 @@ def _handoff_of(res: dict, q: str, err: str | None, rec: dict,
             rec["why"] = "the investigation raised: " + err[:200]
         if written:
             text, stats = shomen.handoff(written, tr.get("trace") or [], seen,
-                                         rec["handle"] or "")
+                                         rec["handle"] or "", root=root)
         else:
             text, stats = shomen.machine_handoff(
                 q, tr.get("trace") or [], seen,
@@ -3019,7 +3279,8 @@ def _think_deeply(payload: dict, args: dict, db: str | None,
             run_tool=lambda fn, a: run_our_tool(fn, a, db, root, None, state),
             context=ctx, tier=tier.get("name") or "max",
             effort=(tier.get("effort") if "effort" in over else None),
-            seed=seed, lane_timeout=lane_timeout)
+            seed=seed, lane_timeout=lane_timeout,
+            **({"source_root": root} if root else {}))
         err = None
     except Exception as e:                                       # noqa: BLE001
         res, err = {}, f"{type(e).__name__}: {e}"
@@ -3036,7 +3297,8 @@ def _think_deeply(payload: dict, args: dict, db: str | None,
                        "action": "go on from what is in context, or call "
                                  "again on a later step",
                        "effect": "the lane frees when the other run ends"}])
-    text, stats, searches = _handoff_of(res, question, err, call, seed)
+    text, stats, searches = _handoff_of(res, question, err, call, seed,
+                                        root)
     call["web_refused"] = len(ctx_run.get("refused") or [])
     head = FINDINGS_HEAD if searches else REASONING_HEAD
     text, n_scrub = scrub_markers(head + text)
@@ -3379,6 +3641,10 @@ def _x_yamadori(payload: dict, *, hops: int, fan: dict | None,
         # where it went (prefill / note / continuation / in_place /
         # appended), and the seed words named.
         "fold_back": list(payload.get("_fold_back") or []),
+        # After a deep-thinking fold-back: how much answer followed the
+        # opening, and whether it pointed at text the user never saw
+        # (fold_back_answer).
+        "fold_back_answer": payload.get("_fold_back_answer"),
         # The ledger: what was restored on this request (counts per kind)
         # and whether this request decided its user turn's injection.
         # `keyed_by_shown`: the client was streamed more content than the
@@ -3441,7 +3707,11 @@ def _cache_summary(payload: dict, log_line: bool = True) -> dict | None:
 
     last = recs[-1]
     out = {"prompt": total("prompt"), "reused": total("reused"),
-           "processed": total("processed"), "slot": last.get("slot"),
+           "processed": total("processed"),
+           # The model server's own milliseconds over this request's
+           # generations (slots.cache_record); None when a generation did not
+           # report them. Wall clock minus this is the stack's overhead.
+           "model_ms": total("model_ms"), "slot": last.get("slot"),
            "mode": last.get("mode"), "generations": len(recs),
            "evicted": next((r.get("evicted") for r in recs if r.get("evicted")),
                            None),
@@ -3690,15 +3960,18 @@ def _run_turn(body: dict, streamed: bool):
     # (mcp/gpu_room.py) -- prepare's own embeddings (skills, library help),
     # then every tool run_our_tool executes. Fresh per request.
     room_log: list = []
-    # FAIL FAST (pre-deploy review, 2026-09-24): prepare's own embeddings
-    # (skill / hint selection) never wait for the A4000's room lock, which
-    # an image draw holds for its whole run (up to ROOM_WAIT_S, 300 s). A
-    # loaded search model still takes its lease; one that is not loaded is
-    # skipped at once, and the skip is recorded (x_yamadori.skills /
-    # x_yamadori.gpu_room).
+    # FAIL FAST (pre-deploy review, 2026-09-24; revised after the live gate
+    # the same night): prepare's own embeddings (skills / hints, library
+    # help, E1) wait at most gpu_room.FAIL_FAST_WAIT_S (2 s) for the A4000's
+    # room lock, which an image draw holds for its whole run (up to
+    # ROOM_WAIT_S, 300 s). A loaded search model takes its lease; one that is
+    # not loaded is LOADED when the room comes free within the wait (after a
+    # restart nothing else loads it), and skipped otherwise -- recorded
+    # (x_yamadori.skills / x_yamadori.gpu_room) and decided again on the next
+    # request (a RETRYABLE injection, prepare).
     with gpu_room.recording(room_log), gpu_room.fail_fast(
-            "a chat turn's own embedding (skill / hint selection) does not "
-            "wait for the A4000"):
+            "a chat turn's own embedding (skills, library help, E1) waits "
+            "for the A4000 only briefly"):
         payload = prepare(body)
     state["_gpu_room"] = room_log
     payload["_gpu_room"] = room_log
@@ -3829,6 +4102,12 @@ def _run_turn(body: dict, streamed: bool):
         # reasoning; the final hop flushes it as content).
         held = ""
         live = False
+        # A fold-back hop (deep thinking's prefill): a second, bold or
+        # heading copy of the opening phrase is removed before the held
+        # content goes out (dedup_opening).
+        fold_hop = prefill is not None and any(
+            f.get("phrase") == "investigate"
+            for f in payload.get("_fold_back") or [])
         try:
             for kind, item in _post_events("/v1/chat/completions", send):
                 if kind == "done":
@@ -3845,6 +4124,8 @@ def _run_turn(body: dict, streamed: bool):
                 held += piece
                 if len(held) > HOLD_CONTENT_CHARS:
                     live = True
+                    if fold_hop:
+                        held = dedup_opening(held, payload)
                     yield from out.content(held)
                     held = ""
         except Exception as e:                                   # noqa: BLE001
@@ -3873,6 +4154,8 @@ def _run_turn(body: dict, streamed: bool):
                 # fix-up's reasoning line must go out before any content.
                 pending = held
             else:
+                if fold_hop:
+                    held = dedup_opening(held, payload)
                 yield from out.content(held)
             held = ""
         # The landing is the last generation whatever it asked for: a call
@@ -3973,6 +4256,11 @@ def _run_turn(body: dict, streamed: bool):
             base_messages[-1] is prefill:
         base_messages = base_messages[:-1]
     content = msg.get("content") or ""
+    if any(f.get("phrase") == "investigate"
+           for f in payload.get("_fold_back") or []):
+        # The delivered text agrees with what was streamed (dedup_opening
+        # counts a removal once).
+        content = dedup_opening(content, payload, count=not streamed)
     client_calls = [c for c in (msg.get("tool_calls") or [])
                     if c.get("function", {}).get("name") not in ours]
     stray = [c for c in (msg.get("tool_calls") or [])
@@ -4021,10 +4309,21 @@ def _run_turn(body: dict, streamed: bool):
         if fan and isinstance(fan.get("_winner"), dict):
             upstream_text.append(fan["_winner"].get("content") or "")
     msg["content"] = content
+    # THE WARM RACE, streamed (live gate 2026-09-24, #5): the client has the
+    # calls the moment they are yielded, and a harness that runs the tool
+    # then and there can send its next request before this turn reaches
+    # _warm below. A HOLD is registered first, so that request waits for the
+    # warm this turn is about to schedule (_warm takes the hold over, or
+    # releases it when nothing is warmed).
+    hold = _warm_hold(payload) if client_calls else None
     if client_calls:
         msg["tool_calls"] = client_calls
         fin = "tool_calls"
-        yield ("calls", client_calls)
+        try:
+            yield ("calls", client_calls)
+        except BaseException:
+            _warm_release(payload, hold)
+            raise
     elif stray:
         msg.pop("tool_calls", None)
     choice["finish_reason"] = fin
@@ -4035,6 +4334,18 @@ def _run_turn(body: dict, streamed: bool):
     if fan is not None:
         d["_fanout"] = dict(fan, winner=(fan.get("_winner")))
         fan.pop("_winner", None)
+    if any(f.get("phrase") == "investigate"
+           for f in payload.get("_fold_back") or []):
+        payload["_fold_back_answer"] = dict(
+            fold_back_answer(content), repeated_opening_removed=int(
+                payload.get("_opening_repeats_removed") or 0))
+        fa = payload["_fold_back_answer"]
+        if fa["refers_to_hidden"] or fa["chars_after_opening"] < \
+                FOLD_BACK_MIN_CHARS:
+            print(f"  fold-back answer: {fa['chars_after_opening']} chars "
+                  f"after the opening"
+                  + (f"; refers to hidden text ({fa['refers_to_hidden']})"
+                     if fa["refers_to_hidden"] else ""), flush=True)
     delivered = {"role": "assistant", "content": content,
                  "reasoning_content": msg["reasoning_content"]}
     if client_calls:
@@ -4072,11 +4383,9 @@ def _run_turn(body: dict, streamed: bool):
            for m in messages):
         echoes = bool(((payload.get("_ledger") or {}).get("restored") or {})
                       .get("echoed_reasoning"))
-        flag = "1" if echoes else "0"
-        if nebari.ledger_get(acct, "client", "echoes_reasoning") != flag:
-            nebari.ledger_put(acct, "", "client", "echoes_reasoning", flag)
+        _echo_note(acct, echoes)
     else:
-        echoes = nebari.ledger_get(acct, "client", "echoes_reasoning") == "1"
+        echoes = _echo_guess(acct)
     client_turn = {k: v for k, v in delivered.items()
                    if k != "reasoning_content"}
     if echoes:
@@ -4112,7 +4421,7 @@ def _run_turn(body: dict, streamed: bool):
         payload["_warm_before"] = dict(payload["_warm_before"],
                                        waited_s=payload["_warm_waited"])
     payload["_warm"] = _warm(payload, warm_base, client_turn, slot_msg,
-                             landed)
+                             landed, hold=hold)
     _log_turn(state, delivered, tcheck, think, fan, rep)
     # THE SELF-IMPROVEMENT LOOP (Phase 0.6): this conversation's earlier
     # decisions are observed against what the client sent back, then this
@@ -4425,20 +4734,24 @@ def _same_turn(a: dict, b: dict) -> bool:
 
 
 def _warm(payload: dict, base: list[dict], delivered: dict, slot_msg: dict,
-          landed: bool) -> dict:
-    """Schedule the warm; the record says whether and why."""
+          landed: bool, hold: "threading.Event | None" = None) -> dict:
+    """Schedule the warm; the record says whether and why. `hold`: the
+    pending event _warm_hold registered before the calls went out -- taken
+    over by the warm, or released when nothing is warmed."""
     sl = payload.get("_slot") or {}
+    why = None
     if not sl.get("key") or sl.get("transient"):
-        return {"sent": False, "why": "not a conversation turn"}
-    if _same_turn(delivered, slot_msg):
-        return {"sent": False, "why": "the slot already holds the turn "
-                                      "as delivered"}
-    if landed:
-        return {"sent": False, "why": "the turn landed; its prompt carries "
-                                      "the landing request, which the "
-                                      "client does not keep"}
-    if not WARM:
-        return {"sent": False, "why": "YAMADORI_WARM=0"}
+        why = "not a conversation turn"
+    elif _same_turn(delivered, slot_msg):
+        why = "the slot already holds the turn as delivered"
+    elif landed:
+        why = ("the turn landed; its prompt carries the landing request, "
+               "which the client does not keep")
+    elif not WARM:
+        why = "YAMADORI_WARM=0"
+    if why:
+        _warm_release(payload, hold)
+        return {"sent": False, "why": why}
     import threading as _threading
     last = (payload.get("_cache_log") or [{}])[-1] or {}
     # What the warm should reuse at the least: the last generation's whole
@@ -4459,7 +4772,11 @@ def _warm(payload: dict, base: list[dict], delivered: dict, slot_msg: dict,
     model = payload.get("model") or "bonsai"
     # Registered BEFORE the thread starts, so a fast client's next request
     # already finds it pending (wait_for_warm) and its record (warm_before).
-    ev = _WARM_PENDING[sl["key"]] = _threading.Event()
+    # A hold registered before the calls went out becomes this warm's event:
+    # a request already waiting on it keeps waiting, now for the warm.
+    ev = hold if hold is not None else _threading.Event()
+    ev.hold_until = None
+    _WARM_PENDING[sl["key"]] = ev
     _WARMS_DONE.pop(sl["key"], None)
     _WARMS_DONE[sl["key"]] = rec
     while len(_WARMS_DONE) > 512:     # conversations that never came back
@@ -4522,25 +4839,108 @@ _WARMS_DONE: dict[str, dict] = {}     # conversation key -> its last warm
 # x_yamadori.warm_before says how long it waited.
 _WARM_PENDING: dict[str, "threading.Event"] = {}
 WARM_WAIT = float(os.environ.get("YAMADORI_WARM_WAIT", "180"))
+# A HOLD (_warm_hold) that no warm took over by then is abandoned: the turn
+# that registered it died between sending its calls and scheduling the warm.
+# A breaker, not a measurement: that stretch is in-process work taking ms.
+WARM_HOLD_S = float(os.environ.get("YAMADORI_WARM_HOLD", "30"))
+
+
+# THE ECHO HABIT on a conversation's FIRST turn, where the conversation has
+# shown nothing yet (live gate 2026-09-24, second run, the repair test): the
+# account's LAST observation said "echoes" -- the agent-loop test's echoing
+# client had just run on the same key -- so the warm rendered the turn WITH
+# its reasoning, the stripping client sent it back without, and the next
+# request diverged at the turn's think block; the warm's own checkpoints had
+# evicted the generation's (server checkpoint_min_step 8192), so it fell back
+# 516 tokens (reused 2374 of 2890, processed 601). Now the account keeps its
+# last ECHO_WINDOW observations and a first turn guesses "echoes" only when
+# every one of them echoed; anything mixed or unknown is "strips", the
+# documented default (Hermes strips for this provider). A choice: 8.
+ECHO_WINDOW = 8
+
+
+def _echo_note(account: str, echoes: bool) -> None:
+    """Record one observation of whether this account's client echoed past
+    reasoning (a request that carries assistant turns)."""
+    hist = nebari.ledger_get(account, "client", "echo_history") or ""
+    new = (hist + ("1" if echoes else "0"))[-ECHO_WINDOW:]
+    if new != hist:
+        nebari.ledger_put(account, "", "client", "echo_history", new)
+
+
+def _echo_guess(account: str) -> bool:
+    """A first turn's guess: echoes only when every recent observation of
+    this account echoed (a record from before the history, the single
+    last flag, counts as one observation)."""
+    hist = nebari.ledger_get(account, "client", "echo_history")
+    if hist is None:
+        hist = nebari.ledger_get(account, "client", "echoes_reasoning") or ""
+    return bool(hist) and set(hist) == {"1"}
+
+
+# A warm that diverges inside the turn the slot just generated restores from
+# the checkpoint llama-server makes 4 tokens before a prompt's end
+# (server-context.cpp checkpoint_offsets {4 + n_ubatch, 4}; live gate
+# 2026-09-24: reused 4452 of 4456, 2886 of 2890), so it re-reads those 4
+# tokens by design. `short` allows that and a little more: 8 is a choice.
+WARM_CHECKPOINT_SLACK = 8
+
+
+def _warm_hold(payload: dict) -> "threading.Event | None":
+    """Register a pending warm for this conversation BEFORE its calls reach
+    the client (the streamed race, #5); None when no warm could follow (not
+    a conversation turn, warming off)."""
+    sl = payload.get("_slot") or {}
+    if not WARM or not sl.get("key") or sl.get("transient"):
+        return None
+    ev = threading.Event()
+    ev.hold_until = time.time() + WARM_HOLD_S
+    _WARM_PENDING[sl["key"]] = ev
+    return ev
+
+
+def _warm_release(payload: dict, ev: "threading.Event | None") -> None:
+    """A hold no warm took over: dropped, and its waiters let through."""
+    if ev is None or getattr(ev, "hold_until", None) is None:
+        return
+    key = (payload.get("_slot") or {}).get("key")
+    if key and _WARM_PENDING.get(key) is ev:
+        _WARM_PENDING.pop(key, None)
+    ev.set()
 
 
 def wait_for_warm(key: str | None, timeout: float | None = None
                   ) -> float | None:
-    """Block until this conversation's pending warm has finished. Returns the
-    seconds waited, or None when no warm was pending.
+    """Block until this conversation's pending warm has finished -- whether
+    it is running, scheduled, or only HELD (its turn's calls went out and
+    the warm is about to be scheduled). Returns the seconds waited, or None
+    when no warm was pending.
 
     RE-CHECKS (pre-deploy review, 2026-09-24): when the warm waited on ends
     and ANOTHER is now pending for the key (a newer turn scheduled one), it
     waits for that one too, within the same budget. A warm itself never
     outlives WARM_WAIT (_warm_now bounds its own requests by it), so a
-    waiter that returns on the budget has not left a warm running."""
+    waiter that returns on the budget has not left a warm running. A hold
+    never taken over is given up at its WARM_HOLD_S."""
     ev = _WARM_PENDING.get(key) if key else None
     if ev is None:
         return None
     t0 = time.time()
     end = t0 + (WARM_WAIT if timeout is None else timeout)
     while ev is not None:
-        ev.wait(max(0.0, end - time.time()))
+        hu = getattr(ev, "hold_until", None)
+        ev.wait(max(0.0, (end if hu is None else min(end, hu))
+                    - time.time()))
+        if not ev.is_set():
+            hu = getattr(ev, "hold_until", None)
+            if hu is not None and time.time() >= hu:
+                # Abandoned: nothing will be warmed.
+                if _WARM_PENDING.get(key) is ev:
+                    _WARM_PENDING.pop(key, None)
+                break
+            if time.time() >= end:
+                break
+            continue          # the hold became a warm meanwhile: wait on
         nxt = _WARM_PENDING.get(key)
         if nxt is ev or nxt is None or time.time() >= end:
             break
@@ -4589,8 +4989,9 @@ def _warm_now(key: str, model: str, msgs: list[dict], fields: dict,
                    processed=t.get("prompt_n"), slot=grant["slot"])
         exp = rec.get("expect_reused_at_least")
         short = (exp is not None and t.get("cache_n") is not None
-                 and int(t["cache_n"]) < int(exp))
+                 and int(t["cache_n"]) < int(exp) - WARM_CHECKPOINT_SLACK)
         rec["short"] = bool(short)
+        rec["slack"] = WARM_CHECKPOINT_SLACK
         print(f"  warm: slot {grant['slot']} reused {t.get('cache_n')} "
               f"processed {t.get('prompt_n')}"
               + (f" -- SHORT: the slot generated on a {exp}-token prompt "

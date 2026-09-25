@@ -201,6 +201,9 @@ export const GIRTH_MIN = 0.35;
 export const GIRTH_MAX = 1.6;
 
 /** Inert values: fixed, matte, unanimated. What a dead channel looks like. */
+/** Smallest live canopy (no recall lately), as a share of full size. */
+export const FOLIAGE_MIN = 0.9;
+
 export const INERT = {
   girth: 0.7,
   growth: 1,
@@ -218,8 +221,10 @@ export function treeParams(state: TreeState, sk: Skeleton): TreeParams {
   // A held fork is full grown; a retracting one shrinks toward arity 1.
   const fade = fan ? clamp01(fan.fade ?? 1) : 1;
   const fol = state.foliage;
-  // Live pads: sparse at no recall, full at 3 items per turn.
-  const padSize = fol ? 0.35 + 0.65 * fol.density : INERT.foliage;
+  // Live pads: the canopy keeps its shape (operator, 2026-09-24: 0.35 at no
+  // recall shrank the tops "way too much"); recall shows as lushness and
+  // light (foliageDensity), with only a small size range: 0.9 -> 1.
+  const padSize = fol ? FOLIAGE_MIN + (1 - FOLIAGE_MIN) * fol.density : INERT.foliage;
   const chosen = fan ? Math.max(0, Math.min(arity - 1, Math.floor(fan.chosen))) : 0;
   const activity = state.activity ?? INERT.activity;
   const alarms = state.alarms ?? 0;

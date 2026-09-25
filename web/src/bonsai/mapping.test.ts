@@ -317,11 +317,11 @@ describe('fanout <- the last x_yamadori.fanout (vitals.tree.recent.fanout)', () 
 describe('foliage <- recall injected lately (vitals.tree.recent.foliage)', () => {
   const tree = (foliage: unknown) => withTree({ ...VITALS.tree, recent: { fanout: null, foliage } });
   const pads = (p: ReturnType<typeof treeParams>) => p.branches.filter((b) => b.foliage > 0);
-  it('density sizes the pads and lights them; the recall path is kept', () => {
+  it('density lights the pads and varies their size only slightly; the recall path is kept', () => {
     const full = treeParams(treeState(tree({ density: 1, path: 'skills' })), SK);
     const bare = treeParams(treeState(tree({ density: 0, path: 'hints' })), SK);
     expect(pads(full)[0]!.foliage).toBeCloseTo(1, 6);
-    expect(pads(bare)[0]!.foliage).toBeCloseTo(0.35, 6);
+    expect(pads(bare)[0]!.foliage).toBeCloseTo(0.9, 6); // the canopy keeps its shape (FOLIAGE_MIN)
     expect(full.scene.foliageLive).toBe(1);
     expect(full.scene.foliageDensity).toBe(1);
     expect(treeState(tree({ density: 0.4, path: 'skills' })).foliage).toEqual({ density: 0.4, path: 'skills' });

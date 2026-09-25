@@ -482,7 +482,14 @@ empty or error calls is a tool defect to fix, not a budget spent.
     PREFILLED as main's `reasoning_content` for this answer; the visible
     answer opens with the seed line and "After thinking deeply,". Citations
     are still checked against what was retrieved; an unchecked fact is
-    labelled, not dropped. No search: it crosses under "reasoning, no
+    labelled, not dropped. A verified fact carries the lines it cites
+    INLINE, read by the verifier from the held index and labelled
+    `pkg@version path:a-b` (main and the user cannot open our paths); a
+    citation the verifier cannot read is REMOVED and its fact labelled
+    reasoning (shomen "THE EVIDENCE"; caps are choices). The hand-off ends
+    by telling main that the user sees only its answer, which states the
+    findings in full (`proxy.FOLD_BACK_TAIL`; live gate 2026-09-24: an
+    answer pointed at "the hand-off above"). No search: it crosses under "reasoning, no
     sources checked". Turn cap or helper-budget landing: the landing prompt
     requires the hand-off. Nothing written: the proxy builds one from the
     trace, labelled machine-built. `MAX_FINDING_CHARS` (6000) is the breaker

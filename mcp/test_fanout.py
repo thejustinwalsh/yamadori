@@ -979,6 +979,40 @@ def test_the_seed_is_not_copied_into_delivered_code():
 TESTS.append(test_the_seed_is_not_copied_into_delivered_code)
 
 
+def test_a_bare_code_answer_to_a_named_language_is_code():
+    """Live gate 2026-09-24 (second run), the cache test's step 4: "Write a
+    Python function fib(n) ... Just the code." routed code_generation and B
+    ran, but the answer carried its code bare (or in an untagged fence), so
+    selection found no tagged block and stopped as "prose: recorded only".
+    A request that names its language reads such an answer as that code."""
+    ask = {"model": "bonsai", "messages": [{"role": "user", "content":
+           "Write a Python function total_even(nums), the sum of the even "
+           "numbers. Just the code."}]}
+    upstream(fenced(OUTLIER), fenced(LOOP_B))
+    v = fanout.run(ask, original=original(LOOP_A.strip()), n=3)
+    check(not str(v.get("stop_reason")).startswith("prose")
+          and v.get("candidates") and v["candidates"][0]["parses"] is True,
+          "bare code answering 'Write a Python function': graded as python, "
+          "not recorded as prose", json.dumps({k: v.get(k) for k in (
+              "stop_reason", "steps", "candidates")})[:400])
+    upstream(fenced(OUTLIER), fenced(LOOP_B))
+    v = fanout.run(ask, original=original("```\n" + LOOP_A + "```\n"), n=3)
+    check(not str(v.get("stop_reason")).startswith("prose"),
+          "an untagged fence answering a named language is that code",
+          str(v.get("stop_reason")))
+    upstream(fenced(OUTLIER))
+    v = fanout.run(ask, original=original("It sums the even numbers."), n=2)
+    check(str(v.get("stop_reason")).startswith("prose"),
+          "prose is still prose (nothing parses as a definition)",
+          str(v.get("stop_reason")))
+    check(fanout.asked_language("Write a TypeScript function f") ==
+          "typescript" and fanout.asked_language("Explain closures") is None,
+          "the language is read off the request, or not at all")
+
+
+TESTS.append(test_a_bare_code_answer_to_a_named_language_is_code)
+
+
 def main() -> int:
     for fn in TESTS:
         print(f"\n--- {fn.__name__} ---")

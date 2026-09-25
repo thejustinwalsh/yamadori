@@ -251,6 +251,12 @@ models:
       --cont-batching
       -b 1024 -ub 512
       --jinja
+      # KEEP IDLE SLOTS RESIDENT (2026-09-24): with the auto 4 slots over one
+      # unified pool, --cache-idle-slots (default on) clears every idle slot
+      # whenever any slot starts a task, and a pinned request to the emptied
+      # slot loads nothing back -- a helper task or side call wiped the
+      # conversation's slot. Measured and explained in config.yaml.
+      --no-cache-idle-slots
 
       # Cap thinking at the SERVER, so no client setting can produce an empty
       # reply. Without it, reasoning and answer share one max_tokens budget:

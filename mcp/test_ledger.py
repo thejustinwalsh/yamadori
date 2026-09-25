@@ -965,6 +965,154 @@ def test_a_duplicate_request_never_blanks_the_library_help():
           "never")
 
 
+PREFIX_HINT = {"recipe": "Static array, many range-sum queries: prefix sums, "
+                         "O(n) build then O(1) per query.",
+               "_score": 0.81, "_bucket": "range", "_file": "usaco.jsonl",
+               "_suppressed": [{"score": 0.7, "recipe": "Point updates "
+                                "interleaved with range sums: Fenwick."}]}
+
+
+def test_a_retryable_decision_is_decided_again():
+    """Live gate 2026-09-24 (STALE DECISION REPLAY). A user turn's injection
+    decided while the embedder could not answer came out "" and was replayed
+    as final ever after -- for every conversation whose first messages hash
+    the same, across restarts. Now a part that came out empty BECAUSE
+    something was unavailable is recorded retryable and decided again by the
+    next request that ends on that same turn; once the conversation has
+    moved past it, what was sent replays unchanged (prefix stability)."""
+    slots.reset(n=4)
+    compaction.reset()
+    saved = proxy._skills_tail
+    state = {"up": False, "calls": 0}
+    GOOD = "\n\n---\nRelevant engineering notes: prefix sums."
+
+    def skills(messages, sel, route):
+        state["calls"] += 1
+        if not state["up"]:
+            return "", [], {"path": "hints", "on": False, "ids": [],
+                            "versions": [], "why": "recall raised NoRoom: "
+                            "embeddings is not loaded (A4000_BUSY)"}
+        return GOOD, [dict(PREFIX_HINT)], {"path": "hints", "on": True,
+                                          "ids": [], "versions": [],
+                                          "why": "attached 1"}
+    proxy._skills_tail = skills
+    feats = {"hints": True}
+    try:
+        # 1. The embedder is down: nothing attached, recorded RETRYABLE.
+        c = Client("medium")
+        c.msgs[0]["content"] += " [retryable]"
+        t1 = c.turn([reply("first")], user="static array, many range-sum "
+                                           "queries", features=feats)
+        inj1 = t1["d"]["x_yamadori"]["ledger"]["inject"]
+        sent1 = t1["gens"][0]["request"]["messages"][-1]["content"]
+        check(GOOD not in sent1 and inj1.get("decided")
+              and "skills" in (inj1.get("retryable") or {}),
+              "[retry] an injection that came out empty because the embedder "
+              "was down is recorded RETRYABLE", json.dumps(inj1))
+        # 2. The SAME request again (a retry, or the next run of a test whose
+        #    messages hash the same): decided again, and now attached.
+        state["up"] = True
+        again = Client("medium")
+        again.msgs = c.msgs[:2]
+        t2 = again.turn([reply("second")], features=feats)
+        inj2 = t2["d"]["x_yamadori"]["ledger"]["inject"]
+        sent2 = t2["gens"][0]["request"]["messages"][-1]["content"]
+        check(sent2.endswith(GOOD) and inj2.get("decided")
+              and not inj2.get("replayed") and inj2.get("retried")
+              == ["skills"] and "skills" in (inj2.get("parts") or []),
+              "[retry] the same request, the embedder up: decided again and "
+              "sent, never replayed as \"\"", json.dumps(inj2))
+        hints = t2["d"]["x_yamadori"].get("hints") or []
+        check(any("prefix sums" in (h.get("recipe") or "") for h in hints),
+              "[retry] x_yamadori.hints names what was attached",
+              json.dumps(hints))
+        # 3. Now FINAL: a third copy replays it byte for byte, and reports
+        #    the hints it carries (they are in the prompt).
+        n0 = state["calls"]
+        third = Client("medium")
+        third.msgs = c.msgs[:2]
+        t3 = third.turn([reply("third")], features=feats)
+        inj3 = t3["d"]["x_yamadori"]["ledger"]["inject"]
+        sent3 = t3["gens"][0]["request"]["messages"][-1]["content"]
+        hints3 = t3["d"]["x_yamadori"].get("hints") or []
+        check(sent3 == sent2 and inj3.get("replayed")
+              and state["calls"] == n0 and inj3.get("parts") == ["skills"],
+              "[retry] a final decision replays identically, nothing decided",
+              json.dumps(inj3))
+        check(any("prefix sums" in (h.get("recipe") or "") for h in hints3)
+              and any("Fenwick" in (s.get("recipe") or "") for s in
+                      t3["d"]["x_yamadori"].get("suppressed_hints") or []),
+              "[retry] a replay reports the hints its turn carries (the live "
+              "'x_yamadori.hints: []' on a replayed turn)",
+              json.dumps(hints3))
+        # 4. PREFIX STABILITY: a retryable turn the conversation has MOVED
+        #    PAST replays what was sent (""), even with the embedder up.
+        state["up"] = False
+        d = Client("medium")
+        d.msgs[0]["content"] += " [moved past]"
+        d.turn([reply("one")], user="static array, many range-sum queries",
+               features=feats)
+        state["up"] = True
+        t5 = d.turn([reply("two")], user="and with updates?", features=feats)
+        req = t5["gens"][0]["request"]["messages"]
+        first_user = next(m for m in req if m.get("role") == "user")
+        check(first_user["content"] == "static array, many range-sum queries"
+              and req[-1]["content"].endswith(GOOD),
+              "[retry] once the conversation moved past a retryable turn, it "
+              "replays as sent (the slot holds it); the new turn is decided",
+              json.dumps([first_user["content"][-60:],
+                          req[-1]["content"][-60:]]))
+    finally:
+        proxy._skills_tail = saved
+
+
+def test_a_definitions_lookup_that_fails_is_retryable():
+    """The definitions part of the injection: a find_definition_opt that
+    could not run (a retryable failure envelope, or a raise) makes the
+    decision retryable instead of final-and-empty."""
+    fail = json.dumps({"tool": "find_definition_opt", "ok": False,
+                       "error": "A4000_BUSY", "reason": "busy",
+                       "retryable": True})
+    ok = "class Foo  ->  src/foo.ts:1-3\n  export class Foo {}"
+    why: list = []
+    saved = (proxy.run_our_tool, proxy.selection.question_of,
+             proxy.selection.defined_symbols)
+    proxy.selection.question_of = lambda m: ("what is Foo?", "", True)
+    proxy.selection.defined_symbols = lambda q, dbs: {"pkg": ["Foo"]}
+    route = {"class": "library_question"}
+    tier = {"retrieval": True}
+    gate = {"offer": True}
+    try:
+        proxy.run_our_tool = lambda *a, **k: fail
+        text = proxy._library_definitions(route, tier, gate, {}, [], {}, None,
+                                          unavailable=why)
+        check(text == "" and why and "A4000_BUSY" in why[0],
+              "a retryable failure envelope is recorded as unavailable",
+              json.dumps(why))
+        why2: list = []
+        proxy.run_our_tool = lambda *a, **k: ok
+        text = proxy._library_definitions(route, tier, gate, {}, [], {}, None,
+                                          unavailable=why2)
+        check(text.startswith(proxy.DEFINITIONS_HEAD) and not why2,
+              "a lookup that answers is a final decision", text[:120])
+    finally:
+        (proxy.run_our_tool, proxy.selection.question_of,
+         proxy.selection.defined_symbols) = saved
+    # The ledger's own rule.
+    nebari.ledger_reset()
+    got = nebari.ledger_decide("acct-r", "s", "k-r", "inject", "",
+                               {"retry": {"skills": "down"}})
+    got2 = nebari.ledger_decide("acct-r", "s", "k-r", "inject", "X",
+                                {"parts": ["skills"]})
+    got3 = nebari.ledger_decide("acct-r", "s", "k-r", "inject", "",
+                                {"retry": {"skills": "down"}})
+    check(got[0] == "" and got2 == ("X", {"parts": ["skills"]})
+          and got3 == ("X", {"parts": ["skills"]}),
+          "ledger_decide: a retryable decision is replaced; a final "
+          "non-empty one never (a duplicate that decided less loses)",
+          json.dumps([got, got2, got3]))
+
+
 def test_text_turn_keys_are_per_conversation():
     """Pre-deploy review, 2026-09-24 (MINOR): a text turn's ledger key was
     the hash of its content alone, so two of an account's conversations in
@@ -1219,6 +1367,142 @@ def test_a_fixup_step_and_its_warm():
                       f"vs sent {r[max(0, n - 80):n + 60]!r}")
     finally:
         WARM_DELAY, FIXED = saved
+
+
+def test_a_client_that_acts_on_the_calls_waits_for_the_warm():
+    """#5, the live gate of 2026-09-24 (the repair path: the next request
+    extended less than the prompt the slot had generated on). A STREAMING
+    harness has the calls the moment their chunk arrives, and one that runs
+    the tool then and there sends its next request while this turn is still
+    between that chunk and scheduling its warm -- when nothing was pending
+    yet, so the next request went straight to the slot and the warm then
+    overwrote it with the older prefix. Here the harness sends its next
+    request on the calls chunk and holds the first stream until that
+    request has either reached the model or visibly waited (3 s); the next
+    request must reach the slot only after the warm finished."""
+    global WARM_DELAY
+    saved = WARM_DELAY
+    WARM_DELAY = 1.0
+    slots.reset(n=4)
+    compaction.reset()
+    msgs = [{"role": "system", "content": SYSTEM + " [pipelined]"},
+            {"role": "user", "content": "Write hi.py with a function f that "
+                                        "returns 1."}]
+    body = {"model": "yamadori", "reasoning_effort": "xhigh",
+            "_account": f"{ACCOUNT}-pipe", "_client_ip": "127.0.0.1",
+            "tools": [WRITE],
+            "_features": json.dumps({"hints": False, "investigate": False,
+                                     "fanout": 1})}
+    _script[:] = [reply("", reasoning="Write it.", calls=[call(
+        "write_file", {"path": "hi.py", "content": BROKEN}, "px1")])]
+    d0 = len(_warm_done_at)
+    content, calls, box = "", [], {}
+    th = None
+    try:
+        for b in proxy.stream_body(dict(body, stream=True,
+                                        messages=json.loads(json.dumps(msgs)))):
+            for line in b.decode("utf-8").split("\n"):
+                if not line.startswith("data:") or line[5:].strip() == "[DONE]":
+                    continue
+                for ch in json.loads(line[5:].strip()).get("choices") or []:
+                    dl = ch.get("delta") or {}
+                    content += dl.get("content") or ""
+                    for c in dl.get("tool_calls") or []:
+                        calls.append({k: v for k, v in c.items()
+                                      if k != "index"})
+            if calls and th is None:
+                # The harness runs the tool NOW and sends the result.
+                follow = msgs + [{"role": "assistant", "content": content,
+                                  "tool_calls": calls},
+                                 {"role": "tool", "tool_call_id": "px1",
+                                  "content": "wrote hi.py"}]
+                _script[:] = [reply("Done.", reasoning="ok")]
+                box["n1"] = len(_gens)
+                th = threading.Thread(target=lambda: box.setdefault(
+                    "d", proxy.complete(dict(body, messages=follow))))
+                th.start()
+                end = time.time() + 3
+                while time.time() < end and len(_gens) == box["n1"]:
+                    time.sleep(0.02)
+        if th is not None:
+            th.join(20)
+    finally:
+        WARM_DELAY = saved
+    n1 = box.get("n1", len(_gens))
+    arrived = _gens[n1]["at"] if len(_gens) > n1 else None
+    done = _warm_done_at[d0] if len(_warm_done_at) > d0 else None
+    wb = ((box.get("d") or {}).get("x_yamadori") or {}).get("warm_before") \
+        or {}
+    check(arrived is not None and done is not None and arrived >= done
+          and wb.get("state") == "done" and wb.get("waited_s") is not None,
+          "[race] a harness that sends its next request on the calls chunk: "
+          "that request reaches the slot only after the warm finished, and "
+          "says it waited",
+          json.dumps({"arrived_minus_done": (arrived - done) if arrived and
+                      done else None, "warm_before": wb}))
+
+
+def test_a_first_turn_warm_does_not_guess_echo_from_a_mixed_account():
+    """Live gate 2026-09-24 (second run), the repair test: the next request
+    reused 2374 of 2890 after a good warm. Rendered with the served
+    template, the warm and that request differ at the repaired turn's think
+    block: the warm carried the turn's reasoning, the stripping client sent
+    none. The account's last observation said "echoes" -- the agent-loop
+    test's echoing client ran just before on the same key. A first turn now
+    guesses "echoes" only when every recent observation echoed."""
+    global WARM_DELAY
+    saved = WARM_DELAY
+    WARM_DELAY = 0.0
+    slots.reset(n=4)
+    compaction.reset()
+    acct = f"{ACCOUNT}-mixed"
+    body = {"model": "yamadori", "reasoning_effort": "xhigh",
+            "_account": acct, "_client_ip": "127.0.0.1", "tools": [WRITE],
+            "_features": json.dumps({"hints": False, "investigate": False,
+                                     "fanout": 1})}
+    try:
+        # The account's recent past: a stripping client, then an echoing one.
+        for i, echo in enumerate((False, True)):
+            past = [{"role": "system", "content": SYSTEM + f" [past {i}]"},
+                    {"role": "user", "content": "hi"},
+                    dict({"role": "assistant", "content": "hello"},
+                         **({"reasoning_content": "greet"} if echo else {})),
+                    {"role": "user", "content": "thanks"}]
+            _script[:] = [reply("ok", reasoning="ack")]
+            _stream(dict(body, messages=past))
+        check(not proxy._echo_guess(acct) and proxy._echo_guess(
+            f"{ACCOUNT}-echo") in (True, False),
+              "[habit] a mixed account's first turn does not guess 'echoes'",
+              nebari.ledger_get(acct, "client", "echo_history") or "")
+        # Now a STRIPPING client's first turn: a repaired write, warmed.
+        msgs = [{"role": "system", "content": SYSTEM + " [mixed strip]"},
+                {"role": "user", "content": "Write hi.py with a function f "
+                                            "that returns 1."}]
+        _script[:] = [reply("", reasoning="Write it.", calls=[call(
+            "write_file", {"path": "hi.py", "content": BROKEN}, "mx1")])]
+        w0 = len(_warms)
+        got = _stream(dict(body, messages=json.loads(json.dumps(msgs))))
+        msgs += [{"role": "assistant", "content": got["content"],
+                  "tool_calls": got["calls"]},
+                 {"role": "tool", "tool_call_id": "mx1",
+                  "content": "wrote hi.py"}]
+        end = time.time() + 5
+        while time.time() < end and len(_warms) == w0:
+            time.sleep(0.02)
+        _script[:] = [reply("Done.", reasoning="ok")]
+        n1 = len(_gens)
+        _stream(dict(body, messages=json.loads(json.dumps(msgs))))
+    finally:
+        WARM_DELAY = saved
+    h = _warms[-1]["prompt"] if len(_warms) > w0 else ""
+    r = render(_gens[n1]["request"]) if len(_gens) > n1 else ""
+    n = next((i for i, (a, b) in enumerate(zip(h, r)) if a != b),
+             min(len(h), len(r)))
+    check(h and r.startswith(h),
+          "[habit] the stripping client's next request extends the warmed "
+          "prompt (no reasoning guessed into its first turn)",
+          f"diverges at {n}: warm {h[max(0, n - 60):n + 60]!r} vs sent "
+          f"{r[max(0, n - 60):n + 60]!r}")
 
 
 def test_the_warm_reports_on_the_next_response():
@@ -1566,12 +1850,16 @@ def main() -> int:
                test_a_large_task_kickoff_prefills_the_plan,
                test_the_warm_reports_on_the_next_response,
                test_a_fixup_step_and_its_warm,
+               test_a_client_that_acts_on_the_calls_waits_for_the_warm,
+               test_a_first_turn_warm_does_not_guess_echo_from_a_mixed_account,
                test_the_fixup_never_touches_the_conversations_slot,
                test_library_use_reaches_harness_traffic,
                test_library_use_reads_the_conversations_version,
                test_a_warm_releases_only_its_own_waiters,
                test_text_turn_keys_are_per_conversation,
                test_a_duplicate_request_never_blanks_the_library_help,
+               test_a_retryable_decision_is_decided_again,
+               test_a_definitions_lookup_that_fails_is_retryable,
                test_the_echo_path_renders_like_the_strip_path,
                test_template_markers_are_scrubbed_on_our_path_and_recorded_from_the_model):
         print(f"\n--- {fn.__name__} ---")

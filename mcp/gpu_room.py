@@ -201,12 +201,7 @@ SWAP_GROUPS = (frozenset({"imagegen", "imagegen-turbo"}),)
 
 # Fixed residents that are not llama-swap's. Informational: their memory is
 # inside the measured free figure, and nothing here can unload them.
-FIXED = {
-    "laya": ("always resident (mcp/laya_service.py, port 1237); not measured "
-             "separately -- Windows reports per-process GPU memory as N/A "
-             "(docs/CLM-EVAL.md s.4). '~1 GiB' per the laya_service comment; "
-             ">= 2,445 MiB by docs/IMAGEGEN.md's arithmetic"),
-}
+FIXED: dict = {}   # Laya retired 2026-09-24 (docs/E1.md); nothing fixed remains
 
 PROCESS = os.path.basename(sys.argv[0] or "python") or "python"
 
@@ -592,28 +587,46 @@ def _settle(upstream: str, victim: str, before: int) -> int | None:
         time.sleep(0.25)
 
 
-# ------------------------------------------------------- the chat path waits
-# for nothing (pre-deploy review, 2026-09-24). A chat request's own embedding
-# (skill / hint selection, in proxy.prepare) went through use() like any
-# caller, and when the search model was not loaded it waited up to
+# ------------------------------------------ the chat path waits only briefly
+# (pre-deploy review, 2026-09-24). A chat request's own embedding (skill /
+# hint selection, library help, E1, in proxy.prepare) went through use() like
+# any caller, and when the search model was not loaded it waited up to
 # ROOM_WAIT_S (300 s) for the room lock -- which an image draw holds for its
-# whole run. Inside `fail_fast()` a caller never waits: a loaded model still
-# takes its lease (no room lock), and one that would need the room lock gets
-# A4000_BUSY at once, which the caller records and goes on without.
+# whole run. Inside `fail_fast()` a loaded model still takes its lease (no
+# room lock); one that needs the room lock waits at most FAIL_FAST_WAIT_S
+# for it. FREE, the chat path makes room and LOADS the model -- after a
+# restart the A4000 is empty and nothing else loads the embedder for the
+# chat path (live gate 2026-09-24: with a zero wait, hints, library help and
+# E1 skipped silently). HELD past the wait (a draw), it gets A4000_BUSY,
+# which the caller records -- a retryable decision (proxy.prepare) -- and goes
+# on without. 2 s is a choice: long enough for another request's lease-free
+# load decision, far short of a draw (19-220 s, docs/IMAGEGEN.md).
+FAIL_FAST_WAIT_S = float(os.environ.get("YAMADORI_GPU_ROOM_FAST_WAIT", "2"))
+
+
 @contextlib.contextmanager
 def fail_fast(why: str = "a chat turn does not wait for the A4000"):
-    prev = getattr(_tl, "fail_fast", None)
+    """The wait is shared by everything inside the block: a chat turn's
+    several embeddings (skills, library help, E1) wait FAIL_FAST_WAIT_S in
+    all, not each."""
+    prev = (getattr(_tl, "fail_fast", None),
+            getattr(_tl, "fail_fast_until", None))
     _tl.fail_fast = why
+    _tl.fail_fast_until = time.monotonic() + FAIL_FAST_WAIT_S
     try:
         yield
     finally:
-        _tl.fail_fast = prev
+        _tl.fail_fast, _tl.fail_fast_until = prev
 
 
 def _wait_budget() -> tuple[float, str | None]:
     """(seconds this thread may wait for the room, the fail-fast reason)."""
     why = getattr(_tl, "fail_fast", None)
-    return (0.0, why) if why else (ROOM_WAIT_S, None)
+    if not why:
+        return ROOM_WAIT_S, None
+    until = getattr(_tl, "fail_fast_until", None)
+    left = FAIL_FAST_WAIT_S if until is None else until - time.monotonic()
+    return max(0.0, min(FAIL_FAST_WAIT_S, left)), why
 
 
 def _unreadable_remedies(what: str) -> list[dict]:
@@ -726,8 +739,8 @@ class use:
                     "A4000_BUSY",
                     f"`{self.model}` is not loaded, and making room for it "
                     f"needs the A4000, which another load holds (an image "
-                    f"draw holds it for its whole run). {fast}, so it did "
-                    f"not wait; nothing was loaded.",
+                    f"draw holds it for its whole run). {fast}, so it "
+                    f"waited only {budget:.0f}s; nothing was loaded.",
                     True, [_agent_retry()],
                     self._done(d, action="busy", fail_fast=True,
                                why="fail-fast: the room lock was held"))

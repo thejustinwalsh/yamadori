@@ -15,9 +15,9 @@ So each claim here is paired with the section of docs/LAYA.md it defends.
 TWO MODES
 
   default   score the CACHED runs in bench/data/. No GPU, ~50 ms, runs in CI.
-  --live    additionally call Laya on 1237 and assert the cache still matches
-            what the service returns today. Catches a model or prompt change
-            silently invalidating every number in the doc.
+  --live    RETIRED 2026-09-24 with the Laya service (docs/E1.md): it
+            called Laya on 1237 to assert the cache still matched the
+            service. It now says so and runs nothing live.
 
 The cached runs are regenerated with:
 
@@ -427,7 +427,12 @@ def main() -> int:
     test_primitive_matches_hemisphere()
     test_no_shared_state_written()
     if live:
-        test_live()
+        # RETIRED 2026-09-24 with the Laya service (docs/E1.md: E1 alone,
+        # retire Laya): test_live() called :1237, which no longer runs, and
+        # crashed on its None answer instead of counting. The cached runs
+        # above remain the record docs/LAYA.md cites.
+        print("\n[live] RETIRED: the Laya service on 1237 was retired "
+              "2026-09-24 (docs/E1.md); not run")
     else:
         print("\n[live] skipped -- pass --live to check the cache against "
               "the running service")

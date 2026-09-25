@@ -1718,6 +1718,10 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
                 # one model, one cache (2026-09-24): the fold-backs, what the
                 # ledger restored and decided, and the slot warm.
                 "fold_back", "ledger", "warm",
+                # the live gate of 2026-09-24: how much answer followed a
+                # deep-thinking fold-back, and whether it pointed at text the
+                # user never saw (proxy.fold_back_answer).
+                "fold_back_answer",
                 # docs/SELF-IMPROVEMENT-LOG.md, 2026-09-24: the previous
                 # warm's own numbers (#11), the template's markers in the
                 # delivered content and whose they are (#12), and the
@@ -1843,11 +1847,17 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
                           for m in first),
               "a finding that searched NOTHING crosses, labelled 'reasoning, "
               "no sources checked' -- never as source", json.dumps(inv))
-        # The fixture's fact cites core/Object3D.js, which nothing retrieved.
-        check(crossed and "did not retrieve: unverified" in crossed[0]
-              and (inv.get("handoff") or {}).get("unverified") == 1,
-              "and its fact is labelled unverified, counted in "
-              "x_yamadori.investigate.handoff",
+        # The fixture's fact cites core/Object3D.js, a file the fixture
+        # store's index does not list (no package_files): the verifier cannot
+        # read it, so the citation is REMOVED and the fact crosses as
+        # reasoning (shomen THE EVIDENCE, live gate 2026-09-24).
+        check(crossed and "DEFAULT_UP is (0,1,0) (reasoning, not checked "
+                          "against source)" in crossed[0]
+              and "core/Object3D.js" not in crossed[0]
+              and (inv.get("handoff") or {}).get("unverified") == 1
+              and (inv.get("handoff") or {}).get("citations_removed") == 1,
+              "and its fact is labelled unverified, its unreadable citation "
+              "removed, counted in x_yamadori.investigate.handoff",
               (crossed[0] if crossed else "")[:300])
         finding["hops"] = 2
 

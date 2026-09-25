@@ -26,7 +26,7 @@
     "src/api/usePoll.ts": "48d037fa647548b1637b95940ea1ee54d54d8772a7bdec994256cb67ac8874ec",
     "src/bonsai/bark.ts": "4e0a9412bad531453dfd37b750ca2a128e5824cf1c58d34ad67cdc97b0c6b671",
     "src/bonsai/live.ts": "be83cbf72231d656787c2bdba3b91832a473a7b15d6cbb435ecde6a1f062634a",
-    "src/bonsai/mapping.ts": "3ba2fbd141fb94bc2db95a0e036323577af9318b8475d741a5466ace56dd487b",
+    "src/bonsai/mapping.ts": "36170346552a8e6595fcbf99c2e9d9b41f942bbf2e23f09e586d6160cbc39b63",
     "src/bonsai/pose.ts": "a7ba50ab69d5f4105823c6b3bc2a3da730cb839a32a8203b8b184883a11758a6",
     "src/bonsai/prng.ts": "3e0ea55fcef1b0a9b389f0b48cfcee2551772bdafa7920815d1128e97419aa29",
     "src/bonsai/scene/Scene.tsx": "8c041484745518b0252836d049c45ba35718a00be1d3ad61733e23c385817c97",
@@ -83,5 +83,5 @@
     "tsconfig.json": "b0da81e25eb6efaf84655dbb823c7fd10812c3c0028fc59a78b9b70ee5f2602f",
     "vite.config.ts": "34ecb87bafd5bf424a57971ceb5240870637ae85887e4861a9211e7a1c88a925"
   },
-  "aggregate": "9542ce26666f9d4507a462c5931d5a737c3fe1e1b30fe656712b4fc37e4d23bd"
+  "aggregate": "d1fc526bdf590711a5d1085ee22293fe1d2aa5427358d821b9937cbc53296db9"
 }
