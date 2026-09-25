@@ -404,6 +404,68 @@ def _task_text(messages: list) -> str:
     return ""
 
 
+# THE LANGUAGE THE REQUEST ASKED FOR (live gate 2026-09-24, second run: the
+# cache test's "Write a Python function fib(n) ... Just the code." routed
+# code_generation, B ran, and the fan-out stopped as "prose: recorded only"
+# -- the answer, 152 characters, carried its code in an UNTAGGED fence or
+# none at all, and selection reads only language-tagged blocks). A request
+# that names its language is read as that language's code.
+_ASKED_LANG = re.compile(
+    r"\b(python|typescript|javascript|rust|tsx|jsx|c\+\+|golang|c)\b"
+    r"(?=\s+(?:function|method|class|script|program|module|code|snippet|"
+    r"implementation|file|struct|trait|component|hook)\b)", re.IGNORECASE)
+_CODE_WORD = re.compile(r"^\s*(?:def|class|async\s+def|function|export|"
+                        r"import|from|const|let|fn|pub|struct|impl|"
+                        r"interface|type|#include)\b", re.MULTILINE)
+
+
+def asked_language(text: str) -> str | None:
+    """The code language a request names ("Write a Python function"), in
+    selection's canonical form, or None."""
+    m = _ASKED_LANG.search(text or "")
+    return _language({"c++": "cpp", "golang": "go"}.get(
+        m.group(1).lower(), m.group(1).lower())) if m else None
+
+
+def with_language(cand: dict, lang: str | None) -> dict:
+    """The candidate as selection reads it, when the request named `lang`:
+    an untagged fence is tagged `lang`, and an answer with no fence at all
+    that PARSES as `lang` (and opens a definition) is fenced whole. The
+    candidate's own content is kept as `raw_content`; what the client is
+    delivered for the original is the proxy's own copy, untouched. A block
+    already tagged, or content that does not parse, is left as it is."""
+    content = cand.get("content") or ""
+    if not lang or not content.strip():
+        return cand
+    blocks = _blocks(content)
+    if any(_language(b["tag"]) for b in blocks if b["tag"]):
+        return cand
+    if blocks:
+        out, n = [], 0
+        for line in content.split("\n"):
+            m = _FENCE.match(line)
+            if m and not m.group(2) and n % 2 == 0:
+                line = line.rstrip() + lang
+            if m:
+                n += 1
+            out.append(line)
+        new = "\n".join(out)
+    else:
+        cc = _code_check()
+        code = content.strip()
+        if cc is None or not _CODE_WORD.search(code) \
+                or code.count("\n") < 1:
+            return cand
+        try:
+            if cc.check(code, lang, run_format=False).get("syntax_errors"):
+                return cand
+        except Exception:                                        # noqa: BLE001
+            return cand
+        new = f"```{lang}\n{code}\n```"
+    return dict(cand, content=new, raw_content=content,
+                language_from="request")
+
+
 def _prompt_code(messages: list) -> list[dict]:
     """The fenced code blocks of the question's latest user message
     (code_check.prompt_code); [] when it has none or the checker is absent,
@@ -549,6 +611,10 @@ def run(payload: dict, original: dict | None = None, n: int = MAX_STEPS,
     else:
         a = dict(original, variant=ORIGINAL, role="main")
     a.setdefault("seed", None)
+    # The language the request named reads an untagged or bare-code answer
+    # as code (with_language); without it, only tagged blocks count.
+    asked = asked_language(_task_text(payload.get("messages") or []))
+    a = with_language(a, asked)
     results = [a]
     base = {"mode": "sequential", "asked": n_max, "steps": 1,
             "stop_reason": None, "similarity_ab": None}
@@ -586,6 +652,7 @@ def run(payload: dict, original: dict | None = None, n: int = MAX_STEPS,
         b = shomen.run("alternative", body=_helper_body(payload),
                        variant=VARIANTS[0], seed=seed("alternative"),
                        timeout=timeout, held=True)
+        b = with_language(b, asked)
         results.append(b)
         base["steps"] = 2
 
@@ -642,6 +709,7 @@ def run(payload: dict, original: dict | None = None, n: int = MAX_STEPS,
         c = shomen.run("tiebreak", body=_helper_body(payload, msgs),
                        variant={"name": TIEBREAK, "nudge": ""},
                        seed=seed("tiebreak"), timeout=timeout, held=True)
+        c = with_language(c, asked)
         results.append(c)
         base["steps"] = 3
 

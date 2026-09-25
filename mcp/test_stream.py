@@ -52,6 +52,17 @@ os.environ["CONCEPT_SEED_LAST"] = os.path.join(_TMP, "seed_last.json")
 
 import proxy  # noqa: E402
 import repeats  # noqa: E402
+import shomen as _shomen  # noqa: E402
+
+# THE EVIDENCE (shomen): a verified fact carries the lines it cites, read
+# from the source the verifier can read. The fixtures' cited files live here.
+_SRC = os.path.join(_TMP, "held_src")
+for _rel in ("src/a.ts", "src/loader.ts", "lib/conf.yaml", "src/game.ts",
+             "src/geometries/LatheGeometry.js"):
+    os.makedirs(os.path.dirname(os.path.join(_SRC, _rel)), exist_ok=True)
+    with open(os.path.join(_SRC, _rel), "w", encoding="utf-8") as _f:
+        _f.write("\n".join(f"line {i} of {_rel}" for i in range(1, 81)) + "\n")
+_shomen.SOURCE_RESOLVER = _shomen.directory_resolver(_SRC, "fixture@1.0.0")
 
 # Every second-brain job draws a concept seed (proxy.ledger_seed). Pinned
 # here, so no test loads the 420 MB embedding matrix and every seed line is
@@ -890,6 +901,39 @@ def test_fan_out_runs_on_the_streamed_path_too():
         proxy.fanout.run = saved
 
 
+def test_a_repeated_opening_never_reaches_the_client():
+    """The guard on the streamed path: main repeats the opening as a bold
+    line inside its held content; the client never receives the copy, the
+    delivered turn matches what it was streamed, and x_yamadori counts it."""
+    saved = proxy.shomen.investigate
+
+    def fake(question, tools, run_tool, context="", hops=8, on_think=None,
+             tier="max", effort=None, seed=None, mode="investigate"):
+        run_tool("find_definition_opt", {"symbol": "LatheGeometry"})
+        return {"ok": True, "finding": "src/geometries/LatheGeometry.js:12",
+                "hops": 1, "handle": "hy", "cited": ["x"], "unsupported": [],
+                "helper_tokens": 1, "seconds": 0.1}
+    try:
+        proxy.shomen.investigate = fake
+        reset([reply(" it is defined in one file.\n\n**After thinking "
+                     "deeply,**\n\nLatheGeometry lives in "
+                     "src/geometries/LatheGeometry.js.")])
+        SELECTION["investigate"] = True
+        ev = run_stream()
+        c = deltas(ev, "content")
+        x = final_chunk(ev).get("x_yamadori") or {}
+        fa = x.get("fold_back_answer") or {}
+        check(c.count("After thinking deeply") == 1
+              and "one file.\n\nLatheGeometry lives" in c
+              and fa.get("repeated_opening_removed") == 1,
+              "streamed: the bold repeat of the opening is removed before it "
+              "reaches the client, and counted", json.dumps(
+                  {"content": c, "fold_back_answer": fa})[:500])
+    finally:
+        proxy.shomen.investigate = saved
+        SELECTION["investigate"] = False
+
+
 def test_deep_thinking_runs_on_the_streamed_path():
     saved = proxy.shomen.investigate
     got: list = []
@@ -1165,13 +1209,173 @@ def test_citations_are_verified_and_unverified_facts_labelled():
           out2)
 
 
+def test_the_fold_back_answer_carries_the_findings():
+    """Live gate 2026-09-24: after a 28-search investigation the visible
+    answer was "Today I was inspired by austerity. After thinking deeply,
+    the deprecation chain is pinned to r179 with the hand-off above." -- the
+    hand-off sat in prefilled REASONING the user never sees. The prefilled
+    reasoning now ENDS by saying so and that the answer states the findings
+    in full; the think_deeply line says the same; and x_yamadori records
+    what followed the opening (fold_back_answer)."""
+    import deep
+    import shomen
+    rec, crossed, sent = _think([{"content": HANDOFF_READ}])
+    r = crossed[0] if crossed else ""
+    check(r.endswith(proxy.FOLD_BACK_TAIL)
+          and "The user sees only my answer" in proxy.FOLD_BACK_TAIL
+          and "in full" in proxy.FOLD_BACK_TAIL
+          and shomen.PHRASES["investigate"] in proxy.FOLD_BACK_TAIL
+          and not proxy.FOLD_BACK_TAIL.endswith(" "),
+          "the prefilled hand-off ends: the user sees only the answer, which "
+          "states the findings in full and opens with the fold-back phrase",
+          r[-400:])
+    check("above" not in deep.THINK_REASONING
+          and "The user sees neither" in deep.THINK_REASONING,
+          "the think_deeply fold-back no longer points at a result 'above'",
+          deep.THINK_REASONING)
+    bad = proxy.fold_back_answer(
+        "Today I was inspired by austerity. After thinking deeply, the "
+        "deprecation chain is pinned to r179 with the hand-off above.")
+    good = proxy.fold_back_answer(
+        "Today I was inspired by cedar. After thinking deeply, `label()` "
+        "was deprecated in r179 in favour of `setName()`; the warning is "
+        "emitted by src/nodes/core/Node.js:412, shown here:\n```js\n"
+        "label( name ) { warnOnce( 'label() is deprecated' ); }\n```\n"
+        "Replace every `.label(` call with `.setName(`.")
+    check(bad["refers_to_hidden"] and bad["chars_after_opening"] <
+          proxy.FOLD_BACK_MIN_CHARS,
+          "the gate's answer is caught: it points at hidden text and is short",
+          json.dumps(bad))
+    check(good["refers_to_hidden"] is None and good["chars_after_opening"]
+          >= proxy.FOLD_BACK_MIN_CHARS and good["opened"],
+          "an answer that states its findings passes", json.dumps(good))
+    # The second live run: the opening, then a sentence about the hand-off,
+    # then the opening AGAIN as a bold heading. The tail forbids both; the
+    # guard removes the repeat deterministically and counts it.
+    check("never mentions the hand-off, the investigation or anything "
+          "\"above\"" in proxy.FOLD_BACK_TAIL
+          and "never writes the opening phrase a second time"
+          in proxy.FOLD_BACK_TAIL,
+          "the tail names the two observed failures", proxy.FOLD_BACK_TAIL)
+    live2 = ("Today I was inspired by schade. After thinking deeply, the "
+             "answer below was assembled from the hand-off facts.\n\n"
+             "**After thinking deeply,**\n\nThe TSL node method `label()` "
+             "is deprecated in r179.\n\n## After thinking deeply\n\nDone.")
+    rec: dict = {}
+    out = proxy.dedup_opening(live2, rec)
+    check(out.count("After thinking deeply") == 1
+          and "the hand-off facts.\n\nThe TSL node" in out
+          and "deprecated in r179.\n\nDone." in out
+          and rec.get("_opening_repeats_removed") == 2,
+          "a repeated bold or heading copy of the opening is removed, the "
+          "prefilled one kept, and the removals counted", repr(out))
+    check(proxy.fold_back_answer(out)["refers_to_hidden"] == "hand-off",
+          "and the pointer at the hand-off is still caught (the live check "
+          "stays strict)", json.dumps(proxy.fold_back_answer(out)))
+    check(proxy.dedup_opening("After thinking deeply, the loop is O(n).")
+          == "After thinking deeply, the loop is O(n).",
+          "an answer with one opening is untouched")
+
+
+def test_a_verified_fact_carries_its_source_lines():
+    """THE EVIDENCE (operator, 2026-09-24). Main and the user cannot open a
+    path on this server, so a verified fact carries the lines it cites, read
+    by the verifier from the held source and labelled with where they came
+    from; and a citation the verifier cannot read -- the live gate's
+    "three/src/core/Open/Three.js:714", no such held file -- is removed from
+    the fact, which crosses as reasoning (it had crossed, cited)."""
+    import shomen
+    seen = {"src/loader.ts", "src/core/open/three.js", "src/a.ts"}
+    text = ("FACTS\n"
+            "- The loader caches the plan. src/loader.ts:42\n"
+            "- The camera flips the target at src/core/Open/Three.js:714.\n"
+            "- The loop runs src/loader.ts:10-30\n"
+            "- Past the end: src/a.ts:500\n"
+            "SEARCHED, FOUND NOTHING\n- none\nOPEN QUESTIONS\n- none\n"
+            "NEXT STEP\n- read src/app.ts:3 in your project\n")
+    out, st = shomen.handoff(text, [], seen, "h9")
+    src = open(os.path.join(_SRC, "src/loader.ts"), encoding="utf-8"
+               ).read().split("\n")
+    want42 = "\n".join(src[38:45])            # 39..45: 3 either side of 42
+    check("source: fixture@1.0.0 src/loader.ts:39-45\n```ts\n" + want42
+          + "\n```" in out,
+          "a verified fact carries the cited line and 3 either side, exactly "
+          "as the file holds them, labelled package@version path:start-end",
+          out[:600])
+    want_range = "\n".join(src[9:21])          # 10..21: capped at 12 lines
+    check("source: fixture@1.0.0 src/loader.ts:10-21\n```ts\n" + want_range
+          + "\n```" in out,
+          "a cited range is inlined, capped at EXCERPT_MAX_LINES (12)",
+          out[:900])
+    check("Open/Three.js" not in out
+          and "- The camera flips the target. (reasoning, not checked "
+              "against source)" in out,
+          "a citation of a file the verifier cannot read is REMOVED, and the "
+          "fact crosses as reasoning (never passed on)", out)
+    check("src/a.ts:500" not in out and "- Past the end (reasoning, not "
+                                          "checked against source)" in out,
+          "a line past the file's end is removed the same way", out)
+    check("read src/app.ts:3 in your project" in out,
+          "NEXT STEP is not checked: it may name the user's own file", out)
+    check(st["verified"] == 2 and st["excerpts"] == 2
+          and st["citations_removed"] == 2 and st["unverified"] == 2,
+          "the counts: 2 verified with excerpts, 2 citations removed",
+          json.dumps(st))
+    # Live gate 2026-09-24 (second run): 3 of 5 excerpts ended on a blank
+    # line the fence dropped, so each body was one line short of its label.
+    # A file shaped like three's Object3D.lookAt: blank lines, tab indents,
+    # a trailing tab. Every excerpt is compared the way the live test does.
+    import re as _re
+    blanky = os.path.join(_SRC, "src/core/Blank.js")
+    os.makedirs(os.path.dirname(blanky), exist_ok=True)
+    body = ["", "\tlookAt( x, y, z ) {", "", "\t\tconst parent = this.parent;",
+            "", "\t\tif ( this.isCamera ) {", "", "\t\t\t_m1.lookAt( a );\t",
+            "", "\t\t} else {", "", "\t\t\t_m1.lookAt( b );", "", "\t\t}", "",
+            "\t}", ""]
+    with open(blanky, "w", encoding="utf-8", newline="") as fh:
+        fh.write("\r\n".join(body))
+    t2 = ("FACTS\n- cameras flip src/core/Blank.js:7\n"
+          "- the else branch src/core/Blank.js:10-15\n"
+          "- the start src/core/Blank.js:2\n")
+    out2, st2 = shomen.handoff(t2, [], {"src/core/blank.js"}, "h11")
+    pat = _re.compile(r"source: (\S+) (\S+?):(\d+)-(\d+)\n(`{3,})[^\n]*\n"
+                      r"(.*?)\n\5(?:\n|$)", _re.S)
+    found = [(m.group(3), m.group(4), m.group(6)) for m in pat.finditer(out2)]
+    exact = [b == "\n".join(body[int(a) - 1:int(z)]) for a, z, b in found]
+    check(len(found) == 3 and all(exact)
+          and all(not b.split("\n")[0].strip() == "" and
+                  b.split("\n")[-1].strip() for _, _, b in found),
+          "an excerpt's body is exactly the lines its label names -- no "
+          "blank edge dropped by the fence, a trailing tab kept, CRLF read "
+          "as the file's lines", json.dumps({"found": found,
+                                              "exact": exact})[:600])
+    # The budget: past EXCERPT_TOTAL_CHARS a verified fact says its excerpt
+    # was not inlined.
+    saved = shomen.EXCERPT_TOTAL_CHARS
+    shomen.EXCERPT_TOTAL_CHARS = 300
+    try:
+        many = "FACTS\n" + "\n".join(f"- fact {i}. src/loader.ts:{i * 5}"
+                                     for i in range(1, 5))
+        out, st = shomen.handoff(many, [], seen, "h10")
+    finally:
+        shomen.EXCERPT_TOTAL_CHARS = saved
+    check(st["verified"] == 4 and st["excerpts"] >= 1
+          and st["excerpts_skipped"] >= 1
+          and "[excerpt not inlined: the hand-off's excerpt budget" in out,
+          "past the excerpt budget a verified fact says its lines were not "
+          "inlined", json.dumps(st))
+
+
 def test_the_hand_off_size_breaker():
     import shomen
     big = "- " + ("The plan is cached. " * 400) + "src/a.ts:1"
     out, st = shomen.handoff("FACTS\n" + big, [], {"src/a.ts"}, "h2")
-    lim = shomen.MAX_FINDING_CHARS
+    # The breaker is on the helper's own words; the inlined evidence rides
+    # on top of it (shomen THE EVIDENCE).
+    lim = shomen.MAX_FINDING_CHARS + st.get("excerpt_chars", 0)
     check(st["cut"] is True and f"[hand-off cut at {lim} characters of " in out
-          and len(out) < lim + 80,
+          and len(out) < lim + 80
+          and lim <= shomen.MAX_FINDING_CHARS + shomen.EXCERPT_TOTAL_CHARS,
           f"over {lim} characters: cut, and the cut says so",
           f"{len(out)} {out[-80:]}")
     many = "FACTS\n" + "\n".join(f"- fact {i} (reasoning, not checked "
@@ -1555,6 +1759,9 @@ def main() -> int:
                test_the_turn_cap_landing_hands_off,
                test_a_helper_that_returns_nothing_still_hands_off,
                test_citations_are_verified_and_unverified_facts_labelled,
+               test_a_verified_fact_carries_its_source_lines,
+               test_the_fold_back_answer_carries_the_findings,
+               test_a_repeated_opening_never_reaches_the_client,
                test_the_hand_off_size_breaker,
                test_x_yamadori_carries_the_hand_off_counts,
                test_the_compaction_store_keeps_the_ledgers_rendering,

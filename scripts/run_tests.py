@@ -33,8 +33,8 @@ LIVE SUITES ARE OPT-IN
 
 `mcp/test_tools_live.py` needs the GPU and a second context on the same card;
 without `--live` it is skipped and the skip is printed. With `--live`, every
-suite that accepts `--live` gets it, and `bench/test_laya_head.py` gets
-`--serve` (an alternate-port Laya service, never 1237).
+suite that accepts `--live` gets it -- except the live arms retired with Laya
+(RETIRED_LIVE, 2026-09-24, docs/E1.md), which run offline only.
 
 The proxy on :1234 requires auth. An API key for it is read from
 YAMADORI_TEST_KEY and handed to live suites in their environment under that
@@ -94,10 +94,51 @@ LIVE_ONLY = {"mcp/test_tools_live.py", "mcp/test_live_stack.py"}
 # Extra arguments a suite takes in --live mode. Anything else whose source
 # accepts "--live" gets that flag.
 LIVE_ARGS = {"mcp/test_tools_live.py": ["--live"],
-             "mcp/test_live_stack.py": ["--live"],
-             "bench/test_laya_head.py": ["--serve"]}
+             "mcp/test_live_stack.py": ["--live"]}
 # Extra arguments under --maintenance: the intrusive live tests.
 MAINTENANCE_ARGS = {"mcp/test_live_stack.py": ["--maintenance"]}
+# LIVE ARMS RETIRED WITH LAYA (operator, 2026-09-24; docs/E1.md "Verdict:
+# E1 alone. Retire Laya."). Their live arm called the Laya service on :1237
+# (or served one on an alternate port), which no longer runs. They still run
+# OFFLINE in every mode -- their cached numbers are the record docs/LAYA.md
+# and docs/E1.md cite -- but --live never passes them --live/--serve, and
+# --live-only skips them. bench/test_hint_collapse.py keeps its live arm:
+# its reranker checks are live and #15d is a documented, open finding; only
+# its Laya check is retired (in the file).
+# EXPECTED FAILURES: checks that fail on purpose, each a documented, open
+# finding. A suite whose ONLY failing checks are listed here passes the gate;
+# they are named in the table and the summary every run, never hidden. A
+# listed check that starts PASSING is reported too (the finding moved).
+EXPECTED_FAIL = {
+    "bench/test_hint_collapse.py": {
+        "scored AS A BATCH it does not":
+            "docs/FINDINGS.md #20 (the reranker's batched scores depend on "
+            "batch composition) / docs/SELF-IMPROVEMENT-LOG.md #15d: open "
+            "until the rank path is fixed and re-measured",
+    },
+}
+_FAIL_LINE = re.compile(r"^\s*FAIL\b:?\s+(.*?)\s*(?:\[.*|\(.*|<-.*)?$",
+                        re.M)
+
+
+def expected_only(name: str, output: str) -> tuple[bool, list[str], list[str]]:
+    """(every failing check in `output` is an expected one, the expected
+    checks that failed, the expected checks that did NOT fail)."""
+    exp = EXPECTED_FAIL.get(name) or {}
+    if not exp:
+        return False, [], []
+    failed = [m.group(1) for m in _FAIL_LINE.finditer(output)]
+    hit = [k for k in exp if any(f.startswith(k) for f in failed)]
+    other = [f for f in failed if not any(f.startswith(k) for k in exp)]
+    missing = [k for k in exp if k not in hit]
+    return bool(failed) and not other, hit, missing
+
+
+RETIRED_LIVE = {
+    "bench/test_guardrail.py": "Laya's live service check (:1237)",
+    "bench/test_laya_calibration.py": "Laya's live service check (:1237)",
+    "bench/test_laya_head.py": "Laya's alternate-port service (--serve)",
+}
 
 _LAYA_IMPORT = re.compile(
     r"^\s*(?:import|from)\s+(?:torch|transformers|laya_head|train_laya)\b", re.M)
@@ -289,7 +330,14 @@ def main(argv: list[str]) -> int:
         py = LAYA_PY if needs_laya(path) else MAIN_PY
         extra: list[str] = []
         is_live_run = False
-        if args.live:
+        if args.live and name in RETIRED_LIVE:
+            if args.live_only:
+                print(f"  skip  {name}  (live arm retired with Laya: "
+                      f"{RETIRED_LIVE[name]}; docs/E1.md)")
+                continue
+            notes.append(f"{name}: live arm retired with Laya "
+                         f"({RETIRED_LIVE[name]}); ran offline")
+        elif args.live:
             if name in LIVE_ARGS:
                 extra = list(LIVE_ARGS[name])
             elif accepts_live(path):
@@ -324,12 +372,22 @@ def main(argv: list[str]) -> int:
         elif rc == 3 and nr and c[0] == c[1]:
             # Nothing failed; something was refused with a 429.
             ok, incomplete, why = True, True, f"INCOMPLETE: {nr} not run (429)"
+        elif rc != 0 and expected_only(name, out)[0]:
+            hit = expected_only(name, out)[1]
+            ok, why = True, ("EXPECTED failure(s): " + "; ".join(
+                f"{k!r} -- {EXPECTED_FAIL[name][k]}" for k in hit))
+            notes.append(f"{name}: expected failure(s), not blocking: "
+                         + "; ".join(hit))
         elif rc != 0:
             ok, why = False, f"exit code {rc}"
         elif c[0] != c[1]:
             ok, why = False, "count incomplete despite exit 0"
         else:
             ok, why = True, ""
+            missing = expected_only(name, out)[2]
+            if missing and name in EXPECTED_FAIL and is_live_run:
+                notes.append(f"{name}: an EXPECTED failure now passes -- "
+                             f"re-read its finding: " + "; ".join(missing))
         rows.append({"suite": name + (" " + " ".join(extra) if extra else ""),
                      "passed": c[0] if c else None, "total": c[1] if c else None,
                      "secs": secs, "ok": ok, "why": why,
@@ -370,7 +428,8 @@ def main(argv: list[str]) -> int:
         p = "?" if r["passed"] is None else str(r["passed"])
         t = "?" if r["total"] is None else str(r["total"])
         flag = (f"   FAIL: {r['why']}" if not r["ok"] else
-                f"   {r['why']}" if r.get("incomplete") else "")
+                f"   {r['why']}" if r.get("incomplete")
+                or str(r.get("why", "")).startswith("EXPECTED") else "")
         print(f"  {r['suite']:<{w}}  {p:>7}  {t:>7}  {r['secs']:>8.1f}{flag}")
     gp = sum(r["passed"] or 0 for r in rows)
     gt = sum(r["total"] or 0 for r in rows)

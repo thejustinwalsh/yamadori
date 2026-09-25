@@ -719,7 +719,8 @@ def test_the_chat_path_never_waits_for_a_draw():
     """Pre-deploy review, 2026-09-24 (FIX SOON #5): a chat request's skill /
     hint selection embeds through use(), and with the search model not
     loaded it waited up to ROOM_WAIT_S (300 s) for the room lock an image
-    draw holds for its whole run. Inside fail_fast() it never waits."""
+    draw holds for its whole run. Inside fail_fast() it waits at most
+    FAIL_FAST_WAIT_S (2 s) in all, however many embeddings it makes."""
     import skill_select
     fresh(held=set())                  # embeddings evicted (vision ran)
     gpu_room.ROOM_WAIT_S = 30.0
@@ -798,6 +799,54 @@ def test_the_chat_path_never_waits_for_a_draw():
     src = inspect.getsource(proxy._run_turn)
     check("gpu_room.fail_fast(" in src.split("payload = prepare(body)")[0],
           "proxy._run_turn runs prepare() inside gpu_room.fail_fast()")
+
+
+def test_the_chat_path_loads_embeddings_when_the_room_is_free():
+    """Live gate 2026-09-24: after a restart the A4000 is empty, and with a
+    ZERO wait the chat path skipped its embedding (hints, library help, E1)
+    whenever the room lock was held even for a moment -- another process's
+    load decision, a look's lease-free check -- and nothing else loads the
+    embedder for it. Now the chat path waits up to FAIL_FAST_WAIT_S (2 s)
+    for the room: a lock that comes free in that time is taken, and the
+    chat path makes room and LOADS the embedder. A draw (held far longer)
+    still fails fast."""
+    fresh(held=set())                  # the A4000 empty, as after a restart
+    gpu_room.ROOM_WAIT_S = 30.0
+    held_room = threading.Event()
+
+    def a_brief_load():                # another caller's load decision
+        lk = gpu_room.room_lock()
+        lk.acquire(5)
+        held_room.set()
+        time.sleep(0.6)
+        lk.release()
+    t = threading.Thread(target=a_brief_load)
+    t.start()
+    held_room.wait(5)
+    sink: list = []
+    t0 = time.time()
+    try:
+        with gpu_room.recording(sink), gpu_room.fail_fast("a chat turn"):
+            try:
+                cs.embed(["q"], is_query=True)
+                err = None
+            except gpu_room.NoRoom as e:
+                err = e
+        took = time.time() - t0
+    finally:
+        t.join(10)
+    acts = _actions(sink)
+    check(err is None and "embeddings" in CARD.served
+          and ("embeddings", "fit") in acts and 0.4 <= took < 3.0,
+          f"the room held for 0.6 s: the chat path waited ({took:.2f}s) and "
+          f"LOADED the embedder (action fit), instead of skipping",
+          json.dumps({"err": str(err), "sink": sink})[:600])
+    with gpu_room.fail_fast("a chat turn"):
+        inside = gpu_room._wait_budget()
+    check(gpu_room.FAIL_FAST_WAIT_S == 2.0 and 1.5 < inside[0] <= 2.0
+          and gpu_room._wait_budget() == (gpu_room.ROOM_WAIT_S, None),
+          "the chat path's wait is 2 s in all; outside fail_fast() it is "
+          "unchanged", json.dumps(inside))
 
 
 def test_a_vision_turn_with_no_room_is_a_structured_error():
@@ -879,6 +928,7 @@ TESTS = [test_the_table_matches_the_config,
          test_the_main_model_is_never_touched,
          test_no_llama_swap_means_uncoordinated_not_blocked,
          test_the_chat_path_never_waits_for_a_draw,
+         test_the_chat_path_loads_embeddings_when_the_room_is_free,
          test_a_vision_turn_with_no_room_is_a_structured_error,
          test_the_proxy_records_decisions]
 

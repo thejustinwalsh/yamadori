@@ -70,6 +70,15 @@ import research_tools as rt  # noqa: E402
 import shomen  # noqa: E402
 import tiers  # noqa: E402
 
+# THE EVIDENCE (shomen): cited files are read by the verifier; the fixtures'
+# cited files live in this directory.
+_SRC = os.path.join(_TMP, "held_src")
+for _rel in ("src/game.ts",):
+    os.makedirs(os.path.dirname(os.path.join(_SRC, _rel)), exist_ok=True)
+    with open(os.path.join(_SRC, _rel), "w", encoding="utf-8") as _f:
+        _f.write("\n".join(f"line {i}" for i in range(1, 41)) + "\n")
+shomen.SOURCE_RESOLVER = shomen.directory_resolver(_SRC, "fixture@1.0.0")
+
 tiers._accepted = ("low", "medium", "xhigh")
 corpus._db().close()          # the events table, which idleness reads
 

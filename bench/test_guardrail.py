@@ -3,7 +3,7 @@
 being true.
 
     python -X utf8 bench/test_guardrail.py           # offline, replays the cache
-    python -X utf8 bench/test_guardrail.py --live    # + 3 against the service
+    python -X utf8 bench/test_guardrail.py --live    # live arm RETIRED with Laya (docs/E1.md)
 
 No GPU and no network in the default mode: the raw per-ordering Laya
 probabilities and the frozen embedding vectors are cached under `bench/data/`,
@@ -416,7 +416,12 @@ def main() -> int:
     test_paired_bootstrap(arms, y)
     test_unions(items, arms, y)
     if args.live:
-        test_live()
+        # RETIRED 2026-09-24 with the Laya service (docs/E1.md: E1 alone,
+        # retire Laya). test_live() called :1237, which no longer runs; the
+        # cached numbers above remain the record. Kept, not deleted, so a
+        # restored service can be checked again.
+        print("\n-- live checks against the Laya service: RETIRED "
+              "(Laya retired 2026-09-24, docs/E1.md); not run")
     print(f"\n{PASS} passed, {len(FAIL)} failed")
     for f in FAIL:
         print(f"  FAILED: {f}")

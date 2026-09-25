@@ -40,8 +40,9 @@ import threading
 import time
 import urllib.request
 
-SINGLETONS = ("laya_service.py", "server.py", "proxy.py", "llama-swap.exe")
-PORTS = {1234: "proxy", 11434: "llama-swap", 1237: "laya", 10001: "bonsai"}
+# Laya retired 2026-09-24 (operator; docs/E1.md): E1 heads replace it.
+SINGLETONS = ("server.py", "proxy.py", "llama-swap.exe")
+PORTS = {1234: "proxy", 11434: "llama-swap", 10001: "bonsai"}
 # Below this much free VRAM a card shows red ("tight"). 1280 MiB, the
 # operator's call on 2026-09-23: the old 2048 was the floor for a card that
 # also drove the Windows display, whose apps take VRAM without asking. The
@@ -222,8 +223,7 @@ def listeners() -> list[dict]:
 
 def endpoints() -> list[dict]:
     out = []
-    for url, name in (("http://127.0.0.1:11434/v1/models", "llama-swap"),
-                      ("http://127.0.0.1:1237/health", "laya")):
+    for url, name in (("http://127.0.0.1:11434/v1/models", "llama-swap"),):
         t0 = time.time()
         try:
             with urllib.request.urlopen(url, timeout=8) as r:

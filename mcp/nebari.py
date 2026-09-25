@@ -436,6 +436,49 @@ def ledger_claim(account: str, session: str, msg_key: str, kind: str,
         return text
 
 
+def _meta_of(raw: str | None) -> dict:
+    try:
+        v = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def ledger_meta(account: str, msg_key: str, kind: str) -> dict:
+    """The record that rides beside a DECISION (`<kind>:meta`, JSON): which
+    parts it holds, what it showed the client, and `retry` -- the parts that
+    came out empty only because something was unavailable. {} for a decision
+    recorded before this existed (it is final)."""
+    return _meta_of(ledger_get(account, msg_key, kind + ":meta"))
+
+
+def ledger_decide(account: str, session: str, msg_key: str, kind: str,
+                  text: str, meta: dict | None = None) -> tuple[str, dict]:
+    """Record a DECISION and its meta, and return (the decision that stands,
+    its meta). The caller sends what this returns.
+
+    What stands (live gate 2026-09-24, a replayed stale decision):
+      - a FINAL non-empty decision (its meta has no `retry`) is never
+        replaced: a duplicate request that decided less must not blank it
+        (ledger_claim's rule), and a turn the slot holds must replay as it
+        was sent;
+      - anything else -- nothing recorded, a final "", or a RETRYABLE
+        decision (some part came out empty because embeddings were not
+        loaded, the A4000 was busy, a lookup raised) -- is replaced by this
+        one. A retryable decision is decided again by the next request that
+        ends on the same message, so it is never replayed as final."""
+    meta = dict(meta or {})
+    with _claim_lock:
+        have = ledger_get(account, msg_key, kind)
+        have_meta = ledger_meta(account, msg_key, kind)
+        if have and not have_meta.get("retry"):
+            return have, have_meta
+        ledger_put(account, session, msg_key, kind, text)
+        ledger_put(account, session, msg_key, kind + ":meta",
+                   json.dumps(meta, sort_keys=True))
+        return text, meta
+
+
 def ledger_get(account: str, msg_key: str, kind: str) -> str | None:
     """The addition recorded for this message, from memory, else the table
     (the most recent across this account's sessions: a message key is a

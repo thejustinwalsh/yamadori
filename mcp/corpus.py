@@ -52,6 +52,11 @@ _lock = threading.Lock()
 def _db() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(os.path.abspath(CORPUS_DB)), exist_ok=True)
     con = sqlite3.connect(CORPUS_DB, timeout=30)
+    # WAL (persistent in the file): readers no longer block the writers --
+    # the rollback journal made deep-thinking records fail "database is
+    # locked" 30 times during the 2026-09-24 live gate.
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA busy_timeout=30000")
     con.execute("""CREATE TABLE IF NOT EXISTS events(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         turn TEXT NOT NULL,       -- groups every event in one request

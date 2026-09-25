@@ -744,7 +744,9 @@ def run(job: str, *, lane_timeout: float | None = None, held: bool = False,
                               on_think=spec.get("on_think"),
                               tier=spec.get("tier", "max"),
                               effort=spec.get("effort"),
-                              seed=spec.get("seed"), mode=job)
+                              seed=spec.get("seed"), mode=job,
+                              **({"source_root": spec["source_root"]}
+                                 if spec.get("source_root") else {}))
         elif job == "fixup":
             res = fixup(spec["units"], spec.get("request", ""),
                         check=spec["check"], tier=spec.get("tier", "max"),
@@ -959,7 +961,8 @@ def investigate(question: str, tools: list[dict], run_tool,
                 on_think=None, tier: str = "max",
                 effort: str | None = None,
                 seed: dict | None | bool = True,
-                mode: str = "investigate") -> dict:
+                mode: str = "investigate",
+                source_root: str | None = None) -> dict:
     """Run a tool loop in a private context and return its hand-off.
 
     `mode` "plan" (Phase 0.6 task kickoff) runs the same loop with
@@ -986,7 +989,8 @@ def investigate(question: str, tools: list[dict], run_tool,
         # own; the proxy passes the one its ledger recorded (run()).
         seed = (concept_seed.seed_for(question, 1) or [None])[0]
     res = _investigate(question, tools, run_tool, context, hops, on_think,
-                       seed, tier=tier, effort=effort, mode=mode)
+                       seed, tier=tier, effort=effort, mode=mode,
+                       source_root=source_root)
     res["mode"] = mode
     res["seed"] = concept_seed.summary(seed)
     res["effort_tier"] = tier
@@ -1002,7 +1006,8 @@ def investigate(question: str, tools: list[dict], run_tool,
 def _investigate(question: str, tools: list[dict], run_tool, context: str,
                  hops: int | None, on_think, seed: dict | None,
                  tier: str = "max", effort: str | None = None,
-                 mode: str = "investigate") -> dict:
+                 mode: str = "investigate",
+                 source_root: str | None = None) -> dict:
     started = time.time()
     plan = mode == "plan"
     landing = PLAN_LANDING if plan else LANDING
@@ -1115,7 +1120,8 @@ def _investigate(question: str, tools: list[dict], run_tool, context: str,
                 return _fail(f"{type(e).__name__}: {e}", trace, started, spent,
                              question, seen_paths)
             return _finish((msg.get("content") or "").strip(), trace,
-                           seen_paths, started, spent, question, mode)
+                           seen_paths, started, spent, question, mode,
+                           source_root)
 
         calls = msg.get("tool_calls") or []
 
@@ -1128,7 +1134,7 @@ def _investigate(question: str, tools: list[dict], run_tool, context: str,
                 return _fail("ran out of budget while reasoning, no conclusion",
                              trace, started, spent, question, seen_paths)
             return _finish(finding, trace, seen_paths, started, spent,
-                           question, mode)
+                           question, mode, source_root)
         if last:
             # The landing went out with no tools and still came back asking
             # for one. Nothing would read its result, and looping again would
@@ -1162,6 +1168,9 @@ def _investigate(question: str, tools: list[dict], run_tool, context: str,
             trace.append({"hop": hop, "tool": fn, "args": args,
                           "chars": len(out), "empty": repeats._empty(out),
                           "paths": len(found),
+                          # The package versions it read: the hand-off's
+                          # evidence is read from these (resolve_source).
+                          "versions": versions_in(out),
                           "ms": round((time.time() - t0) * 1000)})
             # Same breaker as the proxy's loops, with a marker and the next
             # range to request -- a silent cut handed this context half a file
@@ -1181,7 +1190,8 @@ def _investigate(question: str, tools: list[dict], run_tool, context: str,
 
 
 def _finish(finding: str, trace: list, seen: set[str], started: float,
-            spent: int, question: str = "", mode: str = "investigate") -> dict:
+            spent: int, question: str = "", mode: str = "investigate",
+            source_root: str | None = None) -> dict:
     """Attach the receipts, and hand back what was written -- always.
 
     A conclusion citing nothing is indistinguishable from a conclusion the
@@ -1209,9 +1219,10 @@ def _finish(finding: str, trace: list, seen: set[str], started: float,
                        "retrieved": sorted(seen)}
 
     if finding.strip() and mode == "plan":
-        text, stats = plan_handoff(finding, trace, seen, handle)
+        text, stats = plan_handoff(finding, trace, seen, handle,
+                                   root=source_root)
     elif finding.strip():
-        text, stats = handoff(finding, trace, seen, handle)
+        text, stats = handoff(finding, trace, seen, handle, root=source_root)
     else:
         text, stats = machine_handoff(question, trace, seen,
                                       "it returned no text", handle)
@@ -1369,12 +1380,300 @@ def parse_sections(text: str) -> tuple[dict, bool]:
     return out, structured
 
 
-def _label_fact(fact: str, seen: set[str]) -> tuple[str, bool]:
+# ---------------------------------------------------------------------------
+# THE EVIDENCE (operator, 2026-09-24). Main and the user cannot open a path
+# on this server: `three/src/core/Object3D.js:714` names a file in OUR package
+# index, so a bare citation is useless to them. Every VERIFIED fact carries
+# its evidence inline -- the lines it cites, read from the held source by the
+# verifier itself (never the helper's memory), labelled with the package and
+# version they came from:
+#
+#     - lookAt flips the target for cameras. three/src/core/Object3D.js:714
+#       source: three@0.185.1 src/core/Object3D.js:711-717
+#     ```js
+#     ...the lines, exactly as the file holds them...
+#     ```
+#
+# And a citation the verifier cannot read -- no such held file, or a line the
+# file does not have -- is REMOVED from the fact, which crosses relabelled
+# REASONING_LABEL (live gate 2026-09-24: "three/src/core/Open/Three.js:714"
+# crossed although no such file is held). The caps are CHOICES, unmeasured.
+EXCERPT_MAX_LINES = 12          # one fact's excerpt
+EXCERPT_CONTEXT = 3             # lines either side of a single cited line
+EXCERPT_TOTAL_CHARS = int(os.environ.get("YAMADORI_EXCERPT_CHARS", "3600"))
+_EXTS = ("tsx|ts|jsx|js|mjs|cjs|json|jsonc|toml|yaml|yml|hpp|cpp|rs|py|go"
+         "|zig|wgsl|glsl|md|h|c")
+# A file citation with its optional line or range, as the helper writes it.
+_FILE_CITE = re.compile(
+    r"(?<![\w@./\\-])((?:\.{1,2}/)?[\w@.\\/-]*?[\w-]+\.(?:" + _EXTS + r"))"
+    r"(?![A-Za-z0-9])(?::(\d+)(?:\s*[-–]\s*(\d+))?)?")
+_LANG = {"ts": "ts", "tsx": "tsx", "js": "js", "jsx": "jsx", "mjs": "js",
+         "cjs": "js", "py": "python", "rs": "rust", "go": "go",
+         "wgsl": "wgsl", "glsl": "glsl", "json": "json", "md": "markdown",
+         "yaml": "yaml", "yml": "yaml", "toml": "toml", "c": "c", "h": "c",
+         "cpp": "cpp", "hpp": "cpp", "zig": "zig", "jsonc": "json"}
+# "== three@0.185.1 ==" / "== searched three@0.185.1, ..." in a package
+# tool's result: the version the investigation actually read.
+_VERSION_HEAD = re.compile(r"==\s*(?:searched\s+)?(@?[\w./-]+?)@(\d[\w.+-]*)")
+
+
+def versions_in(text: str) -> dict[str, str]:
+    """{package: version} a tool result says it searched or read."""
+    out: dict[str, str] = {}
+    for pkg, ver in _VERSION_HEAD.findall(text or ""):
+        out.setdefault(pkg, ver)
+    return out
+
+
+_FILES_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _package_files(db: str) -> tuple[str, dict[str, str]]:
+    """(source root, {lowercased relative path: relative path}) of one held
+    package index. Cached per index file."""
+    import sqlite3
+    if db not in _FILES_CACHE:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            roots = [r[0] for r in con.execute("SELECT path FROM roots")]
+            files = {r[0].lower(): r[0] for r in con.execute(
+                "SELECT path FROM package_files")}
+        finally:
+            con.close()
+        _FILES_CACHE[db] = {"\x00root": roots[0] if roots else "", **files}
+    got = _FILES_CACHE[db]
+    return got["\x00root"], got
+
+
+def _match_file(files: dict[str, str], rel: str) -> str | None:
+    """The indexed path `rel` names: exact, else a suffix either way at a
+    path boundary -- never a bare file name matched against a deeper
+    path (index.js is in every package)."""
+    r = rel.lower()
+    if r in files:
+        return files[r]
+    if "/" not in r:
+        return None
+    for low, real in files.items():
+        if low.startswith("\x00"):
+            continue
+        if r.endswith("/" + low) or low.endswith("/" + r):
+            return real
+    return None
+
+
+def resolve_source(path: str, prefer: dict | None = None,
+                   root: str | None = None) -> dict | None:
+    """Where a cited path lives in the source this server holds:
+    {label, rel, file} -- `label` "three@0.185.1" (or "repository") -- or
+    None when no held file matches. A path that starts with a held package
+    ("three/src/...", "three@0.185.1/src/...", "node_modules/three/...")
+    is looked up in that package only; any other path in the packages the
+    investigation read (`prefer`, its {package: version}) first, then every
+    held package, then the bound repository `root`."""
+    import domains
+    p = path.replace("\\", "/").strip()
+    while p.startswith("./"):
+        p = p[2:]
+    p = p.lstrip("/")
+    if p.startswith("node_modules/"):
+        p = p[len("node_modules/"):]
+    prefer = prefer or {}
+    try:
+        held = domains.held_sources() or {}
+    except Exception:                                            # noqa: BLE001
+        held = {}
+    names = sorted(held, key=len, reverse=True)
+    routed = None
+    for pkg in names:
+        pl = pkg.lower()
+        lp = p.lower()
+        if lp.startswith(pl + "/") or lp.startswith(pl + "@"):
+            rest = p[len(pkg):]
+            ver = None
+            if rest.startswith("@"):
+                ver, _, rest = rest[1:].partition("/")
+            routed = (pkg, ver, rest.lstrip("/"))
+            break
+
+    def versions(pkg: str, ver: str | None) -> list:
+        rows = list(held.get(pkg) or [])
+        want = ver or prefer.get(pkg)
+        return sorted(rows, key=lambda r: r[0] != want)   # stable: newest next
+
+    if routed:
+        order = [(routed[0], routed[1], routed[2])]
+    else:
+        pkgs = [k for k in prefer if k in held] + [
+            k for k in sorted(held) if k not in prefer]
+        order = [(k, None, p) for k in pkgs]
+    for pkg, ver, rel in order:
+        if not rel:
+            continue
+        for v, db in versions(pkg, ver):
+            try:
+                src, files = _package_files(db)
+            except Exception:                                    # noqa: BLE001
+                continue
+            real = _match_file(files, rel)
+            if real and src:
+                return {"label": f"{pkg}@{v}", "rel": real,
+                        "file": os.path.join(src, real)}
+    if root and not routed:
+        full = os.path.realpath(os.path.join(root, p))
+        base = os.path.realpath(root)
+        if (os.path.commonpath([full, base]) == base
+                and os.path.isfile(full)):
+            return {"label": "repository", "rel": p, "file": full}
+    return None
+
+
+def directory_resolver(base: str, label: str = "fixture@0.0.0"):
+    """A SOURCE_RESOLVER over one directory, for tests: a cited path is the
+    file of that relative path under `base`, or unreadable."""
+    def resolve(path: str, prefer: dict | None = None,
+                root: str | None = None) -> dict | None:
+        p = path.replace("\\", "/").strip()
+        while p.startswith("./"):
+            p = p[2:]
+        p = p.lstrip("/")
+        full = os.path.join(base, p)
+        return ({"label": label, "rel": p, "file": full}
+                if p and os.path.isfile(full) else None)
+    return resolve
+
+
+# Tests replace this; the default reads the held package indexes.
+SOURCE_RESOLVER = resolve_source
+_LINES_CACHE: dict[str, list[str]] = {}
+
+
+def _file_lines(file: str) -> list[str] | None:
+    if file not in _LINES_CACHE:
+        try:
+            with open(file, encoding="utf-8", errors="replace",
+                      newline="") as f:
+                text = f.read()
+        except OSError:
+            return None
+        if len(_LINES_CACHE) > 64:
+            _LINES_CACHE.pop(next(iter(_LINES_CACHE)))
+        _LINES_CACHE[file] = [ln.rstrip("\r") for ln in text.split("\n")]
+    return _LINES_CACHE[file]
+
+
+def _evidence_of(fact: str, ev: dict) -> tuple[str, list[dict], list[str]]:
+    """(the fact with every citation the verifier cannot read removed, the
+    readable line citations [{src, a, b}], the removed citations)."""
+    good: list[dict] = []
+    bad: list[str] = []
+    urls = [(u.start(), u.end()) for u in _URL.finditer(fact)]
+    for m in list(_FILE_CITE.finditer(fact)):
+        path, a, b = m.group(1), m.group(2), m.group(3)
+        if any(s <= m.start() and m.end() <= e for s, e in urls):
+            continue                     # part of a URL, not a file
+        if a is None and "/" not in path.replace("\\", "/"):
+            continue     # a bare file name in prose, not a citation
+        src = ev["resolve"](path, ev.get("prefer"), ev.get("root"))
+        lines = _file_lines(src["file"]) if src else None
+        ok = src is not None and lines is not None
+        if ok and a is not None:
+            ai, bi = int(a), int(b) if b else None
+            n = len(lines)
+            ok = 1 <= ai <= n and (bi is None or ai <= bi <= n)
+            if ok:
+                good.append({"src": src, "a": ai, "b": bi, "text": m.group(0)})
+        if not ok:
+            bad.append(m.group(0))
+    if not bad:
+        return fact, good, []
+    out = fact
+    for cite in bad:
+        out = out.replace(cite, "")
+    # What removing a citation leaves behind: "()", "``", " ,", doubled
+    # spaces, a dangling "at" or "in".
+    out = re.sub(r"\(\s*\)|`\s*`|\[\s*\]", "", out)
+    out = re.sub(r"\s+(?:at|in|see|from)\s*([.,;:]?)\s*$", r"\1", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    out = re.sub(r"\s+([.,;:])", r"\1", out)
+    out = re.sub(r"[\s,;:]+$", "", out)
+    if not out:
+        out = ("a fact whose only content was a citation the verifier could "
+               "not read (removed)")
+    return out, good, bad
+
+
+def _excerpt(cite: dict) -> tuple[str, str]:
+    """(label, code) of one readable citation: the cited range (at most
+    EXCERPT_MAX_LINES), or EXCERPT_CONTEXT lines either side of one line."""
+    lines = _file_lines(cite["src"]["file"]) or []
+    a, b = cite["a"], cite["b"]
+    if b is None:
+        start = max(1, a - EXCERPT_CONTEXT)
+        end = min(len(lines), a + EXCERPT_CONTEXT)
+    else:
+        start, end = a, min(b, a + EXCERPT_MAX_LINES - 1)
+    # The label and the body must name the SAME lines (live gate
+    # 2026-09-24, second run: 3 of 5 excerpts ended on a blank line, which
+    # the fence dropped, so the body was one line short of its label). Blank
+    # lines at either edge are left out of the range, and the label says so.
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    while start < end and not lines[start - 1].strip():
+        start += 1
+    code = "\n".join(lines[start - 1:end])
+    return (f"{cite['src']['label']} {cite['src']['rel']}:{start}-{end}",
+            code)
+
+
+def _with_excerpt(fact: str, cite: dict, ev: dict) -> str:
+    """The fact with its evidence inline, within the hand-off's excerpt
+    budget (ev["left"]); past it, the fact says the excerpt was not
+    inlined, rather than crossing as if it had none to show."""
+    label, code = _excerpt(cite)
+    lang = _LANG.get(cite["src"]["rel"].rsplit(".", 1)[-1].lower(), "")
+    # Not _fence(): it strips the code's trailing whitespace, and an excerpt
+    # is the file's lines EXACTLY.
+    runs = [len(m.group(1)) for m in _LINE_TICKS.finditer(code)]
+    ticks = "`" * max(3, max(runs, default=0) + 1)
+    block = f"\n  source: {label}\n{ticks}{lang}\n{code}\n{ticks}"
+    if len(block) > ev["left"]:
+        ev["skipped"] += 1
+        return (f"{fact} [excerpt not inlined: the hand-off's excerpt "
+                f"budget, {EXCERPT_TOTAL_CHARS} characters (a choice), is "
+                f"spent]")
+    ev["left"] -= len(block)
+    ev["excerpts"] += 1
+    ev["chars"] += len(block)
+    return fact + block
+
+
+def _evidence_state(trace: list | None = None, root: str | None = None
+                    ) -> dict:
+    prefer: dict[str, str] = {}
+    for t in trace or []:
+        for k, v in (t.get("versions") or {}).items():
+            prefer.setdefault(k, v)
+    return {"resolve": SOURCE_RESOLVER, "prefer": prefer, "root": root,
+            "left": EXCERPT_TOTAL_CHARS, "excerpts": 0, "chars": 0,
+            "skipped": 0, "removed": 0}
+
+
+def _label_fact(fact: str, seen: set[str],
+                ev: dict | None = None) -> tuple[str, bool]:
     """(the fact as it crosses, verified?). Verified means it cites at least
-    one path and every path it cites was retrieved by this investigation."""
+    one path, every path it cites was retrieved by this investigation, and
+    every file citation is one the verifier could read in the held source
+    -- whose lines then cross with it (THE EVIDENCE, above). A citation the
+    verifier cannot read is removed, and the fact crosses as reasoning."""
+    ev = ev if ev is not None else _evidence_state()
+    fact, good, bad = _evidence_of(fact, ev)
+    ev["removed"] += len(bad)
     low = fact.lower()
     if "reasoning" in low and "not checked" in low:
         return fact, False
+    if bad:
+        return f"{fact} {REASONING_LABEL}", False
     cited = _cited(fact)
     if not cited:
         return f"{fact} {REASONING_LABEL}", False
@@ -1386,6 +1685,9 @@ def _label_fact(fact: str, seen: set[str]) -> tuple[str, bool]:
     if missing:
         return (f"{fact} [cites {', '.join(missing[:3])}, which this "
                 f"investigation did not retrieve: unverified]"), False
+    line_cites = [c for c in good if c["a"] is not None]
+    if line_cites:
+        fact = _with_excerpt(fact, line_cites[0], ev)
     return fact, True
 
 
@@ -1412,42 +1714,67 @@ def _render(sections: dict, lead: str = "", handle: str = "") -> str:
     return "\n".join(parts)
 
 
-def _cut(text: str) -> tuple[str, bool]:
-    if len(text) <= MAX_FINDING_CHARS:
+def _cut(text: str, extra: int = 0) -> tuple[str, bool]:
+    """MAX_FINDING_CHARS is the breaker on the helper's own words; the
+    inlined evidence (`extra`, itself capped at EXCERPT_TOTAL_CHARS) rides
+    on top of it."""
+    limit = MAX_FINDING_CHARS + max(0, extra)
+    if len(text) <= limit:
         return text, False
-    return (text[:MAX_FINDING_CHARS]
-            + f"\n\n[hand-off cut at {MAX_FINDING_CHARS} characters of "
+    return (text[:limit]
+            + f"\n\n[hand-off cut at {limit} characters of "
               f"{len(text)}]"), True
 
 
 def _stats(sections: dict, verified: int, text: str, machine: bool,
-           structured: bool, cut: bool) -> dict:
+           structured: bool, cut: bool, ev: dict | None = None) -> dict:
     facts = len(sections.get("facts") or [])
-    return {"facts": facts, "verified": verified,
-            "unverified": facts - verified if not machine else 0,
-            "searched_empty": len(sections.get("searched_empty") or []),
-            "open": len(sections.get("open") or []),
-            "chars": len(text), "machine_built": machine,
-            "structured": structured, "cut": cut}
+    out = {"facts": facts, "verified": verified,
+           "unverified": facts - verified if not machine else 0,
+           "searched_empty": len(sections.get("searched_empty") or []),
+           "open": len(sections.get("open") or []),
+           "chars": len(text), "machine_built": machine,
+           "structured": structured, "cut": cut}
+    if ev is not None:
+        # THE EVIDENCE: excerpts inlined, their characters, verified facts
+        # whose excerpt the budget left out, and citations removed because
+        # the verifier could not read them.
+        out.update(excerpts=ev["excerpts"], excerpt_chars=ev["chars"],
+                   excerpts_skipped=ev["skipped"],
+                   citations_removed=ev["removed"])
+    return out
 
 
 def handoff(text: str, trace: list, seen: set[str],
-            handle: str = "") -> tuple[str, dict]:
+            handle: str = "", root: str | None = None) -> tuple[str, dict]:
     """The helper's write-up as the fixed hand-off, and its x_yamadori stats.
 
     Every fact is kept. Its citations are checked against `seen` (the paths
-    the investigation's tool results named): verified facts stand as read,
-    the rest cross labelled. With no search at all every fact is reasoning.
-    The trace's empty searches are added under SEARCHED, FOUND NOTHING, so
-    the main model is told what not to repeat even when the helper forgot.
+    the investigation's tool results named) and read from the held source
+    (THE EVIDENCE): verified facts stand as read, with the lines they cite
+    inlined; the rest cross labelled, and a citation that cannot be read is
+    removed. With no search at all every fact is reasoning. The trace's
+    empty searches are added under SEARCHED, FOUND NOTHING, so the main
+    model is told what not to repeat even when the helper forgot.
+    `root`: the bound repository, for a citation of one of its files.
     """
     sections, structured = parse_sections(text)
+    ev = _evidence_state(trace, root)
     facts, verified = [], 0
-    for f in sections["facts"]:
-        labelled, ok = _label_fact(f, seen)
+    for f in sections["facts"][:MAX_ITEMS["facts"]]:
+        labelled, ok = _label_fact(f, seen, ev)
+        facts.append(labelled)
+        verified += ok
+    # Past the cap a fact is not shown (_render), so it is labelled without
+    # spending the excerpt budget on it.
+    for f in sections["facts"][MAX_ITEMS["facts"]:]:
+        labelled, ok = _label_fact(f, seen, dict(ev, left=0))
         facts.append(labelled)
         verified += ok
     sections["facts"] = facts
+    # OPEN QUESTIONS and NEXT STEP are not checked: they name what is NOT
+    # known, and a NEXT STEP may name a file of the user's own project for
+    # main to read with the harness's tools (Phase 0.5).
     have = {s.lower() for s in sections["searched_empty"]}
     for t in trace:
         if t.get("empty") and "hop" in t:
@@ -1455,9 +1782,9 @@ def handoff(text: str, trace: list, seen: set[str],
             if not any(d.lower() in h or h in d.lower() for h in have):
                 sections["searched_empty"].append(d + " (search log)")
                 have.add(d.lower())
-    rendered, cut = _cut(_render(sections, handle=handle))
+    rendered, cut = _cut(_render(sections, handle=handle), extra=ev["chars"])
     return rendered, _stats(sections, verified, rendered, False, structured,
-                            cut)
+                            cut, ev)
 
 
 def machine_handoff(question: str, trace: list, seen: set[str], why: str,
@@ -1512,7 +1839,8 @@ _PLAN_HEADING = re.compile(
 
 
 def plan_handoff(text: str, trace: list, seen: set[str],
-                 handle: str = "") -> tuple[str, dict]:
+                 handle: str = "", root: str | None = None
+                 ) -> tuple[str, dict]:
     """The planner's write-up as the fixed four-section plan, and its stats.
     Text before any heading is read as ORDER. A KEY DECISION is checked like
     a fact: its citation stands when this run retrieved it, else it crosses
@@ -1546,8 +1874,10 @@ def plan_handoff(text: str, trace: list, seen: set[str],
             out[cur].append(item)
     verified = 0
     labelled = []
-    for d in out["decisions"]:
-        t, ok = _label_fact(d, seen)
+    ev = _evidence_state(trace, root)
+    for i, d in enumerate(out["decisions"]):
+        t, ok = _label_fact(d, seen, ev if i < PLAN_MAX_ITEMS["decisions"]
+                            else dict(ev, left=0))
         labelled.append(t)
         verified += ok
     out["decisions"] = labelled
@@ -1560,14 +1890,17 @@ def plan_handoff(text: str, trace: list, seen: set[str],
             lines.append(f"- (+{len(items) - cap} more"
                          + (f"; trace handle {handle}" if handle else "") + ")")
         parts.append(title + "\n" + "\n".join(lines))
-    rendered, cut = _cut("\n".join(parts))
+    rendered, cut = _cut("\n".join(parts), extra=ev["chars"])
     stats = {"facts": len(out["decisions"]), "verified": verified,
              "unverified": len(out["decisions"]) - verified,
              "searched_empty": sum(1 for t in trace
                                    if t.get("empty") and "hop" in t),
              "open": len(out["risks"]), "chars": len(rendered),
              "machine_built": False, "structured": structured, "cut": cut,
-             "plan": {k: len(v) for k, v in out.items()}}
+             "plan": {k: len(v) for k, v in out.items()},
+             "excerpts": ev["excerpts"], "excerpt_chars": ev["chars"],
+             "excerpts_skipped": ev["skipped"],
+             "citations_removed": ev["removed"]}
     return rendered, stats
 
 

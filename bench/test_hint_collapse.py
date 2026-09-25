@@ -18,9 +18,10 @@ TWO MODES
 
   default   score the CACHED run in bench/data/hint_collapse_runs.json. No GPU,
             no network, ~1 s, runs anywhere.
-  --live    additionally hit Laya on 1237 and the reranker on 11434 and assert
-            the cache still matches what the services return today, plus the
-            two serving diagnostics that explain the rerank arm.
+  --live    additionally hit the reranker on 11434 and assert the cache
+            still matches what it returns today, plus the two serving
+            diagnostics that explain the rerank arm. (The Laya check on 1237
+            is retired with Laya, 2026-09-24, docs/E1.md.)
 
 Regenerate the cache with:
 
@@ -298,14 +299,10 @@ def main(argv=None) -> int:
         print("\nLIVE -- against the services")
         try:
             import code_search as cs
-            p0 = probes[0]
-            b0 = by_id[p0["bucket_id"]]
-            v, _ = H.arm_laya(p0["problem"], b0["members"])
-            cached_pick = records[0]["arms"]["laya"]["pick"]
-            check("laya on 1237 still returns what the cache recorded "
-                  "(deterministic; a model or prompt change breaks this)",
-                  v is not None and v["choice"] == cached_pick,
-                  f"live {v and v['choice']} vs cached {cached_pick}")
+            # RETIRED 2026-09-24: the Laya service on 1237 (docs/E1.md: E1
+            # alone, retire Laya). Its cached arm above stays the record.
+            print("  retired  laya on 1237 still returns what the cache "
+                  "recorded (Laya retired 2026-09-24, docs/E1.md); not run")
 
             # The serving diagnostic behind docs/HINTS.md finding 4.
             docs = ["The capital of France is Paris.",

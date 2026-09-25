@@ -63,6 +63,15 @@ reservation: with 4 slots, two conversations hold a pin at once, not three.
 The server defers a second-brain call while that slot is busy, so the cost of
 two second-brain calls at once is a wait, never a conversation's cache. Set
 YAMADORI_SLOT_PINNING=0 to hand every choice back to llama-server.
+
+A PIN IS ONLY AS GOOD AS THE SERVER KEEPING THE SLOT. With the build's
+defaults (auto -np: 4 slots, unified KV, --cache-idle-slots ON) every task
+that starts on ANY slot saves each idle slot to host RAM and clears it, and a
+pinned request to the emptied slot loads nothing back: the helper's fix-up
+or a side call on the transient slot wiped the conversation's slot (live gate
+2026-09-24, docs/SELF-IMPROVEMENT-LOG.md #11). config.yaml sets
+--no-cache-idle-slots on `bonsai` for that reason. `/slots` n_prompt_tokens
+shows what each slot still holds.
 """
 from __future__ import annotations
 
@@ -446,9 +455,15 @@ def cache_record(timings: dict | None, usage: dict | None,
               if reused is not None and processed is not None
               else u.get("prompt_tokens"))
     g = grant or {}
+    # The model server's own time for this generation (prompt + predicted,
+    # llama-server `timings`): the part of a request's wall clock that is
+    # the model's, so the rest is ours (x_yamadori.cache.model_ms).
+    ms = None
+    if t.get("prompt_ms") is not None and t.get("predicted_ms") is not None:
+        ms = round(float(t["prompt_ms"]) + float(t["predicted_ms"]))
     rec = {"prompt": prompt, "reused": reused, "processed": processed,
            "slot": g.get("slot"), "mode": g.get("mode"),
-           "evicted": g.get("evicted")}
+           "evicted": g.get("evicted"), "model_ms": ms}
     if g.get("affinity"):
         rec["affinity"] = g["affinity"]
     return rec

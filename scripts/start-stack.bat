@@ -55,11 +55,7 @@ if defined DNSIMPLE_API_TOKEN (
   echo [%date% %time%] caddy skipped: no DNSIMPLE_API_TOKEN in caddy\.env >> "logs\caddy.log"
 )
 
-REM Laya decision engine (HTTP 1237 + WebSocket 1238). Runs in its own venv:
-REM laya requires a newer transformers than the rest of the stack.
-if exist ".venv-laya\Scripts\python.exe" (
-  start "" /B ".venv-laya\Scripts\python.exe" "%CD%\mcp\laya_service.py" >> "logs\laya.log" 2>&1
-)
+REM Laya retired 2026-09-24 (docs/E1.md): E1 heads replace it.
 
 REM Job worker: claims dataset pipeline jobs from index\jobs.sqlite3 (fetch,
 REM extract, index). Without it a submitted dataset sits in `queued` forever.
@@ -103,6 +99,8 @@ REM (bench/imagegen/compare_turbo.py). Users can pick base on /settings.
 set "YAMADORI_IMAGEGEN_DEFAULT=turbo"
 REM Web search for deep thinking: the SearXNG started above (docs/SEARCH.md).
 set "YAMADORI_SEARCH_URL=http://127.0.0.1:8888"
+REM E1 heads replace Laya (operator, 2026-09-24; docs/E1.md)
+set "YAMADORI_E1=1"
 "%PY%" "%CD%\mcp\server.py" >> "logs\proxy.log" 2>&1
 set EXITCODE=%errorlevel%
 echo [%date% %time%] llama-swap exited with %EXITCODE% >> "logs\stack.log"

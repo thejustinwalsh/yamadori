@@ -97,13 +97,13 @@ $Services = @(
                 # Turbo default (operator, 2026-09-23); see start-stack.bat.
                 YAMADORI_IMAGEGEN_DEFAULT = 'turbo'
                 # SearXNG, the searxng entry below; docs/SEARCH.md.
-                YAMADORI_SEARCH_URL = 'http://127.0.0.1:8888' } }
+                YAMADORI_SEARCH_URL = 'http://127.0.0.1:8888'
+                # E1 heads replace Laya (operator, 2026-09-24; docs/E1.md)
+                YAMADORI_E1 = '1' } }
     @{ Name = 'tools-api';  Url = 'http://127.0.0.1:1235/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\tools_api.py"); Log = "$root\logs\tools-api.log"
        Match = 'tools_api\.py' }
-    @{ Name = 'laya';       Url = 'http://127.0.0.1:1237/health';  Kind = 'process'
-       Exe = "$root\.venv-laya\Scripts\python.exe"; Args = @("$root\mcp\laya_service.py")
-       Log = "$root\logs\laya.log"; Match = 'laya_service\.py' }
+    # laya retired 2026-09-24 (docs/E1.md): E1 heads replace it
     # SearXNG web search (docs/SEARCH.md). Its own venv and source tree outside
     # the repo; the config path is the only thing it needs from the environment.
     @{ Name = 'searxng';    Url = 'http://127.0.0.1:8888/healthz';  Kind = 'process'

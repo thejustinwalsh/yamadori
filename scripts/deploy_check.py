@@ -12,8 +12,11 @@ the real models, we don't have tests.
 WHAT IT DOES, IN ORDER
 
   1. Waits for every service to answer /health: llama-swap :11434, the proxy
-     :1234, the tools API :1235, Laya :1237 -- and for llama-swap to report
-     the chat model `ready`. A stack that is still loading is not failing.
+     :1234, the tools API :1235 -- and for llama-swap to report the chat
+     model `ready`. A stack that is still loading is not failing. (Laya on
+     :1237 is retired, 2026-09-24, docs/E1.md: E1's heads replace it, and
+     the suites that tested its live service run offline only --
+     scripts/run_tests.py RETIRED_LIVE.)
   2. Refuses to start while another live run is on the card (a python
      process running a live suite). Two consumers on one GPU degrade each
      other into 429s and 502s, and the loser looks like the one with the bug.
@@ -45,8 +48,7 @@ if not os.path.exists(PY):
 
 HEALTH = {"llama-swap": "http://127.0.0.1:11434/health",
           "proxy": "http://127.0.0.1:1234/health",
-          "tools-api": "http://127.0.0.1:1235/health",
-          "laya": "http://127.0.0.1:1237/health"}
+          "tools-api": "http://127.0.0.1:1235/health"}
 SWAP = "http://127.0.0.1:11434"
 CHAT_MODEL = os.environ.get("YAMADORI_CHAT_MODEL", "bonsai")
 LIVE_MARKERS = ("test_live_stack.py", "test_tools_live.py", "run_tests.py --live",

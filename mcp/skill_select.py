@@ -642,10 +642,17 @@ def attach(augmented: list[dict], messages: list[dict], sel: dict,
     else:
         chosen, info = select(messages, rc, pool)
         info["cache"] = "miss"
-        with _SLOCK:
-            _STICKY[key] = {"chosen": chosen, "info": info}
-            while len(_STICKY) > STICKY_MAX:
-                _STICKY.popitem(last=False)
+        emb = info.get("embedding") or {}
+        # A selection that came out EMPTY while the embedder could not answer
+        # is not kept: the next request decides again (the proxy records it
+        # as RETRYABLE, live gate 2026-09-24), and a sticky copy would replay
+        # the miss. One the fallback still decided stands.
+        if chosen or not (emb.get("ok") is False and str(emb.get("why") or "")
+                .startswith(("embedding failed", "the query vector is zero"))):
+            with _SLOCK:
+                _STICKY[key] = {"chosen": chosen, "info": info}
+                while len(_STICKY) > STICKY_MAX:
+                    _STICKY.popitem(last=False)
         fb = info.get("fallback") or {}
         _stats(requests=1, with_candidates=int(bool(info.get("candidates"))),
                injected=int(bool(chosen)), fallbacks=int(bool(fb.get("ran"))),

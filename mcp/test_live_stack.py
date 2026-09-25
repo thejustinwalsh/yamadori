@@ -250,10 +250,13 @@ def test_every_tier_returns_a_complete_answer_on_a_small_budget():
     prompt = ("List the first 25 prime numbers in ascending order, one per "
               "line, digits only, nothing else.")
     took: dict[str, float] = {}
+    model_s: dict[str, float | None] = {}
     for tier in ("minimal", "low", "medium", "high", "max"):
         status, d, dt = chat([{"role": "user", "content": prompt}],
                              max_tokens=64, reasoning_effort=tier)
         took[tier] = dt
+        ms = (_x(d).get("cache") or {}).get("model_ms")
+        model_s[tier] = None if ms is None else ms / 1000.0
         text, fin = _content(d)
         got = _primes_in(text)
         check(status == 200 and got[:25] == PRIMES and fin == "stop",
@@ -271,11 +274,27 @@ def test_every_tier_returns_a_complete_answer_on_a_small_budget():
               json.dumps({"selection": {k: sel.get(k) for k in
                                         ("investigate", "fanout_n", "because")},
                           "investigate": x.get("investigate")})[:400])
+    # OUR OVERHEAD, not the model's thinking (revised after the live gate of
+    # 2026-09-24). The old check compared raw wall clocks: max 11 s vs
+    # minimal 3 s. Measured that night through :1234: minimal generated 71
+    # tokens with thinking OFF (3.0 s), max 705 with xhigh thinking (13.7 s)
+    # -- the embedder was already loaded (no gpu_room decision), E1's vector
+    # came from its cache (0 ms) and no deep-thinking check ran. The tiers
+    # differ in thinking by design (AGENTS.md effort ladder), so the wall
+    # clock less the model server's own time (x_yamadori.cache.model_ms) is
+    # what this bounds: the stack's work around the model.
     if "max" in took and "minimal" in took:
-        check(took["max"] <= 1.5 * took["minimal"] + 5,
-              f"max wall clock within 1.5x of minimal "
-              f"({took['max']:.0f}s vs {took['minimal']:.0f}s)",
-              json.dumps({k: round(v) for k, v in took.items()}))
+        over = {k: (None if model_s.get(k) is None
+                    else round(took[k] - model_s[k], 2)) for k in took}
+        ok = over["max"] is not None and over["minimal"] is not None
+        check(ok and over["max"] <= 1.5 * over["minimal"] + 5,
+              "max: the stack's overhead (wall clock less the model's own "
+              "time) within 1.5x of minimal's + 5 s"
+              + (f" ({over['max']:.1f}s vs {over['minimal']:.1f}s)" if ok
+                 else " -- x_yamadori.cache.model_ms missing: the proxy "
+                      "predates it (restart)"),
+              json.dumps({"wall": {k: round(v, 1) for k, v in took.items()},
+                          "model": model_s, "overhead": over}))
 
 
 def test_streaming_returns_the_whole_answer():
@@ -353,7 +372,12 @@ def test_a_library_question_gets_the_definitions():
                  "no live three index"):
         return
     name, path = sym
-    status, d, dt = chat([{"role": "user", "content":
+    # A fresh conversation per run (the ledger keys a turn by the messages
+    # up to it; the same words every run replayed the first run's decision
+    # -- live gate 2026-09-24).
+    status, d, dt = chat([{"role": "system", "content":
+                           f"[session {_nonce()}]"},
+                          {"role": "user", "content":
                            f"In three.js, which file defines the class "
                            f"`{name}`? Answer with the file path."}],
                          reasoning_effort="medium")
@@ -624,7 +648,7 @@ def test_hints_reach_the_model_collapsed():
         {"role": "system", "content":
          "Before answering, quote verbatim the first sentence of every "
          "engineering note appended to my message, each on its own line "
-         "prefixed NOTE:."},
+         f"prefixed NOTE:. [session {_nonce()}]"},
         {"role": "user", "content": "static array, many range-sum queries"}],
         reasoning_effort="medium")
     text, _ = _content(d)
@@ -659,20 +683,33 @@ def test_selection_decides_deep_thinking():
     q = ("In three r185 TSL, the node method `label()` is deprecated. What "
          "replaces it, in which release was it deprecated, and which file "
          "emits the warning?")
-    status, d, dt = chat([{"role": "user", "content": q}],
+    status, d, dt = chat([{"role": "system", "content":
+                           f"[session {_nonce()}]"},
+                          {"role": "user", "content": q}],
                          reasoning_effort="max")
     x = _x(d)
     sel = x.get("selection") or {}
-    sig = sel.get("signals") or {}
     inv = x.get("investigate") or {}
     text, _fin = _content(d)
     check(status == 200 and sel.get("investigate") is True,
           f"a TSL deprecation question at max investigates ({dt:.0f}s)",
           json.dumps(sel.get("because"))[:400])
-    check(sig.get("rule") is not None and sig.get("laya") is not None,
-          "both signals recorded: the rule AND Laya's trained head",
-          json.dumps({"rule": sig.get("rule"), "laya": sig.get("laya"),
-                      "status": sig.get("laya_status")})[:400])
+    # Laya is retired (docs/E1.md, 2026-09-24): the two signals are the
+    # trigger rule's own (x_yamadori.deep.signals: struggle, kickoff, the
+    # unseen-package area) and E1's route_in head.
+    dsig = (x.get("deep") or {}).get("signals") or {}
+    e1_rin = ((dsig.get("e1") or {}).get("heads") or {}).get("route_in")
+    check(all(k in dsig for k in ("struggle", "kickoff", "area"))
+          and e1_rin is not None and e1_rin.get("version"),
+          "both signals recorded: the rule AND E1's route_in head",
+          json.dumps({"rule": {k: dsig.get(k) for k in ("kickoff", "area")},
+                      "e1": dsig.get("e1")})[:400])
+    fa = x.get("fold_back_answer") or {}
+    check(fa.get("opened") and fa.get("refers_to_hidden") is None
+          and (fa.get("chars_after_opening") or 0) >= 200,
+          "the answer after 'After thinking deeply,' states the findings "
+          "itself (>= 200 chars, never 'the hand-off' or 'above')",
+          json.dumps({"fold_back_answer": fa, "content": text[:300]}))
     check(inv.get("ran") and inv.get("hops", 0) > 0 and inv.get("injected")
           and inv.get("cited", 0) > 0,
           "the investigation searched, cited a retrieved path, and crossed",
@@ -1076,14 +1113,22 @@ def _next_is_extension(label: str, r: dict, convo: list[dict],
     # it + the new messages; everything before it must be reused (the
     # checkpoint at the previous prompt's end -- measured here, live).
     bound = (_chars(add) + _chars([r["msg"]])) // 2 + 128
+    # The server's checkpoint sits 4 tokens before a prompt's end, so a
+    # restore re-reads those by design (proxy.WARM_CHECKPOINT_SLACK, 8).
+    slack = 8
     check(f2.get("processed") is not None and f2["processed"] <= bound
-          and (f2.get("reused") or 0) >= (f1.get("prompt") or 0),
+          and (f2.get("reused") or 0) >= (f1.get("prompt") or 0) - slack,
           f"{label}: the next request extends the slot (processed "
           f"{f2.get('processed')} <= {bound}; reused {f2.get('reused')} >= "
-          f"the previous prompt {f1.get('prompt')})",
+          f"the previous prompt {f1.get('prompt')} less the checkpoint "
+          f"slack {slack})",
+          # `warm` is the FIRST response's record, sent before the warm ran
+          # (always "scheduled"); `warm_before` is the NEXT response's: what
+          # the warm did, and how long this request waited for it.
           json.dumps({"before": r["x"].get("cache"),
                       "after": r2["x"].get("cache"),
-                      "warm": r["x"].get("warm")})[:600])
+                      "warm_before": r2["x"].get("warm_before"),
+                      "warm": r["x"].get("warm")})[:900])
 
 
 def test_tool_call_repair_at_xhigh():
@@ -1217,7 +1262,72 @@ def test_deep_thinking_folds_back():
           f"source ({len(ok)} resolved)",
           json.dumps({"resolved": ok[:8], "missing": missing[:8],
                       "handoff": inv.get("handoff")})[:600])
+    # THE EVIDENCE (operator, 2026-09-24): a verified fact carries the lines
+    # it cites, read from the held index by the verifier. Every excerpt in
+    # the hand-off must be those lines EXACTLY.
+    snips, bad = _excerpts_match_held_source(reasoning)
+    h = inv.get("handoff") or {}
+    check(not bad and (snips or not h.get("verified")),
+          f"deep: every inlined excerpt matches the held source exactly "
+          f"({len(snips)} excerpts, {h.get('verified')} verified facts)",
+          json.dumps({"matched": snips[:6], "mismatched": bad[:4],
+                      "handoff": h})[:900])
+    check(reasoning.rstrip().endswith("the opening phrase a second time."),
+          "deep: the prefilled hand-off ends by saying the user sees only "
+          "the answer, which states the findings in full",
+          f"reasoning tail={reasoning[-240:]!r}")
+    fa = x.get("fold_back_answer") or {}
+    check(fa.get("opened") and fa.get("refers_to_hidden") is None
+          and (fa.get("chars_after_opening") or 0) >= 200,
+          "deep: the answer after 'After thinking deeply,' states the "
+          "findings itself (>= 200 chars, never 'the hand-off' or 'above')",
+          json.dumps({"fold_back_answer": fa, "content": text[:400]}))
     check(fin == "stop", "deep: finish=stop", f"finish={fin}")
+
+
+def _excerpts_match_held_source(text: str) -> tuple[list, list]:
+    """Every `source: <package>@<version> <path>:<a>-<b>` excerpt in `text`:
+    (matched labels, mismatches). An excerpt matches when its fenced lines
+    are exactly lines a..b of that file in that held version's source."""
+    import re
+    import domains
+    held = domains.held_sources() or {}
+    pat = re.compile(r"source: (\S+) (\S+?):(\d+)-(\d+)\n(`{3,})[^\n]*\n"
+                     r"(.*?)\n\5(?:\n|$)", re.S)
+    ok, bad = [], []
+    for m in pat.finditer(text or ""):
+        label, rel, a, b, body = (m.group(1), m.group(2), int(m.group(3)),
+                                  int(m.group(4)), m.group(6))
+        tag = f"{label} {rel}:{a}-{b}"
+        if "@" not in label:
+            bad.append(f"{tag} (not a held package label)")
+            continue
+        pkg, ver = label.rsplit("@", 1)
+        db = next((d for v, d in held.get(pkg) or [] if v == ver), None)
+        root = None
+        if db:
+            try:
+                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+                root = (con.execute("SELECT path FROM roots").fetchone()
+                        or [None])[0]
+                con.close()
+            except sqlite3.Error:
+                root = None
+        if not root:
+            bad.append(f"{tag} (no such held package version)")
+            continue
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8",
+                      errors="replace", newline="") as fh:
+                lines = [ln.rstrip("\r") for ln in fh.read().split("\n")]
+        except OSError as e:
+            bad.append(f"{tag} (unreadable: {e})")
+            continue
+        want = "\n".join(lines[a - 1:b])
+        (ok if body == want else bad).append(
+            tag if body == want else f"{tag} (differs: {body[:80]!r} vs "
+                                     f"{want[:80]!r})")
+    return ok, bad
 
 
 # --------------------------------------------------------- e. fan-out -------
