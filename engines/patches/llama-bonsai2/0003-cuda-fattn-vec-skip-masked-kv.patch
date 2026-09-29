@@ -1,0 +1,54 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Sun, 27 Sep 2026 05:00:00 -0400
+Subject: [PATCH] CUDA FA vec kernel: skip KV cells every query masks out
+
+With a unified KV cache (llama-server's auto -np: 4 slots, one pool) a
+decode step attends over the pool up to its highest used cell
+(llama_kv_cache::get_n_kv pads used_max_p1()), and the cells of OTHER
+sequences are masked -inf. The vec kernel -- the one decode and
+speculative verification use (<= 2 queries on Ada+ with quantized K/V,
+<= 8 in batch-invariant mode) -- still reads and multiplies every one
+of them: mask_to_KV_max, which trims a masked tail, runs only for
+>= 1024 queries or several sequences. Measured on an RTX 5060 Ti
+(Bonsai 2 27B, q8_0 K/V, -c 181248): one slot at 8k decodes at 60.6
+tok/s alone and 36.7 with another slot's 40k cells below it.
+
+Each warp owns 32 cells of the chunk for both the KQ and the VKQ part,
+so a warp whose cells are -inf for every valid query column skips its
+body. Masked cells contribute exp(-inf) = 0 to KQ_sum and VKQ and leave
+KQ_max unchanged, so the result is bit-identical (and a NaN left in an
+empty cell can no longer reach the output through 0 * NaN).
+---
+ ggml/src/ggml-cuda/fattn-vec.cuh | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/ggml/src/ggml-cuda/fattn-vec.cuh b/ggml/src/ggml-cuda/fattn-vec.cuh
+index 69dd936..dd51beb 100644
+--- a/ggml/src/ggml-cuda/fattn-vec.cuh
++++ b/ggml/src/ggml-cuda/fattn-vec.cuh
+@@ -254,6 +254,25 @@ static __global__ void flash_attn_ext_vec(
+     for (int k_VKQ_0 = blockIdx.y*nthreads; k_VKQ_0 < k_VKQ_max; k_VKQ_0 += gridDim.y*nthreads,
+              // Increment pointers after each loop:
+              K += gridDim.y*nthreads*nb11, V += gridDim.y*nthreads*nb21, maskh += gridDim.y*nthreads) {
++        // Skip KV cells that every query of this block masks out. Each warp owns cells
++        // [threadIdx.y*WARP_SIZE, (threadIdx.y + 1)*WARP_SIZE) of this chunk for both the KQ and the VKQ part
++        // (the KQ shared buffer is only read back by the warp that wrote it), so a warp whose 32 cells are all
++        // -inf for every valid column can skip its body: such cells add exp(-inf) = 0 to KQ_sum and VKQ and
++        // leave KQ_max unchanged (scale expf(0) = 1), so the result is the same. With a unified KV cache the
++        // cells of OTHER sequences are masked, and without this each decode step read them all, up to the
++        // highest used cell. The increments in the for statement still run on `continue`.
++        if (mask) {
++            int live = 0;
++#pragma unroll
++            for (int j = 0; j < ncols; ++j) {
++                if (ncols == 1 || ic0 + j < int(ne01.z)) {
++                    live |= __half2float(maskh[j*ne11 + tid]) != -INFINITY;
++                }
++            }
++            if (!warp_reduce_any(live)) {
++                continue;
++            }
++        }
+ 
+         // Calculate KQ tile and keep track of new maximum KQ values:
+         float KQ_reg[ncols]; // KQ in registers.

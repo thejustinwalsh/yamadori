@@ -98,6 +98,13 @@ PACKAGE_DOMAINS = {
     # made every competitive-programming prompt "match a held source" whose
     # code cannot answer an algorithm puzzle.
     "koota": {"web-frontend"},
+    # pmndrs/math (npm `math`, indexed 2026-09-27): vectors, matrices, noise,
+    # springs "for graphics and simulations" -- the domains skill_classify's
+    # `pmndrs_math` term gives it. NOT "algorithms", for koota's reason above.
+    # It imports nothing, so DERIVED DOMAINS found no evidence and the gate
+    # reopened as HELD_SOURCE_UNMAPPED for every request (all 342
+    # LiveCodeBench prompts, mcp/test_domains.py).
+    "math": {"gpu", "web-frontend"},
     "tokio": {"backend", "systems"},
     "axum": {"backend"},
     "actix-web": {"backend"},
@@ -443,6 +450,13 @@ HELD_ALIASES = {
     # the package: quoted or backticked as a module, its repo, a version pin.
     "postprocessing": r"""['"`]postprocessing['"`]|\bpmndrs/postprocessing\b"""
                       r"|\bpostprocessing@\d",
+    # pmndrs/math: "math" is an English word in every competitive-programming
+    # prompt and Python's stdlib, so the bare install name would name it in
+    # all of them. The spellings skill_classify's `pmndrs_math` term uses:
+    # the repo, a subpath, a version pin, "npm math". Its JS import reaches
+    # the gate through discover (stdlib judged per grammar).
+    "math": r"\bpmndrs/math\b|\bmath/(?:noise|random|time|shapes|geometry|color|ik)\b"
+            r"|(?<![\w.])math@\d|\bnpm (?:package )?[`'\"]?math\b",
 }
 
 # An identifier-shaped token: camelCase, snake_case, or letters with a digit.

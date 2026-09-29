@@ -19,7 +19,7 @@ leaves three facts nowhere on disk:
                          required answer here, and "unknown" is a BLOCKER, not
                          a default: a corpus whose licence nobody established
                          is one that cannot be shipped, and finding that out
-                         after it is embedded into the hints cache is finding
+                         after it is armed as a skill is finding
                          out too late.
   HOW FAR IT GOT         A source that was fetched but never extracted, or
                          extracted but never indexed, is invisible. It looks
@@ -33,8 +33,11 @@ THE STAGES
 runs the rest unattended: `mcp/worker.py` advances a dataset the moment the job
 for its current stage is `done`. There is no review GATE -- rows are served as
 soon as they are indexed, and a person reviews them afterwards if they want to,
-on `/dash`. A row marked `reject` there drops out of the hints cache on the
-next index (`hints._load_corpus`).
+on `/dash`. EXTRACT EMITS SKILLS (2026-09-26, the Phase 0.7 unification):
+the verified rows are compiled into atomic skills (mcp/skill_compile.py)
+that walk the one skill pipeline -- screen -> classify -> tests -> validate
+-> arm -- and `index` builds their trigger vectors. The recipe file stays as
+the rows' provenance and the label/train branch's input.
 
 `extract`, `index` and
 `train` need the card, so they are `gpu` lane jobs and they are SERIALISED --
@@ -106,7 +109,7 @@ HUMAN_STAGES = ("clarify",)
 # resource, not the speed -- see jobs.LANES.
 ENQUEUE = {
     "extract": ("dataset.extract", "gpu"),   # needs the model to read a source
-    "index":   ("dataset.index", "gpu"),     # embeds non-rejected rows into hints.npz
+    "index":   ("dataset.index", "gpu"),     # the skills' trigger vectors
     "label":   ("dataset.label", "cpu"),     # pair construction, no model
     "train":   ("dataset.train", "gpu"),     # scripts/train_laya.py
 }
@@ -134,7 +137,61 @@ ASSISTED = ("source_name", "licence", "language", "domains")
 # the dashboard. `operator` is any value a person typed, including at create.
 PROVENANCE = ("evidence", "proposed", "operator")
 
-KINDS = ("recipes", "laya")
+KINDS = ("recipes", "laya", "package")
+
+# ---------------------------------------------------------------------------
+# KIND "package": a PACKAGE ONBOARDING (docs/PACKAGE-ONBOARDING.md; operator,
+# 2026-09-27: "we should be able to automate all of this from a prompt with
+# some links ... That is a stateful pipeline in action, we already have the
+# durable machine too"). One row per resolved package@version; its stages are
+# jobs on the same queue, advanced by the same worker. The handlers live in
+# mcp/onboarding.py. Two stages have no job of their own -- they are JOINS
+# that a worker sweep (onboarding.sweep) advances once their blockers empty:
+#   skills    every skill the sources stage created has stopped (armed,
+#             quarantined, failed, decomposed) and none of its jobs errored
+#   rebuild   the skill document index and the example kNN index are fresh
+# ---------------------------------------------------------------------------
+PACKAGE_STAGES = ("submitted", "resolve", "clarify", "index", "vocab",
+                  "examples", "knn", "sources", "skills", "retire",
+                  "rebuild", "evaluate", "complete")
+PACKAGE_ENQUEUE = {
+    "resolve":  ("package.resolve", "net"),
+    "index":    ("package.index", "gpu"),       # the embedder; idle-gated
+    "vocab":    ("package.vocab", "cpu"),
+    "examples": ("package.examples", "net"),
+    "knn":      ("package.knn", "gpu"),         # the embedder; idle-gated
+    "sources":  ("package.sources", "net"),
+    "retire":   ("package.retire", "cpu"),
+    "evaluate": ("package.evaluate", "cpu"),
+}
+# The gpu stages wait for an idle stack (mcp/idle.py) without burning an
+# attempt (jobs.defer): worker.run_one reads `idle` from the payload.
+PACKAGE_IDLE = frozenset({"index", "knn"})
+PACKAGE_JOINS = ("skills", "rebuild")
+# A package onboarding asks only what resolve could not establish: the
+# licence (a verbatim quote, or the operator's statement) and a locator.
+PACKAGE_FIELDS = ("source_url", "licence")
+
+
+def stages_of(ds: dict) -> tuple:
+    return PACKAGE_STAGES if (ds or {}).get("kind") == "package" else STAGES
+
+
+def enqueue_of(ds: dict) -> dict:
+    return PACKAGE_ENQUEUE if (ds or {}).get("kind") == "package" \
+        else ENQUEUE
+
+
+def package_notes(ds: dict) -> dict:
+    """A package dataset's submission record (links, aliases, replaces, its
+    group), kept as JSON in `notes`. {} for any other kind."""
+    if (ds or {}).get("kind") != "package":
+        return {}
+    try:
+        v = json.loads(ds.get("notes") or "{}")
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +233,7 @@ FIELDS = (
         "why": "This repo has already had to flag an AGPL corpus and a manual "
                "that prohibits redistribution. An unknown licence is a "
                "BLOCKER, never a default: establishing it after the rows are "
-               "embedded into the hints cache is establishing it too late.",
+               "armed as skills is establishing it too late.",
     },
     {
         "name": "language",
@@ -342,6 +399,8 @@ def missing(spec: dict) -> list[dict]:
     for f in FIELDS:
         if not f["required"]:
             continue
+        if spec.get("kind") == "package" and f["name"] not in PACKAGE_FIELDS:
+            continue
         value = spec.get(f["name"])
         if not _blank(value):
             continue
@@ -417,6 +476,11 @@ def create(prompt: str, *, name: str | None = None, source: str = "",
         # not inference: it is the same string the operator typed.
         url = prompt
 
+    if kind == "package" and not url:
+        # A package onboarding's locator is the first link it was given
+        # (transcribed, not inferred); resolve records the rest.
+        m = re.search(r"https?://[^\s)\]>'\"]+", prompt)
+        url = m.group(0).rstrip(".,;:") if m else ""
     name = (name or "").strip() or _name_from(prompt, url)
     did = uuid.uuid4().hex[:12]
     now = time.time()
@@ -444,6 +508,15 @@ def create(prompt: str, *, name: str | None = None, source: str = "",
              json.dumps(assist), now, now))
     finally:
         con.close()
+
+    if kind == "package":
+        # No dataset.fetch and no dataset.assist: resolve reads the links
+        # and establishes the licence from a verbatim quote (onboarding).
+        _set_stage(did, "resolve")
+        jobs.add(PACKAGE_ENQUEUE["resolve"][0], {"dataset": did},
+                 lane=PACKAGE_ENQUEUE["resolve"][1], dataset=did,
+                 stage="resolve")
+        return get(did)
 
     fetching = bool(url and not source)
     if fetching:
@@ -645,10 +718,11 @@ def next_stage(ds: dict) -> str | None:
     """The stage after this one, skipping the optional ones when they do not
     apply. None once the dataset is complete."""
     stage = ds.get("stage") or "submitted"
-    if stage not in STAGES:
+    order = stages_of(ds)
+    if stage not in order:
         return None
-    i = STAGES.index(stage)
-    for nxt in STAGES[i + 1:]:
+    i = order.index(stage)
+    for nxt in order[i + 1:]:
         if nxt in OPTIONAL_STAGES and ds.get("kind") != "laya":
             continue
         return nxt
@@ -695,6 +769,11 @@ def _job_blocker(j: dict) -> dict:
 def blockers(ds: dict) -> list[dict]:
     """Why this dataset cannot leave the stage it is in. Empty means it can."""
     stage = ds.get("stage")
+    if ds.get("kind") == "package":
+        # A package onboarding: its job stages, clarify (the licence), a
+        # held vocabulary and the two JOINS (mcp/onboarding.py).
+        import onboarding
+        return onboarding.blockers(ds)
     if stage == "clarify":
         out = missing(ds)
         # A URL source is read by extract from what fetch saved. Leaving
@@ -720,9 +799,10 @@ def advance(dataset_id: str, *, to: str | None = None) -> dict:
     target = to or next_stage(ds)
     if target is None:
         raise Blocked(ds["stage"], [{"what": "already complete"}])
-    if target not in STAGES:
-        raise ValueError(f"unknown stage {target!r}; known: {list(STAGES)}")
-    if STAGES.index(target) <= STAGES.index(ds["stage"]):
+    order = stages_of(ds)
+    if target not in order:
+        raise ValueError(f"unknown stage {target!r}; known: {list(order)}")
+    if order.index(target) <= order.index(ds["stage"]):
         raise Blocked(ds["stage"],
                       [{"what": f"{target} is not after {ds['stage']}"}])
 
@@ -732,6 +812,15 @@ def advance(dataset_id: str, *, to: str | None = None) -> dict:
 
     _set_stage(dataset_id, target)
     ds = get(dataset_id)
+    if ds.get("kind") == "package":
+        if target in PACKAGE_ENQUEUE:
+            queue, lane = PACKAGE_ENQUEUE[target]
+            payload = {"dataset": ds["id"]}
+            if target in PACKAGE_IDLE:
+                payload["idle"] = True
+            ds["enqueued"] = jobs.add(queue, payload, lane=lane,
+                                      dataset=ds["id"], stage=target)
+        return ds
     if target in ENQUEUE:
         queue, lane = ENQUEUE[target]
         ds["enqueued"] = jobs.add(
@@ -847,7 +936,8 @@ def dataset_jobs(dataset_id: str, limit: int = 50) -> list[dict]:
         out.append({k: j.get(k) for k in
                     ("id", "queue", "lane", "state", "stage", "attempts",
                      "max_attempts", "error", "progress", "created",
-                     "started", "finished", "worker")})
+                     "started", "finished", "worker", "not_before",
+                     "parent")})
     return out
 
 
@@ -928,6 +1018,8 @@ def overview() -> dict:
     return {
         "datasets": out,
         "stages": list(STAGES),
+        "stages_by_kind": {"recipes": list(STAGES), "laya": list(STAGES),
+                           "package": list(PACKAGE_STAGES)},
         "optional_stages": list(OPTIONAL_STAGES),
         "human_stages": list(HUMAN_STAGES),
         # Which stages actually put a row in the queue, so the page can say

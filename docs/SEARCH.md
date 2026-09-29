@@ -10,21 +10,22 @@ Status on 2026-09-24 17:10:
 - **Called by deep thinking's `search_web` tool** (`mcp/research_tools.py`,
   Phase 0.6; built offline 2026-09-24, not yet run live). It reads
   `YAMADORI_SEARCH_URL` (loopback only), asks `format=json` and, for a code
-  question, `categories=general,it`; at most 3 searches per deep-thinking run
-  (`YAMADORI_SEARCHES_PER_RUN`, from the rate limits below); a query carrying
-  code or something secret-shaped is refused before it leaves the machine;
-  `unresponsive_engines` is reported as a partial result, never an error; a
-  service that is down returns `SEARCH_UNAVAILABLE`, retryable, with the
-  remedy.
+  question, `categories=general,it`; at most **10** searches per
+  deep-thinking run (`YAMADORI_SEARCHES_PER_RUN`; 3 until 2026-09-25, see
+  "Limits" below); a query carrying code or something secret-shaped is
+  refused before it leaves the machine; `unresponsive_engines` is reported
+  as a partial result, never an error; a service that is down returns
+  `SEARCH_UNAVAILABLE`, retryable, with the remedy; a service that pushes
+  back returns `SEARCH_RATE_LIMITED` (below).
 - **Fetched content is data** (operator, 2026-09-24). Every title and
   snippet goes through `skill_screen.screen_fetched` (the one screen) before
   the second brain sees it: an offending span is stripped and recorded, a
-  result stripped past 25% is dropped. Only a URL a search returned in the
-  same run, or one the user gave, may then be read (`read_web_page`), each
-  hop pinned to a global address. What deep thinking hands back is screened
-  again (`screen_handoff`): a command, install step or URL from the web is
-  never passed on as an instruction, only as a fact labelled "(from the
-  web, unverified)".
+  result stripped past 25% is dropped. Pages are then read with
+  `read_web_page` (next section), each hop pinned to a global address, and
+  go through the same screen, their link lists too. What deep thinking hands
+  back is screened again (`screen_handoff`): a command, install step or URL
+  from the web is never passed on as an instruction, only as a fact
+  labelled "(from the web, unverified)".
 - **The proxy has not been restarted**, so its environment does not have
   `YAMADORI_SEARCH_URL` until its next restart (by the watchdog or
   `start-stack.bat`).
@@ -180,6 +181,95 @@ field rather than treating a thin result list as "nothing exists".
 
 ---
 
+## Reading pages: `read_web_page` (widened 2026-09-25)
+
+Operator, 2026-09-25: "we should let it search lots of stuff just be
+careful of request params and headers, and keep it on get requests. If we
+strip/limit headers and strip/limit query args, or ensure query args match
+the link from the source we should be good." The trigger was live: the
+kickoff planner's read of a developer.mozilla.org page it knew from memory
+was refused ("the URL came from neither a search_web result in this run nor
+the user's own messages", `logs/proxy.out.log`). Until then only a URL a
+search returned, or the user gave, could be read.
+
+**The request carries nothing.** Every request `mcp/research_tools.py`
+sends -- the page, each redirect hop, robots.txt -- goes through `_send`:
+GET only (anything else is refused before a byte is written), and exactly
+these headers, on every hop:
+
+| header | value |
+|---|---|
+| `User-Agent` | `yamadori-research/2 (documentation reader of Yamadori, a self-hosted coding assistant; one page at a time; honours robots.txt)` |
+| `Accept` | `text/html, application/xhtml+xml, text/markdown, text/plain;q=0.9, application/json;q=0.8` |
+| `Accept-Language` | `en` |
+| `Accept-Encoding` | `identity` |
+
+plus `Host` (the name; the connection goes to the pinned address). No
+`Cookie` -- `Set-Cookie` is never read, so nothing carries across hops -- no
+`Authorization`, no `Referer`, nothing derived from the conversation.
+JSON is now a readable type (a registry's or an API's answer).
+
+**What is left is the URL, so the URL's provenance decides its query:**
+
+| provenance | where the URL appeared | what is fetched |
+|---|---|---|
+| `search` | a `search_web` result in this run | the URL, query exactly as seen |
+| `user` | the user's own messages | the same |
+| `link` | a link of a page read in this run (href resolved against the page or its `<base>`, visible elements only, nav included) | the same |
+| `memory` | anywhere else -- the model's own recall | the **path only**: query string and fragment stripped; the result says `fetched without its query string: ...` |
+
+Matching is on the whole normalised URL (scheme and host lowercased,
+default port dropped, path, query exactly; fragment dropped), so a seen link
+with its query rewritten or reordered is a `memory` URL. A redirect's
+`Location` is followed as the server sent it (its query included), each hop
+re-pinned and re-checked.
+
+**The guard, for every provenance, on the whole URL as given** (the path is
+the channel that remains for data): at most 2,048 characters, a 200-character
+query, a 256-character path for a `memory` URL; no secret-shaped value and
+no high-entropy path segment or query value (24+ characters, over 3.6 bits a
+character, and not made of words: `struct.RenderPipelineDescriptor.html`
+passes, a token or base64 does not); no code in the query; and, except for a
+`search` URL (the engine chose its bytes), no 24-character run of the
+conversation's text -- tool results, answers, the user's words -- where the
+URL's own host+path is not counted (a page the conversation names can be
+read) and a window inside one identifier-sized word (40 alphanumerics or
+fewer: `createRenderPipelineAsync`) is not counted (the docs for an API the
+conversation uses are the point). The remaining channel is the choice of a
+short, word-like path; it is bounded by the read cap. All numbers are
+choices.
+
+**Links.** A page that passes the screen hands back up to 20 of its links
+(same host first; each one the guard would read; the list screened like the
+page), and every visible link on it (up to 300 a page, 3,000 a run) becomes
+`link`, readable exactly as it appeared. Hidden elements, scripts,
+templates, `javascript:` links and local addresses are not collected.
+
+**Recorded.** `x_yamadori.deep.screen[]` carries `searches`, `reads` and
+`fetches`: one row per attempt with the host, the provenance,
+`query_stripped`, the status (`ok`, `refused`, `RATE_LIMITED`, an error
+code), the HTTP status, bytes and characters, the link count, and a
+refusal's reason -- never the path or query. Refusals are also printed to
+the proxy log with their provenance.
+
+### Limits and backing off
+
+| number | value | why (all CHOICES, none measured) |
+|---|---|---|
+| `SEARCHES_PER_RUN` | 10 | Brave, the tightest engine that keeps answering, 429s after ~10 queries in ~2 min; DuckDuckGo is CAPTCHA'd after ~3 quick ones and suspended for an hour whatever the cap, and the other engines carry the query. A run spends minutes generating between searches |
+| `READS_PER_RUN` | 20 | the tool-turn cap at `max`, so a run that reads a page every turn is not cut short by it; each read is at most 12,000 characters plus its links, and shomen's helper-KV check lands a run that fills its share first |
+| `SEARCH_BACKOFF_S` | 180 s | SearXNG's own suspension of Brave after a 429. Search pauses when SearXNG answers 429 (its `Retry-After` wins) or returns no results with every silent engine CAPTCHA'd or rate-limited. A 200 with results and some engines CAPTCHA'd is a partial result, not a pause |
+| host pause | `Retry-After` (seconds form), else 60 s, at most 600 s | a site that answers 429, or 403/503 with a CAPTCHA or bot-check page |
+
+During a pause nothing is sent and no budget is spent; the tool answers
+`SEARCH_RATE_LIMITED` / `RATE_LIMITED`, `retryable: true`, `retry_after_s`,
+and the remedy (read a known documentation page or a link already found;
+another source for the same fact). Tests: `mcp/test_web_access.py` (62
+checks, offline, fake servers; 5/32 of its checks passed against the
+module before this change).
+
+---
+
 ## Measured (2026-09-24, n small; labelled as such)
 
 `scratchpad verify_search.py`: urllib from this box, wall time per request.
@@ -263,6 +353,11 @@ from the same IP. No part of the Yamadori request (conversation, user, key,
 repository) is sent, unless the model puts it in the query text. **Code or
 paths from a private repo written into a query go out.** The tool that calls
 this should say so in its description.
+
+`read_web_page` goes to the page's own host directly (not through SearXNG),
+from the same public IP, with the fixed headers above and no cookies: the
+host sees the IP, the user agent and the URL -- which is why a URL no
+source gave loses its query, and every URL passes the guard.
 
 Locally: the werkzeug server writes no access log. When an engine request
 fails, the full engine URL, query included, is logged in

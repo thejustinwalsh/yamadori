@@ -1,0 +1,101 @@
+// THE WORK-INTENT PARAPHRASE SET (2026-09-27; operator: "every natural language variation of implement, build, make is" the trigger). A user turn AFTER an assistant answer; `intent` true = it asks for something to be made or changed. Written before the detector (route.work_intent) was; labelled by hand from each sentence's meaning. Gate: mcp/test_tool_recall.py [intent].
+{"text": "Great, now implement it.", "intent": true}
+{"text": "Go ahead.", "intent": true}
+{"text": "Do it.", "intent": true}
+{"text": "Ship it.", "intent": true}
+{"text": "Let's do it.", "intent": true}
+{"text": "Sounds good, go ahead and build it.", "intent": true}
+{"text": "OK, build the village next.", "intent": true}
+{"text": "Now the HUD part.", "intent": true}
+{"text": "Next: the inventory screen.", "intent": true}
+{"text": "Can you add a pause menu?", "intent": true}
+{"text": "Could you wire up the settings panel to the store?", "intent": true}
+{"text": "Please create the login page.", "intent": true}
+{"text": "I want a leaderboard that saves the top ten scores.", "intent": true}
+{"text": "I'd like you to set up the database schema now.", "intent": true}
+{"text": "Make the enemies shoot back.", "intent": true}
+{"text": "Add sound effects when the player jumps.", "intent": true}
+{"text": "Write the tests for the parser.", "intent": true}
+{"text": "Scaffold a new Express server in api/.", "intent": true}
+{"text": "Put together a quick landing page for this.", "intent": true}
+{"text": "Spin up a small CLI that wraps this API.", "intent": true}
+{"text": "Whip up a dark mode toggle.", "intent": true}
+{"text": "Knock out the remaining TODOs in utils.ts.", "intent": true}
+{"text": "yes please, do the plan", "intent": true}
+{"text": "Alright, let's build the rendering layer.", "intent": true}
+{"text": "Implement the collision system you described.", "intent": true}
+{"text": "Build the rest.", "intent": true}
+{"text": "Now do the same for the mobile layout.", "intent": true}
+{"text": "Can you turn that into a reusable hook?", "intent": true}
+{"text": "Refactor the renderer to use instancing.", "intent": true}
+{"text": "Port this module to Rust.", "intent": true}
+{"text": "lgtm, start coding", "intent": true}
+{"text": "Perfect. Carry on with step 3.", "intent": true}
+{"text": "Then hook up the save button to localStorage.", "intent": true}
+{"text": "Go for it - build the whole thing.", "intent": true}
+{"text": "Fix the bug you found in the reducer.", "intent": true}
+{"text": "Update the README with the new commands.", "intent": true}
+{"text": "Let's get started on the backend.", "intent": true}
+{"text": "Could you convert the config to YAML?", "intent": true}
+{"text": "I need you to generate the migration for the new table.", "intent": true}
+{"text": "Proceed with the implementation.", "intent": true}
+{"text": "ok now the audio system", "intent": true}
+{"text": "Add a --verbose flag to the CLI, please.", "intent": true}
+{"text": "Would you create a Dockerfile for this service?", "intent": true}
+{"text": "Time to build the shop UI.", "intent": true}
+{"text": "Next up: the particle effects.", "intent": true}
+{"text": "Make it so.", "intent": true}
+{"text": "Execute the plan.", "intent": true}
+{"text": "Thanks!", "intent": false}
+{"text": "Thanks, that's all for now.", "intent": false}
+{"text": "Why does the build fail on Windows?", "intent": false}
+{"text": "What is a koota trait?", "intent": false}
+{"text": "How does useFrame decide the order of callbacks?", "intent": false}
+{"text": "Explain the collision code you wrote.", "intent": false}
+{"text": "Can you explain how the reducer works?", "intent": false}
+{"text": "What's the status of the build?", "intent": false}
+{"text": "Did the tests pass?", "intent": false}
+{"text": "Is the shader compiled at runtime or ahead of time?", "intent": false}
+{"text": "Review the PR and tell me what you think.", "intent": false}
+{"text": "Summarize what you changed.", "intent": false}
+{"text": "Show me the diff.", "intent": false}
+{"text": "Which file handles routing?", "intent": false}
+{"text": "Looks great, nice work.", "intent": false}
+{"text": "Where is the config loaded?", "intent": false}
+{"text": "What does this error mean: TypeError: x is undefined?", "intent": false}
+{"text": "Compare Zustand and koota for this use.", "intent": false}
+{"text": "Should I use WebGL or WebGPU here?", "intent": false}
+{"text": "Hold off on the backend for now.", "intent": false}
+{"text": "Don't build anything yet, just tell me the plan.", "intent": false}
+{"text": "Wait.", "intent": false}
+{"text": "How long will this take?", "intent": false}
+{"text": "Can you list the files you created?", "intent": false}
+{"text": "Tell me why you chose instancing.", "intent": false}
+{"text": "Is there a better way to do this?", "intent": false}
+{"text": "What would it take to add multiplayer?", "intent": false}
+{"text": "How would you build the inventory?", "intent": false}
+{"text": "Walk me through the render loop.", "intent": false}
+{"text": "Cool, I see it running.", "intent": false}
+{"text": "Why is the player sliding after release?", "intent": false}
+{"text": "What version of three are we on?", "intent": false}
+{"text": "Can you check whether the server is up?", "intent": false}
+{"text": "That makes sense.", "intent": false}
+{"text": "Interesting, I didn't know that.", "intent": false}
+{"text": "Describe the data flow between the systems.", "intent": false}
+{"text": "Which approach is faster?", "intent": false}
+{"text": "What did you name the store?", "intent": false}
+{"text": "Is koota compatible with React 19?", "intent": false}
+{"text": "Good morning!", "intent": false}
+{"text": "Where did you put the tests?", "intent": false}
+{"text": "Stop.", "intent": false}
+{"text": "Explain like I'm five what an ECS is.", "intent": false}
+{"text": "How do I run it locally?", "intent": false}
+{"text": "Do you think the colors work?", "intent": false}
+{"text": "Why did you make the enemies faster?", "intent": false}
+{"text": "What would you add next?", "intent": false}
+// Added after the first pass (hard cases found while probing the detector, labelled the same way):
+{"text": "I need a minute.", "intent": false}
+{"text": "Can you run the tests?", "intent": false}
+{"text": "Next, explain the loop.", "intent": false}
+{"text": "Install zustand and use it for the store.", "intent": true}
+{"text": "Keep going.", "intent": true}

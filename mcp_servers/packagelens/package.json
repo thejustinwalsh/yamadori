@@ -1,0 +1,9 @@
+{
+  "name": "yamadori-mcp-packagelens",
+  "private": true,
+  "description": "PackageLens MCP (npm packagelens-mcp), pinned for the proxy's MCP host (mcp/mcp_host.py). Operator-approved download 2026-09-28.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "packagelens-mcp": "0.1.11"
+  }
+}

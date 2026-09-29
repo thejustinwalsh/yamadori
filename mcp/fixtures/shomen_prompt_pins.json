@@ -1,0 +1,10 @@
+{
+  "plan": {
+    "version": "plan/4",
+    "sha256": "ab663d3012c51e39"
+  },
+  "handoff": {
+    "version": "handoff/2",
+    "sha256": "3f2ca0015c7a0c91"
+  }
+}

@@ -3,7 +3,7 @@
 
 WHAT THIS GATES
 
-`mcp/images.py`, the `generate_image` model tool, POST /v1/images/generations
+`mcp/images.py`, the `yama_generate_image` model tool, POST /v1/images/generations
 and GET /media/<sha>.png. The promises, each asserted below:
 
   1. The request the image server receives is the one documented in
@@ -20,7 +20,7 @@ and GET /media/<sha>.png. The promises, each asserted below:
      header (a browser rendering `![](url)` sends none); a tampered sig, an
      expired exp and a sig moved to another sha are each 403; `../` and
      non-hex ids never touch the filesystem.
-  6. generate_image is offered whenever an image server is configured, on
+  6. yama_generate_image is offered whenever an image server is configured, on
      every tier (minimal included) even when the code tools are withheld,
      and to deep thinking (mockups and designs while it investigates).
   7. A chat turn that calls it gets a result carrying the signed URL on the
@@ -94,6 +94,12 @@ for k in ("YAMADORI_IMAGEGEN_URL", "YAMADORI_PUBLIC_BASE",
           "YAMADORI_IMAGEGEN_TIMEOUT", "YAMADORI_IMAGEGEN_DEFAULT",
           "YAMADORI_IMAGEGEN_MODEL", "YAMADORI_IMAGEGEN_TURBO_MODEL"):
     os.environ.pop(k, None)
+
+# Every other store the code under test can write (the jobs database
+# behind skill selection, the concept seed, ...), BEFORE any mcp import:
+# 2026-09-27 this suite wrote the live index/ (the offline guard).
+import offline_stores  # noqa: E402
+offline_stores.isolate("yamadori_test_images_stores_")
 
 import accounts  # noqa: E402
 import admission  # noqa: E402
@@ -544,19 +550,19 @@ def test_tool_is_offered_only_when_configured_and_allowed():
             out = proxy.prepare({"model": "yamadori", "messages": msgs,
                                  "reasoning_effort": effort})
         names = [t.get("function", {}).get("name") for t in out.get("tools") or []]
-        check(("generate_image" in names) == want,
-              f"{why}: generate_image {'offered' if want else 'not offered'}",
+        check(("yama_generate_image" in names) == want,
+              f"{why}: yama_generate_image {'offered' if want else 'not offered'}",
               str(names))
     with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
         client_tool = {"type": "function", "function": {
-            "name": "generate_image", "description": "the client's own",
+            "name": "yama_generate_image", "description": "the client's own",
             "parameters": {"type": "object", "properties": {}}}}
         out = proxy.prepare({"model": "yamadori", "messages": msgs,
                              "reasoning_effort": "low", "tools": [client_tool]})
         mine = [t for t in out["tools"]
-                if t["function"]["name"] == "generate_image"]
+                if t["function"]["name"] == "yama_generate_image"]
         check(len(mine) == 1 and mine[0]["function"]["description"]
-              == "the client's own", "a client's own generate_image wins")
+              == "the client's own", "a client's own yama_generate_image wins")
     d = images.TOOL["function"]["description"]
     for phrase in ("draw", "logo", "icon", "illustration", "picture",
                    "markdown image line", "It makes images only",
@@ -642,12 +648,12 @@ def test_tool_result_is_a_rendered_image():
 
 
 def test_a_chat_turn_that_draws():
-    """complete() with a fake LLM that calls generate_image, then answers."""
+    """complete() with a fake LLM that calls yama_generate_image, then answers."""
     import proxy
 
     replies = [
         {"calls": [{"id": "c1", "type": "function", "function": {
-            "name": "generate_image",
+            "name": "yama_generate_image",
             "arguments": json.dumps({"prompt": "a fox", "seed": 21})}}]},
         {"content": "Here it is."}]
     sent: list = []
@@ -696,7 +702,7 @@ def test_a_chat_turn_that_draws():
         llm.server_close()
         accounts.set_pref("chat-draw-acct", images.PREF_KEY, None)
     first_tools = [t["function"]["name"] for t in (sent[0].get("tools") or [])] if sent else []
-    check("generate_image" in first_tools, "the model was offered generate_image",
+    check("yama_generate_image" in first_tools, "the model was offered yama_generate_image",
           str(first_tools))
     tool_msgs = [m for m in (sent[1]["messages"] if len(sent) > 1 else [])
                  if m.get("role") == "tool"]
@@ -718,8 +724,24 @@ def test_a_chat_turn_that_draws():
     check(im and im[0].get("model") == "yamadori-image-turbo"
           and im[0].get("steps") == 4 and im[0].get("model_source") == "account",
           "x_yamadori.images records the model and steps used", json.dumps(im))
-    check(d["choices"][0]["message"]["content"] == "Here it is.",
-          "the answer comes back")
+    # The picture the proxy showed the moment it existed (2026-09-25), then
+    # the model's words; no session line (#41: the id rides in call ids).
+    check(d["choices"][0]["message"]["content"]
+          == (res.get("markdown") or "?") + "\n\n" + "Here it is.",
+          "the answer comes back: the image line the proxy showed, the "
+          "model's words",
+          d["choices"][0]["message"]["content"][:200])
+    check(res.get("shown_to_user") is True
+          and "already shown to the user" in (res.get("instruction") or ""),
+          "the model's tool result says the picture is already shown",
+          json.dumps(res)[:300])
+    main_desc = next((t["function"]["description"] for t in
+                      (sent[0].get("tools") or []) if t["function"]["name"]
+                      == "yama_generate_image"), "") if sent else ""
+    check(main_desc == images.MAIN_TOOL["function"]["description"]
+          and "shown to the user the moment it is made" in main_desc,
+          "main is offered MAIN_TOOL: the description says the picture is "
+          "shown when made", main_desc[-200:])
 
 
 # --------------------------------------------------------------------------

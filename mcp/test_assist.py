@@ -22,7 +22,8 @@ WHAT THIS IS GATING
 HOW IT IS ISOLATED
 
 Same as test_worker.py: YAMADORI_JOBS_DB is a temp file before `jobs` is
-imported; recipes, datasets dir and hints corpus/cache are temp paths; the
+imported (the skill store follows it); recipes and datasets dir are temp
+paths; the
 embedder is a fake `code_search`. The model is `model.ask`, replaced -- the
 one door, so the assist AND extract both go through the fake. Sources and
 LICENSE files come from a local http.server on an ephemeral port.
@@ -65,7 +66,6 @@ sys.modules["code_search"] = _fake_cs
 
 import dash_data  # noqa: E402
 import datasets  # noqa: E402
-import hints  # noqa: E402
 import jobs  # noqa: E402
 import model  # noqa: E402
 import worker  # noqa: E402
@@ -73,8 +73,6 @@ import worker  # noqa: E402
 RECIPES = os.path.join(_TMP, "recipes")
 os.makedirs(RECIPES, exist_ok=True)
 datasets.RECIPES = RECIPES
-hints.CORPUS = RECIPES
-hints.CACHE = os.path.join(_TMP, "hints.npz")
 worker.DATA_DIR = os.path.join(_TMP, "datasets")
 
 REAL = os.path.abspath(os.path.join(HERE, "..", "index", "jobs.sqlite3"))

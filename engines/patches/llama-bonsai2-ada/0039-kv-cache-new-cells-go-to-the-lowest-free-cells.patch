@@ -1,0 +1,99 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Mon, 28 Sep 2026 07:30:00 -0400
+Subject: [PATCH] kv-cache: a sequence grows in place, else takes the lowest free cells
+
+find_slot searched from the stream's head (the cell after the last one
+placed) and went back to cell 0 only when the head was more than
+used + 2 x n_tokens cells in. So a sequence prefilled while another held
+the bottom of the pool, or any sequence after the head had run high,
+took cells above holes it could have filled -- and an attention op spans
+the cells below its sequence's highest cell (0038), so every such cell
+widens that span for nothing, and past the tiered-KV line (0028) is read
+over PCIe on every step.
+
+Now a sequence's new cells go right after its own highest cell when that
+cell is free (llama_kv_cells::seq_last_p1: the top block of its span,
+scanned), so its cells stay in position order and its layout depends on
+its own history only -- the attention op's arithmetic follows the order of
+the cells it reads, so this keeps a repeated request's output
+reproducible. Otherwise (a new sequence, or that cell taken) the search
+starts at the lowest empty cell (lowest_free(), a hint every emptied cell
+lowers; amortised O(1)). Not for SWA caches (they reuse cells a window has
+masked, which this start would skip). LLAMA_KV_PLACE_LOW=0 restores the
+head search.
+---
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 203035da..c2a8ef12 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -402,8 +402,13 @@ llama_kv_cache::llama_kv_cache(
+     const char * LLAMA_KV_SPAN_BY_SEQ = getenv("LLAMA_KV_SPAN_BY_SEQ");
+     span_by_seq = !(LLAMA_KV_SPAN_BY_SEQ && atoi(LLAMA_KV_SPAN_BY_SEQ) == 0);
+ 
+-    LLAMA_LOG_INFO("%s: kv placement: an attention op spans %s\n", __func__,
+-            span_by_seq ? "the cells of its batch's sequences" : "the pool up to its highest used cell");
++    // SWA caches reuse cells a window has masked, which a search from the lowest free cell would skip
++    const char * LLAMA_KV_PLACE_LOW = getenv("LLAMA_KV_PLACE_LOW");
++    place_low = !(LLAMA_KV_PLACE_LOW && atoi(LLAMA_KV_PLACE_LOW) == 0) && n_swa == 0;
++
++    LLAMA_LOG_INFO("%s: kv placement: an attention op spans %s; new cells go to %s\n", __func__,
++            span_by_seq ? "the cells of its batch's sequences" : "the pool up to its highest used cell",
++            place_low ? "the lowest free cells" : "the free cells after the search head");
+ }
+ 
+ void llama_kv_cache::clear(bool data) {
+@@ -1068,6 +1073,17 @@ llama_kv_cache::slot_info llama_kv_cache::find_slot(const llama_ubatch & ubatch,
+             head_cur = 0;
+         }
+ 
++        // a sequence grows in place: its new cells go right after its own highest cell when that cell is free,
++        // so its cells stay in position order and its layout depends on its own history only (the arithmetic
++        // of an attention op follows the order of the cells it reads). Otherwise -- a new sequence, or the
++        // cell after it taken -- they go to the lowest free cells: an attention op spans the cells below the
++        // highest cell of its sequences, so a cell placed above a hole widens that span for nothing (and past a
++        // tiered cache's VRAM line is read over PCIe on every step). lowest_free() is a hint, not a scan
++        if (place_low) {
++            const uint32_t own = cells.seq_last_p1(seq_id);
++            head_cur = own > 0 && own < cells.size() && cells.is_empty(own) ? own : cells.lowest_free();
++        }
++
+         if (n_tokens > cells.size()) {
+             LLAMA_LOG_ERROR("%s: n_tokens = %d > size = %u\n", __func__, n_tokens, cells.size());
+             return { };
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index 5331d38a..9acc4dc6 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -290,6 +290,9 @@ private:
+     // env: LLAMA_KV_SPAN_BY_SEQ (0 = an attention op spans the whole pool up to its highest used cell, as before)
+     bool span_by_seq = true;
+ 
++    // env: LLAMA_KV_PLACE_LOW (0 = new cells are searched for from the head, as before)
++    bool place_low = true;
++
+     // the tiered-KV line (--kv-vram-cells, cells [0, n_line) in VRAM); 0 when the cache is not tiered
+     uint32_t n_line = 0;
+ 
+diff --git a/src/llama-kv-cells.h b/src/llama-kv-cells.h
+index af5e685a..b92aed71 100644
+--- a/src/llama-kv-cells.h
++++ b/src/llama-kv-cells.h
+@@ -123,6 +123,18 @@ public:
+         return 0;
+     }
+ 
++    // one past the highest cell that holds seq_id, exactly (0 if none): the top block of seq_span_p1(), scanned
++    uint32_t seq_last_p1(llama_seq_id seq_id) const {
++        const uint32_t span = seq_span_p1(seq_id);
++        for (uint32_t i = span; i > span - std::min(span, SPAN_BLK); --i) {
++            if (pos[i - 1] != -1 && seq[i - 1].test(seq_id)) {
++                return i;
++            }
++        }
++
++        return 0;
++    }
++
+     // number of cells that hold seq_id
+     uint32_t seq_n_cells(llama_seq_id seq_id) const {
+         assert(seq_id >= 0 && seq_id < LLAMA_MAX_SEQ);

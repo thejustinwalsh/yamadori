@@ -35,9 +35,16 @@ if not exist "logs" mkdir "logs"
 
 REM Code-intelligence HTTP API (port 1235). Same tools as the MCP server,
 REM different transport: MCP is for agents, this is for your own software.
+REM Every route but /health needs an account key (Authorization: Bearer, the
+REM :1234 keys) and refuses a browser Origin it does not list: docs\TOOLS-API.md.
 REM Started detached so llama-swap stays this script's foreground process
 REM and the Scheduled Task keeps tracking the stack's lifetime correctly.
 set "PY=C:\Users\jwals\textgen\installer_files\env\python.exe"
+REM max mode (bench/deploy_flash_next.py)
+set "YAMADORI_MAX_MODEL=flash-next"
+REM kv layout (bench/deploy_kv_rank.py)
+set "YAMADORI_MAIN_CAP=141824"
+set "YAMADORI_CHILD_TOKENS=65536"
 start "" /B "%PY%" "%CD%\mcp\tools_api.py" >> "logs\tools-api.log" 2>&1
 
 REM TLS reverse proxy. Only started when a DNSimple token is present:

@@ -38,6 +38,7 @@ way, and `run_in_threadpool` keeps it off the loop without touching it.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -52,20 +53,33 @@ from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa
 
 import accounts  # noqa: E402
 import admission  # noqa: E402
+import api_errors  # noqa: E402
 import catalog  # noqa: E402
 import dash_data  # noqa: E402
 import dash_skills  # noqa: E402
 import dash_deep  # noqa: E402
+import dash_mcp  # noqa: E402
+import dash_harness  # noqa: E402
+import dash_nebari  # noqa: E402
 import dash_tokens  # noqa: E402
 import dash_results  # noqa: E402
 import dash_static  # noqa: E402
 import dash_vitals  # noqa: E402
 import dashboard  # noqa: E402
+import cancel  # noqa: E402
 import images  # noqa: E402
+import max_mode  # noqa: E402
 import nebari  # noqa: E402
+import messages_api  # noqa: E402
 import proxy  # noqa: E402
+import responses_api  # noqa: E402
 
 app = FastAPI(title="yamadori", version="1", docs_url=None, redoc_url=None)
+# A request body over image_input.max_body_bytes() (64 MB, a choice) is a 413
+# in OpenAI's envelope, before a byte of it is read (mcp/body_limit.py;
+# docs/VISION.md 5e). Every POST route, so /v1/responses too.
+import body_limit  # noqa: E402
+app.add_middleware(body_limit.BodyLimit)
 
 HOST = os.environ.get("YAMADORI_PROXY_HOST", "0.0.0.0")
 PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1234"))
@@ -114,7 +128,10 @@ async def root(request: Request) -> Response:
     return JSONResponse({
         "service": "yamadori",
         "endpoints": ["/v1/models", "/v1/models/{id}", "/v1/chat/completions",
-                      "/v1/images/generations", "/health", ui,
+                      "/v1/responses", "/v1/messages",
+                      "/v1/messages/count_tokens", "/v1/images/generations",
+                      "/health",
+                      ui,
                       f"/dash{_PY}/data", f"/dash{_PY}/vitals", f"/dash{_PY}/results"],
         "dashboard": DASH_UI,
         "note": "OpenAI-compatible. Point any client here; it needs no tool "
@@ -122,7 +139,7 @@ async def root(request: Request) -> Response:
     }, headers={"Vary": "Accept"})
 
 
-def _too_many(e: "admission.Full") -> JSONResponse:
+def _too_many(e: "admission.Full", messages=None) -> JSONResponse:
     """A refusal, not a timeout.
 
     Three benchmark processes once ran against this proxy at once because
@@ -131,17 +148,49 @@ def _too_many(e: "admission.Full") -> JSONResponse:
     lose most. One model over one shared KV pool does not go faster when it is
     given more work; it goes wrong in a way that looks like a different bug.
     """
+    if messages is not None:
+        return _anthropic_error(api_errors.ApiError(
+            429, str(e), code="server_busy", headers={"Retry-After": "30"}))
     return JSONResponse(
         status_code=429,
         headers={"Retry-After": "30"},
         content={"error": {"message": str(e), "type": "rate_limit_error",
-                           "code": "server_busy"}})
+                           "param": None, "code": "server_busy"}})
 
 
 def _unauthorised(why: str) -> JSONResponse:
     return JSONResponse(status_code=401, content={"error": {
         "message": f"{why}. Set an API key in your client.",
-        "type": "invalid_request_error", "code": "invalid_api_key"}})
+        "type": "invalid_request_error", "param": None,
+        "code": "invalid_api_key"}})
+
+
+def _api_error(e: "api_errors.ApiError") -> JSONResponse:
+    """ONE ERROR PATH (mcp/api_errors.py): the status and OpenAI's object."""
+    return JSONResponse(status_code=e.status, content=e.body(),
+                        headers=e.headers or None)
+
+
+def _anthropic_error(e: "api_errors.ApiError") -> JSONResponse:
+    """The same error in Anthropic's envelope (mcp/messages_api.py), for the
+    /v1/messages routes."""
+    status, body, headers = messages_api.anthropic_error(e)
+    return JSONResponse(status_code=status, content=body, headers=headers)
+
+
+def _identify_anthropic(request: Request) -> tuple[str | None, str]:
+    """An Anthropic client's key: `Authorization: Bearer` (Claude Code's
+    ANTHROPIC_AUTH_TOKEN) or `x-api-key` (ANTHROPIC_API_KEY), either one an
+    account key of ours. Tried in that order; the first that names an
+    account wins."""
+    auth = request.headers.get("authorization")
+    who, why = accounts.identify(auth) if auth else (None, "no API key supplied")
+    if who is not None:
+        return who, why
+    xk = (request.headers.get("x-api-key") or "").strip()
+    if xk:
+        return accounts.identify(f"Bearer {xk}")
+    return who, why
 
 
 @app.get("/health")
@@ -262,6 +311,17 @@ async def dash_get(rest: str, request: Request) -> Response:
         # Deep thinking's triggers and learner (mcp/dash_deep.py, Phase 0.6).
         hit = await run_in_threadpool(dash_deep.handle_get, path)
     if not hit:
+        # The MCP servers the proxy hosts (mcp/dash_mcp.py): read-only.
+        hit = await run_in_threadpool(dash_mcp.handle_get, path)
+    if not hit:
+        # What the model can draw on: skills and held packages
+        # (mcp/dash_nebari.py, the NEBARI screen): read-only.
+        hit = await run_in_threadpool(dash_nebari.handle_get, path)
+    if not hit:
+        # HARNESS TOOLS: the harness kit entries and the per-harness export
+        # (mcp/dash_harness.py).
+        hit = await run_in_threadpool(dash_harness.handle_get, path)
+    if not hit:
         return JSONResponse(status_code=404, content={"error": "not found"})
     code, ctype, payload = hit
     return Response(content=payload, status_code=code, media_type=ctype)
@@ -290,10 +350,26 @@ async def dash_post(rest: str, request: Request) -> Response:
     if not hit:
         hit = await run_in_threadpool(dash_deep.handle_post, path, body, who)
     if not hit:
+        hit = await run_in_threadpool(dash_harness.handle_post, path, body, who)
+    if not hit:
         return JSONResponse(status_code=404, content={"error": "not found"})
     code, ctype, payload = hit
     return Response(content=payload, status_code=code, media_type=ctype)
 
+
+# Session headers, first present wins: ours, then the harness's own session
+# id (OpenCode: X-Session-Id / x-session-affinity, docs/HARNESS-OPENCODE.md).
+SESSION_HEADERS = ("x-yamadori-session", "x-session-id", "x-session-affinity")
+
+
+def session_of_headers(headers) -> tuple[str, str]:
+    """(token, header name) of the first well-formed session header, else
+    ("", "")."""
+    for name in SESSION_HEADERS:
+        tok = nebari.session_token(headers.get(name))
+        if tok:
+            return tok, name
+    return "", ""
 
 @app.post("/v1/chat/completions")
 async def chat(request: Request) -> Response:
@@ -303,40 +379,233 @@ async def chat(request: Request) -> Response:
     try:
         body = json.loads(await request.body() or b"{}")
     except (ValueError, json.JSONDecodeError) as e:
-        return JSONResponse(status_code=400, content={"error": f"bad request: {e}"})
+        return _api_error(api_errors.invalid(
+            f"The request body is not valid JSON: {e}", code="invalid_json"))
+    # The body's shape, before admission (mcp/api_errors.validate_chat): a
+    # client's mistake is its 400, never our 5xx after a queue wait.
+    bad = api_errors.validate_chat(body)
+    if bad is not None:
+        return _api_error(bad)
+    return await _serve_turn(request, account, body,
+                             body.get("model") or "yamadori")
 
+
+@app.post("/v1/responses")
+async def responses(request: Request) -> Response:
+    """The OpenAI Responses API, stateless (mcp/responses_api.py): the
+    request is translated to the chat body, the SAME turn runs
+    (_serve_turn -> proxy.complete / proxy.stream_body), and its result is
+    translated back -- a Response object, or the Responses event stream."""
+    account, why = accounts.identify(request.headers.get("authorization"))
+    if account is None:
+        return _unauthorised(why)
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except (ValueError, json.JSONDecodeError) as e:
+        return _api_error(api_errors.invalid(
+            f"The request body is not valid JSON: {e}", code="invalid_json"))
+    try:
+        chat_body, ctx = responses_api.to_chat(body)
+    except Exception as e:                                       # noqa: BLE001
+        # A request we cannot serve is its 400 (ApiError); anything else is
+        # our fault, and says so (500 internal_error), in the one object.
+        return _api_error(api_errors.of_exception(e))
+    return await _serve_turn(request, account, chat_body, ctx.model,
+                             responses=ctx)
+
+
+@app.post("/v1/messages")
+async def messages(request: Request) -> Response:
+    """The Anthropic Messages API (mcp/messages_api.py), for Claude Code: the
+    request is translated to the chat body, the SAME turn runs (_serve_turn
+    -> proxy.complete / proxy.stream_body), and its result is translated
+    back -- a Message, or Anthropic's event stream. Errors in Anthropic's
+    envelope. Claude Code posts to /v1/messages?beta=true (the path
+    matches)."""
+    account, why = _identify_anthropic(request)
+    if account is None:
+        return _anthropic_error(messages_api.unauthorised(why))
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except (ValueError, json.JSONDecodeError) as e:
+        return _anthropic_error(api_errors.invalid(
+            f"The request body is not valid JSON: {e}", code="invalid_json"))
+    try:
+        chat_body, ctx = messages_api.to_chat(body, request.headers, account)
+    except Exception as e:                                       # noqa: BLE001
+        return _anthropic_error(api_errors.of_exception(e))
+    return await _serve_turn(request, account, chat_body, ctx.model,
+                             messages=ctx)
+
+
+@app.post("/v1/messages/count_tokens")
+async def messages_count_tokens(request: Request) -> Response:
+    """Anthropic's token count (Claude Code's /context): the model server's
+    own count of the client's messages and tools (messages_api.count_tokens).
+    Takes no main lane: it generates nothing."""
+    account, why = _identify_anthropic(request)
+    if account is None:
+        return _anthropic_error(messages_api.unauthorised(why))
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except (ValueError, json.JSONDecodeError) as e:
+        return _anthropic_error(api_errors.invalid(
+            f"The request body is not valid JSON: {e}", code="invalid_json"))
+    try:
+        out = await run_in_threadpool(messages_api.count_tokens, body,
+                                      request.headers, account)
+    except Exception as e:                                       # noqa: BLE001
+        return _anthropic_error(api_errors.of_exception(e))
+    return JSONResponse(out)
+
+
+async def _serve_turn(request: Request, account: str, body: dict,
+                      public_name: str, responses=None,
+                      messages=None) -> Response:
+    """One turn, blocking or streamed, for /v1/chat/completions, (with
+    `responses`, a responses_api.Ctx) /v1/responses and (with `messages`, a
+    messages_api.Ctx) /v1/messages: admission, the retry supersede, the E1
+    commit point and cancel-on-disconnect are the same for all three; only
+    the rendering of the result -- and, for Messages, of the errors --
+    differs."""
+    error = _anthropic_error if messages is not None else _api_error
     # Experiment overrides ride on a header, so the body stays the OpenAI
-    # schema and the override never becomes part of the cached prompt.
+    # schema and the override never becomes part of the cached prompt. A
+    # translation's own (Messages: a Claude Code side request is a utility
+    # call) merges under it: the caller's header wins, key by key.
     feats = request.headers.get("x-yamadori-features")
+    if messages is not None and body.get("_features"):
+        feats = messages_api.merge_features(body["_features"], feats)
     if feats:
         body["_features"] = feats
     # An explicit session token (nebari.key_of): benchmark rows whose first
     # messages are identical get independent sessions. Malformed -> ignored.
-    body["_session_token"] = nebari.session_token(
-        request.headers.get("x-yamadori-session"))
+    # A harness's OWN session id is as explicit as ours: OpenCode sends
+    # X-Session-Id / x-session-affinity with its `ses_...` id on every
+    # request (docs/HARNESS-OPENCODE.md, 2026-09-26: without it an
+    # OpenCode --fork carried the original's tool-call ids and merged into
+    # the original's session). First present wins; utility calls stay
+    # sessionless whatever they carry (proxy.session_context).
+    body["_session_token"], body["_session_header"] = session_of_headers(
+        request.headers)
     client = request.client
     body["_client_ip"] = client.host if client else ""
     # Sessions are per account: the key feeds nebari.key_of, which otherwise
     # merges two callers whose first messages match.
     body["_account"] = account
-    # Where this client reaches us, for the signed /media links generate_image
+    # Where this client reaches us, for the signed /media links yama_generate_image
     # puts in an answer. Underscored: stripped before anything goes upstream.
     body["_public_base"] = _public_base(request)
-    public_name = body.get("model") or "yamadori"
+    route = ("/v1/responses" if responses is not None else
+             "/v1/messages" if messages is not None else
+             "/v1/chat/completions")
+
+    # ONE MODEL PER EFFORT TIER (mcp/max_mode.py, the table mcp/tier_models.py): which main model serves this
+    # request, or a 503 model_at_capacity while a higher tier's model holds the card. Decided before admission; off
+    # (one model) unless the table is set (YAMADORI_TIER_MODELS, or the older YAMADORI_MAX_MODEL).
+    lease = None
+    # A CLIENT's request (the token profile does not trust its max_tokens to size the turn: tiers.apply). Internal
+    # callers (model.shape) never carry it.
+    body["_client"] = True
+    if max_mode.ENABLED:
+        tier_asked = max_mode.requested_tier(body)
+        decision = max_mode.decide(tier_asked, max_mode.is_utility(body))
+        if decision.refuse:
+            print(f"{route} refused: model_at_capacity ({decision.why}; retry after {decision.retry_after} s)",
+                  flush=True)
+            return error(api_errors.at_capacity(decision.holder or max_mode.MAX, decision.retry_after or 30,
+                                                decision.why, model=decision.model, tier=tier_asked))
+        body["_upstream_model"] = decision.model
+        body["_capacity"] = decision.record()
+        lease = max_mode.Lease(decision)
 
     if body.get("stream"):
+        # ONE REQUEST, ONE ATTEMPT (#44): a request identical to one still
+        # running is its client's retry; the attempt it repeats is cancelled
+        # -- on arrival once it has run SUPERSEDE_AFTER_S, and at any age
+        # when the lanes are full (below).
+        key = _retry_key(body)
+        superseded = _supersede(key, SUPERSEDE_AFTER_S) if key else 0
         # The lane is taken HERE, not inside the generator. A StreamingResponse
         # is returned before its body ever runs, so a lane acquired in the
         # generator could not turn a refusal into a 429 -- the client would
         # already be reading a 200 with an error buried in the stream. It is
-        # released in the generator's finally, which also covers the client
-        # hanging up mid-answer.
+        # given back by the request's _Attempt: in the body generator's
+        # finally (the client hanging up mid-answer included) or, when the
+        # body never ran, when the response ends (_CancellingStream).
         lane = admission.admit("main")
         try:
             await lane.__aenter__()
         except admission.Full as e:
-            return _too_many(e)
-        return StreamingResponse(_stream(body, public_name, lane),
+            # THE SELF-LOCK (Octopus v0e-V0-xhigh-1, #44): both lanes were
+            # held by this very request's earlier attempts, abandoned by
+            # Hermes' stale detector and kept open by a relay, and the retry
+            # was refused 429 three times, which ended the run. A refusal is
+            # right against OTHER work; against its own orphans it is a lock.
+            n = _supersede(key, 0.0) if key else 0
+            if not n:
+                max_mode.release(lease)
+                return _too_many(e, messages)
+            superseded += n
+            try:
+                await lane.__aenter__()
+            except admission.Full as e2:
+                max_mode.release(lease)
+                return _too_many(e2, messages)
+        if superseded:
+            body["_superseded"] = superseded
+        token = cancel.Token()
+        # the max-mode lease ends with the attempt (_Attempt.close)
+        token.yamadori_lease = lease
+        # THE 200 IS NOT COMMITTED UNTIL THE TURN HAS STARTED (E1,
+        # 2026-09-25). It used to go out before prepare(), so every failure
+        # -- a refusal, a prompt that does not fit, an upstream 400 -- reached
+        # the client as assistant content on a 200. Now the stream's first
+        # chunk is pulled HERE: proxy.stream_body yields nothing until the
+        # turn's first event (the first upstream generation has answered,
+        # or deep thinking's first heartbeat -- long pre-main work keeps its
+        # keep-alive), and raises the ApiError when the turn fails before
+        # it. A client that hangs up while it waits cancels the token, as
+        # _CancellingStream does once the stream is open.
+        gen = proxy.stream_body(body, public_name, token=token)
+        if responses is not None:
+            # The same chunks, as the Responses event sequence; closing it
+            # closes stream_body (the turn's cancel).
+            gen = responses_api.stream(gen, responses)
+        elif messages is not None:
+            # The same chunks, as Anthropic's event stream (pings while the
+            # turn is silent); closing it closes stream_body.
+            gen = messages_api.stream(gen, messages)
+        attempt = _Attempt(lane, key, token, gen)
+        try:
+            first = await _first_chunk(gen, token, request)
+        except BaseException as e:
+            await attempt.close()
+            if not isinstance(e, Exception):
+                raise
+            if isinstance(e, cancel.Cancelled):
+                return Response(status_code=499)
+            err = api_errors.of_exception(e)
+            print(f"{route} (stream) refused before the first "
+                  f"byte: {err.status} {err.code}", flush=True)
+            return error(err)
+        if first is _GONE:
+            await attempt.close()
+            return Response(status_code=499)
+        if first is _END and token.cancelled:
+            # Superseded (or otherwise cancelled) before its first byte: a
+            # client still listening is told why, not handed an empty 200.
+            await attempt.close()
+            if messages is not None:
+                return error(api_errors.ApiError(
+                    409, f"This request was cancelled before it started: "
+                         f"{token.why}.", code="superseded"))
+            return JSONResponse(status_code=409, content={"error": {
+                "message": f"This request was cancelled before it started: "
+                           f"{token.why}.", "type": "invalid_request_error",
+                "param": None, "code": "superseded"}})
+        return _CancellingStream(_stream(gen, first, attempt),
+                                 token, attempt=attempt,
                                  media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
                                           "X-Accel-Buffering": "no"})
@@ -346,46 +615,141 @@ async def chat(request: Request) -> Response:
         async with admission.admit("main"):
             d = await run_in_threadpool(proxy.complete, body)
     except admission.Full as e:
-        return _too_many(e)
-    except proxy.TurnRefused as e:
-        # A turn that could not start (the vision copy with no room on the
-        # A4000): its status and a structured error, never a bare 502.
-        return JSONResponse(status_code=e.status, content=e.body(),
-                            headers={"Retry-After": "60"}
-                            if e.retryable else None)
+        max_mode.release(lease)
+        return _too_many(e, messages)
     except Exception as e:                                       # noqa: BLE001
-        return JSONResponse(status_code=502,
-                            content={"error": f"{type(e).__name__}: {e}"})
-
-    if proxy.PREAMBLE and proxy.is_first_turn(body.get("messages") or []):
-        import repos
-        msgs = body.get("messages") or []
-        root, trusted, how = proxy.resolve_repo(msgs, body["_client_ip"])
-        info = repos.ensure(root, from_trusted=trusted) if root else None
-        note = proxy.preamble_for(
-            info, proxy.available_checks(root) if root else [], how)
-        try:
-            m = d["choices"][0]["message"]
-            m["content"] = note + (m.get("content") or "")
-        except (KeyError, IndexError, TypeError):
-            pass
+        # ONE ERROR PATH (mcp/api_errors.py): a refusal keeps its status
+        # (TurnRefused: the vision copy with no room on the A4000; a prompt
+        # past the window: 400 context_length_exceeded), an upstream 4xx is
+        # the client's 4xx, an unreachable model server a 503 -- never a
+        # bare-string 502.
+        max_mode.release(lease)
+        err = api_errors.of_exception(e)
+        print(f"{route} failed: {err.status} {err.code}: "
+              f"{type(e).__name__}: {str(e)[:300]}", flush=True)
+        return error(err)
+    max_mode.release(lease)
 
     d = catalog.rewrite_response(d, public_name)
-    print(f"/v1/chat/completions {time.time() - t0:.1f}s", flush=True)
+    print(f"{route} {time.time() - t0:.1f}s", flush=True)
+    if responses is not None:
+        return JSONResponse(responses_api.of_chat(d, responses))
+    if messages is not None:
+        try:
+            return JSONResponse(messages_api.of_chat(d, messages))
+        except api_errors.ApiError as e:
+            return error(e)
     return JSONResponse(d)
 
 
-async def _stream(body: dict, public_name: str, lane=None):
+class _CancellingStream(StreamingResponse):
+    """A stream whose client hanging up STOPS the turn's work (#39).
+
+    Starlette notices the disconnect (http.disconnect) and cancels the body
+    task -- but the task is parked in `run_in_threadpool(next, gen)`, and a
+    thread cannot be cancelled: the cancellation waits until the turn yields
+    again, which during a long prefill or a second-brain job was minutes to
+    never (Octopus v0b-V0-xhigh-1: the abandoned request's deep thinking ran
+    on and held the helper lane). So the disconnect also cancels the
+    request's token (mcp/cancel.py), which shuts every upstream socket the
+    turn opened: the blocked read returns, the turn raises
+    cancel.Cancelled, the lane is freed and llama-server stops generating."""
+
+    def __init__(self, content, token: "cancel.Token",
+                 attempt: "_Attempt | None" = None, **kw):
+        super().__init__(content, **kw)
+        self._token = token
+        self._finished = False
+        self._attempt = attempt
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # THE LANE COMES BACK HOWEVER THE RESPONSE ENDED (#44). It was
+            # given back only in the body generator's finally -- and a
+            # client that hangs up between the first chunk and Starlette's
+            # first pull of the body gets that body cancelled before it ever
+            # runs, so its finally never ran: a main lane lost until the
+            # next restart (mcp/test_stream.py reproduces it). Idempotent.
+            if self._attempt is not None:
+                await self._attempt.close()
+
+    async def stream_response(self, send) -> None:
+        await super().stream_response(send)
+        # The whole reply was sent. A client closing the connection after
+        # this is an ordinary close, not a hang-up (2026-09-25: every
+        # finished stream logged "client disconnected" and cancelled the
+        # token, which post-reply work such as the warm is bound to).
+        self._finished = True
+
+    async def listen_for_disconnect(self, receive) -> None:
+        await super().listen_for_disconnect(receive)
+        if self._finished:
+            return
+        if not self._token.cancelled:
+            print("  client disconnected: cancelling the turn's upstream "
+                  "work", flush=True)
+        self._token.cancel("the client disconnected")
+
+
+_GONE = object()        # the client hung up before the stream's first byte
+_END = object()         # the generator ended
+
+
+async def _wait_disconnect(request: Request) -> None:
+    """Return when the client hangs up (ASGI http.disconnect). The body was
+    read already, so the next message the server has for this request is
+    the disconnect."""
+    while True:
+        msg = await request.receive()
+        if msg.get("type") == "http.disconnect":
+            return
+
+
+async def _first_chunk(gen, token: "cancel.Token", request: Request):
+    """The stream's first chunk, pulled BEFORE the response starts: the
+    chunk, _END, or _GONE when the client hung up first (its turn is
+    cancelled through the token, as _CancellingStream does later). Raises
+    what stream_body raised: a failure before the first byte."""
+    import asyncio
+    pull = asyncio.ensure_future(run_in_threadpool(next, gen, _END))
+    watch = asyncio.ensure_future(_wait_disconnect(request))
+    try:
+        done, _ = await asyncio.wait({pull, watch},
+                                     return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:
+        token.cancel("the request was cancelled before the stream started")
+        watch.cancel()
+        raise
+    if pull in done:
+        watch.cancel()
+        return pull.result()
+    print("  client disconnected before the stream started: cancelling the "
+          "turn's upstream work", flush=True)
+    token.cancel("the client disconnected before the stream started")
+    try:
+        await pull
+    except BaseException:                                        # noqa: BLE001
+        pass
+    return _GONE
+
+
+async def _stream(gen, first=None, lane=None):
     """Bridge the synchronous streaming generator onto the event loop.
 
     `proxy.stream_body` yields bytes and blocks on the upstream socket. Pulling
     it directly here would stall every other request on this worker, so each
     `next()` is taken in a thread and the loop stays free. A queue would buy
-    nothing: the generator is strictly sequential.
+    nothing: the generator is strictly sequential. `first` is the chunk
+    server.chat pulled before the response started (_first_chunk).
     """
-    gen = proxy.stream_body(body, public_name)
-    sentinel = object()
+    sentinel = _END
     try:
+        if first is not None and first is not _END:
+            yield first
+        elif first is _END:
+            return
         while True:
             chunk = await run_in_threadpool(next, gen, sentinel)
             if chunk is sentinel:
@@ -394,10 +758,116 @@ async def _stream(body: dict, public_name: str, lane=None):
     finally:
         # Covers the ordinary end, a client that hangs up mid-answer, and an
         # exception in the generator. A lane that is not released is a lane
-        # this server never gets back.
-        gen.close()
-        if lane is not None:
-            await lane.__aexit__(None, None, None)
+        # this server never gets back -- so it is released even when closing
+        # the generator raises. `lane`: an admission.admit or the request's
+        # _Attempt (both release on __aexit__, once).
+        try:
+            gen.close()
+        except ValueError:
+            # Still executing in its thread: its token was cancelled, so it
+            # ends on its own.
+            pass
+        finally:
+            if lane is not None:
+                await lane.__aexit__(None, None, None)
+
+
+# ---------------------------------------------------------------------------
+# ONE REQUEST, ONE ATTEMPT (Octopus v0e-V0-xhigh-1, 2026-09-26, #44 in
+# docs/SELF-IMPROVEMENT-LOG.md).
+#
+# Hermes' stale detector killed a request after 900 s without a chunk and
+# sent it again; so did the retry. Neither attempt's turn ever learned its
+# client had gone -- a recording relay between them kept both connections to
+# this server open -- so the two attempts of ONE request held both main
+# lanes, and the third attempt was refused 429 three times, which ended the
+# run. A second request byte-identical to one still running (same account,
+# same session token, same messages, same tools) is its client's retry: the
+# earlier attempt's answer has nobody to go to, and leaving it running
+# halves the retry's decode speed beside it (#39).
+#
+# So the earlier attempt is cancelled (its token: upstream sockets shut, the
+# lane freed within a second): on arrival once it has run SUPERSEDE_AFTER_S
+# (30, a CHOICE: far above any client's immediate reconnect, far below the
+# 600-900 s after which SDKs and Hermes give up), and at any age when the
+# lanes are full and the only alternative is refusing the retry. The KNOWN
+# COST: two clients sending byte-identical requests under one key and no
+# session header, at once, with the lanes full, lose the older one -- the
+# X-Yamadori-Session header keeps such arms apart.
+# ---------------------------------------------------------------------------
+SUPERSEDE_AFTER_S = float(os.environ.get("YAMADORI_SUPERSEDE_AFTER", "30"))
+
+# retry key -> [(token, started)]; touched only on the event loop.
+_attempts: dict[str, list] = {}
+
+
+def _retry_key(body: dict) -> str | None:
+    """What makes two requests the same request: the caller's account and
+    session token, the messages and the tools, exactly. None when there is
+    nothing to compare."""
+    msgs = body.get("messages")
+    if not isinstance(msgs, list) or not msgs:
+        return None
+    h = hashlib.sha256()
+    for part in (body.get("_account") or "", body.get("_session_token") or ""):
+        h.update(str(part).encode("utf-8", "replace") + b"\0")
+    h.update(json.dumps([msgs, body.get("tools") or []], sort_keys=True,
+                        ensure_ascii=False, default=str)
+             .encode("utf-8", "replace"))
+    return h.hexdigest()
+
+
+def _supersede(key: str | None, older_than: float) -> int:
+    """Cancel the running attempts of `key` that started at least
+    `older_than` seconds ago; how many were cancelled."""
+    now = time.time()
+    n = 0
+    for tok, t0 in list(_attempts.get(key or "") or []):
+        if tok.cancelled or now - t0 < older_than:
+            continue
+        print(f"  superseded: the same request arrived again (a client "
+              f"retry); cancelling the attempt it repeats, running "
+              f"{now - t0:.0f}s", flush=True)
+        tok.cancel("superseded by a retry of the same request")
+        n += 1
+    return n
+
+
+class _Attempt:
+    """One streamed request's hold: its main lane and its entry in
+    _attempts, given back ONCE, from wherever the request ends."""
+
+    def __init__(self, lane, key: str | None, token: "cancel.Token",
+                 gen=None):
+        self.lane, self.key, self.token, self.gen = lane, key, token, gen
+        self.closed = False
+        if key:
+            _attempts.setdefault(key, []).append((token, time.time()))
+
+    async def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            if self.gen is not None:
+                try:
+                    self.gen.close()
+                except ValueError:
+                    pass            # executing in its thread; token cancelled
+        finally:
+            if self.key:
+                left = [(t, s) for t, s in _attempts.get(self.key, [])
+                        if t is not self.token]
+                if left:
+                    _attempts[self.key] = left
+                else:
+                    _attempts.pop(self.key, None)
+            await self.lane.__aexit__(None, None, None)
+            max_mode.release(getattr(self.token, "yamadori_lease", None))
+
+    async def __aexit__(self, *exc) -> bool:
+        await self.close()
+        return False
 
 
 def _public_base(request: Request) -> str:
@@ -437,9 +907,8 @@ async def images_generations(request: Request) -> Response:
     try:
         body = json.loads(await request.body() or b"{}")
     except (ValueError, json.JSONDecodeError) as e:
-        return JSONResponse(status_code=400, content={"error": {
-            "message": f"bad request: {e}", "type": "invalid_request_error",
-            "code": "bad_json", "param": None}})
+        return _api_error(api_errors.invalid(
+            f"The request body is not valid JSON: {e}", code="invalid_json"))
     if not isinstance(body, dict):
         return _image_error(images.bad_args(
             "the body must be a JSON object.", "send {\"prompt\": \"...\"}"))
@@ -448,6 +917,18 @@ async def images_generations(request: Request) -> Response:
         return _image_error(images.bad_args(
             f"response_format {fmt!r} is not supported.",
             "send response_format 'url' or 'b64_json'"))
+    # The spec's other options (docs/OPENAI-CONFORMANCE.md section 6):
+    # quality accepted (it does not pick the model), output_format png only,
+    # background opaque/auto; style, moderation, output_compression, user
+    # and partial_images accepted and ignored; streaming is not served.
+    if body.get("stream"):
+        return _api_error(api_errors.invalid(
+            "Streaming image generation is not served; leave out 'stream'.",
+            param="stream", code="unsupported_parameter"))
+    bad = images.unsupported_option(body)
+    if bad:
+        return _api_error(api_errors.invalid(bad[1], param=bad[0],
+                                             code="invalid_value"))
     n = body.get("n", 1)
     # Which image model: `model` naming one of ours (catalog.IMAGE_MODELS)
     # overrides for this request; anything else -- an SDK's own default such
@@ -473,12 +954,16 @@ async def images_generations(request: Request) -> Response:
                          "revised_prompt": r["prompt"]})
     print(f"/v1/images/generations {len(recs)} image(s) {choice} "
           f"{recs[0]['size']} {recs[0]['seconds']}s", flush=True)
-    return JSONResponse({"created": int(time.time()), "data": data,
-                         "x_yamadori": {"images": [
-                             {"id": r["id"][:16], "size": r["size"],
-                              "seed": r["seed"], "steps": r["steps"],
-                              "model": r["image_model"], "model_source": source,
-                              "seconds": r["seconds"]} for r in recs]}})
+    out = {"created": int(time.time()), "data": data,
+           "output_format": "png", "size": recs[0]["size"],
+           "background": "opaque"}
+    if body.get("quality") in ("low", "medium", "high", "xhigh", "max"):
+        out["quality"] = body["quality"]      # echoed; it picked nothing
+    out["x_yamadori"] = {"images": [
+        {"id": r["id"][:16], "size": r["size"], "seed": r["seed"],
+         "steps": r["steps"], "model": r["image_model"],
+         "model_source": source, "seconds": r["seconds"]} for r in recs]}
+    return JSONResponse(out)
 
 
 @app.get("/media/{name}")
@@ -512,6 +997,36 @@ async def media(name: str, exp: str = "", sig: str = "") -> Response:
     return Response(content=png, media_type="image/png", headers={
         "Cache-Control": "private, max-age=86400, immutable",
         "X-Content-Type-Options": "nosniff"})
+
+
+@app.api_route("/v1/{rest:path}",
+               methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+               include_in_schema=False)
+async def v1_unknown(rest: str, request: Request) -> Response:
+    """Every /v1 path this server does not serve: 404 in OpenAI's object.
+
+    Registered after every real /v1 route and before the dashboard's SPA
+    catch-all, which is GET-only and so answered an unknown POST
+    (`/v1/embeddings`, `/v1/responses`, `/v1/completions`) with 405 -- "wrong
+    method" where the truth is "no such endpoint" (docs/OPENAI-CONFORMANCE.md
+    section 4). A path a real route serves by another method keeps its 405
+    (GET /v1/chat/completions)."""
+    from starlette.routing import Match
+    allow: set[str] = set()
+    for route in request.app.router.routes:
+        if getattr(route, "endpoint", None) is v1_unknown:
+            continue
+        path = getattr(route, "path", "")
+        if not path.startswith("/v1"):
+            continue
+        match, _ = route.matches(request.scope)
+        if match == Match.PARTIAL:
+            allow |= set(getattr(route, "methods", None) or ())
+    if allow:
+        return _api_error(api_errors.method_not_allowed(
+            request.method, request.url.path, sorted(allow)))
+    return _api_error(api_errors.unknown_route(request.method,
+                                               request.url.path))
 
 
 # The React dashboard. Registered AFTER every other route: Starlette matches in
@@ -550,6 +1065,48 @@ def main() -> None:
     import token_ledger
     token_ledger.enable()
     print(f"  token ledger: {token_ledger.DB}", flush=True)
+    # Slot pins survive a restart (mcp/slots.py, docs/SELF-IMPROVEMENT-LOG.md
+    # #38): llama-server still holds each conversation's prefix on its slot.
+    # Here, not on import, so no test suite writes the file.
+    import slots
+    st = slots.persist(os.environ.get("YAMADORI_SLOTS_STATE", os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "index", "slots_state.json")))
+    print(f"  slot pins: {st['pins']} restored, {st['prompts']} prompts "
+          f"({st['path']})", flush=True)
+    # This process empties the second brain's slot after each run and the
+    # transient slot after each side call (mcp/slots.py RELEASE). Here, not
+    # on import: the worker and the tools API never do, and no test suite
+    # sends a release to a model server unless it asks.
+    slots.enable_release()
+    # ONE PROCESS SWAPS THE CARD: the proxy (mcp/max_mode.py enable_swaps). Here, not on import: an offline suite
+    # that imports max_mode can never make llama-swap load a model (2026-09-29, an unstubbed test started
+    # flash-next on the running stack).
+    max_mode.enable_swaps()
+    print(f"  tier models: {'on' if max_mode.ENABLED else 'off'} ({max_mode.TABLE.source}); "
+          f"{', '.join(f'{t}={m}' for t, m in max_mode.snapshot()['tiers'].items())}", flush=True)
+    print(f"  slot release: on after second-brain runs and side calls "
+          f"(default {'on' if slots._release_default() else 'OFF'}, "
+          f"YAMADORI_SLOT_RELEASE / X-Yamadori-Features slot_release)",
+          flush=True)
+    # THE TURN DECIDER (mcp/decide_turn.py): this process answers each
+    # request's judgment questions on the main model. Here, not on import:
+    # no test suite sends a decider batch to a model server unless it asks.
+    import decide_turn
+    decide_turn.enable()
+    print(f"  turn decider: {'on' if decide_turn.enabled() else 'OFF'} "
+          f"(YAMADORI_DECIDER)", flush=True)
+    # THE MCP HOST (mcp/mcp_host.py): this process is the MCP client of the
+    # servers it hosts for the model (PackageLens first), each started once,
+    # in its gated container, in the background. Here, not on import: no
+    # test suite starts a container, and the worker and the tools API offer
+    # no MCP tool.
+    import mcp_host
+    mcp_host.enable()
+    started = mcp_host.start(background=True)
+    print(f"  mcp host: {'starting ' + ', '.join(started) if started else 'no server started'}"
+          f" (YAMADORI_MCP_HOST; {mcp_host.mcp_config.path()}; switch "
+          f"mcp_tools / YAMADORI_MCP_TOOLS)", flush=True)
     uvicorn.run(app, host=HOST, port=PORT, log_level="warning",
                 # A generation runs for minutes. The default 5s keep-alive
                 # would drop idle sockets between problems, which is the exact

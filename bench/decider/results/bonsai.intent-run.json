@@ -1,0 +1,1757 @@
+{
+ "started": "2026-09-27T16:18:22",
+ "preflight": {
+  "slots_busy": [],
+  "hermes": false,
+  "at": 1790540302.3880672
+ },
+ "template": {
+  "version": "bonsai-decider/1",
+  "system": "You read the material the user gives you and answer one question about it. Reply with the answer's label only.",
+  "state_head": "MATERIAL:\n\n",
+  "yes_no": "QUESTION: {question}\n\nAnswer yes or no.",
+  "choice": "QUESTION: {question}\n\nOPTIONS:\n{options}\n\nAnswer with the letter of one option.",
+  "answer_lead": "Answer:"
+ },
+ "decision": "argmax over the question's labels; no threshold",
+ "in_sample": "every label here is ours; nothing is held out",
+ "status": "complete",
+ "intent": {
+  "n": 99,
+  "positives": 49,
+  "rows": [
+   {
+    "text": "Great, now implement it.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.932257,
+     "Does the user want something built, made or changed?": 0.967579,
+     "Is this message a request to build, make or change something?": 0.928158
+    }
+   },
+   {
+    "text": "Go ahead.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.278445,
+     "Does the user want something built, made or changed?": 0.419194,
+     "Is this message a request to build, make or change something?": 0.182973
+    }
+   },
+   {
+    "text": "Do it.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.673734,
+     "Does the user want something built, made or changed?": 0.810808,
+     "Is this message a request to build, make or change something?": 0.800374
+    }
+   },
+   {
+    "text": "Ship it.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.312738,
+     "Does the user want something built, made or changed?": 0.438058,
+     "Is this message a request to build, make or change something?": 0.200451
+    }
+   },
+   {
+    "text": "Let's do it.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.297054,
+     "Does the user want something built, made or changed?": 0.54,
+     "Is this message a request to build, make or change something?": 0.200009
+    }
+   },
+   {
+    "text": "Sounds good, go ahead and build it.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.991682,
+     "Does the user want something built, made or changed?": 0.995124,
+     "Is this message a request to build, make or change something?": 0.988562
+    }
+   },
+   {
+    "text": "OK, build the village next.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.994104,
+     "Does the user want something built, made or changed?": 0.994095,
+     "Is this message a request to build, make or change something?": 0.991154
+    }
+   },
+   {
+    "text": "Now the HUD part.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.600861,
+     "Does the user want something built, made or changed?": 0.630973,
+     "Is this message a request to build, make or change something?": 0.380053
+    }
+   },
+   {
+    "text": "Next: the inventory screen.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.609782,
+     "Does the user want something built, made or changed?": 0.485956,
+     "Is this message a request to build, make or change something?": 0.604206
+    }
+   },
+   {
+    "text": "Can you add a pause menu?",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.985896,
+     "Does the user want something built, made or changed?": 0.97897,
+     "Is this message a request to build, make or change something?": 0.978489
+    }
+   },
+   {
+    "text": "Could you wire up the settings panel to the store?",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.98397,
+     "Does the user want something built, made or changed?": 0.977593,
+     "Is this message a request to build, make or change something?": 0.977585
+    }
+   },
+   {
+    "text": "Please create the login page.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.99191,
+     "Does the user want something built, made or changed?": 0.993319,
+     "Is this message a request to build, make or change something?": 0.991732
+    }
+   },
+   {
+    "text": "I want a leaderboard that saves the top ten scores.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.988275,
+     "Does the user want something built, made or changed?": 0.964436,
+     "Is this message a request to build, make or change something?": 0.989466
+    }
+   },
+   {
+    "text": "I'd like you to set up the database schema now.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.971762,
+     "Does the user want something built, made or changed?": 0.978261,
+     "Is this message a request to build, make or change something?": 0.980798
+    }
+   },
+   {
+    "text": "Make the enemies shoot back.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.984195,
+     "Does the user want something built, made or changed?": 0.955739,
+     "Is this message a request to build, make or change something?": 0.983789
+    }
+   },
+   {
+    "text": "Add sound effects when the player jumps.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.935617,
+     "Does the user want something built, made or changed?": 0.898978,
+     "Is this message a request to build, make or change something?": 0.922137
+    }
+   },
+   {
+    "text": "Write the tests for the parser.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.91528,
+     "Does the user want something built, made or changed?": 0.867233,
+     "Is this message a request to build, make or change something?": 0.921182
+    }
+   },
+   {
+    "text": "Scaffold a new Express server in api/.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.988105,
+     "Does the user want something built, made or changed?": 0.986429,
+     "Is this message a request to build, make or change something?": 0.982566
+    }
+   },
+   {
+    "text": "Put together a quick landing page for this.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.986454,
+     "Does the user want something built, made or changed?": 0.987276,
+     "Is this message a request to build, make or change something?": 0.988092
+    }
+   },
+   {
+    "text": "Spin up a small CLI that wraps this API.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.991308,
+     "Does the user want something built, made or changed?": 0.987987,
+     "Is this message a request to build, make or change something?": 0.98908
+    }
+   },
+   {
+    "text": "Whip up a dark mode toggle.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.993223,
+     "Does the user want something built, made or changed?": 0.988695,
+     "Is this message a request to build, make or change something?": 0.993428
+    }
+   },
+   {
+    "text": "Knock out the remaining TODOs in utils.ts.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.924308,
+     "Does the user want something built, made or changed?": 0.914296,
+     "Is this message a request to build, make or change something?": 0.917267
+    }
+   },
+   {
+    "text": "yes please, do the plan",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.808832,
+     "Does the user want something built, made or changed?": 0.878642,
+     "Is this message a request to build, make or change something?": 0.91026
+    }
+   },
+   {
+    "text": "Alright, let's build the rendering layer.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.992344,
+     "Does the user want something built, made or changed?": 0.992843,
+     "Is this message a request to build, make or change something?": 0.987833
+    }
+   },
+   {
+    "text": "Implement the collision system you described.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.982292,
+     "Does the user want something built, made or changed?": 0.981954,
+     "Is this message a request to build, make or change something?": 0.975949
+    }
+   },
+   {
+    "text": "Build the rest.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.978618,
+     "Does the user want something built, made or changed?": 0.988611,
+     "Is this message a request to build, make or change something?": 0.980545
+    }
+   },
+   {
+    "text": "Now do the same for the mobile layout.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.900492,
+     "Does the user want something built, made or changed?": 0.893639,
+     "Is this message a request to build, make or change something?": 0.908226
+    }
+   },
+   {
+    "text": "Can you turn that into a reusable hook?",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.915696,
+     "Does the user want something built, made or changed?": 0.892056,
+     "Is this message a request to build, make or change something?": 0.840835
+    }
+   },
+   {
+    "text": "Refactor the renderer to use instancing.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.972039,
+     "Does the user want something built, made or changed?": 0.926859,
+     "Is this message a request to build, make or change something?": 0.961015
+    }
+   },
+   {
+    "text": "Port this module to Rust.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.973123,
+     "Does the user want something built, made or changed?": 0.964386,
+     "Is this message a request to build, make or change something?": 0.957753
+    }
+   },
+   {
+    "text": "lgtm, start coding",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.940356,
+     "Does the user want something built, made or changed?": 0.979848,
+     "Is this message a request to build, make or change something?": 0.894131
+    }
+   },
+   {
+    "text": "Perfect. Carry on with step 3.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.402167,
+     "Does the user want something built, made or changed?": 0.505281,
+     "Is this message a request to build, make or change something?": 0.51832
+    }
+   },
+   {
+    "text": "Then hook up the save button to localStorage.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.909751,
+     "Does the user want something built, made or changed?": 0.875881,
+     "Is this message a request to build, make or change something?": 0.876903
+    }
+   },
+   {
+    "text": "Go for it - build the whole thing.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.993652,
+     "Does the user want something built, made or changed?": 0.995733,
+     "Is this message a request to build, make or change something?": 0.992484
+    }
+   },
+   {
+    "text": "Fix the bug you found in the reducer.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.94703,
+     "Does the user want something built, made or changed?": 0.934135,
+     "Is this message a request to build, make or change something?": 0.943059
+    }
+   },
+   {
+    "text": "Update the README with the new commands.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.966346,
+     "Does the user want something built, made or changed?": 0.959429,
+     "Is this message a request to build, make or change something?": 0.967576
+    }
+   },
+   {
+    "text": "Let's get started on the backend.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.467285,
+     "Does the user want something built, made or changed?": 0.649896,
+     "Is this message a request to build, make or change something?": 0.35785
+    }
+   },
+   {
+    "text": "Could you convert the config to YAML?",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.92754,
+     "Does the user want something built, made or changed?": 0.920486,
+     "Is this message a request to build, make or change something?": 0.912127
+    }
+   },
+   {
+    "text": "I need you to generate the migration for the new table.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.981687,
+     "Does the user want something built, made or changed?": 0.972607,
+     "Is this message a request to build, make or change something?": 0.976337
+    }
+   },
+   {
+    "text": "Proceed with the implementation.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.825302,
+     "Does the user want something built, made or changed?": 0.909361,
+     "Is this message a request to build, make or change something?": 0.82509
+    }
+   },
+   {
+    "text": "ok now the audio system",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.575608,
+     "Does the user want something built, made or changed?": 0.583118,
+     "Is this message a request to build, make or change something?": 0.50734
+    }
+   },
+   {
+    "text": "Add a --verbose flag to the CLI, please.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.990964,
+     "Does the user want something built, made or changed?": 0.985407,
+     "Is this message a request to build, make or change something?": 0.979403
+    }
+   },
+   {
+    "text": "Would you create a Dockerfile for this service?",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.97848,
+     "Does the user want something built, made or changed?": 0.985554,
+     "Is this message a request to build, make or change something?": 0.970259
+    }
+   },
+   {
+    "text": "Time to build the shop UI.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.969675,
+     "Does the user want something built, made or changed?": 0.986619,
+     "Is this message a request to build, make or change something?": 0.938467
+    }
+   },
+   {
+    "text": "Next up: the particle effects.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.285482,
+     "Does the user want something built, made or changed?": 0.452839,
+     "Is this message a request to build, make or change something?": 0.248039
+    }
+   },
+   {
+    "text": "Make it so.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.896559,
+     "Does the user want something built, made or changed?": 0.976619,
+     "Is this message a request to build, make or change something?": 0.917591
+    }
+   },
+   {
+    "text": "Execute the plan.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.479868,
+     "Does the user want something built, made or changed?": 0.647837,
+     "Is this message a request to build, make or change something?": 0.608755
+    }
+   },
+   {
+    "text": "Thanks!",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.049601,
+     "Does the user want something built, made or changed?": 0.115165,
+     "Is this message a request to build, make or change something?": 0.014808
+    }
+   },
+   {
+    "text": "Thanks, that's all for now.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.02233,
+     "Does the user want something built, made or changed?": 0.036563,
+     "Is this message a request to build, make or change something?": 0.009013
+    }
+   },
+   {
+    "text": "Why does the build fail on Windows?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.416369,
+     "Does the user want something built, made or changed?": 0.448431,
+     "Is this message a request to build, make or change something?": 0.30449
+    }
+   },
+   {
+    "text": "What is a koota trait?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.091131,
+     "Does the user want something built, made or changed?": 0.139301,
+     "Is this message a request to build, make or change something?": 0.173117
+    }
+   },
+   {
+    "text": "How does useFrame decide the order of callbacks?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.119715,
+     "Does the user want something built, made or changed?": 0.22203,
+     "Is this message a request to build, make or change something?": 0.155745
+    }
+   },
+   {
+    "text": "Explain the collision code you wrote.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.511035,
+     "Does the user want something built, made or changed?": 0.57805,
+     "Is this message a request to build, make or change something?": 0.587331
+    }
+   },
+   {
+    "text": "Can you explain how the reducer works?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.145368,
+     "Does the user want something built, made or changed?": 0.156061,
+     "Is this message a request to build, make or change something?": 0.311731
+    }
+   },
+   {
+    "text": "What's the status of the build?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.351956,
+     "Does the user want something built, made or changed?": 0.701795,
+     "Is this message a request to build, make or change something?": 0.125255
+    }
+   },
+   {
+    "text": "Did the tests pass?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.087034,
+     "Does the user want something built, made or changed?": 0.186288,
+     "Is this message a request to build, make or change something?": 0.152728
+    }
+   },
+   {
+    "text": "Is the shader compiled at runtime or ahead of time?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.144846,
+     "Does the user want something built, made or changed?": 0.249662,
+     "Is this message a request to build, make or change something?": 0.198406
+    }
+   },
+   {
+    "text": "Review the PR and tell me what you think.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.361607,
+     "Does the user want something built, made or changed?": 0.369138,
+     "Is this message a request to build, make or change something?": 0.320552
+    }
+   },
+   {
+    "text": "Summarize what you changed.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.768494,
+     "Does the user want something built, made or changed?": 0.596599,
+     "Is this message a request to build, make or change something?": 0.565975
+    }
+   },
+   {
+    "text": "Show me the diff.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.769703,
+     "Does the user want something built, made or changed?": 0.781671,
+     "Is this message a request to build, make or change something?": 0.695134
+    }
+   },
+   {
+    "text": "Which file handles routing?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.099356,
+     "Does the user want something built, made or changed?": 0.227354,
+     "Is this message a request to build, make or change something?": 0.207154
+    }
+   },
+   {
+    "text": "Looks great, nice work.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.014121,
+     "Does the user want something built, made or changed?": 0.041049,
+     "Is this message a request to build, make or change something?": 0.009542
+    }
+   },
+   {
+    "text": "Where is the config loaded?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.070279,
+     "Does the user want something built, made or changed?": 0.193021,
+     "Is this message a request to build, make or change something?": 0.18174
+    }
+   },
+   {
+    "text": "What does this error mean: TypeError: x is undefined?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.043044,
+     "Does the user want something built, made or changed?": 0.09063,
+     "Is this message a request to build, make or change something?": 0.069121
+    }
+   },
+   {
+    "text": "Compare Zustand and koota for this use.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.214903,
+     "Does the user want something built, made or changed?": 0.327423,
+     "Is this message a request to build, make or change something?": 0.444557
+    }
+   },
+   {
+    "text": "Should I use WebGL or WebGPU here?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.36392,
+     "Does the user want something built, made or changed?": 0.535778,
+     "Is this message a request to build, make or change something?": 0.234082
+    }
+   },
+   {
+    "text": "Hold off on the backend for now.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.110842,
+     "Does the user want something built, made or changed?": 0.105526,
+     "Is this message a request to build, make or change something?": 0.095977
+    }
+   },
+   {
+    "text": "Don't build anything yet, just tell me the plan.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.097769,
+     "Does the user want something built, made or changed?": 0.04172,
+     "Is this message a request to build, make or change something?": 0.097469
+    }
+   },
+   {
+    "text": "Wait.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.075786,
+     "Does the user want something built, made or changed?": 0.143374,
+     "Is this message a request to build, make or change something?": 0.030628
+    }
+   },
+   {
+    "text": "How long will this take?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.175051,
+     "Does the user want something built, made or changed?": 0.397016,
+     "Is this message a request to build, make or change something?": 0.212947
+    }
+   },
+   {
+    "text": "Can you list the files you created?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.385192,
+     "Does the user want something built, made or changed?": 0.469115,
+     "Is this message a request to build, make or change something?": 0.427036
+    }
+   },
+   {
+    "text": "Tell me why you chose instancing.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.221951,
+     "Does the user want something built, made or changed?": 0.295921,
+     "Is this message a request to build, make or change something?": 0.18771
+    }
+   },
+   {
+    "text": "Is there a better way to do this?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.745222,
+     "Does the user want something built, made or changed?": 0.789913,
+     "Is this message a request to build, make or change something?": 0.672445
+    }
+   },
+   {
+    "text": "What would it take to add multiplayer?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.865241,
+     "Does the user want something built, made or changed?": 0.83992,
+     "Is this message a request to build, make or change something?": 0.791588
+    }
+   },
+   {
+    "text": "How would you build the inventory?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.957092,
+     "Does the user want something built, made or changed?": 0.930109,
+     "Is this message a request to build, make or change something?": 0.94575
+    }
+   },
+   {
+    "text": "Walk me through the render loop.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.215416,
+     "Does the user want something built, made or changed?": 0.153827,
+     "Is this message a request to build, make or change something?": 0.319363
+    }
+   },
+   {
+    "text": "Cool, I see it running.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.01924,
+     "Does the user want something built, made or changed?": 0.058339,
+     "Is this message a request to build, make or change something?": 0.013339
+    }
+   },
+   {
+    "text": "Why is the player sliding after release?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.041762,
+     "Does the user want something built, made or changed?": 0.107349,
+     "Is this message a request to build, make or change something?": 0.124209
+    }
+   },
+   {
+    "text": "What version of three are we on?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.074319,
+     "Does the user want something built, made or changed?": 0.137793,
+     "Is this message a request to build, make or change something?": 0.129337
+    }
+   },
+   {
+    "text": "Can you check whether the server is up?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.03866,
+     "Does the user want something built, made or changed?": 0.096032,
+     "Is this message a request to build, make or change something?": 0.051641
+    }
+   },
+   {
+    "text": "That makes sense.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.029316,
+     "Does the user want something built, made or changed?": 0.070348,
+     "Is this message a request to build, make or change something?": 0.00763
+    }
+   },
+   {
+    "text": "Interesting, I didn't know that.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.012931,
+     "Does the user want something built, made or changed?": 0.026505,
+     "Is this message a request to build, make or change something?": 0.00597
+    }
+   },
+   {
+    "text": "Describe the data flow between the systems.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.201143,
+     "Does the user want something built, made or changed?": 0.289911,
+     "Is this message a request to build, make or change something?": 0.431851
+    }
+   },
+   {
+    "text": "Which approach is faster?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.170424,
+     "Does the user want something built, made or changed?": 0.310682,
+     "Is this message a request to build, make or change something?": 0.231742
+    }
+   },
+   {
+    "text": "What did you name the store?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.153402,
+     "Does the user want something built, made or changed?": 0.291691,
+     "Is this message a request to build, make or change something?": 0.194813
+    }
+   },
+   {
+    "text": "Is koota compatible with React 19?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.069535,
+     "Does the user want something built, made or changed?": 0.131832,
+     "Is this message a request to build, make or change something?": 0.094658
+    }
+   },
+   {
+    "text": "Good morning!",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.009116,
+     "Does the user want something built, made or changed?": 0.019409,
+     "Is this message a request to build, make or change something?": 0.003294
+    }
+   },
+   {
+    "text": "Where did you put the tests?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.03722,
+     "Does the user want something built, made or changed?": 0.110953,
+     "Is this message a request to build, make or change something?": 0.044338
+    }
+   },
+   {
+    "text": "Stop.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.072368,
+     "Does the user want something built, made or changed?": 0.121839,
+     "Is this message a request to build, make or change something?": 0.033515
+    }
+   },
+   {
+    "text": "Explain like I'm five what an ECS is.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.081876,
+     "Does the user want something built, made or changed?": 0.109479,
+     "Is this message a request to build, make or change something?": 0.165239
+    }
+   },
+   {
+    "text": "How do I run it locally?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.199365,
+     "Does the user want something built, made or changed?": 0.264314,
+     "Is this message a request to build, make or change something?": 0.306599
+    }
+   },
+   {
+    "text": "Do you think the colors work?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.199901,
+     "Does the user want something built, made or changed?": 0.32126,
+     "Is this message a request to build, make or change something?": 0.228371
+    }
+   },
+   {
+    "text": "Why did you make the enemies faster?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.559171,
+     "Does the user want something built, made or changed?": 0.571569,
+     "Is this message a request to build, make or change something?": 0.332004
+    }
+   },
+   {
+    "text": "What would you add next?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.593424,
+     "Does the user want something built, made or changed?": 0.581303,
+     "Is this message a request to build, make or change something?": 0.404463
+    }
+   },
+   {
+    "text": "I need a minute.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.036789,
+     "Does the user want something built, made or changed?": 0.068541,
+     "Is this message a request to build, make or change something?": 0.012432
+    }
+   },
+   {
+    "text": "Can you run the tests?",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.301765,
+     "Does the user want something built, made or changed?": 0.450822,
+     "Is this message a request to build, make or change something?": 0.467585
+    }
+   },
+   {
+    "text": "Next, explain the loop.",
+    "intent": false,
+    "rule": false,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.375134,
+     "Does the user want something built, made or changed?": 0.428855,
+     "Is this message a request to build, make or change something?": 0.463475
+    }
+   },
+   {
+    "text": "Install zustand and use it for the store.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.923859,
+     "Does the user want something built, made or changed?": 0.937609,
+     "Is this message a request to build, make or change something?": 0.923675
+    }
+   },
+   {
+    "text": "Keep going.",
+    "intent": true,
+    "rule": true,
+    "p_yes": {
+     "Is the user asking for something to be built, made or changed?": 0.330484,
+     "Does the user want something built, made or changed?": 0.505576,
+     "Is this message a request to build, make or change something?": 0.287558
+    }
+   }
+  ],
+  "route.work_intent": {
+   "n": 99,
+   "tp": 49,
+   "fp": 0,
+   "fn": 0,
+   "tn": 50,
+   "acc": 1.0,
+   "precision": 1.0,
+   "recall": 1.0
+  },
+  "wordings": {
+   "Is the user asking for something to be built, made or changed?": {
+    "confusion": {
+     "n": 99,
+     "tp": 41,
+     "fp": 8,
+     "fn": 8,
+     "tn": 42,
+     "acc": 0.8384,
+     "precision": 0.8367,
+     "recall": 0.8367
+    },
+    "calibration": {
+     "ece": 0.1048,
+     "n": 99,
+     "reliability": [
+      {
+       "p_yes": "0.0-0.1",
+       "n": 22,
+       "mean_p_yes": 0.053,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.1-0.2",
+       "n": 9,
+       "mean_p_yes": 0.158,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.2-0.3",
+       "n": 7,
+       "mean_p_yes": 0.245,
+       "positive_rate": 0.429
+      },
+      {
+       "p_yes": "0.3-0.4",
+       "n": 8,
+       "mean_p_yes": 0.348,
+       "positive_rate": 0.25
+      },
+      {
+       "p_yes": "0.4-0.5",
+       "n": 4,
+       "mean_p_yes": 0.441,
+       "positive_rate": 0.75
+      },
+      {
+       "p_yes": "0.5-0.6",
+       "n": 4,
+       "mean_p_yes": 0.56,
+       "positive_rate": 0.25
+      },
+      {
+       "p_yes": "0.6-0.7",
+       "n": 3,
+       "mean_p_yes": 0.628,
+       "positive_rate": 1.0
+      },
+      {
+       "p_yes": "0.7-0.8",
+       "n": 3,
+       "mean_p_yes": 0.761,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.8-0.9",
+       "n": 4,
+       "mean_p_yes": 0.849,
+       "positive_rate": 0.75
+      },
+      {
+       "p_yes": "0.9-1.0",
+       "n": 35,
+       "mean_p_yes": 0.965,
+       "positive_rate": 0.971
+      }
+     ]
+    },
+    "confidence_right": {
+     "n": 83,
+     "min": 0.5756,
+     "p25": 0.8296,
+     "median": 0.9276,
+     "p75": 0.9786,
+     "max": 0.9941
+    },
+    "confidence_wrong": {
+     "n": 16,
+     "min": 0.511,
+     "p25": 0.5934,
+     "median": 0.6951,
+     "p75": 0.7685,
+     "max": 0.9571
+    },
+    "p_true_on_label_yes": {
+     "n": 49,
+     "min": 0.2784,
+     "p25": 0.8088,
+     "median": 0.9404,
+     "p75": 0.9842,
+     "max": 0.9941
+    },
+    "p_true_on_label_no": {
+     "n": 50,
+     "min": 0.0091,
+     "p25": 0.0695,
+     "median": 0.1451,
+     "p75": 0.3616,
+     "max": 0.9571
+    },
+    "vs_rule": {
+     "both_right": 83,
+     "decider_only_right": [],
+     "rule_only_right": [
+      "Go ahead.",
+      "Ship it.",
+      "Let's do it.",
+      "Perfect. Carry on with step 3.",
+      "Let's get started on the backend.",
+      "Next up: the particle effects.",
+      "Execute the plan.",
+      "Explain the collision code you wrote.",
+      "Summarize what you changed.",
+      "Show me the diff.",
+      "Is there a better way to do this?",
+      "What would it take to add multiplayer?",
+      "How would you build the inventory?",
+      "Why did you make the enemies faster?",
+      "What would you add next?",
+      "Keep going."
+     ]
+    },
+    "errors": [
+     {
+      "text": "Go ahead.",
+      "label": true,
+      "p_yes": 0.278445
+     },
+     {
+      "text": "Ship it.",
+      "label": true,
+      "p_yes": 0.312738
+     },
+     {
+      "text": "Let's do it.",
+      "label": true,
+      "p_yes": 0.297054
+     },
+     {
+      "text": "Perfect. Carry on with step 3.",
+      "label": true,
+      "p_yes": 0.402167
+     },
+     {
+      "text": "Let's get started on the backend.",
+      "label": true,
+      "p_yes": 0.467285
+     },
+     {
+      "text": "Next up: the particle effects.",
+      "label": true,
+      "p_yes": 0.285482
+     },
+     {
+      "text": "Execute the plan.",
+      "label": true,
+      "p_yes": 0.479868
+     },
+     {
+      "text": "Explain the collision code you wrote.",
+      "label": false,
+      "p_yes": 0.511035
+     },
+     {
+      "text": "Summarize what you changed.",
+      "label": false,
+      "p_yes": 0.768494
+     },
+     {
+      "text": "Show me the diff.",
+      "label": false,
+      "p_yes": 0.769703
+     },
+     {
+      "text": "Is there a better way to do this?",
+      "label": false,
+      "p_yes": 0.745222
+     },
+     {
+      "text": "What would it take to add multiplayer?",
+      "label": false,
+      "p_yes": 0.865241
+     },
+     {
+      "text": "How would you build the inventory?",
+      "label": false,
+      "p_yes": 0.957092
+     },
+     {
+      "text": "Why did you make the enemies faster?",
+      "label": false,
+      "p_yes": 0.559171
+     },
+     {
+      "text": "What would you add next?",
+      "label": false,
+      "p_yes": 0.593424
+     },
+     {
+      "text": "Keep going.",
+      "label": true,
+      "p_yes": 0.330484
+     }
+    ],
+    "clm_zero_shot": {
+     "n": 99,
+     "tp": 49,
+     "fp": 50,
+     "fn": 0,
+     "tn": 0,
+     "acc": 0.4949,
+     "precision": 0.4949,
+     "recall": 1.0
+    }
+   },
+   "Does the user want something built, made or changed?": {
+    "confusion": {
+     "n": 99,
+     "tp": 45,
+     "fp": 10,
+     "fn": 4,
+     "tn": 40,
+     "acc": 0.8586,
+     "precision": 0.8182,
+     "recall": 0.9184
+    },
+    "calibration": {
+     "ece": 0.0721,
+     "n": 99,
+     "reliability": [
+      {
+       "p_yes": "0.0-0.1",
+       "n": 10,
+       "mean_p_yes": 0.055,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.1-0.2",
+       "n": 14,
+       "mean_p_yes": 0.137,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.2-0.3",
+       "n": 7,
+       "mean_p_yes": 0.263,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.3-0.4",
+       "n": 5,
+       "mean_p_yes": 0.345,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.4-0.5",
+       "n": 8,
+       "mean_p_yes": 0.449,
+       "positive_rate": 0.5
+      },
+      {
+       "p_yes": "0.5-0.6",
+       "n": 9,
+       "mean_p_yes": 0.555,
+       "positive_rate": 0.444
+      },
+      {
+       "p_yes": "0.6-0.7",
+       "n": 3,
+       "mean_p_yes": 0.643,
+       "positive_rate": 1.0
+      },
+      {
+       "p_yes": "0.7-0.8",
+       "n": 3,
+       "mean_p_yes": 0.758,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.8-0.9",
+       "n": 8,
+       "mean_p_yes": 0.87,
+       "positive_rate": 0.875
+      },
+      {
+       "p_yes": "0.9-1.0",
+       "n": 32,
+       "mean_p_yes": 0.969,
+       "positive_rate": 0.969
+      }
+     ]
+    },
+    "confidence_right": {
+     "n": 85,
+     "min": 0.5053,
+     "p25": 0.7726,
+     "median": 0.8945,
+     "p75": 0.9726,
+     "max": 0.9957
+    },
+    "confidence_wrong": {
+     "n": 14,
+     "min": 0.514,
+     "p25": 0.5619,
+     "median": 0.5811,
+     "p75": 0.7817,
+     "max": 0.9301
+    },
+    "p_true_on_label_yes": {
+     "n": 49,
+     "min": 0.4192,
+     "p25": 0.8672,
+     "median": 0.9557,
+     "p75": 0.9854,
+     "max": 0.9957
+    },
+    "p_true_on_label_no": {
+     "n": 50,
+     "min": 0.0194,
+     "p25": 0.1095,
+     "median": 0.2247,
+     "p75": 0.4484,
+     "max": 0.9301
+    },
+    "vs_rule": {
+     "both_right": 85,
+     "decider_only_right": [],
+     "rule_only_right": [
+      "Go ahead.",
+      "Ship it.",
+      "Next: the inventory screen.",
+      "Next up: the particle effects.",
+      "Explain the collision code you wrote.",
+      "What's the status of the build?",
+      "Summarize what you changed.",
+      "Show me the diff.",
+      "Should I use WebGL or WebGPU here?",
+      "Is there a better way to do this?",
+      "What would it take to add multiplayer?",
+      "How would you build the inventory?",
+      "Why did you make the enemies faster?",
+      "What would you add next?"
+     ]
+    },
+    "errors": [
+     {
+      "text": "Go ahead.",
+      "label": true,
+      "p_yes": 0.419194
+     },
+     {
+      "text": "Ship it.",
+      "label": true,
+      "p_yes": 0.438058
+     },
+     {
+      "text": "Next: the inventory screen.",
+      "label": true,
+      "p_yes": 0.485956
+     },
+     {
+      "text": "Next up: the particle effects.",
+      "label": true,
+      "p_yes": 0.452839
+     },
+     {
+      "text": "Explain the collision code you wrote.",
+      "label": false,
+      "p_yes": 0.57805
+     },
+     {
+      "text": "What's the status of the build?",
+      "label": false,
+      "p_yes": 0.701795
+     },
+     {
+      "text": "Summarize what you changed.",
+      "label": false,
+      "p_yes": 0.596599
+     },
+     {
+      "text": "Show me the diff.",
+      "label": false,
+      "p_yes": 0.781671
+     },
+     {
+      "text": "Should I use WebGL or WebGPU here?",
+      "label": false,
+      "p_yes": 0.535778
+     },
+     {
+      "text": "Is there a better way to do this?",
+      "label": false,
+      "p_yes": 0.789913
+     },
+     {
+      "text": "What would it take to add multiplayer?",
+      "label": false,
+      "p_yes": 0.83992
+     },
+     {
+      "text": "How would you build the inventory?",
+      "label": false,
+      "p_yes": 0.930109
+     },
+     {
+      "text": "Why did you make the enemies faster?",
+      "label": false,
+      "p_yes": 0.571569
+     },
+     {
+      "text": "What would you add next?",
+      "label": false,
+      "p_yes": 0.581303
+     }
+    ],
+    "clm_zero_shot": {
+     "n": 99,
+     "tp": 49,
+     "fp": 50,
+     "fn": 0,
+     "tn": 0,
+     "acc": 0.4949,
+     "precision": 0.4949,
+     "recall": 1.0
+    }
+   },
+   "Is this message a request to build, make or change something?": {
+    "confusion": {
+     "n": 99,
+     "tp": 42,
+     "fp": 6,
+     "fn": 7,
+     "tn": 44,
+     "acc": 0.8687,
+     "precision": 0.875,
+     "recall": 0.8571
+    },
+    "calibration": {
+     "ece": 0.0799,
+     "n": 99,
+     "reliability": [
+      {
+       "p_yes": "0.0-0.1",
+       "n": 16,
+       "mean_p_yes": 0.037,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.1-0.2",
+       "n": 12,
+       "mean_p_yes": 0.164,
+       "positive_rate": 0.083
+      },
+      {
+       "p_yes": "0.2-0.3",
+       "n": 9,
+       "mean_p_yes": 0.228,
+       "positive_rate": 0.444
+      },
+      {
+       "p_yes": "0.3-0.4",
+       "n": 8,
+       "mean_p_yes": 0.329,
+       "positive_rate": 0.25
+      },
+      {
+       "p_yes": "0.4-0.5",
+       "n": 6,
+       "mean_p_yes": 0.44,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.5-0.6",
+       "n": 4,
+       "mean_p_yes": 0.545,
+       "positive_rate": 0.5
+      },
+      {
+       "p_yes": "0.6-0.7",
+       "n": 4,
+       "mean_p_yes": 0.645,
+       "positive_rate": 0.5
+      },
+      {
+       "p_yes": "0.7-0.8",
+       "n": 1,
+       "mean_p_yes": 0.792,
+       "positive_rate": 0.0
+      },
+      {
+       "p_yes": "0.8-0.9",
+       "n": 5,
+       "mean_p_yes": 0.847,
+       "positive_rate": 1.0
+      },
+      {
+       "p_yes": "0.9-1.0",
+       "n": 34,
+       "mean_p_yes": 0.961,
+       "positive_rate": 0.971
+      }
+     ]
+    },
+    "confidence_right": {
+     "n": 86,
+     "min": 0.5073,
+     "p25": 0.8004,
+     "median": 0.9147,
+     "p75": 0.9794,
+     "max": 0.9967
+    },
+    "confidence_wrong": {
+     "n": 13,
+     "min": 0.566,
+     "p25": 0.6421,
+     "median": 0.7124,
+     "p75": 0.7995,
+     "max": 0.9457
+    },
+    "p_true_on_label_yes": {
+     "n": 49,
+     "min": 0.183,
+     "p25": 0.8251,
+     "median": 0.9282,
+     "p75": 0.9805,
+     "max": 0.9934
+    },
+    "p_true_on_label_no": {
+     "n": 50,
+     "min": 0.0033,
+     "p25": 0.0691,
+     "median": 0.1913,
+     "p75": 0.332,
+     "max": 0.9457
+    },
+    "vs_rule": {
+     "both_right": 86,
+     "decider_only_right": [],
+     "rule_only_right": [
+      "Go ahead.",
+      "Ship it.",
+      "Let's do it.",
+      "Now the HUD part.",
+      "Let's get started on the backend.",
+      "Next up: the particle effects.",
+      "Explain the collision code you wrote.",
+      "Summarize what you changed.",
+      "Show me the diff.",
+      "Is there a better way to do this?",
+      "What would it take to add multiplayer?",
+      "How would you build the inventory?",
+      "Keep going."
+     ]
+    },
+    "errors": [
+     {
+      "text": "Go ahead.",
+      "label": true,
+      "p_yes": 0.182973
+     },
+     {
+      "text": "Ship it.",
+      "label": true,
+      "p_yes": 0.200451
+     },
+     {
+      "text": "Let's do it.",
+      "label": true,
+      "p_yes": 0.200009
+     },
+     {
+      "text": "Now the HUD part.",
+      "label": true,
+      "p_yes": 0.380053
+     },
+     {
+      "text": "Let's get started on the backend.",
+      "label": true,
+      "p_yes": 0.35785
+     },
+     {
+      "text": "Next up: the particle effects.",
+      "label": true,
+      "p_yes": 0.248039
+     },
+     {
+      "text": "Explain the collision code you wrote.",
+      "label": false,
+      "p_yes": 0.587331
+     },
+     {
+      "text": "Summarize what you changed.",
+      "label": false,
+      "p_yes": 0.565975
+     },
+     {
+      "text": "Show me the diff.",
+      "label": false,
+      "p_yes": 0.695134
+     },
+     {
+      "text": "Is there a better way to do this?",
+      "label": false,
+      "p_yes": 0.672445
+     },
+     {
+      "text": "What would it take to add multiplayer?",
+      "label": false,
+      "p_yes": 0.791588
+     },
+     {
+      "text": "How would you build the inventory?",
+      "label": false,
+      "p_yes": 0.94575
+     },
+     {
+      "text": "Keep going.",
+      "label": true,
+      "p_yes": 0.287558
+     }
+    ],
+    "clm_zero_shot": {
+     "n": 99,
+     "tp": 49,
+     "fp": 50,
+     "fn": 0,
+     "tn": 0,
+     "acc": 0.4949,
+     "precision": 0.4949,
+     "recall": 1.0
+    }
+   }
+  },
+  "seconds": 130.5
+ },
+ "latency": {
+  "alone": {
+   "total_ms": {
+    "n": 297,
+    "p50": 285.0,
+    "p90": 488.4,
+    "max": 684.2
+   },
+   "prefill_ms": {
+    "n": 297,
+    "p50": 263.7,
+    "p90": 374.8,
+    "max": 398.5
+   },
+   "prompt_tokens": {
+    "n": 297,
+    "p50": 79,
+    "p90": 82,
+    "max": 85
+   },
+   "processed_tokens": {
+    "n": 297,
+    "p50": 35,
+    "p90": 54,
+    "max": 57
+   }
+  },
+  "during_generation": {
+   "total_ms": null,
+   "prefill_ms": null
+  },
+  "by_processed_tokens": {
+   "0-63": {
+    "total_ms": {
+     "n": 297,
+     "p50": 285.0,
+     "p90": 488.4,
+     "max": 684.2
+    },
+    "prefill_ms": {
+     "n": 297,
+     "p50": 263.7,
+     "p90": 374.8,
+     "max": 398.5
+    }
+   },
+   "64-255": {
+    "total_ms": null,
+    "prefill_ms": null
+   },
+   "256-1023": {
+    "total_ms": null,
+    "prefill_ms": null
+   },
+   "1024-4095": {
+    "total_ms": null,
+    "prefill_ms": null
+   },
+   "4096-16383": {
+    "total_ms": null,
+    "prefill_ms": null
+   },
+   "16384-9999999": {
+    "total_ms": null,
+    "prefill_ms": null
+   }
+  },
+  "reads_beyond_first": 0,
+  "labels_unread_after_reads": 0,
+  "label_mass": {
+   "min": 0.902148,
+   "p10": 0.925138,
+   "median": 0.939761
+  },
+  "releases": {
+   "batches": 99,
+   "released": 99,
+   "kept": 0,
+   "ms": {
+    "n": 99,
+    "p50": 256,
+    "p90": 280,
+    "max": 338
+   }
+  }
+ },
+ "calls_n": 297
+}

@@ -1,0 +1,289 @@
+{
+ "id": "codex/responses/namespace-and-hosted-tools",
+ "harness": "codex",
+ "harness_version": "@openai/codex 0.133.0",
+ "wire": "responses",
+ "source": "scratchpad cxcap/cap.jsonl #0 (captured, 0.133.0 defaults): a namespace tool (multi_agent_v1) and hosted web_search on every request",
+ "headers": {
+  "session-id": "01a0de5a-0000-7000-8000-00000000c0de",
+  "thread-id": "01a0de5a-0000-7000-8000-00000000c0de",
+  "originator": "codex_exec",
+  "user-agent": "codex_exec/0.133.0"
+ },
+ "body": {
+  "model": "yamadori",
+  "instructions": "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. Codex CLI is an open source project led by OpenAI. [... 17,174 characters trimmed ...]",
+  "input": [
+   {
+    "type": "message",
+    "role": "developer",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "<skills_instructions>\n## Skills\nA skill is a set of local instructions to follow that is stored in a `SKILL.md` file. [... trimmed ...]\n</skills_instructions>"
+     },
+     {
+      "type": "input_text",
+      "text": "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written. [... trimmed ...]\n</permissions instructions>"
+     }
+    ]
+   },
+   {
+    "type": "message",
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "<environment_context>\n  <cwd>/work/project</cwd>\n  <shell>powershell</shell>\n  <current_date>2026-09-26</current_date>\n  <timezone>UTC</timezone>\n</environment_context>"
+     }
+    ]
+   },
+   {
+    "type": "message",
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "say ok"
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "name": "exec_command",
+    "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction. [... trimmed ...]",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "cmd": {
+       "type": "string"
+      },
+      "workdir": {
+       "type": "string"
+      },
+      "shell": {
+       "type": "string"
+      },
+      "tty": {
+       "type": "boolean"
+      },
+      "login": {
+       "type": "boolean"
+      },
+      "yield_time_ms": {
+       "type": "number"
+      },
+      "max_output_tokens": {
+       "type": "number"
+      },
+      "sandbox_permissions": {
+       "type": "string"
+      },
+      "justification": {
+       "type": "string"
+      },
+      "prefix_rule": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     },
+     "required": [
+      "cmd"
+     ],
+     "additionalProperties": false
+    }
+   },
+   {
+    "type": "function",
+    "name": "write_stdin",
+    "description": "Writes characters to an existing unified exec session and returns recent output.",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "chars": {
+       "type": "string"
+      },
+      "max_output_tokens": {
+       "type": "number"
+      },
+      "session_id": {
+       "type": "number"
+      },
+      "yield_time_ms": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "session_id"
+     ],
+     "additionalProperties": false
+    }
+   },
+   {
+    "type": "function",
+    "name": "update_plan",
+    "description": "Updates the task plan.",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "explanation": {
+       "type": "string"
+      },
+      "plan": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "status": {
+          "type": "string"
+         },
+         "step": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     },
+     "required": [
+      "plan"
+     ],
+     "additionalProperties": false
+    }
+   },
+   {
+    "type": "function",
+    "name": "view_image",
+    "description": "View a local image file from the filesystem when visual inspection is needed.",
+    "strict": false,
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "additionalProperties": false
+    }
+   },
+   {
+    "type": "namespace",
+    "name": "multi_agent_v1",
+    "tools": [
+     {
+      "type": "function",
+      "name": "close_agent",
+      "description": "(trimmed)",
+      "strict": false,
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "message": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     {
+      "type": "function",
+      "name": "resume_agent",
+      "description": "(trimmed)",
+      "strict": false,
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "message": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     {
+      "type": "function",
+      "name": "send_input",
+      "description": "(trimmed)",
+      "strict": false,
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "message": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     {
+      "type": "function",
+      "name": "spawn_agent",
+      "description": "(trimmed)",
+      "strict": false,
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "message": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     {
+      "type": "function",
+      "name": "wait_agent",
+      "description": "(trimmed)",
+      "strict": false,
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "message": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    ]
+   },
+   {
+    "type": "web_search",
+    "external_web_access": false
+   }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "reasoning": {
+   "effort": "medium"
+  },
+  "store": false,
+  "stream": true,
+  "include": [
+   "reasoning.encrypted_content"
+  ],
+  "prompt_cache_key": "01a0de5a-0000-7000-8000-00000000c0de",
+  "client_metadata": {
+   "x-codex-installation-id": "00000000-0000-4000-8000-000000000000"
+  }
+ },
+ "expect": {
+  "accepted": true,
+  "utility": {
+   "utility": false
+  },
+  "session": {
+   "source": "prompt_cache_key"
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "accepted": "a 400 on the namespace tool would end every Codex session (docs/HARNESS-RESPONSES.md s7 P0)"
+ }
+}

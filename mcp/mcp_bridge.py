@@ -33,7 +33,8 @@ USAGE (in the client's MCP config, on the REMOTE machine)
       "mcpServers": {
         "code-search": {
           "command": "python",
-          "args": ["mcp_bridge.py", "--url", "ws://ai.thejustinwalsh.me:1236/mcp"]
+          "args": ["mcp_bridge.py", "--url", "http://ai.thejustinwalsh.me:1235/mcp"],
+          "env": {"YAMADORI_API_KEY": "${YAMADORI_API_KEY}"}
         }
       }
     }
@@ -42,7 +43,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import urllib.error
 import urllib.request
 
 
@@ -58,7 +61,13 @@ def emit(obj: dict) -> None:
     sys.stdout.flush()
 
 
-def run_http(url: str) -> None:
+def auth_headers(key: str) -> dict:
+    """The account key as the MCP spec's Bearer header -- the only place the
+    tools API accepts it (never the query string). Empty without a key."""
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
+def run_http(url: str, key: str = "") -> None:
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -69,7 +78,9 @@ def run_http(url: str) -> None:
             continue
         try:
             r = urllib.request.Request(url, data=line.encode(),
-                                       headers={"Content-Type": "application/json"})
+                                       headers={"Content-Type": "application/json",
+                                                "Accept": "application/json, text/event-stream",
+                                                **auth_headers(key)})
             with urllib.request.urlopen(r, timeout=3600) as resp:
                 if resp.status == 202:      # notification: no reply is correct
                     continue
@@ -79,17 +90,33 @@ def run_http(url: str) -> None:
         except Exception as e:                      # noqa: BLE001
             # A transport failure must still answer the client, or it hangs
             # forever waiting on a response that will never come.
+            msg = f"bridge: {e}"
+            if isinstance(e, urllib.error.HTTPError) and e.code in (401, 403):
+                msg = (f"bridge: HTTP {e.code} from {url}: the tools API needs "
+                       f"an account key (YAMADORI_API_KEY or --key-file) and "
+                       f"no browser Origin")
             if req.get("id") is not None:
                 emit({"jsonrpc": "2.0", "id": req["id"],
-                      "error": {"code": -32000, "message": f"bridge: {e}"}})
+                      "error": {"code": -32000, "message": msg}})
 
 
-def run_ws(url: str) -> None:
-    import asyncio
+def _ws_connect(url: str, key: str):
+    """websockets.connect with the key header: `additional_headers` since
+    websockets 14 (the new asyncio client), `extra_headers` before it. By
+    version, not by TypeError: the legacy client passes unknown keywords on
+    to create_connection and only fails once connecting."""
     import websockets
+    major = int(str(websockets.__version__).split(".")[0])
+    name = "additional_headers" if major >= 14 else "extra_headers"
+    return websockets.connect(url, max_size=32 * 1024 * 1024,
+                              **{name: auth_headers(key)})
+
+
+def run_ws(url: str, key: str = "") -> None:
+    import asyncio
 
     async def main() -> None:
-        async with websockets.connect(url, max_size=32 * 1024 * 1024) as ws:
+        async with _ws_connect(url, key) as ws:
             log(f"connected {url}")
             loop = asyncio.get_running_loop()
             pending: set = set()          # request ids still awaiting a reply
@@ -150,11 +177,21 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--url", required=True,
                     help="ws://host:1236/mcp  or  http://host:1235/mcp")
+    ap.add_argument("--key-file", default="",
+                    help="a file holding the account key (else the "
+                         "YAMADORI_API_KEY environment variable)")
     a = ap.parse_args()
+    key = os.environ.get("YAMADORI_API_KEY", "").strip()
+    if a.key_file:
+        with open(a.key_file, encoding="utf-8") as f:
+            key = f.read().strip()
+    if not key:
+        log("no account key (YAMADORI_API_KEY or --key-file): the tools API "
+            "will answer 401")
     if a.url.startswith(("ws://", "wss://")):
-        run_ws(a.url)
+        run_ws(a.url, key)
     elif a.url.startswith(("http://", "https://")):
-        run_http(a.url)
+        run_http(a.url, key)
     else:
         log("url must start with ws://, wss://, http:// or https://")
         sys.exit(2)

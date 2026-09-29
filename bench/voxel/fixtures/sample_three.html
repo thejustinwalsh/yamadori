@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>voxel check fixture</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#87ceeb}</style>
+<!-- A tiny, hand-written fixture for bench/voxel (not a model output): three.js
+     from a CDN, 400 InstancedMesh voxels in 4 colours, 1 plain box mesh,
+     OrbitControls. Known answers: voxels 401, instanced_meshes 1,
+     box_instances 400, box_meshes 1, instance_colors 4. -->
+<script type="importmap">
+{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+             "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 500);
+camera.position.set(25, 20, 25);
+const controls = new OrbitControls(camera, renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445544, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(10, 20, 5);
+scene.add(sun);
+const colours = [0xff88aa, 0x55aa44, 0x886644, 0xdddddd].map(c => new THREE.Color(c));
+const box = new THREE.BoxGeometry(1, 1, 1);
+const grid = new THREE.InstancedMesh(box, new THREE.MeshLambertMaterial(), 400);
+const m = new THREE.Matrix4();
+for (let i = 0; i < 400; i++) {
+  const x = i % 20 - 10, z = Math.floor(i / 20) - 10;
+  m.makeTranslation(x, Math.floor(Math.random() * 3), z);
+  grid.setMatrixAt(i, m);
+  grid.setColorAt(i, colours[i % 4]);
+}
+scene.add(grid);
+const pagoda = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 2), new THREE.MeshLambertMaterial({color: 0xcc3333}));
+pagoda.position.set(0, 5, 0);
+scene.add(pagoda);
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>

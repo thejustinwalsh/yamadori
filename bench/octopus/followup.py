@@ -3,6 +3,14 @@
 grade (grade.py's row). No model writes it; the same grade gives the same
 text, byte for byte.
 
+NOT USED (operator decision, 2026-09-26): a follow-up built from the grader's
+failed checks leaks the answer key, and some of its items were false
+(grader defects, SELF-IMPROVEMENT-LOG #57, #62). The grader is a measurement
+instrument only; prompt 1 (single-shot) is the headline. run.py refuses
+--iterative without --allow-graded-followups, and every grade of a prompt
+n >= 2 is labelled "assisted: graded follow-up" (grade.ASSISTED; older rows in
+results/grade_annotations.jsonl). Kept for reproducing those runs.
+
     python bench/octopus/followup.py GRADE_ID     # print the follow-up for a grade
 
 Why: the prompt's author needed about six prompts on his earlier 9B run
@@ -87,7 +95,8 @@ def _dedup(msgs: list[str], n: int) -> list[str]:
 def build(variant: str, row: dict) -> str:
     items: list[str] = []
     b = row.get("build") or {}
-    ts = variants.VARIANTS[variant]["ts"]
+    # V4 (ts None): whatever the model built -- the npm steps when it ran them
+    ts = variants.VARIANTS[variant]["ts"] or bool(b.get("npm_install"))
     if row.get("project") is None:
         items.append("There is no index.html in /workspace: the project was not created "
                      "(expected /workspace/space-shooter/).")

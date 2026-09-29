@@ -150,6 +150,24 @@ describe('KV pool split', () => {
     expect(out).toContain('(DERIVED)');
     expect(host!.querySelector('[role="img"]')!.children.length).toBe(3); // main + 1 helper + reserve
   });
+
+  it('names the cap layout: main is the VRAM line, the child its own, the rest a second conversation (2026-09-28)', () => {
+    const out = mount(
+      createElement(KvPanel, {
+        v: vit({ pool: 262144, main: 141824, helper: 65536, helpers: 1, reserve: 54784, gib: 11, layout: 'cap', cap_source: 'YAMADORI_MAIN_CAP', vram_line: 141824 }),
+        failure: null,
+      }),
+    );
+    expect(out).toContain('CAP LAYOUT');
+    expect(out).toContain('MAIN · VRAM LINE');
+    expect(out).toContain('CHILD · DEEP THINKING');
+    expect(out).toContain('SECOND CONVERSATION');
+    expect(out).not.toContain('RESERVE');
+    expect(out).toContain('YAMADORI_MAIN_CAP');
+    expect(out).toContain('served VRAM line 141,824 cells');
+    const bar = host!.querySelector('[role="img"]')!;
+    expect(bar.getAttribute('aria-label')).toContain('main 141,824 (the VRAM line), child 65,536, second conversation 54,784');
+  });
 });
 
 describe('tier strata', () => {

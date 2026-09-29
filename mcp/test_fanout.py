@@ -7,8 +7,8 @@ WHAT THIS IS GATING
      original answer is A; the helper writes B under admission.helper_lane()
      with the helper's whole 3/8 (share_n=1); the two are GRADED:
        - exactly one parses              -> it wins, 2 steps
-       - both parse, similarity >= AGREE -> A wins, 2 steps
-       - otherwise                       -> the tie-breaker C, whose prompt
+       - otherwise (both parse, or none) -> the tie-breaker C, whose prompt
+         (the AGREE 0.80 stop was removed 2026-09-27, CONSTANTS-AUDIT)
          carries the task, both candidates' code and each one's check result
      At most one helper context is ever live, even across requests.
   2. EVERY second-brain run carries a fresh concept seed in its user turn
@@ -17,8 +17,8 @@ WHAT THIS IS GATING
      record, and concept_seed.record() updates the dashboard's last seed.
   3. A prose answer keeps the original: B runs, the vote is recorded only.
   4. A helper lane that never comes free is recorded, skipped: "helper busy".
-  5. NO VOTES IS NOT DISAGREEMENT (docs/SELECTION-BUILD.md harm 2), and
-     observed disagreement is still reported.
+  5. NO VOTES IS NOT DISAGREEMENT (docs/SELECTION-BUILD.md harm 2); observed
+     disagreement is recorded (the dissent note was removed 2026-09-27).
   6. A CODE answer is not picked by length: the medoid of the parsing
      candidates (fanout.consensus), the tie-breaker preferred on a tie;
      nothing parsing falls back, flagged; candidate code is never executed.
@@ -60,6 +60,14 @@ import tiers  # noqa: E402
 
 # budget.pool_size() would ask the live server. Pinned to the shipped `-c`.
 budget._POOL = 147456
+# This suite tests the budget MECHANICS, so it pins the split it was
+# written against (5/8 + 3/8) and turns the standing thinking caps off;
+# mcp/test_budget.py checks the shipped split, test_tiers the caps.
+import budget as _budget_pin  # noqa: E402
+import tiers as _tiers_pin  # noqa: E402
+_budget_pin.MAIN_SHARE, _budget_pin.HELPER_SHARE = 0.625, 0.375
+_budget_pin.HELPER_TOKENS = 0
+_tiers_pin.HELPER_THINKING, _tiers_pin.JOB_THINKING = 0, {}
 tiers._accepted = tiers.FALLBACK_EFFORTS     # no network for the template
 
 _results: list[tuple[bool, str, str]] = []
@@ -223,21 +231,21 @@ def test_a_clear_winner_stops_at_two():
           "per candidate: role, parses, error count",
           json.dumps(rows)[:400])
 
-    # Both parse and agree (a renamed copy): the main brain's answer stays.
-    upstream(fenced(LOOP_B))
+    # Both parse (a renamed copy): the check does not separate them, so the
+    # tie-breaker runs. The "agreement" stop at similarity >= AGREE 0.80
+    # was REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md: an invented number).
+    upstream(fenced(LOOP_B), fenced(LOOP_B, prose="Fixed:"))
     v = fanout.run(PAYLOAD, original=original(fenced(LOOP_A)), n=3)
-    check(len(_seen) == 1 and v["steps"] == 2
-          and v["stop_reason"] == "clear: agreement"
-          and _winner(v) == "original"
-          and v["similarity_ab"] >= fanout.AGREE,
-          "both parse and agree: A wins at two steps",
+    check(len(_seen) == 2 and v["steps"] == 3
+          and v["stop_reason"] == "tie-breaker: both parse"
+          and not hasattr(fanout, "AGREE"),
+          "both parse, however similar: the tie-breaker runs (no AGREE stop)",
           f"{len(_seen)} {v.get('stop_reason')} {v.get('similarity_ab')}")
-    check(fanout.AGREE == 0.80, "AGREE is the documented 0.80 choice")
 
     # And through the proxy: B's code REPLACES nothing yet (that is
     # complete()'s job) but _delivers_winner says it would.
     upstream(fenced(LOOP_B))
-    note, rec, win = proxy._fan_out(dict(PAYLOAD, _selection={"fanout_n": 3}),
+    rec, win = proxy._fan_out(dict(PAYLOAD, _selection={"fanout_n": 3}),
                                     {"content": fenced(BROKEN)}, "stop")
     check(rec["mode"] == "sequential" and rec["steps"] == 2
           and rec["winner"] == "direct" and rec["n"] == 2
@@ -250,11 +258,10 @@ def test_disagreement_runs_the_tiebreaker_with_both_candidates():
     upstream(fenced(OUTLIER), fenced(LOOP_B, prose="Fixed:"))
     v = fanout.run(PAYLOAD, original=original(fenced(LOOP_A)), n=3)
     check(len(_seen) == 2 and v["steps"] == 3
-          and v["stop_reason"].startswith("tie-breaker: both parse but "
-                                          "disagree"),
-          "both parse, similarity below AGREE: the tie-breaker runs",
+          and v["stop_reason"] == "tie-breaker: both parse",
+          "both parse, far apart: the tie-breaker runs",
           f"{len(_seen)} {v.get('stop_reason')} {v.get('similarity_ab')}")
-    check(v["similarity_ab"] is not None and v["similarity_ab"] < fanout.AGREE,
+    check(v["similarity_ab"] is not None and v["similarity_ab"] < 0.5,
           "the A-B similarity is recorded", str(v.get("similarity_ab")))
     prompt = last_user(_seen[1]) if len(_seen) > 1 else ""
     check(TASK in prompt and "total = 0" in prompt
@@ -262,8 +269,8 @@ def test_disagreement_runs_the_tiebreaker_with_both_candidates():
           "C's prompt carries the task and BOTH candidates' code",
           prompt[:600])
     check(prompt.count("parses; no syntax errors") == 2
-          and "disagree" in prompt,
-          "and each one's check result, and that they disagree",
+          and "Both parse" in prompt,
+          "and each one's check result, and that both parse",
           prompt[:900])
     check([c["variant"] for c in v["candidates"]]
           == ["original", "direct", "tiebreak"]
@@ -334,7 +341,7 @@ def test_a_busy_helper_lane_is_recorded_not_raised():
     saved = fanout.LANE_WAIT
     fanout.LANE_WAIT = 0.2
     try:
-        note, rec, win = proxy._fan_out(
+        rec, win = proxy._fan_out(
             dict(PAYLOAD, _selection={"fanout_n": 3}),
             {"content": fenced(BROKEN)}, "stop")
     finally:
@@ -382,7 +389,7 @@ def test_the_budget_is_the_helpers_whole_share():
 
 def test_every_second_brain_run_carries_a_distinct_seed():
     upstream(fenced(OUTLIER), fenced(LOOP_B))
-    note, rec, win = proxy._fan_out(dict(PAYLOAD, _selection={"fanout_n": 3}),
+    rec, win = proxy._fan_out(dict(PAYLOAD, _selection={"fanout_n": 3}),
                                     {"content": fenced(LOOP_A)}, "stop")
     phr = [next((w for w in _WORDS if f"Inspiration word: {w}"
                  in last_user(b)), None) for b in _seen]
@@ -417,9 +424,11 @@ def test_every_second_brain_run_carries_a_distinct_seed():
         shomen._post = saved
     word = ((rec_dt or {}).get("seed") or {}).get("word")
     first = last_user(sent[0]) if sent else ""
-    check(word and f"Inspiration word: {word}" in first
+    # #52: the research jobs frame the word as random, not a clue.
+    check(word and shomen.SEED_LINE_RESEARCH.format(word=word) in first
           and word not in phr,
-          "a deep-thinking run carries its own seed in the user turn",
+          "a deep-thinking run carries its own seed in the user turn, in "
+          "the research frame",
           f"{word} {first[-120:]}")
     check((rec_dt or {}).get("seed", {}).get("u32")
           == concept_seed.encode(word or ""),
@@ -429,7 +438,7 @@ def test_every_second_brain_run_carries_a_distinct_seed():
 
 def test_prose_keeps_the_original():
     upstream("It is src/b.ts")
-    note, rec, win = proxy._fan_out(dict(PAYLOAD, _selection={"fanout_n": 3}),
+    rec, win = proxy._fan_out(dict(PAYLOAD, _selection={"fanout_n": 3}),
                                     {"content": "It is in src/a.ts"}, "stop")
     check(len(_seen) == 1 and rec["steps"] == 2
           and rec["selection"] == "path_consensus"
@@ -438,9 +447,9 @@ def test_prose_keeps_the_original():
           f"{len(_seen)} {json.dumps(rec)[:300]}")
     check(not proxy._delivers_winner(rec, win),
           "and the original is what is delivered")
-    check("unsettled" in note and rec["votes"] == 2,
-          "observed disagreement between A and B is still noted",
-          repr(note))
+    check(rec["votes"] == 2 and "dissent_noted" not in rec,
+          "observed disagreement is recorded (votes), no dissent note is "
+          "appended (removed, CONSTANTS-AUDIT)", json.dumps(rec)[:300])
 
 
 def test_the_proxy_helper_gates():
@@ -455,16 +464,16 @@ def test_the_proxy_helper_gates():
                          "stop"), "a hand-off of client tool calls"),
                        ((payload(3), {"content": "  "}, "stop"),
                         "an empty answer")):
-        note, rec, win = proxy._fan_out(*args)
+        rec, win = proxy._fan_out(*args)
         check(rec is None and not _seen, f"{name}: nothing runs",
               str(len(_seen)))
     saved = fanout.run
     fanout.run = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
     try:
-        note, rec, win = proxy._fan_out(payload(3), msg, "stop")
+        rec, win = proxy._fan_out(payload(3), msg, "stop")
     finally:
         fanout.run = saved
-    check(note == "" and rec and rec.get("error") == "RuntimeError",
+    check(rec and rec.get("error") == "RuntimeError",
           "fan-out that raises: answered once, the error recorded",
           json.dumps(rec))
 
@@ -531,20 +540,24 @@ def test_no_votes_is_not_disagreement():
     check(v["votes"] == 0 and v["path_votes"] == {} and v["agreement"] is None,
           "no file named: no vote cast, agreement None", json.dumps(
               {"votes": v["votes"], "agreement": v["agreement"]}))
-    check(fanout.dissent_note(v) == "", "and no dissent note is written")
+    check(not hasattr(fanout, "dissent_note"),
+          "and there is no dissent note to write (removed, CONSTANTS-AUDIT)")
 
 
 def test_observed_disagreement_is_still_reported():
     v = fanout.consensus(cands(direct="It is in src/a.ts",
                                evidence="See src/b.ts line 4",
                                skeptical="Probably src/c.ts"))
-    note = fanout.dissent_note(v)
-    check(v["agreement"] == 0.33 and "unsettled" in note and "33%" in note,
-          "three files, one vote each: reported", repr(note))
+    # The dissent note was REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md: an
+    # invented 0.75 threshold appending text to the answer). The agreement
+    # is still computed and recorded.
+    check(v["agreement"] == 0.33,
+          "three files, one vote each: agreement recorded",
+          str(v["agreement"]))
     v = fanout.consensus(cands(direct="src/a.ts defines it",
                                evidence="src/a.ts, `sizeKvPool`",
                                skeptical="src/a.ts", terse="src/b.ts"))
-    check(v["agreement"] == 0.75 and fanout.dissent_note(v) == ""
+    check(v["agreement"] == 0.75
           and _winner(v) == "evidence" and v["winner"]["seed"] == "s-evidence",
           "three of four agree: no note; the most-agreed answer wins, whole",
           f"{v['agreement']} {_winner(v)}")
@@ -894,11 +907,11 @@ def test_the_hand_back_names_only_what_differs():
         {"content": " ".join(f"Point {i} names widget{i} gadget{i} "
                              f"sprocket{i} flange{i} bracket{i}."
                              for i in range(20))}]})
-    check(long and long["text"].count("\n- ") + 1
-          <= fanout.ALT_MAX_POINTS + 1
-          and len(long["text"]) <= fanout.ALT_MAX_CHARS + 120
-          and "more points not shown" in long["text"],
-          "prose hand-back is capped, and says so", long["text"][-160:])
+    check(long and long["text"].count("\n- ") + 1 == 20
+          and "more points not shown" not in long["text"]
+          and not hasattr(fanout, "ALT_MAX_CHARS"),
+          "prose hand-back is not cut: every differing point crosses "
+          "(caps removed, CONSTANTS-AUDIT)", long["text"][-160:])
 
 
 TESTS.append(test_the_hand_back_names_only_what_differs)

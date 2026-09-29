@@ -114,9 +114,11 @@ def read(session: str | None = None, limit: int = 60, kind: str = "") -> str:
                 f"Read without the kind filter to see them. Kinds: "
                 f"{', '.join(KINDS)}.")
     if not rows:
+        # The situation only (docs/CONSTANTS-AUDIT.md, 2026-09-27): the
+        # "record it now" instruction that followed was steering text with
+        # no operator decision or measurement behind it.
         return (f"No entries for session {s!r}. Nothing has been recorded yet, "
-                f"which is not the same as nothing having been done -- if you "
-                f"have already worked in this session, record it now.")
+                f"which is not the same as nothing having been done.")
 
     rows = list(reversed(rows))
     out = [f"WORK LOG -- session {s!r}, {total} entries"
@@ -125,7 +127,7 @@ def read(session: str | None = None, limit: int = 60, kind: str = "") -> str:
     checks = [r for r in rows if r[2] == "check"]
     if checks:
         out.append("")
-        out.append("CHECKS RUN -- this is the evidence work actually landed:")
+        out.append("CHECKS RUN:")
         for _id, _ts, _k, summary, _d, outcome in checks:
             mark = {"pass": "PASS", "fail": "FAIL"}.get(outcome.lower(), outcome or "?")
             out.append(f"  [{mark}] {summary}")
@@ -143,9 +145,11 @@ def read(session: str | None = None, limit: int = 60, kind: str = "") -> str:
             first = detail.splitlines()[0][:140]
             out.append(f"       {first}")
 
-    out.append("")
-    out.append("Work listed above is DONE. Do not redo it. If you believe an "
-               "entry is wrong, verify it with a check rather than repeating it.")
+    # The closing instruction ("Work listed above is DONE. Do not redo it.
+    # ...") was REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): a prohibition
+    # re-injected into main after every compaction, with no operator decision
+    # or measurement behind it. The log states what was recorded; nothing
+    # more.
     return "\n".join(out)
 
 

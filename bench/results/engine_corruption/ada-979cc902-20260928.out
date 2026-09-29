@@ -1,0 +1,47 @@
+[05:21:17] waiting: test suites running: 14008 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_skill_factory.py
+[05:21:50] [kvplace] attempt 1: unload bonsai: HTTP 200 OK
+[05:21:53] [kvplace] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[05:21:53] [kvplace] start: C:/Users/jwals/engines/llama-bonsai2-ada-979cc902/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1'}
+[05:22:05] [kvplace] loaded in 9.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 51880, C:\Users\jwals\engines\llama-bonsai2-ada-979cc902\src\build\bin\llama-server.exe; build b10743-adfffbe41
+[05:22:11] [kvplace] greedy ts rep0: n=425 84.55 tok/s acc 261/326 finish=stop symptom=[]
+[05:22:18] [kvplace] greedy bash rep0: n=512 80.93 tok/s acc 306/409 finish=length symptom=[]
+[05:22:23] [kvplace] greedy prose rep0: n=344 68.00 tok/s acc 181/328 finish=stop symptom=[]
+[05:22:28] [kvplace] greedy ts rep1: n=417 84.42 tok/s acc 257/318 finish=stop symptom=[]
+[05:22:35] [kvplace] greedy bash rep1: n=512 80.14 tok/s acc 305/411 finish=length symptom=[]
+[05:22:42] [kvplace] greedy prose rep1: n=461 68.82 tok/s acc 245/430 finish=stop symptom=[]
+[05:22:47] [kvplace] greedy ts rep2: n=404 81.51 tok/s acc 245/318 finish=stop symptom=[]
+[05:22:54] [kvplace] greedy bash rep2: n=512 78.58 tok/s acc 303/414 finish=length symptom=[]
+[05:23:00] [kvplace] greedy prose rep2: n=395 66.21 tok/s acc 205/382 finish=stop symptom=[]
+[05:23:12] [kvplace] plain 0: finish=stop n=768 think=1350c answer=2229c symptom=[] punct=[] words=[]
+[05:23:25] [kvplace] plain 1: finish=stop n=813 think=821c answer=2909c symptom=[] punct=[] words=[]
+[05:23:39] [kvplace] plain 2: finish=stop n=808 think=1404c answer=2396c symptom=[] punct=[] words=[]
+[05:23:54] [kvplace] plain 3: finish=stop n=920 think=873c answer=3461c symptom=[] punct=[] words=[]
+[05:24:09] [kvplace] plain 4: finish=stop n=941 think=2117c answer=2477c symptom=[] punct=[] words=[]
+[05:24:23] [kvplace] plain 5: finish=stop n=914 think=1213c answer=3091c symptom=[] punct=[] words=[]
+[05:24:39] [kvplace] plain 6: finish=stop n=1145 think=3385c answer=1999c symptom=[] punct=[] words=[]
+[05:24:50] [kvplace] plain 7: finish=stop n=708 think=506c answer=2854c symptom=[] punct=[] words=[]
+[05:25:03] [kvplace] plain 8: finish=stop n=777 think=1529c answer=2075c symptom=[] punct=[] words=[]
+[05:25:13] [kvplace] plain 9: finish=stop n=568 think=465c answer=2237c symptom=[] punct=[] words=[]
+[05:25:31] [kvplace] plain 10: finish=stop n=1181 think=3434c answer=2121c symptom=[] punct=[] words=[]
+[05:25:43] [kvplace] plain 11: finish=stop n=699 think=737c answer=2649c symptom=[] punct=[] words=[]
+[05:26:02] [kvplace] plain 12: finish=stop n=1155 think=3587c answer=1836c symptom=[] punct=[] words=[]
+[05:26:14] [kvplace] plain 13: finish=stop n=737 think=669c answer=2732c symptom=[] punct=[] words=[]
+[05:26:23] [kvplace] plain 14: finish=stop n=552 think=739c answer=1937c symptom=[] punct=[] words=[]
+[05:26:37] [kvplace] plain 15: finish=stop n=887 think=1656c answer=2409c symptom=[] punct=[] words=[]
+[05:26:39] [kvplace] tool 0: ok=True [('find_definition_opt', '{"symbol":"apply_budget"}')] finish=tool_calls symptom=[]
+[05:26:40] [kvplace] tool 1: ok=True [('read_file_range', '{"path":"mcp/proxy.py","start":10,"end":40}')] finish=tool_calls symptom=[]
+[05:26:40] [kvplace] tool 2: ok=True [('find_definition_opt', '{"symbol":"SessionStore"}')] finish=tool_calls symptom=[]
+[05:26:42] [kvplace] tool 3: ok=True [('read_file_range', '{"path":"README.md","start":1,"end":20}')] finish=tool_calls symptom=[]
+[05:26:43] [kvplace] tool 4: ok=True [('find_definition_opt', '{"symbol":"run_check"}')] finish=tool_calls symptom=[]
+[05:26:43] [kvplace] tool 5: ok=True [('find_definition_opt', '{"symbol":"apply_budget"}')] finish=tool_calls symptom=[]
+[05:26:45] [kvplace] tool 6: ok=True [('read_file_range', '{"path":"mcp/proxy.py","start":10,"end":40}')] finish=tool_calls symptom=[]
+[05:26:46] [kvplace] tool 7: ok=True [('find_definition_opt', '{"symbol":"SessionStore"}')] finish=tool_calls symptom=[]
+[05:26:47] [kvplace] tool 8: ok=True [('read_file_range', '{"path":"README.md","start":1,"end":20}')] finish=tool_calls symptom=[]
+[05:26:48] [kvplace] tool 9: ok=True [('find_definition_opt', '{"symbol":"run_check"}')] finish=tool_calls symptom=[]
+[05:26:50] [kvplace] vision 0: ok=True finish=stop prompt_n=104 content='left=red, right=blue'
+[05:26:51] [kvplace] vision 1: ok=True finish=stop prompt_n=4 content='left=red, right=blue'
+[05:26:53] [kvplace] stopped; min free 993 MiB
+[05:27:05] restore: {'lane_resumed': True, 'reload_s': 12.4, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+| arm | greedy decode tok/s median (min-max), n | greedy reps 1..n identical | plain: with `!!!!`/`////` | plain: 10+ `!`/`/` | plain: 6+ punct run | plain: 5x word | plain finish | tools valid | error |
+|---|---|---|---|---|---|---|---|---|---|
+| kvplace | 80.14 (66.21-84.55), n=9 | ts NO, bash NO, prose NO | 0/16 | 0/16 | 0/16 | 0/16 | {'stop': 16} | 10/10 |  |

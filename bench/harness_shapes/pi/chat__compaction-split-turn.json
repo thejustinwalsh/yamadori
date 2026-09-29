@@ -1,0 +1,56 @@
+{
+ "id": "pi/chat/compaction-split-turn",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "chat",
+ "source": "relay.jsonl #35 (captured shape): '# Conversation' ... '# Instructions' (compaction.js:751); records synthetic",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "store": false,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_completion_tokens": 8192,
+  "reasoning_effort": "low",
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary."
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "# Conversation\n[User]: Change hello to howdy.\n\n[Assistant thinking]: One edit.\n\n[Assistant tool calls]: edit(path=hello.py, edits=...)\n\n[Tool result]: Successfully replaced 1 block(s) in hello.py.\n\n# Instructions\nThe messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.\n\n[... Pi's prompt trimmed ...]"
+     }
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "accepted": true,
+  "route": "utility",
+  "utility": {
+   "utility": true,
+   "kind": "compaction"
+  },
+  "compaction": {
+   "harness": "pi",
+   "records_min": 2
+  },
+  "session": {
+   "source": null
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "compaction": "Pi's split-turn prefix summary"
+ }
+}

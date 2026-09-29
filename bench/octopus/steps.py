@@ -36,7 +36,7 @@ def steps(run_id: str) -> list[dict]:
     path = os.path.join(runmod.LOGS_DIR, run_id, "relay.jsonl")
     rows = [json.loads(ln) for ln in open(path, encoding="utf-8") if ln.strip()]
     posts = [r for r in rows if r.get("method") == "POST"
-             and r.get("path", "").endswith("/chat/completions")]
+             and r.get("path", "").endswith(("/chat/completions", "/responses"))]
     t0 = posts[0]["t0"] if posts else 0
     out = []
     for i, r in enumerate(posts, 1):

@@ -63,6 +63,10 @@ os.environ["CONCEPT_SEED_LAST"] = os.path.join(_TMP, "seed_last.json")
 
 import code_check as cc  # noqa: E402
 import tiers  # noqa: E402
+import served_fixture  # noqa: E402
+# The served model's /props, pinned (mcp/served_fixture.py): budget and
+# tiers would otherwise ask the live stack (llama-swap reloads `bonsai`).
+served_fixture.pin()
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -932,7 +936,6 @@ def test_the_tool_answers_every_call():
 import proxy  # noqa: E402
 import shomen  # noqa: E402
 
-proxy.PREAMBLE = False
 BONSAI = {"retrieval": False, "hints": False, "investigate": False,
           "fanout": 1, "effort": "medium"}
 LCB_PROMPT = ("You are given an integer array nums. Return the number of "
@@ -1109,6 +1112,10 @@ def run_complete(script: list[dict], header: dict,
     return proxy.complete({
         "model": "yamadori", "_client_ip": "127.0.0.1",
         "_features": json.dumps(header),
+        # A client that names its conversation (X-Yamadori-Session): these
+        # checks read the answer exactly, and a new conversation with no id
+        # would open it with our session line (#41, mcp/test_sessions.py).
+        "_session_token": "code-check-suite",
         "messages": [{"role": "user",
                       "content": completion_question(HEADER_PREFIX)}]})
 
@@ -1223,6 +1230,7 @@ def test_repair_on_the_streamed_path():
     events = []
     for b in proxy.stream_body({
             "model": "yamadori", "stream": True, "_client_ip": "127.0.0.1",
+            "_session_token": "code-check-suite",
             "_features": json.dumps(dict(BONSAI, repair=True)),
             "messages": [{"role": "user",
                           "content": completion_question(HEADER_PREFIX)}]},

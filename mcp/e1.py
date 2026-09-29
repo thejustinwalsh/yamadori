@@ -14,7 +14,8 @@ with this module's own trainer).
                    labels Laya's head used (bench/laya_routing_labels*.jsonl).
     escalate       struggle: escalate now, or continue. UNTRAINED: labelled
                    from deep_decisions outcomes as they accumulate.
-    kickoff        a new task: plan it first, or act. UNTRAINED, same source.
+    (kickoff -- plan a new task first, or act -- was removed 2026-09-27,
+    untrained: every new task is planned, operator.)
     skill_applies  does this armed skill apply to the request? UNTRAINED:
                    labelled from skill_learn's fallback records
                    (index/skills/router_labels.jsonl).
@@ -27,7 +28,7 @@ ONE EMBEDDING PER REQUEST. Every head reads the same vector: the embedding of
 `render(question, context)` -- the route_in state, byte for byte what Laya's
 trainer rendered (laya_head.render_state), with the retrieval query
 instruction code_search.embed prepends. Heads that need more than the text
-append their own small scalar features (the struggle counts, the spec size);
+append their own small scalar features (the struggle counts);
 skill_applies reads the product of the request and skill vectors. The
 feature contract (embedding model, instruction, render revision, extras) is
 stored in each artefact and checked before serving: a head fitted on one
@@ -121,12 +122,6 @@ HEADS: dict[str, dict] = {
         "rule": "deep.py: struggle signals >= struggle_threshold",
         "what": "is the agent stuck enough to escalate now?",
     },
-    "kickoff": {
-        "labels": ["plan", "act"],
-        "extra": ["log_tokens"],
-        "rule": "deep.py: a new task whose spec is >= kickoff_tokens",
-        "what": "should this new task be planned by the second brain?",
-    },
     "skill_applies": {
         "labels": ["applies", "not_applies"],
         "extra": [],
@@ -146,7 +141,7 @@ def enabled() -> bool:
 def laya_allowed() -> bool:
     """False when E1 is on: every Laya caller on the request path checks
     this first (selection.laya_signal, skill_select.laya_pick,
-    shomen._laya, fanout._choice_averaged)."""
+    fanout._choice_averaged; shomen's Laya call was deleted 2026-09-27)."""
     return not enabled()
 
 
@@ -733,6 +728,18 @@ def gold_heldout_rows() -> list[dict]:
 # "helped") is not used. CHOICES, stated in docs/E1.md.
 def _deep_label(head: str, r: dict) -> str | None:
     lab, ran, trig = r.get("label"), bool(r.get("ran")), r.get("trigger")
+    # A run labelled under the old rule (deep.LABEL_RULE, #52: `helped`
+    # needed no project change) is not learned from; `no_effect` reads as
+    # `wasted` (the run did not help).
+    if ran:
+        try:
+            import deep
+            if int(r.get("label_rule") or 0) < deep.LABEL_RULE:
+                return None
+        except Exception:                                        # noqa: BLE001
+            return None
+        if lab == "no_effect":
+            lab = "wasted"
     try:
         sig = json.loads(r.get("signals") or "{}")
     except ValueError:
@@ -745,15 +752,6 @@ def _deep_label(head: str, r: dict) -> str | None:
         if not ran:
             return {"missed": "escalate", "escalated_later": "escalate",
                     "fine": "continue"}.get(lab)
-        return None
-    if head == "kickoff":
-        if not (sig.get("kickoff") or {}).get("new_task"):
-            return None
-        if ran and trig == "kickoff":
-            return {"helped": "plan", "wasted": "act"}.get(lab)
-        if not ran:
-            return {"missed": "plan", "escalated_later": "plan",
-                    "fine": "act"}.get(lab)
         return None
     if head == "route_in":
         if r.get("route") not in ("library_question", "prose"):
@@ -775,9 +773,6 @@ def _deep_extra(head: str, r: dict) -> dict:
         st = sig.get("struggle") or {}
         kinds = st.get("kinds") or {}
         return dict({"struggle_count": st.get("count") or 0}, **kinds)
-    if head == "kickoff":
-        ko = sig.get("kickoff") or {}
-        return {"log_tokens": math.log1p(float(ko.get("tokens") or 0))}
     return {}
 
 
@@ -785,8 +780,6 @@ def _deep_rule(head: str, r: dict) -> str:
     trig = r.get("trigger")
     if head == "escalate":
         return "escalate" if trig == "struggle" else "continue"
-    if head == "kickoff":
-        return "plan" if trig == "kickoff" else "act"
     return "investigate" if r.get("fired") else "answer_directly"
 
 

@@ -1,0 +1,296 @@
+{
+ "id": "opencode/chat/read-image-synthetic-turn",
+ "harness": "opencode",
+ "harness_version": "opencode-ai 1.18.32",
+ "wire": "chat",
+ "source": "relay.2.jsonl #6 (captured): read of a png, tool text 'Image read successfully', then the synthetic user turn 'Attached media from tool result:' + image_url; image synthetic",
+ "headers": {
+  "x-session-affinity": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "x-session-id": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "user-agent": "opencode/1.18.32 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_tokens": 26419,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.\n\n[... OpenCode system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": "Open square.png with your read tool and tell me its colour."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_ec111a7b64fe_00000004",
+      "type": "function",
+      "function": {
+       "name": "read",
+       "arguments": "{\"filePath\": \"C:\\\\work\\\\project\\\\square.png\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_ec111a7b64fe_00000004",
+    "content": "Image read successfully"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "Attached media from tool result:"
+     },
+     {
+      "type": "image_url",
+      "image_url": {
+       "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR4nGNgYPiPAw0pCQCpcD/BFMrqcwAAAABJRU5ErkJggg=="
+      }
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "bash",
+     "description": "(bash: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "timeout": {
+        "type": "integer"
+       },
+       "workdir": {
+        "type": "string"
+       },
+       "description": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "(read: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "filePath": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "filePath"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "glob",
+     "description": "(glob: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "grep",
+     "description": "(grep: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "include": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "edit",
+     "description": "(edit: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "filePath": {
+        "type": "string"
+       },
+       "oldString": {
+        "type": "string"
+       },
+       "newString": {
+        "type": "string"
+       },
+       "replaceAll": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "filePath",
+       "oldString",
+       "newString"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write",
+     "description": "(write: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "filePath": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "filePath",
+       "content"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "task",
+     "description": "(task: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "description": {
+        "type": "string"
+       },
+       "prompt": {
+        "type": "string"
+       },
+       "subagent_type": {
+        "type": "string"
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "todowrite",
+     "description": "(todowrite: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "todos": {
+        "type": "array",
+        "items": {
+         "type": "object"
+        }
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skill",
+     "description": "(skill: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     }
+    }
+   }
+  ],
+  "tool_choice": "auto"
+ },
+ "expect": {
+  "accepted": true,
+  "route": "agent_step",
+  "utility": {
+   "utility": false
+  },
+  "image": {
+   "forms": [
+    "tool_media_turn"
+   ]
+  },
+  "deep": {
+   "kickoff": false,
+   "speaking": false
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "route": "the synthetic turn carries a tool result (message-v2.ts:46 SYNTHETIC_ATTACHMENT_PROMPT): a step in the client's loop, not a new request",
+  "deep": "never a kickoff and never the user speaking"
+ }
+}

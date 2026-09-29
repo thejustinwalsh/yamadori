@@ -46,3 +46,14 @@ bench/data/test6.jsonl
 bench/data/LeetCodeDataset-train.jsonl
 # Local rollback copies of the live config.
 config.yaml.bak-*
+
+# Manifest entries for models whose names are not public (docs/MODELS.md).
+models/manifest.local.yaml
+
+# rollback copies written by deploy scripts (privacy scan 2026-09-29: 14 were untracked clutter)
+*.bak-*
+# secrets backstop (privacy scan 2026-09-29): no key/cert/env file belongs in the public repo
+*.key
+*.pem
+.env
+**/.env

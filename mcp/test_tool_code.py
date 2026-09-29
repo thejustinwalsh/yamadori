@@ -63,13 +63,16 @@ import tiers  # noqa: E402
 import tool_code  # noqa: E402
 import proxy  # noqa: E402
 import shomen  # noqa: E402
+import served_fixture  # noqa: E402
+# The served model's /props, pinned (mcp/served_fixture.py): budget and
+# tiers would otherwise ask the live stack (llama-swap reloads `bonsai`).
+served_fixture.pin()
 
 # A pinned concept seed: no 420 MB matrix load, a predictable seed line.
 proxy._draw_seed = lambda prompt=None: {"word": "cedar", "token_id": 1,
                                         "u32": 2, "hex": "0x00000002"}
 
 tiers._accepted = ("low", "medium", "xhigh")
-proxy.PREAMBLE = False
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -148,6 +151,20 @@ TABLE_CASES = [
      ("edit", "a.py")),
     ("OpenCode write(filePath, content)", "write",
      {"filePath": "a.py", "content": BAD_PY}, ("file", "a.py")),
+    # Pi 0.87.1 (docs/HARNESS-PI.md gap 4; dist/core/tools/edit.js:10-21,
+    # write.js:8-11), 2026-09-26: by the TABLE, no longer the shape fallback.
+    ("Pi edit(path, edits[{oldText,newText}])", "edit",
+     {"path": "a.py", "edits": [{"oldText": GOOD_PY, "newText": BAD_PY}]},
+     ("edit", "a.py")),
+    ("Pi edit, edits as a JSON string (prepareEditArguments)", "edit",
+     {"path": "a.py", "edits": json.dumps([{"oldText": GOOD_PY,
+                                            "newText": BAD_PY}])},
+     ("edit", "a.py")),
+    ("Pi edit, legacy top-level oldText/newText", "edit",
+     {"path": "a.py", "oldText": GOOD_PY, "newText": BAD_PY},
+     ("edit", "a.py")),
+    ("Pi write(path, content)", "write",
+     {"path": "a.py", "content": BAD_PY}, ("file", "a.py")),
     ("Codex apply_patch(input)", "apply_patch",
      {"input": "*** Begin Patch\n*** Update File: a.py\n@@\n-def f():\n"
                "+def f(:\n     return 1\n*** End Patch"}, ("edit", "a.py")),
@@ -360,6 +377,11 @@ def body(messages=None, tools=(WRITE_FILE, TERMINAL), header=None,
     b = {"model": "yamadori", "reasoning_effort": effort,
          "_client_ip": "127.0.0.1",
          "_features": json.dumps(HEADER if header is None else header),
+         # A client that names its conversation (X-Yamadori-Session): these
+         # single-turn checks read the notes exactly, and a new conversation
+         # with no id would open its answer with our session line (#41,
+         # gated in mcp/test_sessions.py).
+         "_session_token": "tool-code-suite",
          "messages": list(messages or ASK)}
     if tools:
         b["tools"] = list(tools)
@@ -477,6 +499,14 @@ def test_a_broken_write_file_is_repaired_before_forwarding():
                           "(javascript): ")
           and "fixed in 1 round" in note and "inspired" not in note,
           "the note: 'Repaired <file>', and no seed line", note)
+    # #34 (docs/SELF-IMPROVEMENT-LOG.md): "fixed in 1 round; prettier would
+    # change 69 lines; sent as written" read as a contradiction. The note
+    # says plainly what went out, and never mentions the formatter.
+    check(note.rstrip().endswith("fixed in 1 round (the repaired file was "
+                                 "sent; formatting left as written).")
+          and "would change" not in note and "sent as written" not in note,
+          "a repaired write's note says the repaired file was sent and its "
+          "formatting left as written (#34)", note)
     check(d["choices"][0]["finish_reason"] == "tool_calls",
           "finish stays tool_calls")
     check(_helper_seen and _helper_seen[0].get("_effort_tier") == "high",
@@ -535,12 +565,13 @@ def test_formatter_output_is_applied_and_noted():
           "no generation anywhere")
     note = d["choices"][0]["message"]["content"]
     tc = x_of(d)["tool_code"]
-    check(note == "Verified js/util.js (javascript): parses; prettier would "
-                  "change 3 lines; sent as written."
+    check(note == "Verified js/util.js (javascript): parses; sent as "
+                  "written."
           and not tc["formatted"] and not tc["files"][0]["formatted"]
           and tc["files"][0].get("format_would_change") == 3,
-          "the note reports the formatting as information ('Verified'), and "
-          "the record says nothing was changed", note)
+          "the note says it parses and went as written; what the formatter "
+          "would change is in the record only (#34), and nothing changed",
+          note)
 
 
 def test_edits_block_only_a_complete_unit():
@@ -563,10 +594,15 @@ def test_edits_block_only_a_complete_unit():
         "new_string": "  if (x && y) {\n    go();"})])])
     tc = x_of(d)["tool_code"]
     note = d["choices"][0]["message"]["content"]
+    # Since 2026-09-26 (docs/HARNESS-PI.md gap 4) the RECORD flags it and
+    # the note says nothing: "Checked" is for problems that remain, and the
+    # model imitated the fragment note (#36).
     check(len(_seen) == 1 and not _helper_seen
-          and tc["files"][0]["flagged"] == "fragment" and "fragment" in note,
-          "an edit fragment is flagged in the note and the record, not "
-          "blocked", note)
+          and tc["files"][0]["flagged"] == "fragment"
+          and shomen.PHRASES["checked"] not in (note or "")
+          and "fragment" not in (note or ""),
+          "an edit fragment is flagged in the record, not blocked, and gets "
+          "no note", repr(note))
 
 
 def test_a_utility_call_and_agent_steps_stay_out_of_the_code_pipelines():
@@ -625,6 +661,98 @@ def test_medium_notes_and_does_not_fix():
           "and the note says what the check found", note)
 
 
+PI_EDIT = {"type": "function", "function": {
+    "name": "edit", "description": "Edit a file.",
+    "parameters": {"type": "object", "properties": {
+        "path": {"type": "string"}, "edits": {"type": "array"}}}}}
+PI_WRITE = {"type": "function", "function": {
+    "name": "write", "description": "Write a file.",
+    "parameters": {"type": "object", "properties": {
+        "path": {"type": "string"}, "content": {"type": "string"}}}}}
+PAGE = ("<!DOCTYPE html>\n<html><body>\n<canvas id=\"c\" width=\"256\" "
+        "height=\"256\"></canvas>\n<script src=\"lib.js\"></script>\n"
+        "<script type=\"x-shader/x-vertex\">void main() { gl_Position = "
+        "vec4(0.0); }</script>\n<script>\n{SCRIPT}</script>\n"
+        "<script type=\"module\">\nimport * as THREE from 'three';\n"
+        "const scene = new THREE.Scene();\n</script>\n</body></html>\n")
+GOOD_SCRIPT = ("const ctx = document.getElementById('c').getContext('2d');\n"
+               "ctx.fillStyle = 'red';\nctx.fillRect(64, 64, 128, 128);\n")
+BAD_SCRIPT = ("const ctx = document.getElementById('c').getContext('2d');\n"
+              "ctx.fillStyle = 'red';\nctx.fillRect(64, 64, 128, 128;\n")
+
+
+def test_pi_edits_and_html_pages():
+    """docs/HARNESS-PI.md gap 4 (2026-09-26): Pi's edit by the table, a clean
+    fragment with no "Checked" note, and an .html write's inline scripts
+    checked as JavaScript."""
+    # Pi's own call, #16 in the harness test (relay a1): by the TABLE now.
+    pi = call("edit", {"path": "hello.py", "edits": [{
+        "oldText": "return 'hello ' + name",
+        "newText": "return 'howdy ' + name"}]})
+    d = tool_code.detect(pi)
+    check(d["detected"] == "table" and d["units"][0]["kind"] == "edit",
+          "Pi's edit(path, edits[{oldText,newText}]) is recognised by the "
+          "known-names table, not the shape fallback", str(d["detected"]))
+    helper()
+    d = run_complete([reply("", [pi])], effort="medium",
+                     tools=(PI_EDIT, PI_WRITE))
+    tc = x_of(d).get("tool_code") or {}
+    note = d["choices"][0]["message"]["content"] or ""
+    f0 = (tc.get("files") or [{}])[0]
+    check(f0.get("flagged") == "fragment" and f0.get("detected") == "table"
+          and shomen.PHRASES["checked"] not in note and not note.strip(),
+          "a clean fragment is recorded, and gets no 'Checked' note (only "
+          "real problems do)", repr(note) + " " + json.dumps(f0))
+    # A write of an .html page: its inline scripts are units of their own.
+    units = tool_code.detect(call("write", {
+        "path": "canvas.html",
+        "content": PAGE.replace("{SCRIPT}", GOOD_SCRIPT)}))["units"]
+    check([(u["language"], u.get("script"), u.get("module")) for u in units]
+          == [("javascript", 1, False), ("javascript", 2, True)],
+          "an .html write: its classic and module scripts are checked as "
+          "JavaScript; the src script and the shader are not",
+          json.dumps([{k: u.get(k) for k in ("language", "script", "module",
+                                              "span")} for u in units]))
+    check(tool_code.detect(call("write", {
+        "path": "page.htm", "content": "<p>no code here</p>"}))["units"]
+          == [], "a page with no script carries no unit")
+    helper()
+    d = run_complete([reply("", [call("write", {
+        "path": "canvas.html",
+        "content": PAGE.replace("{SCRIPT}", GOOD_SCRIPT)})])],
+        effort="medium", tools=(PI_EDIT, PI_WRITE))
+    note = d["choices"][0]["message"]["content"] or ""
+    tc = x_of(d).get("tool_code") or {}
+    check(tc.get("stopped") == "clean" and note.count("Verified canvas.html "
+                                                      "(javascript, script")
+          == 2 and "Checked" not in note,
+          "a clean page: each script verified, by number", note)
+    # A broken classic script: it BLOCKS (the same rule as a .js file), and
+    # at `high` the repair goes back into ITS span only.
+    fixed_page = PAGE.replace("{SCRIPT}", GOOD_SCRIPT)
+    helper(_fence(GOOD_SCRIPT))
+    d = run_complete([reply("", [call("write", {
+        "path": "canvas.html",
+        "content": PAGE.replace("{SCRIPT}", BAD_SCRIPT)})])],
+        effort="high", tools=(PI_EDIT, PI_WRITE))
+    calls = d["choices"][0]["message"]["tool_calls"] or []
+    tc = x_of(d).get("tool_code") or {}
+    got = args_of(calls[0])["content"] if calls else ""
+    check(tc.get("errors_before", 0) >= 1 and tc.get("stopped") == "fixed"
+          and got.rstrip() == fixed_page.rstrip(),
+          "a broken inline script blocks, and the repair is spliced into its "
+          "own span -- the rest of the page as written",
+          json.dumps(tc)[:300] + " | " + got[-200:])
+    helper()
+    d = run_complete([reply("", [call("write", {
+        "path": "canvas.html",
+        "content": PAGE.replace("{SCRIPT}", BAD_SCRIPT)})])],
+        effort="medium", tools=(PI_EDIT, PI_WRITE))
+    note = d["choices"][0]["message"]["content"] or ""
+    check(note.startswith("Checked canvas.html (javascript, script 1): "),
+          "at medium a broken inline script is noted as a real problem", note)
+
+
 def test_final_answer_repair_shares_the_cap():
     code_q = [{"role": "user", "content": "Write a Python function that adds "
                                           "two numbers."}]
@@ -656,9 +784,10 @@ def test_final_answer_repair_shares_the_cap():
 # Pre-deploy review, 2026-09-24 (BLOCKS DEPLOY #1): a failed or truncated
 # fix-up overwrote the model's file. The repaired version replaces the
 # model's content ONLY when it came from a CLOSED fence, the job's reply was
-# not cut off (finish_reason "length"), it parses with no errors left, and
-# it is plausibly complete (shomen.FIXUP_MIN_KEEP). Otherwise the model's own
-# content goes, untouched, and the note says so truthfully.
+# not cut off (finish_reason "length") and it parses with no errors left.
+# Otherwise the model's own content goes, untouched, and the note says so
+# truthfully. (The length floor shomen.FIXUP_MIN_KEEP, half the original, a
+# CHOICE never measured, was removed 2026-09-27: docs/CONSTANTS-AUDIT.md.)
 # ---------------------------------------------------------------------------
 BIG_BROKEN = ("class Game {\n" + "".join(
     f"  m{i}() {{\n    return {i};\n  }}\n" for i in range(12))
@@ -713,13 +842,15 @@ def test_a_failed_or_truncated_fixup_never_overwrites_the_file():
     check(a.get("content") == TICKS_FIXED and tc.get("stopped") == "fixed",
           "the same repair in a fence the file cannot close is written back",
           json.dumps(tc.get("fixup")))
-    # (d) plausibly complete: a closed, parsing, drastically shorter block.
+    # (d) no length floor (FIXUP_MIN_KEEP removed 2026-09-27): a closed,
+    # uncut, parsing block is accepted whatever its length.
     a, tc, note = _one(BIG_BROKEN, _fence("class Game {}\n"))
-    check(a.get("content") == BIG_BROKEN
-          and "under 50% of the original" in note
-          and "sent as written" in note,
-          "a repaired version under half the original's length is a "
-          "fragment: not used, and the note says so", note)
+    check(a.get("content") == "class Game {}\n"
+          and not hasattr(shomen, "FIXUP_MIN_KEEP")
+          and "under 50% of the original" not in note
+          and note.startswith("Repaired"),
+          "a closed, uncut, parsing repair is used whatever its length (no "
+          "FIXUP_MIN_KEEP)", note)
     # (c) errors left after the cap: test_the_cap_and_the_last_version_is_sent.
     # The accepted case, for contrast:
     a, tc, note = _one(BIG_BROKEN, _fence(BIG_FIXED))
@@ -739,6 +870,16 @@ def test_a_failed_or_truncated_fixup_never_overwrites_the_file():
           "and why", json.dumps({k: u[k] for k in ("accepted", "changed",
                                                      "rejected",
                                                      "errors_after")}))
+    # No cuts in the fixup prompt (errors[:8], request[:2000] removed
+    # 2026-09-27, docs/CONSTANTS-AUDIT.md): every error and the whole request.
+    req = "R" * 2500 + " END"
+    fp = shomen.fixup_prompt(
+        {"path": "x.js", "language": "javascript", "kind": "file",
+         "code": BROKEN,
+         "errors": [{"line": i, "message": f"err{i}"} for i in range(1, 11)]},
+        req)
+    check(req in fp and "line 10, col 1: err10" in fp,
+          "the fixup job gets every error and the whole request", fp[-200:])
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +963,7 @@ def main() -> int:
                test_edits_block_only_a_complete_unit,
                test_a_utility_call_and_agent_steps_stay_out_of_the_code_pipelines,
                test_medium_notes_and_does_not_fix,
+               test_pi_edits_and_html_pages,
                test_final_answer_repair_shares_the_cap,
                test_the_stream_repairs_and_keeps_channel_order,
                test_the_stream_cap_sends_the_last_version):

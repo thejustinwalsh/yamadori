@@ -1,0 +1,157 @@
+{
+ "id": "pi/responses/main-turn",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "responses",
+ "source": "scratchpad picap/cap.jsonl #0 (captured, api openai-responses): a leading developer item, prompt_cache_key = the session id, session_id header, tools without strict",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)",
+  "session_id": "01a0de49-0000-7000-8000-0000000000a1"
+ },
+ "body": {
+  "model": "yamadori",
+  "input": [
+   {
+    "role": "developer",
+    "content": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n[... Pi system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "say ok"
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "name": "read",
+    "description": "(read: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string"
+      },
+      "offset": {
+       "type": "integer"
+      },
+      "limit": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "path"
+     ]
+    },
+    "type": "function"
+   },
+   {
+    "name": "bash",
+    "description": "(bash: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "command": {
+       "type": "string"
+      },
+      "timeout": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "command"
+     ]
+    },
+    "type": "function"
+   },
+   {
+    "name": "edit",
+    "description": "(edit: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string"
+      },
+      "edits": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "properties": {
+         "oldText": {
+          "type": "string"
+         },
+         "newText": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "oldText",
+         "newText"
+        ]
+       }
+      }
+     },
+     "required": [
+      "path",
+      "edits"
+     ]
+    },
+    "type": "function"
+   },
+   {
+    "name": "write",
+    "description": "(write: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string"
+      },
+      "content": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "content"
+     ]
+    },
+    "type": "function"
+   }
+  ],
+  "store": false,
+  "stream": true,
+  "max_output_tokens": 26419,
+  "reasoning": {
+   "effort": "medium",
+   "summary": "auto"
+  },
+  "include": [
+   "reasoning.encrypted_content"
+  ],
+  "prompt_cache_key": "01a0de49-0000-7000-8000-0000000000a1"
+ },
+ "expect": {
+  "accepted": true,
+  "utility": {
+   "utility": false
+  },
+  "session": {
+   "source": "prompt_cache_key"
+  },
+  "roles": {
+   "one_system_first": true
+  },
+  "deep": {
+   "kickoff": true,
+   "speaking": true
+  }
+ },
+ "why": {
+  "session": "Pi's Responses key is its session id (openai-responses.js:225)"
+ }
+}

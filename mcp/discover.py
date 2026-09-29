@@ -78,15 +78,38 @@ _FENCE_LANG = {
 _FENCE = re.compile(r"```([A-Za-z0-9_+-]*)\n(.*?)```", re.S)
 
 # Standard libraries are not dependencies worth indexing, and including them
-# would put `fs` and `path` at the top of every discovery.
-_BUILTIN = {
+# would put `fs` and `path` at the top of every discovery. PER LANGUAGE
+# (2026-09-26): one shared list dropped `import { vec3 } from 'math'` -- the
+# npm package pmndrs/math -- as Python's stdlib `math`, so a conversation
+# using it never reached library use or the known-hard-area trigger. A
+# specifier is judged by the grammar that parsed it; with no language (a
+# caller that does not know) the union still applies.
+_BUILTIN_JS = {
     "fs", "path", "os", "url", "util", "events", "stream", "buffer", "crypto",
     "http", "https", "net", "zlib", "child_process", "worker_threads", "assert",
     "process", "readline", "tty", "dns", "cluster", "perf_hooks", "timers",
-    "sys", "re", "json", "time", "math", "typing", "dataclasses", "itertools",
-    "collections", "functools", "subprocess", "std", "core", "alloc", "self",
-    "crate", "super",
 }
+_BUILTIN_PY = {
+    "os", "sys", "re", "json", "time", "math", "typing", "dataclasses",
+    "itertools", "collections", "functools", "subprocess",
+}
+_BUILTIN_RS = {"std", "core", "alloc", "self", "crate", "super"}
+_BUILTIN = _BUILTIN_JS | _BUILTIN_PY | _BUILTIN_RS
+_BUILTIN_BY_LANG = {"typescript": _BUILTIN_JS, "tsx": _BUILTIN_JS,
+                    "javascript": _BUILTIN_JS, "python": _BUILTIN_PY,
+                    "rust": _BUILTIN_RS}
+
+
+def _stdlib_lang(lang: str, guessed: bool) -> str | None:
+    """Which language's standard library judges a specifier from `lang`.
+    A fenced block says its language. An UNFENCED blob is offered to every
+    grammar (_blocks), and tree-sitter is error-tolerant: Python's grammar
+    reads `import fs from 'fs'` as `import fs`. A JavaScript specifier is a
+    quoted string, so the JS grammars' finds are JS; the others' are judged
+    by every list, as before."""
+    if not guessed or lang in ("typescript", "tsx", "javascript"):
+        return lang
+    return None
 
 # A version written next to a package name, in the forms a caller pastes:
 # package.json, a lockfile line, Cargo.toml, pip freeze. This one stays a
@@ -98,19 +121,22 @@ _VERSION = re.compile(
     re.MULTILINE)
 
 
-def package_of(spec: str) -> str | None:
+def package_of(spec: str, lang: str | None = None) -> str | None:
     """The installable package a specifier belongs to.
 
     `three/tsl` and `three/webgpu` are both `three`; `@pmndrs/koota/react` is
     `@pmndrs/koota`. Subpath exports are how these libraries are normally
-    consumed, so collapsing them is most of the work.
+    consumed, so collapsing them is most of the work. `lang` is the grammar
+    the specifier came from: a standard library is judged by it (`math` is
+    Python's stdlib, and an npm package in TypeScript).
     """
     spec = (spec or "").strip().strip("'\"")
     if not spec or spec.startswith((".", "/", "#")) or ":" in spec:
         return None                      # relative, absolute, or node:/http:
     parts = spec.split("/")
     name = "/".join(parts[:2]) if spec.startswith("@") else parts[0]
-    return None if name.lower() in _BUILTIN else name
+    builtin = _BUILTIN_BY_LANG.get(lang or "", _BUILTIN)
+    return None if name.lower() in builtin else name
 
 
 def _parse(source: str, lang: str):
@@ -189,6 +215,7 @@ def imports(text: str) -> list[str]:
     """
     found: list[str] = []
     seen_blocks: set[str] = set()
+    guessed = not _FENCE.search(text or "")
     for lang, body in _blocks(text):
         root = _parse(body, lang)
         if root is None:
@@ -199,7 +226,7 @@ def imports(text: str) -> list[str]:
         # may succeed. Count each specifier once per block, not once per
         # grammar that happened to recognise it.
         for spec in specs:
-            pkg = package_of(spec)
+            pkg = package_of(spec, _stdlib_lang(lang, guessed))
             if not pkg:
                 continue
             tag = f"{id(body)}\x00{spec}\x00{specs.index(spec)}"
@@ -210,13 +237,15 @@ def imports(text: str) -> list[str]:
     return found
 
 
-def _names_in(node, lang: str, out: dict[str, list[str]]) -> None:
+def _names_in(node, lang: str, out: dict[str, list[str]],
+              blang: str | None = "") -> None:
     """Walk a tree collecting {package: [imported names]} (see
-    imported_names)."""
+    imported_names). `blang` judges standard libraries (_stdlib_lang)."""
+    blang = lang if blang == "" else blang
     if lang in ("typescript", "tsx", "javascript") and \
             node.type in ("import_statement", "export_statement"):
         src = node.child_by_field_name("source")
-        pkg = package_of(_text(src)) if src is not None else None
+        pkg = package_of(_text(src), blang) if src is not None else None
         if pkg:
             names = out.setdefault(pkg, [])
             stack = list(node.named_children)
@@ -242,7 +271,7 @@ def _names_in(node, lang: str, out: dict[str, list[str]]) -> None:
             strs = [a for a in (args.named_children if args is not None
                                 else []) if a.type == "string"]
             if fn is not None and _text(fn) == "require" and strs:
-                pkg = package_of(_text(strs[0]))
+                pkg = package_of(_text(strs[0]), blang)
                 if pkg:
                     names = out.setdefault(pkg, [])
                     for c in pat.named_children:
@@ -251,7 +280,8 @@ def _names_in(node, lang: str, out: dict[str, list[str]]) -> None:
                             names.append(_text(c))
     if lang == "python" and node.type == "import_from_statement":
         mod = node.child_by_field_name("module_name")
-        pkg = package_of(_text(mod).split(".")[0]) if mod is not None else None
+        pkg = (package_of(_text(mod).split(".")[0], blang) if mod is not None
+               else None)
         if pkg:
             names = out.setdefault(pkg, [])
             for c in node.children_by_field_name("name"):
@@ -260,7 +290,7 @@ def _names_in(node, lang: str, out: dict[str, list[str]]) -> None:
                     names.append(_text(t))
         return
     for c in node.named_children:
-        _names_in(c, lang, out)
+        _names_in(c, lang, out, blang)
 
 
 def imported_names(text: str) -> dict[str, list[str]]:
@@ -272,12 +302,13 @@ def imported_names(text: str) -> dict[str, list[str]]:
     yields nothing rather than a guess. Used by the proxy's library-use
     injection (#19, docs/SELF-IMPROVEMENT-LOG.md)."""
     out: dict[str, list[str]] = {}
+    guessed = not _FENCE.search(text or "")
     for lang, body in _blocks(text or ""):
         root = _parse(body, lang)
         if root is None:
             continue
         found: dict[str, list[str]] = {}
-        _names_in(root, lang, found)
+        _names_in(root, lang, found, _stdlib_lang(lang, guessed))
         for pkg, names in found.items():
             cur = out.setdefault(pkg, [])
             cur.extend(n for n in names if n not in cur)
@@ -297,7 +328,11 @@ def versions(text: str) -> dict[str, str]:
     for m in _VERSION.finditer(text):
         name = m.group(1) or m.group(3)
         ver = m.group(2) or m.group(4)
-        if name and ver and package_of(name):
+        # `name: "1.2.3"` is a package.json / Cargo.toml line, `name==1.2`
+        # pip's: a stdlib name is never pinned, so only the JS list applies
+        # to the first (node polyfill names) and Python's to the second.
+        if name and ver and package_of(
+                name, "python" if m.group(3) else "javascript"):
             out.setdefault(name, ver)
     return out
 

@@ -47,7 +47,10 @@ def record(xy: dict | None) -> dict:
     fan = xy.get("fanout")
     cc = xy.get("check_code") or {}
     rep = xy.get("repair")
-    hints = xy.get("hints") or []
+    # Skills replaced hints on 2026-09-26: x_yamadori.skills.ids, else an
+    # older record's hints list.
+    sk = xy.get("skills") if isinstance(xy.get("skills"), dict) else {}
+    hints = list(sk.get("ids") or []) or xy.get("hints") or []
     errors: list[str] = []
 
     r = {"present": True, "tier": xy.get("tier"), "effort_sent": xy.get("effort_sent"),
@@ -76,7 +79,8 @@ def record(xy: dict | None) -> dict:
 
     # hints: selection decides; injected ones are listed with ids
     hint_ids = [h.get("id") if isinstance(h, dict) else h for h in hints]
-    r["hints"] = {"allowed": bool(allowed.get("hints")), "decided": bool(sel.get("hints")),
+    r["hints"] = {"allowed": bool(allowed.get("skills", allowed.get("hints"))),
+                  "decided": bool(sel.get("skills", sel.get("hints"))),
                   "injected": len(hints), "ids": hint_ids[:20],
                   "suppressed": len(xy.get("suppressed_hints") or [])}
 

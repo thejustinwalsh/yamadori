@@ -39,6 +39,11 @@ sys.path.insert(0, HERE)
 import analyse  # noqa: E402
 import run  # noqa: E402
 
+# run._run records the RUNNING bonsai's sampling from llama-swap's /running
+# (:11434). Offline, nothing is running: what the reader returns when it
+# cannot read (scripts/offline_guard caught the live read, 2026-09-27).
+run.server_sampling = lambda url=None: {}
+
 _results: list[tuple[bool, str, str]] = []
 KEY = "ym-test-SECRET-do-not-leak-4f1c"
 
@@ -58,20 +63,23 @@ class Fake:
 
 def fake_x(feats: dict) -> dict:
     """x_yamadori as the real proxy would build it for this header at tier max."""
-    forced = sorted(k for k in ("hints", "investigate", "fanout") if k in feats)
+    # The proxy names the flag `skills` since 2026-09-26; an arm's header may
+    # still say `hints` (the alias).
+    forced = sorted(("skills" if k == "hints" else k)
+                    for k in ("hints", "skills", "investigate", "fanout")
+                    if k in feats)
     retrieval = feats.get("retrieval", True)
-    hints = feats.get("hints", True)
+    hints = feats.get("skills", feats.get("hints", True))
     inv = feats.get("investigate", False)
     n = feats.get("fanout", 1)
     return {
         "tier": "max", "effort_sent": feats.get("effort"),
         "tools_gate": ({"offer": True, "why": "held: typegpu"} if retrieval else None),
-        "hints": [{"recipe": "use prefix sums"}] if hints else [],
-        "suppressed_hints": [],
-        "selection": {"hints": hints, "investigate": inv, "fanout_n": n,
+        "skills": {"ids": ["s1"] if hints else [], "names": [], "chars": 0},
+        "selection": {"skills": hints, "investigate": inv, "fanout_n": n,
                       "because": {}, "signals": {
                           "forced": forced,
-                          "allowed": {"hints": True, "investigate": True, "fanout": 3}}},
+                          "allowed": {"skills": True, "investigate": True, "fanout": 3}}},
         "fanout": ({"n": n, "asked": n, "seeds": []} if n > 1 else None),
         "investigate": ({"ran": True, "hops": 2, "injected": True} if inv else None),
         "hops": 1,
@@ -150,8 +158,8 @@ class Handler(BaseHTTPRequestHandler):
         x = fake_x(feats)
         finish = "stop"
         if mode == "lie_hints":
-            x["hints"] = [{"recipe": "smuggled"}]
-            x["selection"]["hints"] = True
+            x["skills"] = {"ids": ["smuggled"]}
+            x["selection"]["skills"] = True
         if mode == "lie_fanout":
             x["fanout"] = {"n": 2, "asked": 3}
         if mode == "length":
@@ -285,10 +293,10 @@ def test_verify_catches_contradictions():
     check(ok == [], "A0 honest record: no mismatch", str(ok))
 
     x = fake_x(run.features("A0", "medium"))
-    x["hints"] = [{"recipe": "r"}]
-    check(any("emitted" in m for m in run.verify("A0", "medium", x, finish="stop",
-                                                 content="c")),
-          "A0 with hints emitted -> mismatch")
+    x["skills"] = {"ids": ["s1"]}
+    check(any("injected" in m for m in run.verify("A0", "medium", x, finish="stop",
+                                                  content="c")),
+          "A0 with skills injected -> mismatch")
 
     x = fake_x(run.features("A3", "medium"))
     x["investigate"] = {"ran": False, "why": "the helper lane is busy"}
@@ -1122,7 +1130,7 @@ def test_hints_epoch_pause():
     xh = fake_x(run.features("A6", "medium"))
     x0 = fake_x(run.features("A0", "medium"))
     xn = json.loads(json.dumps(xh))
-    xn["hints"] = []
+    xn["skills"] = {"ids": []}
     rows = [{"task": "a", "arm": "A0", "outcome": "fail", "x_yamadori": x0},
             {"task": "a", "arm": "A6", "outcome": "pass", "x_yamadori": xh},
             {"task": "b", "arm": "A0", "outcome": "pass", "x_yamadori": x0},
@@ -1224,7 +1232,7 @@ def test_mechanism_evidence(url, tmp):
     check(ms["self_check"]["allowed"] and ms["self_check"]["errors_per_check"] == [2, 0],
           "self-check evidence: error count per check")
     xh = fake_x(run.features("A2", "medium"))
-    xh["hints"] = []
+    xh["skills"] = {"ids": []}
     mh = analyse.mechanisms({"arm": "A2", "x_yamadori": xh})
     check(mh["hints"]["allowed"] and mh["hints"]["ran"] and not mh["hints"]["data"],
           "hints that found nothing above the floor: ran, no data -- recorded, not excluded")

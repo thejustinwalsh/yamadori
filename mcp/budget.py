@@ -23,8 +23,8 @@ THE PROPORTIONS
 Expressed as fractions of whatever the server actually has, discovered at
 startup, so raising `-c` raises both budgets and nothing needs editing twice.
 
-  main      5/8 of the pool -- the conversation
-  helper    3/8 of the pool, for ONE second brain (deep thinking)
+  main      0.70 of the pool -- the conversation (5/8 until 2026-09-25)
+  helper    0.30 of the pool, for ONE second brain (deep thinking; 3/8 until 2026-09-25)
 
 At a pool of 147,456 that is exactly:
 
@@ -87,6 +87,60 @@ At 5/8 + 3/8 the conversation gets 102,400 tokens out of 163,840 -- short of
 promises 128k to a single conversation is quoting the old per-slot ceiling,
 not a budget.
 
+THE CAP LAYOUT (operator, 2026-09-28; replaces the split above when a cap is
+known). "Always run from VRAM." The main model's KV pool is tiered
+(--kv-vram-cells N: cells [0, N) in VRAM, the rest in pinned host RAM, read
+over PCIe on every step once a sequence reaches past them -- pagoda-h6 decoded
+6-15 tok/s from there). So nothing is sized as a fraction of the pool:
+
+  main      MAIN_CAP: the measured VRAM line (the served `kv_vram_cells`,
+            which engine patch 0041 reports in /props, or YAMADORI_MAIN_CAP
+            as the deploy wrote it). EVERY conversation is advertised this
+            window (catalog.context_window) -- "I don't want to limit context
+            to support it".
+  helper    CHILD_TOKENS: the child's window (the second brain, the decider,
+            side calls, an as-sent compaction; one slot, mcp/slots.py). It is
+            NOT taken from main: it swaps into VRAM while its conversation's
+            main pauses (engine 0041 ranks), so it can be 64k+ ("the child
+            can be 64k+"). YAMADORI_CHILD_TOKENS, 65,536 by default (the
+            operator's 64k; PHASE B measures the swap at 49k/64k/larger).
+  window    the most any ONE request may occupy: the cap (a compaction's
+            window included -- tiers.compaction_budget).
+  the rest  of the pool (-c = 2 x cap + child, the deploy's arithmetic) is
+            a second concurrent conversation's room, in host RAM when it
+            must be: it spills, the primary does not (slots RANKS).
+
+LAYOUT V2 (operator, 2026-09-29): "The point is to get more context at speed
+in vram, so decider was the only thing that needed room." The child slot
+becomes THE LANE (mcp/slots.py): the decider and small side calls only, kept between turns and
+kept in VRAM at a rank above the primary conversation's (slots.RANK_LANE), so
+its cells come OUT OF THE LINE:
+
+  main      the line less the lane: MAIN_CAP (the deploy writes N - LANE),
+            else the served `kv_vram_cells` less LANE_TOKENS while the lane
+            is ranked (slots.lane_ranked()); advertised to every conversation
+  lane      LANE_TOKENS (YAMADORI_LANE_TOKENS), below
+  helper    CHILD_TOKENS still: the window a second-brain job gets while that
+            machinery exists (it runs on the lane's slot at its
+            conversation's rank; -c no longer reserves its 64k, so beside two
+            conversations at the cap it has no room)
+  child     the child slot's role for the dashboard (child(): "decider
+            lane", its size, what it serves, kept / ranked)
+  the pool  -c = 2N + LANE (the operator's formula; bench/deploy_layout_v2.py)
+
+THE LANE'S SIZE, DERIVED (logs/proxy.log, read 2026-09-29): the slot holds one
+request's prompt and generation at a time (requests queue there), so it must
+hold the largest one. The decider: the last 200 decider turns held median 837,
+p90 1,609, max 3,047 cells (each release's `cells_before`); its state is capped
+at decide_turn.STATE_TOKENS = 2,048 by construction and the rest -- the system
+block, the question and its options, the answer lead, one generated token --
+is not capped: 3,047 - 2,048 = 999 cells at most in that sample. Side calls:
+69 releases, median 439, p90 614, max 1,682 cells. So LANE_TOKENS =
+STATE_TOKENS + 1,024 (the 999 rounded up to whole 256-cell blocks, the engine's
+placement unit, 0038) = 3,072, which holds every request of both samples. What
+does not fit is not refused (a unified pool gives every slot the whole window):
+its extra cells land where the engine puts them, past the line if need be.
+
 WHAT THIS DOES NOT DO
 
 Raise the pool. That is a launch flag on llama-server and a restart. This
@@ -102,10 +156,30 @@ import urllib.request
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 DIRECT = os.environ.get("YAMADORI_MODEL_SERVER", "http://127.0.0.1:10001")
 
-# Fractions of the discovered pool: 5/8 + 1 x 3/8 = the whole pool.
-MAIN_SHARE = float(os.environ.get("YAMADORI_MAIN_SHARE", "0.625"))
-HELPER_SHARE = float(os.environ.get("YAMADORI_HELPER_SHARE", "0.375"))
+# Fractions of the discovered pool: 0.70 + 1 x 0.30 = the whole pool
+# (operator, 2026-09-25, with the return to q8_0 KV at -c 163840: main
+# 114,688, helper 49,152 -- "push second brain down to the 48k range").
+# A CHOICE, not a measurement. Hermes compacts at 75% of the advertised main
+# share (its small-window floor), so ~86K: the operator's "compact before or
+# around 90k" (effective range ~90-120k, unmeasured). Deep thinking's hops
+# are capped by job (tiers.JOB_THINKING). It replaced 5/8 + 3/8 (2026-09-22).
+MAIN_SHARE = float(os.environ.get("YAMADORI_MAIN_SHARE", "0.70"))
+HELPER_SHARE = float(os.environ.get("YAMADORI_HELPER_SHARE", "0.30"))
+# THE HELPER AS A FIXED SIZE (operator, 2026-09-25: "~48k second brain is the
+# constraint ... make sure the main model gets the share of the new tokens").
+# When > 0 the helper gets exactly this many tokens and main gets the rest of
+# the pool, so a larger -c goes to the conversation; the fractions above are
+# then unused (0 restores them). At -c 181,248: main 132,096 + helper 49,152.
+HELPER_TOKENS = int(os.environ.get("YAMADORI_HELPER_TOKENS", "49152"))
 HELPERS = int(os.environ.get("YAMADORI_HELPERS", "1"))
+# THE CAP LAYOUT (docstring). MAIN_CAP > 0 overrides the served line; 0 reads
+# it from /props (`kv_vram_cells`, engine patch 0041); with neither the split
+# above applies (a pool that is all VRAM).
+MAIN_CAP = int(os.environ.get("YAMADORI_MAIN_CAP", "0") or 0)
+CHILD_TOKENS = int(os.environ.get("YAMADORI_CHILD_TOKENS", "65536") or 0)
+# LAYOUT V2's lane (docstring, "THE LANE'S SIZE, DERIVED"): STATE_TOKENS 2,048
+# + 1,024 = 3,072 cells.
+LANE_TOKENS = int(os.environ.get("YAMADORI_LANE_TOKENS", "3072") or 0)
 # The conversation never gets less than this share however the fractions are
 # set, because a helper starving the thing it was spawned to serve is the one
 # outcome that makes the whole arrangement worse than not having it.
@@ -114,6 +188,9 @@ MAIN_FLOOR = float(os.environ.get("YAMADORI_MAIN_FLOOR", "0.50"))
 KV_KIB_PER_TOKEN = float(os.environ.get("YAMADORI_KV_KIB", "44"))
 
 _POOL: int | None = None
+# The tiered cache's VRAM line from the same /props answer (`kv_vram_cells`,
+# 0 when the cache is not tiered, None when the server does not report it).
+_LINE: int | None = None
 # llama-server's slot count, from the same /props answer (`total_slots`), for
 # mcp/slots.py. None until pool_size() has asked, or when it could not.
 _SLOTS: int | None = None
@@ -134,7 +211,7 @@ def pool_size(refresh: bool = False) -> int:
     ambiguity in the UI (it notes that a pool of exactly 131072 may be this
     fallback rather than a measurement).
     """
-    global _POOL, _SLOTS
+    global _POOL, _SLOTS, _LINE
     if _POOL is not None and not refresh:
         return _POOL
     for url in (f"{DIRECT}/props", f"{UPSTREAM}/props"):
@@ -147,22 +224,129 @@ def pool_size(refresh: bool = False) -> int:
                 _POOL = int(n)
                 if isinstance(d.get("total_slots"), int) and d["total_slots"] > 0:
                     _SLOTS = d["total_slots"]
+                if isinstance(d.get("kv_vram_cells"), int):
+                    _LINE = d["kv_vram_cells"]
                 return _POOL
         except Exception:                                        # noqa: BLE001
             continue
-    _POOL = 131072
+    # A FAILED READ KEEPS THE LAST GOOD POOL. The dashboard's vitals refresh
+    # (refresh=True) ran while the Flash-Next gate held the card
+    # (2026-09-28): the model server did not answer, the fallback replaced
+    # the real 262,144 pool, and every request of the proxy would have been
+    # budgeted against 131,072 until the next good read. The fallback is
+    # only for a process that has never read the pool.
+    if _POOL is None:
+        _POOL = 131072
     return _POOL
 
 
-def budgets(pool: int | None = None) -> dict:
+def lane_reserved() -> int:
+    """The lane's cells taken out of the VRAM line: LANE_TOKENS while the
+    lane is ranked above the primary (slots.lane_ranked(): YAMADORI_KV_RANK
+    on), else 0 (no ranks are sent: the child then swaps like any slot)."""
+    try:
+        import slots
+        return max(LANE_TOKENS, 0) if slots.lane_ranked() else 0
+    except Exception:                                            # noqa: BLE001
+        return 0
+
+
+def main_cap(pool: int | None = None) -> tuple[int | None, str]:
+    """(the main cap, where it came from): YAMADORI_MAIN_CAP (the deploy
+    writes the line less the lane), else the served VRAM line (/props
+    kv_vram_cells) less the lane (lane_reserved) when the pool is tiered
+    past it, else (None, why) -- the split applies."""
     p = pool or pool_size()
-    main = max(int(p * MAIN_SHARE), int(p * MAIN_FLOOR))
-    helper = int(p * HELPER_SHARE)
+    if MAIN_CAP > 0:
+        return min(MAIN_CAP, p), "YAMADORI_MAIN_CAP"
+    if _LINE and 0 < _LINE < p:
+        lane = lane_reserved()
+        if lane and _LINE > lane:
+            return int(_LINE) - lane, (f"llama-server /props kv_vram_cells "
+                                       f"less the lane ({lane})")
+        return int(_LINE), "llama-server /props kv_vram_cells"
+    return None, ("no cap: the pool is not tiered" if _LINE == 0 else
+                  "no cap: the server reports no kv_vram_cells")
+
+
+def model_window(model: str | None = None) -> dict | None:
+    """ONE MODEL PER EFFORT TIER (mcp/tier_models.py): the window the table declares for the model this request is
+    served by -- {ctx, slots, main_cap?, source} -- or None for the default model (its pool is read from its own
+    /props, below) and with the table off. The deploy (bench/deploy_tier_models.py) writes each row from the same
+    -c it writes into config.yaml, so the two agree by construction; nothing here reads another model's /props (it
+    would load that model)."""
+    try:
+        import max_mode
+        import tier_models
+        t = tier_models.table()
+        if not t.profiles_on:
+            return None
+        m = model or max_mode.current()
+        if m == t.default:
+            return None
+        return t.window(m)
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def budgets(pool: int | None = None, model: str | None = None) -> dict:
+    """The shares of the pool the request's MODEL serves (the per-model window: model_window), or the default
+    model's (its served /props, the cap layout or the split)."""
+    w = None if pool else model_window(model)
+    if w:
+        p = int(w["ctx"])
+        cap = int(w["main_cap"]) if w.get("main_cap") else None
+        source = f"tier table: {w.get('source') or 'window'}"
+    else:
+        p = pool or pool_size()
+        cap, source = main_cap(p)
+    if cap:
+        # THE CAP LAYOUT (docstring): main = the cap, the child its own size
+        # (it swaps in while its main pauses, so it is not taken from main).
+        helper = max(min(CHILD_TOKENS or cap, p), 0)
+        return {"pool": p, "main": cap, "helper": helper, "helpers": HELPERS,
+                "lane": max(LANE_TOKENS, 0), "child": child(),
+                "reserve": max(p - cap - helper, 0), "window": cap,
+                "layout": "cap", "cap_source": source,
+                "gib": round(p * KV_KIB_PER_TOKEN / 1024 / 1024, 2),
+                **({"model_window": w} if w else {})}
+    if HELPER_TOKENS > 0:
+        helper = min(HELPER_TOKENS,
+                     (p - int(p * MAIN_FLOOR)) // max(HELPERS, 1))
+        main = p - max(HELPERS, 1) * helper
+    else:
+        main = max(int(p * MAIN_SHARE), int(p * MAIN_FLOOR))
+        helper = int(p * HELPER_SHARE)
     if main + HELPERS * helper > p:
         helper = max((p - main) // max(HELPERS, 1), 0)
     return {"pool": p, "main": main, "helper": helper, "helpers": HELPERS,
-            "reserve": p - main - HELPERS * helper,
-            "gib": round(p * KV_KIB_PER_TOKEN / 1024 / 1024, 2)}
+            "child": child(),
+            "reserve": p - main - HELPERS * helper, "window": p,
+            "layout": "split", "cap_source": source,
+            "gib": round(p * KV_KIB_PER_TOKEN / 1024 / 1024, 2),
+            **({"model_window": w} if w else {})}
+
+
+def child() -> dict:
+    """The child slot's role and size, named (layout v2): the dashboard's KV
+    panel prints it instead of a label of its own, which still said "deep
+    thinking" (docs/DASHBOARD.md). {role, tokens, serves, kept, ranked, rank,
+    slot}."""
+    try:
+        import slots
+        kept, ranked, rank = slots.lane_kept(), slots.lane_ranked(), slots.RANK_LANE
+        slot = slots.child_slot(slots._known_n())
+    except Exception:                                            # noqa: BLE001
+        kept = ranked = False
+        rank = slot = None
+    return {"role": "decider lane", "tokens": max(LANE_TOKENS, 0),
+            "serves": ["the decider", "small side calls (titles)"],
+            "also": "a second-brain job, when one runs, at its conversation's "
+                    "rank with the helper window",
+            "not": "a compaction sent up as is (the least recently used "
+                   "conversation slot)",
+            "kept": kept, "ranked": ranked,
+            "rank": rank if ranked else None, "slot": slot}
 
 
 def cap_for(kind: str) -> int:
@@ -208,8 +392,12 @@ if __name__ == "__main__":
     b = budgets()
     print(f"  server reports a pool of {p} tokens "
           f"({b['gib']} GiB of KV at {KV_KIB_PER_TOKEN} KiB/token)")
-    print(f"    main   {b['main']:>7}  ({MAIN_SHARE:.0%}, floor {MAIN_FLOOR:.0%})")
-    print(f"    helper {b['helper']:>7}  ({HELPER_SHARE:.0%} each, x{b['helpers']})")
+    how = (f"fixed {HELPER_TOKENS} each" if HELPER_TOKENS > 0
+           else f"{HELPER_SHARE:.0%} each")
+    print(f"    main   {b['main']:>7}  (the rest; floor {MAIN_FLOOR:.0%})"
+          if HELPER_TOKENS > 0 else
+          f"    main   {b['main']:>7}  ({MAIN_SHARE:.0%}, floor {MAIN_FLOOR:.0%})")
+    print(f"    helper {b['helper']:>7}  ({how}, x{b['helpers']})")
     print(f"    reserve{b['reserve']:>7}  (whatever the shares leave unclaimed)")
     print()
     print(what_if())

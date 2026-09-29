@@ -45,8 +45,11 @@ extract -> index -> complete happens unattended. `clarify` answers itself
 where the source allows: a finished fetch enqueues `dataset.assist`, which
 fills the licence from a verified verbatim quote and proposes the rest, then
 advances -- see handle_assist. Review is optional and after
-the fact, on /dash; a row marked `reject` there leaves the hints corpus on the
-next index.
+the fact, on /dash. EXTRACT EMITS SKILLS (the Phase 0.7 unification,
+2026-09-26): the verified rows are kept as the dataset's recipe file (its
+provenance, and the label/train branch's input) and compiled into atomic
+skills (skill_compile) that walk the skill pipeline; `index` builds the
+skills' trigger vectors. There is no hints corpus any more.
 """
 from __future__ import annotations
 
@@ -114,6 +117,18 @@ class Permanent(Exception):
 def describe(situation: str, retryable: bool, remedy: str, owner: str) -> str:
     return (f"{situation} | retryable: {'yes' if retryable else 'no'} | "
             f"remedy ({owner}): {remedy}")
+
+
+class Deferred(Exception):
+    """The job may not run yet: return it to the queue WITHOUT counting an
+    attempt (jobs.defer), not to be claimed before `until`. Raised by a
+    handler that was told to wait -- a server's rate-limit headers (GitHub's
+    X-RateLimit-Reset, a Retry-After) -- and by run_one itself for an
+    idle-gated job that found the stack busy (mcp/idle.py)."""
+
+    def __init__(self, until: float, why: str):
+        self.until, self.why = float(until), why
+        super().__init__(why)
 
 
 class Context:
@@ -476,50 +491,83 @@ def handle_extract(job: dict, ctx: Context) -> dict:
             "advice")
     _write_atomic(path, "".join(json.dumps(r, ensure_ascii=False) + "\n"
                                 for r in kept).encode("utf-8"))
+    counts.update(emit_skills(ds, kept, rfile))
+    _merge_counts(ds["id"], {k: v for k, v in counts.items()
+                             if k.startswith("skills_")})
     return dict(counts, recipe_file=rfile, failures=failures[:10])
+
+
+def emit_skills(ds: dict, rows: list[dict], rfile: str) -> dict:
+    """A dataset's verified rows as atomic skills: compiled (grouped, packed
+    under the caps, tagged, tested) and run through the skill pipeline
+    inline -- screen -> classify -> tests -> validate -> arm, no model call.
+    A skill already made from this dataset (same name, same id) is left
+    alone; re-extracting a changed source makes new names only where the
+    groups changed. Returns counts for the dataset."""
+    import skill_compile
+    import skills
+    stem = rfile[:-len(".jsonl")] if rfile.endswith(".jsonl") else rfile
+    for i, r in enumerate(rows, 1):
+        r.setdefault("_file", stem)
+        r.setdefault("_line", i)
+    groups, gcounts = skill_compile.group(rows)
+    made = armed = quarantined = skipped = 0
+    for g in groups:
+        c = skill_compile.compile_group(
+            g, origin="dataset",
+            licence_lookup=skill_compile.licence_lookup_from_datasets())
+        if skills.get(c["sid"]) is not None:
+            skipped += 1
+            continue
+        s = skills.create_compiled(
+            skill=c["skill"], rule=c["rule"], tests=c["tests"],
+            source=c["source"], origin="dataset",
+            author=f"pipeline:dataset:{ds['id']}",
+            meta=dict(c["meta"], dataset=ds["id"]), sid=c["sid"], run=True)
+        made += 1
+        armed += s["status"] == "armed"
+        quarantined += s["status"] == "quarantined"
+    return {"skills_groups": gcounts.get("groups", 0), "skills_made": made,
+            "skills_armed": armed, "skills_quarantined": quarantined,
+            "skills_existing": skipped}
 
 
 # ---------------------------------------------------------------------------
 # dataset.index  (gpu -- the embedding model)
+#
+# Builds the trigger vectors of every armed skill (skill_select.
+# refresh_triggers), so the dataset's new skills are matched by the
+# embedding stage from the next request. The skills themselves armed in
+# extract; this stage checks that the dataset made some.
 # ---------------------------------------------------------------------------
 def handle_index(job: dict, ctx: Context) -> dict:
-    import numpy as np
-
-    import hints
+    import skill_select
+    import skills
 
     ds = _dataset(job)
-    rfile = job["payload"].get("recipe_file") or datasets.recipe_file(ds)
-    ctx.beat("embedding the hints corpus")
-    rows, mat = hints.refresh()
-    mine = sum(1 for r in rows if r.get("_file") == rfile)
+    mine = [s for s in skills.listing()
+            if (s.get("meta") or {}).get("dataset") == ds["id"]]
+    armed = [s for s in mine if s["status"] == "armed"]
     if not mine:
         raise Permanent(
-            f"{rfile} contributes no servable rows to the hints corpus "
-            f"(looked in {hints.CORPUS})",
-            "check extract wrote the file and that not every row is marked "
-            "reject", owner="worker")
-    if mat is None or mat.shape[0] != len(rows):
+            "extract made no skill from this dataset's rows",
+            "check extract wrote rows (the counts say how many verified); "
+            "a dataset whose every row failed the evidence check has "
+            "nothing to compile", owner="worker")
+    ctx.beat(f"building trigger vectors for {len(skills.armed())} armed "
+             "skills")
+    try:
+        built = skill_select.refresh_triggers()
+    except Exception as e:                                       # noqa: BLE001
         raise RuntimeError(describe(
-            f"hints cache has {0 if mat is None else mat.shape[0]} vectors "
-            f"for {len(rows)} rows", True, "re-run; if it repeats, delete "
-            f"{hints.CACHE} and re-run", "operator"))
-    norms = np.linalg.norm(mat, axis=1)
-    # PROTOCOL rule 1: an index of zero vectors once reported success and a
-    # component was cut on it. Check the vectors, not that the file exists.
-    if float(norms.min()) < 0.5:
-        raise RuntimeError(describe(
-            f"{int((norms < 0.5).sum())} hint vector(s) have norm < 0.5 "
-            "(expected 1.0) -- the embedding server returned zeros", True,
-            "check the embedding model on llama-swap, then re-run",
-            "operator"))
-    counts = {"indexed_rows": mine, "corpus_rows": len(rows)}
+            f"the trigger vectors could not be built: {type(e).__name__}: "
+            f"{e}", True, "check the embedding model on llama-swap, then "
+            "re-run", "operator")) from e
+    counts = {"skills": len(mine), "skills_armed_now": len(armed)}
     _merge_counts(ds["id"], counts)
-    return dict(counts, dim=int(mat.shape[1]),
-                norm_min=round(float(norms.min()), 4),
-                norm_max=round(float(norms.max()), 4),
-                cache=os.path.abspath(hints.CACHE),
-                note="the proxy holds hints in memory from its first use; "
-                     "restart it to serve these rows")
+    return dict(counts, trigger_index=built,
+                note="the skills serve from the next request; nothing to "
+                     "restart")
 
 
 # ---------------------------------------------------------------------------
@@ -1024,6 +1072,28 @@ def _register_deep() -> None:
 _register_deep()
 
 
+def _register_onboarding() -> None:
+    """Package onboarding (mcp/onboarding.py; docs/PACKAGE-ONBOARDING.md):
+    the stage handlers of a dataset of kind `package`, and the two index
+    upkeep jobs it relies on (the example kNN index)."""
+    import onboarding
+    HANDLERS.update(onboarding.HANDLERS)
+
+
+_register_onboarding()
+
+
+def _register_skill_match() -> None:
+    """The skill document index (mcp/skill_match.py UPKEEP): one gpu-lane
+    rebuild, enqueued by the loop below when the index does not match the
+    armed set (an arm, archive, supersede, edit or learned trigger)."""
+    import skill_match
+    HANDLERS[skill_match.QUEUE] = skill_match.handle_build
+
+
+_register_skill_match()
+
+
 # ---------------------------------------------------------------------------
 # The loop.
 # ---------------------------------------------------------------------------
@@ -1050,6 +1120,11 @@ def advance_after(job: dict) -> str | None:
     ds = datasets.get(job.get("dataset") or "") if job.get("dataset") else None
     if ds is None:
         return None
+    if ds.get("kind") == "package":
+        # A package onboarding: past this stage and on through the jobless
+        # ones (clarify, the JOINS) while nothing blocks them.
+        import onboarding
+        return onboarding.after_job(job)
     if job["queue"] == datasets.ASSIST[0]:
         # The assist advances (or HOLDS) the dataset itself; advancing here
         # as well would walk straight past a hold.
@@ -1078,17 +1153,35 @@ def run_one(job: dict) -> str:
                               daemon=True)
     beater.start()
     try:
+        if (job.get("payload") or {}).get("idle"):
+            # AN IDLE-GATED JOB (docs/PACKAGE-ONBOARDING.md 3.2): checked
+            # BEFORE its handler, in one place, so every gpu stage of an
+            # onboarding, its skills' model stages and the index rebuilds
+            # wait the same way. A job already running is never interrupted.
+            import idle
+            st = idle.stack_idle(job["id"])
+            if not st["idle"]:
+                raise Deferred(st["until"] or time.time(),
+                               f"waiting for an idle stack: {st['why']}")
         if handler is None:
             raise Permanent(f"no handler for queue {job['queue']!r}; this "
                             f"worker knows {sorted(HANDLERS)}",
                             "add a handler in mcp/worker.py",
                             owner="developer")
         result = handler(job, Context(job))
+    except Deferred as e:
+        stop.set()
+        return jobs.defer(job["id"], e.until, e.why)
     except Permanent as e:
         stop.set()
         return jobs.fail(job["id"], e.text(), retry=False)
     except Exception as e:                                       # noqa: BLE001
         stop.set()
+        if type(e).__name__ == "ModelAtCapacity":
+            # MAX MODE (mcp/max_mode.py): the job asked for a model that is off the card; back to the queue without
+            # an attempt, looked at again when max mode may have freed it
+            return jobs.defer(job["id"], time.time() + float(getattr(e, "retry_after", 30) or 30),
+                              f"max mode: {e}")
         msg = str(e)
         if "| retryable:" not in msg:
             msg = describe(f"{type(e).__name__}: {msg}", True,
@@ -1161,8 +1254,9 @@ def run(once: bool = False, lanes: dict | None = None) -> int:
             t.join()
         # A job finishing can enqueue the next stage after another lane has
         # already found its queue empty; go round until nothing is queued.
-        if any(jobs.snapshot()["lanes"].get(lane, {}).get("queued")
-               for lane in lanes):
+        # A DEFERRED job (jobs.defer: waiting for an idle stack) is queued
+        # but not claimable before its not_before, so it does not count.
+        if any(jobs.claimable(lane) for lane in lanes):
             return sum(counts) + run(once=True, lanes=lanes)
         return sum(counts)
 
@@ -1209,6 +1303,39 @@ def run(once: bool = False, lanes: dict | None = None) -> int:
                           flush=True)
             except Exception as e:                               # noqa: BLE001
                 print(f"[worker] deep learn scheduling failed: {e}",
+                      file=sys.stderr, flush=True)
+            # The skill library's PROVE backlog (mcp/skill_prove.py): one
+            # idle-gated gpu-lane proof at a time for armed skills not yet
+            # proved at their served version (operator, 2026-09-28).
+            try:
+                import skill_prove
+                jid = skill_prove.schedule_backlog()
+                if jid:
+                    print(f"[worker] enqueued a skill prove backlog job {jid}",
+                          flush=True)
+            except Exception as e:                               # noqa: BLE001
+                print(f"[worker] skill prove scheduling failed: {e}",
+                      file=sys.stderr, flush=True)
+            # The skill document index for the matcher (skill_match): one
+            # gpu-lane rebuild when it no longer matches the armed set.
+            try:
+                import skill_match
+                jid = skill_match.schedule()
+                if jid:
+                    print(f"[worker] enqueued {skill_match.QUEUE} {jid}",
+                          flush=True)
+            except Exception as e:                               # noqa: BLE001
+                print(f"[worker] skill index scheduling failed: {e}",
+                      file=sys.stderr, flush=True)
+            # Package onboarding: the example kNN index when stale, and the
+            # sweep that advances an onboarding whose JOIN (its skills, the
+            # index rebuilds) or whose licence answer has cleared.
+            try:
+                import onboarding
+                for line in onboarding.tick():
+                    print(f"[worker] {line}", flush=True)
+            except Exception as e:                               # noqa: BLE001
+                print(f"[worker] onboarding sweep failed: {e}",
                       file=sys.stderr, flush=True)
             # The hosted-API price snapshot for the dashboard's savings
             # estimate (mcp/prices.py): at most one fetch job a day.

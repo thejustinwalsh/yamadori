@@ -1,0 +1,48 @@
+[04:58:22] [dev] unload bonsai: HTTP 200
+[04:58:35] [dev] loaded in 9.6 s; card {'used': 14946, 'free': 1105, 'util': 0}
+[04:58:35] [dev] A_deep_slot0 ...
+[05:04:31] [dev] A_deep_slot0: prompt_n=160000 (467 tok/s) decode 19.98 tok/s acc 186/272 pool_max_p1=160249 used=160249 ours=[]
+[05:04:31] [dev] B_new_slot1_while_slot0_holds ...
+[05:06:04] [dev] B_new_slot1_while_slot0_holds: prompt_n=60000 (669 tok/s) decode 60.24 tok/s acc 106/150 pool_max_p1=262144 used=220435 ours=['kv promote: seqs 1: 59996 cells, span 163584 -> 60672 (VRAM line 114432): 0 moved, 92 exchanged with idle cells, 512 idle cells moved out; 696 rows (1.4 MiB) in 1 graph(s), 0.7 ms', 'kv promote: seqs 0: 160254 cells, span 262144 -> 220928 (VRAM line 114432): 41378 moved, 0 exchanged with idle cells, 0 idle cells moved out; 41378 rows (85.9 MiB) in 1 graph(s), 33.2 ms', 'kv promote: seqs 1: 60004 cells, span 204544 -> 60672 (VRAM line 114432): 0 moved, 4 exchanged with idle cells, 512 idle cells moved out; 520 rows (1.1 MiB) in 1 graph(s), 0.7 ms']
+[05:06:04] [dev] C_clear_slot0 ...
+[05:06:07] [dev] C_clear_slot0: prompt_n=1 (11 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=60180 used=60180 ours=[]
+[05:06:07] [dev] D_slot1_continues_after_clear ...
+[05:06:13] [dev] D_slot1_continues_after_clear: prompt_n=257 (404 tok/s) decode 58.98 tok/s acc 140/228 pool_max_p1=60691 used=60691 ours=[]
+[05:06:13] [dev] E_clear_slot1 ...
+[05:06:15] [dev] E_clear_slot1: prompt_n=1 (16 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=60181 used=1 ours=[]
+[05:06:15] [dev] E_same_prompt_from_empty_pool_slot2 ...
+[05:07:37] [dev] E_same_prompt_from_empty_pool_slot2: prompt_n=60000 (757 tok/s) decode 63.58 tok/s acc 100/144 pool_max_p1=262144 used=60173 ours=['kv promote: seqs 2: 3072 cells, span 4352 -> 4096 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 1 idle cells moved out; 1 rows (0.0 MiB) in 1 graph(s), 5.1 ms', 'kv promote: seqs 2: 3072 cells, span 4352 -> 4096 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 1 idle cells moved out; 1 rows (0.0 MiB) in 1 graph(s), 0.2 ms']
+[05:07:37] [dev] F_clear_slot2 ...
+[05:07:38] [dev] F_clear_slot2: prompt_n=1 (20 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=262144 used=2 ours=[]
+[05:07:38] [dev] F_idle_40000_slot0 ...
+[05:08:26] [dev] F_idle_40000_slot0: prompt_n=39999 (836 tok/s) decode 60.07 tok/s acc 4/4 pool_max_p1=262144 used=40005 ours=['kv promote: seqs 0: 1 cells, span 60416 -> 1280 (VRAM line 114432): 1 moved, 0 exchanged with idle cells, 0 idle cells moved out; 1 rows (0.0 MiB) in 1 graph(s), 0.6 ms', 'kv promote: seqs 0: 1 cells, span 60416 -> 1280 (VRAM line 114432): 1 moved, 0 exchanged with idle cells, 0 idle cells moved out; 1 rows (0.0 MiB) in 1 graph(s), 0.2 ms']
+[05:08:26] [dev] F_clear_slot1_before_8000 ...
+[05:08:27] [dev] F_clear_slot1_before_8000: prompt_n=1 (32 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=40007 used=40007 ours=[]
+[05:08:27] [dev] F_active_8000_slot1 ...
+[05:08:41] [dev] F_active_8000_slot1: prompt_n=7999 (854 tok/s) decode 67.97 tok/s acc 138/233 pool_max_p1=262144 used=48261 ours=['kv promote: seqs 1: 7996 cells, span 42496 -> 8704 (VRAM line 114432): 0 moved, 315 exchanged with idle cells, 512 idle cells moved out; 1142 rows (2.4 MiB) in 1 graph(s), 0.9 ms', 'kv promote: seqs 0: 40006 cells, span 262144 -> 48640 (VRAM line 114432): 6144 moved, 0 exchanged with idle cells, 1 idle cells moved out; 6145 rows (12.8 MiB) in 1 graph(s), 4.3 ms', 'kv promote: seqs 1: 8004 cells, span 48128 -> 8704 (VRAM line 114432): 0 moved, 4 exchanged with idle cells, 512 idle cells moved out; 520 rows (1.1 MiB) in 1 graph(s), 0.6 ms']
+[05:08:41] [dev] F_clear_slot1_before_32000 ...
+[05:08:42] [dev] F_clear_slot1_before_32000: prompt_n=1 (24 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=262144 used=40008 ours=[]
+[05:08:42] [dev] F_active_32000_slot1 ...
+[05:09:24] [dev] F_active_32000_slot1: prompt_n=31999 (856 tok/s) decode 61.24 tok/s acc 134/241 pool_max_p1=262144 used=72261 ours=['kv promote: seqs 1: 31484 cells, span 49408 -> 32000 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 512 idle cells moved out; 512 rows (1.1 MiB) in 1 graph(s), 0.7 ms', 'kv promote: seqs 1: 31996 cells, span 43264 -> 32512 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 512 idle cells moved out; 512 rows (17.0 MiB) in 1 graph(s), 2.5 ms', 'kv promote: seqs 1: 31996 cells, span 48896 -> 32512 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 512 idle cells moved out; 512 rows (1.1 MiB) in 1 graph(s), 0.8 ms']
+[05:09:24] [dev] F_clear_slot1_before_64000 ...
+[05:09:25] [dev] F_clear_slot1_before_64000: prompt_n=1 (22 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=262144 used=40008 ours=[]
+[05:09:25] [dev] F_active_64000_slot1 ...
+[05:10:48] [dev] F_active_64000_slot1: prompt_n=59999 (752 tok/s) decode 62.92 tok/s acc 105/152 pool_max_p1=262144 used=100188 ours=['kv promote: seqs 1: 46081 cells, span 50176 -> 47360 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 1024 idle cells moved out; 1024 rows (2.1 MiB) in 1 graph(s), 1.2 ms', 'kv promote: seqs 1: 47105 cells, span 50176 -> 48384 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 1024 idle cells moved out; 1024 rows (2.1 MiB) in 1 graph(s), 1.2 ms', 'kv promote: seqs 1: 48129 cells, span 50176 -> 49408 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 844 idle cells moved out; 844 rows (1.8 MiB) in 1 graph(s), 1.3 ms']
+[05:10:50] [dev] stopped; min free 1035 MiB
+[05:11:00] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 98}}
+| arm | stage | prompt_n | prompt tok/s | decode tok/s | draft acc | pool max+1 | used |
+|---|---|---|---|---|---|---|---|
+| dev | A_deep_slot0 | 160000 | 467 | 19.98 | 186/272 | 160249 | 160249 |
+| dev | B_new_slot1_while_slot0_holds | 60000 | 669 | 60.24 | 106/150 | 262144 | 220435 |
+| dev | C_clear_slot0 | 1 | 11 | 0.00 | - | 60180 | 60180 |
+| dev | D_slot1_continues_after_clear | 257 | 404 | 58.98 | 140/228 | 60691 | 60691 |
+| dev | E_clear_slot1 | 1 | 16 | 0.00 | - | 60181 | 1 |
+| dev | E_same_prompt_from_empty_pool_slot2 | 60000 | 757 | 63.58 | 100/144 | 262144 | 60173 |
+| dev | F_clear_slot2 | 1 | 20 | 0.00 | - | 262144 | 2 |
+| dev | F_idle_40000_slot0 | 39999 | 836 | 60.07 | 4/4 | 262144 | 40005 |
+| dev | F_clear_slot1_before_8000 | 1 | 32 | 0.00 | - | 40007 | 40007 |
+| dev | F_active_8000_slot1 | 7999 | 854 | 67.97 | 138/233 | 262144 | 48261 |
+| dev | F_clear_slot1_before_32000 | 1 | 24 | 0.00 | - | 262144 | 40008 |
+| dev | F_active_32000_slot1 | 31999 | 856 | 61.24 | 134/241 | 262144 | 72261 |
+| dev | F_clear_slot1_before_64000 | 1 | 22 | 0.00 | - | 262144 | 40008 |
+| dev | F_active_64000_slot1 | 59999 | 752 | 62.92 | 105/152 | 262144 | 100188 |

@@ -742,7 +742,7 @@ directory that is never created.
 |---|---|
 | tier `minimal` | no |
 | tier `medium` and up, code tools offered by the gate | yes (with them) |
-| tier `medium` and up, code tools **withheld** (e.g. a LiveCodeBench puzzle) | yes, alone. Like `generate_image`, it reads no index |
+| tier `medium` and up, code tools **withheld** (e.g. a LiveCodeBench puzzle) | yes, alone. Like `yama_generate_image`, it reads no index |
 | header turns `retrieval` off (the `bonsai` arm) | no. The bare arm stays bare |
 | header `{"check_code": true}` | yes, whatever `retrieval` says |
 | header `{"check_code": false}` | no |

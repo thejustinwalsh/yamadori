@@ -1,0 +1,20 @@
+{
+ "tag": "pagoda-r3f-1",
+ "task": "r3f-stack",
+ "prompt": "Design and create a very creative, elaborate, and detailed voxel art scene of a pagoda in a beautiful garden with trees, including some cherry blossoms, add a village with people living in it. Make the scene impressive and varied and use colorful voxels. Make it really detailed use as many voxels as you want, we have a power machine here. Build it with r3f (react-three-fiber) v10 and Koota and pmndrs math.",
+ "prompt_sha256": "a5d46abd906f20b8d543ddcdbf087c581d1dbd9492bf08ba65bf3f4fb70407cd",
+ "reps": 1,
+ "max_tokens_sent": null,
+ "runner": "bench/voxel/run.py",
+ "stack_sentence": "Build it with r3f (react-three-fiber) v10 and Koota and pmndrs math.",
+ "replaces": "Create a single HTML file.",
+ "arms": {
+  "xhigh": {
+   "base": "xhigh",
+   "effort": "xhigh",
+   "features": null,
+   "model": "yamadori",
+   "note": "our full stack at medium thinking (the planned arm)"
+  }
+ }
+}

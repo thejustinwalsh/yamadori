@@ -4,7 +4,7 @@
 docs/SELECTION-BUILD.md is the spec. This module is step 3 and 4 of its build
 plan; the decisions it owns are D2-D4 of that plan's table:
 
-    hints         may recipe hints be attached at all?
+    skills        may skills be attached at all?
     investigate   does deep thinking run before the answer?
     fanout_n      how many ways is the answer written?
 
@@ -31,7 +31,7 @@ DEEP THINKING ON THE PROXY'S PATH: TRIGGERS (Phase 0.6, 2026-09-24)
 
 The proxy passes a route and mcp/deep.py's trigger; deep thinking then runs
 exactly when a trigger fired (struggle, task kickoff, known-hard area; the
-model's own think_deeply call runs during generation), on ANY route class.
+model's own yama_think_deeply call runs during generation), on ANY route class.
 The library_question-only gate is gone, and the two-signal rule below is not
 consulted there: it is the LEGACY path, kept byte for byte for the offline
 evaluators that replay it (no route, no trigger). A header still forces deep
@@ -627,7 +627,7 @@ def acts_locally(instruction: str) -> str | None:
 # command-approval classifier, a session title, a compaction of its history.
 # Live, Hermes, 2026-09-23 (corpus turns 510e1d, fbe1dc, 9cca1a, bbddcf, and
 # every row since 09-23 whose system prompt is a reviewer or a title namer):
-# each got the capability block, our tools and hints. 9cca1a took 409 s to
+# each got the capability block, our tools and recipes. 9cca1a took 409 s to
 # answer one word and CALLED run_check; the compaction bbddcf took 355 s. None
 # of them is a task the code tools or a second brain can serve, and every one
 # holds the GPU while the user's real turn waits.
@@ -658,7 +658,7 @@ def acts_locally(instruction: str) -> str | None:
 # (PROTOCOL rule 7) -- see that file for the counts.
 #
 # A utility call gets the bare model at the tier it resolves to: no capability
-# block, no tools, no hints, no deep thinking, no fan-out, no repair, and no
+# block, no tools, no skills, no deep thinking, no fan-out, no repair, and no
 # session (it neither reads nor writes the conversation's offered-tools flag,
 # work log or pins -- proxy.session_context). X-Yamadori-Features {"utility":
 # true|false} forces it; a header that forces an augmentation ON wins over the
@@ -702,6 +702,39 @@ def summarises_conversation(text: str) -> bool:
     return bool(_SUMMARISE.search(head) and _CONVERSATION.search(head))
 
 
+# A TITLE CALL names the conversation; its reply is one line. The harnesses'
+# own words, in the head of the system or user text:
+#   Hermes    "You name chat sessions. ... write a title" (corpus 510e1d)
+#   OpenCode  "You are a title generator. You output ONLY a thread title."
+#             plus a user turn "Generate a title for this conversation:"
+#             (opencode-ai 1.18.32, SessionPrompt.ensureTitle and the title
+#             agent's prompt; corpus 6580, 6584, 6600, ...)
+_TITLE = re.compile(
+    r"\b(?:title\s+generator|only\s+(?:a|the)\s+(?:thread|session|chat|"
+    r"conversation)\s+title|"
+    r"(?:generate|write|create)\s+(?:a|an)\s+(?:\w+\s+){0,2}title\s+for\s+"
+    r"(?:this|the)\s+(?:conversation|chat|session|thread)|"
+    r"name\s+chat\s+sessions)\b", re.I)
+
+
+def names_a_title(text: str) -> bool:
+    return bool(_TITLE.search((text or "")[:SUMMARY_HEAD_CHARS]))
+
+
+def _harness_compaction(messages: list[dict]) -> bool:
+    """A harness's own flattened compaction whose summarise verb is past the
+    head (OpenCode's "Create a new anchored summary ..." follows the whole
+    transcript): mcp/compaction.harness_of, on the last user turn."""
+    import compaction
+    users = [m for m in messages if isinstance(m, dict)
+             and m.get("role") == "user"]
+    if not users:
+        return False
+    system = next((_text(m) for m in messages if isinstance(m, dict)
+                   and m.get("role") in ("system", "developer")), "")
+    return compaction.harness_of(_text(users[-1]), system) is not None
+
+
 # Content-part types that carry an image: the same set as vision.IMAGE_PARTS
 # (mcp/test_utility.py asserts they match; not imported, to keep this module
 # free of the GPU-side imports vision pulls in).
@@ -733,8 +766,32 @@ def utility_call(messages: list[dict], client_tools: list[str] | None = None,
         # review, 2026-09-24). Hermes' vision_analyze asks the main provider
         # -- us -- "describe this image" in one exchange with no tools, which
         # read as a side call and went to the bare text model, which cannot
-        # see. It is a task for the vision path (describe_image).
+        # see. It is a task for the vision path (yama_describe_image).
+        # ONE EXCEPTION (operator, 2026-09-26): a tool-less, single-exchange
+        # TITLE or SUMMARY side call stays a side call when it quotes the
+        # user's image (OpenCode's title call carries the user's first
+        # message, image included, docs/HARNESS-OPENCODE.md 3b). A title
+        # needs no vision: the image becomes its text placeholder and
+        # nothing is described, and the call never becomes the
+        # conversation's first request (no session, no slot pin, no
+        # yama_think_deeply offer, no chain salt).
         sig["image"] = True
+        form = None
+        if not client_tools and sig["single_exchange"]:
+            texts = [_text(m) for m in messages if isinstance(m, dict)
+                     and m.get("role") in ("system", "developer", "user")]
+            form = ("title" if any(names_a_title(t) for t in texts) else
+                    "summarise_conversation"
+                    if any(summarises_conversation(t) for t in texts)
+                    or _harness_compaction(messages) else None)
+        if form:
+            sig["form"] = form
+            return {"utility": True, "signals": sig,
+                    "because": (f"no client tools, one exchange, and the "
+                                f"reply is fixed by a contract ({form}): a "
+                                f"client's own side call; the image it "
+                                f"quotes becomes a placeholder, nothing is "
+                                f"described (a {form} needs no vision)")}
         return {"utility": False, "signals": sig,
                 "because": "the request carries an image: it goes to the "
                            "vision path, never the bare text model"}
@@ -750,13 +807,20 @@ def utility_call(messages: list[dict], client_tools: list[str] | None = None,
     texts = [_text(m) for m in messages
              if isinstance(m, dict) and m.get("role") in ("system", "developer",
                                                            "user")]
+    # A TITLE first (2026-09-26): OpenCode's title generator says it is
+    # "summarizing" the user's message and names "this conversation", which
+    # read as a compaction (corpus 6580 on: 7 OpenCode title calls recorded
+    # utility_kind "compaction"). Hermes' title namer is one too.
+    if not sig["form"] and any(names_a_title(t) for t in texts):
+        sig["form"] = "title"
     if not sig["form"]:
         for t in texts:
             f = closed_form(t)
             if f:
                 sig["form"] = f
                 break
-    if not sig["form"] and any(summarises_conversation(t) for t in texts):
+    if not sig["form"] and (any(summarises_conversation(t) for t in texts)
+                            or _harness_compaction(messages)):
         sig["form"] = "summarise_conversation"
     if not sig["form"]:
         return {"utility": False, "signals": sig,
@@ -778,22 +842,27 @@ def utility_call(messages: list[dict], client_tools: list[str] | None = None,
 #                checkpoint" -- one user message, no system prompt, the turns
 #                as text. (A compaction that RESENDS the conversation is not a
 #                utility call at all; compaction.in_place finds it.)
+#                Pi's and OpenCode's summarisers too (compaction.harness_of).
+#   title        a title call: Hermes' title namer, OpenCode's title
+#                generator (names_a_title; checked before the other forms).
 #   classifier   one_word / one_of / yes_no: Hermes' approval reviewer.
-#   structured   json_only or a response_format: Hermes' title namer.
+#   structured   json_only or a response_format.
 #   other        forced on by X-Yamadori-Features with no contract form.
 #
 # NOT a compaction: the turn that FOLLOWS one. Hermes opens it with
 # "[CONTEXT COMPACTION -- REFERENCE ONLY]" and sends it with its tools and the
 # history, so it is an agent turn (proxy._continue_after_compaction keeps its
 # session), never a utility call. mcp/test_utility.py checks both on the corpus.
-UTILITY_KINDS = {"summarise_conversation": "compaction",
+UTILITY_KINDS = {"summarise_conversation": "compaction", "title": "title",
                  "one_word": "classifier", "one_of": "classifier",
                  "yes_no": "classifier", "json_only": "structured"}
 
 
 def utility_kind(util: dict | None) -> str | None:
-    """'compaction' | 'classifier' | 'structured' | 'other' for a utility
-    call (utility_call's or proxy.utility_of's decision); None otherwise."""
+    """'compaction' | 'title' | 'classifier' | 'structured' | 'other' for a
+    utility call (utility_call's or proxy.utility_of's decision); None
+    otherwise. `title`: Hermes' title namer and OpenCode's title generator
+    (2026-09-26; the namer was `structured` before, by its JSON form)."""
     if not util or not util.get("utility"):
         return None
     form = (util.get("signals") or {}).get("form") or ""
@@ -823,14 +892,27 @@ def question_of(messages: list[dict]) -> tuple[str, str, bool]:
     The third value is False when the conversation ends on something other
     than a user turn -- a client's tool result, mid-way through its own agent
     loop. That turn continues a task; it does not ask a new question.
+
+    A harness's SYNTHETIC TOOL-MEDIA TURN (OpenCode's "Attached media from
+    tool result:", Pi's "Attached image(s) from tool result:", Cline's
+    image-only turn; image_input.TOOL_MEDIA_TURNS) is the tool result it
+    carries, never the user speaking: it is looked past, as route.ends_on
+    and deep do (2026-09-26).
     """
-    users = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    import image_input
+    import message_text
+    # A harness's CONTEXT turn (Codex's <environment_context>) is not the
+    # user either (message_text.HARNESS_CONTEXT_TURNS).
+    users = [i for i, m in enumerate(messages) if m.get("role") == "user"
+             and not image_input.is_tool_media(messages, i)
+             and message_text.harness_context(m) is None]
     if not users:
         return "", "", False
     last = users[-1]
     earlier = "\n".join(_text(messages[i]) for i in users[:-1])
-    speaking = not any(m.get("role") not in ("user", "system")
-                       for m in messages[last + 1:])
+    speaking = not any(m.get("role") not in ("user", "system", "developer")
+                       or image_input.is_tool_media(messages, j)
+                       for j, m in enumerate(messages[last + 1:], last + 1))
     return _text(messages[last]), earlier[-CONTEXT_CHARS:], speaking
 
 
@@ -869,7 +951,7 @@ def decide(messages: list[dict], tier: dict, gate: dict | None,
            route: dict | None = None,
            trigger: dict | None = None,
            second: str = "Laya") -> dict:
-    """{hints, investigate, fanout_n, because, signals} for one request.
+    """{skills, investigate, fanout_n, because, signals} for one request.
 
     `route` is mcp/route.py's class for the request (proxy.prepare decides
     it once). When given, fan-out READS it instead of re-deciding: it runs on
@@ -905,9 +987,9 @@ def decide(messages: list[dict], tier: dict, gate: dict | None,
                  "instruction_chars": len(q), "attached_chars": len(attached),
                  "client_tools": len(client_tools or []),
                  "acts_locally": local,
-                 "forced": sorted(k for k in ("hints", "investigate", "fanout")
+                 "forced": sorted(k for k in ("skills", "investigate", "fanout")
                                   if _forced(tier, k)),
-                 "allowed": {"hints": bool(tier.get("hints")),
+                 "allowed": {"skills": bool(tier.get("skills")),
                              "investigate": bool(tier.get("investigate")),
                              "fanout": int(tier.get("fanout") or 1)},
                  "gate": (gate or {}).get("situation"),
@@ -915,17 +997,19 @@ def decide(messages: list[dict], tier: dict, gate: dict | None,
                  "laya": laya, "laya_status": laya_status}
     rclass = (route or {}).get("class")
 
-    # ---- hints: allowed or forced. hints.select abstains per hint. ----------
-    if _forced(tier, "hints"):
-        hints = bool(tier.get("hints"))
-        because["hints"] = f"forced {'on' if hints else 'off'} by X-Yamadori-Features"
-    elif tier.get("hints"):
-        hints = True
-        because["hints"] = ("allowed; hints.select attaches only what clears the "
-                            "0.55 floor inside the task's domains")
+    # ---- skills: allowed or forced. skill_select abstains per skill. ------
+    if _forced(tier, "skills"):
+        skills_on = bool(tier.get("skills"))
+        because["skills"] = (f"forced {'on' if skills_on else 'off'} by "
+                             "X-Yamadori-Features")
+    elif tier.get("skills"):
+        skills_on = True
+        because["skills"] = ("allowed; skill_select injects only what its "
+                             "applies-when and tests select")
     else:
-        hints = False
-        because["hints"] = f"tier {tier.get('name', '?')} does not allow hints"
+        skills_on = False
+        because["skills"] = (f"tier {tier.get('name', '?')} does not allow "
+                             "skills")
 
     # ---- deep thinking ------------------------------------------------------
     investigate = False
@@ -946,7 +1030,7 @@ def decide(messages: list[dict], tier: dict, gate: dict | None,
         # deep thinking is no longer limited to library questions. Four
         # TRIGGERS decide it (mcp/deep.py) -- struggle, a task kickoff and a
         # known-hard area here, before main generates; the model's own
-        # think_deeply call during generation -- on every route class, the
+        # yama_think_deeply call during generation -- on every route class, the
         # agent path included. The rule, the symbol lookup and Laya are not
         # consulted on this path (a separate evaluation decides Laya vs
         # Tev1); a header still forces it either way (above). The reason is
@@ -954,7 +1038,7 @@ def decide(messages: list[dict], tier: dict, gate: dict | None,
         investigate = fired
         why = (trig.get("because") or
                "no trigger was evaluated for this request (mcp/deep.py "
-               "decides); the model may call think_deeply")
+               "decides); the model may call yama_think_deeply")
     elif local:
         why = (f"the client sent its own tools ({_tool_list(client_tools)}) and "
                f"the request asks to act on the user's machine ({local!r}): "
@@ -1074,7 +1158,7 @@ def decide(messages: list[dict], tier: dict, gate: dict | None,
                              "(fanout.py: 7/8 vs 7/8, 0 discordant, n=8)")
 
     _ = st  # the session row is part of the contract; nothing reads it yet
-    return {"hints": hints, "investigate": investigate, "fanout_n": fanout_n,
+    return {"skills": skills_on, "investigate": investigate, "fanout_n": fanout_n,
             "because": because, "signals": sig}
 
 
@@ -1166,7 +1250,7 @@ def log_line(d: dict) -> str:
     held = ";".join(f"{k}:{','.join(v[:3])}"
                     for k, v in (s.get("held_symbols") or {}).items()) or "-"
     return (f"selection: investigate={'yes' if d['investigate'] else 'no'} "
-            f"fanout={d['fanout_n']} hints={'yes' if d['hints'] else 'no'} | "
+            f"fanout={d['fanout_n']} skills={'yes' if d['skills'] else 'no'} | "
             f"rule={s.get('rule')} held={held} {name}={lay} | "
             f"{d['because'].get('investigate', '')[:220]}")
 

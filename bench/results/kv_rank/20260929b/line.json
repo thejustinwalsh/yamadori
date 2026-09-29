@@ -1,0 +1,32 @@
+{
+ "margin_mib": 1000,
+ "display_active": "Disabled",
+ "per_cell_bytes": 36992,
+ "rounds": [
+  {
+   "n": 147456,
+   "c": 360448,
+   "min_free_mib": 805,
+   "error": null,
+   "image": {
+    "status": 200,
+    "content": "The left half is red, and the right half is blue."
+   }
+  },
+  {
+   "n": 141824,
+   "c": 349184,
+   "min_free_mib": 1001,
+   "error": null,
+   "image": {
+    "status": 200,
+    "content": "- **Left half:** Red\n- **Right half:** Blue"
+   }
+  }
+ ],
+ "n": 141824,
+ "child": 65536,
+ "c": 349184,
+ "host_ram_gb": 7.22,
+ "free_ram_gb_at_fit": 32.37
+}

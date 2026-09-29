@@ -1,0 +1,201 @@
+{
+ "id": "pi/chat/skills-target",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "chat",
+ "source": "shape: Pi write(path, content) and text-part user turns (every Pi user turn is a list of parts); request from the authored skill's activation test",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_completion_tokens": 26419,
+  "store": false,
+  "messages": [
+   {
+    "role": "developer",
+    "content": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n[... Pi system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "Build a small canvas game."
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "piWriteAudio00000000000000000000",
+      "type": "function",
+      "function": {
+       "name": "write",
+       "arguments": "{\"path\": \"js/audio.js\", \"content\": \"const AUDIO = (function () {\\n  function play(name) {\\n    return name;\\n  }\\n  return { beep: play };\\n})();\\n\"}"
+      }
+     },
+     {
+      "id": "piWritePlayer0000000000000000000",
+      "type": "function",
+      "function": {
+       "name": "write",
+       "arguments": "{\"path\": \"js/player.js\", \"content\": \"const PLAYER = {\\n  shoot() {\\n    AUDIO.play('shot');\\n  }\\n};\\n\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "piWriteAudio00000000000000000000",
+    "content": "Successfully wrote to js/audio.js"
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "piWritePlayer0000000000000000000",
+    "content": "Successfully wrote to js/player.js"
+   },
+   {
+    "role": "assistant",
+    "content": "Done."
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "Uncaught TypeError: AUDIO.play is not a function when the player shoots. Fix it."
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "(read: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "bash",
+     "description": "(bash: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "timeout": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "edit",
+     "description": "(edit: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "edits": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "oldText": {
+           "type": "string"
+          },
+          "newText": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "oldText",
+          "newText"
+         ]
+        }
+       }
+      },
+      "required": [
+       "path",
+       "edits"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write",
+     "description": "(write: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "medium",
+  "prompt_cache_key": "pik1"
+ },
+ "expect": {
+  "accepted": true,
+  "roles": {
+   "one_system_first": true
+  },
+  "skills": {
+   "includes": [
+    "module-exports-match-callers"
+   ]
+  }
+ },
+ "why": {
+  "skills": "the same work as the other harnesses' targets, in Pi's shape: the skill must reach a text-part user turn too"
+ }
+}

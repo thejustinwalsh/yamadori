@@ -1,0 +1,259 @@
+{
+ "id": "hermes/chat/patch-replace-broken",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "chat",
+ "source": "shape: v0e hermes.jsonl patch(path, old_string, new_string); content synthetic (a replacement that breaks the parse)",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask. [... Hermes system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": "Rename f's parameter in app.py."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_1a2b3c4d5e6f_00000002",
+      "type": "function",
+      "function": {
+       "name": "patch",
+       "arguments": "{\"mode\": \"replace\", \"path\": \"app.py\", \"old_string\": \"def f():\\n    return 1\\n\", \"new_string\": \"def f(:\\n    return 1\\n\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_1a2b3c4d5e6f_00000002",
+    "content": "{\"success\": true, \"diff\": \"...\"}"
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "terminal",
+     "description": "(terminal: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "background": {
+        "type": "boolean"
+       },
+       "timeout": {
+        "type": "integer"
+       },
+       "workdir": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read_file",
+     "description": "(read_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write_file",
+     "description": "(write_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "patch",
+     "description": "(patch: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "mode": {
+        "type": "string",
+        "enum": [
+         "replace",
+         "patch"
+        ]
+       },
+       "path": {
+        "type": "string"
+       },
+       "old_string": {
+        "type": "string"
+       },
+       "new_string": {
+        "type": "string"
+       },
+       "replace_all": {
+        "type": "boolean"
+       },
+       "patch": {
+        "type": "string"
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "search_files",
+     "description": "(search_files: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "target": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "file_glob": {
+        "type": "string"
+       },
+       "output_mode": {
+        "type": "string"
+       },
+       "context": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skills_list",
+     "description": "(skills_list: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_view",
+     "description": "(skill_view: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "vision_analyze",
+     "description": "(vision_analyze: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "image_url": {
+        "type": "string"
+       },
+       "question": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "image_url",
+       "question"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "xhigh"
+ },
+ "expect": {
+  "accepted": true,
+  "route": "agent_step",
+  "roles": {
+   "one_system_first": true
+  },
+  "tool_code": [
+   {
+    "call": [
+     -1,
+     0
+    ],
+    "detected": "table",
+    "kind": "edit",
+    "language": "python",
+    "blocking": true
+   }
+  ]
+ },
+ "why": {
+  "tool_code": "the text it replaces parses and the replacement does not: a complete unit that blocks (tool_code docstring)"
+ }
+}

@@ -1,0 +1,182 @@
+{
+ "id": "pi/chat/write-html",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "chat",
+ "source": "relay.jsonl #23 (captured shape: write of canvas.html); page content synthetic",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_completion_tokens": 26419,
+  "store": false,
+  "messages": [
+   {
+    "role": "developer",
+    "content": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n[... Pi system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "Write canvas.html that draws a red square."
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "8rN28fpt4ZnmFSlk61H5X9zNS7IOCCWV",
+      "type": "function",
+      "function": {
+       "name": "write",
+       "arguments": "{\"path\": \"canvas.html\", \"content\": \"<!DOCTYPE html>\\n<html>\\n<head><meta charset=\\\"utf-8\\\"><title>PI-TEST</title></head>\\n<body>\\n<canvas id=\\\"c\\\" width=\\\"256\\\" height=\\\"256\\\"></canvas>\\n<script>\\nconst ctx = document.getElementById('c').getContext('2d');\\nctx.fillStyle = 'white';\\nctx.fillRect(0, 0, 256, 256);\\nctx.fillStyle = 'red';\\nctx.fillRect(64, 64, 128, 128);\\n</script>\\n</body>\\n</html>\\n\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "8rN28fpt4ZnmFSlk61H5X9zNS7IOCCWV",
+    "content": "Successfully wrote to canvas.html"
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "(read: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "bash",
+     "description": "(bash: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "timeout": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "edit",
+     "description": "(edit: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "edits": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "oldText": {
+           "type": "string"
+          },
+          "newText": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "oldText",
+          "newText"
+         ]
+        }
+       }
+      },
+      "required": [
+       "path",
+       "edits"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write",
+     "description": "(write: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "medium",
+  "prompt_cache_key": "piv2"
+ },
+ "expect": {
+  "accepted": true,
+  "route": "agent_step",
+  "roles": {
+   "one_system_first": true
+  },
+  "tool_code": [
+   {
+    "call": [
+     -1,
+     0
+    ],
+    "detected": "table",
+    "language": "javascript",
+    "blocking": false
+   }
+  ]
+ },
+ "why": {
+  "tool_code": "the live record said stopped: no_code for canvas.html (docs/HARNESS-PI.md gap 4): its inline script is JavaScript and is checked"
+ }
+}

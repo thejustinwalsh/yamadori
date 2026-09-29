@@ -10,7 +10,10 @@ export type Gpu = {
   total_mib: number;
   free_mib: number;
   pct: number;
+  /** free_mib under floor_mib: the card's own live free-VRAM floor */
   tight: boolean;
+  /** the free-VRAM floor this card is sized to, read live by the server (absent on older servers) */
+  floor_mib?: number | null;
   util: number;
   /** nvidia-smi uuid, power.draw and power.limit (W); absent on older servers, null for [N/A] */
   uuid?: string | null;
@@ -98,6 +101,14 @@ export type ContextPool =
       helpers?: number;
       reserve: number;
       gib: number;
+      /** 'cap': main = the VRAM line (THE CAP LAYOUT, 2026-09-28); 'split': the pool divided; absent on older servers */
+      layout?: 'cap' | 'split' | string;
+      /** where the main cap came from, or why there is none */
+      cap_source?: string;
+      /** the most one request may occupy */
+      window?: number;
+      /** /props kv_vram_cells as served (engine patch 0041); null when not reported; absent on older servers */
+      vram_line?: number | null;
     }
   | { error: string };
 
@@ -146,7 +157,33 @@ export type Vitals = {
    *  last requests' fan-out and recall; absent on older servers. Read by
    *  bonsai/mapping.ts treeSources(), which checks every field it uses. */
   tree?: Record<string, unknown> | null;
+  /** mcp/vitals.py serving(): which main model holds the card (max mode); absent on older servers */
+  serving?: Serving | null;
   warnings: string[];
+};
+
+/** A llama-swap /running row as vitals reports it. */
+export type LoadedModel = { model: string; state: string; port: number | null; gguf: string | null };
+
+/** mcp/vitals.py serving() over mcp/max_mode.py. */
+export type Serving = {
+  /** max mode is configured (YAMADORI_MAX_MODEL) */
+  enabled: boolean;
+  main: string;
+  max: string | null;
+  max_tier: string;
+  /** the main model or the max model, whichever llama-swap has loaded; null when neither or unread */
+  on_card: string | null;
+  /** max mode holds the card: a max request in flight or waiting to swap in */
+  max_active: boolean;
+  inflight: Record<string, number>;
+  switching_to: string | null;
+  last_max_end: number | null;
+  /** the operator's idle seconds before swapping back; null until given */
+  idle_s: number | null;
+  /** llama-swap /running; null when it could not be read */
+  loaded: LoadedModel[] | null;
+  error: string | null;
 };
 
 /** mcp/vitals.py slots(): llama-server /slots, one row per slot. */
@@ -165,8 +202,25 @@ export type Slot = {
   tps: number;
   /** prefill tokens/s since the server's previous read */
   pps: number;
+  /** the slot layout (mcp/slots.py): conversations on 0..n-2, the child n-1; absent on older servers */
+  role?: 'conversation' | 'child';
+  /** a conversation is pinned here (proxy process only) */
+  pinned?: boolean;
+  /** the primary conversation's slot (slots RANKS) */
+  primary?: boolean;
 };
-export type Slots = { ok: boolean; slots: Slot[]; ms: number; error?: string; decoding?: number; prefilling?: number; tps?: number };
+export type Slots = {
+  ok: boolean;
+  slots: Slot[];
+  ms: number;
+  error?: string;
+  /** the model whose server answered (the max model's while it holds the card); absent on older servers */
+  model?: string | null;
+  off_card?: boolean;
+  decoding?: number;
+  prefilling?: number;
+  tps?: number;
+};
 
 /** mcp/vitals.py lanes(): admission lanes held right now. */
 export type Lanes = {
@@ -761,8 +815,13 @@ export type Results = {
 };
 
 export type TierSpec = {
-  thinks: boolean; floor: number; effort: string; retrieval: boolean; hints: boolean;
+  thinks: boolean; floor?: number; effort: string; retrieval: boolean;
+  /** retired with hints (2026-09-26): skills are the knowledge system; kept optional for old payloads */
+  hints?: boolean;
+  skills?: boolean;
   fanout: number; investigate: boolean; why: string;
+  /** the model that serves the tier (mcp/max_mode.py model_for); absent on older servers */
+  model?: string | null;
   check_code?: boolean; repair?: boolean;
   /** the reasoning_effort the proxy actually sends (tiers.safe_effort); absent until the server reports it */
   sent_effort?: string;
@@ -776,4 +835,6 @@ export type Tiers = {
   feature_columns?: string[];
   default?: string;
   ceiling?: string;
+  /** max mode (mcp/max_mode.py); null where it cannot be read, absent on older servers */
+  max_mode?: { enabled: boolean; main: string; max: string | null; tier: string } | null;
 };

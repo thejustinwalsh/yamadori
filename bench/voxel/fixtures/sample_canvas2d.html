@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>voxel check fixture: no three.js</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#222}</style>
+<!-- A hand-written fixture for bench/voxel (not a model output): a 2D canvas
+     "voxel" grid with no three.js, one script from a host that is NOT a CDN
+     (the check must abort and record it) and one uncaught error. Known
+     answers: three not seen, blocked_hosts [example.com], page_errors >= 1,
+     non-blank, orbit by pixels false (it ignores the mouse). -->
+<script src="https://example.com/analytics.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c'), g = c.getContext('2d');
+c.width = innerWidth; c.height = innerHeight;
+const cols = ['#e89', '#5a4', '#864', '#ddd', '#c33'];
+function draw() {
+  g.fillStyle = '#222'; g.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 30; i++) for (let j = 0; j < 12; j++) {
+    g.fillStyle = cols[(i * 7 + j * 3) % cols.length];
+    g.fillRect(200 + i * 28, 150 + j * 28, 26, 26);
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+setTimeout(() => { undefinedFunctionCall(); }, 100);
+</script>
+</body>
+</html>

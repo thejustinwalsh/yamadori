@@ -206,6 +206,145 @@ def fetch(name: str, version: str) -> str | None:
     return dest if os.listdir(dest) else None
 
 
+# The licence files a tarball carries (onboarding reads the licence from a
+# verbatim quote; docs/PACKAGE-ONBOARDING.md 2.2 and 2.4). Their stems, any
+# extension: LICENSE, LICENSE.md, LICENCE.txt, COPYING, license-MIT ...
+LICENCE_STEMS = ("license", "licence", "copying")
+
+
+def is_licence_file(rel: str) -> bool:
+    base = rel.rsplit("/", 1)[-1].lower()
+    return base.split(".", 1)[0].split("-", 1)[0] in LICENCE_STEMS
+
+
+def verify_integrity(blob: bytes, integrity: str) -> tuple[bool, str]:
+    """(ok, what was checked) for one SRI string ("sha512-<base64>", as the
+    registry's `dist.integrity` writes it; several space-separated hashes:
+    any one that verifies is enough, as npm does). An algorithm this
+    function cannot compute is NOT a pass."""
+    import base64
+    import hashlib
+    seen = []
+    for part in (integrity or "").split():
+        algo, _, want = part.partition("-")
+        algo = algo.lower()
+        if algo not in ("sha512", "sha384", "sha256", "sha1"):
+            seen.append(f"{algo}: not computable")
+            continue
+        got = base64.b64encode(hashlib.new(algo, blob).digest()).decode()
+        if got == want:
+            return True, f"{algo} matches the registry's dist.integrity"
+        seen.append(f"{algo}: mismatch")
+    return False, "; ".join(seen) or "no integrity string to check"
+
+
+def fetch_verified(name: str, version: str, *, tarball: str | None = None,
+                   integrity: str | None = None,
+                   unpacked_size: int | None = None,
+                   dest: str | None = None, get=None) -> dict:
+    """fetch() for a package onboarding (docs/PACKAGE-ONBOARDING.md 2.4):
+    the tarball's bytes are VERIFIED against the packument's
+    `dist.integrity` before anything is unpacked; the unpacked bytes are
+    refused when they exceed the packument's own `dist.unpackedSize` (a
+    consistency check against the registry's record, not a number of ours);
+    LICENSE / COPYING files at the package root are extracted beside
+    SOURCE_EXTS. The traversal and extension filters of fetch() stay, and so
+    does its per-member 2,000,000-byte cap. Unpacked into `<dest>.unpacking`
+    and moved into place, so a killed run leaves the old directory or none.
+    Returns {ok, dest, integrity, integrity_check, tarball_bytes,
+    unpacked_bytes, unpacked_size, files, licence_files, error}; never
+    raises for a refusal (package_net.RateLimited passes through, for the
+    stage to defer on). `get` (tests) is package_net.get's shape."""
+    import hashlib
+    import shutil
+    out: dict = {"ok": False, "dest": None, "integrity": integrity,
+                 "unpacked_size": unpacked_size}
+    dest = dest or os.path.join(SRC_CACHE, slug(name, version))
+    short = name.split("/")[-1]
+    url = tarball or f"{REGISTRY}/{name}/-/{short}-{version}.tgz"
+    out["tarball"] = url
+    if not integrity:
+        out["error"] = ("the packument gives no dist.integrity for this "
+                        "version: the tarball cannot be verified")
+        return out
+    if get is None:
+        import package_net
+        get = package_net.get
+    try:
+        r = get(url, accept="application/octet-stream")
+    except Exception as e:                                       # noqa: BLE001
+        if type(e).__name__ == "RateLimited":
+            raise
+        out["error"] = f"GET {url}: {type(e).__name__}: {e}"[:300]
+        return out
+    if r.status != 200:
+        out["error"] = f"GET {url} answered HTTP {r.status}"
+        return out
+    blob = r.body
+    out["tarball_bytes"] = len(blob)
+    out["tarball_sha256"] = hashlib.sha256(blob).hexdigest()
+    ok, how = verify_integrity(blob, integrity)
+    out["integrity_check"] = how
+    if not ok:
+        out["error"] = f"integrity: {how}; nothing unpacked"
+        return out
+    tmp = dest + ".unpacking"
+    files, lic = 0, []
+    try:
+        with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tf:
+            members = [m for m in tf.getmembers() if m.isfile()]
+            total = sum(m.size for m in members)
+            out["unpacked_bytes"] = total
+            if unpacked_size and total > int(unpacked_size):
+                out["error"] = (f"the tarball unpacks to {total:,} bytes, more "
+                                f"than the registry's dist.unpackedSize "
+                                f"({int(unpacked_size):,}); nothing unpacked")
+                return out
+            if os.path.isdir(dest) and os.listdir(dest):
+                # Unpacked by an earlier run of this stage: the bytes were
+                # verified again above, so the directory is kept.
+                lic = sorted(f for f in os.listdir(dest)
+                             if is_licence_file(f))
+                out.update(ok=True, dest=dest, reused=True,
+                           licence_files=lic)
+                return out
+            if os.path.isdir(tmp):
+                shutil.rmtree(tmp, ignore_errors=True)
+            os.makedirs(tmp, exist_ok=True)
+            for m in members:
+                # Tarballs are rooted at package/; strip it, and refuse any
+                # member that would escape the destination.
+                rel = m.name.split("/", 1)[-1]
+                if not rel or os.path.isabs(rel) or ".." in rel.split("/"):
+                    continue
+                licence = "/" not in rel and is_licence_file(rel)
+                if os.path.splitext(rel)[1].lower() not in SOURCE_EXTS \
+                        and not licence:
+                    continue
+                if m.size > 2_000_000:
+                    continue
+                target = os.path.join(tmp, rel)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                src = tf.extractfile(m)
+                if src:
+                    with open(target, "wb") as f:
+                        f.write(src.read())
+                    files += 1
+                    if licence:
+                        lic.append(rel)
+    except (tarfile.TarError, OSError) as e:
+        out["error"] = f"unpacking failed: {type(e).__name__}: {e}"[:300]
+        return out
+    if not files:
+        shutil.rmtree(tmp, ignore_errors=True)
+        out["error"] = "the tarball holds no file fetch() keeps"
+        return out
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    os.replace(tmp, dest)
+    out.update(ok=True, dest=dest, files=files, licence_files=sorted(lic))
+    return out
+
+
 def plan(root: str) -> list[dict]:
     """What would be fetched and indexed for this repository, and what exists."""
     out = []
@@ -653,20 +792,94 @@ HISTORY_FILE = os.environ.get("YAMADORI_PKG_HISTORY",
 def registry_history(name: str, timeout: float = 60) -> dict | None:
     """{first_published, releases} from the registry's packument, or None.
     First published = the earliest version's time (the packument's
-    `created` can be later than it). Network: index time or the CLI only."""
+    `created` can be later than it) IN THE CURRENT PROJECT's lineage
+    (history_of_packument). Network: index time or the CLI only."""
     try:
         url = f"{REGISTRY}/{name.replace('/', '%2F')}"
         with urllib.request.urlopen(url, timeout=timeout) as r:
             doc = json.loads(r.read().decode("utf-8", "replace"))
     except Exception:                                            # noqa: BLE001
         return None
+    return history_of_packument(doc)
+
+
+# A REUSED NAME (2026-09-26): npm `math` was Kaleb Hornsby's js-math (two
+# versions, 2011, repository kaleb/js-math) until pmndrs published a
+# different project under the name (canaries from 2026-08-16, 0.1.0 on
+# 2026-09-11, repository pmndrs/math). The earliest version's date said
+# "first published 2011", so deep.unseen called a library born after the
+# model's cutoff "seen". The project a version belongs to is its
+# `repository`; an earlier run of versions whose repository is KNOWN, is a
+# different one, and ended at least REUSE_GAP_DAYS before the current
+# project's first version is another project's, and is left out of
+# first_published and releases (recorded under `name_reused`). A missing
+# repository proves nothing (koota's first 37 versions carry none), and a
+# short gap is a transfer, not a reuse (@react-three/fiber's first version
+# says drcmda/react-three-fiber, two months before pmndrs'). The gap is a
+# CHOICE.
+REUSE_GAP_DAYS = 365
+
+
+def _repo_key(repo) -> str | None:
+    """A version's `repository` as `host/owner/name`, or None."""
+    url = repo.get("url") if isinstance(repo, dict) else repo
+    if not isinstance(url, str) or not url.strip():
+        return None
+    u = url.strip().lower()
+    u = re.sub(r"^git\+", "", u)
+    u = re.sub(r"^(?:https?|git|ssh|git\+ssh)://(?:[^@/]+@)?", "", u)
+    u = re.sub(r"^git@([^:]+):", r"\1/", u)
+    u = re.sub(r"^github:", "github.com/", u)
+    if re.match(r"^[\w.-]+/[\w.-]+$", u):          # npm's "owner/repo" form
+        u = "github.com/" + u
+    u = re.sub(r"(?:\.git)?/*$", "", u)
+    return u or None
+
+
+def history_of_packument(doc: dict | None) -> dict | None:
+    """{first_published, releases[, name_reused]} from one packument."""
     times = {k: str(v) for k, v in ((doc or {}).get("time") or {}).items()
              if k not in ("created", "modified") and v}
     if not times:
         return None
-    return {"first_published": min(times.values())[:10],
-            "releases": {k: v[:10] for k, v in sorted(times.items())
-                         if "-" not in k}}
+    versions = (doc or {}).get("versions") or {}
+    order = sorted(times, key=lambda k: times[k])
+    repo = {v: _repo_key((versions.get(v) or {}).get("repository"))
+            for v in order}
+    tags = (doc or {}).get("dist-tags") or {}
+    anchor = tags.get("latest") if tags.get("latest") in times else order[-1]
+    cur = repo.get(anchor)
+    reused = None
+    if cur:
+        # Walk back from the newest version while the repository is the
+        # current project's (or unknown); stop at a KNOWN other one.
+        start = len(order)
+        for i in range(len(order) - 1, -1, -1):
+            r = repo[order[i]]
+            if r is not None and r != cur:
+                break
+            start = i
+        before = order[:start]
+        if before and start < len(order):
+            import datetime as _dt
+
+            def day(k):
+                return _dt.date.fromisoformat(times[k][:10])
+            gap = (day(order[start]) - day(before[-1])).days
+            if gap >= REUSE_GAP_DAYS:
+                prev = sorted({repo[v] for v in before if repo[v]})
+                reused = {"previous_repositories": prev,
+                          "previous_versions": len(before),
+                          "previous_first": times[before[0]][:10],
+                          "previous_last": times[before[-1]][:10],
+                          "gap_days": gap, "repository": cur}
+                order = order[start:]
+    out = {"first_published": times[order[0]][:10],
+           "releases": {k: times[k][:10] for k in sorted(order)
+                        if "-" not in k}}
+    if reused:
+        out["name_reused"] = reused
+    return out
 
 
 def package_history(name: str) -> dict | None:
@@ -719,7 +932,8 @@ def _write_meta(db: str, rows: dict, files: list[str], src: str) -> None:
 
 def index_package(name: str, version: str, embed: bool = False,
                   db: str | None = None, src: str | None = None,
-                  timeout: int | None = None, log=None) -> dict:
+                  timeout: int | None = None, log=None,
+                  from_registry: bool | None = None) -> dict:
     """Fetch, select with code_files, index, and install only if healthy.
 
     Built into `<db>.building` and moved into place at the end, so nothing
@@ -732,8 +946,11 @@ def index_package(name: str, version: str, embed: bool = False,
 
     say = log or (lambda *_a: None)
     # Only a package fetched from the registry has a registry record to read
-    # its publish date from (a caller-supplied `src` -- the tests -- has not).
-    from_registry = not src
+    # its publish date from (a caller-supplied `src` -- the tests -- has not,
+    # unless the caller says it came from the registry: an onboarding's
+    # fetch_verified).
+    if from_registry is None:
+        from_registry = not src
     src = src or fetch(name, version)
     if not src:
         return {"ok": False, "installed": False,

@@ -1,0 +1,328 @@
+{
+ "id": "2026-09-28-assured-voice",
+ "why": "Operator, 2026-09-28, after pagoda-h6: \"those are all terrible skills and plans don't sow doubt, I have been building with all of those APIs in alpha state with none of those concerns.\" \"All of our skills increase confidence and improve correctness; if it can't, then the line doesn't need to exist.\" \"You can't just archive skills, you need to build new skills ... Archive the doubt-skills only when their replacements are ready to arm, or in the same step.\"",
+ "run": "python mcp/skill_rebuild.py --plan (read-only), then --queue: GPU work, idle-gated, scheduled by the operator; --settle archives a finished batch's replaced skills (the worker also settles after every job)",
+ "batches": [
+  {
+   "id": "r3f-v10-docs",
+   "what": "React Three Fiber v10 and drei v11 from their own docs at the pinned tags, distilled through distil/6 -> review/1 -> validate -> prove/1; the migration guides are left out (version history is not a skill). Skills of the file with a doubt line are archived when the batch settles (finished, one armed); the clean how-to packs only per replaces_when_proved.",
+   "replaces_migration_files": [
+    "r3f"
+   ],
+   "keep": [
+    "r3f-v10-compute-gpu-compute-access",
+    "r3f-v10-render-pipeline-reserved-scene-pass-key",
+    "r3f-v10-render-pipeline-userenderpipeline",
+    "r3f-v10-typescript-extending-custom-elements"
+   ],
+   "provenance": {
+    "r3f": {
+     "repo": "pmndrs/react-three-fiber",
+     "ref": "v10.0.0-alpha.5",
+     "commit": "27df622f4990778db05fbca0b77ad5a61165169a"
+    },
+    "drei": {
+     "repo": "pmndrs/drei",
+     "ref": "v11.0.0-alpha.7",
+     "commit": "fee88b6ce0dc45eeee845d9515a6843a5580358d"
+    }
+   },
+   "sources": [
+    {
+     "pkg": "r3f",
+     "path": "docs/API/canvas.mdx",
+     "goal": "the Canvas component and its props"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/API/objects.mdx",
+     "goal": "declaring three.js objects, args, attach and constructor arguments in JSX"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/API/events.mdx",
+     "goal": "pointer events on meshes"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/API/hooks.mdx",
+     "goal": "useThree, useFrame, useLoader and the other fiber hooks"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/API/typescript.mdx",
+     "goal": "typing React Three Fiber code and extending custom elements"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/API/testing.mdx",
+     "goal": "testing React Three Fiber scenes"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/API/additional-exports.mdx",
+     "goal": "the additional exports: extend, createRoot, invalidate, advance"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/advanced/pitfalls.mdx",
+     "goal": "performance pitfalls and their fixes"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/advanced/scaling-performance.mdx",
+     "goal": "scaling scene performance: on-demand rendering, instancing, level of detail"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/frame-loop.mdx",
+     "goal": "the frame loop, phases and useFrame scheduling"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/getting-started/installation.mdx",
+     "goal": "installing React Three Fiber and its peer packages"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/getting-started/your-first-scene.mdx",
+     "goal": "building a first scene"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/scene/camera-parenting.mdx",
+     "goal": "parenting objects to the camera"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/scene/render-targets.mdx",
+     "goal": "render targets"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/scene/visibility.mdx",
+     "goal": "showing and hiding objects without remounting"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/tutorials/basic-animations.mdx",
+     "goal": "animating objects"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/tutorials/events-and-interaction.mdx",
+     "goal": "interaction with pointer events"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/tutorials/how-it-works.mdx",
+     "goal": "how JSX maps to three.js objects"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/tutorials/loading-models.mdx",
+     "goal": "loading glTF models"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/tutorials/loading-textures.mdx",
+     "goal": "loading textures"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/webgpu/overview.mdx",
+     "goal": "the WebGPU renderer in a Canvas"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/webgpu/tsl-hooks.mdx",
+     "goal": "the TSL hooks for node materials"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/webgpu/render-pipeline.mdx",
+     "goal": "the WebGPU render pipeline and post-processing"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/webgpu/compute.mdx",
+     "goal": "compute shaders with WebGPU"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/webgpu/multi-canvas.mdx",
+     "goal": "several WebGPU canvases sharing one renderer"
+    },
+    {
+     "pkg": "r3f",
+     "path": "docs/webgpu/hmr.mdx",
+     "goal": "hot reloading WebGPU scenes"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/getting-started/introduction.mdx",
+     "goal": "drei's entry points and how its components are imported"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/performances/instances.mdx",
+     "goal": "Instances for many similar meshes"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/performances/merged.mdx",
+     "goal": "Merged meshes"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/performances/bvh.mdx",
+     "goal": "Bvh-accelerated raycasting"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/performances/adaptive-dpr.mdx",
+     "goal": "AdaptiveDpr"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/performances/performance-monitor.mdx",
+     "goal": "PerformanceMonitor"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/performances/preload.mdx",
+     "goal": "Preload"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/performances/detailed.mdx",
+     "goal": "Detailed level of detail"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/loaders/use-gltf.mdx",
+     "goal": "useGLTF"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/loaders/use-texture.mdx",
+     "goal": "useTexture"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/staging/environment.mdx",
+     "goal": "Environment lighting"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/staging/bounds.mdx",
+     "goal": "Bounds"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/shaders/soft-shadows.mdx",
+     "goal": "SoftShadows"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/misc/html.mdx",
+     "goal": "Html overlays in the scene"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/controls/introduction.mdx",
+     "goal": "camera controls"
+    },
+    {
+     "pkg": "drei",
+     "path": "docs/controls/orbit-controls.mdx",
+     "goal": "OrbitControls"
+    }
+   ],
+   "replaces_when_proved": {
+    "_why": "Operator, 2026-09-28: the clean how-to packs (no line skill_limits.doubt rejects) are archived one by one, each only when EVERY page listed for it has a replacement skill that is armed AND passed PROVE (verdict better or tie); a clean r3f skill not listed here is kept.",
+    "r3f-useloader": [
+     "r3f:docs/API/hooks.mdx",
+     "r3f:docs/tutorials/loading-textures.mdx",
+     "r3f:docs/tutorials/loading-models.mdx"
+    ],
+    "r3f-tsl-hooks-18": [
+     "r3f:docs/webgpu/tsl-hooks.mdx"
+    ],
+    "r3f-bounds-1": [
+     "drei:docs/staging/bounds.mdx",
+     "drei:docs/staging/environment.mdx"
+    ],
+    "r3f-usethree": [
+     "r3f:docs/API/hooks.mdx"
+    ],
+    "r3f-lod-3": [
+     "drei:docs/performances/detailed.mdx",
+     "drei:docs/performances/merged.mdx",
+     "drei:docs/performances/performance-monitor.mdx",
+     "drei:docs/performances/preload.mdx"
+    ],
+    "r3f-events-9": [
+     "r3f:docs/API/events.mdx",
+     "r3f:docs/tutorials/events-and-interaction.mdx"
+    ],
+    "r3f-softshadows-4": [
+     "drei:docs/shaders/soft-shadows.mdx",
+     "drei:docs/performances/adaptive-dpr.mdx"
+    ],
+    "r3f-instancing-11": [
+     "r3f:docs/advanced/scaling-performance.mdx",
+     "drei:docs/performances/instances.mdx"
+    ],
+    "r3f-concurrency-7": [
+     "r3f:docs/advanced/pitfalls.mdx",
+     "r3f:docs/API/additional-exports.mdx"
+    ],
+    "r3f-usegltf-20": [
+     "drei:docs/loaders/use-gltf.mdx",
+     "drei:docs/loaders/use-texture.mdx"
+    ],
+    "r3f-html-2": [
+     "drei:docs/misc/html.mdx",
+     "drei:docs/performances/instances.mdx"
+    ]
+   }
+  },
+  {
+   "id": "pmndrs-three-upstream",
+   "what": "koota v0.6.6 and pmndrs/math 0.1.0's own SKILL.md and references, re-run through the fixed templates as NEW VERSIONS of the skills that hold them (the served ones serve until the new ones arm); three.js r185's docs/llms.txt and docs/llms-full.txt (the full TSL reference; the screen strips its zero-width characters) at the pinned commit, distilled new.",
+   "rerun_source_urls_starting": [
+    "https://raw.githubusercontent.com/pmndrs/koota/7d1329aa82e313e715f6b7afbb8350e028c313b5/",
+    "https://raw.githubusercontent.com/pmndrs/math/c6713e38dd86de6e3e5bf98b94e22c2a29e4a709/"
+   ],
+   "provenance": {
+    "three": {
+     "repo": "mrdoob/three.js",
+     "ref": "r185 = three@0.185.1",
+     "commit": "2431a09f46f34c560bc8e44b33be0e567723d5b9"
+    }
+   },
+   "sources": [
+    {
+     "pkg": "three",
+     "path": "docs/llms.txt",
+     "goal": "three.js r185 (0.185.1): WebGPURenderer, TSL and node materials"
+    },
+    {
+     "pkg": "three",
+     "path": "docs/llms-full.txt",
+     "goal": "TSL (three.js shading language) at three.js r185 (0.185.1): the full reference"
+    }
+   ]
+  },
+  {
+   "id": "rebuild",
+   "what": "Every other armed skill with a line skill_limits.doubt rejects: a new version of the same skill through review/1 -> validate -> prove/1. The served version serves until the new one arms; a rebuild in which no item survives archives the skill (the review found nothing to act on)."
+  }
+ ],
+ "raw_url": {
+  "r3f": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/{commit}/{path}",
+  "drei": "https://raw.githubusercontent.com/pmndrs/drei/{commit}/{path}",
+  "three": "https://raw.githubusercontent.com/mrdoob/three.js/{commit}/{path}"
+ }
+}

@@ -26,7 +26,12 @@ the reasoning and the model next saw an empty turn -- fixed the same day in
 `stream_body`) and our internal tool loop rebuilding turns. Not measured
 apart: nobody replayed the morning's loop with only one of the two fixed.
 
-**Now (design change, coordinator/operator):** past reasoning PASSES THROUGH.
+**Superseded 2026-09-27 (operator): past reasoning is RESTORED again** (the
+ledger records the slot's reasoning per delivered turn; AGENTS.md "Past
+reasoning is restored"). The 2026-09-24 design, kept below for the record,
+is switch `restore_reasoning` off.
+
+**Then (design change, coordinator/operator, 2026-09-24):** past reasoning PASSES THROUGH.
 What a client sends is what the model sees -- a stripping client's turns
 render with empty think blocks, an echoing client's with its echo -- and the
 ledger records and restores no reasoning. Reasoning lives within one request
@@ -59,7 +64,7 @@ stores is its decision; what the model is shown is what it saw last time.
 |---|---|---|
 | static addendum (how this model works: writes are checked, library questions are researched, the phrase vocabulary) | end of the client's system text, same every turn | never changes |
 | per-turn context (skills, retrieval) | tail of the user turn it served, re-added from the ledger | was in the prompt when the slot processed it |
-| the model's reasoning | NOT restored (superseded 2026-09-24): past reasoning passes through as the client sends it; it lives within one request (its hidden hops, a prefilled hand-off) | it cannot: the next request diverges at the previous turn's think block and reuses up to the checkpoint at the previous prompt's end -- cost to be measured live (see Status above) |
+| the model's reasoning | RESTORED again since 2026-09-27 (operator: "Keeping thinking across turns seems useful, fuck Hermes, Hermes can do whatever it wants."; the ledger records the slot's reasoning per delivered turn and puts it back where the client dropped it; an echo is kept; switch `restore_reasoning`, AGENTS.md "Past reasoning is restored"). From 2026-09-24 to 2026-09-27 it passed through as the client sent it | yes: the served template renders every past think block (`preserve_thinking` undefined), so the next request extends the slot; the cost is context (every past turn's reasoning on every request), counted by the window check |
 | second-brain results (deep thinking, B/C, fix-up) | distilled, then PREFILLED into the main turn: the conclusion opens the visible answer in fixed phrases ("After thinking deeply, ...", "Verified ...", "Repaired ...") | the slot processed exactly those tokens; conclusions sit in content, so they survive a harness's own compaction |
 | a fixed tool call | the client stores the fixed call; the proxy warms the pinned slot with it while the harness runs the tool | the next request finds it cached |
 
@@ -216,7 +221,7 @@ with server-side tools only, and hands back a distilled result with sources.
 | tool (second brain only) | source |
 |---|---|
 | library source | existing indexes |
-| skills + knowledge base (skill store, docs, work log) | thin wrappers over existing stores |
+| knowledge base: the skills and hints pipeline, nowhere else (armed skills + hints; operator, 2026-09-25 -- it used to read this repo's docs and the work log, see SELF-IMPROVEMENT-LOG #42; the work log is `read_rings`) | a thin wrapper over the two stores, each item re-screened on read |
 | web fetch | the skills pipeline fetcher + `skill_screen` (fetched text is data; hand-off cites the URL, labelled `(web)`) |
 | web search | SearXNG, self-hosted, loopback only, JSON output, developer-leaning engines (operator, 2026-09-24). Native Windows first, in its own venv (Windows is not an upstream-supported target: try it, report what fails); WSL as today's fallback. Either way the watchdog supervises it like the other services, so it is up when deep thinking needs it; a search that finds it down returns the situation, retryable, and the remedy, per "Failure returns carry the next step". Queries still reach the upstream engines, unattributed. Long term: a launcher that also runs it on a macOS/Linux host (operator) |
 
@@ -266,8 +271,10 @@ thinking's triggers" is the reference. What exists:
   the ledger replays; the next hop is prefilled with the fold-back opening.
 - Struggle, area and kickoff run BEFORE main (`proxy._deep_thinking`); the
   kickoff is shomen's new `plan` job (FILES / ORDER / KEY DECISIONS / RISKS).
-- The second brain's sources (`mcp/research_tools.py`): `find_skills`,
-  `find_in_knowledge_base`, `read_web_page` (skills fetcher + `skill_screen`,
+- The second brain's sources (`mcp/research_tools.py`):
+  `find_in_knowledge_base` (the armed skills and the hints, cited
+  `skill:<id>` / `hint:<id>`, re-screened on read; `find_skills` folded in
+  and developer docs removed, 2026-09-25), `read_web_page` (skills fetcher + `skill_screen`,
   private addresses refused, cited by URL with `(web)`), `search_web`
   (SearXNG on loopback, `YAMADORI_SEARCH_URL`; at most 3 searches per run;
   queries carrying code or secrets refused; down -> situation, retryable,
@@ -297,7 +304,8 @@ thinking's triggers" is the reference. What exists:
   bug report is a task; one incident = one label, `in_cooldown`, traffic
   fails closed (`hermes-dogfood` = client); recording off the response path;
   compaction epochs, the continuation guard and a per-conversation lock;
-  the knowledge base keeps network details out. And the operator's rule
+  the knowledge base keeps network details out (moot since 2026-09-25: it
+  reads no docs). And the operator's rule
   FETCHED CONTENT IS DATA, in one place (`skill_screen`): fetched text
   stripped, the hand-off screened on the way to main, skill items about
   unrelated actions dropped.
@@ -333,6 +341,40 @@ rows, not a second pipeline. The recipes/hints corpus (2,575 rows,
 repeated live runs (Octopus variants, LiveBench). NAEDOKO (the seedbed)
 is the natural name for the one surface; the SKILLS tab folds into it.
 Nothing is renamed or deleted before that measurement.
+
+**Status (2026-09-26): DONE in the backend, ahead of the measurement, by
+the operator's decision.** "It's time to retire hints and build the skills
+system ... because skills are proven in the greater ecosystem." "We don't
+have rules to fix bugs, we have skills." This overrides "nothing deleted
+before paired runs": the V0 baseline (v0e-V0-xhigh-1) had ZERO hints
+injected across 106+ requests, so skills are measured against a clean
+no-knowledge baseline instead of against hints.
+
+- One pipeline: fetch -> screen -> screen_model -> licence (verbatim quote,
+  kept) -> distil | decompose (frontier SKILL.md into atomic skills) ->
+  classify/tag -> tests -> validate -> arm, plus watch
+  (`mcp/skill_pipeline.py`); every model prompt a versioned template
+  (`mcp/skill_prompts.py`). A dataset's `extract` now EMITS SKILLS
+  (`worker.emit_skills`) and `index` builds their trigger vectors; the
+  label/train branch reads the same rows.
+- Skills are Agent Skills folders (`index/skills/library/<name>/SKILL.md` +
+  `tests.json`), harness-portable; each carries activation tests that gate
+  arming.
+- The migration: 2,575 rows -> 179 rejected, 3 leaks excluded, 4 over the
+  item cap -> 2,389 rows -> 522 atomic skills, 522 armed, 0 quarantined,
+  2,367 items armed, 22 items dropped by the item screen
+  (`mcp/skill_migrate.py --apply`; reproducible, models/manifest.yaml
+  `skills-migration`). Plus three AUTHORED skills from our own evidence.
+- Deleted: `mcp/hints.py`, `mcp/test_hints.py`, `YAMADORI_RECALL`,
+  `index/hints.npz` (archived), `x_yamadori.hints` / `suppressed_hints`.
+  The tier flag is `skills`; the header's `hints` is an alias for one
+  release (benchmarks send it).
+- The skill factory API and its contract: docs/SKILL-FACTORY.md. The React
+  NAEDOKO surface is the follow-up (the current SKILLS tab still renders
+  the old list).
+- Still to measure: paired, repeated live runs (Octopus V0 with vs without
+  the authored skills; LiveBench) and the embedding thresholds. Nothing
+  here has been run live.
 
 ## Phase 1 -- dogfood harness
 

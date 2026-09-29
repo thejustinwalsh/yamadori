@@ -249,6 +249,11 @@ BODY = r"""<main>
   name and URL -- is read-only: if a source does not say it, reject the row
   rather than re-attributing it. Nothing here is scored, because nothing has
   yet measured which recipes help.</p>
+  <p class="lede"><strong>Not served.</strong> Since 2026-09-26 the model reads
+  skills, not recipes: these rows were migrated into skills
+  (mcp/skill_migrate.py) and a dataset's extract compiles its rows into skills.
+  The files stay as provenance, so an edit or a reject here changes the row,
+  not an armed skill -- skills are reviewed on the dashboard's SKILLS screen.</p>
 </div>
 
 <section class="panel group" id="login" hidden>
@@ -561,13 +566,28 @@ def handle_get(path: str):
         # `features`: what RUNS at the tier (tiers.features, the one
         # feature matrix the docs and mcp/test_tier_docs.py also read); the
         # ladder renders these cells rather than deriving its own.
+        # `model`: which model serves the tier (mcp/max_mode.py model_for,
+        # the tier -> model table mcp/tier_models.py; stateless for a tier,
+        # no request made). `max_mode.table`: each model's rank, window and
+        # token profile, values with their classes (tier_models.describe).
+        try:
+            import max_mode
+            import tier_models
+            model_of, mm = max_mode.model_for, {
+                "enabled": max_mode.ENABLED, "main": max_mode.MAIN,
+                "max": max_mode.MAX or None, "tier": max_mode.MAX_TIER,
+                "table": tier_models.describe()}
+        except Exception:                                        # noqa: BLE001
+            model_of, mm = (lambda _n: None), None
         view = {n: dict(t, sent_effort=tiers.safe_effort(t["effort"]),
-                        features=tiers.features(n, "README.md"))
+                        features=tiers.features(n, "README.md"),
+                        model=model_of(n))
                 for n, t in tiers.TIERS.items()}
         return 200, "application/json", json.dumps(
             {"order": tiers.ORDER, "tiers": view,
              "feature_columns": list(tiers.FEATURE_COLUMNS),
-             "default": tiers.DEFAULT, "ceiling": tiers.CEILING}).encode()
+             "default": tiers.DEFAULT, "ceiling": tiers.CEILING,
+             "max_mode": mm}).encode()
     return None
 
 

@@ -1,0 +1,1114 @@
+# models/manifest.yaml -- every model file and derived artifact Yamadori loads,
+# and the runtimes around them. The engines (llama-server, sd-server builds)
+# are engines/manifest.yaml's; this file is the weights and what feeds them.
+#
+# Checked by scripts/verify_artifacts.py `verify(config_path)` (the deploy
+# check calls it): every file config.yaml passes to a model server must be
+# recorded here, present, and these bytes. Re-obtained by
+# scripts/fetch_models.py. How to re-obtain or rebuild each one, and what
+# cannot be: docs/MODELS.md.
+#
+# A model whose NAME is not already public in the tracked tree goes in
+# models/manifest.local.yaml instead (gitignored, same shape, merged at
+# verify time).
+#
+# FIELDS (artifacts)
+#   id             unique, kebab-case
+#   role           what it does in the stack, in one line
+#   status         in_service | disabled (in config.yaml, not served) |
+#                  retired (kept for results that used it) |
+#                  input (not loaded; an input to a recipe) | candidate
+#   config_entries the config.yaml entries that load it (informational;
+#                  verify() reads config.yaml itself)
+#   loaded_by      config (default: a config.yaml cmd argument) | code (a
+#                  Python module opens it; verify() checks it directly)
+#   path           ${models} and any other ${macro} expand from config.yaml's
+#                  macros; ${repo} is the repository root
+#   size           bytes
+#   sha256         of the whole file
+#   provenance
+#     status       pinned     -- an HF repo @ a full commit whose LFS sha256
+#                                equals ours (fetch_models.py re-obtains it)
+#                  reproduced -- derived; the recipe was re-run and gave these
+#                                exact bytes (date in `reproduced`)
+#                  recipe     -- derived; recipe recorded, not byte-reproducible
+#                                or not re-run
+#                  hash_only  -- source unknown; the hash is all we have
+#     repo, revision, filename    for pinned (filename as in the repo; the
+#                                 local name may differ)
+#     revision_basis   why this revision: `download` (the commit current when
+#                  the file was fetched, from the file's mtime or a doc) or
+#                  `head-at-check` (the repo head on `checked`; the
+#                  download-time commit was not recorded)
+#     checked      date the HF API was compared with the local sha256
+#     licence      from the repo card
+#     recipe       tool (repo @ commit, path), engine, inputs by id + sha256,
+#                  command, notes
+#   format         optional: e1-head (verify() also checks the head's own
+#                  W_sha256 and that state.json serves this version)
+#   severity       optional: what a mismatch is (default error)
+#
+# FIELDS (runtimes)
+#   check: lock (interpreter + lock file) | buildinfo (web/dist vs source) |
+#          version (binary --version and sha256) | files | git (commit + a
+#          clean tree, line endings aside)
+#   severity: error blocks a deploy; warn is drift around the stack
+
+schema: 1
+checked: "2026-09-25"
+models_dir_macro: models          # config.yaml macros.models
+
+artifacts:
+
+  # ------------------------------------------------------------ main model
+  - id: bonsai-2-27b-abliterated-mtp
+    role: "the ABLITERATED trunk with the lean MTP head: the main model until 2026-09-27 (operator: back to the original trunk); only the unlisted context-trial entries still name it"
+    status: in_service
+    config_entries: [bonsai-q4kv, bonsai-q4kv-196k]
+    path: "${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf"
+    size: 6297658880
+    sha256: 4ca238c1ac2bf3299d1d012fb1d4357c4840e0dbbc95c14701db7ab9cb137a3b
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-25: both commands re-run into a scratch dir; head-lean.gguf sha256 ec9ecad8b3cef6c5fdadbdfd4c3c72842dde4e6afe6b50085040088a42404acb and the graft 4ca238c1... byte-identical to the served file"
+      recipe:
+        tool: {repo: "https://github.com/sudoingX/bonsai2-small-gpu", commit: eb52d9d7363cda2d910146f4e37f4b8c64c30c46, path: graft/tools, version: "bonsai2-mtp merge 1"}
+        interpreter: stack-python
+        inputs:
+          - {id: bonsai-2-27b-abliterated, sha256: 94dd53cbad55db5a515f245887c9f0317484502a451ccc0424c7d7788b52900a, as: trunk}
+          - {id: bonsai-2-27b-mtp-lean-stock, sha256: 1e33c571a5ce7a9a3e42474d66192923d5a6d77da7fb3a22986dc809522b5685, as: head donor}
+        intermediate: {file: head-lean.gguf, size: 351010432, sha256: ec9ecad8b3cef6c5fdadbdfd4c3c72842dde4e6afe6b50085040088a42404acb}
+        command: |
+          python graft/tools/extract_head.py Ternary-Bonsai-2-27B-PTQ1_0-mtp-lean.gguf head-lean.gguf --no-embed-tokens
+          python graft/tools/merge.py Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf head-lean.gguf Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf
+        check: "merge.py --strip on the output reproduces the trunk byte for byte (docs/MTP-STAGING.md section 4)"
+        doc: docs/MTP-STAGING.md
+
+  - id: bonsai-2-27b-abliterated
+    role: "the abliterated trunk: input to the lean graft; scripts/extract_token_embd.py reads its token_embd. `bonsai-vision` (which served it with the mmproj on the A4000) is retired 2026-09-27"
+    status: input
+    path: "${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf"
+    size: 5946648928
+    sha256: 94dd53cbad55db5a515f245887c9f0317484502a451ccc0424c7d7788b52900a
+    provenance:
+      status: pinned
+      repo: BoldingBuilds/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-GGUF
+      revision: 30a3dcbf8aaade922ac060b9215fde42d9012ab8
+      revision_basis: download
+      filename: Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf
+      checked: "2026-09-25"
+      licence: apache-2.0
+      notes: "base_model Qwen/Qwen3.8-27B via prism-ml's PTQ1_0 (bench/livebench/README.md). The stock prism-ml PTQ1_0 (sha256 53107f53...) is a different file and is not on this machine."
+
+  - id: bonsai-2-27b-mtp-lean-stock
+    role: "input to the graft only: the stock (not abliterated) Bonsai 2 PTQ1_0 with the MTP head; its 15 blk.64.* tensors are the head we serve"
+    status: input
+    path: "${models}/Ternary-Bonsai-2-27B-PTQ1_0-mtp-lean.gguf"
+    size: 6297658848
+    sha256: 1e33c571a5ce7a9a3e42474d66192923d5a6d77da7fb3a22986dc809522b5685
+    provenance:
+      status: pinned
+      repo: sudoingx/Ternary-Bonsai-2-27B-PTQ1_0-MTP-GGUF
+      revision: e9c159a6bc69b927021a7288ca7d451e192d4db1
+      revision_basis: download
+      filename: Ternary-Bonsai-2-27B-PTQ1_0-mtp-lean.gguf
+      checked: "2026-09-25"
+      licence: apache-2.0
+      notes: "also matches the repo's SHA256SUMS (docs/MTP-STAGING.md section 3)"
+
+  # ---------------------------------------- ProCreations MTP head (candidate)
+  # Fetched 2026-09-27 on the operator's yes (docs/ENGINES.md
+  # "bonsai-ada-surgery merge", "The ProCreations MTP head"). The head was
+  # trained on-policy against the ORIGINAL Bonsai 2 PQ2_0 trunk; its draft
+  # acceptance on our ABLITERATED PTQ1_0 trunk is unmeasured (PHASE 2).
+  - id: procreations-mtp-master-bf16
+    role: "input to the head's verification only: ProCreations' BF16 master weights of the on-policy MTP head (r3-mtp); re-exported with their training/export_mtp.py rules it reproduces every fetched head tensor byte for byte"
+    status: input
+    path: "${models}/procreations-mtp/model_mtp.safetensors"
+    size: 849400392
+    sha256: 7a4a18b2d02116ef184d1b0ee4af46d829825ff2c042f79cf37ef8a03c399218
+    provenance:
+      status: pinned
+      repo: ProCreations/Ternary-Bonsai-2-27B-MTP
+      revision: efffdea64c1f9e93cc7fa6bb24f72ae9d66ecf51
+      revision_basis: download
+      filename: model_mtp.safetensors
+      checked: "2026-09-27"
+      licence: apache-2.0
+      notes: "equals the repo's SHA256SUMS and manifest.json (manifest.json itself 47a50ff7..., in SHA256SUMS). NOTICE: Prism ML / Qwen3.8-27B (Alibaba) / ProCreations, Apache 2.0."
+
+  - id: procreations-mtp-head
+    role: "candidate MTP head (15 blk.64.* tensors, Q8_0 matrices + F32 norms, no embed table) for a graft onto our abliterated trunk; the bonsai-ada-surgery bundle's recommended head"
+    status: input
+    path: "${models}/procreations-mtp/head-procreations.gguf"
+    size: 451321504
+    sha256: c047329010e6e614e2a997ecc57f1ce8e289937145d2ff4fcfd2df6faea2e5ba
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: "https://github.com/sudoingX/bonsai2-small-gpu", commit: eb52d9d7363cda2d910146f4e37f4b8c64c30c46, path: graft/tools, version: "bonsai2-mtp merge 1 (graft/tools unchanged at faa7147, the head on 2026-09-27)"}
+        fetch_tool: {repo: "https://github.com/professorpalmer/bonsai-ada-surgery", commit: 5158a8df3bc4c8b9375ed521021eb6118feda78d, path: surgery/hf_sparse_fetch.py, gguf_py: "PrismML llama.cpp adfffbe41b2c + the series, gguf-py/"}
+        interpreter: stack-python
+        inputs:
+          - {repo: ProCreations/Ternary-Bonsai-2-27B-MTP, revision: efffdea64c1f9e93cc7fa6bb24f72ae9d66ecf51, filename: Ternary-Bonsai-2-27B-PQ2_0-MTP-Q8_0.gguf, size: 7657489728, sha256: 3cb3f0056d2e34ee44245a64396004a21f8492573d6ce1266ec4b7222c131dd4, as: "head donor, SPARSE: only these byte ranges were fetched, so the whole-file sha256 (SHA256SUMS, X-Linked-ETag) cannot be checked"}
+        byte_ranges:
+          # [first, last] byte of the donor file; header = the 96 MiB probe
+          header:                               [0, 100663295]
+          blk.64.nextn.eh_proj.weight:          [7206169920, 7261875519]
+          blk.64.attn_norm.weight:              [7261875520, 7261895999]
+          blk.64.ffn_down.weight:               [7261896000, 7356595519]
+          blk.64.ffn_gate.weight:               [7356595520, 7451295039]
+          blk.64.ffn_up.weight:                 [7451295040, 7545994559]
+          blk.64.post_attention_norm.weight:    [7545994560, 7546015039]
+          blk.64.attn_k_norm.weight:            [7546015040, 7546016063]
+          blk.64.attn_k.weight:                 [7546016064, 7551586623]
+          blk.64.attn_output.weight:            [7551586624, 7585009983]
+          blk.64.attn_q_norm.weight:            [7585009984, 7585011007]
+          blk.64.attn_q.weight:                 [7585011008, 7651857727]
+          blk.64.attn_v.weight:                 [7651857728, 7657428287]
+          blk.64.nextn.shared_head_norm.weight: [7657428288, 7657448767]
+          blk.64.nextn.enorm.weight:            [7657448768, 7657469247]
+          blk.64.nextn.hnorm.weight:            [7657469248, 7657489727]
+        tensor_sha256:
+          # the payload of each fetched tensor
+          blk.64.nextn.eh_proj.weight:          cf212e087650e9e03fbd72862ed420d1f6e171b834a52052441245bcd3ff4e32
+          blk.64.attn_norm.weight:              aa7ce80742dff5c671744abb3266eb2b47f7f02da1bd463c9e0b30c67317f158
+          blk.64.ffn_down.weight:               5ac6ae8f6c38dac24a551033d4acfca7720767a9f841fe1e054356fb24840a59
+          blk.64.ffn_gate.weight:               eed77e51cf60985f637da4052c085fcb49f8d30dab363575f1226c261d4c3dfe
+          blk.64.ffn_up.weight:                 3f07cf6c3db70e00e40d3bbbee3299ee545329291ae7d0029adef20f5604625f
+          blk.64.post_attention_norm.weight:    5e117f7ff4d02f9c2ad4a806fa1f0827f4bc8f098bbc7c7ae9105ba33a4ac58e
+          blk.64.attn_k_norm.weight:            c972b6432e3c4e3949b65f4cfe09483e11edc7be435fb43f2b25cb4fec5db623
+          blk.64.attn_k.weight:                 40f8c741218d7390b39c04e486e88097d39b5350ee9c692fa61f96c3ca655e7f
+          blk.64.attn_output.weight:            3f83b4544a65f8d29eda652e34180371241ab9fd9bda63ba523cd74b36cdee61
+          blk.64.attn_q_norm.weight:            70bbdd0c18e830354d5f84ade52da10516cba6dc9d6140b8e65d7642bfac5e92
+          blk.64.attn_q.weight:                 190b495ced0a5f7a188313c42c8de0bdd4dfd156be846ec17a26568a1b69e206
+          blk.64.attn_v.weight:                 9ab8fe31508bee42def879f139569804ccffb87be19df26f0d0b2099ca21cdec
+          blk.64.nextn.shared_head_norm.weight: 8c2a2af50a4a7665f657fa72139dab8daf143fd1b9de4ae3d1daaf9d00832138
+          blk.64.nextn.enorm.weight:            fa9d78958a45abbc9dc6d1bd304ffb211255cdace1d2a5aea501d4a8f6aee774
+          blk.64.nextn.hnorm.weight:            37d3e6ead9759f6649a0b719627df4561b55f99f5067e07b9f8af1713fc70607
+        command: |
+          python surgery/hf_sparse_fetch.py https://huggingface.co/ProCreations/Ternary-Bonsai-2-27B-MTP/resolve/efffdea64c1f9e93cc7fa6bb24f72ae9d66ecf51/Ternary-Bonsai-2-27B-PQ2_0-MTP-Q8_0.gguf procreations-mtp/procreations-pq2-mtp.sparse.gguf blk.64.
+          python graft/tools/extract_head.py procreations-mtp/procreations-pq2-mtp.sparse.gguf procreations-mtp/head-procreations.gguf --no-embed-tokens
+        check: >-
+          The sparse fetch cannot be checked against the donor's whole-file
+          sha256. Instead: re-exporting procreations-mtp-master-bf16 (pinned,
+          SHA256SUMS) with ProCreations' own training/export_mtp.py rules
+          (bf16 -> f32; 1-D norms + 1 as f32; 2-D through gguf-py's Q8_0
+          quantize) gives all 15 fetched tensor payloads byte for byte
+          (15/15 identical, 2026-09-27). The HTTP response named X-Repo-Commit
+          efffdea6... and X-Linked-ETag = the SHA256SUMS hash.
+      licence: apache-2.0
+      notes: "NOT YET GRAFTED. The graft onto bonsai-2-27b-abliterated (-> Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-procreations.gguf, then merge.py --strip must reproduce the trunk's 94dd53cb... byte for byte) was refused by the session's permission classifier on 2026-09-27 and awaits the operator: python graft/tools/merge.py Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf procreations-mtp/head-procreations.gguf Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-procreations.gguf. Record the graft as its own candidate artifact when it exists."
+
+  - id: bonsai-2-27b-abliterated-mtp-procreations
+    role: "CANDIDATE main model: the abliterated trunk with ProCreations' on-policy MTP head (r3-mtp) grafted on as block 64; acceptance on this trunk is measured by bench/engine_phase2.py, not assumed"
+    status: candidate
+    path: "${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-procreations.gguf"
+    size: 6397969888
+    sha256: 1ec2415fbcd2b997a56e3c5313a0c57e29324d0ec5027b31368816b25dac488a
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: "https://github.com/sudoingX/bonsai2-small-gpu", commit: eb52d9d7363cda2d910146f4e37f4b8c64c30c46, path: graft/tools, version: "bonsai2-mtp merge 1"}
+        interpreter: stack-python
+        inputs:
+          - {id: bonsai-2-27b-abliterated, sha256: 94dd53cbad55db5a515f245887c9f0317484502a451ccc0424c7d7788b52900a, as: trunk}
+          - {id: procreations-mtp-head, sha256: c047329010e6e614e2a997ecc57f1ce8e289937145d2ff4fcfd2df6faea2e5ba, as: head}
+        command: |
+          python graft/tools/merge.py Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf procreations-mtp/head-procreations.gguf Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-procreations.gguf
+        check: "merge.py --strip on the output reproduces the trunk byte for byte (sha256 94dd53cbad55db5a515f245887c9f0317484502a451ccc0424c7d7788b52900a, checked 2026-09-27 by bench/engine_phase2.py --record-graft)"
+        doc: docs/ENGINES.md
+      licence: apache-2.0
+
+  # ------------------------------ the ORIGINAL trunk (operator, 2026-09-27)
+  # "I don't know that I have seen any performance gains with abliterated":
+  # the MAIN model (5060 Ti) moves to the original PrismML trunk with the
+  # ProCreations head. The A4000's image generation is untouched.
+  - id: bonsai-2-27b-original
+    role: "the ORIGINAL (not abliterated) Bonsai 2 27B PTQ1_0 trunk: input to the main model's graft; after the layout-v2 deploy (bench/deploy_layout_v2.py, operator 2026-09-29) also served by `bonsai-vision` on the A4000 with the projector"
+    status: input
+    path: "${models}/Ternary-Bonsai-2-27B-PTQ1_0.gguf"
+    size: 5946648928
+    sha256: 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3
+    provenance:
+      status: pinned
+      repo: prism-ml/Ternary-Bonsai-2-27B-gguf
+      revision: b072e1d3b35a0a630cece372c2127528e0994386
+      revision_basis: head-at-check
+      filename: Ternary-Bonsai-2-27B-PTQ1_0.gguf
+      checked: "2026-09-27"
+      licence: apache-2.0
+      notes: "NOT downloaded: obtained offline as `merge.py --strip` of bonsai-2-27b-mtp-lean-stock (sudoingX's stock PTQ1_0 + lean head, 1e33c571...), and its bytes equal the HF API's LFS sha256 for this file at b072e1d3 (size 5,946,648,928), so fetch_models.py can re-obtain it from the repo."
+
+  - id: bonsai-2-27b-mtp-procreations
+    role: "the main model (`bonsai`, 5060 Ti): the original trunk with ProCreations' on-policy MTP head (r3-mtp, trained against the original trunk's features) grafted on as block 64; served with its projector from 2026-09-27 until the layout-v2 deploy, which takes it off (bench/deploy_layout_v2.py)"
+    status: in_service
+    config_entries: [bonsai]
+    path: "${models}/Ternary-Bonsai-2-27B-PTQ1_0-mtp-procreations.gguf"
+    size: 6397969888
+    sha256: ed55a7aa3202505b00d3314b9a63a15bf178dc347611dae7e8570d12ba647594
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: "https://github.com/sudoingX/bonsai2-small-gpu", commit: eb52d9d7363cda2d910146f4e37f4b8c64c30c46, path: graft/tools, version: "bonsai2-mtp merge 1"}
+        interpreter: stack-python
+        inputs:
+          - {id: bonsai-2-27b-original, sha256: 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3, as: trunk}
+          - {id: procreations-mtp-head, sha256: c047329010e6e614e2a997ecc57f1ce8e289937145d2ff4fcfd2df6faea2e5ba, as: head}
+        command: |
+          python graft/tools/merge.py Ternary-Bonsai-2-27B-PTQ1_0.gguf procreations-mtp/head-procreations.gguf Ternary-Bonsai-2-27B-PTQ1_0-mtp-procreations.gguf
+        check: "merge.py --strip on the output (procreations-mtp/strip-check-orig.gguf) hashes to the trunk's 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3 = prism-ml's official LFS sha256 (checked 2026-09-27)"
+        doc: docs/ENGINES.md
+      licence: apache-2.0
+
+  - id: bonsai-2-27b-mmproj-q8
+    role: "vision projector: `bonsai --mmproj` from 2026-09-27 (images pass to the main model); after the layout-v2 deploy (operator 2026-09-29, bench/deploy_layout_v2.py) `bonsai-vision --mmproj` on the A4000, which yama_describe_image asks"
+    status: in_service
+    config_entries: [bonsai]
+    path: "${models}/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+    size: 629246976
+    sha256: 6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903
+    provenance:
+      status: pinned
+      repo: prism-ml/Ternary-Bonsai-2-27B-gguf
+      revision: 6ed5e12bf84b7a63069882c91dd9e9218647d17b
+      revision_basis: download
+      filename: Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf
+      checked: "2026-09-25"
+      licence: apache-2.0
+      notes: "the stock projector; that it suits the abliterated trunk is assumed, not verified (docs/IMAGEGEN.md, 'Seeing')"
+
+  - id: bonsai-kv-mean-center-q4
+    role: "per-channel K-cache mean-centering bias for q4_0 K (the context trial). RETIRED 2026-09-25 with the rollback to q8_0 K/V; only the unlisted trial entries still name it"
+    status: retired
+    config_entries: [bonsai-q4kv, bonsai-q4kv-196k]
+    path: "${models}/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.kv-mean-center-q4_0.gguf"
+    size: 66400
+    sha256: 2267a33ad33ad5d36579c3e005da9922b0b11bb9f57a2b2226e8936c97af52aa
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: "https://github.com/sudoingX/llama.cpp", commit: 285542d98d37d0f07f491cd206aefa31f1848f33, path: tools/kv-mean-center, binary: llama-kv-mean-center.exe}
+        engine: "engines/manifest.yaml `llama-bonsai2-base` (sudoingX/llama.cpp 285542d9, build/ dir); llama-kv-mean-center.exe was compiled there on its own 2026-09-23 23:52 EDT (.ninja_log). Whether the working-tree reasoning-budget patch (0001, common/ + server) was present at that moment is not recorded; it does not touch tools/kv-mean-center or the KV cache."
+        inputs:
+          - {id: bonsai-2-27b-abliterated-mtp, sha256: 4ca238c1ac2bf3299d1d012fb1d4357c4840e0dbbc95c14701db7ab9cb137a3b}
+          - {file: kv-calib-corpus.txt, sha256: null, from: "bench/kv_context/make_calib_corpus.py --out kv-calib-corpus.txt (default --kib 450), on the working tree of 2026-09-23 ~23:5x EDT"}
+        command: |
+          python bench/kv_context/make_calib_corpus.py --out <models>/kv-calib-corpus.txt
+          llama-kv-mean-center.exe -m <models>/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.gguf -f <models>/kv-calib-corpus.txt -o <models>/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-lean.kv-mean-center-q4_0.gguf -dev CUDA0 -ngl 999 -fa on -ctk q4_0 -ctv q4_0 -c 512 --chunks 250
+        gpu: "RTX A4000 (CUDA_VISIBLE_DEVICES=GPU-43e37d0c-...)"
+        header: "general.type kv-mean-center, kv_mean_center.k_rot true, 16 tensors"
+        not_reproducible: "the corpus was not kept and its sha256 was not recorded; make_calib_corpus.py reads the repo WORKING TREE (docs/, mcp/, web/src, index/packages/_src/typegpu), which had uncommitted edits then, so no commit reproduces it. A GPU mean is also not guaranteed bit-stable. A rebuild gives a comparable bias, not these bytes."
+        doc: docs/CONTEXT-EXPANSION.md
+
+  # ------------------------------------------------------ image generation
+  - id: qwen-image-2.1-q5km
+    role: "image denoiser for `imagegen` (base, 20 steps)"
+    status: in_service
+    config_entries: [imagegen]
+    path: "${models}/qwen-image-2.1/qwen-image-2.1-Q5_K_M.gguf"
+    size: 5390223072
+    sha256: 4b53321654dd3bf0aa8dd6bb821fdcb1c9053ca735070e359a23cbb9f97268ce
+    provenance:
+      status: pinned
+      repo: unsloth/Qwen-Image-2.1-GGUF
+      revision: 2c31ccd392b367a6637841a143813320a02dff55
+      revision_basis: download
+      filename: qwen-image-2.1-Q5_K_M.gguf
+      checked: "2026-09-25"
+      licence: "Qwen Research License (other / qwen-research) -- not Apache"
+      doc: docs/IMAGEGEN.md
+
+  - id: qwen-image-2.1-turbo-q5km
+    role: "image denoiser for `imagegen-turbo` (Viggle's DMD-distilled 4-step student)"
+    status: in_service
+    config_entries: [imagegen-turbo]
+    path: "${models}/qwen-image-2.1/qwen_image_2.1_turbo_Q5_K_M.gguf"
+    size: 5007399712
+    sha256: 92521fe8d6e25cd8e23dae57f077cac29d07d23ee128c50e79d9b1e60343888a
+    provenance:
+      status: pinned
+      repo: Abiray/Qwen-Image-2.1-viggle-4-steps-turbo-GGUF
+      revision: 0016110b769f6625b92098ab9e3f4906dba367f6
+      revision_basis: download
+      filename: qwen_image_2.1_turbo_Q5_K_M.gguf
+      checked: "2026-09-25"
+      licence: "Qwen Research License (base_model Viggle/Qwen-Image-2.1-viggle-turbo); non-commercial"
+      doc: docs/IMAGEGEN-TURBO.md
+
+  - id: qwen-image-2.1-text-encoder-heretic-q4km
+    role: "text encoder (`--llm`) for both image models: Qwen3-VL-8B-Instruct with refusal directions ablated (Heretic)"
+    status: in_service
+    config_entries: [imagegen, imagegen-turbo]
+    path: "${models}/qwen-image-2.1/qwen3vl_8b_heretic-Q4_K_M.gguf"
+    size: 5027785376
+    sha256: 1338274ac7a6344f262a16c7a52d1bd7fe789307d252733b23ea421126e5d343
+    provenance:
+      status: pinned
+      repo: pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF
+      revision: 68ceaa766cad81046a7a613ee84be3e9e361149a
+      revision_basis: download
+      filename: qwen3vl_8b_heretic-Q4_K_M.gguf
+      checked: "2026-09-25"
+      licence: apache-2.0
+      doc: docs/IMAGEGEN.md
+
+  - id: qwen-image-2.1-vae-bf16
+    role: "VAE for both image models (run with --vae-dtype bf16: the white-block fix)"
+    status: in_service
+    config_entries: [imagegen, imagegen-turbo]
+    path: "${models}/qwen-image-2.1/vae/qwen_image_2.1_vae_bf16.safetensors"
+    size: 675508656
+    sha256: 71879ffd5321e6d10c3c87513e2b474b1252efa7f3dec2969214a9bf06a6dd5c
+    provenance:
+      status: pinned
+      repo: unsloth/Qwen-Image-2.1-FP8
+      revision: 9e5206424833a00b340bf5396b37486d1306e61f
+      revision_basis: download
+      filename: vae/qwen_image_2.1_vae_bf16.safetensors
+      checked: "2026-09-25"
+      licence: "none declared; a derivative of Qwen/Qwen-Image-2.1, so treat as Qwen Research License"
+      doc: docs/IMAGEGEN.md
+
+  # -------------------------------------------------------------- retrieval
+  - id: qwen3-embedding-0.6b-q8
+    role: "the resident embedder (`embeddings`): code search, E1's request vectors, skill triggers, hints"
+    status: in_service
+    config_entries: [embeddings]
+    path: "${models}/Qwen3-Embedding-0.6B-Q8_0.gguf"
+    size: 639150592
+    sha256: 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
+    provenance:
+      status: pinned
+      repo: Qwen/Qwen3-Embedding-0.6B-GGUF
+      revision: 370f27d7550e0def9b39c1f16d3fbaa13aa67728
+      revision_basis: download
+      filename: Qwen3-Embedding-0.6B-Q8_0.gguf
+      checked: "2026-09-25"
+      licence: apache-2.0
+
+  - id: qwen3-reranker-0.6b-q8
+    role: "the reranker (`reranker`); resident, but its scores are not trusted (docs/FINDINGS.md #20)"
+    status: in_service
+    config_entries: [reranker]
+    path: "${models}/Qwen3-Reranker-0.6B-Q8_0.gguf"
+    size: 639150752
+    sha256: c525a7449243f690a7062e6377d6cf5adbb289354bd4316312367cd20e187ab7
+    provenance:
+      status: pinned
+      repo: mradermacher/Qwen3-Reranker-0.6B-GGUF
+      revision: 6727da811d2cc45b078b744bffaaab122a0691da
+      revision_basis: download
+      filename: Qwen3-Reranker-0.6B.Q8_0.gguf
+      checked: "2026-09-25"
+      licence: apache-2.0
+      notes: "renamed on disk (repo name uses '.Q8_0', ours '-Q8_0'); identified by sha256 -- no Qwen/ repo publishes a GGUF of it, and ggml-org's Q8_0 is a different file"
+
+  # ------------------------------------------------ CLM (docs/CLM.md)
+  # The decision model: our own Q8_0 GGUF of Qwen/Qwen3-8B as the encoder
+  # (llama-swap `clm-encoder`), the CLM-v0.1-8B heads in numpy. Built
+  # 2026-09-27; the Q6_K (39/40 decisions) and Q4_K_M (37/40) were measured
+  # and deleted (docs/CLM.md "Fidelity").
+  - id: qwen3-8b-clm-q8
+    role: "the CLM encoder (`clm-encoder`): Qwen3-8B Q8_0, last-token embeddings for the CLM heads (mcp/clm.py)"
+    status: in_service
+    config_entries: [clm-encoder]
+    path: "${models}/Qwen3-8B-Q8_0.gguf"
+    size: 8709518688
+    sha256: 1633fc3e60add8eebb2aede44d8ba6a82872c339c673da6dc6efaa6a86ec860a
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-27: convert_hf_to_gguf.py and llama-quantize re-run into a scratch dir (CUDA_VISIBLE_DEVICES=-1): the BF16 intermediate, this Q8_0 and the Q6_K all byte-identical"
+      recipe:
+        tool: {repo: "https://github.com/PrismML-Eng/llama.cpp", commit: 9a9394a895b96003ca842a6041cb28ac49a108f7, path: convert_hf_to_gguf.py, sha256: 21b70f59d9cfa5f3963bfe9b1c648c16b1fdeca9cff67778bf776d1137b267b5, gguf_py: "0.19.0 (the checkout's own gguf-py)"}
+        engine: "engines/manifest.yaml llama-prism: build/bin/llama-quantize.exe sha256 fc7c5579629a4610b497423ec5b3c998cc740b712f07ffcf3ab45b8c24689668 (llama-quantize-impl.dll and the shipped ggml/llama DLLs)"
+        interpreter: stack-python
+        inputs:
+          - {id: qwen3-8b-hf-shard-1, sha256: 31d6a825ae35f11fb85b195b4c42c146c051e446433125a215336abdf95cbf5f}
+          - {id: qwen3-8b-hf-shard-2, sha256: 5991236cea6fe21f3d43cab0f0e84448734fbbe0789816202989f2ddc9d18282}
+          - {id: qwen3-8b-hf-shard-3, sha256: c5185c4794be2d8a9784d5753c9922db38df478ce11f9ed0b415b7304d896836}
+          - {id: qwen3-8b-hf-shard-4, sha256: b5ee7de71fbf17db3d5704e0c8f2bc7d005ca9e1d7ca2aeb19827b0cfcaa917a}
+          - {id: qwen3-8b-hf-shard-5, sha256: 20c2d6366ab85c90786ccdd829cd2b9e7d30ef3b2ebbb998280e7e4014b542ff}
+          - {id: qwen3-8b-tokenizer, sha256: aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4}
+          - {file: "Qwen3-8B/config.json", sha256: f7c4eadfbbf522470667b797a3c89be2524832d2d599797248dc304fff447c30}
+          - {file: "Qwen3-8B/generation_config.json", sha256: 2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2}
+          - {file: "Qwen3-8B/model.safetensors.index.json", sha256: f9fdbcb91c23971c13ec5d5f2573d2349e8f61f2f049371ec699281748fdb1bc}
+          - {file: "Qwen3-8B/tokenizer_config.json", sha256: d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101}
+          - {file: "Qwen3-8B/vocab.json", sha256: ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910}
+          - {file: "Qwen3-8B/merges.txt", sha256: 8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5}
+        intermediate: {id: qwen3-8b-clm-bf16, size: 16388044128, sha256: 9992dae57b55989222bbad7e5fa96ca596d096560ec8554d6de46698740ec820}
+        command: |
+          python convert_hf_to_gguf.py <models>/Qwen3-8B --outtype bf16 --outfile <models>/Qwen3-8B-BF16.gguf
+          llama-quantize.exe <models>/Qwen3-8B-BF16.gguf <models>/Qwen3-8B-Q8_0.gguf Q8_0
+        notes: "Run from the llama-prism checkout (clean tree at the commit). llama-quantize initialises CUDA when it can see a GPU; the re-run hid the GPUs and gave the same bytes. The converter set add_bos_token false and no add_eos: llama-server's /tokenize matched the HF tokenizer (add_special_tokens=False) on all 185 fidelity texts."
+
+  - id: qwen3-8b-clm-bf16
+    role: "input to the CLM encoder's quantization only: Qwen3-8B converted to GGUF at bf16 (the recipe's intermediate; re-quantize other types from it)"
+    status: input
+    path: "${models}/Qwen3-8B-BF16.gguf"
+    size: 16388044128
+    sha256: 9992dae57b55989222bbad7e5fa96ca596d096560ec8554d6de46698740ec820
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-27: re-converted into a scratch dir, byte-identical"
+      recipe:
+        tool: {repo: "https://github.com/PrismML-Eng/llama.cpp", commit: 9a9394a895b96003ca842a6041cb28ac49a108f7, path: convert_hf_to_gguf.py, sha256: 21b70f59d9cfa5f3963bfe9b1c648c16b1fdeca9cff67778bf776d1137b267b5}
+        interpreter: stack-python
+        inputs:
+          - {id: qwen3-8b-hf-shard-1, sha256: 31d6a825ae35f11fb85b195b4c42c146c051e446433125a215336abdf95cbf5f}
+        command: "python convert_hf_to_gguf.py <models>/Qwen3-8B --outtype bf16 --outfile <models>/Qwen3-8B-BF16.gguf"
+        notes: "inputs as qwen3-8b-clm-q8 (all five shards, the tokenizer and the JSON files)"
+
+  - id: qwen3-8b-hf-shard-1
+    role: "input: Qwen/Qwen3-8B safetensors shard 1/5 (the CLM encoder's source; the CPU fp32 reference of bench/clm/fidelity.py reads the shards)"
+    status: input
+    path: "${models}/Qwen3-8B/model-00001-of-00005.safetensors"
+    size: 3996250744
+    sha256: 31d6a825ae35f11fb85b195b4c42c146c051e446433125a215336abdf95cbf5f
+    provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00001-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
+
+  - id: qwen3-8b-hf-shard-2
+    role: "input: Qwen/Qwen3-8B safetensors shard 2/5"
+    status: input
+    path: "${models}/Qwen3-8B/model-00002-of-00005.safetensors"
+    size: 3993160032
+    sha256: 5991236cea6fe21f3d43cab0f0e84448734fbbe0789816202989f2ddc9d18282
+    provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00002-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
+
+  - id: qwen3-8b-hf-shard-3
+    role: "input: Qwen/Qwen3-8B safetensors shard 3/5"
+    status: input
+    path: "${models}/Qwen3-8B/model-00003-of-00005.safetensors"
+    size: 3959604768
+    sha256: c5185c4794be2d8a9784d5753c9922db38df478ce11f9ed0b415b7304d896836
+    provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00003-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
+
+  - id: qwen3-8b-hf-shard-4
+    role: "input: Qwen/Qwen3-8B safetensors shard 4/5"
+    status: input
+    path: "${models}/Qwen3-8B/model-00004-of-00005.safetensors"
+    size: 3187841392
+    sha256: b5ee7de71fbf17db3d5704e0c8f2bc7d005ca9e1d7ca2aeb19827b0cfcaa917a
+    provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00004-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
+
+  - id: qwen3-8b-hf-shard-5
+    role: "input: Qwen/Qwen3-8B safetensors shard 5/5"
+    status: input
+    path: "${models}/Qwen3-8B/model-00005-of-00005.safetensors"
+    size: 1244659840
+    sha256: 20c2d6366ab85c90786ccdd829cd2b9e7d30ef3b2ebbb998280e7e4014b542ff
+    provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00005-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
+
+  - id: qwen3-8b-tokenizer
+    role: "the CLM client's tokenizer (mcp/clm.py): token ids are computed here and sent to `clm-encoder`, so truncation to CLM's 2,047 tokens is exact"
+    status: candidate
+    loaded_by: code
+    severity: warn
+    path: "${models}/Qwen3-8B/tokenizer.json"
+    size: 11422654
+    sha256: aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4
+    provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: tokenizer.json, checked: "2026-09-27", licence: apache-2.0}
+
+  - id: clm-v0.1-8b-pt
+    role: "input: the official CLM-v0.1-8B projection heads (a torch pickle; read with weights_only=True by mcp/clm_heads.py extract, never on the request path)"
+    status: input
+    path: "${models}/CLM-v0.1-8B/CLM_v0.1-8B.pt"
+    size: 75557149
+    sha256: b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5
+    provenance: {status: pinned, repo: Contrastive-LM/CLM-v0.1-8B, revision: e939398d4556fcd9400c76fa8c5a513202f42b0a, revision_basis: download, filename: CLM_v0.1-8B.pt, checked: "2026-09-27", licence: apache-2.0, notes: "code: https://github.com/Contrastive-LM/CLM @ bb42c6c5bf914fd449bed2f6ca65be80602cb1f7 (Apache-2.0), read only"}
+
+  - id: clm-heads-v0.1
+    role: "the CLM state/action heads as numpy arrays (mcp/clm_heads.py): width 1536, depth 3, LayerNorm, GELU, projection 512, scale 100"
+    status: candidate
+    loaded_by: code
+    severity: warn
+    path: "${repo}/index/clm/heads/CLM_v0.1-8B.npz"
+    size: 75555716
+    sha256: 4f751c4a05c0958c6caa4ba7714d4968435c544727415fe3f39b155aa7c1a416
+    weights_sha256: d221a0e64fd62e80208c1c3a8d47a1d1677732a33277f96b503600c51fc3354c
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-27: extract re-run into a scratch path, byte-identical (fixed zip timestamps, fixed array order); parity with the official torch make_head on 64 random unit vectors: max |logit| difference 7.6e-6, projections 2.4e-7"
+      recipe:
+        tool: {repo: this, path: mcp/clm_heads.py, sha256: c5da371ed4d2db375af6a5c46d1547776c1b64db95e65e054bd1b36f2b3686bf}
+        interpreter: stack-python
+        inputs:
+          - {id: clm-v0.1-8b-pt, sha256: b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5}
+        command: "python mcp/clm_heads.py extract --pt <models>/CLM-v0.1-8B/CLM_v0.1-8B.pt\npython mcp/clm_heads.py parity --pt <models>/CLM-v0.1-8B/CLM_v0.1-8B.pt"
+
+  - id: clm-heads-skills-v1
+    role: "the CLM heads fine-tuned on the skills' activation tests (Tier 1, docs/CLM.md): the release's heads warm-started, train/finetune.py --task choice on our served Q8_0 encoder's embeddings; the daily eval held out. NOT the default (YAMADORI_CLM_HEADS selects it): on the daily eval it scored as the release did, 445/464"
+    status: candidate
+    loaded_by: code
+    severity: warn
+    path: "${repo}/index/clm/heads/CLM_v0.1-8B_skills-v1.npz"
+    size: 75555897
+    sha256: a23464863f07ef68be7c09a7a7e45cf0a6f9d13f74225674031c33f90e29c686
+    weights_sha256: 3c8329c2a4867aaaed941c9660972a6cca4d2940ba5da9dbabb39e8164c17cd3
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-27: finetune.py re-run on the CPU (CUDA hidden) into a scratch run dir: best_head.pt byte-identical (sha256 7349837b...), so the extracted weights are too"
+      recipe:
+        tool: {repo: "https://github.com/Contrastive-LM/CLM", commit: bb42c6c5bf914fd449bed2f6ca65be80602cb1f7, path: train/finetune.py, sha256_lf: 4917046b1b38f4ce3602b039b85dc7f238263b87f040793f6b12446a271bb9d6, extract: "mcp/clm_heads.py (sha256 c5da371e...)"}
+        interpreter: stack-python
+        inputs:
+          - {id: clm-v0.1-8b-pt, sha256: b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5, as: "--init-ckpt"}
+          - {file: "index/clm/finetune/data/skills/train-00000-of-00001.parquet (2,202 rows)", sha256: feb9f19a151f505f085cde111ee38b2f6f17c445265fc383f1ec59ae1064d1c0}
+          - {file: "index/clm/finetune/data/skills/test-00000-of-00001.parquet (18 rows, the daily eval)", sha256: 566565e704bdd3530b1b389784db529624fb17ac712735e6a5da1c2fe762ba1e}
+          - {file: "index/clm/finetune/embeddings/choice_Qwen_Qwen3-8B_2048.npz (1,771 texts, the served Q8_0 encoder)", via: "bench/clm/finetune_data.py embed"}
+          - {file: "index/clm/finetune/runs/skills-v1/best_head.pt", sha256: 7349837bad0422382bb9bbbf86eb5d6dd33dc018bfaaa06803964f72c0017adb}
+        command: |
+          python bench/clm/finetune_data.py build
+          python bench/clm/finetune_data.py embed --url <a clm-encoder llama-server>
+          python bench/clm/finetune_data.py command      # prints the finetune.py line; run it with CUDA_VISIBLE_DEVICES=-1
+          python -c "import clm_heads; clm_heads.extract('<run>/best_head.pt', 'index/clm/heads/CLM_v0.1-8B_skills-v1.npz', name='CLM_v0.1-8B+skills-v1')"
+        notes: "The embedding cache is recomputed from the served encoder, which is deterministic run to run (bench/clm/standalone.py: identical vectors over 3 passes); a different card or build may differ in the last bits (docs/MODELS.md, E1's vectors)."
+
+  # ------------------------------------------------------------ disabled
+  - id: huihui-qwen3.8-27b-abliterated-q4km
+    role: "the adversarial critic (`critic-disabled`): does not fit on the A4000, never served"
+    status: disabled
+    config_entries: [critic-disabled]
+    path: "${models}/Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_M.gguf"
+    size: 16551316384
+    sha256: 0c7cfe3060493485bb9a6a51195897b0c1d347a49929206adb9a52170183ea03
+    provenance:
+      status: pinned
+      repo: huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF
+      revision: 3d5cf9efbd7cd22926e648a7c1cbaa001fc29f54
+      revision_basis: download
+      filename: Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_M.gguf
+      checked: "2026-09-25"
+      licence: apache-2.0
+
+  # ------------------------------------------- derived, loaded by our code
+  - id: token-embd-npz
+    role: "the 27B's own input embeddings (whole-word rows) + a frozen 3D PCA basis: concept seeds (mcp/concept_seed.py) and the bonsai viz"
+    status: in_service
+    loaded_by: code
+    path: "${repo}/index/token_embd.npz"
+    size: 420558198
+    sha256: eb55f1d347c43cceb86f8fcb9b3f33d8ab5f2353e9e74e14c1b82abd593297f4
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-25: re-run into a scratch dir; the .npz is byte-identical (every array too), numpy 2.2.6 in the stack env"
+      recipe:
+        tool: {repo: this, path: scripts/extract_token_embd.py, sha256: 8d1444fd7b3dba9e2aacb532ca8f9e536de6e45b9ed9ba16d69cead127a3e431}
+        interpreter: stack-python
+        inputs:
+          - {id: bonsai-2-27b-abliterated, sha256: 94dd53cbad55db5a515f245887c9f0317484502a451ccc0424c7d7788b52900a}
+        command: "python scripts/extract_token_embd.py --gguf <models>/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0.gguf --out index/token_embd.npz"
+        notes: "CPU only, ~2 min. Refuses to write unless 3 of 4 word probes find a related neighbour (4/4 on both runs)."
+
+  - id: e1-route-in-v1
+    role: "E1 route_in head v1: logistic regression over the embedder's request vector (investigate / answer_directly / clarify). Served when YAMADORI_E1=1"
+    status: in_service
+    loaded_by: code
+    format: e1-head
+    severity: warn
+    path: "${repo}/index/e1/heads/route_in/v0001.json"
+    size: 25670
+    sha256: 0be34b750294af534e5d4efd767ae1b076f5591e1288ad21f40df7dffd0fb0dd
+    weights_sha256: 83f990ebf9ceebf1349f7c41823ba33911e443b4eeb3fdaa70ca89ca4f050849
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-25: refitted offline from the stored vectors (e1.gold_route_rows, cross_validate seed 0, fit_logistic); W sha256 83f990eb... and b identical. The JSON file itself also carries a creation timestamp, so compare W_sha256, not the file hash, after a retrain."
+      recipe:
+        tool: {repo: this, path: bench/e1/eval_e1.py, sha256: 0b7ef6e8c649cfd6c4275b3ada6aa092424012b99cbda4087bcc8a9000ba1dc4, module: mcp/e1.py, module_sha256: c71ef4f5fbd7c77826dd3f8e1652ede1174f8d8997cba19d15623ae152e554f6}
+        interpreter: stack-python
+        inputs:
+          - {file: bench/laya_routing_labels.jsonl, sha256: 3ccce23666cd3918308974af3fc7d8826bab619b236cf149434eee761b55dd75}
+          - {file: bench/laya_routing_labels_ext.jsonl, sha256: 53d4ed838929608682aad8750c875272c8e51d1efed56922a152b04b564c5198}
+          - {file: bench/laya_routing_labels_packages_train.jsonl, sha256: 2c759f564eef522c371997fff3adf384652cfe838c6c0cb715072a8acef8334b}
+          - {id: qwen3-embedding-0.6b-q8, sha256: 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439, via: "the `embeddings` llama-server (engine: engines/manifest.yaml), instruct_sha 3b29b12a819cc015, render_rev 1"}
+        command: |
+          python bench/e1/eval_e1.py embed     # needs the live `embeddings` model; fills index/e1/vectors.sqlite3
+          python bench/e1/eval_e1.py train     # --force to write a new version
+        notes: "The head self-tunes (e1.learn promotes new versions); verify() warns when state.json serves another version."
+
+  - id: skills-migration
+    role: "the fingerprint of the skill store's migrated library: every SKILL.md + tests.json the recipe-corpus migration wrote (522 skills, 2026-09-26), per folder and as one sha256. The live store grows past it (authored, ingested and distilled skills arm later); MANIFEST.json beside it is the whole store now"
+    status: in_service
+    loaded_by: code
+    severity: warn
+    path: "${repo}/index/skills/MIGRATION.json"
+    size: 136748
+    sha256: 109600c1c69bd5be4011fc9cc49caf6508f48ac1c932295a931e6116d64a803e
+    manifest_sha256: 62422f7014a3a46b7cae1a450cc6ccce23f7b685557de79a2ab60b6bbacb1adb
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-26: re-run into a scratch store (PYTHONHASHSEED 1, 2, 7 and 11), the licence records read read-only from the live jobs DB: MIGRATION.json byte-identical, manifest sha256 62422f70... The first --apply that day was NOT reproducible (a set-order tie in topics and licences); fixed in skill_compile.py and the store rebuilt; rebuilt once more after the selector's precision fixes (plain topics need two words and never make a fact), so every stored activation result is the current selector's."
+      recipe:
+        tool: {repo: this, path: mcp/skill_migrate.py, sha256: 80929866c1bb94143b701a0ca3581058921ec44ab6da2f4c9e0018749d7a4f29, module: mcp/skill_compile.py, module_sha256: a69e0aaad91303dc9355e668fc020499367e44799b7d3662014990a386b1f558}
+        interpreter: stack-python
+        inputs:
+          - {file: "bench/recipes/*.jsonl (136 files, concatenated in sorted order)", sha256: 34136c1e5ef6367df99dd018edaa167c07f85875379353c36bad895fec8a0526}
+          - {file: bench/domain/leak_review.json, sha256: b6cf58b5c66ecf90f90c859793d81344147e97e609bd8cf26d8f87d43d2a1a5d}
+          - {file: "index/jobs.sqlite3 table datasets (the verified licence quotes, read only)"}
+        command: "python mcp/skill_migrate.py --dry-run   # counts, a temp store\npython mcp/skill_migrate.py --apply     # backs up, archives the corpus, migrates, writes MIGRATION.json"
+        notes: "No model call: the rows compile deterministically (mcp/skill_*.py at this tree). The hints corpus is archived, never deleted: index/_archive/hints-20260926-094342/ (recipes copy, hint_buckets/probes, and the moved index/hints.npz)."
+
+  # --------------------------------------------------- retired (Laya, 2026-09-24)
+  - id: laya-model
+    role: "Laya (convaiinnovations/laya): decision model behind :1237. RETIRED 2026-09-24 for E1 (docs/E1.md); kept because recorded results used it"
+    status: retired
+    loaded_by: code
+    path: "C:/Users/jwals/.cache/huggingface/hub/models--convaiinnovations--laya/snapshots/55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851/model.safetensors"
+    size: 842609210
+    sha256: 891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c
+    provenance:
+      status: pinned
+      repo: convaiinnovations/laya
+      revision: 55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851
+      revision_basis: download
+      filename: model.safetensors
+      checked: "2026-09-25"
+      licence: apache-2.0
+      notes: "the HF cache also holds revision 1c5edc17 (2026-09-20) with the same model.safetensors blob; encoder answerdotai/ModernBERT-large per the heads' feature_meta. The whole snapshot (tokenizer, configs) is what laya.load() reads."
+
+  - id: laya-head-route-in
+    role: "Laya's trained route_in head (retrained 2026-09-22 on 289 labels). RETIRED with Laya"
+    status: retired
+    loaded_by: code
+    path: "${repo}/index/laya/route_in.json"
+    size: 96829
+    sha256: 0390aa73f2cbfd3da1cc99a6a420dd9c7dc498a2d53660e234a6030dc864e99a
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: this, path: scripts/train_laya.py}
+        interpreter: laya-python
+        inputs:
+          - {id: laya-model, sha256: 891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c}
+          - {file: bench/laya_routing_labels.jsonl, sha256: 3ccce23666cd3918308974af3fc7d8826bab619b236cf149434eee761b55dd75}
+          - {file: bench/laya_routing_labels_ext.jsonl, sha256: 53d4ed838929608682aad8750c875272c8e51d1efed56922a152b04b564c5198}
+          - {file: bench/laya_routing_labels_packages_train.jsonl, sha256: 2c759f564eef522c371997fff3adf384652cfe838c6c0cb715072a8acef8334b}
+        not_reproducible: "not re-run (Laya is retired; the features came from a bf16 CUDA encoder, not bit-stable). The previous head is index/laya/_backup_20260922_191425 (with its own SHA256SUMS.txt)."
+
+  - id: laya-head-grounded-excerpt
+    role: "Laya's grounded_excerpt head. RETIRED with Laya"
+    status: retired
+    loaded_by: code
+    path: "${repo}/index/laya/grounded_excerpt.json"
+    size: 65094
+    sha256: c5474f5874dd8043c3690e7602cd5900981558f332720bfab47f846d6a7fb3b6
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: this, path: scripts/train_laya.py}
+        interpreter: laya-python
+        inputs:
+          - {id: laya-model, sha256: 891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c}
+        not_reproducible: "not re-run; training inputs were not recorded by hash"
+
+  - id: laya-calibration
+    role: "Laya's temperature calibration (index/calibration.json, scripts/calibrate_laya.py). RETIRED with Laya"
+    status: retired
+    loaded_by: code
+    path: "${repo}/index/calibration.json"
+    size: 155
+    sha256: eae2117c372b927a9c37794b1c680113b847936ecefb6d2d0161a55c22211efe
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: this, path: scripts/calibrate_laya.py}
+        interpreter: laya-python
+        inputs:
+          - {id: laya-model, sha256: 891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c}
+        not_reproducible: "not re-run"
+
+  # ------------------------------------------------ Flash-Next (max tier)
+  # Qwen3.8-Flash-Next, the max tier's model (operator, 2026-09-27; plan in
+  # docs/FLASH-NEXT.md). Engine: engines/manifest.yaml llama-upstream (no
+  # MTP) / llama-upstream-mtp. Downloaded 2026-09-27 on the operator's yes.
+  # Ownership checked on the HF API: the base is Qwen/ (author "Qwen", 1.23M
+  # downloads), the quants ISTA-DASLab/ (author "ISTA-DASLab", every commit
+  # by user helcig or anm2211). Every GGUF below equals the LFS sha256 the HF
+  # API lists for it AND the X-Linked-ETag of the pinned resolve URL
+  # (docs/research/STRATA.md said "no SHA256 sums": the repo has no
+  # SHA256SUMS file, but LFS publishes a sha256 per file).
+  #
+  # LICENCE -- all of it inherits the base model's (ISTA's card: "inherit the
+  # license of the base model"; its YAML says apache-2.0, which its own text
+  # contradicts): Qwen Community License 1.0 (Qwen/Qwen3.8-Flash-Next LICENSE
+  # @ de4b8e4d, copied beside the weights as flash-next/mtp-bf16/LICENSE).
+  # The internal-use clause, verbatim (condition 2): "If the licensee or any
+  # of its affiliates conducts a Model as a Service or AI Work Assistant
+  # business, the licensee shall obtain a separate license from Qwen before
+  # Using the Software or its derivative works for any commercial purpose.
+  # The foregoing requirement shall not apply to the licensee's internal Use
+  # of the Software, provided that such Use does not make the Software, its
+  # outputs, or its underlying model capabilities available to any third
+  # party." "AI Work Assistant" includes products "primarily designed for
+  # AI-assisted coding". Condition 1: keep the copyright/permission notice
+  # with every copy. Our base (Qwen3.8-27B -> Bonsai) is Apache-2.0.
+
+  - id: flash-next-iq2xs-shard1
+    role: "CANDIDATE max-tier model, shard 1 of 2: every transformer weight of Qwen3.8-Flash-Next at GSQ-RCO IQ2_XS (2.50 bpw; 35.45 GB routed experts + 3.76 GB dense/attention/router/shared/hc/head, 1,223 tensors; embedded chat template = Strata's serve/chat_template.jinja, sha256 12827f24...)"
+    status: in_service
+    config_entries: [flash-next]
+    path: "${models}/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf"
+    size: 39225954592
+    sha256: 92cee27ae5bbadcd732416a0f7a7f0acc092399dbbe8f5a5efa707c2ec0a49d7
+    provenance:
+      status: pinned
+      repo: ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+      revision: 2a55d75962e22f7a4a1d9963ab6eae3678537831
+      revision_basis: download
+      filename: IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf
+      checked: "2026-09-27"
+      licence: "Qwen Community License 1.0 (inherited; see the block comment above)"
+      notes: "unchanged since ISTA commit 89123389 (2026-09-15); c67535c (Strata's pin) and 2a55d759 differ only in IQ3_S files and the README"
+
+  - id: flash-next-iq2xs-shard2-ngram
+    role: "CANDIDATE max-tier model, shard 2 of 2: the PLE n-gram table (per_layer_token_embd, 51.2B params at IQ4_NL), identical across ISTA's four quants; read lazily from disk (llama.cpp --lazy-mode)"
+    status: in_service
+    config_entries: [flash-next]
+    path: "${models}/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00002-of-00002.gguf"
+    size: 28800138432
+    sha256: 316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113
+    provenance:
+      status: pinned
+      repo: ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+      revision: 2a55d75962e22f7a4a1d9963ab6eae3678537831
+      revision_basis: download
+      filename: IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00002-of-00002.gguf
+      checked: "2026-09-27"
+      licence: "Qwen Community License 1.0 (inherited)"
+      notes: "byte-identical (same LFS sha256) to Q2_0/, IQ3_XXS/ and IQ3_S/ shard 2: a Q2_0 or IQ3 arm needs only its shard 1"
+
+  - id: flash-next-q2_0-shard1
+    role: "CANDIDATE max-tier model, shard 1 of 2, the SPEED quant: every transformer weight of Qwen3.8-Flash-Next at GSQ-RCO Q2_0 (2.40 bpw; all routed experts Q2_0 -- the one format our AVX2 Q2_0 kernel serves -- vs IQ2_S gate/up in IQ2_XS). ISTA's own quality table (their runs, relative to BF16): AIME25 96.67 / GPQA-D 89.39 / LCB v6 81.14 vs IQ2_XS 96.67 / 87.37 / 83.43. Downloaded on the operator's approval (2026-09-29, relayed: \"approving quant downloads now, buld this\")"
+    status: candidate
+    config_entries: []
+    path: "${models}/flash-next/Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf"
+    size: 37623740192
+    sha256: 69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720
+    provenance:
+      status: pinned
+      repo: ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+      revision: ed59f92082b1e93c0e96d60a8b11aab089b52f09
+      revision_basis: download
+      filename: Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf
+      checked: "2026-09-29"
+      licence: "Qwen Community License 1.0 (inherited)"
+      notes: "sha256 equals the HF API's LFS sha256 at ed59f920 (local sha256sum, flash-next/download.log 2026-09-29T12:01)"
+
+  - id: flash-next-q2_0-shard2-ngram
+    role: "CANDIDATE: the Q2_0 file's shard 2 -- the same PLE n-gram table as flash-next-iq2xs-shard2-ngram (the same LFS sha256), present under Q2_0/ as an NTFS HARD LINK to IQ2_XS/'s file (llama.cpp finds shard 2 by shard 1's name); no second copy on disk"
+    status: candidate
+    config_entries: []
+    path: "${models}/flash-next/Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf"
+    size: 28800138432
+    sha256: 316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113
+    provenance:
+      status: pinned
+      repo: ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+      revision: ed59f92082b1e93c0e96d60a8b11aab089b52f09
+      revision_basis: hard link to the byte-identical IQ2_XS shard 2 (HF LFS sha256 316b46f3... for Q2_0/ at ed59f920)
+      filename: Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf
+      checked: "2026-09-29"
+      licence: "Qwen Community License 1.0 (inherited)"
+
+  - id: flash-next-mmproj
+    role: "CANDIDATE: Flash-Next's own vision encoder + projector (BF16), loaded WITH the main model on the 5060 Ti (operator, 2026-09-27: vision folds into the main model; bonsai-vision on the A4000 retires)"
+    status: in_service
+    config_entries: [flash-next]
+    path: "${models}/flash-next/mmproj-Qwen3.8-Flash-Next-BF16.gguf"
+    size: 907543008
+    sha256: b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0
+    provenance:
+      status: pinned
+      repo: ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+      revision: 2a55d75962e22f7a4a1d9963ab6eae3678537831
+      revision_basis: download
+      filename: mmproj-Qwen3.8-Flash-Next-BF16.gguf
+      checked: "2026-09-27"
+      licence: "Qwen Community License 1.0 (inherited)"
+
+  - id: flash-next-mtp-bf16
+    role: "input: Qwen3.8-Flash-Next's MTP draft block, the 31 mtp.* tensors of the BF16 checkpoint (5,214,301,696 payload bytes from 28 of its 131 shards) as ONE safetensors file; the GGUF quants ship no MTP head"
+    status: input
+    loaded_by: code
+    path: "${models}/flash-next/mtp-bf16/model-mtp-bf16.safetensors"
+    size: 5214305424
+    sha256: f346d471136314ebe66af5193c0a01fd00ffdc22a4a8c9f86bd15948bc9a8212
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: this, path: scripts/fetch_hf_tensors.py}
+        interpreter: stack-python
+        inputs:
+          - {repo: Qwen/Qwen3.8-Flash-Next, revision: de4b8e4d43b917e7706784d8bb445c9af86a3540, files: "model-000{37..124}-of-00131.safetensors (28 shards; per-tensor shard and byte range in fetch-manifest.json)", as: "SPARSE: only each shard's header and the mtp.* byte ranges were fetched"}
+        command: |
+          python scripts/fetch_hf_tensors.py --repo Qwen/Qwen3.8-Flash-Next --revision de4b8e4d43b917e7706784d8bb445c9af86a3540 --prefix mtp. --name Qwen3.8-Flash-Next-mtp-bf16 --out ${models}/flash-next/mtp-bf16
+          # then renamed to model-mtp-bf16.safetensors (the converter only
+          # finds safetensors named model*) and model.safetensors.index.json
+          # written beside it (31 entries -> that file); Qwen's config.json,
+          # generation_config.json, tokenizer*.json, vocab.json, merges.txt,
+          # chat_template.jinja and LICENSE @ de4b8e4d copied beside it.
+        check: >-
+          Every range response named X-Repo-Commit de4b8e4d and returned
+          exactly the requested length; each payload's sha256 is in
+          flash-next/mtp-bf16/fetch-manifest.json. A shard's LFS sha256
+          covers the whole shard, which a range fetch cannot check. Sanity:
+          all 31 tensors finite; norm weights O(1).
+      licence: "Qwen Community License 1.0"
+
+  - id: flash-next-mtp-draft-bf16
+    role: "input: the MTP draft as a draft-only GGUF (blk.48, 32 tensors, BF16/F32; embeddings, output norm and LM head borrowed from the target at load, --mtp-shared-embd), for llama-upstream-mtp's --spec-draft-model; quantised copies are derived from it in PHASE 2"
+    status: input
+    loaded_by: code
+    path: "${models}/flash-next/mtp-Qwen3.8-Flash-Next-BF16-shared-embd.gguf"
+    size: 5227963360
+    sha256: 37f3c1104a9d8760aa166f166276e65d93248fa17f79155d3e42274c01a8fffe
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-27: the conversion re-run into a scratch file gave these exact bytes (37f3c110...)"
+      recipe:
+        tool: {repo: "https://github.com/ggml-org/llama.cpp", commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a, path: convert_hf_to_gguf.py, patches: "engines/patches/llama-upstream-mtp/0001 + 0002 (PR #28243's converter: --mtp, --mtp-shared-embd)"}
+        interpreter: "stack-python (torch 2.9.0+cu128, transformers 5.6.2, safetensors 0.7.0, gguf-py from the patched tree)"
+        inputs:
+          - {id: flash-next-mtp-bf16, sha256: f346d471136314ebe66af5193c0a01fd00ffdc22a4a8c9f86bd15948bc9a8212}
+        command: |
+          python convert_hf_to_gguf.py ${models}/flash-next/mtp-bf16 --mtp --mtp-shared-embd --outtype bf16 --outfile ${models}/flash-next/mtp-Qwen3.8-Flash-Next-BF16-shared-embd.gguf
+        notes: "mtp.fc_embedding + mtp.fc_hidden are concatenated into blk.48.nextn.eh_proj [5120, 2560] by the PR's converter; the converter warned 'Unknown RoPE type: default' (rope scaling NONE, as for the trunk)"
+      licence: "Qwen Community License 1.0"
+
+  - id: flash-next-expert-profile-strata
+    role: "input: Strata's expert profile for Qwen3.8-Flash-Next (STRP v1: all 24,576 (layer, expert) pairs ranked by routing frequency, then each pair's rank); LLAMA_MOE_CACHE_PROFILE for llama-upstream-moe's expert cache (0004). Round-trips byte for byte through scripts/moe_profile.py"
+    status: input
+    loaded_by: code
+    path: "${models}/flash-next/expert-profile-strata-d551edf4.bin"
+    size: 196632
+    sha256: 8f59b4aa8873209dff11c11e37bcda9529a1335b724a1afeea37bf6388975baf
+    provenance:
+      status: recipe
+      recipe:
+        tool: {repo: "https://github.com/Niko1221/Strata", commit: d551edf42c157f1c8c20f07f68c5dfe506b1edda, path: data/expert-profile.bin, last_changed_in: e6265c7195 (ranks all 24,576 pairs; the first 8,000 unchanged)}
+        command: |
+          git clone https://github.com/Niko1221/Strata && git -C Strata checkout d551edf42c157f1c8c20f07f68c5dfe506b1edda
+          copy Strata/data/expert-profile.bin ${models}/flash-next/expert-profile-strata-d551edf4.bin
+        notes: "built by Strata from its own --dump-routing traces (tools/make_profile.py); the traces are not published. Its h (the share of routed experts that are resident) at 4,105 slots is 0.6447 ten-fold leave-one-out by Strata's own measurement (include/strata/core/expert_cache.hpp); PR #27861 reports no exploitable static skew on its workload -- conflicting claims, measured on ours in PHASE 2"
+      licence: "MIT since Strata c0107c3 (2026-09-28; LICENSE blob 6687a423dde6b7aff1b748c07f5ee93ff788089c, Copyright (c) 2026 Niko1221 and the Strata contributors): data/expert-profile.bin is byte-identical at 3ce2523c2823687de5372be3af58534f56cbf286 (sha256 8f59b4aa..., checked 2026-09-29). Taken at d551edf4 before the licence, with the operator's authorisation (2026-09-28)"
+
+  - id: flash-next-mtp-draft-q8_0
+    role: "CANDIDATE MTP draft for llama-upstream-mtp (--spec-draft-model): flash-next-mtp-draft-bf16 at Q8_0 (2,647 MiB, 8.52 BPW; its 512 routed experts are 2.5 GB of it, so they go to CPU with the trunk's). A speed arm in PHASE 2, not in config.yaml"
+    status: candidate
+    config_entries: []
+    path: "${models}/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf"
+    size: 2786568160
+    sha256: 79abc660ca830b37c7204c728b2b38f2562db59e3559b85fc08cb1817d13149c
+    provenance:
+      status: reproduced
+      reproduced: "2026-09-27: the quantize re-run into a scratch file gave these exact bytes (79abc660...)"
+      recipe:
+        tool: {engine: llama-upstream-mtp, binary: "C:/Users/jwals/engines/llama-upstream-mtp-3534183c/src/build/bin/llama-quantize.exe", note: "CPU only (CUDA_VISIBLE_DEVICES empty)"}
+        inputs:
+          - {id: flash-next-mtp-draft-bf16, sha256: 37f3c1104a9d8760aa166f166276e65d93248fa17f79155d3e42274c01a8fffe}
+        command: |
+          llama-quantize mtp-Qwen3.8-Flash-Next-BF16-shared-embd.gguf mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf Q8_0 12
+      licence: "Qwen Community License 1.0"
+
+  # ---------------------------------------- Mirai S (candidate, 2026-09-29)
+  # Operator, 2026-09-29: "We also should pull and get ready to try Mirai S." WHO MADE WHAT (HF API + both cards,
+  # 2026-09-29): the base model and its vision encoder are Qwen's (Qwen/Qwen3.8-27B, Apache-2.0). The codec (2.4-bit
+  # QTIP-style trellis, "Mirai S"), the compressed weights and the vLLM plugin mirai_s are Mirai Labs'
+  # (trymirai/Qwen3.8-27B-S-experimental @ 32d4c042, author trymirai, Apache-2.0; card: "a work in progress and the
+  # numbers here are not final"; provenance.json names a QAT package, q38zmrr2-package-qat-v1). THE GGUF IS A
+  # THIRD-PARTY CONVERSION, NOT A MIRAI RELEASE (its own card: "a community conversion, not an official Mirai
+  # release"): alesha-pro (GitHub alesha-pro, "Alexey Fateev"; the HF repo's first two commits are by HF user
+  # superalesha, the rest by alesha-pro; the fork README says it moved from anonymousmaharaj) converted Mirai's
+  # vllm/ folder with tools/mirai-s/convert_mirai_s_to_gguf.py of alesha-pro/llama.cpp-mirai-s. What is copied and
+  # what is re-encoded, by that converter's docstring and read from the file: the 417 trellis matrices (MS_V4T8 x207,
+  # MS_V2T6 x197, MS_V2T4 x12, MS_I3 head x1) keep Mirai's codes "bit for bit" (NOT independently checked: that
+  # needs Mirai's 8.45 GB trellis.mirai, not downloaded); token_embd (Mirai's D4 embedding) is DECODED to F16;
+  # ssm_alpha/beta DECODED to F16; the MTP block (bf16 in Mirai's checkpoint) re-quantised to Q8_0. The author's
+  # own checks (not ours): decoder vs lalamo to 3e-8; greedy vs Mirai's vLLM plugin 8/10 prompts identical over
+  # 64 tokens, top-5 logprobs overlap 5/5 at the first token. The mmproj is Qwen's base encoder, stock
+  # convert_hf_to_gguf.py --mmproj (Mirai ships the language model only).
+  - id: mirai-s-qwen3.8-27b-gguf
+    role: "CANDIDATE main model: Mirai S Qwen3.8-27B (2.4-bit trellis) as a GGUF for engines llama-mirai-s ONLY (4 fork-only ggml types, ids 90-93: mainline llama.cpp and our PTQ1_0 forks cannot load it). arch qwen35, 65 blocks (64 + MTP blk.64 Q8_0, 451 MB), 1,303 tensors; token_embd F16 2,542,796,800 B (host-side lookups); embedded chat template byte-identical to our Bonsai GGUF's (sha256 c3cf9e34...), tokenizer arrays hash-equal to Bonsai's. general.name reads 'Vllm' (converter artefact)"
+    status: candidate
+    config_entries: []
+    path: "${models}/mirai-s/Qwen3.8-27B-S-mirai.gguf"
+    size: 11173346688
+    sha256: 5aa4365c3362983e52ff71d8ec2452c2e2e199e299f91594dc85523aa62a43ce
+    provenance:
+      status: pinned
+      repo: alesha-pro/Qwen3.8-27B-S-mirai-GGUF
+      revision: db365f5b93338b8f56f2c6b09efaeb8b1de82a33
+      revision_basis: download
+      filename: Qwen3.8-27B-S-mirai.gguf
+      checked: "2026-09-29"
+      licence: "Apache-2.0 (the repo's LICENSE and card; Mirai's checkpoint is Apache-2.0, the base Qwen3.8-27B Apache-2.0)"
+      notes: "fetched by scripts/fetch_models.py (ad hoc --repo/--revision/--filename): streamed sha256 = the HF API's LFS sha256 = the pinned resolve URL's X-Linked-ETag; X-Linked-Size 11,173,346,688. The file was last changed in b12e7ba3 (2026-09-26, HF user superalesha); db365f5b changed only the README. Source: trymirai/Qwen3.8-27B-S-experimental @ 32d4c0422a14353808659f2f2333b207bc1dd12a (vllm/trellis.mirai sha256 56009f4f..., the dense shards, mirai_s 0.2.1)"
+
+  - id: mirai-s-mmproj
+    role: "CANDIDATE vision projector for mirai-s (Qwen3.8-27B BASE vision encoder, clip / qwen3vl_merger, F16, 334 tensors); loaded WITH the main model (operator, 2026-09-27: vision folds into the main model)"
+    status: candidate
+    config_entries: []
+    path: "${models}/mirai-s/mmproj-Qwen3.8-27B-base-f16.gguf"
+    size: 927607008
+    sha256: cb0a71fe9b84af2552fc6260acf8e9773a29d115c683aba01c72a7ac537b212b
+    provenance:
+      status: pinned
+      repo: alesha-pro/Qwen3.8-27B-S-mirai-GGUF
+      revision: db365f5b93338b8f56f2c6b09efaeb8b1de82a33
+      revision_basis: download
+      filename: mmproj-Qwen3.8-27B-base-f16.gguf
+      checked: "2026-09-29"
+      licence: "Apache-2.0 (Qwen/Qwen3.8-27B)"
+      notes: "streamed sha256 = HF LFS sha256 = X-Linked-ETag. Converted by alesha-pro from Qwen/Qwen3.8-27B with the stock convert_hf_to_gguf.py --mmproj (their card); not compared with a Qwen-published mmproj"
+
+runtimes:
+  - id: stack-python
+    role: "the stack's interpreter: proxy, tools API, worker, every script and test"
+    check: lock
+    severity: error
+    interpreter: "C:/Users/jwals/textgen/installer_files/env/python.exe"
+    python: "3.13.15 | packaged by conda-forge"
+    conda_meta: "C:/Users/jwals/textgen/installer_files/env/conda-meta"
+    lock: requirements.lock.txt
+    freeze: pip
+
+  - id: laya-python
+    role: ".venv-laya (Laya's torch env). RETIRED with Laya; the lock is kept to re-run old Laya results"
+    status: retired
+    check: lock
+    interpreter: "C:/Users/jwals/llama-stack/.venv-laya/Scripts/python.exe"
+    lock: locks/laya.lock.txt
+    freeze: pip
+
+  - id: web-dashboard
+    role: "the React dashboard: web/dist is committed and must be built from web/package-lock.json and the source (.buildinfo)"
+    check: buildinfo
+    severity: warn
+    dist: web/dist
+    lock: web/package-lock.json
+
+  - id: llama-swap
+    role: "model router on :11434. The binary (sha256, release zip) is pinned by engines/manifest.yaml `llama-swap`; this entry only checks the version it reports, which config.yaml's features (profiles, groups) depend on"
+    check: version
+    severity: warn
+    path: "C:/Users/jwals/llama-stack/bin/llama-swap.exe"
+    version: "v256 (6701d0d)"
+    source: "engines/manifest.yaml llama-swap (https://github.com/mostlygeek/llama-swap/releases/tag/v256)"
+
+  - id: searxng
+    role: "web search for deep thinking (loopback :8888, docs/SEARCH.md)"
+    check: files
+    severity: warn
+    doc: docs/SEARCH.md
+    commit: 3cd69d30e2a78dfc817be9e349e7c2e4317c92e3
+    source: "https://github.com/searxng/searxng/archive/3cd69d30e2a78dfc817be9e349e7c2e4317c92e3.tar.gz (the install came from the master tarball; local copy searxng-master.tar.gz sha256 b83b6ba59bd52fa2efd07dcb676438c7467a90aa3fc7ac9ba4f149dc2160dd55)"
+    files:
+      - {path: "C:/Users/jwals/searxng/src/searx/version_frozen.py", contains: "3cd69d30e"}
+      - {path: "C:/Users/jwals/searxng/settings.template.yml", sha256: 3207e39e0bda635a374a2e017f4d7b5200f687dd035f19ffd94b812505077b67}
+      - {path: "C:/Users/jwals/searxng/render_settings.py", sha256: 9e4fc2bcd278bdb6f9aa1cfe0b1ae166976a1828624e1efae1132a7b196fa819}
+      - {path: "C:/Users/jwals/searxng/etc/limiter.toml", sha256: 527138715f40ba5f26f9966111ab3879e102a9fb5a3aac9582b84d320c4ab3ec}
+    notes: "etc/settings.yml is rendered from the template and holds the secret key: not hashed here"
+
+  - id: searxng-python
+    role: "SearXNG's own venv"
+    check: lock
+    severity: warn
+    interpreter: "C:/Users/jwals/searxng/.venv/Scripts/python.exe"
+    lock: locks/searxng.lock.txt
+    freeze: pip
+
+  - id: hermes
+    role: "Hermes Agent, the measurement harness (Octopus, dogfood). Its version is part of every result it produced"
+    check: git
+    severity: warn
+    path: "C:/Users/jwals/AppData/Local/hermes/hermes-agent"
+    repo: "https://github.com/NousResearch/hermes-agent"
+    version: "0.21.5"
+    commit: ee5ee84a345204a3b1d6ef6ba1ab747e602867b9
+    notes: "on 2026-09-25 the tree differed from the commit only in line endings (8 files, git diff --ignore-cr-at-eol is empty)"
+
+  - id: hermes-python
+    role: "Hermes' venv (no pip in it; listed through importlib.metadata)"
+    check: lock
+    severity: warn
+    interpreter: "C:/Users/jwals/AppData/Local/hermes/hermes-agent/venv/Scripts/python.exe"
+    lock: locks/hermes.lock.txt
+    freeze: importlib
+
+  - id: harness-box
+    role: "the container OpenCode 1.18.32, Pi 0.87.1 and Codex 0.157.1 run in for the harness tests, with their default loadout's tools (bench/sandbox/harness_box.py, docs/HARNESS-SANDBOX.md, docs/HARNESSES.md, SELF-IMPROVEMENT-LOG #47/#49). Its versions are part of every result it produces"
+    check: files
+    severity: warn
+    doc: docs/HARNESS-SANDBOX.md
+    # The recipe, byte for byte (bench/sandbox/harness/.gitattributes: -text).
+    files:
+      - {path: "C:/Users/jwals/llama-stack/bench/sandbox/harness/Dockerfile", sha256: 137f23a2226d420fb4629498c0240f104521852eed34b78c4474c81204993380}
+      - {path: "C:/Users/jwals/llama-stack/bench/sandbox/harness/package.json", sha256: a0dc00080b2a18d6a029757c3f3357aef2009124abcfdf265a99f5af0cdd5b39}
+      - {path: "C:/Users/jwals/llama-stack/bench/sandbox/harness/package-lock.json", sha256: aac91b7f1e2c29f992997d6f9fd26ff6fd893e831c1222db6c018a6260ee075e}
+    # What was built from it on 2026-09-26 (`harness_box.py build`). The base
+    # is pinned by digest; the image is SOURCE-reproducible, not bit-for-bit
+    # (npm ci writes fresh timestamps), so a rebuild without the layer cache
+    # gets a new id: record it here. `harness_box.py verify` compares the
+    # local image with image_id, and every run record carries both.
+    # Rebuilt 2026-09-27 02:53Z with the default loadout (tag suffix -tools1;
+    # the previous image, without it, was sha256:94a13239f2d3..., built
+    # 2026-09-26T17:14:28Z). `npm audit signatures` at build: 158 packages
+    # with verified registry signatures, 64 with verified attestations.
+    image: "yamadori-harness-box:oc1.18.32-pi0.87.1-cx0.157.1-tools1"
+    image_id: "sha256:e5ce5d268b61f6d7eb215beec2d8779249e87d77ff49c207b95a45f6eab396b7"
+    image_created: "2026-09-27T02:53:38Z"
+    base: "node:24.21.0-bookworm@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4"
+    base_image_id: "sha256:b795e77f6c253b171f482eff27b9b882dc4cdcb42d773372e298481c7318fbc2"
+    versions: {opencode: "1.18.32", pi: "0.87.1", codex: "codex-cli 0.157.1", node: "24.21.0", ripgrep: "15.2.0 (Codex's vendored rg on PATH)", playwright_mcp: "0.0.82 (@playwright/mcp, playwright-core 1.64.0-alpha-1789764292000; attaches over CDP, no browser download)", typescript_language_server: "6.0.1", typescript: "5.9.3", pyright: "1.1.414", agent_browser: "0.26.0", fd: "10.5.0 (sharkdp/fd release, sha256 761c72dc...)"}
+    # The browser for the default loadout is NOT in this image: the grader's
+    # octo-playwright:1.63.0 (sha256:c990d0cc7a5f..., HeadlessChrome
+    # 153.0.8010.12) runs bench/octopus/browser_sidecar.py beside it.
+
+  - id: mcp-packagelens
+    role: "PackageLens MCP (npm packagelens-mcp 0.1.11, MIT), the first MCP server the proxy hosts for the model: yama_find_package / yama_package_versions / yama_package_readme (mcp/mcp_host.py, mcp/mcp_config.py). Operator-approved download 2026-09-28 (\"Yes get package lens\")"
+    check: files
+    severity: warn
+    doc: mcp/mcp_host.py
+    # The recipe, byte for byte (mcp_servers/packagelens/.gitattributes: -text).
+    files:
+      - {path: "C:/Users/jwals/llama-stack/mcp_servers/packagelens/Dockerfile", sha256: 7064d27c82073fd0deb7ecd3760a619b8ce810d88f30854f0642111896f2cbbe}
+      - {path: "C:/Users/jwals/llama-stack/mcp_servers/packagelens/package.json", sha256: 4dc468aad852ec130b7fd5b2e5046ce62e14d27e8b6e441e1afebb002a5d3409}
+      - {path: "C:/Users/jwals/llama-stack/mcp_servers/packagelens/package-lock.json", sha256: 9ba92a16538822692079feee506b820c11d313e21ef84d1e3577c4acb0d7530b}
+    # Built 2026-09-29T03:18Z (`python mcp/mcp_host.py build packagelens`,
+    # --pull=false, the harness box's base). Source-reproducible, not
+    # bit-for-bit (npm ci writes fresh timestamps): a rebuild without the
+    # layer cache gets a new id, which must be recorded here -- the proxy
+    # refuses to start a docker server whose local image id is not this one
+    # (mcp_host.Server._start).
+    image: "yamadori-mcp-packagelens:0.1.11"
+    image_id: "sha256:5b2bc3bd575d8c1735bde3c090a5fcbe4dc5d8023d8191dbdbcaca20d5666e59"
+    image_created: "2026-09-29T03:18:24Z"
+    base: "node:24.21.0-bookworm@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4"
+    base_image_id: "sha256:b795e77f6c253b171f482eff27b9b882dc4cdcb42d773372e298481c7318fbc2"
+    package:
+      name: packagelens-mcp
+      version: "0.1.11"
+      licence: MIT
+      integrity: "sha512-UewlYHX2Pdla4E/otovyYcQvXPI6oHoRpR4Ew+eMHlA/rLcH4Wg1yzWl32mBql3GRfFpTU3iY8LxZfEkErhF4A=="
+      tarball: "https://registry.npmjs.org/packagelens-mcp/-/packagelens-mcp-0.1.11.tgz (34,482 bytes; unpacked 154,834 bytes, 52 files)"
+      published: "2025-10-29T18:48:05Z (the only version; unmaintained since)"
+      repository: "https://github.com/rakeshmenon/packagelens-mcp (gitHead 7bec89f08b364d3a22cec2d1650fb774d7bd8223)"
+    # The tree the lockfile pins (npm ci --omit=dev --ignore-scripts; no
+    # package declares an install script): 16 packages, 6.7 MB unpacked.
+    # `npm audit signatures` at build: 16 verified registry signatures, 2
+    # verified attestations.
+    tree: "packagelens-mcp 0.1.11 (MIT) -> @modelcontextprotocol/sdk 0.5.0 (MIT; -> zod 3.25.76, raw-body 3.0.2 -> bytes 3.1.2, unpipe 1.0.0, iconv-lite 0.7.3 -> safer-buffer 2.1.2, http-errors 2.0.1 -> depd 2.0.0, inherits 2.0.4, statuses 2.0.2, toidentifier 1.0.1, setprototypeof 1.2.0; content-type 1.0.5), lru-cache 10.4.3 (ISC)"
+    # THE SOURCE AUDIT (2026-09-28, dist/ of 0.1.11 and the SDK's dist/ read
+    # before it ran): the server makes only fetch() GETs (dist/http.js: no
+    # method, no body; 12 s abort, one retry) to registry.npmjs.org,
+    # api.npmjs.org (downloads), api.github.com (repo info; sends
+    # GITHUB_TOKEN only if set -- it is not), crates.io, pypi.org (its search
+    # downloads the WHOLE simple index), rubygems.org, packagist.org, hex.pm.
+    # It executes nothing (child_process appears only in the SDK's CLIENT
+    # transport, dist/client/stdio.js, which the server never imports) and
+    # writes nothing; it reads its own package.json and, for smart_search
+    # without an ecosystem, stats manifest names in its cwd. Its User-Agent
+    # names packagelens-mcp/0.1.10 and a mailto:packagelens@example.com.
+    # Its tool descriptions carry "CRITICAL RULES" prose aimed at the model;
+    # the model never sees them (our yama_* descriptions replace them).
+    versions: {packagelens_mcp: "0.1.11", mcp_sdk: "0.5.0 (protocol 2024-11-05)", node: "24.21.0"}

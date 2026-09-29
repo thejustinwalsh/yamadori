@@ -1,0 +1,56 @@
+{
+ "id": "pi/chat/compaction-history",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "chat",
+ "source": "relay.jsonl #34 (captured shape): the summariser system prompt (utils.js:139) and a <conversation> record block (compaction.js:544); records synthetic",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_completion_tokens": 13107,
+  "store": false,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary."
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "<conversation>\n[User]: Create hello.py containing a function greet(name) that returns 'hello ' + name.\n\n[Assistant thinking]: A write, then run it.\n\n[Assistant tool calls]: write(path=hello.py, content=def greet(name): ...)\n\n[Tool result]: Successfully wrote to hello.py\n\n[Assistant]: Done: hello.py is written.\n</conversation>\n\nThe messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.\n\nUse this EXACT format:\n\n## Goal\n[... Pi's prompt trimmed ...]"
+     }
+    ]
+   }
+  ],
+  "reasoning_effort": "low"
+ },
+ "expect": {
+  "accepted": true,
+  "route": "utility",
+  "utility": {
+   "utility": true,
+   "kind": "compaction"
+  },
+  "compaction": {
+   "harness": "pi",
+   "records_min": 3
+  },
+  "session": {
+   "source": null
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "compaction": "Pi's history summary, recognised and parsed (docs/HARNESS-PI.md s6)"
+ }
+}

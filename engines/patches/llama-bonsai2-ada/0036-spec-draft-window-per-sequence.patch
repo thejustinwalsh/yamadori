@@ -1,0 +1,55 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Sun, 27 Sep 2026 20:00:00 -0400
+Subject: [PATCH] server: --spec-draft-window trims each sequence by its own position
+
+The series' 0031 trims the draft (MTP) context of EVERY slot by the view's
+lowest position minus the window. With -np 1 that is the one slot; with
+several slots, a batch that carries a deep conversation erases a shallow
+one's recent draft rows, and its drafts then come from missing context
+(output stays correct: the target verifies every token; acceptance drops).
+
+Now each sequence present in the view is trimmed by ITS OWN lowest
+position in the view, and a sequence with no token in the view is not
+touched: llama_memory_seq_rm is called only with seq ids read from
+batch_view.seq_id, and each with a bound from that sequence's own rows.
+With one slot the result is the same as before.
+---
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 5e3420509..f1c158864 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -3702,15 +3702,28 @@ private:
+         // --spec-draft-window: before feeding this view to the draft context, drop its rows older than the window.
+         // The draft context is sized for the window (common_speculative_init), so freed cells are reused and its
+         // attention span stays short; the MTP head predicts the next few tokens from recent context.
++        // PER SEQUENCE: each sequence of this view is trimmed by ITS OWN lowest position in the view, and only
++        // sequences that have a token in the view are touched. (Trimming every slot by the view's lowest
++        // position would erase a shallow conversation's recent draft rows whenever a deep one shares the
++        // batch: with several slots, a draft from missing context.)
+         if (spec_process && ctx_dft && params_base.speculative.draft.n_window > 0) {
+-            llama_pos pos_min = std::numeric_limits<llama_pos>::max();
++            std::vector<std::pair<llama_seq_id, llama_pos>> seq_pos_min; // (seq, lowest pos of it in this view)
+             for (int i = 0; i < batch_view.n_tokens; ++i) {
+-                pos_min = std::min(pos_min, batch_view.pos[i]);
++                for (int k = 0; k < batch_view.n_seq_id[i]; ++k) {
++                    const llama_seq_id s = batch_view.seq_id[i][k];
++                    auto it = std::find_if(seq_pos_min.begin(), seq_pos_min.end(),
++                            [s](const std::pair<llama_seq_id, llama_pos> & e) { return e.first == s; });
++                    if (it == seq_pos_min.end()) {
++                        seq_pos_min.emplace_back(s, batch_view.pos[i]);
++                    } else {
++                        it->second = std::min(it->second, batch_view.pos[i]);
++                    }
++                }
+             }
+-            const llama_pos hi = pos_min - params_base.speculative.draft.n_window;
+-            if (hi > 0) {
+-                for (auto & slot : slots) {
+-                    llama_memory_seq_rm(llama_get_memory(ctx_dft), slot.id, 0, hi);
++            for (const auto & [s, pos_min] : seq_pos_min) {
++                const llama_pos hi = pos_min - params_base.speculative.draft.n_window;
++                if (hi > 0) {
++                    llama_memory_seq_rm(llama_get_memory(ctx_dft), s, 0, hi);
+                 }
+             }
+         }

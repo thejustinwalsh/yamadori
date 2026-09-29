@@ -1,0 +1,586 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Mon, 28 Sep 2026 07:30:00 -0400
+Subject: [PATCH] kv-cache: before a batch whose span would pass the VRAM line, move its cells low
+
+0038 and 0039 keep a batch's span to its own cells, but cells already
+placed stay where they are: a conversation prefilled while an idle one
+held the bottom of the pool lives above it for good (pagoda-h6: the new
+conversation's 67k cells at 176k+, all past the 114,432-cell VRAM line of
+the tiered cache (0028), staged over PCIe on every step even after the old
+one was cleared).
+
+At the one moment a move pays -- the memory update before a batch whose
+span would reach past the VRAM line -- the cells of the batch's sequences
+move to the lowest cells of the pool, and cells of sequences no recent
+batch used move out of the way:
+
+- llama_context::decode tells the memory the batch's sequences, its token
+  count and n_ubatch (llama_memory_i::set_next_batch; hybrid: its
+  attention cache) before memory_update().
+- init_update plans (plan_moves). S = the batch's sequences; P = sequences
+  in one of the last n_seq_max batches but not this one (they are running
+  too: a draft context decodes each slot on its own), never moved. Nothing
+  happens unless (a) the batch's span -- its highest cell, or its new cells
+  placed from the lowest free cell -- passes the VRAM line, and (b) it is
+  at least a block above every S and P cell plus room for
+  max(n_tokens, n_ubatch) new cells (per-sequence counts and spans, no
+  scan). Below the line nothing moves: a move there saves only masked VRAM
+  reads and changes the order the attention op reads the cells in, and
+  with it the rounding of its sums. Then one pass over the cells: R = the
+  lowest K cells that are not P's, K = S's cells + that room; S cells above
+  R go to empty cells in R, else exchange with an idle cell in R (which
+  lands where the S cell was); the idle cells left in R move to the lowest
+  empty cells above R -- just past the new span, never parked at the top of
+  the pool. The room makes this once per ubatch of new cells.
+- update() applies it after any K-shift (apply_moves): per chunk of at most
+  n_ubatch rows (a gathered chunk is no larger than one F32 activation of a
+  ubatch's graph, which the reserved compute buffer holds), one graph of
+  ggml_get_rows + ggml_set_rows per K and V tensor over a raw alias of the
+  tensor as 32-bit words -- the bytes move, never a value; every source row
+  is gathered before any destination is written, so exchanges need no
+  scratch. The cells' state (swap_cells) follows each graph. Host-backed
+  rows of the tiered buffer are read and written through its VMM mapping.
+
+Tiered caches only (--kv-vram-cells), and needs whole rows per cell: one
+stream, no transposed V (flash attention), no SWA, rows a multiple of 4
+bytes, no shared cells; otherwise off. One INFO line per move
+("kv promote: ..."). LLAMA_KV_PROMOTE=0 turns it off;
+LLAMA_KV_PROMOTE_VERIFY=1 reads a sample of moved rows before and after and
+logs whether they are byte-identical. Measurements: docs/ENGINES.md
+"KV placement" (bench/kv_placement.py).
+---
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 207b0cf8..8dde2b2d 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1968,6 +1968,17 @@ int llama_context::decode(const llama_batch & batch_inp) {
+ 
+     bool did_optimize = false;
+ 
++    // the memory learns which sequences this batch holds before its update, which may move their KV cells
++    if (memory) {
++        std::vector<llama_seq_id> seq_ids;
++        for (llama_seq_id s = 0; s < (llama_seq_id) cparams.n_seq_max; ++s) {
++            if (balloc->seq_pos_min(s) >= 0) {
++                seq_ids.push_back(s);
++            }
++        }
++        memory->set_next_batch(seq_ids, n_tokens_all, cparams.n_ubatch);
++    }
++
+     // handle any pending shifts/copies
+     memory_update(false);
+ 
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index c2a8ef12..7cd36fa8 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -406,9 +406,26 @@ llama_kv_cache::llama_kv_cache(
+     const char * LLAMA_KV_PLACE_LOW = getenv("LLAMA_KV_PLACE_LOW");
+     place_low = !(LLAMA_KV_PLACE_LOW && atoi(LLAMA_KV_PLACE_LOW) == 0) && n_swa == 0;
+ 
+-    LLAMA_LOG_INFO("%s: kv placement: an attention op spans %s; new cells go to %s\n", __func__,
++    // moving cells needs whole K/V rows per cell (no transposed V), one stream, no SWA reuse, and rows whose
++    // bytes can be gathered as 32-bit words
++    const char * LLAMA_KV_PROMOTE = getenv("LLAMA_KV_PROMOTE");
++    promote = !(LLAMA_KV_PROMOTE && atoi(LLAMA_KV_PROMOTE) == 0) && !other && n_stream == 1 && n_swa == 0 && !v_trans &&
++            n_line > 0;
++    for (const auto & layer : layers) {
++        for (ggml_tensor * t : { layer.k, layer.v }) {
++            if (t && (t->nb[1] % 4 != 0 || t->ne[1] != (int64_t) kv_size)) {
++                promote = false;
++            }
++        }
++    }
++    const char * LLAMA_KV_PROMOTE_VERIFY = getenv("LLAMA_KV_PROMOTE_VERIFY");
++    promote_verify = LLAMA_KV_PROMOTE_VERIFY && atoi(LLAMA_KV_PROMOTE_VERIFY) != 0;
++    seq_last_batch.assign(LLAMA_MAX_SEQ, 0);
++
++    LLAMA_LOG_INFO("%s: kv placement: an attention op spans %s; new cells go to %s; a batch's cells %s\n", __func__,
+             span_by_seq ? "the cells of its batch's sequences" : "the pool up to its highest used cell",
+-            place_low ? "the lowest free cells" : "the free cells after the search head");
++            place_low ? "the lowest free cells" : "the free cells after the search head",
++            promote ? "move low before it runs when their span would pass the VRAM line" : "never move");
+ }
+ 
+ void llama_kv_cache::clear(bool data) {
+@@ -811,6 +828,8 @@ llama_memory_context_ptr llama_kv_cache::init_update(llama_context * lctx, bool
+ 
+     bool do_shift = get_has_shift();
+ 
++    plan_moves();
++
+     return std::make_unique<llama_kv_cache_context>(this, lctx, do_shift, std::move(sc_info));
+ }
+ 
+@@ -958,9 +977,169 @@ bool llama_kv_cache::update(llama_context * lctx, bool do_shift, const stream_co
+         }
+     }
+ 
++    if (!pending.pairs.empty()) {
++        updated = apply_moves(lctx) || updated;
++    }
++
+     return updated;
+ }
+ 
++void llama_kv_cache::set_next_batch(const std::vector<llama_seq_id> & seq_ids, uint32_t n_tokens, uint32_t n_ubatch) {
++    next_seq_ids  = seq_ids;
++    next_n_tokens = n_tokens;
++    next_n_ubatch = n_ubatch;
++}
++
++void llama_kv_cache::plan_moves() {
++    pending = {};
++
++    if (next_seq_ids.empty()) {
++        return;
++    }
++
++    const std::vector<llama_seq_id> seq_ids = std::move(next_seq_ids);
++    next_seq_ids.clear();
++
++    n_batches++;
++    for (const llama_seq_id s : seq_ids) {
++        if (s >= 0 && s < LLAMA_MAX_SEQ) {
++            seq_last_batch[s] = n_batches;
++        }
++    }
++
++    if (!promote) {
++        return;
++    }
++
++    const auto & cells = v_cells[0];
++    const uint32_t size = cells.size();
++
++    // S: the batch's sequences. P: sequences that were in one of the last n_seq_max batches but not in this one --
++    // they are running too (a draft context decodes each slot on its own), so their cells stay where they are
++    std::bitset<LLAMA_MAX_SEQ> in_s;
++    std::bitset<LLAMA_MAX_SEQ> in_p;
++
++    uint32_t span0 = 0;
++    uint64_t n_s   = 0;
++    uint64_t n_p   = 0;
++    std::string seqs;
++    for (const llama_seq_id s : seq_ids) {
++        if (s < 0 || s >= LLAMA_MAX_SEQ) {
++            return;
++        }
++        in_s.set(s);
++        span0 = std::max(span0, cells.seq_span_p1(s));
++        n_s  += cells.seq_n_cells(s);
++        seqs += (seqs.empty() ? "" : ",") + std::to_string(s);
++    }
++    for (uint32_t s = 0; s < std::min<uint32_t>(n_seq_max, LLAMA_MAX_SEQ); ++s) {
++        if (!in_s.test(s) && seq_last_batch[s] > 0 && n_batches - seq_last_batch[s] < n_seq_max) {
++            in_p.set(s);
++            n_p += cells.seq_n_cells(s);
++        }
++    }
++
++    // where the batch's span ends without a move: its highest cell, or the new cells placed from the lowest
++    // free cell. The least it could be: every cell of S and P below it, and room for this batch's new cells
++    // (at least a ubatch, so that the moves are made once per ubatch of new cells, not once per token)
++    const uint64_t room  = std::max(next_n_tokens, next_n_ubatch);
++    const uint32_t v0    = std::max<uint32_t>(span0, (uint32_t) std::min<uint64_t>(size, (uint64_t) cells.lowest_free() + next_n_tokens));
++    const uint64_t ideal = std::min<uint64_t>(size, n_s + n_p + room);
++
++    const uint32_t blk = llama_kv_cells::SPAN_BLK;
++    if (GGML_PAD(v0, blk) <= GGML_PAD(ideal, blk)) {
++        return;
++    }
++
++    // the one moment a move pays: the batch's span would reach past the tiered cache's VRAM line, so every step
++    // would stage the cells above it over PCIe. Below the line (and in a cache that is not tiered) the cells stay
++    // where they are: a move there saves only masked VRAM reads, and changes the order the attention op reads
++    // the cells in, and with it the rounding of its sums
++    if (n_line == 0 || v0 <= n_line) {
++        return;
++    }
++
++    // the full plan: one pass over the cells
++    enum { C_E, C_S, C_P, C_X };
++    auto kind = [&](uint32_t i) {
++        if (cells.is_empty(i))       return C_E;
++        if (cells.seq_any(i, in_s))  return C_S;
++        if (cells.seq_any(i, in_p))  return C_P;
++        return C_X;
++    };
++
++    uint64_t n_s_cells = 0;
++    for (uint32_t i = 0; i < size; ++i) {
++        n_s_cells += kind(i) == C_S;
++    }
++
++    // R: the lowest K cells that are not P's; the batch's cells belong there
++    const uint64_t K = std::min<uint64_t>(size, n_s_cells + room);
++    uint32_t r_end = size;
++    {
++        uint64_t cnt = 0;
++        for (uint32_t i = 0; i < size; ++i) {
++            if (kind(i) != C_P && ++cnt == K) {
++                r_end = i + 1;
++                break;
++            }
++        }
++    }
++    if (GGML_PAD(r_end, blk) >= GGML_PAD(v0, blk)) {
++        return;
++    }
++
++    std::vector<uint32_t> s_out; // S cells above R, highest first
++    std::vector<uint32_t> x_in;  // cells of idle sequences inside R, lowest first
++    std::vector<uint32_t> e_in;  // empty cells inside R, lowest first
++    std::vector<uint32_t> e_out; // empty cells above R, lowest first
++    for (uint32_t i = 0; i < size; ++i) {
++        const int c = kind(i);
++        if (i < r_end) {
++            if (c == C_X) { x_in.push_back(i); }
++            if (c == C_E) { e_in.push_back(i); }
++        } else {
++            if (c == C_S) { s_out.push_back(i); }
++            if (c == C_E) { e_out.push_back(i); }
++        }
++    }
++    std::reverse(s_out.begin(), s_out.end());
++
++    move_plan plan;
++    size_t ie = 0;
++    size_t ix = 0;
++    for (const uint32_t s : s_out) {
++        if (ie < e_in.size()) {
++            plan.pairs.emplace_back(s, e_in[ie++]);
++            plan.n_moved++;
++        } else if (ix < x_in.size()) {
++            plan.pairs.emplace_back(s, x_in[ix++]);
++            plan.n_swapped++;
++        } else {
++            break;
++        }
++    }
++    // the rest of R's idle cells make room for the batch's new cells: out to the lowest empty cells above R --
++    // just past the batch's new span, never parked at the top of the pool (where an idle sequence's own span
++    // would reach deep into the host tier when it runs again)
++    for (size_t io = 0; ix < x_in.size() && io < e_out.size(); ) {
++        plan.pairs.emplace_back(x_in[ix++], e_out[io++]);
++        plan.n_evicted++;
++    }
++
++    if (plan.pairs.empty()) {
++        return;
++    }
++
++    plan.n_ubatch    = std::max<uint32_t>(1, next_n_ubatch);
++    plan.n_seq_cells = (uint32_t) n_s_cells;
++    plan.span_before = GGML_PAD(v0, blk);
++    plan.span_after  = GGML_PAD(r_end, blk);
++    plan.seqs        = seqs;
++
++    pending = std::move(plan);
++}
++
+ llama_kv_cache::slot_info llama_kv_cache::find_slot(const llama_ubatch & ubatch, bool cont) const {
+ 
+     if (debug > 0) {
+@@ -2272,6 +2451,182 @@ ggml_cgraph * llama_kv_cache::build_graph_shift(llm_graph_result * res, llama_co
+     return gf;
+ }
+ 
++// the row indices of one chunk of a move: dst[i] <- src[i], a gather of every src row before any dst row is written
++class llm_graph_input_kv_move : public llm_graph_input_i {
++public:
++    llm_graph_input_kv_move() = default;
++    virtual ~llm_graph_input_kv_move() = default;
++
++    void set_input(const llama_ubatch * ubatch) override {
++        GGML_UNUSED(ubatch);
++
++        for (size_t i = 0; i < t_src.size(); ++i) {
++            ggml_backend_tensor_set(t_src[i], v_src[i].data(), 0, v_src[i].size()*sizeof(int32_t));
++            ggml_backend_tensor_set(t_dst[i], v_dst[i].data(), 0, v_dst[i].size()*sizeof(int64_t));
++        }
++    }
++
++    std::vector<ggml_tensor *> t_src; // I32 [n]
++    std::vector<ggml_tensor *> t_dst; // I64 [n]
++
++    std::vector<std::vector<int32_t>> v_src;
++    std::vector<std::vector<int64_t>> v_dst;
++};
++
++bool llama_kv_cache::apply_moves(llama_context * lctx) {
++    move_plan plan = std::move(pending);
++    pending = {};
++
++    auto & cells = v_cells[0];
++
++    llama_synchronize(lctx);
++    const int64_t t_start_us = ggml_time_us();
++
++    // every K and V tensor, gathered and scattered as rows of 32-bit words: the bytes move, never a value
++    std::vector<ggml_tensor *> tensors;
++    for (const auto & layer : layers) {
++        for (ggml_tensor * t : { layer.k, layer.v }) {
++            if (t) {
++                tensors.push_back(t);
++            }
++        }
++    }
++
++    // rows of a pair: its first cell to its second, and the second back when it is in use
++    auto rows_of = [&](const std::pair<uint32_t, uint32_t> & p, std::vector<int32_t> & src, std::vector<int64_t> & dst) {
++        src.push_back((int32_t) p.first);
++        dst.push_back((int64_t) p.second);
++        if (!cells.is_empty(p.second)) {
++            src.push_back((int32_t) p.second);
++            dst.push_back((int64_t) p.first);
++        }
++    };
++
++    // verification: the bytes of a few moved rows of the first tensor, read before and after
++    struct probe { uint32_t from, to; std::vector<uint8_t> bytes; };
++    std::vector<probe> probes;
++    if (promote_verify && !tensors.empty()) {
++        ggml_tensor * t = tensors[0];
++        for (size_t i = 0; i < plan.pairs.size() && probes.size() < 16; i += std::max<size_t>(1, plan.pairs.size()/8)) {
++            const auto & p = plan.pairs[i];
++            probe pr = { p.first, p.second, std::vector<uint8_t>(t->nb[1]) };
++            ggml_backend_tensor_get(t, pr.bytes.data(), (size_t) p.first*t->nb[1], t->nb[1]);
++            probes.push_back(std::move(pr));
++            if (!cells.is_empty(p.second)) {
++                probe pb = { p.second, p.first, std::vector<uint8_t>(t->nb[1]) };
++                ggml_backend_tensor_get(t, pb.bytes.data(), (size_t) p.second*t->nb[1], t->nb[1]);
++                probes.push_back(std::move(pb));
++            }
++        }
++    }
++
++    auto * sched = lctx->get_sched();
++
++    // chunks of at most one ubatch of rows: a chunk's gathered rows are no larger than one F32 activation of
++    // a ubatch's graph, which the reserved compute buffer already holds. A chunk never splits a pair
++    size_t ip = 0;
++    size_t n_rows = 0;
++    int n_graphs = 0;
++    while (ip < plan.pairs.size()) {
++        ggml_backend_sched_reset(sched);
++
++        auto * res = lctx->get_gf_res_reserve();
++        res->reset();
++
++        auto * ctx = res->get_ctx();
++        auto * gf  = res->get_gf();
++
++        std::vector<ggml_tensor *> raws;
++        for (ggml_tensor * t : tensors) {
++            ggml_tensor * r = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, t->nb[1]/4, t->ne[1]);
++            r->data   = t->data;
++            r->buffer = t->buffer;
++            ggml_format_name(r, "kv_move_%s", t->name);
++            raws.push_back(r);
++        }
++
++        auto inp = std::make_unique<llm_graph_input_kv_move>();
++
++        const size_t ip0 = ip;
++        while (ip < plan.pairs.size() &&
++               ggml_graph_n_nodes(gf) + 4*(int) raws.size() + 8 < ggml_graph_size(gf)/2) {
++            std::vector<int32_t> src;
++            std::vector<int64_t> dst;
++            while (ip < plan.pairs.size() && src.size() + 2 <= std::max<uint32_t>(2, plan.n_ubatch)) {
++                rows_of(plan.pairs[ip++], src, dst);
++            }
++
++            ggml_tensor * t_src = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, (int64_t) src.size());
++            ggml_tensor * t_dst = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, (int64_t) dst.size());
++            ggml_set_input(t_src);
++            ggml_set_input(t_dst);
++
++            for (ggml_tensor * r : raws) {
++                ggml_build_forward_expand(gf, ggml_set_rows(ctx, r, ggml_get_rows(ctx, r, t_src), t_dst));
++            }
++
++            n_rows += src.size();
++
++            inp->t_src.push_back(t_src);
++            inp->t_dst.push_back(t_dst);
++            inp->v_src.push_back(std::move(src));
++            inp->v_dst.push_back(std::move(dst));
++        }
++
++        res->add_input(std::move(inp));
++
++        if (!ggml_backend_sched_alloc_graph(sched, gf)) {
++            LLAMA_LOG_ERROR("%s: failed to allocate the graph that moves KV cells; %zu of %zu pairs moved\n",
++                    __func__, ip0, plan.pairs.size());
++            return ip0 > 0;
++        }
++
++        res->set_inputs(nullptr);
++
++        if (lctx->graph_compute(gf, false) != GGML_STATUS_SUCCESS) {
++            GGML_ABORT("%s: failed to compute the graph that moves KV cells", __func__);
++        }
++
++        // the cells' state follows the rows it describes
++        for (size_t i = ip0; i < ip; ++i) {
++            cells.swap_cells(plan.pairs[i].first, plan.pairs[i].second);
++        }
++
++        n_graphs++;
++    }
++
++    llama_synchronize(lctx);
++    const double ms = (ggml_time_us() - t_start_us)/1000.0;
++
++    size_t row_bytes = 0;
++    for (ggml_tensor * t : tensors) {
++        row_bytes += t->nb[1];
++    }
++
++    LLAMA_LOG_INFO("%s: kv promote: seqs %s: %u cells, span %u -> %u%s: %u moved, %u exchanged with idle cells, "
++            "%u idle cells moved out; %zu rows (%.1f MiB) in %d graph(s), %.1f ms\n", __func__,
++            plan.seqs.c_str(), plan.n_seq_cells, plan.span_before, plan.span_after,
++            n_line ? (" (VRAM line " + std::to_string(n_line) + ")").c_str() : "",
++            plan.n_moved, plan.n_swapped, plan.n_evicted, n_rows, n_rows*row_bytes/1048576.0, n_graphs, ms);
++
++    if (!probes.empty()) {
++        ggml_tensor * t = tensors[0];
++        int bad = 0;
++        std::vector<uint8_t> got(t->nb[1]);
++        for (const auto & pr : probes) {
++            ggml_backend_tensor_get(t, got.data(), (size_t) pr.to*t->nb[1], t->nb[1]);
++            bad += memcmp(got.data(), pr.bytes.data(), t->nb[1]) != 0;
++        }
++        if (bad) {
++            LLAMA_LOG_ERROR("%s: kv promote verify: %d of %zu moved rows of %s differ from their source\n", __func__, bad, probes.size(), t->name);
++        } else {
++            LLAMA_LOG_INFO("%s: kv promote verify: %zu moved rows of %s byte-identical to their source\n", __func__, probes.size(), t->name);
++        }
++    }
++
++    return true;
++}
++
+ void llama_kv_cache::state_write(llama_io_write_i & io, llama_seq_id seq_id, llama_state_seq_flags flags) const {
+     // TODO: refactor [TAG_KV_CACHE_SHARE_CELLS]
+     if (other) {
+@@ -2838,7 +3193,7 @@ llama_kv_cache_context::llama_kv_cache_context(
+         llama_context * lctx,
+         bool do_shift,
+         stream_copy_info sc_info) : status(LLAMA_MEMORY_STATUS_SUCCESS), kv(kv), lctx(lctx), do_shift(do_shift), sc_info(std::move(sc_info)) {
+-    if (!do_shift && this->sc_info.empty()) {
++    if (!do_shift && this->sc_info.empty() && !kv->has_pending_moves()) {
+         status = LLAMA_MEMORY_STATUS_NO_UPDATE;
+     }
+ }
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index 9acc4dc6..e6dc4398 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -147,6 +147,8 @@ public:
+ 
+     uint32_t seq_span_p1(llama_seq_id seq_id) const override;
+ 
++    void set_next_batch(const std::vector<llama_seq_id> & seq_ids, uint32_t n_tokens, uint32_t n_ubatch) override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+@@ -216,6 +218,9 @@ public:
+ 
+     bool update(llama_context * lctx, bool do_shift, const stream_copy_info & sc_info);
+ 
++    // KV cells to move before the next batch (planned by init_update, applied by update)
++    bool has_pending_moves() const { return !pending.pairs.empty(); }
++
+     // find a slot of kv cells that can hold the ubatch
+     // if cont == true, then the slot must be continuous
+     // return empty slot_info on failure
+@@ -293,6 +298,43 @@ private:
+     // env: LLAMA_KV_PLACE_LOW (0 = new cells are searched for from the head, as before)
+     bool place_low = true;
+ 
++    // env: LLAMA_KV_PROMOTE (0 = cells never move). Tiered caches only: before a batch whose span would pass the
++    // VRAM line, the cells of its sequences move to the lowest cells of the pool, and cells of sequences no recent
++    // batch used move out of the way (to the lowest empty cells above them).
++    // LLAMA_KV_PROMOTE_VERIFY=1 reads moved rows back and compares their bytes
++    bool promote        = false;
++    bool promote_verify = false;
++
++    // the sequences of the next batch (set_next_batch), and when each sequence was last in a batch
++    std::vector<llama_seq_id> next_seq_ids;
++    uint32_t next_n_tokens = 0;
++    uint32_t next_n_ubatch = 0;
++    uint64_t n_batches     = 0;
++    std::vector<uint64_t> seq_last_batch;
++
++    struct move_plan {
++        // cells to exchange; the first of each pair is in use, the second is empty or in use
++        std::vector<std::pair<uint32_t, uint32_t>> pairs;
++
++        uint32_t n_ubatch     = 0;
++        uint32_t n_seq_cells  = 0; // cells of the batch's sequences
++        uint32_t span_before  = 0; // the batch's span (with its new cells) without the moves
++        uint32_t span_after   = 0; // ... after them
++        uint32_t n_moved      = 0; // cells of the batch's sequences moved into empty cells
++        uint32_t n_swapped    = 0; // ... exchanged with a cell of an idle sequence
++        uint32_t n_evicted    = 0; // cells of idle sequences moved out of the batch's span into empty cells
++        std::string seqs;
++    };
++
++    move_plan pending;
++
++    // plan the moves for the sequences set by set_next_batch (cheap unless something can be gained)
++    void plan_moves();
++
++    // move the K/V rows of the planned pairs (a gather and a scatter per layer, on the backends that hold them)
++    // and then the cells' state
++    bool apply_moves(llama_context * lctx);
++
+     // the tiered-KV line (--kv-vram-cells, cells [0, n_line) in VRAM); 0 when the cache is not tiered
+     uint32_t n_line = 0;
+ 
+diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
+index 5c85c0be..85186c8c 100644
+--- a/src/llama-memory-hybrid.cpp
++++ b/src/llama-memory-hybrid.cpp
+@@ -186,6 +186,10 @@ uint32_t llama_memory_hybrid::seq_span_p1(llama_seq_id seq_id) const {
+     return mem_attn->seq_span_p1(seq_id);
+ }
+ 
++void llama_memory_hybrid::set_next_batch(const std::vector<llama_seq_id> & seq_ids, uint32_t n_tokens, uint32_t n_ubatch) {
++    mem_attn->set_next_batch(seq_ids, n_tokens, n_ubatch);
++}
++
+ uint32_t llama_memory_hybrid::cells_used_max_p1() const {
+     // the recurrent part has no KV cells: only the attention cache spans a tiered buffer
+     return mem_attn->cells_used_max_p1();
+diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
+index ccb7de77..deb5407c 100644
+--- a/src/llama-memory-hybrid.h
++++ b/src/llama-memory-hybrid.h
+@@ -74,6 +74,8 @@ public:
+ 
+     uint32_t seq_span_p1(llama_seq_id seq_id) const override;
+ 
++    void set_next_batch(const std::vector<llama_seq_id> & seq_ids, uint32_t n_tokens, uint32_t n_ubatch) override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+diff --git a/src/llama-memory.h b/src/llama-memory.h
+index e1fcac0f..4eed4f54 100644
+--- a/src/llama-memory.h
++++ b/src/llama-memory.h
+@@ -124,6 +124,9 @@ struct llama_memory_i {
+     // cells): an attention op for this sequence spans the cells below it
+     virtual uint32_t seq_span_p1(llama_seq_id /*seq_id*/) const { return 0; }
+ 
++    // the sequences of the next batch, told before its memory update (which may move their KV cells low)
++    virtual void set_next_batch(const std::vector<llama_seq_id> & /*seq_ids*/, uint32_t /*n_tokens*/, uint32_t /*n_ubatch*/) {}
++
+     virtual std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const = 0;
+ 
+     //

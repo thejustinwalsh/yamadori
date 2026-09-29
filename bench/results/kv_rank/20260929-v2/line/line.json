@@ -1,0 +1,21 @@
+{
+ "layout": "v2",
+ "margin_mib": 1000,
+ "display_active": "Disabled",
+ "per_cell_bytes": 36992,
+ "rounds": [
+  {
+   "n": 170240,
+   "c": 343552,
+   "min_free_mib": null,
+   "error": "not run: test suites running: 70524 C:\\Users\\jwals\\textgen\\installer_files\\env\\python.exe scripts/run_tests.py; 61712 C:\\Users\\jwals\\textgen\\installer_files\\env\\python.exe scripts/run_tests.py; 59088 C:\\Users\\jwals\\textgen\\installer_files\\env\\python.exe scripts/run_tests.py; 6600 C:\\Users\\jwals\\textgen\\installer_files\\env\\python.exe -X utf8 scripts/run_tests.py; 68548 C:\\Users\\jwals\\textgen\\installer_files\\env\\python.exe scripts/run_tests.py; 68292 C:/Users/jwals/textgen/installer_files/env/python.exe -X utf8 C:\\Users\\jwals\\llama-stack\\mcp\\test_stray_markers.py; 71440 C:/Users/jwals/textgen/installer_files/env/python.exe -X utf8 C:\\Users\\jwals\\llama-stack\\mcp\\test_ledger.py; 66096 C:/Users/jwals/textgen/installer_files/env/python.exe -X utf8 C:\\Users\\jwals\\llama-stack\\mcp\\test_ledger.py; 55848 C:/Users/jwals/textgen/installer_files/env/python.exe -X utf8 C:\\Users\\jwals\\llama-stack\\mcp\\test_harness_forms.py; 61852 C:/Users/jwals/textgen/installer_files/env/python.exe -X utf8 C:\\Users\\jwals\\llama-stack\\mcp\\test_harness_decisions.py",
+   "image": null,
+   "lane_warm": []
+  }
+ ],
+ "n": null,
+ "child": 65536,
+ "lane": 3072,
+ "rank_lane": 3,
+ "mmproj": "removed"
+}

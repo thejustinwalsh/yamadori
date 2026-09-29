@@ -55,7 +55,10 @@ THE SIGNALS ARE DETERMINISTIC, AND EACH ONE IS JUSTIFIED
   ends on a tool result   STRUCTURE: the role of the last non-system message.
                           A client tool result means the model is mid-way
                           through the client's loop (selection.question_of
-                          uses the same fact to keep deep thinking out).
+                          uses the same fact to keep deep thinking out). A
+                          harness's synthetic tool-media turn (OpenCode, Pi,
+                          Cline; image_input.TOOL_MEDIA_TURNS) counts as
+                          the tool result it carries.
   harness notice          THE REAL PRODUCER'S WORDS (PROTOCOL rule 7). Hermes
                           resumes with "[System: The previous response was cut
                           off ...]", "[Context from the interrupted assistant
@@ -106,6 +109,7 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import image_input  # noqa: E402
 import selection  # noqa: E402
 
 CLASSES = ("utility", "agent_step", "code_edit", "code_generation",
@@ -117,13 +121,23 @@ CODE_CLASSES = frozenset({"code_generation", "code_edit"})
 
 def ends_on(messages: list[dict]) -> str | None:
     """The role of the last non-system message: "user", "tool" (a client
-    tool result; "function" is the legacy name), "assistant", or None."""
-    for m in reversed(messages or []):
+    tool result; "function" is the legacy name), "assistant", or None.
+
+    A harness's SYNTHETIC TOOL-MEDIA TURN is "tool" (docs/VISION.md 5a):
+    OpenCode, Pi and Cline carry a tool's image in a user message after the
+    tool result, because a Chat Completions tool message holds text only.
+    It is the tool result, not a new request (image_input.TOOL_MEDIA_TURNS,
+    each row read from the harness's source)."""
+    msgs = messages or []
+    for i in range(len(msgs) - 1, -1, -1):
+        m = msgs[i]
         if not isinstance(m, dict):
             continue
         role = m.get("role")
         if role in ("system", "developer"):
             continue
+        if role == "user" and image_input.is_tool_media(msgs, i):
+            return "tool"
         return "tool" if role == "function" else role
     return None
 
@@ -357,6 +371,107 @@ def is_question(instruction: str) -> bool:
     prose = _prose_of(instruction).strip()
     return "?" in prose or bool(_QUESTION_LEAD.search(prose))
 
+# ----------------------------------------------------------- work intent ---
+# DOES THIS USER TURN ASK FOR SOMETHING TO BE MADE OR CHANGED? (operator,
+# 2026-09-27: "'Go implement' is not the trigger, every natural language
+# variation of implement, build, make is.") Read by skill_select's server-tool
+# recall (trigger 4: a user turn after an answer that sends the model off to
+# build names yama_plan). The embedder and E1 cannot be run offline and have
+# no head for this; the router's own STRUCTURE is reused instead: a clause is
+# a request for work when its HEAD -- after discourse openers ("ok", "great",
+# "now", "then") -- is
+#   an imperative work verb                "build the village", "wire up X"
+#   a request lead + a work verb           "can you add ...", "please create"
+#   a desire lead + a work verb or object  "I want a leaderboard", "I'd like
+#                                          you to set up ..."
+#   let's + a work verb                    "let's do it", "let's build ..."
+#   a sequencing adverb + a noun phrase    "now the HUD part", "next up: the
+#   (an elliptical "build X next")         particle effects"
+# and the clause is not a question (a "?" without a request lead, or an
+# interrogative head), not negated ("don't build", "hold off") and not an
+# information verb ("explain", "show me", "summarize", "check"). The work
+# verbs are the router's own sets (_WRITE, selection._ACT_VERB, _EDIT_VERB)
+# plus the pro-verbs that carry an earlier proposal forward (do, go ahead,
+# proceed, carry on, ship, execute) and the phrasal verbs of making (put
+# together, whip up, knock out, hook up, flesh out). Measured in-sample on
+# bench/skills/work_intent.jsonl (mcp/test_tool_recall.py [intent]).
+_PRO_VERBS = (r"do|go\s+ahead|go\s+for\s+it|proceed|carry\s+on|continue|"
+              r"keep\s+going|ship|execute|start|begin|get\s+(?:going|started)|"
+              r"tackle|finish|complete|put\s+together|whip\s+up|knock\s+out|"
+              r"hook\s+up|wire\s+up|flesh\s+out|code(?:\s+up)?|land|roll\s+out|"
+              r"turn|integrate|extend|implement|build|make|add|create|write|"
+              r"scaffold|set\s*up|spin\s+up")
+# selection._ACT_VERB less `run`: running something makes and changes
+# nothing ("can you run the tests?" is a check).
+_ACT_WORK = "|".join(v for v in selection._ACT_VERB[3:-1].split("|")
+                     if v != "run")
+_WORK_VERB = (r"(?:" + _PRO_VERBS + r"|" + _WRITE + r"|"
+              + _ACT_WORK + r"|change|clean\s+up|simplify|"
+              r"optimi[sz]e|replace|adapt|migrate|correct|improve|speed\s+up|"
+              r"tidy|restructure|redo|rework|swap|move|hook)")
+# What a clause may open with before its head: assent, praise, sequencing.
+_OPENER = (r"(?:(?:ok(?:ay)?|alright|all\s+right|right|great|nice|cool|good|"
+           r"perfect|awesome|excellent|sounds\s+good|looks\s+good|lgtm|yes|"
+           r"yeah|yep|yup|sure|so|and|also|then|now|next|please|pls|thanks|"
+           r"thank\s+you)\b[\s,.!:;-]*)*")
+_REQUEST_HEAD = (r"(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|"
+                 r"please\s+|pls\s+|go\s+ahead\s+and\s+|time\s+to\s+|"
+                 r"(?:i|we)(?:\s+(?:want|need|would\s+like)|['’]d\s+like)"
+                 r"\s+(?:you\s+to\s+|to\s+have\s+you\s+)?|"
+                 r"let'?s\s+|let\s+us\s+|let’s\s+)")
+_WORK_CLAUSE = re.compile(
+    r"^" + _OPENER + r"(?:" + _REQUEST_HEAD + r")?(" + _WORK_VERB + r")\b",
+    re.I)
+# A desire for a THING: "I want a leaderboard that ...".
+_WANT_THING = re.compile(
+    r"^" + _OPENER + r"(?:i|we)(?:\s+(?:want|need|would\s+like)|['’]d\s+"
+    r"like)\s+(?:a|an|the|some|another)\s+(?!(?:explanation|summary|"
+    r"overview|review|answer|list|comparison|breakdown|update|status|"
+    r"word|look|idea|sense|minute|second|moment|break|hand|hint|chance)\b)"
+    r"\w+", re.I)
+# "now the HUD part", "next: the inventory screen", "next up: ...": a
+# sequencing adverb heading a verbless noun phrase.
+_NEXT_PIECE = re.compile(
+    r"^" + _OPENER.replace("now|next|", "") + r"(?:now|next(?:\s+up)?|then)"
+    r"\s*[:,-]?\s*(?:on\s+to\s+|onto\s+)?(?:the|a|an|some|our|my)\s+"
+    r"[\w-]+(?:\s+[\w-]+){0,3}\s*[.!]*$", re.I)
+_INFO_VERB = re.compile(
+    r"\b(?:explain|describe|tell|show|summari[sz]e|list|compare|review|"
+    r"check|verify|look|read|analy[sz]e|clarify|walk\s+me|remind|think|"
+    r"say|mean|know|see|understand|wonder)\b", re.I)
+_NEGATED = re.compile(r"^" + _OPENER + r"(?:don'?t|do\s+not|don’t|never|"
+                      r"hold\s+off|wait|stop|no\b|not\s+yet)", re.I)
+_INTERROGATIVE = re.compile(
+    r"^" + _OPENER + r"(?:what|where|which|who|whom|whose|why|how|when|is|"
+    r"are|was|were|does|did|do\s+you|should|has|have|am)\b", re.I)
+
+
+def _clauses(prose: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?;])\s+|\n+|\s+[-–—]\s+", prose or "")
+    return [p.strip() for p in parts if p and p.strip()]
+
+
+def work_intent(instruction: str) -> str | None:
+    """The clause of a user turn that asks for something to be made or
+    changed, or None. Pure; reads the prose (code removed first)."""
+    for c in _clauses(_prose_of(instruction)):
+        if _NEGATED.match(c) or _INTERROGATIVE.match(c):
+            continue
+        m = _WORK_CLAUSE.match(c)
+        if m:
+            head = c[:m.end()]
+            asked = c.rstrip().endswith("?")
+            if asked and not re.search(r"(?:can|could|would|will)\s+you",
+                                       head, re.I):
+                continue
+            if _INFO_VERB.fullmatch(m.group(1).split()[0]):
+                continue
+            return " ".join(c.split())[:80]
+        if (_WANT_THING.match(c) or _NEXT_PIECE.match(c)) and \
+                not c.rstrip().endswith("?"):
+            return " ".join(c.split())[:80]
+    return None
+
 # -------------------------------------------------------------- decision ---
 
 
@@ -379,9 +494,15 @@ def classify(messages: list[dict], *, client_tools: list[str] | None = None,
     whole = _last_user(messages)
     instruction, attached = selection.instruction_of(whole)
     last = ends_on(messages)
+    media_row = image_input.last_is_tool_media(messages)
     sig: dict = {"ends_on": last, "client_tools": len(client_tools or []),
                  "instruction_chars": len(instruction),
                  "attached_chars": len(attached)}
+    if media_row:
+        sig["tool_media_turn"] = media_row["harness"]
+    media_why = (f"the conversation ends on {media_row['harness']}'s "
+                 f"synthetic turn carrying a tool result's media: a step in "
+                 f"the client's own loop" if media_row else None)
 
     def out(cls: str, because: str) -> dict:
         return {"class": cls, "because": because, "signals": sig}
@@ -393,8 +514,9 @@ def classify(messages: list[dict], *, client_tools: list[str] | None = None,
 
     # 2. agent_step -----------------------------------------------------------
     if client_tools and last == "tool":
-        return out("agent_step", "the conversation ends on a client tool "
-                                 "result: a step in the client's own loop")
+        return out("agent_step", media_why or "the conversation ends on a "
+                                 "client tool result: a step in the client's "
+                                 "own loop")
     notice = harness_notice(instruction) if client_tools and _has_answers(
         messages) else None
     sig["harness_notice"] = notice
@@ -411,8 +533,9 @@ def classify(messages: list[dict], *, client_tools: list[str] | None = None,
     if last == "tool":
         # A tool result with no client tools: a client replaying a tool loop
         # of its own (the conversation carries results but no tool list).
-        return out("agent_step", "the conversation ends on a tool result: a "
-                                 "step in a loop, not a new request")
+        return out("agent_step", media_why or "the conversation ends on a "
+                                 "tool result: a step in a loop, not a new "
+                                 "request")
 
     # 3-4. code -------------------------------------------------------------
     langs = prompt_code(whole)

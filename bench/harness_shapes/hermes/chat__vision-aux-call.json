@@ -1,0 +1,50 @@
+{
+ "id": "hermes/chat/vision-aux-call",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "chat",
+ "source": "Hermes tools/vision_tools.py:674 _media_messages (one user message: text + one image_url data URL); image synthetic",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "messages": [
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "Describe this image in detail."
+     },
+     {
+      "type": "image_url",
+      "image_url": {
+       "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "accepted": true,
+  "utility": {
+   "utility": false
+  },
+  "image": {
+   "forms": [
+    "user_part"
+   ]
+  },
+  "deep": {
+   "kickoff": true,
+   "speaking": true
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "utility": "a request carrying an image is never a utility call (AGENTS.md; the bare text model cannot see)"
+ }
+}

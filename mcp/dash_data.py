@@ -193,8 +193,7 @@ BODY = r"""<main>
     </label>
     <label class="field"><span class="label">KIND</span>
       <select id="p-kind">
-        <option value="recipes">recipes</option>
-        <option value="laya">laya training set</option>
+        <option value="recipes">recipes &rarr; skills</option>
       </select></label>
     <button class="btn-primary" onclick="submitPrompt()">submit</button>
     <span class="saved" id="p-msg"></span>

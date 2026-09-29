@@ -1,0 +1,26 @@
+{
+ "bank_system": {
+  "sha256": "dd3db63cae406d19",
+  "version": "qbank/1"
+ },
+ "clm_question": {
+  "sha256": "17b2d4f56ad02123",
+  "version": "qmatch/1"
+ },
+ "clm_skill": {
+  "sha256": "b1768755082d31d8",
+  "version": "qmatch/1"
+ },
+ "recall_task": {
+  "sha256": "e5fc6d1a4b491c45",
+  "version": "qmatch/1"
+ },
+ "something_else": {
+  "sha256": "4cbecb3f90cc3933",
+  "version": "qmatch/1"
+ },
+ "something_else_skill": {
+  "sha256": "cc72843144841a6f",
+  "version": "qmatch/1"
+ }
+}

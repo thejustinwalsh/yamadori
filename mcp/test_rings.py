@@ -79,7 +79,8 @@ def test_what_is_recorded_reads_back_in_order():
     check("2 entries" in log, "the header counts the session's entries", log[:80])
     a, b = log.find("changed parser.ts"), log.find("the lexer is generated")
     check(0 < a < b, "entries read oldest first, as a narrative")
-    check("Do not redo it" in log, "and the log says listed work is done")
+    check("Do not redo it" not in log and "record it now" not in log,
+          "and the log carries no instruction (removed, CONSTANTS-AUDIT)")
 
 
 def test_checks_are_surfaced_as_evidence():

@@ -34,15 +34,31 @@ sys.path.insert(0, HERE)
 # Read at import. A deployment's own ceiling must not change what is asserted.
 os.environ.pop("YAMADORI_TIER_CEILING", None)
 os.environ.pop("YAMADORI_TIER_DEFAULT", None)
+# Read per call; the suite asserts the shipped default (on) unless a test
+# sets it itself.
+os.environ.pop("YAMADORI_THINKING_NUDGE", None)
 
 import budget  # noqa: E402
+import served_fixture  # noqa: E402
 import tiers  # noqa: E402
 
+# The served template's efforts and slot count from the pinned /props
+# (mcp/served_fixture.py): tiers.accepted_efforts() would read them through
+# llama-swap, which reloads `bonsai`. The pool is this suite's own, below.
+served_fixture.pin()
 # budget.pool_size() would ask the live server. Pinned to the shipped `-c`,
 # so every derived number below is the shipped split and nothing leaves
 # the box.
-POOL, MAIN, HELPER = 147456, 92160, 55296   # 5/8 + 1 x 3/8
+POOL, MAIN, HELPER = 147456, 92160, 55296   # 5/8 + 1 x 3/8, pinned below
 budget._POOL = POOL
+# This suite tests the budget MECHANICS, so it pins the split it was
+# written against (5/8 + 3/8) and turns the standing thinking caps off;
+# mcp/test_budget.py checks the shipped split, test_tiers the caps.
+import budget as _budget_pin  # noqa: E402
+import tiers as _tiers_pin  # noqa: E402
+_budget_pin.MAIN_SHARE, _budget_pin.HELPER_SHARE = 0.625, 0.375
+_budget_pin.HELPER_TOKENS = 0
+_tiers_pin.HELPER_THINKING, _tiers_pin.JOB_THINKING = 0, {}
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -105,12 +121,15 @@ def _with_template(tpl: str | None):
         return io.BytesIO(json.dumps({"chat_template": tpl}).encode())
     real = urllib.request.urlopen
     urllib.request.urlopen = fake
+    pinned = tiers._accepted
     tiers._accepted = None
     try:
         return tiers.accepted_efforts()
     finally:
         urllib.request.urlopen = real
-        tiers._accepted = None
+        # Back to the pinned set: None made the next apply() ask the live
+        # server (the offline guard caught it, 2026-09-27).
+        tiers._accepted = pinned
 
 
 def test_the_accepted_set_is_read_from_the_served_template():
@@ -127,6 +146,41 @@ def test_the_accepted_set_is_read_from_the_served_template():
           "with the server unreachable, the fallback is today's template")
     check(_with_template("no guard here") == tiers.FALLBACK_EFFORTS,
           "and a template with no guard also falls back")
+    tpl = served_fixture.props()["chat_template"]
+    check(set(tiers.efforts_in_template(tpl)) == set(tiers.FALLBACK_EFFORTS),
+          "the fallback is what the pinned served template accepts "
+          "(mcp/fixtures; test_live_stack --only served checks it is served)",
+          str(tiers.efforts_in_template(tpl)))
+
+
+def test_reading_the_efforts_never_loads_the_model():
+    """2026-09-28 11:47: a dashboard view (/dash/api/tiers -> safe_effort)
+    asked /upstream/bonsai/props while the Flash-Next gate held the card;
+    llama-swap started bonsai and the gate killed its arm. With the model
+    not in llama-swap's /running, nothing is asked of /upstream, and the
+    fallback is answered without being kept."""
+    import io
+    import urllib.request
+    asked = []
+
+    def fake(url, timeout=None):
+        asked.append(str(url))
+        if str(url).endswith("/running"):
+            return io.BytesIO(json.dumps({"running": [
+                {"model": "embeddings", "state": "ready"}]}).encode())
+        return io.BytesIO(json.dumps({"chat_template": ""}).encode())
+    real, pinned = urllib.request.urlopen, tiers._accepted
+    urllib.request.urlopen, tiers._accepted = fake, None
+    try:
+        got = tiers.accepted_efforts()
+        kept = tiers._accepted
+    finally:
+        urllib.request.urlopen, tiers._accepted = real, pinned
+    check(got == tiers.FALLBACK_EFFORTS and kept is None
+          and not any("/upstream/" in u for u in asked),
+          "with the model off the card, the efforts are the fallback, not "
+          "kept, and /upstream (which would load it) is never asked",
+          json.dumps({"asked": asked, "kept": kept}))
 
 
 def test_the_template_never_sees_an_effort_it_rejects():
@@ -166,7 +220,7 @@ def test_the_answer_allowance_is_added_to_the_thinking_breaker():
         thinking = max(window - prompt - answer, MIN_THINKING)
 
     The pool is pinned at 147,456 above, so main is 92,160 and the one helper
-    55,296 (5/8 + 3/8, the operator's split of 2026-09-22)."""
+    55,296 (5/8 + 3/8, pinned for this suite; test_budget has the shipped split)."""
     A, M, MSG = tiers.A_MIN, tiers.MIN_THINKING, tiers.BUDGET_MESSAGE
     check(A == 2048 and M == 1024, "the answer minimum is 2048 and the thinking "
           "floor 1024", f"{A}/{M}")
@@ -179,9 +233,54 @@ def test_the_answer_allowance_is_added_to_the_thinking_breaker():
     # --- the derived rule, by role, share and prompt ---------------------
     got = tiers.budget(None)
     check(got == {"max_tokens": MAIN, "reasoning_budget_tokens": MAIN - A,
-                  "reasoning_budget_message": MSG},
+                  "reasoning_budget_message": MSG,
+                  "reasoning_budget_nudge": tiers.NUDGE_MESSAGE,
+                  "reasoning_budget_nudge_at": tiers.NUDGE_AT},
           "main, no prompt: thinking is main's whole 5/8 minus the answer, "
-          "and the total is exactly that share", json.dumps(got))
+          "and the total is exactly that share (with the message and the "
+          "thinking nudge)", json.dumps(got))
+
+    # --- the thinking nudge (operator, 2026-09-25) ------------------------
+    check(tiers.NUDGE_AT == 0.6
+          and tiers.NUDGE_MESSAGE == ("\n\nThe user is waiting for a response. "
+                                      "Let me go with the best answer I've "
+                                      "already worked out, and only keep "
+                                      "thinking if that answer would be "
+                                      "misleading.\n")
+          and tiers.BUDGET_MESSAGE == ("\n\nThinking budget reached. I will "
+                                       "stop deliberating and write the final "
+                                       "answer now.\n"),
+          "the nudge fires at 0.6; the hard stop keeps "
+          "its original line (operator, 2026-09-25)",
+          json.dumps([tiers.NUDGE_MESSAGE,
+                                           tiers.BUDGET_MESSAGE]))
+    check(tiers.NUDGE_MESSAGE.endswith("\n")
+          and not tiers.NUDGE_MESSAGE.endswith(" \n")
+          and not any(w in tiers.NUDGE_MESSAGE.lower()
+                      for w in ("don't", "never", "do not", "stop")),
+          "the nudge ends on a newline and carries no prohibition (the hard "
+          "stop's original line is the operator's choice)")
+    for val, want in (("0", False), ("off", False), ("false", False),
+                      ("1", True), ("on", True)):
+        os.environ["YAMADORI_THINKING_NUDGE"] = val
+        try:
+            got = tiers.budget(None)
+            has = ("reasoning_budget_nudge" in got
+                   and "reasoning_budget_nudge_at" in got)
+            check(has is want and got["reasoning_budget_message"] == MSG
+                  and got["reasoning_budget_tokens"] == MAIN - A,
+                  f"YAMADORI_THINKING_NUDGE={val}: nudge "
+                  f"{'sent' if want else 'absent'}, the budget unchanged",
+                  json.dumps(got))
+        finally:
+            os.environ.pop("YAMADORI_THINKING_NUDGE", None)
+    got = tiers.budget(None, role="helper", cap=8192)
+    check(got.get("reasoning_budget_nudge") == tiers.NUDGE_MESSAGE
+          and got.get("reasoning_budget_nudge_at") == tiers.NUDGE_AT,
+          "the nudge rides on every thinking budget: helper, capped",
+          json.dumps(got))
+    check("reasoning_budget_nudge" not in tiers.budget(None, thinks=False),
+          "and never on a request that does not think")
     got = tiers.budget(None, role="helper")
     check(got["max_tokens"] == HELPER
           and got["reasoning_budget_tokens"] == HELPER - A,
@@ -246,6 +345,8 @@ def test_the_answer_allowance_is_added_to_the_thinking_breaker():
     body = tiers.apply({"max_tokens": 100}, off)
     check(body["max_tokens"] == A and "reasoning_budget_tokens" not in body
           and "reasoning_budget_message" not in body
+          and "reasoning_budget_nudge" not in body
+          and "reasoning_budget_nudge_at" not in body
           and body["enable_thinking"] is False,
           "apply() with thinking off adds no thinking allowance", json.dumps(body))
 
@@ -277,8 +378,11 @@ def test_the_answer_allowance_is_added_to_the_thinking_breaker():
         out = tiers.apply({}, tiers.resolve({"reasoning_effort": name}))
         check(out["max_tokens"] == MAIN
               and out.get("reasoning_budget_tokens") == MAIN - A
-              and out.get("reasoning_budget_message") == MSG,
-              f"{name}: an empty body gets the main window, with the message",
+              and out.get("reasoning_budget_message") == MSG
+              and out.get("reasoning_budget_nudge") == tiers.NUDGE_MESSAGE
+              and out.get("reasoning_budget_nudge_at") == tiers.NUDGE_AT,
+              f"{name}: an empty body gets the main window, with the message "
+              f"and the nudge",
               json.dumps({k: out.get(k) for k in
                           ("max_tokens", "reasoning_budget_tokens")}))
     msgs = [{"role": "user", "content": "x" * 30000}]
@@ -348,10 +452,10 @@ def test_the_answer_allowance_is_added_to_the_thinking_breaker():
         budget.budgets = broken
         got = tiers.budget(None, role="helper")
         # The fallback is the split at the live `-c 163840`, not the pinned
-        # 147,456 fixture: 5/8 = 102,400 and 3/8 = 61,440.
-        check(got["max_tokens"] == 61440 and tiers.budget(None)["max_tokens"]
-              == 102400, "an unavailable budget falls back to the shipped "
-              "split at the live pool (102,400 / 61,440)", json.dumps(got))
+        # The fallback is the SHIPPED split at 163,840: 114,688 / 49,152.
+        check(got["max_tokens"] == 49152 and tiers.budget(None)["max_tokens"]
+              == 114688, "an unavailable budget falls back to the shipped "
+              "split at the live pool (114,688 / 49,152)", json.dumps(got))
     finally:
         budget.budgets = saved
 
@@ -388,7 +492,7 @@ def test_thinking_is_off_only_at_minimal():
           json.dumps({k: lo.get(k) for k in ("chat_template_kwargs",
                       "reasoning_effort")}))
     t = tiers.TIERS["low"]
-    check(not any(t[k] for k in ("retrieval", "hints", "investigate",
+    check(not any(t[k] for k in ("retrieval", "skills", "investigate",
                                  "check_code", "repair")) and t["fanout"] == 1
           and tiers.TIERS["minimal"]["fanout"] == 1,
           "low: none of our augmentation; neither low nor minimal fans out")
@@ -408,7 +512,10 @@ def test_resolve_returns_a_copy():
 
 def test_overrides_break_the_bundle_and_say_so():
     t = tiers.resolve({"reasoning_effort": "high"}, overrides={"fanout": 1})
-    check(t["fanout"] == 1 and t["hints"] is True and t["effort"] == "medium",
+    # `repair` stands for the untouched rest (skills are off at every tier
+    # since 2026-09-29, so they no longer tell a change apart)
+    check(t["fanout"] == 1 and t["repair"] is True
+          and t["skills"] is tiers.TIERS["high"]["skills"] and t["effort"] == "medium",
           "only the overridden field changes", json.dumps(t)[:160])
     check(t["overridden"] == ["fanout"], "and the tier records what was overridden")
     check("overridden" not in tiers.resolve({"reasoning_effort": "high"}),
@@ -424,8 +531,10 @@ def test_overrides_break_the_bundle_and_say_so():
 def test_the_feature_header_is_parsed_defensively():
     check(tiers.from_header(None) is None and tiers.from_header("") is None,
           "no header, no overrides")
-    check(tiers.from_header('{"fanout": 1, "hints": false}')
-          == {"fanout": 1, "hints": False}, "a valid header is used")
+    check(tiers.from_header('{"fanout": 1, "skills": false}')
+          == {"fanout": 1, "skills": False}, "a valid header is used")
+    check(tiers.from_header('{"hints": false}') == {"skills": False},
+          "the flag's old name `hints` is read as `skills` (one release)")
     check(tiers.from_header('{"thinks": false, "admin": true}') is None,
           "keys outside the allowed set are dropped (thinks is not settable "
           "from a header)")
@@ -435,7 +544,7 @@ def test_the_feature_header_is_parsed_defensively():
             check(out is None, f"header {bad!r} is ignored", repr(out))
         except Exception as e:                                   # noqa: BLE001
             check(False, f"header {bad!r} does not raise", f"{type(e).__name__}: {e}")
-    out = tiers.from_header('{"floor": "big", "fanout": "3", "hints": 1, '
+    out = tiers.from_header('{"floor": "big", "fanout": "3", "skills": 1, '
                             '"retrieval": true, "investigate": "yes", '
                             '"effort": 5}')
     check(out == {"retrieval": True},
@@ -459,8 +568,11 @@ def test_describe_lists_every_tier():
 
 def test_the_self_test_runs():
     """PROTOCOL rule 14: a self-test that crashes looks like coverage."""
+    # YAMADORI_SERVED_FIXTURE: the self-test reads the pinned /props, not
+    # llama-swap's (which reloads `bonsai`).
     r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(HERE, "tiers.py")],
-                       capture_output=True, text=True, timeout=60)
+                       capture_output=True, text=True, timeout=60,
+                       env=dict(os.environ, YAMADORI_SERVED_FIXTURE="1"))
     check(r.returncode == 0, "`python mcp/tiers.py` exits 0",
           ((r.stderr or "").strip().splitlines() or [""])[-1])
     check("factorial arm" in r.stdout, "and prints its last line")
@@ -522,13 +634,114 @@ def test_generic_client_spellings():
           "max_completion_tokens is the answer allowance and is not sent upstream",
           json.dumps({k: a.get(k) for k in ("max_tokens", "max_completion_tokens")}))
 
+def test_the_second_brains_nudge():
+    """A research hop (investigate, plan) is nudged toward its action -- the
+    search or the hand-off -- not "the best answer" (operator, 2026-09-26;
+    handle d28941fb); the other jobs keep NUDGE_MESSAGE; the switch works;
+    a rebudget keeps the text."""
+    for job in ("investigate", "plan"):
+        check(tiers.helper_nudge(job) == tiers.HELPER_NUDGE_MESSAGE,
+              f"a {job} hop gets the second brain's nudge", job)
+    for job in ("fixup", "alternative", "tiebreak", None):
+        check(tiers.helper_nudge(job) is None,
+              f"a {job} hop keeps NUDGE_MESSAGE (it ends in an answer)", job)
+    m = tiers.HELPER_NUDGE_MESSAGE
+    check(m.startswith("\n\nThe user is waiting for a response. Let me make "
+                       "the search") and "write the hand-off now" in m
+          and m.endswith("misleading.\n") and not m.endswith(" \n")
+          and not any(w in m.lower() for w in (" never ", " do not ", "don't")),
+          "the operator's wording, in the model's voice, ends on a newline, "
+          "no prohibition", repr(m))
+    got = tiers.budget(None, role="helper", step_cap=6144,
+                       nudge=tiers.helper_nudge("investigate"))
+    check(got.get("reasoning_budget_nudge") == m
+          and got.get("reasoning_budget_message") == tiers.BUDGET_MESSAGE,
+          "the budget carries it, and the hard stop keeps the operator's line",
+          json.dumps({k: got.get(k) for k in ("reasoning_budget_nudge",)}))
+    body = {"messages": [{"role": "user", "content": "x"}]}
+    out = tiers.apply(body, tiers.resolve({"reasoning_effort": "max"}),
+                      role="helper", step_cap=6144,
+                      nudge=tiers.helper_nudge("investigate"))
+    check(out.get("reasoning_budget_nudge") == m and out.get("_nudge") == m,
+          "apply keeps it for a rebudget", str(out.get("_nudge"))[:60])
+    os.environ["YAMADORI_HELPER_NUDGE"] = "0"
+    try:
+        check(tiers.helper_nudge("investigate") is None,
+              "YAMADORI_HELPER_NUDGE=0 switches it off")
+    finally:
+        os.environ.pop("YAMADORI_HELPER_NUDGE", None)
+
+
+def test_the_thinking_caps():
+    """AGENT_STEP_THINKING caps main on an agent step (step_cap), and
+    HELPER_THINKING every second-brain hop; a benchmark's reasoning_cap still
+    wins; rebudget keeps a step cap. (operator, 2026-09-25)"""
+    old = tiers.HELPER_THINKING, tiers.JOB_THINKING
+    try:
+        tiers.HELPER_THINKING, tiers.JOB_THINKING = 8192, {"fixup": 2048}
+        check(tiers.AGENT_STEP_THINKING == 6144,
+              "the shipped agent-step cap is 6,144 (1.5x, 2026-09-25)", str(tiers.AGENT_STEP_THINKING))
+        got = tiers.budget(None, role="helper")
+        check(got["reasoning_budget_tokens"] == 8192
+              and got["max_tokens"] == HELPER,
+              "a helper hop thinks at most HELPER_THINKING, and its total is "
+              "still the whole share (the cap limits thinking only)",
+              json.dumps(got))
+        got = tiers.budget(None, step_cap=4096)
+        check(got["max_tokens"] == MAIN,
+              "an agent step's total stays the whole share: a 7K-token file "
+              "write is never cut by the thinking cap", json.dumps(got))
+        got = tiers.budget(None, step_cap=4096)
+        check(got["reasoning_budget_tokens"] == 4096,
+              "an agent step thinks at most its step cap", json.dumps(got))
+        got = tiers.budget(None)
+        check(got["reasoning_budget_tokens"] == MAIN - tiers.A_MIN,
+              "a main request with no step cap keeps its whole share",
+              json.dumps(got))
+        got = tiers.budget(None, step_cap=4096, cap=20000)
+        check(got["reasoning_budget_tokens"] == 20000,
+              "a benchmark's reasoning_cap wins over the step cap", json.dumps(got))
+        got = tiers.budget(None, step_cap=100)
+        check(got["reasoning_budget_tokens"] == tiers.MIN_THINKING,
+              "a step cap never goes below MIN_THINKING", json.dumps(got))
+        t = tiers.resolve({"reasoning_effort": "xhigh"})
+        a = tiers.apply({"messages": [{"role": "user", "content": "x"}]}, t,
+                        step_cap=4096)
+        check(a["reasoning_budget_tokens"] == 4096 and a.get("_step_cap") == 4096,
+              "apply() writes the step cap and remembers it", json.dumps(
+                  {k: a.get(k) for k in ("reasoning_budget_tokens", "_step_cap")}))
+        r = tiers.rebudget(dict(a, messages=a["messages"] * 3))
+        check(r["reasoning_budget_tokens"] == 4096,
+              "rebudget() keeps the step cap on later hops",
+              str(r["reasoning_budget_tokens"]))
+        th = tiers.resolve({"reasoning_effort": "xhigh"},
+                           tiers.from_header('{"reasoning_cap": 1200}'))
+        a = tiers.apply({"messages": [{"role": "user", "content": "x"}]}, th)
+        r = tiers.rebudget(dict(a, messages=a["messages"] * 3))
+        check(a["reasoning_budget_tokens"] == 1200
+              and r["reasoning_budget_tokens"] == 1200,
+              "a header reasoning_cap survives rebudget() (live bug 2026-09-25)",
+              f"{a['reasoning_budget_tokens']} -> {r['reasoning_budget_tokens']}")
+        got = tiers.budget(None, role="helper", step_cap=2048)
+        check(got["reasoning_budget_tokens"] == 2048,
+              "a job's own cap replaces the helper default (fix-up 2,048)",
+              json.dumps(got))
+        got = tiers.budget(None, role="helper", step_cap=16384)
+        check(got["reasoning_budget_tokens"] == 16384,
+              "a job cap above the helper default is honoured (the plan)",
+              json.dumps(got))
+    finally:
+        tiers.HELPER_THINKING, tiers.JOB_THINKING = old
+
+
 def main() -> int:
-    for fn in (test_generic_client_spellings, test_vendor_sampling_is_enforced,
+    for fn in (test_the_second_brains_nudge, test_the_thinking_caps, test_generic_client_spellings, test_vendor_sampling_is_enforced,
                test_the_fixture_uses_the_shipped_settings,
                test_every_spelling_resolves,
                test_every_alias_lands_on_a_real_tier,
                test_the_ceiling_caps_the_request,
                test_the_accepted_set_is_read_from_the_served_template,
+               test_reading_the_efforts_never_loads_the_model,
                test_the_template_never_sees_an_effort_it_rejects,
                test_the_answer_allowance_is_added_to_the_thinking_breaker,
                test_apply_does_not_mutate_its_input,

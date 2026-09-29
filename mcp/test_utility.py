@@ -5,7 +5,7 @@ WHAT THIS IS GATING (the live Hermes session of 2026-09-23, 20:45-22:10)
 
   1. A harness's own side calls -- the approval classifier, the session
      title, the compaction -- get the bare model at tier `minimal`: no
-     capability block, no tools, no hints, no deep thinking, no fan-out
+     capability block, no tools, no skills, no deep thinking, no fan-out
      (selection.utility_call, proxy.prepare). They got all of it; one
      classifier call took 409 s for one word and called run_check.
   2. A utility call has no session: it neither inherits nor writes the
@@ -39,7 +39,7 @@ urllib transport run unmodified; each request body is recorded, which is how
 "no tools", "no block" and "id_slot" are asserted on what was actually sent.
 Everything that would touch shared state -- corpus, nebari, rings, the package
 store -- is redirected to temp files before import, and nothing here talks to
-:1234, :11434 or :10001 (the pool, the effort list and the hint embedder are
+:1234, :11434 or :10001 (the pool, the effort list and the skill embedder are
 pinned or stubbed).
 """
 from __future__ import annotations
@@ -51,7 +51,6 @@ import sys
 import tempfile
 import threading
 import traceback
-import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -68,34 +67,60 @@ os.environ["CODE_INDEX_DB"] = os.path.join(_TMP, "code.sqlite3")
 os.environ.pop("YAMADORI_IMAGEGEN_URL", None)
 os.environ.pop("YAMADORI_SLOTS", None)
 os.environ.pop("YAMADORI_SLOT_PINNING", None)
+# Every other store the code under test can write -- the skill store above
+# all: the craft offer and a step's skills read and record through it
+# (2026-09-27, 37 writes to the live index/jobs.sqlite3 refused by the
+# offline guard) -- BEFORE any mcp import.
+import offline_stores  # noqa: E402
+offline_stores.isolate("yamadori_test_utility_stores_")
 
-# The hint embedder would call the live embeddings server. The stub marks the
-# request so "no hints" is asserted on the text that went upstream.
-HINT_MARK = "\n\n[hint: prefix sums answer range queries]"
+# Skill selection would call the live embeddings server. The stub marks the
+# request (when the tier allows skills) so "no skills" is asserted on the
+# text that went upstream.
+HINT_MARK = "\n\n[skill: prefix sums answer range queries]"
 
 
-def _attach(messages):
-    out = [dict(m) for m in messages]
+
+def max_mode_is_main(name: str) -> bool:
+    import max_mode
+    return max_mode.is_main(name)
+
+def _attach(augmented, messages, sel, body=None):
+    rec = {"on": bool((sel or {}).get("skills")), "ids": [], "versions": [],
+           "names": [], "chars": 0, "why": "stub"}
+    if not (sel or {}).get("skills"):
+        return augmented, rec
+    out = [dict(m) for m in augmented]
     for m in reversed(out):
         if m.get("role") == "user" and isinstance(m.get("content"), str):
             m["content"] += HINT_MARK
             break
-    return out, [{"_score": 0.9, "recipe": "prefix sums", "_bucket": "t"}]
-
-
-sys.modules["hints"] = types.SimpleNamespace(attach=_attach)
+    return out, dict(rec, ids=["stub"], versions=[1], names=["stub"],
+                     chars=len(HINT_MARK))
 
 import budget  # noqa: E402
 import tiers  # noqa: E402
 import domains  # noqa: E402
 import nebari  # noqa: E402
 import proxy  # noqa: E402
+import skill_select  # noqa: E402
+
+skill_select.attach = _attach
 import selection  # noqa: E402
 import slots  # noqa: E402
 import rings  # noqa: E402
 import compaction  # noqa: E402
+import session_id  # noqa: E402
 
 budget._POOL = 163840               # config.yaml -c; main share 102,400
+# This suite tests the budget MECHANICS, so it pins the split it was
+# written against (5/8 + 3/8) and turns the standing thinking caps off;
+# mcp/test_budget.py checks the shipped split, test_tiers the caps.
+import budget as _budget_pin  # noqa: E402
+import tiers as _tiers_pin  # noqa: E402
+_budget_pin.MAIN_SHARE, _budget_pin.HELPER_SHARE = 0.625, 0.375
+_budget_pin.HELPER_TOKENS = 0
+_tiers_pin.HELPER_THINKING, _tiers_pin.JOB_THINKING = 0, {}
 tiers._accepted = ("low", "medium", "xhigh")
 _HELD_DB = os.path.join(_TMP, "three@0.185.1.sqlite3")
 domains.held_sources = lambda store=None: {"three": [("0.185.1", _HELD_DB)]}
@@ -212,7 +237,6 @@ proxy.UPSTREAM = f"http://127.0.0.1:{_srv.server_address[1]}"
 # offline test may reach the live model server.
 import model as _model  # noqa: E402
 _model.UPSTREAM = proxy.UPSTREAM
-proxy.PREAMBLE = False
 
 
 def script(*replies: dict) -> None:
@@ -280,6 +304,14 @@ def main_turn(history: list[dict], **extra) -> dict:
                  + history, "tools": CLIENT_TOOLS}, **extra)
 
 
+def conv_key(messages: list[dict], account: str) -> str:
+    """The key the proxy files these messages under: the conversation's
+    id (carried in our tool-call ids, #41). Read-only
+    (proxy.session_identity); for messages with no id it mints a fresh
+    one, so a test reads proxy._LAST_SESSION there instead."""
+    return proxy.session_identity(messages, account)[0]
+
+
 def side_call(messages: list[dict], **extra) -> dict:
     return dict({"model": "yamadori", "_account": ACCOUNT,
                  "messages": messages}, **extra)
@@ -312,8 +344,11 @@ def test_the_rule_on_real_shapes():
           "the approval classifier is a utility call (one_word)", json.dumps(d))
     d = u([{"role": "system", "content": TITLE_SYSTEM},
            {"role": "user", "content": FIRST_ASK}], [])
-    check(d["utility"] and d["signals"]["form"] == "json_only",
-          "the title namer is a utility call (json_only)", json.dumps(d))
+    # Its reply form is JSON, but what it IS is a title call (2026-09-26:
+    # the `title` form is checked first, so Hermes' namer and OpenCode's
+    # title generator are one kind).
+    check(d["utility"] and d["signals"]["form"] == "title",
+          "the title namer is a utility call (title)", json.dumps(d))
     d = u([{"role": "user", "content": COMPACTION_USER}], [])
     check(d["utility"] and d["signals"]["form"] == "summarise_conversation",
           "the compaction is a utility call (summarise_conversation)",
@@ -390,9 +425,27 @@ def _client_tools_of(p: dict, ours: set) -> list[str]:
     if "client_tools" in p:
         return list(p.get("client_tools") or [])
     up = list(p.get("tools_offered") or [])
-    if p.get("utility") and any(n in proxy.OUR_NAMES for n in up):
+    # Ours by their names at the time: the yama_* names since 2026-09-27,
+    # the old ones (proxy.LEGACY_TOOL_NAMES) in rows written before.
+    if p.get("utility") and any(n in proxy.OUR_NAMES
+                                or n in proxy.LEGACY_TOOL_NAMES for n in up):
         return []
     return [n for n in up if n not in ours]
+
+
+SIDE_SYSTEM_HEADS = ("You are a security reviewer",          # Hermes approval
+                     "You name chat sessions",               # Hermes title
+                     "You are a title generator",            # OpenCode title
+                     "You are a context summarization assistant")  # Pi
+SIDE_REQUEST_HEADS = (
+    "You are a summarization agent creating a context checkpoint",  # Hermes
+    "Here is the conversation so far:")                      # OpenCode
+
+
+def _side_call_truth(p: dict) -> bool:
+    sh, rq = p.get("system_head") or "", p.get("request") or ""
+    return (sh.startswith(SIDE_SYSTEM_HEADS)
+            or rq.startswith(SIDE_REQUEST_HEADS))
 
 
 def test_the_rule_on_the_corpus():
@@ -409,12 +462,17 @@ def test_the_rule_on_the_corpus():
 
     def side(p: dict) -> bool:
         # The ground truth, labelled by what each request IS: Hermes' approval
-        # reviewer, its title namer and its compaction summariser.
-        sh, rq = p.get("system_head") or "", p.get("request") or ""
-        return (sh.startswith("You are a security reviewer")
-                or sh.startswith("You name chat sessions")
-                or rq.startswith("You are a summarization agent creating a "
-                                 "context checkpoint"))
+        # reviewer, its title namer and its compaction summariser; since
+        # 2026-09-26 the corpus also holds OpenCode's and Pi's (the harness
+        # tests, docs/HARNESS-OPENCODE.md / HARNESS-PI.md): OpenCode's title
+        # generator (system "You are a title generator. You output ONLY a
+        # thread title." -- opencode-ai 1.18.32, SessionPrompt.ensureTitle;
+        # its last user message is the user's own first message, which is
+        # why corpus 6580's request reads '"What is the capital of
+        # France?..."') and Pi's summariser (system "You are a context
+        # summarization assistant." -- pi-coding-agent 0.87.1
+        # dist/core/compaction/utils.js:139).
+        return _side_call_truth(p)
 
     tp = fp = fn = tn = bare_tasks = 0
     wrong: list[str] = []
@@ -504,7 +562,10 @@ def test_the_rule_on_the_benchmark_prompt_sets():
 
 
 def test_slots():
-    slots.reset(n=4)
+    # THE THREE-SLOT LAYOUT (operator, 2026-09-28): two conversation slots
+    # and one child slot -- the second brain, the decider, side calls and an
+    # as-sent compaction, queued there (mcp/slots.py, mcp/test_slots.py).
+    slots.reset(n=3)
     a = slots.acquire("conv-a")
     b = slots.acquire("conv-b")
     check(a["slot"] == 0 and b["slot"] == 1, "conversations pin from the low end",
@@ -512,46 +573,48 @@ def test_slots():
     slots.release(a)
     slots.release(b)
     t = slots.acquire(None, transient=True)
-    check(t["slot"] == 3 and t["mode"] == "transient",
-          "a utility call takes the top slot, which is never pinned", str(t))
+    check(t["slot"] == 2 and t["mode"] == "transient",
+          "a utility call takes the child slot (the top one), which is never "
+          "pinned", str(t))
     slots.release(t)
     a2 = slots.acquire("conv-a")
     check(a2["slot"] == 0 and a2["how"].startswith("pinned"),
           "a conversation returns to its own slot", str(a2))
     busy = slots.acquire("conv-a")
-    check(busy["slot"] not in (0, 3) and busy["how"].startswith("moved"),
+    check(busy["slot"] not in (0, 2) and busy["how"].startswith("moved"),
           "its slot busy (an orphaned earlier request): it moves, never to "
-          "the utility slot, and is not queued behind the orphan", str(busy))
+          "the child slot, and is not queued behind the orphan", str(busy))
     slots.release(a2)
     slots.release(busy)
-    # Since 2026-09-24 slot 2 of 4 is the second brain's, RESERVED: no
-    # conversation is pinned there (#10/#11 in docs/SELF-IMPROVEMENT-LOG.md,
-    # mcp/slots.py, mcp/test_slots.py). Two conversations hold pins at once.
-    slots.reset(n=4)
+    # The child slot is RESERVED: no conversation is pinned there (#10/#11
+    # in docs/SELF-IMPROVEMENT-LOG.md). Two conversations hold pins at once.
+    slots.reset(n=3)
     for k in ("c1", "c2"):
         slots.release(slots.acquire(k))
     g = slots.acquire("c3")
     check(g["slot"] == 0 and g["evicted"] == "c1",
           "a third live conversation evicts the least recently used (slots "
-          "0-1 hold conversations; 2 is the second brain's)", str(g))
+          "0-1 hold conversations; 2 is the child's)", str(g))
     slots.release(g)
     t = slots.acquire(None, transient=True)
-    check(t["slot"] == 3, "and the utility slot is still free", str(t))
+    check(t["slot"] == 2, "and the utility call still gets the child slot",
+          str(t))
     t2 = slots.acquire(None, transient=True)
-    check(t2["slot"] == 2 and not t2["evicted"],
-          "a second concurrent utility call takes the idle second-brain slot, "
-          "not a conversation's", str(t2))
+    check(t2["slot"] == 2 and not t2["evicted"] and "queued" in t2["how"],
+          "a second concurrent utility call QUEUES on the child slot, never "
+          "a conversation's", str(t2))
     t3 = slots.acquire(None, transient=True)
-    check(t3["slot"] in (0, 1) and t3["evicted"],
-          "a third takes the LRU conversation's slot, and says so", str(t3))
+    check(t3["slot"] == 2 and not t3["evicted"],
+          "and a third: no conversation is ever evicted for a side call",
+          str(t3))
     slots.release(t)
     slots.release(t2)
     slots.release(t3)
-    slots.reset(n=4)
+    slots.reset(n=3)
     c = slots.acquire("conv-a")
     h = slots.acquire(slots.HELPER)
     check(c["slot"] == 0 and h["slot"] == 2,
-          "the second brain uses its reserved slot (2 of 4), in every "
+          "the second brain uses the child slot (2 of 3), in every "
           "process, so the worker's calls never land on a conversation's",
           f"{c} {h}")
     slots.release(c)
@@ -606,19 +669,23 @@ def test_a_hermes_session_replayed():
     check(msg.get("tool_calls") and "[no answer" not in (msg.get("content") or ""),
           "a client tool call with no preface text is not an 'empty answer'",
           json.dumps(msg)[:200])
-    k1 = nebari.key_of(main_turn(turn1)["messages"], ACCOUNT)
+    # The conversation's key: its id, minted on this first answer (#41).
+    k1 = proxy._LAST_SESSION[ACCOUNT][0]
     check(nebari.load(k1).get("tools_offered") is True,
           "the main session is marked as having had the tools")
+    first_content = msg.get("content") or ""
 
     # ---- main turn 2: the proxy writes the work log itself -----------------
-    turn2 = turn1 + [{"role": "assistant", "content": "",
-                      "tool_calls": [call("terminal", {"command": "ls"})]},
-                     {"role": "tool", "tool_call_id": "call_1",
+    # Hermes echoes the call ids it was sent (#41: they carry the id).
+    turn2 = turn1 + [{"role": "assistant", "content": first_content,
+                      "tool_calls": msg["tool_calls"]},
+                     {"role": "tool", "tool_call_id": msg["tool_calls"][0]["id"],
                       "content": "js/game.js js/particles.js"}]
     script(reply("Reading the game loop next.",
                  calls=[call("read_file", {"path": "js/game.js"}, "c3")],
                  cache_n=9150, prompt_n=120))
     d = proxy.complete(main_turn(turn2))
+    calls2 = d["choices"][0]["message"]["tool_calls"]
     check(all(b.get("id_slot") == main_slot for b in _seen),
           "main turn 2: back on the conversation's slot",
           str([b.get("id_slot") for b in _seen]))
@@ -641,8 +708,9 @@ def test_a_hermes_session_replayed():
         check(not up.get("tools") and system_of(up) == CLASSIFIER_SYSTEM,
               f"classifier #{attempt}: no tools, and its own system prompt "
               f"untouched (no capability block)", str(names(up)))
-        check(HINT_MARK not in text_of(up) and not x.get("hints"),
-              f"classifier #{attempt}: no hints")
+        check(HINT_MARK not in text_of(up)
+              and not (x.get("skills") or {}).get("ids"),
+              f"classifier #{attempt}: no skills")
         check(up.get("enable_thinking") is False
               and (up.get("chat_template_kwargs") or {}).get("enable_thinking") is False
               and up.get("temperature") == 0.7 and up.get("presence_penalty") == 1.5
@@ -688,8 +756,9 @@ def test_a_hermes_session_replayed():
 
     # ---- the next main turn: back on its slot ------------------------------
     turn3 = turn2 + [{"role": "assistant", "content": "Reading the game loop next.",
-                      "tool_calls": [call("read_file", {"path": "js/game.js"}, "c3")]},
-                     {"role": "tool", "tool_call_id": "c3", "content": "loop()"}]
+                      "tool_calls": calls2},
+                     {"role": "tool", "tool_call_id": calls2[0]["id"],
+                      "content": "loop()"}]
     script(reply("", calls=[call("write_file", {"path": "js/game.js"}, "c4")],
                  cache_n=9300, prompt_n=200))
     d = proxy.complete(main_turn(turn3))
@@ -717,11 +786,13 @@ def test_a_hermes_session_replayed():
           "compaction: x_yamadori.utility_kind says so",
           str(d["x_yamadori"].get("utility_kind")))
     aff = d["x_yamadori"]["cache"].get("affinity") or {}
-    check(up.get("id_slot") == 3 and aff.get("took") is False
+    check(up.get("id_slot") in (0, 1, 2) and aff.get("took") is False
+          and d["x_yamadori"]["cache"].get("mode") == "compaction"
           and aff.get("candidates", 0) >= 1 and aff.get("shared_tokens") == 0,
           "compaction: a flattened request that maps onto nothing stored "
           "goes up as sent, shares no prefix with the conversation's slot, "
-          "so the utility slot -- and the record says it looked",
+          "so (layout v2) the least recently used conversation slot, never "
+          "the lane (3) -- and the record says it looked",
           json.dumps(aff))
 
     # ---- the conversation after the compaction -----------------------------
@@ -738,30 +809,23 @@ def test_a_hermes_session_replayed():
     d = proxy.complete(main_turn(after))
     first = _seen[0]
     x = d["x_yamadori"]
-    k2 = nebari.key_of(main_turn(after)["messages"], ACCOUNT)
+    # No id of ours survives Hermes' rewrite here (its own "c5"), the
+    # compaction mapped onto nothing stored, and this request does not carry
+    # its summary: nothing names the compacted conversation, so this is a NEW
+    # one. The recency guess that linked it (COMPACTION_LINK_SECONDS) was
+    # removed 2026-09-27 (docs/CONSTANTS-AUDIT.md; operator 2026-09-25: "we
+    # can't assume a new session is a resumable one").
+    k2 = proxy._LAST_SESSION[ACCOUNT][0]
     st = nebari.load(k2)
-    check(k2 != k1 and st.get("lineage") == k1,
-          "after the compaction: a new key, continuing the old session",
+    check(k2 != k1 and st.get("lineage") != k1 and not st.get("continues"),
+          "after an unmapped compaction with nothing naming it: a new "
+          "conversation, no recency guess",
           json.dumps({k: st.get(k) for k in ("lineage", "continues")}))
-    check((x.get("tools_gate") or {}).get("why", "").startswith(
-              "OFFERED_EARLIER_THIS_SESSION"),
-          "after the compaction: the tools stay offered (they would otherwise "
-          "be re-decided, and this text alone withholds them)",
-          json.dumps(x.get("tools_gate")))
     head = next((m.get("content") or "" for m in first.get("messages") or []
                  if m.get("role") == "user"), "")
     check(names(first) == [t["function"]["name"] for t in CLIENT_TOOLS]
-          and "Work log of this conversation" in head
-          and "read_file js/game.js" in head,
-          "after the compaction: the work log is re-injected on its user "
-          "turn (no read_rings tool: the proxy does it)", head[-400:])
-    check(nebari.ledger_get(ACCOUNT, proxy.chain_keys(
-              main_turn(after)["messages"])[1], "inject") is not None,
-          "and the injection is in the ledger, so the next request renders "
-          "it again byte for byte")
-    check(first.get("id_slot") == main_slot,
-          "after the compaction: the conversation keeps its slot",
-          str(first.get("id_slot")))
+          and "Work log of this conversation" not in head,
+          "and it carries no other conversation's work log", head[-400:])
     slots.reset(n=4)
 
 
@@ -787,6 +851,217 @@ def test_a_streamed_utility_call():
           "streamed: the final chunk's x_yamadori carries utility and cache",
           json.dumps({k: x.get(k) for k in ("utility", "tier_overridden", "cache")}))
     slots.reset(n=4)
+
+
+def test_a_side_call_releases_its_slot():
+    """RELEASE (mcp/slots.py): a side call's slot is emptied when it ends --
+    nothing reuses it, and its cells slow every other slot's decode -- and
+    a conversation's pinned slot never is. Through the real prepare(),
+    complete() and stream_body(); model.release_slot is replaced, so no
+    release reaches a server."""
+    import model
+    slots.reset(n=4)
+    calls: list = []
+    saved = model.release_slot
+
+    def fake(slot, model=None, timeout=None):
+        calls.append((slot, model))
+        return {"ok": True, "method": "shrink", "cells_before": 400, "ms": 5}
+    model.release_slot = fake
+    old_env = os.environ.pop("YAMADORI_SLOT_RELEASE", None)
+    slots.enable_release(True)
+    # the release path itself (slots.LANE_KEEP off); layout v2 keeps the
+    # lane: test_a_side_call_keeps_the_lane
+    old_keep, slots.LANE_KEEP = slots.LANE_KEEP, False
+    try:
+        script(reply("", calls=[call("terminal", {"command": "ls"})],
+                     cache_n=0, prompt_n=900))
+        d = proxy.complete(main_turn([{"role": "user", "content": FIRST_ASK}]))
+        x = d["x_yamadori"]["slots"]
+        check(calls == [] and x["released"] == []
+              and x["release"] == {"on": True, "source": "default"},
+              "a main turn: its pinned slot is never released; the switch "
+              "is on by default (x_yamadori.slots.release)", json.dumps(x))
+        cls = side_call([{"role": "system", "content": CLASSIFIER_SYSTEM},
+                         {"role": "user", "content": CLASSIFIER_USER}])
+        script(reply("APPROVE", cache_n=0, prompt_n=400))
+        d = proxy.complete(dict(cls))
+        rel = d["x_yamadori"]["slots"]["released"]
+        check(len(calls) == 1 and calls[0][0] == 3 and calls[0][1]
+              and len(rel) == 1 and rel[0]["slot"] == 3 and rel[0]["released"]
+              and rel[0]["cells_before"] == 400 and rel[0]["ms"] == 5
+              and rel[0]["why"] == "side call ended",
+              "a side call: the transient slot (3) released when it ended, "
+              "and x_yamadori.slots.released says so", json.dumps(rel))
+        script(reply("DENY", cache_n=10, prompt_n=390))
+        events = []
+        for b in proxy.stream_body(dict(cls, stream=True), "yamadori"):
+            if b.strip() == b"data: [DONE]":
+                continue
+            events.append(json.loads(b[6:].decode()))
+        xs = (events[-1].get("x_yamadori") or {}).get("slots") or {}
+        check(len(calls) == 2 and calls[1][0] == 3
+              and [r.get("slot") for r in xs.get("released") or []] == [3],
+              "streamed: released too, recorded on the final chunk",
+              json.dumps(xs))
+        script(reply("APPROVE", cache_n=0, prompt_n=400))
+        d = proxy.complete(dict(cls, _features='{"slot_release": false}'))
+        x = d["x_yamadori"]["slots"]
+        check(len(calls) == 2 and x["released"] == []
+              and x["release"] == {"on": False, "source": "header"},
+              "X-Yamadori-Features {\"slot_release\": false}: the old "
+              "behaviour, nothing released", json.dumps(x))
+    finally:
+        slots.enable_release(False)
+        model.release_slot = saved
+        slots.LANE_KEEP = old_keep
+        if old_env is not None:
+            os.environ["YAMADORI_SLOT_RELEASE"] = old_env
+        slots.reset(n=4)
+
+
+def test_a_side_call_keeps_the_lane():
+    """LAYOUT V2 (operator, 2026-09-29): the child slot is THE LANE, kept
+    between side calls and decider turns (its head stays cached); a side
+    call records that it was kept and sends no release. Through the real
+    complete()."""
+    import model
+    slots.reset(n=4)
+    calls: list = []
+    saved = model.release_slot
+
+    def fake(slot, model=None, timeout=None):
+        calls.append((slot, model))
+        return {"ok": True, "method": "shrink", "cells_before": 400, "ms": 5}
+    model.release_slot = fake
+    old_env = os.environ.pop("YAMADORI_SLOT_RELEASE", None)
+    slots.enable_release(True)
+    old_keep, slots.LANE_KEEP = slots.LANE_KEEP, True
+    try:
+        cls = side_call([{"role": "system", "content": CLASSIFIER_SYSTEM},
+                         {"role": "user", "content": CLASSIFIER_USER}])
+        script(reply("APPROVE", cache_n=0, prompt_n=400))
+        d = proxy.complete(dict(cls))
+        rel = d["x_yamadori"]["slots"]["released"]
+        cache = d["x_yamadori"].get("cache") or {}
+        check(calls == [] and len(rel) == 1 and rel[0]["slot"] == 3
+              and rel[0]["released"] is False and "kept" in rel[0]["skipped"]
+              and rel[0]["why"] == "side call ended",
+              "a side call on the lane (slot 3 of 4): KEPT, recorded in "
+              "x_yamadori.slots.released, no release sent", json.dumps(rel))
+        check((cache.get("kv_ranks") or [None] * 4)[3] == slots.RANK_LANE,
+              "and x_yamadori.cache records the lane's rank (3)",
+              json.dumps(cache)[:300])
+    finally:
+        slots.enable_release(False)
+        model.release_slot = saved
+        slots.LANE_KEEP = old_keep
+        if old_env is not None:
+            os.environ["YAMADORI_SLOT_RELEASE"] = old_env
+        slots.reset(n=4)
+
+
+def test_an_idle_conversation_is_cleared_and_resumes_cold():
+    """IDLE CLEAR (mcp/slots.py) through the real prepare() and complete():
+    conversation A goes quiet past IDLE_CLEAR_S; conversation B's turn
+    clears A's slot before it generates (x_yamadori.slots.cleared_idle);
+    A keeps its pin, and its next turn goes back to its slot and says it
+    re-processed its prompt (x_yamadori.slots.resumed_cold).
+    model.release_slot is replaced: no release reaches a server."""
+    import time
+    import model
+    slots.reset(n=4)
+    calls: list = []
+    saved = model.release_slot
+
+    def fake(slot, model=None, timeout=None):
+        calls.append(slot)
+        return {"ok": True, "method": "shrink", "cells_before": 9100, "ms": 6}
+    model.release_slot = fake
+    olds = {k: os.environ.pop(k, None) for k in ("YAMADORI_SLOT_RELEASE",
+                                                 "YAMADORI_IDLE_CLEAR")}
+    slots.enable_release(True)
+    try:
+        a1 = [{"role": "user", "content": FIRST_ASK}]
+        script(reply("", calls=[call("terminal", {"command": "ls"}, "ia1")],
+                     cache_n=0, prompt_n=9000))
+        da = proxy.complete(main_turn(a1))
+        ka = proxy._LAST_SESSION[ACCOUNT][0]
+        slot_a = slots._pins[ka]
+        b1 = [{"role": "user", "content": "Now a snake game, please."}]
+        script(reply("", calls=[call("terminal", {"command": "pwd"}, "ib1")],
+                     cache_n=0, prompt_n=800))
+        dbm = proxy.complete(main_turn(b1))["choices"][0]["message"]
+        check(calls == [], "two conversations, both recent: nothing "
+              "cleared", str(calls))
+        slots._last_end[slot_a] = time.time() - slots.IDLE_CLEAR_S - 60
+        slots._last_seen[ka] = time.time() - slots.IDLE_CLEAR_S - 60
+        b2 = b1 + [{"role": "assistant", "content": dbm.get("content") or "",
+                    "tool_calls": dbm["tool_calls"]},
+                   {"role": "tool", "tool_call_id": dbm["tool_calls"][0]["id"],
+                    "content": "/home/snake"}]
+        script(reply("", calls=[call("terminal", {"command": "ls"}, "ib2")],
+                     cache_n=800, prompt_n=100))
+        db = proxy.complete(main_turn(b2))
+        xs = db["x_yamadori"]["slots"]
+        cl = xs.get("cleared_idle") or []
+        check(calls == [slot_a] and len(cl) == 1 and cl[0]["slot"] == slot_a
+              and cl[0]["released"] and cl[0]["idle_s"] > slots.IDLE_CLEAR_S
+              and xs["idle_clear"] == {"on": True, "source": "default",
+                                       "after_s": slots.IDLE_CLEAR_S},
+              "another conversation's turn clears A's idle slot before it "
+              "generates, and records it", json.dumps(xs))
+        check(slots._pins.get(ka) == slot_a, "A keeps its pin",
+              str(slots._pins))
+        m = da["choices"][0]["message"]
+        a2 = a1 + [{"role": "assistant", "content": m.get("content") or "",
+                    "tool_calls": m["tool_calls"]},
+                   {"role": "tool", "tool_call_id": m["tool_calls"][0]["id"],
+                    "content": "js/game.js"}]
+        script(reply("Done.", cache_n=0, prompt_n=9200))
+        d2 = proxy.complete(main_turn(a2))
+        rc = d2["x_yamadori"]["slots"].get("resumed_cold") or {}
+        check(_seen[0].get("id_slot") == slot_a and rc.get("slot") == slot_a
+              and rc.get("cells_cleared") == 9100
+              and d2["x_yamadori"]["cache"].get("slot") == slot_a,
+              "A's next turn goes back to its own slot and says it resumed "
+              "cold (x_yamadori.slots.resumed_cold)",
+              json.dumps(d2["x_yamadori"]["slots"]))
+        script(reply("Listed.", cache_n=900, prompt_n=50))
+        db = proxy.complete(dict(main_turn(b2), _features='{"idle_clear": false}'))
+        check(db["x_yamadori"]["slots"]["idle_clear"]["on"] is False
+              and db["x_yamadori"]["slots"]["idle_clear"]["source"]
+              == "header", "the header switches it off per request",
+              json.dumps(db["x_yamadori"]["slots"]))
+        import corpus
+        saved_traffic = corpus.account_traffic
+        try:
+            for who in ("client", "test"):
+                corpus.account_traffic = lambda a, w=who: w
+                script(reply("Listed.", cache_n=900, prompt_n=50))
+                d = proxy.complete(dict(main_turn(b2),
+                                        _features='{"idle_clear_s": 2}'))
+                ic = d["x_yamadori"]["slots"]["idle_clear"]
+                if who == "client":
+                    check(ic.get("override_s") is None
+                          and ic.get("override_refused")
+                          and ic["after_s"] == slots.IDLE_CLEAR_S,
+                          "the live test's threshold override is refused "
+                          "for a client account", json.dumps(ic))
+                else:
+                    check(ic.get("override_s") == 2 and ic["after_s"] == 2,
+                          "and honoured for a test account (which then "
+                          "clears only its own conversations)",
+                          json.dumps(ic))
+        finally:
+            corpus.account_traffic = saved_traffic
+    finally:
+        slots.enable_release(False)
+        model.release_slot = saved
+        for k, v in olds.items():
+            if v is not None:
+                os.environ[k] = v
+        slots.reset(n=4)
 
 
 def test_internal_generation_is_pinned_to_the_helper_slot():
@@ -829,13 +1104,25 @@ def test_internal_generation_is_pinned_to_the_helper_slot():
         c = slots.acquire("conv-a")
         slots.release(c)
         model.post({"model": model.MODEL, "messages": []}, timeout=10)
-        model.post({"model": model.VISION_MODEL, "messages": []}, timeout=10)
-        check(seen_bodies[0].get("id_slot") == 2
+        # another server (an A4000 model): its slots are its own
+        model.post({"model": "another-server", "messages": []}, timeout=10)
+        check(seen_bodies[0].get("id_slot") == slots.helper_slot()
               and seen_bodies[0].get("cache_prompt") is True,
-              "model.post pins to the helper slot, never the conversation's",
-              json.dumps(seen_bodies[0]))
+              "model.post pins to the helper (child) slot, never the "
+              "conversation's", json.dumps(seen_bodies[0]))
+        check(seen_bodies[0].get("kv_rank") == 0
+              and seen_bodies[0].get("kv_ranks")
+              == [2] + [0] * (slots.count() - 1),
+              "and names the slots' KV ranks (engine 0041): the "
+              "conversation's slot primary, a generation outside any request "
+              "(the worker's) rank 0", json.dumps(seen_bodies[0]))
         check("id_slot" not in seen_bodies[1],
-              "and leaves the vision server's slots alone", json.dumps(seen_bodies[1]))
+              "and leaves another server's slots alone", json.dumps(seen_bodies[1]))
+        check(model.VISION_MODEL == "bonsai-vision"
+              and not max_mode_is_main(model.VISION_MODEL),
+              "a look (yama_describe_image) is the A4000 copy again since "
+              "layout v2 (2026-09-29): another server, whose slots are its "
+              "own, like the one above", model.VISION_MODEL)
         check(slots.snapshot()["busy"] == {},
               "and releases the slot when the call returns", str(slots.snapshot()))
     finally:
@@ -862,11 +1149,13 @@ def test_an_empty_answer_is_explained():
     script(reply("", reasoning="I should explain quicksort briefly.",
                  finish="stop"))
     d = proxy.complete(dict(ask))
+    # The "[no answer: the model stopped ...]" notice (_empty_notice) was
+    # REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): a stop with nothing
+    # written is delivered as it is -- blank content, finish_reason stop.
     content = d["choices"][0]["message"].get("content") or ""
-    check(content.startswith("[no answer:") and "Retryable: yes" in content
-          and "reasoning_content" in content,
-          "blocking: a stop with nothing written says so, retryable, with a remedy",
-          content[:200])
+    check(content == "" and d["choices"][0].get("finish_reason") == "stop",
+          "blocking: a stop with nothing written is blank, finish stop",
+          repr(content[:200]))
     a = _corpus_answers()[-1]
     check(a.get("finish") == "stop" and a.get("tool_calls") == 0,
           "the corpus answer row records finish and tool_calls", json.dumps(a))
@@ -877,8 +1166,8 @@ def test_an_empty_answer_is_explained():
             out.append(json.loads(b[6:].decode()))
     text = "".join((e["choices"][0]["delta"].get("content") or "")
                    for e in out if e.get("choices"))
-    check(text.startswith("[no answer:"), "streamed: the same notice, as content",
-          text[:160])
+    check(text == "",
+          "streamed: the same, no content", repr(text[:160]))
     script(reply("", calls=[call("terminal", {"command": "ls"})]))
     d = proxy.complete(main_turn([{"role": "user", "content": "list the files"}]))
     a = _corpus_answers()[-1]
@@ -910,6 +1199,7 @@ def test_the_logged_empty_answers_were_tool_calls():
     main = [t for t in order if "turn" in turns[t]
             and "Hermes Agent" in (turns[t]["turn"].get("system_head") or "")]
     zero = followed = 0
+    failed: list[str] = []
     for i, t in enumerate(main[:-1]):
         a = turns[t].get("answer")
         if not a or a.get("chars") != 0:
@@ -920,16 +1210,29 @@ def test_the_logged_empty_answers_were_tool_calls():
             # themselves: an empty answer that ended in a client tool call.
             if a.get("finish") == "tool_calls" and (a.get("tool_calls") or 0) > 0:
                 followed += 1
+            elif a.get("finish") in (None, "error") and a.get("tool_calls") \
+                    is None:
+                # A FAILED turn, not an answer: the proxy's error path logs
+                # the answer row with no finish and no tool_calls
+                # (proxy._run_turn: corpus.log_answer(turn, root, "", hop,
+                # ms) before it re-raises; finish "error" since
+                # 2026-09-26). Corpus 6466/6467 (turns 69e447, 7ffbaf): the
+                # same Hermes request twice, both rows written in the same
+                # 0.12 s after 1,259 s and 224 s -- the upstream failed
+                # under both at once.
+                failed.append(t[:6])
             continue
         nxt = turns[main[i + 1]]["turn"]
         if (nxt.get("request") == turns[t]["turn"].get("request")
                 and nxt.get("n_messages", 0) - turns[t]["turn"].get("n_messages", 0) >= 2):
             followed += 1
     print(f"  corpus: {zero} Hermes turns logged chars=0; {followed} were followed "
-          f"by the same request plus an assistant turn and its tool results")
-    check(zero >= 28 and followed == zero,
-          "every chars=0 Hermes turn was a client tool call, not an empty answer",
-          f"{followed}/{zero}")
+          f"by the same request plus an assistant turn and its tool results "
+          f"(or record a tool-call finish); {len(failed)} are failed turns "
+          f"({', '.join(failed)})")
+    check(zero >= 28 and followed + len(failed) == zero,
+          "every chars=0 Hermes turn was a client tool call or a failed turn, "
+          "never an empty answer", f"{followed}+{len(failed)}/{zero}")
 
 
 def test_an_upstream_refusal_is_explained():
@@ -993,7 +1296,7 @@ def test_the_kind_of_side_call():
     comp = [{"role": "user", "content": COMPACTION_USER}]
     check(kind(u(comp, [])) == "compaction", "the compaction: compaction")
     check(kind(u(cls, [])) == "classifier", "the approval check: classifier")
-    check(kind(u(title, [])) == "structured", "the title namer: structured")
+    check(kind(u(title, [])) == "title", "the title namer: title")
     check(kind(u([{"role": "user", "content": "Name a colour."}], [],
                  {"type": "json_object"})) == "structured",
           "response_format JSON: structured")
@@ -1013,7 +1316,7 @@ def test_the_kind_of_side_call():
     ours = proxy.OUR_NAMES | proxy._LEGACY_NAMES
     rows = _producer_events(db, "SELECT turn, payload FROM events WHERE "
                                 "kind='turn' ORDER BY id")
-    n_comp = n_after = n_other_side = 0
+    n_comp = n_after = n_other_side = n_title = 0
     wrong: list[str] = []
     for turn, raw in rows:
         p = json.loads(raw)
@@ -1025,10 +1328,19 @@ def test_the_kind_of_side_call():
         rq = p.get("request") or ""
         msgs.append({"role": "user", "content": rq})
         k = kind(u(msgs, client))
-        is_comp = rq.startswith("You are a summarization agent creating a "
-                                "context checkpoint")
-        is_after = rq.lstrip().startswith("[CONTEXT COMPACTION")
         sh = p.get("system_head") or ""
+        # Hermes' summariser, and (2026-09-26) Pi's -- its system prompt
+        # (utils.js:139) over a "<conversation>" / "# Conversation"
+        # transcript (compaction.js:544, :751) -- and OpenCode's
+        # ("Here is the conversation so far:", its compaction buildPrompt).
+        is_comp = (rq.startswith("You are a summarization agent creating a "
+                                 "context checkpoint")
+                   or sh.startswith("You are a context summarization "
+                                    "assistant")
+                   or rq.startswith("Here is the conversation so far:"))
+        is_title = sh.startswith(("You name chat sessions",
+                                  "You are a title generator"))
+        is_after = rq.lstrip().startswith("[CONTEXT COMPACTION")
         if is_comp:
             n_comp += 1
             if k != "compaction":
@@ -1040,10 +1352,14 @@ def test_the_kind_of_side_call():
         elif k == "compaction":
             wrong.append(f"not a compaction {turn[:6]} -> compaction "
                          f"{rq[:40]!r}")
-        if sh.startswith(("You are a security reviewer", "You name chat sessions")):
+        if is_title:
+            n_title += 1
+            if k != "title":
+                wrong.append(f"title call {turn[:6]} -> {k}")
+        if sh.startswith("You are a security reviewer") or is_title:
             n_other_side += 1
     print(f"  corpus: {n_comp} compactions, {n_after} post-compaction turns, "
-          f"{n_other_side} approval/title calls")
+          f"{n_other_side} approval/title calls ({n_title} titles)")
     check(n_comp >= 12 and n_after >= 17 and n_other_side >= 29 and not wrong,
           f"corpus: all {n_comp} compactions are 'compaction'; none of the "
           f"{n_after} post-compaction turns or {n_other_side} approvals/titles "
@@ -1112,22 +1428,25 @@ def test_compaction_affinity():
     hermes = _payload(None, [{"role": "user", "content": COMPACTION_USER}])
     g = slots.acquire(None, transient=True, prefix=slots.fingerprint(hermes))
     aff = g.get("affinity") or {}
-    check(g["slot"] == 3 and g["mode"] == "transient" and not aff.get("took")
+    check(g["slot"] != 3 and g["mode"] == "compaction" and not aff.get("took")
           and aff.get("shared_tokens") == 0,
-          "a flattened compaction sent as is shares nothing: the transient slot", json.dumps(g))
+          "a flattened compaction sent as is shares nothing: a conversation "
+          "slot (layout v2: the least recently used), never the lane", json.dumps(g))
     slots.release(g)
 
     # 4. Tools where the slot had none (or other tools): the template renders
     #    tools before the system text, so nothing is shared.
     g = slots.acquire(None, transient=True, prefix=slots.fingerprint(
         _payload(sys_a, hist_a, tools=CLIENT_TOOLS)))
-    check(g["slot"] == 3 and (g.get("affinity") or {}).get("shared_tokens") == 0,
+    check(g["slot"] != 3 and g["mode"] == "compaction"
+          and (g.get("affinity") or {}).get("shared_tokens") == 0,
           "same system and history but tools added: shares nothing", json.dumps(g))
     slots.release(g)
     #    ... and thinking on at effort xhigh adds an effort line first.
     g = slots.acquire(None, transient=True, prefix=slots.fingerprint(
         dict(_payload(sys_a, hist_a, thinking=True), reasoning_effort="xhigh")))
-    check(g["slot"] == 3, "an effort line A's prompt did not have: shares nothing",
+    check(g["slot"] != 3 and g["mode"] == "compaction",
+          "an effort line A's prompt did not have: shares nothing",
           json.dumps(g))
     slots.release(g)
 
@@ -1140,9 +1459,11 @@ def test_compaction_affinity():
     g = slots.acquire(None, transient=True, prefix=slots.fingerprint(
         _payload("Be brief.", [{"role": "user", "content": "Summarize this chat."}])))
     aff = g.get("affinity") or {}
-    check(g["slot"] == 3 and 0 < aff.get("shared_tokens", 0)
+    check(g["slot"] != 3 and g["mode"] == "compaction"
+          and 0 < aff.get("shared_tokens", 0)
           < slots.AFFINITY_MIN_TOKENS and not aff.get("took"),
-          f"a shared prefix under {slots.AFFINITY_MIN_TOKENS} tokens: transient",
+          f"a shared prefix under {slots.AFFINITY_MIN_TOKENS} tokens: not "
+          f"taken by affinity (the least recently used conversation slot)",
           json.dumps(g))
     slots.release(g)
 
@@ -1164,7 +1485,7 @@ def test_compaction_affinity():
     slots.remember(h, slots.fingerprint(conv_a))
     slots.release(h)
     g = slots.acquire(None, transient=True, prefix=fp)
-    check(g["slot"] == 3 and (g.get("affinity") or {}).get("candidates") == 0,
+    check(g["slot"] != 3 and (g.get("affinity") or {}).get("candidates") == 0,
           "the second brain's slot is never a candidate", json.dumps(g))
     slots.release(g)
 
@@ -1249,9 +1570,13 @@ def test_the_compaction_budget():
     98,304."""
     cb = tiers.compaction_budget
     B = tiers.COMPACTION_BUDGET
-    check(B == 5120 and tiers.COMPACTION_THINKING == 2048,
-          "defaults: budget 5,120, compaction thinking 2,048",
-          f"{B} {tiers.COMPACTION_THINKING}")
+    check(B == 5120 and not hasattr(tiers, "COMPACTION_THINKING"),
+          "defaults: budget 5,120; compaction thinking is what its window "
+          "leaves (COMPACTION_THINKING removed, CONSTANTS-AUDIT)", str(B))
+    r = cb(None, 20000, 0, SHARES_256K)
+    check(r["thinking_tokens"] == r["window"] - 20000 - r["answer"],
+          "compaction thinking = window - prompt - answer",
+          json.dumps(r))
     b = budget.budgets(262144)
     check(b["main"] == 163840 and b["helper"] == 98304,
           "the pool splits 163,840 + 98,304", json.dumps(b))
@@ -1405,19 +1730,23 @@ def _a_conversation() -> tuple[list[dict], dict, int]:
     script(reply("", reasoning="List the folder first.",
                  calls=[call("terminal", {"command": "ls"}, "t1")],
                  cache_n=0, prompt_n=9000))
-    proxy.complete(main_turn(turn1))
+    d1 = proxy.complete(main_turn(turn1))
     slot = _seen[0].get("id_slot")
-    turn2 = turn1 + [{"role": "assistant", "content": "",
-                      "tool_calls": [call("terminal", {"command": "ls"}, "t1")]},
-                     {"role": "tool", "tool_call_id": "t1",
+    # Hermes keeps what it was sent: the calls' ids carry OUR SESSION ID
+    # (#41), which names the conversation from here on.
+    m1 = d1["choices"][0]["message"]
+    turn2 = turn1 + [{"role": "assistant", "content": m1.get("content") or "",
+                      "tool_calls": m1["tool_calls"]},
+                     {"role": "tool", "tool_call_id": m1["tool_calls"][0]["id"],
                       "content": "js/game.js js/particles.js"}]
     script(reply("", reasoning="Read the loop.",
                  calls=[call("read_file", {"path": "js/game.js"}, "t2")],
                  cache_n=8900, prompt_n=300))
-    proxy.complete(main_turn(turn2))
+    m2 = proxy.complete(main_turn(turn2))["choices"][0]["message"]
     turn3 = turn2 + [{"role": "assistant", "content": "",
-                      "tool_calls": [call("read_file", {"path": "js/game.js"}, "t2")]},
-                     {"role": "tool", "tool_call_id": "t2", "content": GAME_LOOP}]
+                      "tool_calls": m2["tool_calls"]},
+                     {"role": "tool", "tool_call_id": m2["tool_calls"][0]["id"],
+                      "content": GAME_LOOP}]
     script(reply("The loop calls update then render every frame.",
                  reasoning="Summarise what the file does.",
                  cache_n=9150, prompt_n=900))
@@ -1480,7 +1809,7 @@ def test_an_in_place_compaction_reuses_the_conversation():
     slots.reset(n=4)
     compaction.reset()
     history, stored, slot = _a_conversation()
-    k1 = nebari.key_of(main_turn(history)["messages"], ACCOUNT)
+    k1 = conv_key(main_turn(history)["messages"], ACCOUNT)
     state0 = nebari.load(k1)
     comp_body = main_turn(history + [{"role": "user", "content": CLAUDE_COMPACT}])
 
@@ -1507,6 +1836,11 @@ def test_an_in_place_compaction_reuses_the_conversation():
     slots.reset(n=4)
     compaction.reset()
     history, stored, slot = _a_conversation()
+    # A new conversation (a new session line, #41): the compaction is of
+    # THIS one, so it resends THIS history.
+    k1 = conv_key(main_turn(history)["messages"], ACCOUNT)
+    state0 = nebari.load(k1)
+    comp_body = main_turn(history + [{"role": "user", "content": CLAUDE_COMPACT}])
     script(reply("## Goal\nBuild octopus-invaders.", cache_n=9900, prompt_n=60))
     d = proxy.complete(dict(comp_body))
     up = _seen[0]
@@ -1524,14 +1858,18 @@ def test_an_in_place_compaction_reuses_the_conversation():
           and _shared_share(up, stored) == 1.0,
           "the stored prompt goes up byte for byte: its messages and its tools",
           f"{_shared_share(up, stored):.3f}")
-    # Since 2026-09-24 past reasoning passes through (proxy LEDGER block):
-    # this client did not echo it, so the stored answer is the one it sends
-    # back -- no reasoning -- and the compaction extends it byte for byte.
-    check(up["messages"][n_stored].get("role") == "assistant"
-          and not up["messages"][n_stored].get("reasoning_content")
+    # Since 2026-09-27 past reasoning is restored (proxy LEDGER block,
+    # switch restore_reasoning): this client dropped it, the ledger puts the
+    # slot's back, so the stored answer carries the reasoning the slot
+    # generated and the compaction extends it byte for byte.
+    ans = up["messages"][n_stored]
+    check(ans.get("role") == "assistant"
+          and ans.get("reasoning_content") == "Summarise what the file does."
+          and all(m.get("reasoning_content") for m in up["messages"]
+                  if m.get("role") == "assistant")
           and up["messages"][-1] == {"role": "user", "content": CLAUDE_COMPACT},
-          "then the answer as the client sends it (its reasoning dropped, as "
-          "it dropped it), then the one summarise turn",
+          "then the answer with the slot's own reasoning restored (the "
+          "client dropped it), then the one summarise turn",
           json.dumps(up["messages"][n_stored:])[:300])
     check(up.get("id_slot") == slot and x["cache"]["mode"] == "pinned"
           and x["cache"]["reused"] == 9900,
@@ -1540,12 +1878,13 @@ def test_an_in_place_compaction_reuses_the_conversation():
     check(up.get("tool_choice") == "none" and up.get("enable_thinking") is True
           and (up.get("chat_template_kwargs") or {}).get("enable_thinking") is True
           and up.get("reasoning_effort") == "medium"
-          and up.get("reasoning_budget_tokens") == tiers.COMPACTION_THINKING
-          and up.get("max_tokens") == 5120 + tiers.COMPACTION_THINKING
+          and up.get("reasoning_budget_tokens") == c["thinking_tokens"]
+          and up.get("max_tokens") == 5120 + c["thinking_tokens"]
           and c["thinking"].startswith("on")
           and up.get("temperature") == 1.0,
           "tool_choice none, thinking at the conversation's own effort "
-          "(medium), 2,048 of it, the conversation's own sampling, the "
+          "(medium), what its window leaves of it, the conversation's own "
+          "sampling, the "
           "compaction budget",
           json.dumps({k: up.get(k) for k in ("tool_choice", "enable_thinking",
                                              "reasoning_effort", "max_tokens",
@@ -1574,18 +1913,21 @@ def test_the_prefix_rules():
     check(not line(medium) and line(xhigh) and not line(off)
           and line({"enable_thinking": True}) and line(dict(medium, reasoning_effort="low")),
           "an effort line: thinking on at xhigh, low, or unset (xhigh default)")
-    f = pf(medium, 5120)
+    f = pf(medium, 5120, 7000)
     check(f["enable_thinking"] is True and f["reasoning_effort"] == "medium"
-          and f["reasoning_budget_tokens"] == tiers.COMPACTION_THINKING
-          and f["max_tokens"] == 5120 + tiers.COMPACTION_THINKING,
+          and f["reasoning_budget_tokens"] == 7000
+          and f["max_tokens"] == 5120 + 7000
+          and f["reasoning_budget_message"] == tiers.BUDGET_MESSAGE
+          and (f.get("reasoning_budget_nudge") == tiers.NUDGE_MESSAGE)
+          == tiers.nudge_on(),
           "medium: a compaction THINKS at the conversation's effort "
-          "(operator, 2026-09-24), 2,048 of it", json.dumps(f))
-    f = pf(xhigh, 5120)
+          "(operator, 2026-09-24), the thinking it is given", json.dumps(f))
+    f = pf(xhigh, 5120, 7000)
     check(f["enable_thinking"] is True and f["reasoning_effort"] == "xhigh"
-          and f["reasoning_budget_tokens"] == tiers.COMPACTION_THINKING,
+          and f["reasoning_budget_tokens"] == 7000,
           "xhigh: thinking kept, at xhigh: the effort line stays the "
           "conversation's", json.dumps(f)[:200])
-    f = pf(off, 5120)
+    f = pf(off, 5120, 7000)
     check(f["enable_thinking"] is False and f["max_tokens"] == 5120,
           "a conversation with thinking off compacts with it off",
           json.dumps(f))
@@ -1635,16 +1977,20 @@ def test_a_hermes_compaction_is_rewritten_onto_the_conversation():
     check(up.get("id_slot") == slot and x["cache"]["reused"] == 9950,
           "on the conversation's slot", json.dumps(x["cache"]))
     check(up.get("tool_choice") == "none" and up.get("enable_thinking") is True
-          and up.get("max_tokens") == 8192 + tiers.COMPACTION_THINKING
+          and up.get("max_tokens") == 8192 + c["thinking_tokens"]
           and c["answer"] == 8192 and c["target_tokens"] == 8192,
           "tool_choice none, thinking at the conversation's effort, and "
           "Hermes' own 'Target ~8,192 tokens' as the answer allowance",
           json.dumps({k: up.get(k) for k in ("tool_choice", "enable_thinking",
                                              "max_tokens")}))
     msg = d["choices"][0]["message"]
-    check(msg.get("content", "").startswith("## Goal") and not msg.get("tool_calls")
+    sid = session_id.from_messages(history)[0]
+    check(sid and msg.get("content", "").startswith(session_id.line(sid)
+                                                    + "## Goal")
+          and not msg.get("tool_calls")
           and d.get("object") == "chat.completion",
-          "Hermes gets an ordinary chat completion with the summary",
+          "Hermes gets an ordinary chat completion with the summary, opened "
+          "by the conversation's own session line (#41)",
           json.dumps(msg)[:200])
     # The corpus row: the UPSTREAM list is the stored conversation's (the
     # rewrite), and the client's own list -- none -- is recorded apart, so a
@@ -1669,9 +2015,12 @@ def test_a_hermes_compaction_is_rewritten_onto_the_conversation():
           "tools had its list replaced: the client sent none")
 
     # The turn after it: continues the session, on the same slot, and its
-    # tools-and-system prefix is what that slot holds.
+    # tools-and-system prefix is what that slot holds. It carries the
+    # summary as Hermes got it -- opened by the conversation's session line
+    # (#41), which names it (the recency link that used to name it without
+    # the line, COMPACTION_LINK_SECONDS, was removed 2026-09-27).
     after = [{"role": "user", "content": "[CONTEXT COMPACTION - REFERENCE "
-              "ONLY] ## Goal\nBuild octopus-invaders."}] + history[5:] + [
+              "ONLY]\n" + msg.get("content", "")}] + history[5:] + [
              {"role": "user", "content": "Now add a score counter."}]
     script(reply("Adding it.", cache_n=9000, prompt_n=400))
     held = slots._prompts.get(slot)
@@ -1682,7 +2031,9 @@ def test_a_hermes_compaction_is_rewritten_onto_the_conversation():
           slots.shared_prefix(slots.fingerprint(up2), held) >= seg0,
           "the post-compaction turn: same slot, and its tools and system "
           "prompt are the prefix that slot holds",
-          json.dumps(d2["x_yamadori"]["cache"]))
+          json.dumps({"cache": d2["x_yamadori"]["cache"],
+                      "session": d2["x_yamadori"].get("session"),
+                      "slot": slot, "after0": after[0]["content"][:120]}))
 
     # Fallbacks: another account, a restart, a transcript that does not map.
     slots.reset(n=4)
@@ -1708,11 +2059,202 @@ def test_a_hermes_compaction_is_rewritten_onto_the_conversation():
     script(reply("## Goal", cache_n=0, prompt_n=2000))
     d = proxy.complete(dict(body))
     c = d["x_yamadori"]["compaction"]
-    check(c["mode"] == "as_sent" and _seen[0].get("id_slot") == 3,
-          "after a restart (nothing stored): as sent, on the transient slot",
+    check(c["mode"] == "as_sent" and _seen[0].get("id_slot") in (0, 1, 2),
+          "after a restart (nothing stored): as sent, on a conversation slot "
+          "(layout v2: the least recently used; never the lane)",
           json.dumps(c)[:200])
     slots.reset(n=4)
     compaction.reset()
+
+
+HERMES_SUMMARY = (
+    "## Goal\nBuild octopus-invaders, a vanilla JavaScript canvas space "
+    "shooter.\n\n## Completed Actions\n1. Listed the folder: js/game.js and "
+    "js/particles.js exist.\n2. Read js/game.js: loop() calls update then "
+    "render every frame and schedules itself with requestAnimationFrame.\n\n"
+    "## Active State\nThe second model flagged a possible dt scope bug in "
+    "js/game.js; it is not confirmed.\n\n## Remaining Work\nWire the entry "
+    "point and verify the canvas draws.")
+HERMES_SUMMARY_PREFIX = ("[CONTEXT COMPACTION — REFERENCE ONLY] Earlier "
+                         "turns were compacted into the summary below.")
+
+
+def _hermes_continuation(history: list[dict], summary: str,
+                         day: str = "Friday, September 25, 2026") -> dict:
+    """What Hermes sends after a compaction (Octopus v0b-V0-xhigh-1,
+    session.jsonl ids 188-195; agent/context_compressor.py): the system
+    prompt REBUILT (its date line changes -- so the session key changes), the
+    protected head (the task, the first call and its result), the summary as
+    an assistant message behind SUMMARY_PREFIX, the tail, and the task
+    restated as the last user turn."""
+    system = HERMES_SYSTEM + ("\nToday's date (as of the last context "
+                              f"rebuild): {day}")
+    msgs = ([{"role": "system", "content": system}] + history[:3]
+            + [{"role": "assistant",
+                "content": HERMES_SUMMARY_PREFIX + "\n" + summary}]
+            + [{"role": "user", "content": "[STILL IN PROGRESS — this is "
+                "the active request, restated after the compaction boundary "
+                "because it was not finished yet. Continue it; do not start "
+                "over.]\n" + FIRST_ASK}])
+    return {"model": "yamadori", "_account": ACCOUNT, "messages": msgs,
+            "tools": CLIENT_TOOLS}
+
+
+def test_the_continuation_after_a_long_turn_keeps_its_conversation():
+    """DEFECT #38 (Octopus v0b-V0-xhigh-1, proxy.out.log 416-425): the turn
+    before Hermes' compaction ran 2,903 s, so the account's last session had
+    STARTED 2,905 s before the summarise call -- past the 1,800 s window the
+    link was measured with. Nothing was pending; the continuation (a rebuilt
+    system prompt, so a new key) became a new conversation on a NEW slot
+    ("slot 1 (pinned) first prompt 14227 reused 0 ... evicted 7b43d48b") with
+    a fresh deep-thinking state, and slot 0 kept the abandoned 106K prompt."""
+    slots.reset(n=4)
+    compaction.reset()
+    proxy._PENDING_COMPACTION.clear()
+    history, stored, slot = _a_conversation()
+    k1 = conv_key(main_turn(history)["messages"], ACCOUNT)
+    lineage = nebari.load(k1).get("lineage") or k1
+    # The last turn STARTED 2,905 s ago (it ran 2,903 s).
+    key, _when, lin = proxy._LAST_SESSION[ACCOUNT]
+    proxy._LAST_SESSION[ACCOUNT] = (key, _when - 2905, lin)
+
+    script(reply(HERMES_SUMMARY, cache_n=9950, prompt_n=500))
+    d = proxy.complete(side_call([{"role": "user",
+                                   "content": hermes_compaction(history[1:5])}]))
+    c = d["x_yamadori"]["compaction"]
+    check(c["mode"] == "rewritten" and _seen[0].get("id_slot") == slot,
+          "the compaction maps onto the conversation and runs on its slot "
+          "(as live: 136 of 136 turns map, slot 0)", json.dumps(c)[:200])
+    pend = proxy._PENDING_COMPACTION.get(ACCOUNT) or {}
+    check(pend.get("lineage") == lineage and pend.get("probes"),
+          "the mapped conversation is pending its continuation, whatever the "
+          "last turn's start time, with probes of the summary",
+          json.dumps({k: pend.get(k) for k in ("lineage", "how")}))
+
+    body = _hermes_continuation(history, HERMES_SUMMARY)
+    k2 = conv_key(body["messages"], ACCOUNT)
+    script(reply("", calls=[call("terminal", {"command": "ls js"}, "c9")],
+                 cache_n=40, prompt_n=3000))
+    d2 = proxy.complete(dict(body))
+    st = nebari.load(k2)
+    # Since #41 the continuation is keyed by the conversation's id: its
+    # protected head keeps the first call, whose id carries it -- the SAME
+    # key, whatever the rebuilt system prompt says.
+    check(k2 == k1 and (st.get("lineage") or k2) == lineage
+          and (d2["x_yamadori"].get("session") or {}).get("source")
+          == "tool_call_id"
+          and ACCOUNT not in proxy._PENDING_COMPACTION,
+          "the continuation (rebuilt system prompt) keeps the conversation: "
+          "the same key, by the id its first call carries; the pending link "
+          "is consumed",
+          json.dumps({"same_key": k2 == k1,
+                      "session": d2["x_yamadori"].get("session")}))
+    check(_seen[0].get("id_slot") == slot
+          and d2["x_yamadori"]["cache"]["mode"] == "pinned"
+          and not d2["x_yamadori"]["cache"].get("evicted"),
+          "and lands on the conversation's own slot -- its cells are "
+          "reused/overwritten there, not abandoned beside a new pin",
+          json.dumps(d2["x_yamadori"]["cache"]))
+
+    # AN UNMAPPED COMPACTION NAMES NOTHING (2026-09-27, docs/CONSTANTS-
+    # AUDIT.md): for a client that REWRITES the tool-call ids (no id of ours
+    # survives, #41), a compaction this proxy could not map (sent as is)
+    # used to be linked to the account's most recent conversation by a
+    # recency guess (COMPACTION_LINK_SECONDS), and its continuation joined
+    # it. The guess is gone: nothing is pending, and the continuation --
+    # even one carrying the summary -- is a new conversation.
+    slots.reset(n=4)
+    compaction.reset()
+    proxy._PENDING_COMPACTION.clear()
+    history, stored, slot = _a_conversation()
+    k1 = conv_key(main_turn(history)["messages"], ACCOUNT)
+    lineage = nebari.load(k1).get("lineage") or k1
+    renamed: dict = {}
+
+    def _own(cid):
+        return renamed.setdefault(cid, f"own-{len(renamed)}")
+    history = [dict(m, tool_calls=[dict(c, id=_own(c["id"]))
+                                   for c in m["tool_calls"]])
+               if m.get("tool_calls") else
+               dict(m, tool_call_id=_own(m["tool_call_id"]))
+               if m.get("role") == "tool" else m for m in history]
+    check(session_id.from_messages(history) == (None, None),
+          "the rewritten history carries no id of ours")
+    compaction.reset()                  # a restart of the compaction store
+    script(reply(HERMES_SUMMARY, cache_n=0, prompt_n=2000))
+    proxy.complete(side_call([{"role": "user",
+                               "content": hermes_compaction(history[1:5])}]))
+    check(ACCOUNT not in proxy._PENDING_COMPACTION,
+          "unmapped: no conversation is guessed, nothing is pending",
+          json.dumps(proxy._PENDING_COMPACTION.get(ACCOUNT)))
+    body = _hermes_continuation(history, HERMES_SUMMARY,
+                                day="Sunday, September 27, 2026")
+    script(reply("ok", cache_n=0, prompt_n=3000))
+    proxy.complete(dict(body))
+    k3 = proxy._LAST_SESSION[ACCOUNT][0]
+    st = nebari.load(k3)
+    check(k3 != k1 and st.get("lineage") != lineage
+          and st.get("linked_by") is None,
+          "and a continuation that carries its summary is a new "
+          "conversation (nothing named the old one)",
+          json.dumps({k: st.get(k) for k in ("lineage", "linked_by")}))
+    slots.reset(n=4)
+    compaction.reset()
+    proxy._PENDING_COMPACTION.clear()
+
+
+def test_the_continuation_keeps_its_conversation_by_the_summary_line():
+    """#41 (4): two Hermes conversations open alike (two Octopus runs); the
+    SECOND is compacted. The summary the proxy serves opens with that
+    conversation's session line, and a continuation that has DROPPED the
+    first answer (only the summary carries the id) keeps the second
+    conversation -- its key, lineage and slot -- whatever its rebuilt head
+    says, and whether the summary rides as an assistant or a user turn."""
+    slots.reset(n=4)
+    compaction.reset()
+    proxy._PENDING_COMPACTION.clear()
+    h1, _s1, slot1 = _a_conversation()
+    k1 = conv_key(main_turn(h1)["messages"], ACCOUNT)
+    history, _stored, slot = _a_conversation()
+    k2 = conv_key(main_turn(history)["messages"], ACCOUNT)
+    sid = session_id.from_messages(history)[0]
+    check(k1 != k2 and slot != slot1 and sid,
+          "two conversations with one opening: two keys, two slots",
+          json.dumps({"slot1": slot1, "slot2": slot}))
+    script(reply(HERMES_SUMMARY, cache_n=9950, prompt_n=500))
+    d = proxy.complete(side_call([{"role": "user",
+                                   "content": hermes_compaction(history[1:5])}]))
+    served = d["choices"][0]["message"]["content"]
+    check(served.startswith(session_id.line(sid))
+          and d["x_yamadori"]["compaction"].get("session_line")
+          and (d["x_yamadori"].get("session") or {}).get("id") == sid,
+          "the compaction is mapped onto the second conversation and its "
+          "summary opens with THAT conversation's line", served[:80])
+    system = HERMES_SYSTEM + "\nToday's date (as of the last context rebuild): " \
+        "Friday, September 25, 2026"
+    for role in ("assistant", "user"):
+        proxy._PENDING_COMPACTION.clear()   # no belt-and-braces link: the id alone
+        msgs = [{"role": "system", "content": system},
+                {"role": role, "content": HERMES_SUMMARY_PREFIX + "\n" + served},
+                {"role": "user", "content": "Continue: " + FIRST_ASK}]
+        script(reply("", calls=[call("terminal", {"command": "ls js"},
+                                     f"c-{role}")], cache_n=40, prompt_n=3000))
+        d2 = proxy.complete({"model": "yamadori", "_account": ACCOUNT,
+                             "messages": msgs, "tools": CLIENT_TOOLS})
+        s = d2["x_yamadori"].get("session") or {}
+        back = d2["choices"][0]["message"].get("tool_calls") or [{}]
+        check(proxy._LAST_SESSION[ACCOUNT][0] == k2 and s.get("id") == sid
+              and s.get("source") == "summary_line" and not s.get("line")
+              and _seen[0].get("id_slot") == slot
+              and session_id.of_call_id(back[0].get("id")) == sid,
+              f"a continuation whose only id is the summary ({role} turn) "
+              f"keeps the second conversation: its key and its slot, and "
+              f"its new call carries the id on",
+              json.dumps({"session": s, "slot": _seen[0].get("id_slot"),
+                          "want_slot": slot, "call": back[0].get("id")}))
+    slots.reset(n=4)
+    compaction.reset()
+    proxy._PENDING_COMPACTION.clear()
 
 
 def test_the_iterative_form_references_the_previous_summary():
@@ -1761,8 +2303,13 @@ def test_the_hermes_compactions_in_the_corpus_replayed():
         return
     rows = [(t, ts, json.loads(p)) for t, ts, p in _producer_events(
         db, "SELECT turn, ts, payload FROM events WHERE kind='turn' ORDER BY id")]
-    n = iterative = visible = linked = 0
-    gaps = []
+    # The recency link window (COMPACTION_LINK_SECONDS) this replay used to
+    # check was removed 2026-09-27 (docs/CONSTANTS-AUDIT.md); the gaps from a
+    # conversation's last main turn to its compaction are printed as data.
+    ended = {t: ts for t, ts in _producer_events(
+        db, "SELECT turn, ts FROM events WHERE kind='answer' ORDER BY id")}
+    n = iterative = visible = 0
+    gaps, start_gaps = [], []
     for k, (turn, ts, p) in enumerate(rows):
         rq = p.get("request") or ""
         if not rq.startswith("You are a summarization agent creating a context"):
@@ -1771,21 +2318,22 @@ def test_the_hermes_compactions_in_the_corpus_replayed():
         iterative += "PREVIOUS SUMMARY:" in rq or "You are updating a context" in rq
         parsed = compaction.parse_flattened(rq)
         visible += bool(parsed and parsed["records"])
-        prev = [ts2 for _t, ts2, pp in rows[:k]
+        prev = [(t2, ts2) for t2, ts2, pp in rows[:k]
                 if (pp.get("system_head") or "").startswith("You are Hermes Agent")]
-        if prev and ts - prev[-1] <= proxy.COMPACTION_LINK_SECONDS:
-            linked += 1
-            gaps.append(round(ts - prev[-1]))
-    print(f"  corpus: {n} Hermes compactions; {linked} follow a Hermes main "
-          f"turn within {proxy.COMPACTION_LINK_SECONDS} s (gaps {sorted(gaps)} s),"
-          f" so a stored prompt would exist barring a restart; {iterative} are "
-          f"the iterative form, whose 2,000-character head is all preamble and "
-          f"previous summary; {visible} show any transcript record")
-    # Counted from the corpus, never hard-coded: it grows with traffic (12
-    # on 2026-09-23; 13 once turn 11c0be7eff30 arrived, 2026-09-24).
-    check(n >= 12 and linked == n,
-          f"all {n} compactions follow their conversation's last main turn "
-          f"inside the link window", f"{linked}/{n}")
+        if not prev:
+            continue
+        t2, start = prev[-1]
+        end = ended.get(t2, start)
+        start_gaps.append(round(ts - start))
+        gaps.append(round(ts - min(end, ts)))
+    print(f"  corpus: {n} Hermes compactions; seconds from the END of the "
+          f"last Hermes main turn: {sorted(gaps)}; from its START: "
+          f"{sorted(start_gaps)}; {iterative} are the iterative form, whose "
+          f"2,000-character head is all preamble and previous summary; "
+          f"{visible} show any transcript record")
+    # Counted from the corpus, never hard-coded: it grows with traffic.
+    check(n >= 12, f"the corpus holds {n} Hermes compactions (>= 12)",
+          str(n))
     # The corpus keeps each request's first 2,000 characters. The parser must
     # find a transcript record in EVERY compaction whose head shows one (a
     # start marker, then a [ROLE]: record) and in no other -- real input for
@@ -1827,6 +2375,9 @@ def main() -> int:
                test_slots,
                test_a_hermes_session_replayed,
                test_a_streamed_utility_call,
+               test_a_side_call_releases_its_slot,
+               test_a_side_call_keeps_the_lane,
+               test_an_idle_conversation_is_cleared_and_resumes_cold,
                test_internal_generation_is_pinned_to_the_helper_slot,
                test_an_empty_answer_is_explained,
                test_the_logged_empty_answers_were_tool_calls,
@@ -1842,6 +2393,8 @@ def main() -> int:
                test_the_prefix_rules,
                test_a_hermes_compaction_is_rewritten_onto_the_conversation,
                test_the_iterative_form_references_the_previous_summary,
+               test_the_continuation_after_a_long_turn_keeps_its_conversation,
+               test_the_continuation_keeps_its_conversation_by_the_summary_line,
                test_the_hermes_compactions_in_the_corpus_replayed):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

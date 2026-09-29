@@ -158,11 +158,15 @@ def check_arm(row: dict, arm: str) -> str | None:
         return "check_code forced but x_yamadori.check_code.offered is false (proxy dropped the key?)"
     if want.get("repair") and not (xy.get("repair") or {}).get("enabled"):
         return "repair forced but x_yamadori.repair.enabled is not true (proxy dropped the key?)"
-    if not {"hints", "investigate", "fanout"} <= forced:
+    # `skills` is the flag's name since 2026-09-26 (the header's `hints`
+    # is its alias for one release); a record may carry either.
+    forced = {("skills" if k == "hints" else k) for k in forced}
+    got_skills = sel.get("skills", sel.get("hints"))
+    if not {"skills", "investigate", "fanout"} <= forced:
         return f"flags not forced by header: forced={sorted(forced)}"
     if sel.get("fanout_n") != want["fanout"] or bool(sel.get("investigate")) != want["investigate"] \
-            or bool(sel.get("hints")) != want["hints"]:
-        return f"selection {sel.get('fanout_n')}/{sel.get('investigate')}/{sel.get('hints')} != arm {arm}"
+            or bool(got_skills) != want["hints"]:
+        return f"selection {sel.get('fanout_n')}/{sel.get('investigate')}/{got_skills} != arm {arm}"
     return None
 
 

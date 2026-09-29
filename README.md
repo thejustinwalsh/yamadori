@@ -103,7 +103,7 @@ top of this file is a promise, not a receipt.
 | OpenAI API | `https://ai.thejustinwalsh.me/v1` (via Caddy) |
 | Dashboard | `https://ai.thejustinwalsh.me/` (old `/dash` links redirect; Python pages at `/dash/classic`) |
 | Code-intelligence API | `https://ai.thejustinwalsh.me/tools` |
-| OpenAPI spec | `https://ai.thejustinwalsh.me/tools/openapi.json` |
+| OpenAPI spec | `https://ai.thejustinwalsh.me/tools/openapi.json` (needs the account key, like every tools route except `/health`) |
 
 Direct ports still work if Caddy is not running: `:1234` for the API and
 dashboard, `:1235` for the tools API.
@@ -130,7 +130,7 @@ and the model weighs them in its own turn.
 
 Our code-search tools are not offered to the model you talk to: it sees your
 client's tools (plus image tools where an image server is configured, and at
-`xhigh` and `max` one more, `think_deeply`, to call when it is stuck). The
+`xhigh` and `max` one more, `yama_think_deeply`, to call when it is stuck). The
 service works beside it -- library definitions after a library question, the
 second brain's investigation, repair and comparison -- and folds the result
 back in fixed phrases ("After thinking deeply,", "Verified", "Repaired",
@@ -139,20 +139,25 @@ was inspired by <word>." for the concept seed it drew. Everything it adds is
 replayed byte for byte on every request, so the model's prompt cache is
 never broken by the service.
 
+**Skills are off at every tier** (operator, 2026-09-29: "Stop skills until we
+have a good skill injector." -- "Skills are still valuable we just haven't
+found the unlock yet. TBD."). Nothing of the skills system reaches the
+model's context; the skills code stays.
+
 | `reasoning_effort` | thinking | library help | skills | code check | fan-out | deep thinking | addendum | images | concept seed | adds |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `minimal` | off | – | – | – | 1 | – | – | yes | – | the fastest answer: no thinking, nothing of ours (least injection-resistant) |
 | `low` | on | – | – | – | 1 | – | – | yes | – | nothing: the model as it ships, the benchmark baseline |
-| `medium` | on | definitions | yes | note | 1 | – | – | yes | – | library definitions for a library question, skills (formerly hints; armed without review, screened), a note when a client write does not parse |
-| `high` | on | definitions | yes | repair | up to 3 | – | yes | yes | yes | the second brain: code that does not parse is repaired, a second approach is compared, and the addendum says so |
-| `xhigh` | on | definitions | yes | repair | up to 3 | allowed | yes | yes | yes | everything: deep thinking on top of `high` |
-| `max` | on | definitions | yes | repair | up to 3 | allowed | yes | yes | yes | everything, with the longest thinking (slowest) |
+| `medium` | on | definitions | – | note | 1 | – | – | yes | – | library definitions for a library question, a note when a client write does not parse (skills: off, 2026-09-29) |
+| `high` | on | definitions | – | repair | up to 3 | – | yes | yes | yes | the second brain: code that does not parse is repaired, a second approach is compared, and the addendum says so |
+| `xhigh` | on | definitions | – | repair | up to 3 | allowed | yes | yes | yes | everything: deep thinking on top of `high` |
+| `max` | on | definitions | – | repair | up to 3 | allowed | yes | yes | yes | everything, with the longest thinking (slowest) |
 
 - **Code check:** syntax and lint of what the model writes; its code is
   changed only where a repair of real errors needs it (formatting is
   reported, never applied).
 - **Deep thinking** (`xhigh`, `max`) runs on a trigger, on any kind of
-  request, agent steps included: the model calls `think_deeply`; the
+  request, agent steps included: the model calls `yama_think_deeply`; the
   service sees the work stall (the same error again, a failing command
   re-run, "still broken"); the conversation uses a library newer than the
   model; or a large new task arrives, whose plan the second brain writes
@@ -166,7 +171,7 @@ never broken by the service.
 - **Thinking budget:** it isn't set by the tier. It comes from the request's
   share of the KV cache: 5/8 of the pool for the conversation, minus the
   prompt and the answer allowance.
-- **Images:** `generate_image` is offered on every tier when image generation
+- **Images:** `yama_generate_image` is offered on every tier when image generation
   is configured: it is a capability, not a gate (`docs/IMAGEGEN.md`).
 
 ## TLS
@@ -195,13 +200,19 @@ behind both — `mcp/code_search.py` and `mcp/tools_api.py` import the same
 module, so they cannot drift.
 
 ```bash
-# your code, no JSON-RPC needed
-curl "http://ai.thejustinwalsh.me:1235/definition?symbol=parse_tool_call"
+# your code, no JSON-RPC needed -- the same account key as :1234
+curl "http://ai.thejustinwalsh.me:1235/definition?symbol=parse_tool_call" \
+  -H "Authorization: Bearer $YAMADORI_API_KEY"
 
 curl http://ai.thejustinwalsh.me:1235/search \
+  -H "Authorization: Bearer $YAMADORI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query":"how are tool calls parsed","top_k":5}'
 ```
+
+Every route except `/health` needs the key. A browser request whose Origin is
+not listed in `YAMADORI_TOOLS_ALLOWED_ORIGINS` is refused (2026-09-26). Client
+configs for Claude Code, OpenCode and Hermes are in `docs/TOOLS-API.md`.
 
 | route | use when |
 |---|---|
@@ -286,6 +297,11 @@ For reference, the journey to get here (same model family, same machine):
 ```
 bin/                 llama-swap (downloaded, not committed)
 config.yaml          the whole stack definition
+engines/manifest.yaml  every engine pinned: base commit, patches, flags, shipped hashes
+engines/patches/     our patch series, one directory per engine
+engines/src/         the engine SOURCE we build (upstream base + our patches),
+                     vendored; `scripts/build_engine.py build <engine>` builds
+                     it with no network (docs/ENGINES.md)
 mcp/code_search.py   MCP server: the 8 tools in TOOLS (find_by_meaning,
                      find_definition_opt, find_references, find_by_pattern,
                      read_file_range, describe_index, run_check,
@@ -303,10 +319,14 @@ docs/HERMES.md       wiring an agent to this stack
 docs/KNOWN-ISSUES.md open problems, with the measurements behind them
 mcp/server.py        the front door on :1234 (auth, /v1, dashboard at /); logic in proxy.py
 mcp/model.py         the one door for internal generation (same tiers.apply)
-mcp/selection.py     per-request: hints, deep thinking, fan-out
+mcp/selection.py     per-request: skills, deep thinking, fan-out
 mcp/deep.py          deep thinking's triggers, their records and outcome labels
 mcp/deep_learn.py    idle-time learner: thresholds within bounds, reversible
 mcp/research_tools.py  the second brain's skills, notes and web sources
+mcp/skills.py        the skill store (Agent Skills folders under index/skills/library)
+mcp/skill_pipeline.py  the one skill pipeline; prompts in skill_prompts.py
+mcp/skill_select.py  which skills a request gets; docs/SKILL-FACTORY.md is the API
+skills/authored/     skills written from our own evidence (SKILL.md + tests.json)
 mcp/worker.py        claims dataset jobs from index/jobs.sqlite3
 mcp/tool_shim.py     UNUSED. Kept as a record; see known issues
 mcp/tools_api.py     HTTP transport for the same tools
@@ -333,6 +353,24 @@ Run the tests with `python scripts/run_tests.py` (offline + ruff), then
 autostart so it cannot contend for port 1234. The task is kept, not deleted —
 re-enable it any time.
 
+**The engines are built from this repo.** Every llama.cpp and sd.cpp tree the
+stack runs is vendored under `engines/src/<engine>` (the upstream base with
+our patch series applied), so a clone is enough to rebuild them and nothing
+is fetched (the two entries that reproduce a binary with llama-server's web
+UI, `llama-prism` and `llama-bonsai2-base`, also need that UI archive,
+pinned by hash):
+
+```powershell
+python scripts\build_engine.py check                  # the trees are what the manifest records
+python scripts\build_engine.py build llama-bonsai2-ada --jobs 8
+```
+
+The toolchain (VS 2022 + CUDA 12.8) is the manifest's `toolchains` entry.
+Moving an engine to a newer upstream is `build_engine.py update <engine> --to
+<sha>`, which rebases our patches and reports conflicts. llama-swap is the
+upstream release binary, pinned by hash. See
+[docs/ENGINES.md](docs/ENGINES.md) "Vendored source".
+
 ## Things that will bite you
 
 **Device numbering.** `start-stack.bat` pins `CUDA_DEVICE_ORDER=PCI_BUS_ID`.
@@ -351,7 +389,9 @@ kernel that is numerically broken. It is ~20% quicker (55.33 vs 46.06 tok/s)
 and collapses generation into runs of `/`, taking tool calling from 9/9 to
 0/10. Use `PrismML-Eng/llama.cpp` branch `prism`, release
 `prism-b10709-9a9394a`. Full comparison in
-[docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
+[docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md). The trees we build are the ones
+vendored in `engines/src`, each recorded with its origin in
+`engines/manifest.yaml`.
 
 **Embeddings are asymmetric.** Qwen3-Embedding needs an instruction prefix on
 *queries* and none on documents. Getting it wrong does not error — it silently

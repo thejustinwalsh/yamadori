@@ -33,8 +33,8 @@ export type Channel = {
  *    runs on is computing or it is not. Real, and named as what it is.
  *  - "Foliage density <- hints above the floor": the floor is applied before
  *    anything reaches the payload, so foliage reads what recall actually
- *    INJECTED: items per task turn over the last 30 min (x_yamadori.skills
- *    on YAMADORI_RECALL=skills, x_yamadori.hints on =hints; the path is
+ *    INJECTED: skills per task turn over the last 30 min (x_yamadori.skills;
+ *    skills are the one knowledge system since 2026-09-26, and the path is
  *    labelled). 3 items per turn is full foliage -- a choice, not a measure.
  *  - "Nebari <- corpus breadth": the breadth is the indexes the server
  *    holds (package indexes, the bound code index, repository indexes:
@@ -47,8 +47,8 @@ export type Channel = {
 export const CHANNELS: Channel[] = [
   { name: 'genome', source: 'seed.u32', api: 'vitals', reads: 'the concept seed word, as the PRNG seed of every limb' },
   { name: 'limb.main.girth', source: 'context.main', api: 'vitals', reads: 'main KV budget share of the pool' },
-  { name: 'limb.thinking.girth', source: 'context.helper', api: 'vitals', reads: 'deep-thinking KV budget share of the pool' },
-  { name: 'reserve.sapwood', source: 'context.reserve', api: 'vitals', reads: 'unclaimed reserve share (trunk girth)' },
+  { name: 'limb.thinking.girth', source: 'context.helper', api: 'vitals', reads: 'deep-thinking KV budget share of the pool (the child slot in the cap layout)' },
+  { name: 'reserve.sapwood', source: 'context.reserve', api: 'vitals', reads: 'the rest of the pool: unclaimed reserve (split layout) or room for a second conversation (cap layout); trunk girth' },
   { name: 'arcs.activity', source: 'gpus.util', api: 'vitals', reads: 'GPU0 utilisation: the model card at work' },
   { name: 'slab.haze', source: 'gpus.pct', api: 'vitals', reads: 'highest GPU memory use' },
   { name: 'slab.alarm', source: 'gpus.tight', api: 'vitals', reads: 'any GPU below the free-memory floor' },
@@ -57,14 +57,14 @@ export const CHANNELS: Channel[] = [
   { name: 'caps.crimson', source: 'warnings', api: 'vitals', reads: 'warnings, endpoints down, port conflicts' },
   { name: 'shari.errored', source: 'queue.states.errored', api: 'datasets', reads: 'errored jobs, bleached to deadwood' },
   { name: 'fanout', source: 'tree.recent.fanout', api: 'vitals', reads: 'the last fan-out (x_yamadori.fanout): arity, delivered, culled; held 120 s, retracts over 60 s' },
-  { name: 'foliage', source: 'tree.recent.foliage', api: 'vitals', reads: 'recall injected per task turn, last 30 min (x_yamadori.skills / .hints, per YAMADORI_RECALL): pad density' },
+  { name: 'foliage', source: 'tree.recent.foliage', api: 'vitals', reads: 'skills injected per task turn, last 30 min (x_yamadori.skills): pad density' },
   { name: 'nebari.spread', source: 'tree.nebari.spread', api: 'vitals', reads: 'index breadth: package + code + repo indexes, log10(chunks + defs): root reach and girth' },
   { name: 'sway', source: 'slots.slots.state', api: 'pulse', reads: 'busy llama-server slots (main and deep thinking): wind and gusts' },
   { name: 'ground.glow', source: 'slots.slots.tps', api: 'pulse', reads: 'decode tokens/s across slots: slab rings and traces brighten' },
   { name: 'rings.request', source: 'tools.last_turn.id', api: 'pulse', reads: 'a request arrived (or a slot woke): a green pulse' },
   { name: 'rings.tool', source: 'tools.last.id', api: 'pulse', reads: 'a tool was called: a cyan pulse' },
   { name: 'rings.seed', source: 'seed.at', api: 'pulse', reads: 'a concept seed was drawn: a pale pulse' },
-  { name: 'moss', source: 'tree.moss.value', api: 'vitals', reads: 'index staleness: package indexes, code index, last skill arm (recipes on the hints path); fresh = bare bark' },
+  { name: 'moss', source: 'tree.moss.value', api: 'vitals', reads: 'index staleness: package indexes, code index, last skill arm; fresh = bare bark' },
 ];
 
 // ------------------------------------------------------------------- state
@@ -85,7 +85,7 @@ export type TreeState = {
   fanout: { arity: number; chosen: number; fade?: number } | null;
   /** index breadth, [0, 1] (log scale) */
   rootSpread: number | null;
-  /** recall injected per recent task turn, [0, 1]; path is YAMADORI_RECALL */
+  /** skills injected per recent task turn, [0, 1]; path is "skills" */
   foliage: { density: number; path: string } | null;
   /** index staleness, [0, 1] */
   moss: number | null;
@@ -148,7 +148,7 @@ function treeSources(tree: unknown): Pick<TreeState, 'fanout' | 'rootSpread' | '
   const fadeRaw = pick(f, 'fade');
   const fade = finite(fadeRaw) ? clamp01(fadeRaw) : 1;
   const density = live ? pick(recent, 'foliage', 'density') : null;
-  // The recall path: the turns' own, else the live YAMADORI_RECALL (moss reads it).
+  // The recall path: the turns' own, else the live one the moss reports.
   const path = live ? (pick(recent, 'foliage', 'path') ?? pick(tree, 'moss', 'recall')) : null;
   return {
     fanout: finite(arity) && arity >= 2 && fade > 0 ? { arity: Math.floor(arity), chosen: finite(chosen) ? Math.floor(chosen) : 0, fade } : null,

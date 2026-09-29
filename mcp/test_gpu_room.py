@@ -19,9 +19,13 @@ and optionally a foreign consumer; nvidia-smi is replaced by a read of that
 card. Every allocation updates the card's minimum free memory, and one past
 the card's total is recorded as an out-of-memory.
 
-The sequences run through the REAL callers -- vision.describe (via
-model.post), images.generate, code_search.embed / rerank -- so the test
-covers the wiring, not only the module. A control arm runs the row-16
+The sequences run through the REAL callers -- model.chat (model.post, the one
+door), images.generate, code_search.embed / rerank -- so the test covers the
+wiring, not only the module. The on-demand, exclusive A4000 chat model they
+load is a FIXTURE (FIXTURE below) since 2026-09-27: `bonsai-vision`, the model
+this suite was written around, is retired (the main model on the 5060 Ti has
+its projector), and the coordinator's rules for an exclusive on-demand model
+are unchanged. A control arm runs the row-16
 sequence with the coordinator off and must reproduce the failure, or the
 check that the coordinator prevents it could not fail.
 """
@@ -148,7 +152,7 @@ class Card:
             self.served.append(m)
             if m not in self.held:
                 if self.backstop:
-                    if m == "bonsai-vision":           # `ondemand`, exclusive
+                    if m == FIXTURE:           # `ondemand`, exclusive
                         for x in list(self.held):
                             if x in RETRIEVAL | IMAGE:
                                 del self.held[x]
@@ -244,16 +248,30 @@ for k in ("YAMADORI_VISION", "YAMADORI_VISION_MODEL", "YAMADORI_IMAGEGEN_MODEL",
           "YAMADORI_GPU_ROOM_WAIT", "EMBED_MODEL", "RERANK_MODEL"):
     os.environ.pop(k, None)
 
+# Every other store the code under test can write (the jobs database
+# behind skill selection, the concept seed, ...), BEFORE any mcp import:
+# 2026-09-27 this suite wrote the live index/ (the offline guard).
+import offline_stores  # noqa: E402
+offline_stores.isolate("yamadori_test_gpu_room_stores_")
+
 import gpu_room  # noqa: E402
 import budget  # noqa: E402
 import tiers  # noqa: E402
 import images  # noqa: E402
-import vision  # noqa: E402
 import code_search as cs  # noqa: E402
 
 tiers._accepted = tiers.FALLBACK_EFFORTS     # no network for the template
 _real_budgets = budget.budgets
 budget.budgets = lambda pool=None: _real_budgets(pool or 163840)
+
+# THE FIXTURE: an on-demand, exclusive A4000 chat model with the retired
+# bonsai-vision's estimate, registered for this suite only.
+FIXTURE = "a4000-ondemand-fixture"
+gpu_room.SIZES[FIXTURE] = gpu_room.Size(
+    9449, 9449, False,
+    "TEST FIXTURE (mcp/test_gpu_room.py): the retired bonsai-vision's ESTIMATE, "
+    "an on-demand exclusive chat model on the A4000")
+catalog_alias = "yamadori-a4000-fixture"
 
 CARD.__init__()
 gpu_room.CARD_READER = CARD.smi
@@ -281,7 +299,23 @@ def fresh(held=None, foreign: int = 0, backstop: bool = True,
 
 
 def look() -> dict:
-    return vision.describe(_png(), "png", "What colour is each half?")
+    """A chat request with an image to the on-demand A4000 model, through the
+    one door (model.chat -> model.post -> gpu_room.use)."""
+    import model
+    uri = "data:image/png;base64," + base64.b64encode(_png()).decode()
+    try:
+        d = model.chat([{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": uri}},
+            {"type": "text", "text": "What colour is each half?"}]}],
+            max_tokens=64, model=FIXTURE)
+    except gpu_room.NoRoom as e:
+        # a refusal in the tool envelope a caller hands the model (the shape
+        # vision.describe gave it when the A4000 copy was its caller)
+        raise images.ImageError(e.code, e.reason, retryable=e.retryable,
+                                remedies=e.remedies,
+                                status=429 if e.retryable else 507,
+                                **e.facts) from None
+    return {"answer": model.answer(d)}
 
 
 def draw() -> list:
@@ -313,16 +347,26 @@ def test_the_table_matches_the_config():
             on.add(mid)
         elif "CUDA_VISIBLE_DEVICES=" in env:
             off.add(mid)
-    check(set(gpu_room.SIZES) == on,
+    # LAYOUT V2 (operator, 2026-09-29): the `bonsai-vision` row is restored in
+    # the code now; its config.yaml entry is written by
+    # bench/deploy_layout_v2.py at the deploy. Until then the config still
+    # serves vision from `bonsai` (--mmproj), and the row waits for it.
+    main_sees = "--mmproj" in str(((cfg.get("models") or {}).get("bonsai")
+                                   or {}).get("cmd"))
+    pending = {"bonsai-vision"} - on if main_sees else set()
+    check(set(gpu_room.SIZES) - {FIXTURE} == on | pending,
           "SIZES has a row for exactly the models config.yaml pins to the "
-          "A4000's UUID", f"table={sorted(gpu_room.SIZES)} config={sorted(on)}")
+          "A4000's UUID (and, before the layout-v2 deploy, bonsai-vision's)",
+          f"table={sorted(set(gpu_room.SIZES) - {FIXTURE})} "
+          f"config={sorted(on)} pending={sorted(pending)}")
     check(gpu_room.NEVER <= (off | {"bonsai-agent"}) and "bonsai" in off,
           "the models the coordinator never touches are pinned to the OTHER "
           "card", f"never={sorted(gpu_room.NEVER)} other card={sorted(off)}")
     check(all(s.source and s.peak_mib >= s.resident_mib > 0
               for s in gpu_room.SIZES.values()),
           "every row names its source; peak >= resident > 0")
-    unmeasured = sorted(m for m, s in gpu_room.SIZES.items() if not s.measured)
+    unmeasured = sorted(m for m, s in gpu_room.SIZES.items()
+                        if not s.measured and m != FIXTURE)
     check(gpu_room.SIZES["imagegen"].measured and all(
         "ESTIMATE" in gpu_room.SIZES[m].source
         or "ARITHMETIC" in gpu_room.SIZES[m].source
@@ -365,12 +409,12 @@ def test_look_draw_search():
                      "min_free": CARD.min_free})[:1500]
     check(r1.get("answer") and r2 and r2[0].get("id"),
           "look -> draw -> search: all three calls succeed through the real "
-          "callers (vision.describe, images.generate, code_search)", ev)
+          "callers (model.chat, images.generate, code_search)", ev)
     check(CARD.min_free >= H and not CARD.oom,
           f"the A4000 never goes below {H:,} MiB free (min "
           f"{CARD.min_free:,}); no allocation past the total", ev)
     look_d = sink[0]
-    check(look_d["model"] == "bonsai-vision" and look_d["action"] == "evicted"
+    check(look_d["model"] == FIXTURE and look_d["action"] == "evicted"
           and [e["model"] for e in look_d["evicted"]] == ["reranker"],
           "look: vision (9,449 est.) does not fit beside search, so the "
           "coordinator unloads the reranker -- the bigger of two never-used "
@@ -380,13 +424,13 @@ def test_look_draw_search():
           "look: free before < need + headroom <= free after (the "
           "measurement, re-read after each unload, decides)",
           json.dumps(look_d))
-    check("bonsai-vision" in after_look and not (set(after_look) & RETRIEVAL),
+    check(FIXTURE in after_look and not (set(after_look) & RETRIEVAL),
           "the backstop still acts: loading vision (exclusive) took "
           "embeddings out too", json.dumps(after_look))
     draw_d = next(d for d in sink if d["model"] == "imagegen-turbo")
     check(draw_d["action"] == "evicted"
-          and [e["model"] for e in draw_d["evicted"]] == ["bonsai-vision"]
-          and "bonsai-vision" not in after_draw,
+          and [e["model"] for e in draw_d["evicted"]] == [FIXTURE]
+          and FIXTURE not in after_draw,
           "draw: the image server's peak (6,389) does not fit beside vision, "
           "so vision leaves before the draw", json.dumps(draw_d))
     later = [d for d in sink if d["model"] in RETRIEVAL]
@@ -412,7 +456,7 @@ def test_draw_then_look():
           "draw first: the image server fits beside search (search + image "
           "generator), nothing is unloaded", ev)
     look_d = sink[-1]
-    check(look_d["model"] == "bonsai-vision"
+    check(look_d["model"] == FIXTURE
           and [e["model"] for e in look_d["evicted"]] == ["reranker"],
           "then look: the least recently used goes first -- the never-used "
           "reranker, not the image server that just drew", ev)
@@ -433,14 +477,14 @@ def test_a_model_already_loaded():
           "nvidia-smi read, nothing unloaded", json.dumps(sink))
     # A LOADED image server still grows from idle to peak on each draw: it is
     # not "nothing to do" when vision sits beside it.
-    fresh(held={"bonsai-vision", "imagegen-turbo"})
+    fresh(held={FIXTURE, "imagegen-turbo"})
     sink = []
     with gpu_room.recording(sink):
         draw()
     d = sink[0]
     check(d["action"] == "evicted" and d["loaded"] is True
           and d["need_mib"] == 6389 - 319
-          and [e["model"] for e in d["evicted"]] == ["bonsai-vision"]
+          and [e["model"] for e in d["evicted"]] == [FIXTURE]
           and CARD.min_free >= H,
           "a loaded but idle image server counts its growth (6,389 - 319 = "
           "6,070) and still makes room", json.dumps(d))
@@ -492,7 +536,7 @@ def test_concurrent_callers():
     t = threading.Thread(target=hold_embeddings)
     t.start()
     started.wait(5)
-    d = gpu_room.ensure_room("bonsai-vision", upstream=URL)
+    d = gpu_room.ensure_room(FIXTURE, upstream=URL)
     t.join(5)
     t_unload = next((tt for tt, m in CARD.unloads if m == "embeddings"), None)
     check(t_unload is not None and "t" in released and t_unload >= released["t"]
@@ -518,7 +562,7 @@ def test_concurrent_callers():
         first = child.stdout.readline().strip()
         if not first and child.poll() is not None:
             break
-    d = gpu_room.ensure_room("bonsai-vision", upstream=URL)
+    d = gpu_room.ensure_room(FIXTURE, upstream=URL)
     rest = child.stdout.read()
     child.wait(10)
     rel = float(rest.split("released", 1)[1].split()[0]) if "released" in rest else None
@@ -541,12 +585,12 @@ def test_concurrent_callers():
     line = holder.stdout.readline().strip()     # acquire() logs nothing
     gpu_room.ROOM_WAIT_S = 0.4
     try:
-        gpu_room.ensure_room("bonsai-vision", upstream=URL)
+        gpu_room.ensure_room(FIXTURE, upstream=URL)
         busy = None
     except gpu_room.NoRoom as e:
         busy = e
     gpu_room.ROOM_WAIT_S = 10.0
-    d = gpu_room.ensure_room("bonsai-vision", upstream=URL)
+    d = gpu_room.ensure_room(FIXTURE, upstream=URL)
     holder.wait(10)
     check(line == "held True" and busy is not None
           and busy.code == "A4000_BUSY" and busy.retryable is True
@@ -569,10 +613,10 @@ def test_nothing_evictable():
             look()
         except images.ImageError as e:
             err = e
-    env = err.envelope("describe_image") if err else {}
+    env = err.envelope("yama_describe_image") if err else {}
     check(err is not None and err.code == "A4000_NO_ROOM"
           and err.retryable is False and err.status == 507
-          and not CARD.unloads and "bonsai-vision" not in CARD.served,
+          and not CARD.unloads and FIXTURE not in CARD.served,
           "vision with nothing evictable: A4000_NO_ROOM, not retryable, "
           "nothing unloaded, and the request never reached llama-swap (no "
           "load into an out-of-memory)", json.dumps(env)[:900])
@@ -601,7 +645,7 @@ def test_nothing_evictable():
     out = json.loads(images.run_tool({"prompt": "a fox"}, "http://example"))
     check(out.get("ok") is False and out.get("error") == "A4000_NO_ROOM"
           and out.get("remedies"),
-          "generate_image returns the A4000_NO_ROOM envelope to the model",
+          "yama_generate_image returns the A4000_NO_ROOM envelope to the model",
           json.dumps(out)[:600])
     # And through search: the error propagates as NoRoom, not an empty list.
     fresh(held=set(), foreign=13000)
@@ -632,7 +676,7 @@ def test_the_main_model_is_never_touched():
         pass
     fresh(held={"embeddings", "reranker", "imagegen"}, foreign=3000)
     try:
-        gpu_room.ensure_room("bonsai-vision", upstream=URL)
+        gpu_room.ensure_room(FIXTURE, upstream=URL)
     except gpu_room.NoRoom:
         pass
     check(not any(m in gpu_room.NEVER or m not in gpu_room.SIZES
@@ -650,12 +694,12 @@ def test_no_llama_swap_means_uncoordinated_not_blocked():
     sink: list = []
     with gpu_room.recording(sink):
         try:
-            with gpu_room.use("bonsai-vision", upstream=DEAD):
+            with gpu_room.use(FIXTURE, upstream=DEAD):
                 pass
             err = None
         except gpu_room.NoRoom as e:
             err = e
-    env = err.envelope("describe_image") if err else {}
+    env = err.envelope("yama_describe_image") if err else {}
     check(err is not None and err.code == "A4000_UNREADABLE"
           and err.retryable is True
           and {r.get("fixable_by") for r in err.remedies} >= {"agent",
@@ -689,7 +733,7 @@ def test_no_llama_swap_means_uncoordinated_not_blocked():
     gpu_room.CARD_READER = lambda: None
     try:
         try:
-            gpu_room.ensure_room("bonsai-vision", upstream=URL)
+            gpu_room.ensure_room(FIXTURE, upstream=URL)
             code = None
         except gpu_room.NoRoom as e:
             code = e.code
@@ -698,14 +742,14 @@ def test_no_llama_swap_means_uncoordinated_not_blocked():
     finally:
         gpu_room.CARD_READER = saved
     check(code == "A4000_UNREADABLE" and not CARD.unloads
-          and "bonsai-vision" not in CARD.served,
+          and FIXTURE not in CARD.served,
           "nvidia-smi unreadable: vision is refused, nothing unloaded, "
           "nothing loaded", str(code))
     check(d_emb and d_emb["action"] == "loaded",
           "nvidia-smi unreadable: a loaded, resident search model is still "
           "served (fast path, no card read)", json.dumps(d_emb))
     os.environ["YAMADORI_GPU_ROOM"] = "0"
-    with gpu_room.use("bonsai-vision", upstream=URL) as d2:
+    with gpu_room.use(FIXTURE, upstream=URL) as d2:
         pass
     os.environ["YAMADORI_GPU_ROOM"] = "1"
     check(d2 is None and not CARD.unloads,
@@ -747,14 +791,23 @@ def test_the_chat_path_never_waits_for_a_draw():
                 err = e
             # The real selection path (its trigger store stubbed: no real
             # skills database is read): an embedding failure is reported.
-            saved = (skill_select.trigger_rows, skill_select.TRIGGER_CACHE)
+            # The trigger vectors are served from memory, as on a warm
+            # stack (on a cold one the request path answers TriggersBuilding
+            # before it embeds anything); the query's embedding is what
+            # meets the held room.
+            import numpy as np
+            saved = (skill_select.trigger_rows, skill_select.TRIGGER_CACHE,
+                     skill_select.trigger_index)
             skill_select.trigger_rows = lambda pool: [("s1", "bind a buffer")]
             skill_select.TRIGGER_CACHE = os.path.join(_TMP, "triggers.npz")
+            skill_select.trigger_index = lambda pool, **k: (
+                [("s1", "bind a buffer")], np.ones((1, 4), dtype=np.float32))
             try:
                 best, why = skill_select.best_cosines(
                     "how do I bind a buffer", [{"id": "s1"}])
             finally:
-                skill_select.trigger_rows, skill_select.TRIGGER_CACHE = saved
+                (skill_select.trigger_rows, skill_select.TRIGGER_CACHE,
+                 skill_select.trigger_index) = saved
         took = time.time() - t0
     finally:
         let_go.set()
@@ -851,7 +904,8 @@ def test_the_chat_path_loads_embeddings_when_the_room_is_free():
 
 def test_a_vision_turn_with_no_room_is_a_structured_error():
     """Pre-deploy review, 2026-09-24 (MINOR): a client naming
-    `yamadori-vision` when the A4000 has no room got gpu_room.NoRoom as a
+    an A4000 chat model (then `yamadori-vision`; now the fixture's alias)
+    when the A4000 has no room got gpu_room.NoRoom as a
     bare 502 (blocking) or a broken stream. Now: the refusal's status and a
     structured error -- situation, retryable as a fact, remedies."""
     import accounts
@@ -859,7 +913,10 @@ def test_a_vision_turn_with_no_room_is_a_structured_error():
     from starlette.testclient import TestClient
     import server
     fresh(held=set(), foreign=13000)      # vision cannot fit, nothing to evict
-    body = {"model": "yamadori-vision", "_client_ip": "127.0.0.1",
+    import catalog
+    catalog.INTERNAL[catalog_alias] = (FIXTURE, None)
+    catalog.CATALOG[catalog_alias] = (FIXTURE, None)
+    body = {"model": catalog_alias, "_client_ip": "127.0.0.1",
             "_features": json.dumps({"hints": False, "retrieval": False,
                                      "investigate": False, "fanout": 1}),
             "messages": [{"role": "user", "content": "Describe a cat."}]}
@@ -872,19 +929,27 @@ def test_a_vision_turn_with_no_room_is_a_structured_error():
     check(err is not None and err.status == 507
           and b.get("code") == "A4000_NO_ROOM" and b.get("retryable") is False
           and b.get("remedies") and "Nothing was generated" in b["message"]
-          and "bonsai-vision" not in CARD.served,
+          and FIXTURE not in CARD.served,
           "blocking: a structured refusal (507, A4000_NO_ROOM, remedies), "
           "and nothing reached the card", json.dumps(b)[:500])
     fresh(held=set(), foreign=13000)
-    raw = b"".join(proxy.stream_body(dict(body, stream=True),
-                                     "yamadori-vision"))
-    events = [ln[6:] for ln in raw.decode().split("\n\n") if ln.startswith(
-        "data: ")]
-    first = json.loads(events[0]) if events and events[0] != "[DONE]" else {}
-    check(len(events) == 2 and events[-1] == "[DONE]"
-          and (first.get("error") or {}).get("code") == "A4000_NO_ROOM",
-          "streamed: one SSE error event in OpenAI's shape, then [DONE] -- "
-          "not a broken stream", raw.decode()[:400])
+    # ONE ERROR PATH (2026-09-25, docs/OPENAI-CONFORMANCE.md E1): the
+    # streamed path commits nothing before the turn has started, so a
+    # refusal before any byte is RAISED by stream_body -- server.chat
+    # answers it with its HTTP status (below) -- instead of an SSE error
+    # event on a 200 (what this check asserted until then).
+    raw, refused = b"", None
+    try:
+        raw = b"".join(proxy.stream_body(dict(body, stream=True),
+                                         catalog_alias))
+    except proxy.TurnRefused as e:
+        refused = e
+    check(refused is not None and not raw
+          and refused.body()["error"].get("code") == "A4000_NO_ROOM",
+          "streamed: the refusal is raised before any byte (no 200 is "
+          "committed), not a broken stream",
+          json.dumps(refused.body() if refused else None)[:300]
+          + raw.decode()[:200])
     fresh(held=set(), foreign=13000)
     key = accounts.create("gpu-room-tests")
     r = TestClient(server.app).post(
@@ -896,11 +961,23 @@ def test_a_vision_turn_with_no_room_is_a_structured_error():
           and (got.get("error") or {}).get("code") == "A4000_NO_ROOM",
           "through the server: HTTP 507 with the structured error, not a "
           "bare 502", f"{r.status_code} {r.text[:300]}")
+    fresh(held=set(), foreign=13000)
+    r = TestClient(server.app).post(
+        "/v1/chat/completions", headers={"Authorization": f"Bearer {key}"},
+        json=dict({k: v for k, v in body.items() if not k.startswith("_")},
+                  stream=True))
+    got = r.json() if r.headers.get("content-type", "").startswith(
+        "application/json") else {}
+    check(r.status_code == 507
+          and (got.get("error") or {}).get("code") == "A4000_NO_ROOM",
+          "through the server, streamed: the same HTTP 507 before any byte, "
+          "not a 200 carrying an error event", f"{r.status_code} "
+          f"{r.text[:300]}")
 
 
 def test_the_proxy_records_decisions():
     import proxy
-    fresh(held={"bonsai-vision"})
+    fresh(held={FIXTURE})
     state = {"_gpu_room": [], "_public_base": "http://example",
              "_account": ""}
     out = json.loads(proxy.run_our_tool(images.TOOL_NAME,
@@ -909,7 +986,7 @@ def test_the_proxy_records_decisions():
     rec = state["_gpu_room"]
     check(out.get("ok") is True and rec and rec[0]["model"] in IMAGE
           and rec[0]["action"] == "evicted"
-          and [e["model"] for e in rec[0]["evicted"]] == ["bonsai-vision"],
+          and [e["model"] for e in rec[0]["evicted"]] == [FIXTURE],
           "a tool the proxy runs records its A4000 decision in the request's "
           "x_yamadori.gpu_room list", json.dumps({"out": out, "rec": rec})[:900])
     x = proxy._x_yamadori({"_gpu_room": rec}, hops=0, fan=None, think=None)

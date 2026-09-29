@@ -200,8 +200,10 @@ export function AddDatasetPanel({ onSubmitted, fill }: { onSubmitted: (id: strin
           <label {...stylex.props(layout.rowWrap)}>
             <Label>KIND</Label>
             <select name="kind" value={kind} onChange={(e) => setKind(e.target.value)} {...stylex.props(text.bodySm, s.input, s.select)}>
-              <option value="recipes">recipes</option>
-              <option value="laya">laya training set</option>
+              {/* Extract compiles the rows into skills (mcp/datasets.py, 2026-09-26).
+                  The "laya training set" kind went with Laya (retired 2026-09-24,
+                  docs/E1.md); a package onboarding is SKILLS · CREATE · PROMPT + LINKS. */}
+              <option value="recipes">recipes → skills</option>
             </select>
           </label>
           {shape && <Chip tone="muted">{shape}</Chip>}

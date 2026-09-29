@@ -4,26 +4,56 @@
 WHY IT EXISTS
 
 The served model (Bonsai 2 27B on the RTX 5060 Ti) is text-only. It can draw
-with generate_image, and it cannot look at what it drew. A user's attached
+with yama_generate_image, and it cannot look at what it drew. A user's attached
 image was worse than invisible: the image part went upstream to a server
 started without a projector, and llama-server refuses that request outright
 ("image input is not supported - hint: ... provide the mmproj",
 tools/server/server-common.cpp:1212 in the prism build), so the turn failed.
 
-A copy that can see exists as a llama-swap model, `bonsai-vision`: the same
-27B plus Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf on the A4000, -c 16384, group
-`ondemand` (exclusive), loaded on demand. This module is the only caller.
+WHO LOOKS (LAYOUT V2, operator 2026-09-29: "Vision can go to second card and
+swap in and out" -- reversing 2026-09-27's "fold vision into the main models
+on the main card"). `main_sees()` reads the loaded main model's /props
+(`modalities.vision`):
+
+  - it SEES (the max-mode model; `bonsai` from 2026-09-27 until layout v2):
+    a readable image in a user turn passes to it, and yama_describe_image
+    asks it;
+  - it does NOT (`bonsai` since layout v2: no --mmproj, the ~24.8k cells the
+    projector cost went back to the KV line): every image is a placeholder
+    naming its id, and yama_describe_image asks `bonsai-vision` -- the same
+    27B with its projector on the A4000, loaded on demand by llama-swap
+    (model.VISION_MODEL; mcp/gpu_room.py makes room and evicts, LRU), as
+    before the fold. The route is the pre-fold one, restored.
+
+Only when neither exists (YAMADORI_VISION_MODEL names the main model and it
+has no projector) does yama_describe_image answer VISION_NO_PROJECTOR.
 
 WHAT IT DOES
 
-1. `extract()` runs on every chat request, in proxy.prepare. It takes each
-   image part out of the messages, keeps it for this request under an id the
-   model can pass (`image-<10 hex of its sha256>`), and puts a short text
-   placeholder naming that id where the image was. The text model sees the
-   placeholder; nothing is dropped silently and nothing crashes. Other media
-   parts (audio, video, files) get a placeholder too, for the same crash.
-2. `describe_image`, a model tool, sends one image and a question to
-   `bonsai-vision` and returns its answer as text.
+1. `normalise()` (= `extract()`, its old name) runs on every chat request,
+   in proxy.prepare. It takes each image out of the messages, keeps it for
+   this request under an id the model can pass (`image-<10 hex of its
+   sha256>`), and puts a short text placeholder naming that id where the
+   image was -- or, when the main model sees (`see=True`), an image part the
+   main model reads directly (a data: URI built HERE from the bytes, MIME
+   sniffed, never a client URL) followed by a short label naming the id.
+   Only images in a USER turn pass through (a person's attachment, a
+   harness's synthetic tool-media turn, our own /media link); an image in a
+   `tool` message or printed as text stays a placeholder, and WebP (which
+   llama-server decodes only with ffmpeg) always does. The text model sees the placeholder; nothing is dropped
+   silently and nothing crashes. Other media parts (audio, video, files)
+   get a placeholder too, for the same crash. EVERY FORM a harness sends
+   lands in the one register (docs/VISION.md 5a; the recognisers are in
+   mcp/image_input.py): an image part in any message, a harness's synthetic
+   tool-media turn, a Responses `input_image` (a file id too), and image
+   bytes PRINTED AS TEXT in a tool result or a user message. Each entry
+   names its `form`.
+2. `yama_describe_image`, a model tool, sends one image and a question to
+   the model that can see (WHO LOOKS, above: `bonsai-vision` on the A4000,
+   or the main model when it has a projector, on the child slot like any
+   internal generation) and returns its answer as text: how an attached
+   image, an image in a tool result, one yama_generate_image made, or an
+   older one no longer held is looked at.
 
 WHERE AN IMAGE MAY COME FROM, AND NOWHERE ELSE
 
@@ -33,7 +63,7 @@ This is the security contract, and it is why no argument is ever a path:
   - an image in OUR media store (index/media, by sha) that this conversation
     holds a capability for: a signed /media link that verifies (images.verify),
     a link that appeared in the conversation with a valid signature, or an
-    image generate_image made during this request.
+    image yama_generate_image made during this request.
 
 Nothing is fetched from a URL -- ours or anyone's; a /media link is resolved
 to its sha and read from the store through images.media_path, which admits
@@ -53,13 +83,11 @@ override, because the vision server has its own -c 16384 and a thinking room
 derived from the main model's pool (~100k tokens) would not fit it. See
 `thinking_cap()` for the arithmetic.
 
-It takes the IMAGE lane (admission.image_lane): vision and image generation
-are both GPU consumers on the A4000, and one at a time is the rule
-(AGENTS.md, "one GPU consumer at a time").
+It takes the IMAGE lane (admission.image_lane), one look at a time, as
+before; the main server's slots do the rest.
 
-UNTESTED LIVE. Every test is against a fake server (mcp/test_vision.py). The
-first real call to bonsai-vision is the live check in docs/IMAGEGEN.md,
-"Seeing: describe_image".
+Offline tests: mcp/test_vision.py (a fake server). The live check is the
+deploy's (bench/engine_phase2.py smoke, mcp/test_live_stack.py images).
 """
 from __future__ import annotations
 
@@ -78,28 +106,35 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import admission  # noqa: E402
 import gpu_room  # noqa: E402
+import image_input  # noqa: E402
 import images  # noqa: E402
 import model  # noqa: E402
 import tiers  # noqa: E402
 
-TOOL_NAME = "describe_image"
+# `yama_describe_image` (operator, 2026-09-27; images.DESCRIBE_TOOL_NAME,
+# the one constant): named apart from anything a harness offers. The old
+# name, `describe_image`, is still read in stored ledger rows and records
+# (proxy.LEGACY_TOOL_NAMES).
+TOOL_NAME = images.DESCRIBE_TOOL_NAME
+LEGACY_TOOL_NAME = "describe_image"
+GENERATE_TOOL_NAME = images.TOOL_NAME
 
 # The effort the vision call is shaped at: model.chat's default, the same one
 # summarize_text uses. Not measured for vision; the live check records
 # completion tokens so it can be.
 EFFORT = "low"
 
-# THE VISION SERVER'S CONTEXT. config.yaml, `bonsai-vision`: `-c 16384`.
-# Read at call time so an operator who changes -c can say so without a
-# restart of anything that imported this module.
+# THE CONTEXT ONE LOOK IS SIZED FOR: the A4000 copy's `-c 16384`
+# (config.yaml `bonsai-vision`), and the size of one describe request (image +
+# question + thinking + answer) when the main model looks instead, which the
+# thinking cap below follows. YAMADORI_VISION_CTX, read at call time.
 DEFAULT_CONTEXT = 16384
 
-# THE LARGEST IMAGE THE PROJECTOR EMITS. llama.cpp clip.cpp:1632 (prism
-# build) caps the Qwen-VL projector family at set_limit_image_tokens(8, 4096).
-# ASSUMED, NOT MEASURED: that this mmproj is of that family (the base model
-# is a Qwen3.8 derivative). The live check reads usage.prompt_tokens, which
-# replaces this allowance with a number.
-IMAGE_TOKENS_MAX = 4096
+# THE LARGEST IMAGE THE PROJECTOR EMITS: image_input.MAX_IMAGE_TOKENS, read
+# from the served mmproj (qwen3vl_merger) and the engine's clip.cpp
+# (PROJECTOR_TYPE_QWEN3VL: set_limit_image_tokens(8, 4096)); see the note
+# there. The thinking cap below budgets for the largest image.
+IMAGE_TOKENS_MAX = image_input.MAX_IMAGE_TOKENS
 
 # llama-server's own ceiling on an image it downloads (server-common.cpp:1068,
 # params.max_size = 10 MB). The same number, so an attachment is refused here
@@ -120,9 +155,9 @@ _SHA = re.compile(r"[0-9a-f]{64}")
 # A /media capability link, anywhere in a string: the sha, and the query.
 _MEDIA = re.compile(r"/media/([0-9a-f]{64})\.png(?:\?([^\s)\"'<>\]]*))?")
 
-IMAGE_PARTS = {"image_url", "input_image", "image"}
-OTHER_MEDIA = {"input_audio", "input_video", "audio", "video", "file",
-               "input_file", "document"}
+IMAGE_PARTS = image_input.IMAGE_PARTS
+OTHER_MEDIA = image_input.OTHER_MEDIA
+TEXT_PARTS = image_input.TEXT_PARTS
 
 SYSTEM = (
     "You are looking at one image for another model that cannot see it. "
@@ -139,6 +174,98 @@ def _env(name: str, default: str = "") -> str:
 def enabled() -> bool:
     """Vision is on unless YAMADORI_VISION=0. Read per call."""
     return _env("YAMADORI_VISION", "1") != "0"
+
+
+# Whether the MAIN model has a projector, from its /props (`modalities.vision`,
+# llama-server). YAMADORI_MAIN_VISION=1/0 overrides it (offline tests; an
+# operator who knows). NO TIMER: the projector is a launch flag (--mmproj),
+# so the answer can change only when the model's server is started again,
+# and a deploy restarts every service, this proxy included (docs/ENGINES.md).
+# The answer is kept per model name for the process's life, and dropped
+# (note_no_projector) the moment the server says it cannot take an image
+# ("image input is not supported"): api_errors.of_upstream and
+# _classify_http. A /props that cannot be read is not kept: asked again on
+# the next request.
+_sees: dict = {"value": None, "why": None, "model": None}
+
+
+def separate_copy() -> bool:
+    """Is there a vision copy apart from the main model (model.VISION_MODEL,
+    `bonsai-vision` on the A4000 by default)?"""
+    return bool(model.VISION_MODEL) and model.VISION_MODEL != model.MODEL
+
+
+def _vision_model() -> str:
+    """The model yama_describe_image asks (WHO LOOKS): the conversation's main model when it has a projector (MAX
+    MODE, mcp/max_mode.py: a max conversation asks the max model, which loads with its own projector), else the
+    separate copy (YAMADORI_VISION_MODEL, `bonsai-vision` on the A4000)."""
+    import max_mode
+    cur = max_mode.current(model.MODEL)
+    if cur != model.MODEL:
+        # another tier's model (mcp/tier_models.py): it looks itself when its
+        # llama-swap entry carries a projector (the table's `vision`, which
+        # the deploy writes from the entry; config.yaml `flash-next --mmproj`),
+        # else the separate copy on the A4000; no /props read of it here
+        import tier_models
+        if tier_models.table().vision(cur) is False and separate_copy():
+            return model.VISION_MODEL
+        return cur
+    if main_sees() or not separate_copy():
+        return cur
+    return model.VISION_MODEL
+
+
+def main_sees(refresh: bool = False) -> bool:
+    v = _env("YAMADORI_MAIN_VISION")
+    if v in ("0", "1"):
+        _sees.update(value=v == "1", why="YAMADORI_MAIN_VISION")
+        return v == "1"
+    if not enabled():
+        return False
+    import max_mode
+    # MAX MODE (mcp/max_mode.py): the model serving this request, cached per model; never a /props read of a model
+    # that is off the card (it would load it)
+    name = max_mode.current(model.MODEL)
+    if not refresh and _sees["value"] is not None and _sees["model"] == name:
+        return _sees["value"]
+    if max_mode.blocks(name) and max_mode.bound_model() != name:
+        return False
+    try:
+        props = model.props(name)
+        seen = bool((props.get("modalities") or {}).get("vision"))
+        _sees.update(value=seen, model=name,
+                     why="/props modalities.vision")
+    except Exception as e:                                      # noqa: BLE001
+        # Not known: the text path (placeholders) for THIS request, and not
+        # kept -- the next request asks again.
+        _sees.update(value=None, model=None,
+                     why=f"/props unreadable ({type(e).__name__})")
+        return False
+    return bool(_sees["value"])
+
+
+def note_no_projector(detail: str = "") -> None:
+    """The main server refused an image ("image input is not supported"):
+    what /props said is no longer true (the server was started again without
+    --mmproj). Kept as NO until this process restarts."""
+    _sees.update(value=False, model=model.MODEL,
+                 why=f"the server refused an image{': ' + detail[:120] if detail else ''}")
+
+
+def no_projector() -> Err:
+    return Err(
+        "VISION_NO_PROJECTOR",
+        f"The loaded main model (`{model.MODEL}`) has no vision projector and "
+        f"no separate vision copy is configured (YAMADORI_VISION_MODEL names "
+        f"the main model), so no image can be looked at on this server now "
+        f"({_sees.get('why') or 'its /props says so'}). Nothing was looked at.",
+        retryable=False, status=503,
+        remedies=[_operator("unset YAMADORI_VISION_MODEL (the A4000 copy, "
+                            "`bonsai-vision` in config.yaml, is the default), "
+                            f"or serve `{model.MODEL}` with --mmproj",
+                            "server configuration"),
+                  _agent("tell the user you cannot see images with the model "
+                         "loaded now", "the user is not left waiting")])
 
 
 def context() -> int:
@@ -228,12 +355,12 @@ def _available(att: dict | None) -> dict:
 def unknown(ref, att: dict | None, why: str) -> Err:
     have = _available(att)
     if have["attached_ids"] or have["generated_ids"]:
-        action = ("call describe_image again with one of the ids listed in "
+        action = ("call yama_describe_image again with one of the ids listed in "
                   "`available`: an attached image's id, or the url (or sha) "
-                  "generate_image returned")
+                  "yama_generate_image returned")
     else:
         action = ("there is no image in this conversation to look at: ask the "
-                  "user to attach one, or make one with generate_image first")
+                  "user to attach one, or make one with yama_generate_image first")
     shown = ref if isinstance(ref, str) else type(ref).__name__
     return Err("UNKNOWN_IMAGE",
                f"{str(shown)[:80]!r} is not an image this conversation can "
@@ -263,8 +390,8 @@ def link_invalid(why: str) -> Err:
         f"That /media link does not verify ({why}). Only a valid signed link "
         f"names an image here. Nothing was looked at.",
         retryable=False, status=403,
-        remedies=[_agent("use the url exactly as generate_image returned it, or "
-                         "draw the image again with generate_image",
+        remedies=[_agent("use the url exactly as yama_generate_image returned it, or "
+                         "draw the image again with yama_generate_image",
                          "a fresh link verifies")])
 
 
@@ -277,7 +404,7 @@ def not_found(sha: str) -> Err:
         remedies=[{"fixable_by": "operator",
                    "action": "check index/media for the file; it may have been removed",
                    "why_not_the_agent": "the agent cannot restore files"},
-                  _agent("draw it again with generate_image, then look at the new one",
+                  _agent("draw it again with yama_generate_image, then look at the new one",
                          "the new image is in the store")])
 
 
@@ -307,10 +434,46 @@ def too_large(n: int) -> Err:
                    "effect": "the model can look at it"}])
 
 
+def not_held(iid: str) -> Err:
+    return Err(
+        "IMAGE_NOT_HELD",
+        f"{iid} is an older image of this request, over this server's limit "
+        f"of {image_input.max_images()} images held per request (the newest "
+        f"are held). Nothing was looked at.",
+        retryable=False, status=413,
+        remedies=[_agent("look at one of the newest images, listed in "
+                         "`available`, or have the image shown again (read "
+                         "the file again, or ask the user to attach it)",
+                         "an image in the newest part of the conversation is held")])
+
+
+def incomplete(fmt: str | None) -> Err:
+    return Err(
+        "IMAGE_INCOMPLETE",
+        f"The {(fmt or 'image').upper()} data printed as text was cut off "
+        f"before its end (a tool's output limit), so the image is "
+        f"incomplete. Nothing was looked at.",
+        retryable=True, status=422,
+        remedies=[_agent("print a smaller copy whose base64 fits the tool's "
+                         "output limit: a JPEG at lower quality or a narrower "
+                         "width", "the whole image arrives and gets an id")])
+
+
+def file_id_not_supported() -> Err:
+    return Err(
+        "IMAGE_FILE_ID",
+        "That image was sent as a file id. This server is stateless and has "
+        "no files API, so a file id names nothing here. Nothing was looked at.",
+        retryable=False, status=400,
+        remedies=[{"fixable_by": "user",
+                   "action": "attach the image itself (a data URL), not a file id",
+                   "effect": "the model can look at it"}])
+
+
 def busy() -> Err:
     return Err(
         "VISION_BUSY",
-        "The A4000 is busy with another image job (drawing or looking), and "
+        "Another image job (drawing or looking) is running, and "
         "only one runs at a time. Nothing was looked at.",
         retryable=True, status=429,
         remedies=[_agent("try again in a minute", "the lane frees when the other job finishes")])
@@ -327,7 +490,7 @@ def _down(detail: str) -> Err:
         f"Nothing was looked at.",
         retryable=False, status=503,
         remedies=[_operator("start llama-swap (scripts/start-stack.bat); "
-                            f"it serves `{model.VISION_MODEL}` on demand",
+                            f"it serves `{model.VISION_MODEL}`",
                             "the agent cannot start processes on the server"),
                   _agent("tell the user the image could not be looked at",
                          "retrying in this turn cannot succeed")])
@@ -336,11 +499,11 @@ def _down(detail: str) -> Err:
 def _timeout_err() -> Err:
     return Err(
         "VISION_TIMEOUT",
-        f"The vision model did not answer within {timeout():.0f}s. A cold "
-        f"start loads the 27B and its projector first. Nothing came back.",
+        f"The vision model did not answer within {timeout():.0f}s. Nothing "
+        f"came back.",
         retryable=False, status=504,
         remedies=[_operator(f"check the `{model.VISION_MODEL}` process in "
-                            "llama-swap's log and the A4000 in nvidia-smi"),
+                            "llama-swap's log and its card in nvidia-smi"),
                   _agent("tell the user looking at the image timed out",
                          "the user is not left waiting")])
 
@@ -349,6 +512,7 @@ def _classify_http(code: int, body: str) -> Err:
     low = body.lower()
     head = body[:200].strip() or f"HTTP {code}"
     if "image input is not supported" in low:
+        note_no_projector(head)
         return Err(
             "VISION_NO_PROJECTOR",
             f"The server answering as `{model.VISION_MODEL}` was started "
@@ -361,12 +525,12 @@ def _classify_http(code: int, body: str) -> Err:
                               "failed to allocate")):
         return Err(
             "VISION_OUT_OF_MEMORY",
-            f"The vision model ran out of GPU memory on the A4000 ({head}). "
+            f"The vision model ran out of GPU memory ({head}). "
             f"Nothing was looked at.",
             retryable=False, status=507,
-            remedies=[_operator("check the A4000 with nvidia-smi: bonsai-vision "
-                                "needs 8,265-9,449 MiB (config.yaml estimate) and "
-                                "retrieval, Laya or an image generation may hold it"),
+            remedies=[_operator(f"check `{model.VISION_MODEL}`'s card with "
+                                "nvidia-smi and its VRAM line (--kv-vram-cells, "
+                                "docs/ENGINES.md)"),
                       _agent("tell the user the image could not be looked at "
                              "right now", "retrying in this turn is unlikely to help")])
     if "exceed" in low and "context" in low:
@@ -375,8 +539,9 @@ def _classify_http(code: int, body: str) -> Err:
             f"The image and question do not fit the vision model's context "
             f"({head}). Nothing was looked at.",
             retryable=False, status=413,
-            remedies=[_operator("raise -c on bonsai-vision, or YAMADORI_VISION_CTX "
-                                "if it was changed", "server configuration"),
+            remedies=[_operator(f"raise -c on `{model.VISION_MODEL}`, or "
+                                "YAMADORI_VISION_CTX if it was changed",
+                                "server configuration"),
                       _agent("tell the user the image is too detailed to look at here",
                              "the user can send a smaller crop")])
     if any(s in low for s in ("failed to load image", "failed to decode",
@@ -398,8 +563,9 @@ def _classify_http(code: int, body: str) -> Err:
             f"llama-swap has no model `{model.VISION_MODEL}` ({head}). Nothing "
             f"was looked at.",
             retryable=False, status=503,
-            remedies=[_operator("add the `bonsai-vision` entry to config.yaml, or "
-                                "set YAMADORI_VISION_MODEL to its name", "server configuration"),
+            remedies=[_operator(f"check config.yaml's `{model.VISION_MODEL}` entry, or "
+                                "set YAMADORI_VISION_MODEL to the main model's name",
+                                "server configuration"),
                       _agent("tell the user image viewing is not available here",
                              "retrying cannot succeed")])
     if code == 503 and "loading" in low:
@@ -407,8 +573,8 @@ def _classify_http(code: int, body: str) -> Err:
             "VISION_LOADING",
             f"The vision model is still loading ({head}). Nothing was looked at.",
             retryable=True, status=503,
-            remedies=[_agent("call describe_image once more in a minute",
-                             "the model finishes loading and stays resident for 15 minutes (ttl 900)")])
+            remedies=[_agent("call yama_describe_image once more in a minute",
+                             "the model is loading; it stays resident while in use")])
     if code in (502, 503, 504):
         # llama-swap answers this way when the process it starts exits or never
         # comes up, and when it was stopped mid-request -- an eviction and a
@@ -419,7 +585,7 @@ def _classify_http(code: int, body: str) -> Err:
             f"crashed, or was evicted. Nothing was looked at.",
             retryable=False, status=503,
             remedies=[_operator(f"read llama-swap's log for `{model.VISION_MODEL}` "
-                                "and nvidia-smi for A4000 free memory"),
+                                "and nvidia-smi for its card's free memory"),
                       _agent("tell the user the image could not be looked at",
                              "retrying in this turn is unlikely to succeed")])
     return Err(
@@ -469,6 +635,10 @@ def _source_of(part: dict) -> tuple[str, str | None]:
             if isinstance(src.get("url"), str):
                 return "url", src["url"]
         return "other", None
+    if t == "input_image" and not part.get("image_url") \
+            and isinstance(part.get("file_id"), str):
+        # A Responses file id: there is no files API here (docs/VISION.md 5a).
+        return "file_id", part["file_id"]
     iu = part.get("image_url")
     url = iu.get("url") if isinstance(iu, dict) else iu
     if not isinstance(url, str):
@@ -515,9 +685,60 @@ def _is_ours(url: str, hosts: frozenset | None) -> bool:
     return (parts.hostname or "").lower() in (hosts or our_hosts())
 
 
-def _admit(part: dict, att: dict, hosts: frozenset | None = None) -> str:
-    """Register one image part; return the placeholder the text model sees."""
+def _put(att: dict, iid: str, entry: dict) -> None:
+    """Register an entry; an id seen again moves to the NEWEST position (the
+    count cap holds the newest images)."""
+    att["images"].pop(iid, None)
+    att["images"][iid] = entry
+
+
+def _size(fmt: str, n: int) -> str:
+    return f"{fmt.upper()}, {max(1, n // 1024):,} KB"
+
+
+def _register(att: dict, data: bytes, fmt: str, form: str, where: str,
+              b64: str | None = None) -> str:
+    """Hold one readable image; return its placeholder: a pure function of
+    the bytes and of `where` it came in, so the same history renders the
+    same text on every request."""
+    iid = _new_id(data)
+    _put(att, iid, {"id": iid, "source": "attached", "form": form,
+                    "format": fmt, "bytes": len(data),
+                    "sha": hashlib.sha256(data).hexdigest(),
+                    "b64": b64 or base64.b64encode(data).decode("ascii"),
+                    "error": None})
+    if not enabled():
+        return (f"[{iid}: {where} ({_size(fmt, len(data))}). Image viewing is "
+                f"switched off on this server, so its content is unavailable; "
+                f"tell the user you cannot see it.]")
+    return (f"[{iid}: {where} ({_size(fmt, len(data))}). You cannot see it "
+            f"directly. To look at it, call yama_describe_image with image "
+            f"\"{iid}\" and a question about it.]")
+
+
+# Where an image came in, as its placeholder says it (docs/VISION.md 5b).
+# "an attached image" is the wording every placeholder had before 2026-09-26,
+# kept byte for byte so an existing conversation's prefix does not move.
+WHERE = {"user_part": "an attached image",
+         "tool_part": "an image from a tool result",
+         "tool_media_turn": "an image from a tool result",
+         "responses_output": "an image from a tool result"}
+
+
+def _admit(part: dict, att: dict, hosts: frozenset | None = None,
+           form: str = "user_part") -> str:
+    """Register one image part; return the placeholder the text model sees.
+    `form` says how it came (image_input.FORMS); a link or a file id records
+    its own form."""
     kind, value = _source_of(part)
+    if kind == "file_id":
+        iid = _new_id(("file_id\x00" + value).encode("utf-8", "replace"))
+        _put(att, iid, {"id": iid, "source": "attached", "form": "file_id",
+                        "format": None, "bytes": None, "b64": None,
+                        "error": "IMAGE_FILE_ID"})
+        return (f"[{iid}: an image sent as a file id. This server is "
+                f"stateless and has no files API, so a file id names nothing "
+                f"here and the image was not seen. Ask for the image itself.]")
     if kind == "url":
         m = _MEDIA.search(value or "")
         if m and _is_ours(value, hosts):
@@ -534,10 +755,10 @@ def _admit(part: dict, att: dict, hosts: frozenset | None = None) -> str:
                                     (q.get("sig") or [""])[0])
             iid = _new_id(("media\x00" + sha).encode())
             if not ok:
-                att["images"][iid] = {"id": iid, "source": "media",
-                                      "format": None, "bytes": None,
-                                      "b64": None, "error": "IMAGE_LINK_INVALID",
-                                      "detail": why}
+                _put(att, iid, {"id": iid, "source": "media",
+                                "form": "media_link", "format": None,
+                                "bytes": None, "b64": None,
+                                "error": "IMAGE_LINK_INVALID", "detail": why})
                 return (f"[{iid}: a link to an image on this server whose "
                         f"signature does not verify ({why}), so it was not "
                         f"read. Tell the user the link has expired or was "
@@ -549,20 +770,20 @@ def _admit(part: dict, att: dict, hosts: frozenset | None = None) -> str:
             if data is None or not fmt or len(data) > max_bytes():
                 err = ("IMAGE_NOT_FOUND" if data is None else
                        "IMAGE_TOO_LARGE" if fmt else "NOT_AN_IMAGE")
-                att["images"][iid] = {"id": iid, "source": "media",
-                                      "format": None,
-                                      "bytes": len(data) if data else None,
-                                      "b64": None, "error": err, "sha": sha,
-                                      "detail": "the stored file is not an "
-                                                "image" if data else None}
+                _put(att, iid, {"id": iid, "source": "media",
+                                "form": "media_link", "format": None,
+                                "bytes": len(data) if data else None,
+                                "b64": None, "error": err, "sha": sha,
+                                "detail": "the stored file is not an "
+                                          "image" if data else None})
                 return (f"[{iid}: a link to an image this server made, which "
                         f"could not be read from its media store ({err}). "
                         f"Tell the user.]")
-            att["images"][iid] = {"id": iid, "source": "media", "format": fmt,
-                                  "bytes": len(data), "sha": sha,
-                                  "b64": base64.b64encode(data).decode("ascii"),
-                                  "error": None}
-            size = f"{fmt.upper()}, {max(1, len(data) // 1024):,} KB"
+            _put(att, iid, {"id": iid, "source": "media", "form": "media_link",
+                            "format": fmt, "bytes": len(data), "sha": sha,
+                            "b64": base64.b64encode(data).decode("ascii"),
+                            "error": None})
+            size = _size(fmt, len(data))
             if not enabled():
                 return (f"[{iid}: an image this server made ({size}). Image "
                         f"viewing is switched off on this server, so its "
@@ -570,12 +791,12 @@ def _admit(part: dict, att: dict, hosts: frozenset | None = None) -> str:
                         f"see it.]")
             return (f"[{iid}: an image this server made ({size}), attached by "
                     f"its link. You cannot see it directly. To look at it, "
-                    f"call describe_image with image \"{iid}\" and a question "
+                    f"call yama_describe_image with image \"{iid}\" and a question "
                     f"about it.]")
         iid = _new_id(("url\x00" + (value or "")).encode("utf-8", "replace"))
-        att["images"][iid] = {"id": iid, "source": "link", "format": None,
-                              "bytes": None, "b64": None,
-                              "error": "IMAGE_URL_NOT_ALLOWED"}
+        _put(att, iid, {"id": iid, "source": "link", "form": "url",
+                        "format": None, "bytes": None, "b64": None,
+                        "error": "IMAGE_URL_NOT_ALLOWED"})
         return (f"[{iid}: a link to an image on another site. It was NOT "
                 f"downloaded: this server never fetches image links, and "
                 f"looks only at images attached to the conversation or made "
@@ -583,9 +804,10 @@ def _admit(part: dict, att: dict, hosts: frozenset | None = None) -> str:
                 f"image, and ask them to attach the image file itself.]")
     if kind != "data":
         iid = _new_id(json.dumps(part, sort_keys=True, default=str)[:4096].encode())
-        att["images"][iid] = {"id": iid, "source": "attached", "format": None,
-                              "bytes": None, "b64": None, "error": "NOT_AN_IMAGE",
-                              "detail": "not a base64 data: URI or a link"}
+        _put(att, iid, {"id": iid, "source": "attached", "form": form,
+                        "format": None, "bytes": None, "b64": None,
+                        "error": "NOT_AN_IMAGE",
+                        "detail": "not a base64 data: URI or a link"})
         return (f"[{iid}: an attachment that could not be read as an image "
                 f"(it was not image data or a link). Tell the user, and ask "
                 f"for a PNG or JPEG file.]")
@@ -595,8 +817,9 @@ def _admit(part: dict, att: dict, hosts: frozenset | None = None) -> str:
     est = len(b64) * 3 // 4
     if est > max_bytes() + 3:
         iid = _new_id(b64[:65536].encode("ascii", "replace"))
-        att["images"][iid] = {"id": iid, "source": "attached", "format": None,
-                              "bytes": est, "b64": None, "error": "IMAGE_TOO_LARGE"}
+        _put(att, iid, {"id": iid, "source": "attached", "form": form,
+                        "format": None, "bytes": est, "b64": None,
+                        "error": "IMAGE_TOO_LARGE"})
         return (f"[{iid}: an attached image of about {est // 1024:,} KB, over "
                 f"this server's {max_bytes() // (1024 * 1024)} MB limit for "
                 f"looking at images. Tell the user, and ask for a smaller copy.]")
@@ -607,64 +830,216 @@ def _admit(part: dict, att: dict, hosts: frozenset | None = None) -> str:
     fmt = sniff(data) if data else None
     if not fmt:
         iid = _new_id(data if data else b64[:65536].encode("ascii", "replace"))
-        att["images"][iid] = {"id": iid, "source": "attached", "format": None,
-                              "bytes": len(data) if data else None, "b64": None,
-                              "error": "NOT_AN_IMAGE",
-                              "detail": ("the data is not valid base64" if data is None
-                                         else "the bytes are not PNG, JPEG, GIF, BMP or WebP")}
+        _put(att, iid, {"id": iid, "source": "attached", "form": form,
+                        "format": None,
+                        "bytes": len(data) if data else None, "b64": None,
+                        "error": "NOT_AN_IMAGE",
+                        "detail": ("the data is not valid base64" if data is None
+                                   else "the bytes are not PNG, JPEG, GIF, BMP or WebP")})
         return (f"[{iid}: an attachment that is not an image this server can "
                 f"read. Tell the user, and ask for a PNG or JPEG file.]")
-    iid = _new_id(data)
-    att["images"][iid] = {"id": iid, "source": "attached", "format": fmt,
-                          "bytes": len(data), "b64": b64, "error": None}
-    size = f"{fmt.upper()}, {max(1, len(data) // 1024):,} KB"
-    if not enabled():
-        return (f"[{iid}: an attached image ({size}). Image viewing is switched "
-                f"off on this server, so its content is unavailable; tell the "
-                f"user you cannot see it.]")
-    return (f"[{iid}: an attached image ({size}). You cannot see it directly. "
-            f"To look at it, call describe_image with image \"{iid}\" and a "
-            f"question about it.]")
+    return _register(att, data, fmt, form,
+                     WHERE.get(form, WHERE["user_part"]), b64=b64)
 
 
-def extract(messages: list, hosts: frozenset | None = None
-            ) -> tuple[list, dict]:
-    """(the messages the text model sees, the attachment register).
+def _inline(text: str, att: dict, in_tool: bool) -> str:
+    """Image bytes PRINTED AS TEXT (image_input.find_inline) become
+    placeholders in place; the rest of the text is kept. Returns `text`
+    itself when there are none."""
+    runs = image_input.find_inline(text)
+    if not runs:
+        return text
+    where = ("an image printed as text in a tool result" if in_tool
+             else "an image pasted as text in the message")
+    what = ("image data printed as text in a tool result" if in_tool
+            else "image data pasted as text in the message")
+    out: list[str] = []
+    pos = 0
+    for r in runs:
+        out.append(text[pos:r["start"]])
+        pos = r["end"]
+        data, fmt = r["data"], r["format"]
+        if r["status"] == "complete" and len(data) <= max_bytes():
+            out.append(_register(att, data, fmt, "inline_text", where))
+            continue
+        seed = text[r["start"]:r["end"]]
+        iid = _new_id(("inline\x00" + seed[:65536]).encode("ascii", "replace"))
+        if r["status"] == "complete":
+            _put(att, iid, {"id": iid, "source": "attached",
+                            "form": "inline_text", "format": None,
+                            "bytes": len(data), "b64": None,
+                            "error": "IMAGE_TOO_LARGE"})
+            out.append(f"[{iid}: {what} ({_size(fmt, len(data))}), over this "
+                       f"server's {max_bytes() // (1024 * 1024)} MB limit for "
+                       f"looking at images; the text was replaced. To look at "
+                       f"it, print a smaller copy.]")
+        elif r["status"] == "cut":
+            _put(att, iid, {"id": iid, "source": "attached",
+                            "form": "inline_text", "format": fmt,
+                            "bytes": None, "b64": None,
+                            "error": "IMAGE_INCOMPLETE"})
+            remedy = ("To look at it, print a smaller copy whose base64 fits "
+                      "the tool's output limit, for example a JPEG at lower "
+                      "quality or a narrower width." if in_tool else
+                      "Ask the user to attach the image file instead.")
+            out.append(f"[{iid}: {what} ({fmt.upper()}), cut off after "
+                       f"{r['chars']:,} base64 characters, so the image is "
+                       f"incomplete and cannot be looked at. {remedy}]")
+        else:
+            _put(att, iid, {"id": iid, "source": "attached",
+                            "form": "inline_text", "format": None,
+                            "bytes": len(data), "b64": None,
+                            "error": "NOT_AN_IMAGE",
+                            "detail": f"declared image/{r['declared']}"})
+            out.append(f"[{iid}: {what}, declared as image/{r['declared']} "
+                       f"({max(1, len(data) // 1024):,} KB), a format this "
+                       f"server cannot look at; the text was replaced. A PNG "
+                       f"or JPEG can be looked at.]")
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _hold_newest(att: dict) -> None:
+    """At most image_input.max_images() images keep their bytes: the newest.
+    An older one keeps its id and placeholder (the text never changes) and
+    yama_describe_image on it says IMAGE_NOT_HELD."""
+    cap = image_input.max_images()
+    held = [i for i, e in att["images"].items() if e.get("b64")]
+    if len(held) <= cap:
+        return
+    for iid in held[:len(held) - cap]:
+        e = att["images"][iid]
+        e["b64"] = None
+        e["error"] = "IMAGE_NOT_HELD"
+    att["not_held"] = len(held) - cap
+
+
+# THE FORMS THAT PASS THROUGH to a main model that sees: an image in a USER
+# turn -- a person's attachment, a harness's synthetic tool-media turn, our
+# own signed /media link. llama-server reads image parts in any message, but
+# a `tool` message's image and base64 printed as text keep their placeholder
+# (the model looks at them with yama_describe_image, as before), and so does
+# a format the server cannot decode without ffmpeg.
+PASS_FORMS = ("user_part", "tool_media_turn", "media_link")
+PASS_FORMATS = ("png", "jpeg", "gif", "bmp")
+
+
+def _seen_label(e: dict, where: str) -> str:
+    """The text after an image part the model sees: its id, so the model can
+    still name it (yama_describe_image, the user). A pure function of the
+    bytes and where it came in, like every placeholder."""
+    return (f"[{e['id']}: {where} ({_size(e['format'], e['bytes'] or 0)}), "
+            f"shown to you above.]")
+
+
+def _pass_through(parts: list, att: dict) -> tuple[list, int]:
+    """Markers left by normalise(see=True) become [image part, label] when
+    the image is still held (the newest image_input.max_images()), else its
+    ordinary placeholder. Returns the parts and how many images passed."""
+    out, n = [], 0
+    for p in parts:
+        if not (isinstance(p, dict) and "_see" in p):
+            out.append(p)
+            continue
+        iid, where, placeholder = p["_see"]
+        e = att["images"].get(iid) or {}
+        if e.get("b64") and not e.get("error") and e.get("format") in PASS_FORMATS:
+            uri = f"data:{MIME[e['format']]};base64,{e['b64']}"
+            out.append({"type": "image_url", "image_url": {"url": uri}})
+            out.append({"type": "text", "text": _seen_label(e, where)})
+            e["passed"] = True
+            n += 1
+        else:
+            out.append({"type": "text", "text": placeholder})
+    return out, n
+
+
+def normalise(messages: list, hosts: frozenset | None = None,
+              see: bool = False) -> tuple[list, dict]:
+    """THE NORMALISER: (the messages the model sees, the register).
 
     `hosts`: the hosts an image part's /media link may name to be read as
     ours (our_hosts); default loopback and YAMADORI_PUBLIC_BASE.
 
-    Each image part becomes a text part naming its id; each other media part
-    becomes a text part saying it was not passed on. Text is untouched, and
-    signed /media links in it are noted as images this conversation holds.
-    When nothing changes the SAME list is returned, so a text-only request
-    keeps a byte-identical prefix (strip_thinking's rule).
+    `see`: the main model has a projector (main_sees()). Then a readable
+    image in a user turn (PASS_FORMS) goes to it as an image part -- a data:
+    URI built here from the held bytes, never the client's URL -- followed by
+    a label naming its id; every other image keeps its placeholder. Only the
+    newest images_input.max_images() pass (the held ones); an older one is a
+    placeholder, exactly as without `see`.
+
+    Each image -- a chat `image_url` part, an Anthropic `image` block, a
+    Responses `input_image` (url or file id), in ANY message: user, a
+    harness's synthetic tool-media turn (image_input.tool_media_turn), a
+    `tool` message -- becomes a text part naming its id; each other media
+    part becomes a text part saying it was not passed on. Image bytes
+    printed as text in a user or tool message (image_input.find_inline)
+    become a placeholder in place, the rest of the text kept. Responses text
+    parts (`input_text`, `output_text`) become `text` parts. Every other
+    text is untouched, and signed /media links in it are noted as images
+    this conversation holds. Every placeholder is a pure function of the
+    image's bytes and where it came in, so the same history renders the same
+    bytes on every request. When nothing changes the SAME list is returned,
+    so a text-only request keeps a byte-identical prefix (strip_thinking's
+    rule). Nothing is fetched and nothing is opened.
     """
     att = empty()
+    msgs = messages or []
     out: list = []
     changed_any = False
-    for m in messages or []:
+    for i, m in enumerate(msgs):
         if not isinstance(m, dict):
             out.append(m)
             continue
+        role = m.get("role")
+        in_tool = role in ("tool", "function")
+        # Printed image bytes are looked for where a person or a tool put
+        # text: never in the model's own turns (the slot generated those).
+        scan = in_tool or role == "user"
         c = m.get("content")
         if isinstance(c, str):
             _note_links(c, att)
-            out.append(m)
+            new = _inline(c, att, in_tool) if scan else c
+            if new is not c:
+                changed_any = True
+                out.append(dict(m, content=new))
+            else:
+                out.append(m)
             continue
         if not isinstance(c, list):
             out.append(m)
             continue
+        media_turn = role == "user" and image_input.is_tool_media(msgs, i)
         parts: list = []
         changed = False
         for p in c:
             kind = p.get("type") if isinstance(p, dict) else None
-            if kind == "text":
-                _note_links(p.get("text") or "", att)
-                parts.append(p)
+            if kind in TEXT_PARTS:
+                t = p.get("text")
+                t = t if isinstance(t, str) else ""
+                _note_links(t, att)
+                new = _inline(t, att, in_tool) if scan else t
+                if kind != "text" or new is not t:
+                    parts.append({"type": "text", "text": new})
+                    changed = True
+                else:
+                    parts.append(p)
             elif kind in IMAGE_PARTS:
-                parts.append({"type": "text", "text": _admit(p, att,
-                                                             hosts)})
+                form = ("responses_output" if in_tool and kind == "input_image"
+                        else "tool_part" if in_tool
+                        else "tool_media_turn" if media_turn else "user_part")
+                text = _admit(p, att, hosts, form)
+                # _admit registers (or re-registers) exactly one entry, and
+                # _put moves it to the newest position: the last key is it
+                iid = next(reversed(att["images"])) if att["images"] else None
+                e = att["images"].get(iid) or {}
+                if see and iid and not e.get("error") and \
+                        e.get("form", form) in PASS_FORMS and form in PASS_FORMS:
+                    where = ("an image this server made" if e.get("form") == "media_link"
+                             else WHERE.get(form, WHERE["user_part"]))
+                    parts.append({"_see": (iid, where, text)})
+                else:
+                    parts.append({"type": "text", "text": text})
                 changed = True
             elif kind in OTHER_MEDIA:
                 parts.append({"type": "text", "text": (
@@ -679,18 +1054,33 @@ def extract(messages: list, hosts: frozenset | None = None
             out.append(dict(m, content=parts))
         else:
             out.append(m)
+    _hold_newest(att)
+    if see and changed_any:
+        passed = 0
+        for k, m in enumerate(out):
+            c = m.get("content") if isinstance(m, dict) else None
+            if isinstance(c, list) and any(isinstance(p, dict) and "_see" in p for p in c):
+                parts, n = _pass_through(c, att)
+                out[k] = dict(m, content=parts)
+                passed += n
+        att["passed"] = passed
     return (out if changed_any else messages), att
 
 
+# The old name: proxy.prepare and the tests call it.
+extract = normalise
+
+
 def summary(att: dict | None) -> list[dict]:
-    """The register for x_yamadori: id, source, format, size, error. Never the
-    bytes."""
-    return [{k: e.get(k) for k in ("id", "source", "format", "bytes", "error")}
+    """The register for x_yamadori: id, source, form (image_input.FORMS),
+    format, size, error. Never the bytes."""
+    return [{k: e.get(k) for k in ("id", "source", "form", "format", "bytes",
+                                   "error", "passed")}
             for e in ((att or {}).get("images") or {}).values()]
 
 
 def note_generated(result: str, att: dict | None) -> None:
-    """generate_image's result in this request: the image it made may now be
+    """yama_generate_image's result in this request: the image it made may now be
     looked at by its sha or its url."""
     if att is None:
         return
@@ -729,7 +1119,7 @@ def resolve(ref, att: dict | None) -> dict:
     att = att if att is not None else empty()
     if not isinstance(ref, str) or not ref.strip():
         raise bad_args("`image` must be a string: an attached image's id or "
-                       "the url generate_image returned.",
+                       "the url yama_generate_image returned.",
                        "call again with image set to an id from the conversation")
     r = ref.strip().strip("`'\"<>()[] ")
     low = r.lower()
@@ -747,6 +1137,12 @@ def resolve(ref, att: dict | None) -> dict:
             raise not_found(e.get("sha") or "?" * 16)
         if code == "IMAGE_TOO_LARGE":
             raise too_large(int(e.get("bytes") or 0))
+        if code == "IMAGE_NOT_HELD":
+            raise not_held(e["id"])
+        if code == "IMAGE_INCOMPLETE":
+            raise incomplete(e.get("format"))
+        if code == "IMAGE_FILE_ID":
+            raise file_id_not_supported()
         if code:
             raise not_an_image(e.get("detail") or "unreadable attachment")
         return {"data": base64.b64decode(e["b64"]), "format": e["format"],
@@ -798,6 +1194,8 @@ def describe(data: bytes, fmt: str, question: str) -> dict:
     {answer, seconds, usage, finish}; raises ImageError."""
     if not enabled():
         raise vision_off()
+    if not main_sees() and not separate_copy():
+        raise no_projector()
     q = _question(question)
     uri = f"data:{MIME[fmt]};base64,{base64.b64encode(data).decode('ascii')}"
     messages = [{"role": "system", "content": SYSTEM},
@@ -811,7 +1209,7 @@ def describe(data: bytes, fmt: str, question: str) -> dict:
         t0 = time.time()
         try:
             d = model.chat(messages, effort=EFFORT, max_tokens=tiers.A_MIN,
-                           timeout=timeout(), cap=cap, model=model.VISION_MODEL)
+                           timeout=timeout(), cap=cap, model=_vision_model())
         except gpu_room.NoRoom as e:
             # The A4000 coordinator could not make room (model.post holds it
             # around the request): busy (retryable) or no room at all.
@@ -849,7 +1247,7 @@ def describe(data: bytes, fmt: str, question: str) -> dict:
                   retryable=True, status=502,
                   remedies=[_agent("call again with a narrower question about "
                                    "one part of the image", "a shorter answer fits"),
-                            _operator("raise -c on bonsai-vision; the thinking cap "
+                            _operator("raise YAMADORI_VISION_CTX; the thinking cap "
                                       "follows YAMADORI_VISION_CTX", "server configuration")],
                   seconds=seconds) from None
     if not (text or "").strip():
@@ -867,7 +1265,7 @@ def describe(data: bytes, fmt: str, question: str) -> dict:
 # ----------------------------------------------------------------- model tool
 # A description is a trigger condition (AGENTS.md "Tool descriptions are
 # prompts"): the question it answers first, the contrast with the tool it
-# could be confused with (generate_image), then the phrasings that fire it.
+# could be confused with (yama_generate_image), then the phrasings that fire it.
 TOOL = {
     "type": "function",
     "function": {
@@ -875,9 +1273,9 @@ TOOL = {
         "description": (
             "Answers a question about what is IN an image. Use it whenever you "
             "need to see a picture: an image the user attached (the "
-            "conversation names it like image-3f9a1c2b7d) or one generate_image "
-            "made (pass the url it returned). generate_image turns words into "
-            "a new picture; describe_image turns an existing picture back into "
+            "conversation names it like image-3f9a1c2b7d) or one yama_generate_image "
+            "made (pass the url it returned). yama_generate_image turns words into "
+            "a new picture; yama_describe_image turns an existing picture back into "
             "words. Use it for 'what is in this image', 'describe this "
             "screenshot', 'read the text in this picture', 'what does this "
             "error dialog say', 'what colour is the button', 'does the mockup "
@@ -894,7 +1292,7 @@ TOOL = {
                     "description": (
                         "Which image: an attached image's id as the "
                         "conversation shows it (image-...), or the url "
-                        "generate_image returned."),
+                        "yama_generate_image returned."),
                 },
                 "question": {
                     "type": "string",
@@ -911,7 +1309,7 @@ TOOL = {
 
 
 def run_tool(args, att: dict | None, record: list | None = None) -> str:
-    """Execute describe_image for the model. Always returns a JSON envelope;
+    """Execute yama_describe_image for the model. Always returns a JSON envelope;
     never raises. `att` is this request's attachment register (extract()).
     `record` collects one entry per call for x_yamadori.vision: ok, which
     image (attached id or sha prefix), source, format, bytes, seconds, token

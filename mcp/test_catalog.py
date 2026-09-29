@@ -29,15 +29,36 @@ sys.path.insert(0, HERE)
 os.environ.pop("YAMADORI_EXPOSE_INTERNAL", None)
 os.environ.pop("YAMADORI_OWNER", None)
 
+# Vision is available when a model that can see is in config.yaml WITH its
+# projector (catalog.vision_configured): the A4000 copy `bonsai-vision`
+# (layout v2, 2026-09-29), or the main model itself (the 2026-09-27 fold). A
+# config of our own, in the layout-v2 shape, so the assertions do not follow
+# the live config.yaml.
+import tempfile  # noqa: E402
+_SWAP = os.path.join(tempfile.mkdtemp(prefix="yamadori_test_catalog_"), "swap.yaml")
+with open(_SWAP, "w", encoding="utf-8") as _f:
+    _f.write('models:\n  "bonsai":\n    cmd: |\n      server\n'
+             '  "bonsai-vision":\n    cmd: |\n      server\n      --mmproj m.gguf\n')
+os.environ["YAMADORI_SWAP_CONFIG"] = _SWAP
+os.environ.pop("YAMADORI_VISION_MODEL", None)
+
 import catalog  # noqa: E402
 import budget  # noqa: E402
 
 # budget.pool_size() would ask the live server for n_ctx. Pinned to the pool
 # config.yaml launches with (-c 163840), so the window is 5/8 of it.
 budget._POOL = 163840
+# This suite tests the budget MECHANICS, so it pins the split it was
+# written against (5/8 + 3/8) and turns the standing thinking caps off;
+# mcp/test_budget.py checks the shipped split, test_tiers the caps.
+import budget as _budget_pin  # noqa: E402
+import tiers as _tiers_pin  # noqa: E402
+_budget_pin.MAIN_SHARE, _budget_pin.HELPER_SHARE = 0.625, 0.375
+_budget_pin.HELPER_TOKENS = 0
+_tiers_pin.HELPER_THINKING, _tiers_pin.JOB_THINKING = 0, {}
 
-INTERNAL_NAMES = {"bonsai", "bonsai-agent", "bonsai-vision", "embeddings",
-                  "reranker", "critic-disabled"}
+INTERNAL_NAMES = {"bonsai", "bonsai-agent", "embeddings",
+                  "reranker", "critic-disabled", "bonsai-vision"}
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -84,6 +105,7 @@ def test_names_resolve_to_a_working_model():
     cases = {"yamadori": ("bonsai", None, True),
              "yamadori-fast": ("bonsai", "low", True),
              "yamadori-max": ("bonsai", "max", True),
+             # the A4000 copy again since layout v2 (2026-09-29)
              "yamadori-vision": ("bonsai-vision", None, True),
              " yamadori-max ": ("bonsai", "max", True),
              "bonsai": ("bonsai", None, True),
@@ -314,6 +336,28 @@ def test_the_card_is_complete_and_follows_the_budget():
         budget._POOL = old
 
 
+def test_vision_configured_reads_either_shape():
+    """Layout v2's config (bonsai-vision with --mmproj, bonsai without) and
+    the 2026-09-27 fold's (bonsai with --mmproj, no copy) both promise image
+    input; a config with neither does not."""
+    import model
+    check(catalog.vision_configured() and model.VISION_MODEL == "bonsai-vision",
+          "layout v2: bonsai-vision's --mmproj makes vision available")
+    shapes = {
+        "fold": ('models:\n  "bonsai":\n    cmd: |\n      server\n'
+                 '      --mmproj m.gguf\n', True),
+        "none": ('models:\n  "bonsai":\n    cmd: |\n      server\n'
+                 '  "bonsai-vision":\n    cmd: |\n      server\n', False)}
+    for name, (text, want) in shapes.items():
+        path = os.path.join(os.path.dirname(_SWAP), f"swap-{name}.yaml")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        with _Env("YAMADORI_SWAP_CONFIG", path):
+            got = catalog.vision_configured()
+        check(got is want, f"config shape `{name}`: vision_configured is {want}",
+              str(got))
+
+
 def test_image_input_follows_the_vision_switch():
     with _Env("YAMADORI_VISION", "0"):
         m = _card()
@@ -421,6 +465,7 @@ def main() -> int:
                test_only_the_product_is_advertised,
                test_the_context_window_is_advertised,
                test_the_card_is_complete_and_follows_the_budget,
+               test_vision_configured_reads_either_shape,
                test_image_input_follows_the_vision_switch,
                test_nothing_internal_leaks,
                test_model_detail_route_and_unknown_names,

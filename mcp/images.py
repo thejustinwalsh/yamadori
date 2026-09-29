@@ -266,8 +266,8 @@ class ImageError(Exception):
         self.status = status
         self.facts = facts
 
-    def envelope(self, tool: str = "generate_image") -> dict:
-        return {"tool": tool, "ok": False, "error": self.code,
+    def envelope(self, tool: str | None = None) -> dict:
+        return {"tool": tool or TOOL_NAME, "ok": False, "error": self.code,
                 "reason": self.reason, "retryable": self.retryable,
                 "remedies": self.remedies, **self.facts}
 
@@ -314,7 +314,7 @@ def _oom(detail: str, w: int, h: int) -> ImageError:
         f"image was made.",
         retryable=True, status=507,
         remedies=[{"fixable_by": "agent",
-                   "action": f"call generate_image again with size {smaller}",
+                   "action": f"call {TOOL_NAME} again with size {smaller}",
                    "effect": "a smaller image needs less memory"},
                   {"fixable_by": "operator",
                    "action": ("check CUDA1 with nvidia-smi: something else may "
@@ -372,6 +372,41 @@ def parse_size(size) -> tuple[int, int]:
             f"{MAX_PIXELS:,} pixels.",
             "call again with one of 1024x1024, 1536x1024, 1024x1536, 768x768")
     return w, h
+
+
+# OpenAI's image options (the Images API's CreateImageRequest and the
+# Responses `image_generation` tool, openai-openapi 2.3.0), and what this
+# server does with each. `quality` is ACCEPTED and does not pick the model:
+# the caller's saved preference does (operator, 2026-09-24: turbo is the
+# default) -- a client that always sends "high" would otherwise override the
+# operator's choice on every image. `model` picks ours only by our names
+# (catalog.resolve_image); any other value is ignored.
+QUALITIES = ("standard", "hd", "low", "medium", "high", "xhigh", "max",
+             "auto")
+OUTPUT_FORMATS = ("png",)           # what sd-server returns; nothing converts
+BACKGROUNDS = ("opaque", "auto")    # "transparent" is a prompt, not a setting
+
+
+def unsupported_option(opts: dict) -> tuple[str, str] | None:
+    """(field, reason) for the first OpenAI image option in `opts` this
+    server cannot honour, else None. Fields it ignores are not checked:
+    style, moderation, output_compression, user, partial_images."""
+    q = opts.get("quality")
+    if q is not None and q not in QUALITIES:
+        return "quality", f"quality must be one of {', '.join(QUALITIES)}."
+    f = opts.get("output_format")
+    if f is not None and f not in OUTPUT_FORMATS:
+        return "output_format", (f"output_format {f!r} is not served: this "
+                                 f"server makes PNG images; send 'png' or "
+                                 f"leave it out.")
+    b = opts.get("background")
+    if b is not None and b not in BACKGROUNDS:
+        return "background", (f"background {b!r} is not served: the image "
+                              f"model takes no background setting. Leave it "
+                              f"out and ask for a transparent background in "
+                              f"the prompt; real transparency is kept "
+                              f"(drop_alpha).")
+    return None
 
 
 # sd-server reads generation settings out of the prompt text itself
@@ -711,7 +746,14 @@ def png_bytes(sha: str) -> bytes | None:
 
 
 # ----------------------------------------------------------------- model tool
-TOOL_NAME = "generate_image"
+# `yama_*` (operator, 2026-09-27): the tools this service adds to main are
+# named apart from anything a harness offers. The old name, `generate_image`,
+# is still read in stored ledger rows and records (proxy.LEGACY_TOOL_NAMES).
+TOOL_NAME = "yama_generate_image"
+LEGACY_TOOL_NAME = "generate_image"
+# The vision tool's name (mcp/vision.py TOOL_NAME is this constant: vision
+# imports this module, so the one definition lives here).
+DESCRIBE_TOOL_NAME = "yama_describe_image"
 
 # A description is a trigger condition (AGENTS.md "Tool descriptions are
 # prompts"): the question it answers first, then the phrasings that should
@@ -735,7 +777,8 @@ TOOL = {
             "service; put that line in your answer exactly as given, "
             "because it is the only way the user sees the picture. It makes "
             "images only: files in the user's project are written with your "
-            "client's own file tools."),
+            "client's own file tools. A server tool: it runs on the Yamadori "
+            "server and does not touch your workspace."),
         "parameters": {
             "type": "object",
             "properties": {
@@ -749,9 +792,9 @@ TOOL = {
                 "size": {
                     "type": "string",
                     "description": (
-                        "WIDTHxHEIGHT, multiples of 32. 1024x1024 (default, "
-                        "about 2 minutes), 1536x1024 landscape, 1024x1536 "
-                        "portrait (about 3-4 minutes)."),
+                        "WIDTHxHEIGHT, multiples of 32. 1024x1024 (default), "
+                        "1536x1024 landscape, 1024x1536 portrait; larger "
+                        "sizes take longer."),
                 },
                 "seed": {
                     "type": "integer",
@@ -764,6 +807,55 @@ TOOL = {
 }
 
 
+# MAIN'S COPY (operator, 2026-09-25: "emit the image to the harness when they
+# make it"). On main the proxy shows the picture to the user the moment it
+# exists (proxy._run_turn, IMAGES REACH THE CHAT), so the description says so
+# instead of asking the model to copy the line. Deep thinking keeps TOOL: its
+# markdown crosses back in the hand-off, which main then writes.
+_COPY_SENTENCE = (
+    "The result gives a markdown image line linking to the picture on the "
+    "image service; put that line in your answer exactly as given, because "
+    "it is the only way the user sees the picture.")
+_SHOWN_SENTENCE = (
+    "The picture is shown to the user the moment it is made, on its own line "
+    "above your reply; the result gives its markdown image line and its url, "
+    "so you can write about it and refer to it.")
+MAIN_TOOL = json.loads(json.dumps(TOOL))
+MAIN_TOOL["function"]["description"] = TOOL["function"]["description"].replace(
+    _COPY_SENTENCE, _SHOWN_SENTENCE)
+assert _COPY_SENTENCE in TOOL["function"]["description"]
+
+# What the model reads in the tool result once the proxy has shown the image
+# (a tool result is a prompt: the situation, plainly; no prohibition).
+SHOWN_INSTRUCTION = (
+    "This picture is already shown to the user, on its own line above your "
+    "reply, as the markdown line above. Write your reply around it: say what "
+    "you drew, or refer to it as the image above.")
+SHOWN_LOOK = (f" To look at it yourself, pass the url to "
+              f"{DESCRIBE_TOOL_NAME}.")
+
+
+def shown_on_main(result: str, looks: bool = False):
+    """yama_generate_image's result, rewritten for main once the proxy has shown
+    the picture: (result, markdown line, url), or None when the result is
+    not a successful image (an error envelope, a stub's text). `looks`:
+    yama_describe_image is on main's list, so the result says how to use it."""
+    try:
+        d = json.loads(result)
+    except (TypeError, ValueError):
+        return None
+    if not (isinstance(d, dict) and d.get("ok") and d.get("tool") == TOOL_NAME
+            and isinstance(d.get("markdown"), str)
+            and isinstance(d.get("url"), str)):
+        return None
+    md = d["markdown"].strip()
+    if not md.startswith("![") or "\n" in md or d["url"] not in md:
+        return None
+    d["shown_to_user"] = True
+    d["instruction"] = SHOWN_INSTRUCTION + (SHOWN_LOOK if looks else "")
+    return json.dumps(d), md, d["url"]
+
+
 def _alt(prompt: str) -> str:
     """Markdown alt text: the prompt, flattened and cut, with the characters
     that would end the alt early removed."""
@@ -772,16 +864,23 @@ def _alt(prompt: str) -> str:
 
 
 def run_tool(args, base: str, record: list | None = None,
-             account: str | None = None) -> str:
-    """Execute generate_image for the model. Always returns a JSON envelope;
+             account: str | None = None, options: dict | None = None) -> str:
+    """Execute yama_generate_image for the model. Always returns a JSON envelope;
     never raises. `record` collects one entry per call for x_yamadori.
     `account` picks the image model (the caller's preference, else the
-    server default); the model being called has no say in it."""
+    server default); the model being called has no say in it. `options`:
+    the REQUEST's image settings (a Responses `image_generation` tool,
+    mcp/responses_api.py): its `size`, when set, is the client's and wins
+    over the size the model asked for."""
     t0 = time.time()
     rec: dict = {"ok": False}
     try:
         choice, source = resolve_model(account)
         rec.update(model=MODELS[choice]["name"], model_source=source)
+        if isinstance(options, dict) and options.get("size") and \
+                isinstance(args, dict):
+            args = dict(args, size=options["size"])
+            rec["size_source"] = options.get("source") or "request"
         if not isinstance(args, dict):
             raise bad_args("arguments must be an object with a prompt.",
                            "call again with {\"prompt\": \"...\"}")

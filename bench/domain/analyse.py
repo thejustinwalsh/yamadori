@@ -201,13 +201,30 @@ def annotate(rows: list[dict]) -> list[dict]:
 # run.verify and is a stack_error row, re-run.
 MECHANISMS = ("retrieval", "hints", "deep_thinking", "fanout", "self_check",
               "check_code")
-NOT_RETRIEVAL = ("check_code", "generate_image")
+# generate_image by its name before and after the yama_* rename
+# (2026-09-27): records of both ages are read.
+NOT_RETRIEVAL = ("check_code", "generate_image", "yama_generate_image")
 
 
-def _hint_id(h: dict) -> str:
+def _hint_id(h) -> str:
+    """A skill id as it is (x_yamadori.skills.ids, since 2026-09-26), or an
+    older row's hint hashed from its source and recipe."""
+    if isinstance(h, str):
+        return h
     import hashlib
     return hashlib.sha1(((h.get("source") or "") + "|" + (h.get("recipe") or ""))
                         .encode("utf-8")).hexdigest()[:10]
+
+
+def _injected(x: dict) -> list:
+    """What recall injected on one record: x_yamadori.skills.ids (skills
+    replaced hints on 2026-09-26), else an older record's hints list."""
+    sk = x.get("skills") if isinstance(x.get("skills"), dict) else {}
+    return list(sk.get("ids") or []) or list(x.get("hints") or [])
+
+
+def _sel_skills(s: dict):
+    return s.get("skills", s.get("hints"))
 
 
 def mechanisms(r: dict) -> dict:
@@ -220,12 +237,16 @@ def mechanisms(r: dict) -> dict:
         otherwise what the tier allowed the selection engine to choose."""
         for sl in sels:
             sig = sl.get("signals") or {}
-            if key in (sig.get("forced") or []):
-                v = sl.get(sel_key)
+            forced = [("skills" if k == "hints" else k)
+                      for k in (sig.get("forced") or [])]
+            if (("skills" if key == "hints" else key) in forced):
+                v = _sel_skills(sl) if key == "hints" else sl.get(sel_key)
                 if (int(v or 1) > 1) if key == "fanout" else bool(v):
                     return True
             else:
-                v = (sig.get("allowed") or {}).get(key)
+                al = sig.get("allowed") or {}
+                v = al.get("skills", al.get("hints")) if key == "hints" \
+                    else al.get(key)
                 if (int(v or 1) > 1) if key == "fanout" else bool(v):
                     return True
         return False
@@ -249,11 +270,11 @@ def mechanisms(r: dict) -> dict:
         "evidence": "x_yamadori.tools" if any("tools" in x for x in xs) else
                     "not recorded by this proxy build (x_yamadori.tools absent)",
         "gate_why": next((g.get("why") for g in gates if isinstance(g, dict)), None)}
-    hints = [h for x in xs for h in (x.get("hints") or [])]
+    hints = [h for x in xs for h in _injected(x)]
     supp = [h for x in xs for h in (x.get("suppressed_hints") or [])]
     out["hints"] = {
         "allowed": allowed("hints", "hints"),
-        "ran": any(s.get("hints") for s in sels), "data": bool(hints),
+        "ran": any(_sel_skills(s) for s in sels), "data": bool(hints),
         "injected": len(hints), "ids": sorted({_hint_id(h) for h in hints}),
         "suppressed": len(supp)}
     invs = [x.get("investigate") for x in xs if isinstance(x.get("investigate"), dict)]
@@ -399,7 +420,7 @@ def hint_metrics(last: dict, tasks: list[str], arm: str) -> dict:
     """Hint injection rate (rows with >= 1 hint injected / scored rows) and,
     on the injected rows, the pass rate beside their paired A0."""
     sc = [last[(t, arm)] for t in tasks if scored(last.get((t, arm)))]
-    inj = [r for r in sc if any((x.get("hints") or []) for x in _xs(r))]
+    inj = [r for r in sc if any(_injected(x) for x in _xs(r))]
     paired = [r for r in inj if scored(last.get((r["task"], BASE)))]
     return {"hint_rows": len(inj), "hint_rate": (len(inj) / len(sc)) if sc else None,
             "hint_rows_paired": len(paired),
@@ -610,8 +631,8 @@ def triggers(last: dict, tasks: list[str], arms: list[str]) -> dict:
         out[a] = {
             "n": n,
             "tools_offered": rate(sum(1 for g in gate if g and g.get("offer"))),
-            "hints_selected": rate(sum(1 for s in sel if s.get("hints"))),
-            "hints_emitted": rate(sum(1 for x in xs if x.get("hints"))),
+            "hints_selected": rate(sum(1 for s in sel if _sel_skills(s))),
+            "hints_emitted": rate(sum(1 for x in xs if _injected(x))),
             "investigate_chosen": rate(sum(1 for s in sel if s.get("investigate"))),
             "investigate_searched": rate(sum(1 for i in inv
                                              if i.get("ran") and (i.get("hops") or 0) > 0)),

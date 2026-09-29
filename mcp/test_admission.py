@@ -60,6 +60,14 @@ def _blocked(url, timeout=None):                                  # noqa: ARG001
 
 urllib.request.urlopen = _blocked
 budget._POOL = 147456
+# This suite tests the budget MECHANICS, so it pins the split it was
+# written against (5/8 + 3/8) and turns the standing thinking caps off;
+# mcp/test_budget.py checks the shipped split, test_tiers the caps.
+import budget as _budget_pin  # noqa: E402
+import tiers as _tiers_pin  # noqa: E402
+_budget_pin.MAIN_SHARE, _budget_pin.HELPER_SHARE = 0.625, 0.375
+_budget_pin.HELPER_TOKENS = 0
+_tiers_pin.HELPER_THINKING, _tiers_pin.JOB_THINKING = 0, {}
 
 # Short enough to keep the suite fast, long enough that a lane released
 # mid-wait is seen.
@@ -317,6 +325,30 @@ def test_snapshot_reports_the_cap_and_the_ceiling():
           "ONE main request at full budget fits the pool (92,160 x 2 would "
           "not), so MAIN_LANES = 2 is stated oversubscription",
           str(snap["full_budget_ceiling"]))
+    # THE THREE-SLOT LAYOUT (operator, 2026-09-28): the pool is 2 x the main
+    # cap + the child, so both main lanes fit at full budget, and the lanes
+    # match the two conversation slots.
+    import slots
+    saved = (budget._POOL, budget._LINE, budget.MAIN_CAP, budget.CHILD_TOKENS)
+    try:
+        budget._POOL, budget._LINE = 393216, 163840
+        budget.MAIN_CAP, budget.CHILD_TOKENS = 0, 65536
+        slots.reset(n=3)
+        snap = admission.snapshot()
+        # LAYOUT V2: the lane (budget.LANE_TOKENS, ranked above the primary)
+        # comes off the served line
+        check(snap["layout"] == "cap"
+              and snap["main_budget"] == 163840 - budget.lane_reserved()
+              and snap["child_budget"] == 65536
+              and snap["full_budget_ceiling"] == 2
+              and snap["conversation_slots"] == [0, 1]
+              and admission.MAIN_LANES == len(snap["conversation_slots"]),
+              "the cap layout: main = the cap, the child its own size, two "
+              "conversations at full budget fit the pool, one main lane per "
+              "conversation slot", str(snap))
+    finally:
+        budget._POOL, budget._LINE, budget.MAIN_CAP, budget.CHILD_TOKENS = saved
+        slots.reset()
     old = budget.budgets
     try:
         def broken(*a, **k):

@@ -1,0 +1,74 @@
+// PACKAGE DETECTION LABELS (2026-09-27; mcp/skill_packages.py). One request per line. `expect`: the held
+// packages the request USES, labelled from its intent by hand -- implicit prompts never name the package;
+// near misses (`near: true`) use generic words or another library and expect nothing. IN-SAMPLE: written
+// by the same agent that built the detector, while reading its vocabulary. Run: python bench/skills/eval_packages.py
+{"id": "imp-useframe-stutter", "text": "the particles stutter in useFrame", "expect": ["@react-three/fiber"]}
+{"id": "imp-usethree-resize", "text": "useThree returns a camera that never updates after I resize the window", "expect": ["@react-three/fiber"]}
+{"id": "imp-canvas-black", "text": "My <Canvas> goes black when I switch browser tabs and come back", "expect": ["@react-three/fiber"]}
+{"id": "imp-useloader-refetch", "text": "useLoader keeps refetching the texture on every render of my component", "expect": ["@react-three/fiber"]}
+{"id": "imp-hooks-outside-canvas", "text": "Uncaught Error: R3F: Hooks can only be used within the Canvas component!", "expect": ["@react-three/fiber"]}
+{"id": "imp-query-nothing", "text": "world.query(Position, Velocity) returns nothing", "expect": ["koota"]}
+{"id": "imp-updateeach-no-write", "text": "updateEach never writes back my positions, they stay at zero", "expect": ["koota"]}
+{"id": "imp-readeach-entity", "text": "how do I get the entity inside readEach?", "expect": ["koota"]}
+{"id": "imp-createworld-twice", "text": "createWorld() runs twice in StrictMode and I end up with two empty worlds", "expect": ["koota"]}
+{"id": "imp-usetrait-undefined", "text": "useTrait(entity, Health) is undefined after the trait is removed", "expect": ["koota"]}
+{"id": "imp-queryfirst-spawn", "text": "queryFirst(IsPlayer) returns undefined right after I spawn the player", "expect": ["koota"]}
+{"id": "imp-createactions", "text": "where should createActions live so the spawnBullet action can reach the world?", "expect": ["koota"]}
+{"id": "imp-updateeach-error", "text": "TypeError: Cannot read properties of undefined (reading 'x')\n    at updateEach (game.ts:31:17)", "expect": ["koota"]}
+{"id": "imp-scaleandadd-nan", "text": "vec3.scaleAndAdd(p, p, v, dt) turns every position into NaN", "expect": ["math"]}
+{"id": "imp-simplex-flat", "text": "simplex2d.sample gives me the same value everywhere on the terrain", "expect": ["math"]}
+{"id": "imp-mulberry-seed", "text": "mulberry32 gives the same terrain on every reload; how do I vary the seed?", "expect": ["math"]}
+{"id": "imp-squared-distance", "text": "should I use squaredDistance for the bullet hit test?", "expect": ["math"]}
+{"id": "imp-fromrotationtranslation", "text": "fromRotationTranslation builds a matrix that flips my bones", "expect": ["math"]}
+{"id": "imp-colornode-ts2339", "text": "mat.colorNode = texture(grid, uv()) fails with TS2339 on MeshBasicMaterial", "expect": ["three/tsl"]}
+{"id": "imp-positionnode-vanish", "text": "setting material.positionNode for a wave makes the mesh disappear", "expect": ["three/tsl"]}
+{"id": "imp-webgpurenderer-safari", "text": "WebGPURenderer init hangs on Safari, should I await renderer.init()?", "expect": ["three/tsl"]}
+{"id": "imp-roughnessnode", "text": "MeshStandardNodeMaterial ignores my roughnessNode", "expect": ["three/tsl"]}
+{"id": "imp-fn-not-function", "text": "const wave = Fn(() => { ... }) throws when I call wave() inside the material", "expect": ["three/tsl"]}
+{"id": "imp-usegltf-cache", "text": "useGLTF.preload doesn't seem to cache my model between routes", "expect": ["@react-three/drei"]}
+{"id": "imp-html-drift", "text": "the <Html> labels drift away from my meshes when the camera moves", "expect": ["@react-three/drei"]}
+{"id": "imp-vec3f-array", "text": "d.arrayOf(d.vec3f, n) gives me the wrong buffer size", "expect": ["typegpu"]}
+{"id": "imp-merge-geometries", "text": "mergeGeometries loses the UVs of half my meshes", "expect": ["three"]}
+{"id": "imp-gltfloader-draco", "text": "GLTFLoader fails on a Draco-compressed file with no error", "expect": ["three"]}
+{"id": "imp-accelerated-raycast", "text": "acceleratedRaycast is still slow on my skinned mesh", "expect": ["three-mesh-bvh"]}
+{"id": "imp-bloom-washed", "text": "<Bloom> makes the whole scene washed out, even the dark parts", "expect": ["@react-three/postprocessing"]}
+{"id": "imp-fence-koota", "text": "why doesn't this move anything?\n```ts\nworld.query(Position, Velocity).updateEach(([p, v]) => { p.x += v.x })\n```", "expect": ["koota"]}
+{"id": "imp-fence-tsl", "text": "```ts\nconst m = new MeshStandardNodeMaterial()\nm.colorNode = Fn(() => vec3(1, 0, 0))()\n```\nit renders black", "expect": ["three/tsl"]}
+{"id": "imp-import-math", "text": "```ts\nimport { vec3 } from 'math'\n```\nwhy is my vec3 a plain array?", "expect": ["math"]}
+{"id": "imp-pin-fiber", "text": "package.json has \"@react-three/fiber\": \"^9.8.0\" and the WebGPU renderer won't start", "expect": ["@react-three/fiber"]}
+{"id": "near-worldbank", "near": true, "text": "Write a Python script that queries the world bank API for GDP data", "expect": []}
+{"id": "near-dark-mode", "near": true, "text": "Add a dark-mode toggle to my React settings page", "expect": []}
+{"id": "near-react-query", "near": true, "text": "useQuery from @tanstack/react-query refetches on every window focus", "expect": []}
+{"id": "near-express-cors", "near": true, "text": "my express server's app.use(cors()) still blocks the preflight request", "expect": []}
+{"id": "near-css-particles", "near": true, "text": "the particles in my CSS keyframe animation stutter on Safari", "expect": []}
+{"id": "near-rust-sort", "near": true, "text": "Sort a list of numbers in Rust without allocating", "expect": []}
+{"id": "near-sql-world", "near": true, "text": "The query on my SQL world table returns nothing for Canada", "expect": []}
+{"id": "near-numpy-normalize", "near": true, "text": "How do I normalize a vector in numpy without dividing by zero?", "expect": []}
+{"id": "near-unity-update", "near": true, "text": "Unity: my GameObject's Update() stutters when the frame rate drops", "expect": []}
+{"id": "near-babylon", "near": true, "text": "Babylon.js engine.runRenderLoop stutters on mobile Safari", "expect": []}
+{"id": "near-pixi-anchor", "near": true, "text": "PixiJS sprite.anchor.set(0.5) still draws the sprite off-center", "expect": []}
+{"id": "near-godot", "near": true, "text": "In Godot, get_node returns null from _ready", "expect": []}
+{"id": "near-glsl-vec3", "near": true, "text": "the vec3 color in my raw GLSL fragment shader comes out black", "expect": []}
+{"id": "near-useeffect-twice", "near": true, "text": "useEffect runs twice in StrictMode and my fetch fires twice", "expect": []}
+{"id": "near-useref", "near": true, "text": "changing useRef().current doesn't update the UI", "expect": []}
+{"id": "near-pandas", "near": true, "text": "pandas groupby drops the rows whose key is NaN", "expect": []}
+{"id": "near-canvas2d", "near": true, "text": "The Canvas 2D context's fillRect draws nothing on my page", "expect": []}
+{"id": "near-bitecs", "near": true, "text": "my bitECS query(world, [Position]) returns stale entities after removeEntity", "expect": []}
+{"id": "near-d3", "near": true, "text": "d3.scaleLinear().domain([0, 10]) maps my data upside down", "expect": []}
+{"id": "near-chartjs", "near": true, "text": "Chart.js tooltip shows undefined for my second dataset", "expect": []}
+{"id": "near-gl-matrix", "near": true, "text": "gl-matrix vec3.transformMat4(out, v, m) gives me the wrong point", "expect": []}
+{"id": "near-zustand", "near": true, "text": "my zustand store updates but the component does not re-render", "expect": []}
+{"id": "near-framer", "near": true, "text": "Framer Motion's animate prop flickers on the first render", "expect": []}
+{"id": "near-ts-partial", "near": true, "text": "TypeScript: when should I use Partial<T> instead of Required<T>?", "expect": []}
+{"id": "near-webgl-uniform", "near": true, "text": "my uniform float time isn't updating in raw WebGL with gl.uniform1f", "expect": []}
+{"id": "near-deno-fetch", "near": true, "text": "Deno fetch hangs on a self-signed certificate", "expect": []}
+{"id": "near-matplotlib", "near": true, "text": "matplotlib colorbar tick labels overlap", "expect": []}
+{"id": "near-blender", "near": true, "text": "the mesh looks faceted after I export it from Blender", "expect": []}
+{"id": "near-perlin-cpp", "near": true, "text": "my Perlin noise function in C++ makes blocky terrain", "expect": []}
+{"id": "near-vue-ref", "near": true, "text": "Vue ref() changes don't trigger my watch callback", "expect": []}
+{"id": "near-rn-flatlist", "near": true, "text": "React Native FlatList onEndReached fires twice", "expect": []}
+{"id": "near-bitecs-createworld", "near": true, "text": "```ts\nimport { createWorld, addEntity } from \"bitecs\"\nconst world = createWorld()\n```\nmy entities vanish after the first frame", "expect": []}
+{"id": "near-bitecs-namespace", "near": true, "text": "```ts\nimport * as ecs from \"bitecs\"\nconst world = ecs.createWorld()\nconst q = ecs.defineQuery([Position])\n```\nthe query returns stale entities", "expect": []}
+{"id": "near-miniplex-world", "near": true, "text": "```ts\nimport { World } from \"miniplex\"\nconst world = new World()\nconst moving = world.with(\"position\", \"velocity\")\nfor (const e of moving) e.position.x += e.velocity.x\n```\nnothing moves", "expect": []}
+{"id": "near-becsy-query", "near": true, "text": "```js\nconst { World, System } = require(\"@lastolivegames/becsy\")\nconst world = await World.create()\n```\nhow do I query entities with a Position component?", "expect": []}
+{"id": "imp-koota-createworld-import", "text": "```ts\nimport { createWorld } from \"koota\"\nconst world = createWorld()\n```\nworld.spawn does nothing", "expect": ["koota"]}

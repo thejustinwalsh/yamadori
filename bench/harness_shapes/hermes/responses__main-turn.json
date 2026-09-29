@@ -1,0 +1,236 @@
+{
+ "id": "hermes/responses/main-turn",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "responses",
+ "source": "scratchpad hcap/cap.jsonl #6 (captured, recording stub): instructions + string user item, flat tools strict:false, content-hash prompt_cache_key",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "instructions": "You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask. [... Hermes system prompt trimmed ...]",
+  "input": [
+   {
+    "role": "user",
+    "content": "say ok"
+   }
+  ],
+  "tools": [
+   {
+    "name": "terminal",
+    "description": "(terminal: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "command": {
+       "type": "string"
+      },
+      "background": {
+       "type": "boolean"
+      },
+      "timeout": {
+       "type": "integer"
+      },
+      "workdir": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "command"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "read_file",
+    "description": "(read_file: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string"
+      },
+      "offset": {
+       "type": "integer"
+      },
+      "limit": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "path"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "write_file",
+    "description": "(write_file: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string"
+      },
+      "content": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "content"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "patch",
+    "description": "(patch: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "mode": {
+       "type": "string",
+       "enum": [
+        "replace",
+        "patch"
+       ]
+      },
+      "path": {
+       "type": "string"
+      },
+      "old_string": {
+       "type": "string"
+      },
+      "new_string": {
+       "type": "string"
+      },
+      "replace_all": {
+       "type": "boolean"
+      },
+      "patch": {
+       "type": "string"
+      }
+     },
+     "required": []
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "search_files",
+    "description": "(search_files: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "pattern": {
+       "type": "string"
+      },
+      "target": {
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      },
+      "file_glob": {
+       "type": "string"
+      },
+      "output_mode": {
+       "type": "string"
+      },
+      "context": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "pattern"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "skills_list",
+    "description": "(skills_list: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {},
+     "required": []
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "skill_view",
+    "description": "(skill_view: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "name"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "vision_analyze",
+    "description": "(vision_analyze: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "image_url": {
+       "type": "string"
+      },
+      "question": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "image_url",
+      "question"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "store": false,
+  "stream": true,
+  "reasoning": {
+   "effort": "medium",
+   "summary": "auto"
+  },
+  "include": [
+   "reasoning.encrypted_content"
+  ],
+  "prompt_cache_key": "pck_77697d442e431aba357f1eca"
+ },
+ "expect": {
+  "accepted": true,
+  "utility": {
+   "utility": false
+  },
+  "session": {
+   "source": "prompt_cache_key"
+  },
+  "roles": {
+   "one_system_first": true
+  },
+  "deep": {
+   "kickoff": true,
+   "speaking": true
+  }
+ },
+ "why": {
+  "session": "Hermes' Responses key (codex.py:414-435), session source 1"
+ }
+}

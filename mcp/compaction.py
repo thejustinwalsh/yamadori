@@ -54,7 +54,7 @@ at the top of the system block, which is rendered only when thinking is on
 AND the effort is xhigh or low (or unset, which defaults to xhigh). A
 compaction therefore keeps the conversation's own thinking flag and effort
 (`prefix_fields`; since 2026-09-24 it thinks at every effort where the
-conversation does, with tiers.COMPACTION_THINKING), so the effort line is
+conversation does, with what its window leaves), so the effort line is
 always the conversation's. `tool_choice: "none"` is sent so the model cannot call a
 tool; it does not change the render: llama-server passes the tools to the
 template whatever tool_choice says (common/chat.cpp
@@ -83,8 +83,11 @@ MATCH_CHARS = 200
 # The share of a flattened transcript's records that must map, in order,
 # for the rewrite to be trusted. Hermes redacts secrets in the copy
 # (_redact_compaction_text), which can move a record's first characters;
-# everything else is verbatim. NOT MEASURED: a choice, stated.
-MIN_MAPPED = float(os.environ.get("YAMADORI_COMPACTION_MIN_MAPPED", "0.8"))
+# everything else is verbatim. EVERY record must map (1.0, the strict rule):
+# the 0.8 that stood here was invented (docs/CONSTANTS-AUDIT.md, 2026-09-27),
+# and a transcript that does not map whole goes up as sent, as any unmapped
+# compaction does. The variable still overrides it.
+MIN_MAPPED = float(os.environ.get("YAMADORI_COMPACTION_MIN_MAPPED", "1.0"))
 
 _lock = threading.Lock()
 # account -> {key: entry}; entry = {key, account, client, upstream, response, ts}
@@ -214,13 +217,15 @@ _TARGET = re.compile(r"\bTarget ~\s*([0-9][0-9,]*)\s*tokens\b")
 
 
 def parse_flattened(text: str) -> dict | None:
-    """Hermes' flattened compaction: {start, end, records: [{role, id, text}],
-    iterative, target_tokens}, or None when the text is not that shape."""
+    """A flattened compaction, whichever harness wrote it: {harness, start,
+    end, records: [{role, id, text, calls?}], iterative, previous,
+    target_tokens}, or None when the text is none of the known shapes
+    (Hermes' below; Pi's and OpenCode's, parse_transcript)."""
     if not text:
         return None
     m = _START.search(text)
     if not m:
-        return None
+        return parse_transcript(text)
     start = m.end()
     ends = [i for i in (text.find(e, start) for e in _ENDS) if i >= 0]
     end = min(ends) if ends else len(text)
@@ -249,9 +254,149 @@ def parse_flattened(text: str) -> dict | None:
         if p >= 0:
             previous = {"start": p + len("PREVIOUS SUMMARY:\n"),
                         "end": m.start()}
-    return {"start": start, "end": end, "records": records,
-            "iterative": iterative, "previous": previous,
+    return {"harness": "hermes", "start": start, "end": end,
+            "records": records, "iterative": iterative, "previous": previous,
             "target_tokens": int(t.group(1).replace(",", "")) if t else None}
+
+
+# ------------------------------------------ Pi's and OpenCode's transcripts --
+#
+# Two more harnesses flatten the conversation into one user message, each in
+# its own words (2026-09-26, docs/HARNESS-PI.md section 6 and
+# docs/HARNESS-OPENCODE.md). READ FROM THEIR SOURCE:
+#
+#   pi       @earendil-works/pi-coding-agent 0.87.1,
+#            dist/core/compaction/compaction.js:544 (history summary):
+#            "<conversation>\n{records}\n</conversation>\n\n"
+#            [+ "<previous-summary>\n{s}\n</previous-summary>\n\n"] + prompt,
+#            and :751 (a split turn's prefix): "# Conversation\n{records}
+#            \n\n# Instructions\n{prompt}". System prompt: utils.js:139
+#            "You are a context summarization assistant. ...". Records,
+#            utils.js:94 serializeConversation, joined by "\n\n": [User],
+#            [Assistant thinking], [Assistant], [Assistant tool calls]
+#            ("name(k=v, ...); ..."), [Tool result] (cut at 2,000 chars,
+#            "\n\n[... N more characters truncated]"). No session is sent
+#            (compaction.js:503 cacheRetention "none").
+#   opencode opencode-ai 1.18.32 (a bun binary; the string literals read
+#            from it): session/compaction buildPrompt, one user message,
+#            no system, no tools -- "Here is the conversation so far:\n\n
+#            <conversation>\n{records}\n</conversation>" [+ "<prior-summary>
+#            ...</prior-summary>"] + "Create a new anchored summary ...".
+#            Records: [User] (+ "[Attached mime: name]" lines), [Assistant],
+#            [Assistant reasoning], [Assistant tool call] ("name({json})"),
+#            [Tool result] (cut at 2,000, "\n[truncated]"), [Tool error];
+#            a message's parts joined by "\n", messages by "\n\n".
+#
+# Both are mapped onto the stored prompt like Hermes' (map_records): a
+# message's records fold into ONE record per message -- reasoning is not
+# compared (clients echo it variously), an assistant's tool calls are
+# compared by name.
+_PI_OPEN = re.compile(r"\A\s*<conversation>\n")
+_PI_PREFIX = re.compile(r"\A\s*# Conversation\n")
+_OC_OPEN = re.compile(r"\A\s*Here is the conversation so far:\s*\n\s*"
+                      r"<conversation>\n")
+_TRANSCRIPT_RECORD = re.compile(
+    r"(?:^|\n)\[(User|Assistant|Assistant thinking|Assistant reasoning|"
+    r"Assistant tool calls?|Tool result|Tool error|System update|"
+    r"Synthetic context|Shell)\]: ")
+_ATTACHED_LINE = re.compile(r"\n\[Attached [^\]\n]*\]\s*$")
+_PREVIOUS = {"pi": ("<previous-summary>\n", "\n</previous-summary>"),
+             "opencode": ("<prior-summary>\n", "\n</prior-summary>")}
+# The harnesses' own summariser instructions, for recognising the call
+# (selection.utility_call, harness_of) when its transcript is past the head.
+SYSTEM_HEADS = {"pi": "You are a context summarization assistant."}
+PROMPT_MARKS = {"opencode": "Create a new anchored summary from the "
+                            "conversation history"}
+
+
+def _call_names(label: str, body: str) -> list[str]:
+    if label == "Assistant tool calls":          # Pi: "a(...); b(...)"
+        return [s.split("(", 1)[0].strip() for s in re.split(r";\s+(?=\w+\()",
+                                                             body) if s.strip()]
+    return [body.split("(", 1)[0].strip()]       # OpenCode: one per record
+
+
+def parse_transcript(text: str) -> dict | None:
+    """Pi's or OpenCode's flattened compaction (see above), in
+    parse_flattened's shape, or None."""
+    if not text:
+        return None
+    m = _OC_OPEN.match(text) or _PI_OPEN.match(text)
+    harness = ("opencode" if m and m.re is _OC_OPEN else "pi") if m else None
+    if m:
+        start = m.end()
+        end = text.find("\n</conversation>", start)
+        if end < 0:
+            return None
+    else:
+        m = _PI_PREFIX.match(text)
+        if not m:
+            return None
+        harness, start = "pi", m.end()
+        end = text.find("\n\n# Instructions\n", start)
+        if end < 0:
+            return None
+    block = text[start:end]
+    hits = list(_TRANSCRIPT_RECORD.finditer(block))
+    if not hits:
+        return None
+    records: list[dict] = []
+    for i, h in enumerate(hits):
+        body = block[h.end():hits[i + 1].start() if i + 1 < len(hits)
+                     else len(block)]
+        label = h.group(1)
+        if label == "User":
+            body = _ATTACHED_LINE.sub("", body)
+            records.append({"role": "user", "id": None, "text": body})
+        elif label.startswith("Assistant"):
+            # One assistant MESSAGE: its thinking, text and calls fold into
+            # one record (a message's records are consecutive).
+            last = records[-1] if records else None
+            if last is None or last["role"] != "assistant" or (
+                    label == "Assistant" and last.get("_text_done")):
+                last = {"role": "assistant", "id": None, "text": "",
+                        "calls": []}
+                records.append(last)
+            if label == "Assistant":
+                last["text"] = (last["text"] + "\n" + body) if last["text"] \
+                    else body
+            elif label.startswith("Assistant tool call"):
+                last["calls"] += _call_names(label, body)
+                last["_text_done"] = True
+        elif label in ("Tool result", "Tool error"):
+            records.append({"role": "tool", "id": None, "text": body})
+        # System update / Synthetic context / Shell: OpenCode's own records,
+        # nothing the chat history holds as a message of its own.
+    for r in records:
+        r.pop("_text_done", None)
+        if r["role"] == "assistant" and not r["calls"]:
+            r.pop("calls")
+    previous = None
+    open_, close = _PREVIOUS[harness]
+    p = text.find(open_, end)
+    if p >= 0:
+        q = text.find(close, p + len(open_))
+        if q >= 0:
+            previous = {"start": p + len(open_), "end": q}
+    return {"harness": harness, "start": start, "end": end,
+            "records": records, "iterative": previous is not None,
+            "previous": previous, "target_tokens": None}
+
+
+def harness_of(text: str, system: str = "") -> str | None:
+    """Whose summariser this compaction request is, from its own words:
+    'hermes', 'pi', 'opencode', or None. Cheap (no record parsing): the
+    utility rule (selection) asks it of every tool-less single exchange."""
+    t = text or ""
+    if _START.search(t) and "summar" in t[:2000].lower():
+        return "hermes"
+    if any((system or "").lstrip().startswith(h) for h in
+           SYSTEM_HEADS.values()) and (_PI_OPEN.match(t)
+                                       or _PI_PREFIX.match(t)):
+        return "pi"
+    if _OC_OPEN.match(t) and PROMPT_MARKS["opencode"] in t:
+        return "opencode"
+    return None
 
 
 def find_previous(text: str, parsed: dict, stored: list[dict]) -> int | None:
@@ -269,7 +414,12 @@ def find_previous(text: str, parsed: dict, stored: list[dict]) -> int | None:
 
 
 def _norm(s: str) -> str:
-    return " ".join((s or "").split())
+    """Whitespace-normalised, without our session line (#41): the client's
+    copy of a summary we wrote carries it (and of a first answer stored
+    while answers carried it, before 2026-09-25), the stored text (what the
+    slot generated) does not."""
+    import session_id
+    return " ".join(session_id.strip(s or "").split())
 
 
 def _same(record: dict, msg: dict) -> bool:
@@ -277,6 +427,13 @@ def _same(record: dict, msg: dict) -> bool:
         return False
     if record["role"] == "tool" and record.get("id"):
         return record["id"] == msg.get("tool_call_id")
+    if record.get("calls") is not None:
+        # Pi's and OpenCode's records name an assistant's calls: the stored
+        # turn must make the same calls, in order.
+        names = [(c.get("function") or {}).get("name")
+                 for c in (msg.get("tool_calls") or []) if isinstance(c, dict)]
+        if names != record["calls"]:
+            return False
     a = _norm(record["text"].split("\n...[truncated]...\n", 1)[0])[:MATCH_CHARS]
     b = _norm(_text(msg))
     if not a:
@@ -320,11 +477,18 @@ def _describe(msg: dict, n: int = 80) -> str:
 
 
 def instruction_for(text: str, parsed: dict, mapping: dict,
-                    stored: list[dict], previous: int | None = None) -> str:
+                    stored: list[dict], previous: int | None = None,
+                    system: str = "") -> str:
     """The client's instruction with its flattened transcript replaced by a
     reference to the span of the conversation above -- and, in the iterative
     form, its copy of the previous summary by a reference to the turn that
-    already carries it."""
+    already carries it. `system`: the compaction call's OWN system prompt
+    (Pi's "You are a context summarization assistant ..."), which cannot
+    stay a system message on top of the conversation's prefix: it opens the
+    instruction instead."""
+    if system and system.strip():
+        return system.strip() + "\n\n" + instruction_for(
+            text, parsed, mapping, stored, previous)
     ref = ("[The turns to summarise are in the conversation above: from "
            f"{_describe(stored[mapping['first']])} to "
            f"{_describe(stored[mapping['last']])}. Summarise only that span; "
@@ -401,30 +565,63 @@ def renders_effort_line(fields: dict) -> bool:
     return on and (fields.get("reasoning_effort") or "xhigh") in ("xhigh", "low")
 
 
-def prefix_fields(stored: dict, answer: int) -> dict:
+def client_fields(tier_name: str | None) -> dict:
+    """The thinking fields of the tier the CLIENT asked for, for a
+    compaction that maps onto no stored conversation (2026-09-26,
+    docs/HARNESS-PI.md section 6). Such a compaction is a utility call, and
+    a utility call runs at `minimal` -- thinking off -- but the client's
+    reasoning_effort is the conversation's own effort (Pi sends its thinking
+    level; its summaries of a thinking conversation ran without thinking,
+    recorded as "the conversation itself runs without it", which was not
+    true). `_whose` names where the effort came from. `tier_name` None: the
+    client sent no effort either, so nothing says the conversation thinks
+    -- off, as before, and the record says why."""
+    import tiers
+    if not tier_name:
+        return {"chat_template_kwargs": {"enable_thinking": False},
+                "enable_thinking": False,
+                "_whose": "nothing stored to take the conversation's effort "
+                          "from, and the client sent none"}
+    t = tiers.TIERS.get(tier_name) or tiers.TIERS[tiers.DEFAULT]
+    if not t["thinks"]:
+        return {"chat_template_kwargs": {"enable_thinking": False},
+                "enable_thinking": False,
+                "_whose": f"the client's (tier {tier_name}: thinking off)"}
+    return {"chat_template_kwargs": {"enable_thinking": True},
+            "enable_thinking": True,
+            "reasoning_effort": tiers.safe_effort(t["effort"]),
+            "_whose": f"the client's (tier {tier_name})"}
+
+
+def prefix_fields(stored: dict, answer: int, thinking: int) -> dict:
     """The template and budget fields for a compaction on top of `stored`:
     the conversation's own thinking flag and effort (interim defaults,
     operator 2026-09-24: a compaction thinks at the conversation's effort,
     medium included; off only where the conversation runs with thinking
-    off), with tiers.COMPACTION_THINKING of thinking. Either way the
+    off), with `thinking` tokens of it -- what the compaction's window
+    leaves (tiers.compaction_budget). Either way the
     rendered prefix is the conversation's: the effort line is the same, and
     only the generation prompt at the end differs."""
     import tiers
+    whose = stored.get("_whose")
     ctk = dict(stored.get("chat_template_kwargs") or {})
     on = stored.get("enable_thinking") is not False and \
         ctk.get("enable_thinking") is not False
     if on:
         ctk["enable_thinking"] = True
-        thinking = tiers.COMPACTION_THINKING
         out = {"chat_template_kwargs": ctk, "enable_thinking": True,
                "reasoning_budget_tokens": thinking,
                "reasoning_budget_message": tiers.BUDGET_MESSAGE,
+               # the message above points back at the nudge's summary
+               **tiers.nudge_fields(),
                "max_tokens": thinking + answer,
-               "_thinking": "on: the conversation's own effort"}
+               "_thinking": (f"on: {whose} effort" if whose else
+                             "on: the conversation's own effort")}
         if stored.get("reasoning_effort"):
             out["reasoning_effort"] = stored["reasoning_effort"]
         return out
     ctk["enable_thinking"] = False
     return {"chat_template_kwargs": ctk, "enable_thinking": False,
             "max_tokens": answer,
-            "_thinking": "off: the conversation itself runs without it"}
+            "_thinking": (f"off: {whose}" if whose else
+                          "off: the conversation itself runs without it")}

@@ -1,0 +1,272 @@
+{
+ "id": "hermes/chat/skills-located-defects",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "chat",
+ "source": "shape: a follow-up user turn that hands over several located defects (error strings, file:line, named functions) after the project was written -- the shape of Octopus v0e-V0-xhigh-1 prompt 2, as a short synthetic stand-in (no Octopus text); docs/SELF-IMPROVEMENT-LOG.md #50",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask. [... Hermes system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": "Build a small canvas game."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_1a2b3c4d5e6f_00000028",
+      "type": "function",
+      "function": {
+       "name": "write_file",
+       "arguments": "{\"path\": \"js/audio.js\", \"content\": \"const AUDIO = (function () {\\n  function play(name) {\\n    return name;\\n  }\\n  return { beep: play };\\n})();\\n\"}"
+      }
+     },
+     {
+      "id": "call_1a2b3c4d5e6f_00000029",
+      "type": "function",
+      "function": {
+       "name": "write_file",
+       "arguments": "{\"path\": \"js/player.js\", \"content\": \"const PLAYER = {\\n  shoot() {\\n    AUDIO.play('shot');\\n  }\\n};\\n\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_1a2b3c4d5e6f_00000028",
+    "content": "{\"bytes_written\": 90}"
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_1a2b3c4d5e6f_00000029",
+    "content": "{\"bytes_written\": 60}"
+   },
+   {
+    "role": "assistant",
+    "content": "Done: js/audio.js and js/player.js are written, and index.html loads them."
+   },
+   {
+    "role": "user",
+    "content": "Playtesting found these problems:\n1. `Uncaught TypeError: PLAYER.hit is not a function` at js/enemies.js:212 when a bullet reaches the ship.\n2. The score does not reset on restart (resetGame in js/game.js).\n3. The boss health bar is drawn off screen, js/ui.js:88.\nPlease fix them."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "terminal",
+     "description": "(terminal: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "background": {
+        "type": "boolean"
+       },
+       "timeout": {
+        "type": "integer"
+       },
+       "workdir": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read_file",
+     "description": "(read_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write_file",
+     "description": "(write_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "patch",
+     "description": "(patch: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "mode": {
+        "type": "string",
+        "enum": [
+         "replace",
+         "patch"
+        ]
+       },
+       "path": {
+        "type": "string"
+       },
+       "old_string": {
+        "type": "string"
+       },
+       "new_string": {
+        "type": "string"
+       },
+       "replace_all": {
+        "type": "boolean"
+       },
+       "patch": {
+        "type": "string"
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "search_files",
+     "description": "(search_files: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "target": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "file_glob": {
+        "type": "string"
+       },
+       "output_mode": {
+        "type": "string"
+       },
+       "context": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skills_list",
+     "description": "(skills_list: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_view",
+     "description": "(skill_view: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "vision_analyze",
+     "description": "(vision_analyze: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "image_url": {
+        "type": "string"
+       },
+       "question": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "image_url",
+       "question"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "xhigh"
+ },
+ "expect": {
+  "accepted": true,
+  "roles": {
+   "one_system_first": true
+  },
+  "skills": {
+   "includes": [
+    "fix-located-defect-first"
+   ]
+  }
+ },
+ "why": {
+  "skills": "a user turn naming several located defects (an error string, file:line, a named function): fix-located-defect-first's target shape, #50"
+ }
+}

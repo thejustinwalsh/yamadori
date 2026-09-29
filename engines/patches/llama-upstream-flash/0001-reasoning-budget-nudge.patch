@@ -1,0 +1,763 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Fri, 25 Sep 2026 09:24:12 -0400
+Subject: [PATCH] common, server: reasoning-budget nudge
+
+A nudge forced mid-reasoning at the first newline after nudge_at x the
+reasoning budget (common_params_sampling::reasoning_budget_nudge,
+reasoning_budget_nudge_at, default 0.8), exposed through the server schema,
+with tests in test-reasoning-budget and test-chat.
+
+Exported read-only from the uncommitted working tree of
+a local checkout of sudoingX/llama.cpp (branch bonsai2) against base
+285542d98d37d0f07f491cd206aefa31f1848f33 (git diff), 2026-09-25.
+---
+ common/common.h                 |   2 +
+ common/reasoning-budget.cpp     | 116 +++++++++++--
+ common/reasoning-budget.h       |  36 +++-
+ common/sampling.cpp             |  11 +-
+ tests/test-chat.cpp             |  42 +++++
+ tests/test-reasoning-budget.cpp | 288 +++++++++++++++++++++++++++++++-
+ tools/server/server-schema.cpp  |  21 ++-
+ 7 files changed, 494 insertions(+), 22 deletions(-)
+
+diff --git a/common/common.h b/common/common.h
+index 527f4be7d89985ab63cd84bb9be9aa6f69a6c0e8..6c427531868d13b73a97134dd274bfb4ee99b2a4 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -292,6 +292,8 @@ struct common_params_sampling {
+     std::vector<llama_tokens> reasoning_budget_end;            // end tag token sequences; the first tag is used as the forcing sequence
+     std::vector<llama_token>  reasoning_budget_forced;         // forced sequence (message + first end tag)
+     std::string               reasoning_budget_message;        // message injected before end tag when budget exhausted
++    std::vector<llama_token>  reasoning_budget_nudge;          // nudge forced mid-reasoning at the first newline after nudge_at x budget (empty = off)
++    float                     reasoning_budget_nudge_at = 0.8f; // fraction of reasoning_budget_tokens consumed before the nudge arms
+     bool                      reasoning_control = false;       // create the budget sampler on demand so reasoning can be ended at runtime
+ 
+     bool backend_sampling = false;
+diff --git a/common/reasoning-budget.cpp b/common/reasoning-budget.cpp
+index 4884299f3011fa9ecf99d684bb332fbe7d223ee9..8dc8d7a15b46c8105aec80049dd9c6c94355d9d8 100644
+--- a/common/reasoning-budget.cpp
++++ b/common/reasoning-budget.cpp
+@@ -6,6 +6,7 @@
+ #include "log.h"
+ 
+ #include <algorithm>
++#include <climits>
+ #include <cmath>
+ #include <cstdint>
+ #include <string>
+@@ -65,8 +66,28 @@ struct common_reasoning_budget_ctx {
+     size_t force_pos;         // next position in forced_tokens to force
+ 
+     int32_t end_match;        // index into end_matcher.seqs of the sequence that transitioned to DONE, -1 if none
++
++    // optional early nudge (see common_reasoning_budget_nudge in the header)
++    llama_tokens nudge_tokens;          // forced mid-reasoning; empty = off
++    llama_tokens nudge_boundary_tokens; // boundary tokens when vocab == nullptr (tests)
++    int32_t      nudge_at;              // budget tokens consumed before the nudge arms; -1 = off
++    int32_t      nudge_min_room;        // budget that must remain after the nudge
++    bool         nudge_spent;           // fired or abandoned in this generation
++    size_t       nudge_pos;             // next position in nudge_tokens to force
+ };
+ 
++// a nudge boundary: the piece contains a newline (with a vocab), else a listed
++// boundary token (or any token when none are listed)
++static bool common_reasoning_budget_is_boundary(const common_reasoning_budget_ctx * ctx, llama_token token, const std::string & piece) {
++    if (ctx->vocab != nullptr) {
++        return piece.find('\n') != std::string::npos;
++    }
++    if (ctx->nudge_boundary_tokens.empty()) {
++        return true;
++    }
++    return std::find(ctx->nudge_boundary_tokens.begin(), ctx->nudge_boundary_tokens.end(), token) != ctx->nudge_boundary_tokens.end();
++}
++
+ static const char * common_reasoning_budget_name(const struct llama_sampler * /*smpl*/) {
+     return "reasoning-budget";
+ }
+@@ -102,8 +123,9 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
+             }
+ 
+             bool utf8_complete = true;
++            std::string piece;
+             if (ctx->vocab != nullptr) {
+-                const std::string piece = common_token_to_piece(ctx->vocab, token, false);
++                piece = common_token_to_piece(ctx->vocab, token, false);
+                 utf8_complete = common_utf8_is_complete(piece);
+             }
+ 
+@@ -127,6 +149,37 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
+                         ctx->end_matcher.reset();
+                         COM_TRC("%s", "budget exhausted, waiting for UTF-8 completion\n");
+                     }
++                } else if (ctx->nudge_at >= 0 && !ctx->nudge_spent &&
++                           ctx->budget - ctx->remaining >= ctx->nudge_at &&
++                           utf8_complete && common_reasoning_budget_is_boundary(ctx, token, piece)) {
++                    // at most one nudge per generation, whether it fires or is abandoned here
++                    ctx->nudge_spent = true;
++                    if ((int64_t) ctx->remaining >= (int64_t) ctx->nudge_tokens.size() + ctx->nudge_min_room) {
++                        ctx->state = REASONING_BUDGET_NUDGING;
++                        ctx->nudge_pos = 0;
++                        ctx->end_matcher.reset();
++                        COM_TRC("nudging at a boundary, remaining=%d tokens\n", ctx->remaining);
++                    } else {
++                        COM_TRC("nudge abandoned, only %d tokens remain\n", ctx->remaining);
++                    }
++                }
++            }
++            break;
++        }
++        case REASONING_BUDGET_NUDGING:
++        {
++            // the forced nudge tokens count against the budget
++            ctx->nudge_pos++;
++            ctx->remaining--;
++            if (ctx->nudge_pos >= ctx->nudge_tokens.size()) {
++                ctx->end_matcher.reset();
++                if (ctx->remaining <= 0) {
++                    ctx->state = REASONING_BUDGET_FORCING;
++                    ctx->force_pos = 0;
++                    COM_TRC("%s", "nudge complete, budget exhausted, forcing end sequence\n");
++                } else {
++                    ctx->state = REASONING_BUDGET_COUNTING;
++                    COM_TRC("nudge complete, back to counting, remaining=%d tokens\n", ctx->remaining);
+                 }
+             }
+             break;
+@@ -166,17 +219,22 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
+ static void common_reasoning_budget_apply(struct llama_sampler * smpl, llama_token_data_array * cur_p) {
+     auto * ctx = (common_reasoning_budget_ctx *) smpl->ctx;
+ 
+-    if (ctx->state != REASONING_BUDGET_FORCING) {
++    llama_token forced;
++    if (ctx->state == REASONING_BUDGET_FORCING) {
++        if (ctx->force_pos >= ctx->forced_tokens.size()) {
++            return;
++        }
++        forced = ctx->forced_tokens[ctx->force_pos];
++    } else if (ctx->state == REASONING_BUDGET_NUDGING) {
++        if (ctx->nudge_pos >= ctx->nudge_tokens.size()) {
++            return;
++        }
++        forced = ctx->nudge_tokens[ctx->nudge_pos];
++    } else {
+         // passthrough — don't modify logits
+         return;
+     }
+ 
+-    if (ctx->force_pos >= ctx->forced_tokens.size()) {
+-        return;
+-    }
+-
+-    const llama_token forced = ctx->forced_tokens[ctx->force_pos];
+-
+     // set all logits to -inf except the forced token
+     for (size_t i = 0; i < cur_p->size; i++) {
+         if (cur_p->data[i].id != forced) {
+@@ -193,12 +251,15 @@ static void common_reasoning_budget_reset(struct llama_sampler * smpl) {
+     ctx->end_matcher.reset();
+     ctx->force_pos = 0;
+     ctx->end_match = -1;
++    ctx->nudge_spent = false;
++    ctx->nudge_pos = 0;
+ }
+ 
+ static struct llama_sampler * common_reasoning_budget_init_state(
+         const struct llama_vocab * vocab, const std::vector<llama_tokens> & start_seqs,
+         const std::vector<llama_tokens> & end_seqs, const llama_tokens & forced_tokens,
+-        int32_t budget, common_reasoning_budget_state initial_state);
++        int32_t budget, common_reasoning_budget_state initial_state,
++        const common_reasoning_budget_nudge & nudge);
+ 
+ static struct llama_sampler * common_reasoning_budget_clone(const struct llama_sampler * smpl);
+ 
+@@ -236,12 +297,29 @@ static struct llama_sampler * common_reasoning_budget_init_state(
+         const std::vector<llama_tokens> & end_seqs,
+         const llama_tokens              & forced_tokens,
+         int32_t                           budget,
+-        common_reasoning_budget_state     initial_state) {
++        common_reasoning_budget_state     initial_state,
++        const common_reasoning_budget_nudge & nudge) {
+     // promote COUNTING with budget <= 0 to FORCING
+     if (initial_state == REASONING_BUDGET_COUNTING && budget <= 0) {
+         initial_state = REASONING_BUDGET_FORCING;
+     }
+ 
++    // the nudge arms only with a finite budget (INT_MAX is how sampling.cpp
++    // spells "unlimited") that leaves room for the nudge plus min_room after it
++    int32_t nudge_at = -1;
++    const int32_t nudge_min_room = std::max<int32_t>(nudge.min_room, 0);
++    if (!nudge.tokens.empty() && budget > 0 && budget != INT_MAX) {
++        const float   at     = std::min(std::max(nudge.at, 0.0f), 1.0f);
++        const int64_t at_tok = (int64_t) std::floor((double) at * (double) budget);
++        if ((int64_t) budget - at_tok >= (int64_t) nudge.tokens.size() + nudge_min_room) {
++            nudge_at = (int32_t) at_tok;
++            COM_TRC("nudge armed at %d of %d budget tokens (%zu nudge tokens)\n", nudge_at, budget, nudge.tokens.size());
++        } else {
++            COM_TRC("nudge disabled: %lld tokens after %d leave no room for %zu nudge tokens + %d\n",
++                    (long long) ((int64_t) budget - at_tok), (int32_t) at_tok, nudge.tokens.size(), nudge_min_room);
++        }
++    }
++
+     return llama_sampler_init(
+         /* .iface = */ &common_reasoning_budget_i,
+         /* .ctx   = */ new common_reasoning_budget_ctx {
+@@ -254,6 +332,12 @@ static struct llama_sampler * common_reasoning_budget_init_state(
+             /* .state         = */ initial_state,
+             /* .force_pos     = */ 0,
+             /* .end_match     = */ -1,
++            /* .nudge_tokens          = */ nudge_at >= 0 ? nudge.tokens : llama_tokens(),
++            /* .nudge_boundary_tokens = */ nudge.boundary_tokens,
++            /* .nudge_at              = */ nudge_at,
++            /* .nudge_min_room        = */ nudge_min_room,
++            /* .nudge_spent           = */ false,
++            /* .nudge_pos             = */ 0,
+         }
+     );
+ }
+@@ -264,8 +348,9 @@ struct llama_sampler * common_reasoning_budget_init(
+         const std::vector<llama_tokens> & end_seqs,
+         const llama_tokens              & forced_tokens,
+         int32_t                           budget,
+-        common_reasoning_budget_state     initial_state) {
+-    return common_reasoning_budget_init_state(vocab, start_seqs, end_seqs, forced_tokens, budget, initial_state);
++        common_reasoning_budget_state     initial_state,
++        const common_reasoning_budget_nudge & nudge) {
++    return common_reasoning_budget_init_state(vocab, start_seqs, end_seqs, forced_tokens, budget, initial_state, nudge);
+ }
+ 
+ common_reasoning_budget_state common_reasoning_budget_get_state(const struct llama_sampler * smpl) {
+@@ -295,9 +380,10 @@ bool common_reasoning_budget_force(struct llama_sampler * smpl) {
+ 
+     auto * ctx = (common_reasoning_budget_ctx *) smpl->ctx;
+ 
+-    // only a sampler that is actively counting down the budget may be forced;
+-    // any other state (idle, already forcing/waiting, or done) is left untouched
+-    if (ctx->state != REASONING_BUDGET_COUNTING) {
++    // only a sampler that is actively counting down the budget (or forcing the
++    // nudge, which is then abandoned) may be forced; any other state (idle,
++    // already forcing/waiting, or done) is left untouched
++    if (ctx->state != REASONING_BUDGET_COUNTING && ctx->state != REASONING_BUDGET_NUDGING) {
+         return false;
+     }
+ 
+diff --git a/common/reasoning-budget.h b/common/reasoning-budget.h
+index 1b89a04c42e8056d6450d3266e4f0c1e2a561d2e..f219d00bd79cabed33f32e79fa9fc4453defad70 100644
+--- a/common/reasoning-budget.h
++++ b/common/reasoning-budget.h
+@@ -13,25 +13,53 @@ enum common_reasoning_budget_state {
+     REASONING_BUDGET_FORCING,      // forcing budget message + end sequence
+     REASONING_BUDGET_WAITING_UTF8, // budget exhausted, waiting for UTF-8 completion
+     REASONING_BUDGET_DONE,         // passthrough forever
++    REASONING_BUDGET_NUDGING,      // forcing the nudge mid-reasoning, then back to COUNTING
++};
++
++// Optional early "wrap up" nudge, forced INSIDE the reasoning block before the
++// hard stop. Off when `tokens` is empty (the sampler then behaves exactly as
++// it does without a nudge).
++//
++// Once COUNTING has consumed floor(at * budget) tokens, the sampler waits for a
++// natural boundary -- the next token whose piece contains '\n' and completes a
++// UTF-8 sequence -- then forces `tokens` one by one and returns to COUNTING.
++// The forced nudge tokens COUNT against the budget. It fires at most once per
++// generation (a re-armed second reasoning block does not nudge again; reset()
++// re-arms it). A natural end of reasoning before the boundary means no nudge.
++// The hard stop always wins: at init the nudge is dropped when the budget is
++// unlimited or when budget - floor(at * budget) < tokens.size() + min_room, and
++// at the boundary it is dropped when fewer than tokens.size() + min_room tokens
++// of budget remain.
++struct common_reasoning_budget_nudge {
++    llama_tokens tokens;          // forced nudge sequence; empty = feature off
++    float        at       = 0.8f; // fraction of the budget consumed before the nudge arms, in [0, 1]
++    int32_t      min_room = 64;   // budget that must remain after the nudge, else no nudge
++
++    // Boundary detection when vocab == nullptr (unit tests): only these tokens
++    // count as boundaries, and when this is empty every token does. With a
++    // vocab the boundary is always "the piece contains '\n'".
++    llama_tokens boundary_tokens;
+ };
+ 
+ // Creates a reasoning budget sampler that limits token generation inside a
+ // reasoning block (e.g. between <think> and </think>).
+ //
+-// State machine: IDLE -> COUNTING -> WAITING_UTF8 -> FORCING -> DONE
++// State machine: IDLE -> COUNTING -> [NUDGING -> COUNTING] -> WAITING_UTF8 -> FORCING -> DONE
+ //   IDLE:         passthrough, watching for a start sequence
+ //   COUNTING:     counting down remaining tokens, watching for a natural end sequence
++//   NUDGING:      forces nudge.tokens token-by-token, then returns to COUNTING (optional, once)
+ //   WAITING_UTF8: budget exhausted, allowing tokens to complete a UTF-8 sequence
+ //   FORCING:      forces forced_tokens token-by-token (all other logits -> -inf)
+ //   DONE:         passthrough forever
+ //
+ // Parameters:
+-//   vocab          - vocabulary (used for UTF-8 boundary detection; can be nullptr)
++//   vocab          - vocabulary (used for UTF-8 and newline boundary detection; can be nullptr)
+ //   start_seqs     - token sequences, any of which activates counting
+ //   end_seqs       - token sequences, any of which naturally deactivates
+ //   forced_tokens  - token sequence forced when budget expires
+ //   budget         - max tokens allowed in the reasoning block
+ //   initial_state  - initial state
++//   nudge          - optional early nudge (see common_reasoning_budget_nudge); default off
+ //
+ struct llama_sampler * common_reasoning_budget_init(
+         const struct llama_vocab        * vocab,
+@@ -39,7 +67,8 @@ struct llama_sampler * common_reasoning_budget_init(
+         const std::vector<llama_tokens> & end_seqs,
+         const llama_tokens              & forced_tokens,
+         int32_t                           budget,
+-        common_reasoning_budget_state     initial_state = REASONING_BUDGET_IDLE);
++        common_reasoning_budget_state     initial_state = REASONING_BUDGET_IDLE,
++        const common_reasoning_budget_nudge & nudge = {});
+ 
+ common_reasoning_budget_state common_reasoning_budget_get_state(const struct llama_sampler * smpl);
+ 
+@@ -48,5 +77,6 @@ common_reasoning_budget_state common_reasoning_budget_get_state(const struct lla
+ const llama_tokens * common_reasoning_budget_get_end_match(const struct llama_sampler * smpl);
+ 
+ // Manually transition the reasoning budget sampler into the FORCING state.
++// Allowed from COUNTING and from NUDGING (the nudge is abandoned).
+ // Returns true if the transition occurred.
+ bool common_reasoning_budget_force(struct llama_sampler * smpl);
+diff --git a/common/sampling.cpp b/common/sampling.cpp
+index 27a752cc8df6dc2c95c620e754982727cfc17502..63318f8c25a354bfdb16b127b97b12d6212148c3 100644
+--- a/common/sampling.cpp
++++ b/common/sampling.cpp
+@@ -309,12 +309,21 @@ struct common_sampler * common_sampler_init(
+ 
+     // reasoning budget sampler (skip when budget is unlimited unless a lazy grammar is active, which needs rbudget for thinking-block suppression)
+     if (!params.reasoning_budget_start.empty() && !params.reasoning_budget_end.empty() && (params.grammar_lazy || params.reasoning_budget_tokens >= 0 || params.reasoning_control)) {
++        // the early nudge needs a finite budget to take a fraction of
++        common_reasoning_budget_nudge nudge;
++        if (params.reasoning_budget_tokens >= 0) {
++            nudge.tokens = params.reasoning_budget_nudge;
++            nudge.at     = params.reasoning_budget_nudge_at;
++        }
++
+         rbudget = common_reasoning_budget_init(
+             vocab,
+             {params.reasoning_budget_start},
+             params.reasoning_budget_end,
+             params.reasoning_budget_forced,
+-            params.reasoning_budget_tokens < 0 ? INT_MAX : params.reasoning_budget_tokens);
++            params.reasoning_budget_tokens < 0 ? INT_MAX : params.reasoning_budget_tokens,
++            REASONING_BUDGET_IDLE,
++            nudge);
+ 
+         for (const auto & token : prefill_tokens) {
+             llama_sampler_accept(rbudget, token);
+diff --git a/tests/test-chat.cpp b/tests/test-chat.cpp
+index f2728f7ccaddcdd45e15b45f6799af40da41a2bf..a6a0a11644d7e9d716dbf67cd6b313764f0836f5 100644
+--- a/tests/test-chat.cpp
++++ b/tests/test-chat.cpp
+@@ -7460,6 +7460,47 @@ static void test_reasoning_budget_message_per_request() {
+     }
+ }
+ 
++static void test_reasoning_budget_nudge_per_request() {
++    LOG_DBG("%s\n", __func__);
++    // The nudge fields have no server default; they reach the sampling schema
++    // through the "copy remaining properties" pass of oaicompat_chat_params_parse.
++    auto tmpls = read_templates("models/templates/Qwen-Qwen3-0.6B.jinja");
++
++    server_chat_params opt;
++    opt.tmpls            = std::move(tmpls);
++    opt.use_jinja        = true;
++    opt.enable_thinking  = true;
++    opt.reasoning_budget = -1;
++    opt.reasoning_format = COMMON_REASONING_FORMAT_NONE;
++
++    const std::string nudge = "\n\nI'm close to my thinking limit.\n";
++    json body = {
++        {"messages", json::array({json{{"role", "user"}, {"content", "hello"}}})},
++        {"reasoning_budget_tokens", 100},
++        {"reasoning_budget_nudge", nudge},
++        {"reasoning_budget_nudge_at", 0.75},
++    };
++    std::vector<raw_buffer> out_files;
++    auto llama_params = oaicompat_chat_params_parse(body, opt, out_files);
++
++    if (llama_params.value("reasoning_budget_nudge", std::string()) != nudge) {
++        throw std::runtime_error("reasoning_budget_nudge did not pass through to llama_params");
++    }
++    if (llama_params.value("reasoning_budget_nudge_at", 0.0) != 0.75) {
++        throw std::runtime_error("reasoning_budget_nudge_at did not pass through to llama_params");
++    }
++
++    // absent from the request = absent from llama_params (feature off)
++    json body_off = {
++        {"messages", json::array({json{{"role", "user"}, {"content", "hello"}}})},
++        {"reasoning_budget_tokens", 100},
++    };
++    auto llama_params_off = oaicompat_chat_params_parse(body_off, opt, out_files);
++    if (llama_params_off.contains("reasoning_budget_nudge") || llama_params_off.contains("reasoning_budget_nudge_at")) {
++        throw std::runtime_error("nudge fields must not appear when the request does not send them");
++    }
++}
++
+ static void test_reasoning_effort_caps() {
+     LOG_DBG("%s\n", __func__);
+ 
+@@ -7640,6 +7681,7 @@ int main(int argc, char ** argv) {
+         test_reasoning_effort_caps();
+         test_reasoning_budget_tokens_per_request();
+         test_reasoning_budget_message_per_request();
++        test_reasoning_budget_nudge_per_request();
+         test_template_output_peg_parsers(detailed_debug);
+         std::cout << "\n[chat] All tests passed!" << '\n';
+     }
+diff --git a/tests/test-reasoning-budget.cpp b/tests/test-reasoning-budget.cpp
+index 3bcc77e1733cef05166737cb89a29edae182a260..a989c37f0e75f150a5a33a5f2e2987697308e38f 100644
+--- a/tests/test-reasoning-budget.cpp
++++ b/tests/test-reasoning-budget.cpp
+@@ -8,6 +8,8 @@
+ #undef NDEBUG
+ #endif
+ 
++#include <algorithm>
++#include <climits>
+ #include <cmath>
+ #include <cstddef>
+ #include <cstdio>
+@@ -333,6 +335,289 @@ static void test_reasoning_budget_end_match() {
+     fprintf(stderr, "  Test 'matched end sequence' passed\n");
+ }
+ 
++// ---------------------------------------------------------------------------
++// Early nudge tests
++//
++// simulate() drives the sampler like a generation loop: at each step it calls
++// apply(); when exactly one logit survives, that forced token is emitted,
++// otherwise the "model" emits its next token. Forced steps do not consume a
++// model token. Tokens: 100 = <think>, 101 = </think>, 102 = budget message,
++// 10 = a newline piece (the boundary), 200..202 = the nudge, 50..54 = filler.
++// ---------------------------------------------------------------------------
++
++static const llama_token NUDGE_MAX_TOKEN = 300;
++
++static std::vector<llama_token> simulate(struct llama_sampler * sampler, const std::vector<llama_token> & model, size_t n_steps) {
++    std::vector<llama_token_data> cur;
++    for (llama_token i = 0; i <= NUDGE_MAX_TOKEN; i++) {
++        cur.emplace_back(llama_token_data{i, 0.0f, 0.0f});
++    }
++
++    std::vector<llama_token> emitted;
++    size_t next_model = 0;
++    for (size_t step = 0; step < n_steps; step++) {
++        for (auto & td : cur) {
++            td.logit = 1.0f;
++        }
++        llama_token_data_array cur_p = { cur.data(), cur.size(), -1, false };
++        llama_sampler_apply(sampler, &cur_p);
++
++        size_t      finite_count = 0;
++        llama_token finite_token = LLAMA_TOKEN_NULL;
++        for (const auto & td : cur) {
++            if (std::isfinite(td.logit)) {
++                finite_count++;
++                finite_token = td.id;
++            }
++        }
++
++        llama_token token;
++        if (finite_count == 1) {
++            token = finite_token;
++        } else {
++            GGML_ASSERT(finite_count == cur.size() && "sampler must either force one token or pass through");
++            if (next_model >= model.size()) {
++                break;
++            }
++            token = model[next_model++];
++        }
++
++        llama_sampler_accept(sampler, token);
++        emitted.push_back(token);
++    }
++    return emitted;
++}
++
++// <think>, then n_think tokens of filler with a newline at every `newline_every`-th
++// thinking token (1-based: tokens 7, 14, ... for 7), then more filler forever.
++static std::vector<llama_token> model_stream(size_t n_think, size_t newline_every, size_t last_newline = SIZE_MAX) {
++    std::vector<llama_token> out = {100};
++    for (size_t n = 1; n <= n_think; n++) {
++        const bool newline = newline_every > 0 && n % newline_every == 0 && n <= last_newline;
++        out.push_back(newline ? 10 : (llama_token) (50 + n % 5));
++    }
++    return out;
++}
++
++static size_t count_subsequence(const std::vector<llama_token> & hay, const std::vector<llama_token> & needle, size_t * first = nullptr) {
++    size_t count = 0;
++    for (size_t i = 0; i + needle.size() <= hay.size(); i++) {
++        if (std::equal(needle.begin(), needle.end(), hay.begin() + i)) {
++            if (count == 0 && first) {
++                *first = i;
++            }
++            count++;
++        }
++    }
++    return count;
++}
++
++static void test_reasoning_budget_nudge() {
++    const std::vector<llama_tokens> start  = {{100}};
++    const std::vector<llama_tokens> end    = {{101}};
++    const llama_tokens              forced = {102, 101};
++    const llama_tokens              nudge_tokens = {200, 201, 202};
++    const int32_t                   budget = 100;
++
++    common_reasoning_budget_nudge nudge;
++    nudge.tokens          = nudge_tokens;
++    nudge.at              = 0.8f;
++    nudge.min_room        = 8;
++    nudge.boundary_tokens = {10};
++
++    const auto model = model_stream(400, 7);
++
++    // baseline: no nudge argument at all (the pre-nudge call)
++    std::vector<llama_token> baseline;
++    {
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE);
++        baseline = simulate(s, model, 150);
++        llama_sampler_free(s);
++
++        // the hard stop: exactly `budget` thinking tokens, then message + end tag
++        GGML_ASSERT(baseline[0] == 100);
++        GGML_ASSERT(baseline[1 + budget] == 102 && baseline[2 + budget] == 101);
++        GGML_ASSERT(count_subsequence(baseline, nudge_tokens) == 0);
++    }
++
++    // 1. off by default: an empty nudge (other fields set) gives the identical sequence
++    {
++        common_reasoning_budget_nudge off = nudge;
++        off.tokens.clear();
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, off);
++        GGML_ASSERT(simulate(s, model, 150) == baseline && "an empty nudge must not change the sequence");
++        llama_sampler_free(s);
++
++        auto * s2 = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, common_reasoning_budget_nudge{});
++        GGML_ASSERT(simulate(s2, model, 150) == baseline && "a default nudge must not change the sequence");
++        llama_sampler_free(s2);
++
++        // an unlimited budget (INT_MAX, as sampling.cpp passes it) never nudges
++        auto * s3 = common_reasoning_budget_init(nullptr, start, end, forced, INT_MAX, REASONING_BUDGET_IDLE, nudge);
++        const auto out3 = simulate(s3, model, 150);
++        GGML_ASSERT(count_subsequence(out3, nudge_tokens) == 0 && "an unlimited budget must not nudge");
++        llama_sampler_free(s3);
++    }
++
++    // 2. fires once, at the first boundary at or after 80% of the budget; returns
++    //    to COUNTING; the hard stop still fires after, with the nudge counted
++    {
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
++
++        std::vector<llama_token> out;
++        bool saw_nudging = false;
++        bool saw_counting_after = false;
++        {
++            // step manually so the states can be observed
++            std::vector<llama_token_data> cur;
++            for (llama_token i = 0; i <= NUDGE_MAX_TOKEN; i++) {
++                cur.emplace_back(llama_token_data{i, 0.0f, 0.0f});
++            }
++            size_t next_model = 0;
++            for (size_t step = 0; step < 150; step++) {
++                for (auto & td : cur) { td.logit = 1.0f; }
++                llama_token_data_array cur_p = { cur.data(), cur.size(), -1, false };
++                llama_sampler_apply(s, &cur_p);
++                size_t finite_count = 0;
++                llama_token finite_token = LLAMA_TOKEN_NULL;
++                for (const auto & td : cur) {
++                    if (std::isfinite(td.logit)) { finite_count++; finite_token = td.id; }
++                }
++                const llama_token token = finite_count == 1 ? finite_token : model[next_model++];
++                llama_sampler_accept(s, token);
++                out.push_back(token);
++
++                const auto state = common_reasoning_budget_get_state(s);
++                if (state == REASONING_BUDGET_NUDGING) {
++                    saw_nudging = true;
++                } else if (saw_nudging && state == REASONING_BUDGET_COUNTING) {
++                    saw_counting_after = true;
++                }
++            }
++        }
++        llama_sampler_free(s);
++
++        size_t at = SIZE_MAX;
++        GGML_ASSERT(count_subsequence(out, nudge_tokens, &at) == 1 && "the nudge must fire exactly once");
++        // thinking tokens 7, 14, ..., 77, 84 are newlines; 80% of 100 = 80, so the
++        // boundary is thinking token 84 (out[84]) and the nudge starts at out[85]
++        GGML_ASSERT(at == 85);
++        GGML_ASSERT(out[at - 1] == 10 && "the nudge follows a boundary token");
++        for (size_t i = 1; i < at - 1; i++) {
++            GGML_ASSERT(!(out[i] == 10 && i >= 80) && "no earlier boundary at or after 80% was skipped");
++        }
++        GGML_ASSERT(saw_nudging && saw_counting_after && "NUDGING must return to COUNTING");
++        // the model resumes right after the nudge (thinking token 85 of the model stream)
++        GGML_ASSERT(out[at + nudge_tokens.size()] == model[85]);
++        // the nudge counts against the budget: the hard stop still lands after
++        // exactly `budget` thinking tokens (nudge included)
++        GGML_ASSERT(out[1 + budget] == 102 && out[2 + budget] == 101);
++        GGML_ASSERT(count_subsequence(out, forced) == 1);
++    }
++
++    // 3. natural end before 80% = no nudge, no forcing
++    {
++        auto natural = model_stream(50, 7);
++        natural.push_back(101);            // </think> after 50 thinking tokens
++        for (int i = 0; i < 100; i++) {
++            natural.push_back(i % 2 ? 10 : 60); // answer text, with newlines
++        }
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
++        const auto out = simulate(s, natural, 200);
++        GGML_ASSERT(out == natural && "a natural end before 80% must leave the sequence untouched");
++        GGML_ASSERT(common_reasoning_budget_get_state(s) == REASONING_BUDGET_DONE);
++        llama_sampler_free(s);
++    }
++
++    // 4. no boundary between 80% and the hard stop: the hard stop wins, no nudge
++    {
++        const auto no_late_newline = model_stream(400, 7, 77);
++        auto * s0 = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE);
++        const auto expected = simulate(s0, no_late_newline, 150);
++        llama_sampler_free(s0);
++
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
++        const auto out = simulate(s, no_late_newline, 150);
++        llama_sampler_free(s);
++        GGML_ASSERT(out == expected && "without a boundary the nudge must not fire");
++        GGML_ASSERT(out[1 + budget] == 102);
++    }
++
++    // 5. a boundary too close to the hard stop (fewer than nudge + min_room left): abandoned
++    {
++        // newlines only at thinking token 95 (5 tokens remain < 3 + 8)
++        auto late = model_stream(400, 0);
++        late[95] = 10;
++        auto * s0 = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE);
++        const auto expected = simulate(s0, late, 150);
++        llama_sampler_free(s0);
++
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
++        const auto out = simulate(s, late, 150);
++        llama_sampler_free(s);
++        GGML_ASSERT(out == expected && "a nudge with no room left must be abandoned");
++    }
++
++    // 6. init guard: budget - at x budget < nudge + min_room (default 64) disables it
++    {
++        common_reasoning_budget_nudge tight = nudge;
++        tight.min_room = 64; // 100 - 80 = 20 < 3 + 64
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, tight);
++        GGML_ASSERT(simulate(s, model, 150) == baseline && "the init guard must disable a nudge with no room");
++        llama_sampler_free(s);
++
++        // with room (budget 1000: 200 left >= 3 + 64) it fires, once
++        auto * s2 = common_reasoning_budget_init(nullptr, start, end, forced, 1000, REASONING_BUDGET_IDLE, tight);
++        const auto out2 = simulate(s2, model_stream(1200, 7), 1100);
++        llama_sampler_free(s2);
++        size_t at2 = SIZE_MAX;
++        GGML_ASSERT(count_subsequence(out2, nudge_tokens, &at2) == 1);
++        GGML_ASSERT(at2 == 806); // the first newline at or after 800 is thinking token 805 (7 x 115), so the nudge starts at out[806]
++    }
++
++    // 7. at most once per generation: a second reasoning block does not nudge
++    //    again; reset() re-arms it
++    {
++        std::vector<llama_token> two_blocks = model_stream(90, 7); // nudge fires after token 84
++        two_blocks.push_back(101);                                 // natural end
++        for (size_t n = 1; n <= 150; n++) {
++            two_blocks.push_back(n == 1 ? 100 : (n % 7 == 0 ? 10 : 55)); // second <think> block
++        }
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
++        const auto out = simulate(s, two_blocks, 300);
++        GGML_ASSERT(count_subsequence(out, nudge_tokens) == 1 && "the nudge fires at most once per generation");
++        GGML_ASSERT(count_subsequence(out, forced) == 1 && "the second block still gets its hard stop");
++
++        llama_sampler_reset(s);
++        const auto out_again = simulate(s, model, 150);
++        GGML_ASSERT(count_subsequence(out_again, nudge_tokens) == 1 && "reset() re-arms the nudge");
++        llama_sampler_free(s);
++    }
++
++    // 8. clone mid-nudge keeps the nudge position; force() from NUDGING goes to FORCING
++    {
++        auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
++        for (size_t i = 0; i <= 84; i++) {
++            llama_sampler_accept(s, model[i]); // <think> + 84 thinking tokens, the last a boundary
++        }
++        GGML_ASSERT(common_reasoning_budget_get_state(s) == REASONING_BUDGET_NUDGING);
++        GGML_ASSERT(get_forced_token(s, NUDGE_MAX_TOKEN) == 200);
++        llama_sampler_accept(s, 200);
++
++        auto * clone = llama_sampler_clone(s);
++        GGML_ASSERT(get_forced_token(clone, NUDGE_MAX_TOKEN) == 201 && "cloned nudging state lost its position");
++
++        GGML_ASSERT(common_reasoning_budget_force(clone) && "force() should succeed from NUDGING");
++        GGML_ASSERT(common_reasoning_budget_get_state(clone) == REASONING_BUDGET_FORCING);
++        GGML_ASSERT(get_forced_token(clone, NUDGE_MAX_TOKEN) == 102);
++
++        llama_sampler_free(clone);
++        llama_sampler_free(s);
++    }
++
++    fprintf(stderr, "  Test 'early nudge' passed\n");
++}
++
+ // UTF-8 boundary detection unit test
+ // Tests common_utf8_is_complete() from reasoning-budget.h
+ static void test_utf8_boundary_detection() {
+@@ -494,8 +779,9 @@ int main(void) {
+     test_reasoning_budget_clone_mid_forcing();
+     test_reasoning_budget_force_manual();
+     test_reasoning_budget_end_match();
++    test_reasoning_budget_nudge();
+ 
+-    printf("OK (12 tests passed)\n");
++    printf("OK (13 tests passed)\n");
+ 
+     printf("Testing UTF-8 boundary detection... ");
+     test_utf8_boundary_detection();
+diff --git a/tools/server/server-schema.cpp b/tools/server/server-schema.cpp
+index 27ecafb7a5952677a997c62f4b26a1b67f7a36d9..3cf161f4f741cdae3f904a8fd7a42c26dde5ae94 100644
+--- a/tools/server/server-schema.cpp
++++ b/tools/server/server-schema.cpp
+@@ -431,6 +431,21 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
+             }
+         }));
+ 
++    add((new field_str("reasoning_budget_nudge"))
++        ->set_desc("Text forced inside the reasoning block, once, at the first newline after reasoning_budget_nudge_at of the budget is used; reasoning then continues (empty = off). Its tokens count against the budget")
++        ->set_handler([&](field_eval_context & ctx, const json & data) {
++            GGML_ASSERT(ctx.vocab != nullptr);
++            std::string nudge = json_value(data, "reasoning_budget_nudge", std::string());
++            ctx.params.sampling.reasoning_budget_nudge.clear();
++            if (!nudge.empty()) {
++                ctx.params.sampling.reasoning_budget_nudge = common_tokenize(ctx.vocab, nudge, false, true);
++            }
++        }));
++
++    add((new field_num("reasoning_budget_nudge_at", params.sampling.reasoning_budget_nudge_at))
++        ->set_hard_limits(0.0f, 1.0f)
++        ->set_desc("Fraction of reasoning_budget_tokens used before reasoning_budget_nudge fires (default 0.8)"));
++
+     add((new field_json("logit_bias"))
+         ->set_desc("Modify the likelihood of specific tokens. Accepts an array of [token, bias] pairs or an object mapping token to bias. Use false as bias to ban a token")
+         ->set_handler([&](field_eval_context & ctx, const json & data) {
+@@ -560,11 +575,13 @@ task_params eval_llama_cmpl_schema(
+     // debugging
+     {
+         auto budget = params.sampling.reasoning_budget_tokens;
+-        SRV_DBG("reasoning budget: tokens=%d, generation_prompt='%s', start=%zu toks, end=%zu seqs, forced=%zu toks\n",
++        SRV_DBG("reasoning budget: tokens=%d, generation_prompt='%s', start=%zu toks, end=%zu seqs, forced=%zu toks, nudge=%zu toks at %.3f\n",
+                 budget, params.sampling.generation_prompt.c_str(),
+                 params.sampling.reasoning_budget_start.size(),
+                 params.sampling.reasoning_budget_end.size(),
+-                params.sampling.reasoning_budget_forced.size());
++                params.sampling.reasoning_budget_forced.size(),
++                params.sampling.reasoning_budget_nudge.size(),
++                (double) params.sampling.reasoning_budget_nudge_at);
+     }
+ 
+     return params;

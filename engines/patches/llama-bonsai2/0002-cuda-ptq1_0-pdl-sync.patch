@@ -1,0 +1,34 @@
+From 967d31271cc3f389fd362dc5cb0f2f9a634dec79 Mon Sep 17 00:00:00 2001
+From: Paul Zammit <zammpaul@gmail.com>
+Date: Fri, 25 Sep 2026 14:57:47 +0200
+Subject: [PATCH] Fix: wait on the PDL dependency in the PTQ1_0 mat-vec kernel
+ before reading vy
+
+mul_mat_vec_ptq1_0_pt is launched through ggml_cuda_kernel_launch, which
+opts into programmatic dependent launch on Hopper and newer. The kernel
+never called ggml_cuda_pdl_sync(), so it could start reading vy before
+the q8_1 activation quantization had finished writing it. On an RTX 5080
+(sm_120) llama-server output broke into repeated '!' or '/' a few tokens
+in, text and vision alike. GGML_CUDA_PDL=0 or GGML_CUDA_DISABLE_GRAPHS=1
+hid it. llama-bench speed is unaffected; test-backend-ops runs each op
+on its own and cannot catch it. The mul_mat_vec_q kernels in mmvq.cu
+make the same call. Ampere and Ada never take the PDL path.
+---
+ ggml/src/ggml-cuda/mmvq-ptq1_0.cuh | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/ggml/src/ggml-cuda/mmvq-ptq1_0.cuh b/ggml/src/ggml-cuda/mmvq-ptq1_0.cuh
+index baa90977b0ef..d70ae4415df3 100644
+--- a/ggml/src/ggml-cuda/mmvq-ptq1_0.cuh
++++ b/ggml/src/ggml-cuda/mmvq-ptq1_0.cuh
+@@ -298,6 +298,10 @@ static __global__ void mul_mat_vec_ptq1_0_pt(
+     const void * GGML_CUDA_RESTRICT vx  = vx_ptr;
+     const void * GGML_CUDA_RESTRICT vy  = vy_ptr;
+     float      * GGML_CUDA_RESTRICT dst = dst_ptr;
++    // launched through ggml_cuda_kernel_launch, which opts into PDL on Hopper and newer: wait for the kernel
++    // that wrote vy (the q8_1 activation quantization) before reading it
++    ggml_cuda_pdl_sync();
++
+     extern __shared__ float partials_dyn[];
+     float * partials = partials_dyn;                                       // [ncols][rows_per_cta][bpr]
+     [[maybe_unused]] float * partials_gate = partials_dyn + ncols*rows_per_cta*(ncols_x / QK_PTQ1_0);

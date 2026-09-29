@@ -1,0 +1,39 @@
+{
+ "id": "hermes/chat/approval-classifier",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "chat",
+ "source": "corpus turns 3703/3857 (Hermes' security reviewer, verbatim head)",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are a security reviewer for an AI coding agent.\n\nRespond with exactly one word: APPROVE, DENY, or ESCALATE"
+   },
+   {
+    "role": "user",
+    "content": "<command>ls -la</command>\n\nRespond with exactly one word: APPROVE, DENY, or ESCALATE"
+   }
+  ]
+ },
+ "expect": {
+  "accepted": true,
+  "route": "utility",
+  "utility": {
+   "utility": true,
+   "kind": "classifier"
+  },
+  "session": {
+   "source": null
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "utility": "a one-word closed form (selection._CLOSED_FORMS)"
+ }
+}

@@ -41,7 +41,7 @@ model wraps that request in `use(model_id, upstream=...)`:
      fact), and a remedy with an owner (AGENTS.md "Failure returns carry the
      next step"). It never lets a load go into an out-of-memory.
   6. Decisions are serialised ACROSS PROCESSES by a file lock: the proxy, the
-     tools API (code search -> embeddings) and the worker (hint indexing ->
+     tools API (code search -> embeddings) and the worker (skill triggers ->
      embeddings) all load A4000 models, and a lock inside one process would
      not stop the other two. A caller that may allocate (a load, or a draw
      whose server grows from idle to peak) holds the card's room lock until
@@ -70,7 +70,7 @@ outcome if something bypasses it.
 KNOWN GAP. The proxy's chat path for the unadvertised name `yamadori-vision`
 (a client asking for the vision copy directly) calls `ensure_room()` once
 before the turn and holds no lock through the generation, so a concurrent
-load can still race it. The tool path (describe_image) holds the lock.
+load can still race it. The tool path (yama_describe_image) holds the lock.
 """
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ CARD_UUID = os.environ.get("YAMADORI_A4000_UUID",
 # #16; config.yaml's `bonsai` comment uses the same figure for the 5060 Ti).
 # Read as 1.3 GiB = 1,331 MiB, the stricter of the two readings. A choice,
 # not a measurement: nothing here measured how little free memory the A4000's
-# consumers survive. vitals.TIGHT_MIB (1,280) is the dashboard's red line.
+# consumers survive. vitals.floor_mib() uses this as the A4000 red line on the dashboard.
 HEADROOM_MIB = int(os.environ.get("YAMADORI_A4000_HEADROOM_MIB", "1331"))
 
 # How long a caller waits for the card's room lock or for a model another
@@ -172,12 +172,18 @@ SIZES: dict[str, Size] = {
         "(Qwen3-Reranker-0.6B-Q8_0.gguf) + f16 KV at -c 16384 (1,792 MiB) + "
         "compute buffer and CUDA context (~600, assumed). Measured only "
         "together with embeddings and Laya: 7,565 MiB (config.yaml)"),
+    # LAYOUT V2 (operator, 2026-09-29: "Vision can go to second card and swap
+    # in and out"): the row retired with the 2026-09-27 fold, restored.
     "bonsai-vision": Size(
         9449, 9449, False,
         "ESTIMATE, the upper end of config.yaml's 8,265-9,449 MiB (weights "
         "5.95 GiB + mmproj 0.59 + q8 KV at -c 16384 + a 1-2 GiB compute "
         "buffer; `ondemand` group comment, docs/IMAGEGEN.md 'VRAM on the "
-        "A4000'). Never measured alone"),
+        "A4000'). Never measured alone. The one live reading with it loaded "
+        "(2026-09-24, mcp/test_live_stack.py --only images, n=1) was the "
+        "card's peak with embeddings, the reranker, Laya, imagegen-turbo and "
+        "bonsai-vision resident together: 16,068 of 16,376 MiB, 308 MiB free "
+        "-- a sum, not this row"),
     "imagegen": Size(
         6389, 319, True,
         "MEASURED: peak +6,389 MiB at 1344x1344 under --max-vram 6 (n=1); "
@@ -189,6 +195,13 @@ SIZES: dict[str, Size] = {
         "`imagegen`, whose measured ceiling (+6,389) is used. Its own peak was "
         "read once, +5,527 MiB (sd-cli smoke test, n=1, docs/IMAGEGEN.md "
         "'Smoke test'); its idle hold is assumed equal to imagegen's 319"),
+    "clm-encoder": Size(
+        9415, 9379, True,
+        "MEASURED 2026-09-27 (bench/clm/standalone.py, config.yaml's "
+        "clm-encoder flags, Qwen3-8B-Q8_0.gguf, A4000): 9,379 MiB held idle "
+        "after load, 9,413-9,415 MiB after a full-window (2,047-token) "
+        "input (n=3 loads). Swap-in 3.7 s warm, 6.3 s cold (bench/clm/"
+        "swap.py). docs/CLM.md"),
     "critic-disabled": Size(
         20173, 20173, False,
         "ARITHMETIC in config.yaml: ~19.7 GiB (weights 15.41 + q8 KV 1.06 + "
@@ -589,7 +602,7 @@ def _settle(upstream: str, victim: str, before: int) -> int | None:
 
 # ------------------------------------------ the chat path waits only briefly
 # (pre-deploy review, 2026-09-24). A chat request's own embedding (skill /
-# hint selection, library help, E1, in proxy.prepare) went through use() like
+# skill selection, library help, E1, in proxy.prepare) went through use() like
 # any caller, and when the search model was not loaded it waited up to
 # ROOM_WAIT_S (300 s) for the room lock -- which an image draw holds for its
 # whole run. Inside `fail_fast()` a loaded model still takes its lease (no

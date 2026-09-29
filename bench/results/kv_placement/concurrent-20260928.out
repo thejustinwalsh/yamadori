@@ -1,0 +1,45 @@
+[06:58:30] [current] unload bonsai: HTTP 200
+[06:58:42] [current] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}
+[06:58:43] [current] G_concurrent_slots_1_2 ...
+[06:58:57] GUARD: llama-swap started ['bonsai'] on the card; killing the arm
+Exception in thread Thread-48 (one):
+Traceback (most recent call last):
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\threading.py", line 1044, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\threading.py", line 995, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\llama-stack\bench\kv_placement.py", line 207, in one
+    outs[slot] = completion(base, prompts[slot], slot, a.n)
+                 ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\llama-stack\bench\kv_placement.py", line 111, in completion
+    raise RuntimeError(f"/completion slot {slot}: HTTP {st}: {txt[:300]}")
+RuntimeError: /completion slot 1: HTTP 0: ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+Exception in thread Thread-49 (one):
+Traceback (most recent call last):
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\threading.py", line 1044, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\threading.py", line 995, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\llama-stack\bench\kv_placement.py", line 207, in one
+    outs[slot] = completion(base, prompts[slot], slot, a.n)
+                 ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\llama-stack\bench\kv_placement.py", line 111, in completion
+    raise RuntimeError(f"/completion slot {slot}: HTTP {st}: {txt[:300]}")
+RuntimeError: /completion slot 2: HTTP 0: ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+[06:58:58] [current] ERROR KeyError(1)
+[06:58:58] [current] stopped; min free 26 MiB
+[06:58:58] restore: {'lane_resumed': True, 'bonsai_state': 'starting', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 5940, 'free': 10111, 'util': 10}}
+[06:59:10] waiting: card busy (30% mean utilisation over 10 s)
+[06:59:54] [kvplace] unload bonsai: HTTP 200
+[07:00:01] GUARD: llama-swap started ['bonsai'] on the card; killing the arm
+[07:00:03] [kvplace] ERROR RuntimeError("server exited 1 during load (llama-swap started ['bonsai'] on the card)")
+[07:00:03] [kvplace] stopped; min free 9998 MiB
+[07:00:03] restore: {'lane_resumed': True, 'bonsai_state': 'starting', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 6066, 'free': 9985, 'util': 7}}
+| arm | stage | prompt_n | prompt tok/s | decode tok/s | draft acc | pool max+1 | used |
+|---|---|---|---|---|---|---|---|
+| current | ERROR | KeyError(1) | | | | | |
+| kvplace | ERROR | RuntimeError("server exited 1 during load (llama-swap started ['bonsai'] on the card)") | | | | | |

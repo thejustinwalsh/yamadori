@@ -72,18 +72,24 @@ os.environ["YAMADORI_CORPUS_DB"] = os.path.join(
     tempfile.gettempdir(), "yamadori_test_corpus.sqlite3")
 os.environ["RINGS_DB"] = os.path.join(
     tempfile.gettempdir(), "yamadori_test_rings.sqlite3")
+# Nor the live ledger or jobs/skills store: proxy (imported below) opens
+# nebari, and the knowledge-base test reads the skills store.
+_DB_TMP = tempfile.mkdtemp(prefix="yamadori_test_tools_db_")
+os.environ["YAMADORI_NEBARI_DB"] = os.path.join(_DB_TMP, "nebari.sqlite3")
+os.environ["YAMADORI_JOBS_DB"] = os.path.join(_DB_TMP, "jobs.sqlite3")
+os.environ["YAMADORI_SKILLS_DIR"] = os.path.join(_DB_TMP, "skills")
 # Never the real package store either. With no repository bound, index tools
 # now fall back to every held package index; against the real store that made
 # "no index anywhere" checks pass or fail depending on what this machine had
 # downloaded. Tests that want a package put one here deliberately.
 PKG_STORE = tempfile.mkdtemp(prefix="yamadori_test_pkgs_")
 os.environ["YAMADORI_PKG_DIR"] = PKG_STORE
-# No image server, whatever the operator's shell has: generate_image is offered
+# No image server, whatever the operator's shell has: yama_generate_image is offered
 # only when one is configured, and this suite asserts both sides of that gate
 # itself (test_generate_image_is_gated_and_says_why). The media store and URL
 # key are temp files, never index/media.
 os.environ.pop("YAMADORI_IMAGEGEN_URL", None)
-os.environ.pop("YAMADORI_VISION", None)     # describe_image on, as shipped
+os.environ.pop("YAMADORI_VISION", None)     # yama_describe_image on, as shipped
 _MEDIA_TMP = tempfile.mkdtemp(prefix="yamadori_test_media_")
 os.environ["YAMADORI_MEDIA_DIR"] = os.path.join(_MEDIA_TMP, "media")
 os.environ["YAMADORI_MEDIA_SECRET_FILE"] = os.path.join(_MEDIA_TMP, "url.key")
@@ -133,10 +139,20 @@ PARTIAL_DB = os.path.join(FIXTURE_ROOT, "partial.sqlite3")
 
 os.environ["CODE_INDEX_DB"] = FIXTURE_DB
 
+# Every other store the code under test can write (the jobs database
+# behind skill selection, the concept seed, ...), BEFORE any mcp import:
+# 2026-09-27 this suite wrote the live index/ (the offline guard).
+import offline_stores  # noqa: E402
+offline_stores.isolate("yamadori_test_tools_stores_")
+
 import code_search as cs  # noqa: E402
 import fusion  # noqa: E402
 import shomen  # noqa: E402
 import proxy  # noqa: E402
+import served_fixture  # noqa: E402
+# The served model's /props, pinned (mcp/served_fixture.py): budget and
+# tiers would otherwise ask the live stack (llama-swap reloads `bonsai`).
+served_fixture.pin()
 # No offline test may reach the live model server (2026-09-24: a fixture
 # that faked only proxy._post let the turn engine's _post_events reach
 # :11434). The proxy's door and the second brain's (mcp/model.py) go to a
@@ -275,7 +291,7 @@ def test_never_empty_never_raw():
         ("run_check", {"label": "lint"}),
         ("record_step", {"kind": "did", "summary": "tried the median approach"}),
         ("read_rings", {}),
-        ("generate_image", {"prompt": "a lighthouse at dusk"}),
+        ("yama_generate_image", {"prompt": "a lighthouse at dusk"}),
     ]
     for tool, args in cases:
         if tool in NEEDS_MODEL:
@@ -1178,14 +1194,14 @@ def test_delegate_investigation_returns_the_cost_with_the_finding():
 # THE COVERAGE ASSERTION
 # ---------------------------------------------------------------------------
 def test_generate_image_is_gated_and_says_why():
-    """generate_image with no image server: offered nowhere, and a call that
+    """yama_generate_image with no image server: offered nowhere, and a call that
     arrives anyway (a stale transcript, a replay) is answered with the
     situation, a false `retryable`, and remedies with owners. Its behaviour
     against a server lives in mcp/test_images.py."""
     names = {t["function"]["name"] for t in proxy.main_tools(None)[0]}
-    check("generate_image" not in names,
-          "unconfigured: generate_image is not offered", str(sorted(names)))
-    d = as_json(call("generate_image", {"prompt": "a lighthouse at dusk"}))
+    check("yama_generate_image" not in names,
+          "unconfigured: yama_generate_image is not offered", str(sorted(names)))
+    d = as_json(call("yama_generate_image", {"prompt": "a lighthouse at dusk"}))
     check(d is not None and d.get("ok") is False
           and d.get("error") == "IMAGEGEN_NOT_CONFIGURED",
           "a call names the situation", json.dumps(d)[:160])
@@ -1198,14 +1214,14 @@ def test_generate_image_is_gated_and_says_why():
     os.environ["YAMADORI_IMAGEGEN_URL"] = "http://127.0.0.1:9"
     try:
         names = {t["function"]["name"] for t in proxy.main_tools(None)[0]}
-        check("generate_image" in names,
-              "configured: generate_image is offered", str(sorted(names)))
+        check("yama_generate_image" in names,
+              "configured: yama_generate_image is offered", str(sorted(names)))
         dt = {t["function"]["name"] for t in proxy.deep_thinking_tools()}
-        check("generate_image" in dt,
+        check("yama_generate_image" in dt,
               "deep thinking gets it too -- mockups and designs while it "
               "works (operator, 2026-09-23)", str(sorted(dt)))
-        check("describe_image" in names and "describe_image" in dt,
-              "describe_image goes wherever generate_image goes, deep "
+        check("yama_describe_image" in names and "yama_describe_image" in dt,
+              "yama_describe_image goes wherever yama_generate_image goes, deep "
               "thinking included", str(sorted(dt)))
     finally:
         os.environ.pop("YAMADORI_IMAGEGEN_URL", None)
@@ -1232,7 +1248,7 @@ def test_descriptions_say_remote_read_only():
     for want in ("find_by_meaning", "find_definition_opt", "find_references",
                  "find_by_pattern", "read_file_range", "describe_index",
                  "summarize_text", "run_check", "record_step", "read_rings",
-                 "delegate_investigation", "generate_image", "describe_image"):
+                 "delegate_investigation", "yama_generate_image", "yama_describe_image"):
         check(want in by_name, f"{want} is in the second brain's set")
     texts = dict(by_name, ADDENDUM=proxy.ADDENDUM)
     for name, text in texts.items():
@@ -1249,8 +1265,8 @@ def test_descriptions_say_remote_read_only():
               d[-160:])
         check(d.startswith("Answers '"),
               f"{name}: leads with the question it answers", d[:60])
-    for name in ("run_check", "summarize_text", "generate_image",
-                 "describe_image", "record_step", "delegate_investigation"):
+    for name in ("run_check", "summarize_text", "yama_generate_image",
+                 "yama_describe_image", "record_step", "delegate_investigation"):
         check("client's own" in by_name[name],
               f"{name}: sends the user's files to the client's own tools",
               by_name[name][-200:])
@@ -1268,22 +1284,22 @@ def test_descriptions_say_remote_read_only():
 
 
 def test_describe_image_names_what_it_can_see():
-    """describe_image with nothing to look at: a call that arrives anyway is
+    """yama_describe_image with nothing to look at: a call that arrives anyway is
     answered with the situation, whether retrying helps, and a remedy -- and
     a path is never read. Its behaviour against a vision server lives in
     mcp/test_vision.py."""
     names = {t["function"]["name"] for t in proxy.main_tools(None)[0]}
-    check("describe_image" not in names,
-          "no image server and nothing attached: describe_image is not offered",
+    check("yama_describe_image" not in names,
+          "no image server and nothing attached: yama_describe_image is not offered",
           str(sorted(names)))
-    d = as_json(call("describe_image", {"image": "image-0123456789",
+    d = as_json(call("yama_describe_image", {"image": "image-0123456789",
                                         "question": "what is in it?"}))
     check(d is not None and d.get("ok") is False
           and d.get("error") == "UNKNOWN_IMAGE" and d.get("retryable") is True,
           "an id the conversation does not hold: UNKNOWN_IMAGE", json.dumps(d)[:200])
     check(d is not None and "available" in d and d.get("remedies"),
           "it names what IS available, with a remedy", json.dumps(d)[:200])
-    d = as_json(call("describe_image", {"image": "C:/Windows/win.ini",
+    d = as_json(call("yama_describe_image", {"image": "C:/Windows/win.ini",
                                         "question": "read it"}))
     check(d is not None and d.get("error") == "UNKNOWN_IMAGE",
           "a filesystem path is not an image id", json.dumps(d)[:200])
@@ -1360,30 +1376,34 @@ def test_concurrent_calls_never_swap_indexes():
 
 
 def test_the_second_brains_other_sources_answer_or_say_why():
-    """Phase 0.6's tools (mcp/research_tools.py, and think_deeply) through
+    """Phase 0.6's tools (mcp/research_tools.py, and yama_think_deeply) through
     the proxy's own dispatch: each answers, or fails with the situation,
     whether a retry helps, and a remedy. Nothing leaves the machine: the
     search goes to a refusing loopback port, the page to a private address.
     Their behaviour in depth is mcp/test_deep.py."""
     import research_tools as rt
     import skills as skill_store
-    saved = (skill_store.armed, rt.KB_PATHS, rt.SEARXNG_URL)
-    kb = tempfile.mkdtemp(prefix="yamadori_test_kb_")
-    with open(os.path.join(kb, "NOTES.md"), "w", encoding="utf-8") as f:
-        f.write("# Notes\nThe helper lane runs one second brain at a time.\n")
+    saved = (skill_store.armed, rt.SEARXNG_URL)
     skill_store.armed = lambda: [{"id": "r3f-v10-frame", "version": 1,
                                   "title": "R3F v10 frame loop",
                                   "text": "- DO use delta in useFrame",
-                                  "rule": {"text": "react-three-fiber"}}]
-    rt.KB_PATHS = [kb]
+                                  "rule": {"text": "react-three-fiber"}},
+                                 {"id": "prefix-sums", "version": 1,
+                                  "title": "Range sums",
+                                  "body": "Range sums\n- DO: use prefix sums "
+                                          "for many range-sum queries on a "
+                                          "static array.",
+                                  "text": "---\nname: prefix-sums\n---\n",
+                                  "rule": {}}]
     rt.SEARXNG_URL = "http://127.0.0.1:9"
     try:
-        out = call("find_skills", {"query": "useFrame delta"})
-        check("skill:r3f-v10-frame" in out, "find_skills cites skill:<id>",
-              out[:160])
-        out = call("find_in_knowledge_base", {"query": "helper lane"})
-        check("NOTES.md:2" in out, "find_in_knowledge_base cites path:line",
-              out[:160])
+        out = call("find_in_knowledge_base", {"query": "useFrame delta"})
+        check("skill:r3f-v10-frame" in out,
+              "find_in_knowledge_base cites a skill as skill:<id>", out[:160])
+        out = call("find_in_knowledge_base", {"query": "range-sum prefix"})
+        check("skill:prefix-sums" in out and "hint:" not in out,
+              "a migrated skill (a SKILL.md body) is found and cited as "
+              "skill:<id>", out[:160])
         d = as_json(call("read_web_page", {"url": "http://127.0.0.1:1234/"}))
         check(d and d.get("error") == "REFUSED_ADDRESS"
               and d.get("retryable") is False and d.get("remedies"),
@@ -1397,13 +1417,46 @@ def test_the_second_brains_other_sources_answer_or_say_why():
                       for r in d.get("remedies") or []),
               "search_web with nothing listening: the situation, retryable, "
               "the remedy", json.dumps(d)[:200])
-        d = as_json(call("think_deeply", {"question": "why does it fail?"}))
+        out = call("yama_recall_craft", {"name_or_topic": "no such craft here"})
+        d = as_json(out)
+        check(d and d.get("error") == "NO_SUCH_CRAFT"
+              and d.get("retryable") is True and d.get("remedies")
+              and "skill" not in out.lower(),
+              "yama_recall_craft with nothing matching: the situation, "
+              "retryable, a remedy -- and the model reads 'craft'",
+              (out or "")[:200])
+        d = as_json(call("yama_think_deeply", {"question": "why does it fail?"}))
         check(d and d.get("error") == "NOT_IN_A_TURN"
               and d.get("retryable") is False,
-              "think_deeply outside a chat turn says where it runs",
+              "yama_think_deeply outside a chat turn says where it runs",
               json.dumps(d)[:200])
+        d = as_json(call("yama_plan", {"task": "build a voxel pagoda"}))
+        check(d and d.get("error") == "NOT_IN_A_TURN"
+              and d.get("retryable") is False,
+              "yama_plan outside a chat turn says where it runs",
+              json.dumps(d)[:200])
+        # The MCP host's package lookups (mcp/mcp_host.py): this process never
+        # enabled the host (server.py does), so each says so -- the
+        # situation, not retryable, a remedy with its owner. Their own
+        # suite, against a real stdio server, is mcp/test_mcp_host.py.
+        for name, args in (
+                ("yama_find_package", {"query": "a date library",
+                                       "ecosystem": "npm"}),
+                ("yama_list_package_versions", {"package": "left-pad",
+                                                "ecosystem": "npm"}),
+                ("yama_read_package_readme", {"package": "left-pad",
+                                              "ecosystem": "npm"}),
+                ("yama_resolve_packages", {"packages": ["left-pad"],
+                                           "ecosystem": "npm"})):
+            d = as_json(call(name, args))
+            check(d and d.get("error") == "MCP_SERVER_OFF"
+                  and d.get("retryable") is False
+                  and any(r.get("fixable_by") == "operator"
+                          for r in d.get("remedies") or []),
+                  f"{name} with the MCP host off: the situation, not "
+                  f"retryable, the operator's remedy", json.dumps(d)[:200])
     finally:
-        skill_store.armed, rt.KB_PATHS, rt.SEARXNG_URL = saved
+        skill_store.armed, rt.SEARXNG_URL = saved
 
 
 def test_every_tool_has_a_test():
@@ -1420,18 +1473,37 @@ def test_every_tool_has_a_test():
     stray = sorted(_exercised - proxy.OUR_NAMES)
     check(not stray, "no test exercises a tool the proxy does not offer",
           "unknown: " + ", ".join(stray))
-    # 13 since generate_image (2026-09-22, docs/IMAGEGEN.md). It is offered
+    # 13 since yama_generate_image (2026-09-22, docs/IMAGEGEN.md). It is offered
     # only when an image server is configured; OUR_NAMES lists it always,
     # because OUR_NAMES is what the proxy recognises as its own to execute.
     # 14 since check_code (2026-09-23, mcp/code_check.py; its own suite is
-    # mcp/test_code_check.py). 15 since describe_image (2026-09-23,
+    # mcp/test_code_check.py). 15 since yama_describe_image (2026-09-23,
     # mcp/vision.py; its own suite is mcp/test_vision.py). 13 since
     # 2026-09-24: bind_project_context is deleted, and check_code is no
     # longer a tool the proxy runs (the proxy checks code itself). 18 since
-    # Phase 0.6 (2026-09-24): think_deeply on main, and the second brain's
+    # Phase 0.6 (2026-09-24): yama_think_deeply on main, and the second brain's
     # find_skills, find_in_knowledge_base, read_web_page and search_web
-    # (mcp/research_tools.py; their own suite is mcp/test_deep.py).
-    check(len(proxy.OUR_NAMES) == 18,
+    # (mcp/research_tools.py; their own suite is mcp/test_deep.py). 17
+    # since 2026-09-25: find_skills folded into find_in_knowledge_base (the
+    # knowledge base is the skills pipeline, nothing else). 18 since
+    # 2026-09-27: yama_recall_craft on main (skill_select PROGRESSIVE
+    # DISCLOSURE; its own suite is mcp/test_skill_turns.py). 19 since
+    # 2026-09-27: yama_plan on main (its own suite is mcp/test_ledger.py);
+    # every tool of ours on main renamed yama_* the same day. 22 since
+    # 2026-09-28: the MCP host's package lookups (yama_find_package,
+    # yama_package_versions, yama_package_readme; mcp/mcp_host.py, their
+    # own suite is mcp/test_mcp_host.py). 23 since 2026-09-29:
+    # yama_resolve_packages (mcp/npm_resolve.py, its own suite
+    # mcp/test_npm_resolve.py), and the two lookups renamed verb first
+    # (yama_list_package_versions, yama_read_package_readme; the old names
+    # are legacy, not OUR_NAMES).
+    check(len(proxy.OUR_NAMES) == 23 and "yama_recall_craft" in proxy.OUR_NAMES
+          and "yama_plan" in proxy.OUR_NAMES
+          and "yama_find_package" in proxy.OUR_NAMES
+          and "yama_resolve_packages" in proxy.OUR_NAMES
+          and "yama_package_versions" not in proxy.OUR_NAMES
+          and "find_skills" not in proxy.OUR_NAMES
+          and not set(proxy.LEGACY_TOOL_NAMES) & proxy.OUR_NAMES,
           "the tool count is what the audit was written against",
           str(sorted(proxy.OUR_NAMES)))
 
@@ -1517,11 +1589,11 @@ def test_tools_are_withheld_when_they_cannot_work():
         check("NO_INDEX" in why or "no index" in why,
               "and the reason says why, for the log", why)
 
-        # Hints forced off: at `medium` they would embed the question through
+        # Skills forced off: at `medium` they would embed the question through
         # the live embeddings server, and an offline suite sends no traffic.
         body = {"model": "yamadori", "reasoning_effort": "medium",
                 "messages": msgs, "_client_ip": "127.0.0.1",
-                "_features": '{"hints": false}'}
+                "_features": '{"skills": false}'}
         # prepare() reads and writes session memory, and the gate now honours
         # "this conversation already had the tools". Against the real
         # index/nebari.sqlite3 that makes this check depend on whatever the
@@ -1534,7 +1606,7 @@ def test_tools_are_withheld_when_they_cannot_work():
             proxy.nebari.DB = prev_nebari
         # CHANGED 2026-09-23: check_code needs no index (it parses the text it
         # is handed), so the gate says nothing about it and it is offered at
-        # `medium` and up whatever the gate decides (generate_image: every
+        # `medium` and up whatever the gate decides (yama_generate_image: every
         # tier). What
         # this check protects is that no INDEX tool is sent.
         # CHANGED 2026-09-24: no tool of ours goes to main at all; the
@@ -1555,12 +1627,13 @@ def test_tools_are_withheld_when_they_cannot_work():
 
 
 def _selection_fixture():
-    """A package store holding `three` with a symbol table, a dead Laya, no
-    hint embedding, and an upstream that answers at once. Returns (restore,
-    upstream_calls, investigations)."""
+    """A package store holding `three` with a symbol table, a dead Laya, a
+    skill selection that injects one skill without the embedder, and an
+    upstream that answers at once. Returns (restore, upstream_calls,
+    investigations)."""
     import domains
-    import hints as hints_mod
     import selection
+    import skill_select
     import sqlite3
 
     store = tempfile.mkdtemp(prefix="yamadori_test_sel_pkgs_")
@@ -1596,7 +1669,7 @@ def _selection_fixture():
 
     def fake_investigate(question, tools, run_tool, context="", hops=8,
                          on_think=None, tier="max", effort=None, seed=None,
-                         mode="investigate"):
+                         mode="investigate", **_kw):
         ran.append({"question": question, "tier": tier, "effort": effort,
                     "mode": mode,
                     "tools": [t["function"]["name"] for t in tools]})
@@ -1606,24 +1679,34 @@ def _selection_fixture():
                 "hops": finding["hops"], "handle": "h1", "cited": [],
                 "unsupported": [], "helper_tokens": 1, "seconds": 0.1}
 
-    used_hint = {"_score": 0.71, "recipe": "R" * 300, "source_name": "src",
-                 "_bucket": "b1",
-                 "_suppressed": [{"score": 0.6, "recipe": "S" * 300}]}
+    def fake_attach(augmented, messages, sel, body=None):
+        rec = {"on": True, "route_class": "code_generation",
+               "ids": ["abc123def456"], "versions": [2],
+               "names": ["prefix-sums"], "chars": 42, "tokens": 14,
+               "matched": [{"id": "abc123def456", "version": 2,
+                            "name": "prefix-sums", "title": "T" * 300}],
+               "why": "1 skill(s) injected"}
+        if not sel.get("skills"):
+            return augmented, dict(rec, on=False, ids=[], versions=[],
+                                   names=[], chars=0, why="not allowed")
+        out = [dict(m) for m in augmented]
+        out[-1]["content"] = out[-1]["content"] + "\n" + "S" * 41
+        return out, rec
 
     saved = (domains.PACKAGE_STORE, selection.LAYA_URL, proxy._post,
-             proxy._post_events, shomen.investigate, hints_mod.attach,
+             proxy._post_events, shomen.investigate, skill_select.attach,
              proxy.nebari.DB)
     domains.PACKAGE_STORE = store
     selection.LAYA_URL = "http://127.0.0.1:1"      # reserved; refuses
     proxy._post = fake_post
     proxy._post_events = fake_events
     shomen.investigate = fake_investigate
-    hints_mod.attach = lambda msgs, **k: (msgs, [used_hint])
+    skill_select.attach = fake_attach
     proxy.nebari.DB = os.path.join(store, "nebari.sqlite3")
 
     def restore():
         (domains.PACKAGE_STORE, selection.LAYA_URL, proxy._post,
-         proxy._post_events, shomen.investigate, hints_mod.attach,
+         proxy._post_events, shomen.investigate, skill_select.attach,
          proxy.nebari.DB) = saved
     return restore, upstream, ran, finding
 
@@ -1661,25 +1744,33 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
     try:
         secret = "acct-7f3a-not-for-the-wire"
         lcb = _lcb_prompt()
+        # skills are off at every tier (operator, 2026-09-29: "Stop skills
+        # until we have a good skill injector."): forced on so the skills
+        # record is checked
         d = proxy.complete({"model": "yamadori", "reasoning_effort": "max",
                             "messages": [{"role": "user", "content": lcb}],
-                            "_client_ip": "127.0.0.1", "_account": secret})
+                            "_client_ip": "127.0.0.1", "_account": secret,
+                            "_features": '{"skills": true}'})
         x = d.get("x_yamadori") or {}
-        check(not ran, "a LiveCodeBench prompt at max: shomen.investigate is "
-              "NOT called", str(ran)[:200])
-        # CHANGED 2026-09-24 (Phase 0.6, docs/SELF-IMPROVEMENT-PLAN.md): deep
-        # thinking runs on a trigger, not on the gate + rule; a first user
-        # turn under the kickoff size with no struggle and no unseen package
-        # fires none, and the decision says which it counted.
-        check(x.get("selection", {}).get("investigate") is False
+        # CHANGED 2026-09-27 (operator: "Doesn't matter the length of the
+        # prompt, we should always give it a planning turn"): a first user
+        # turn is a new task, so at max the plan job runs before main --
+        # whatever its size; the gate + rule still never decide it.
+        check(len(ran) == 1 and ran[0]["mode"] == "plan"
+              and ran[0]["question"].startswith("Plan this task."),
+              "a LiveCodeBench prompt at max: a new task, so the PLAN job "
+              "runs (every new task is planned)", str(ran)[:200])
+        check(x.get("selection", {}).get("investigate") is True
               and x["selection"]["because"]["investigate"].startswith(
-                  "no trigger fired")
-              and (x.get("deep") or {}).get("fire") is False,
-              "and the decision says why: no trigger fired",
+                  "task kickoff")
+              and (x.get("deep") or {}).get("kind") == "kickoff",
+              "and the decision says why: task kickoff",
               json.dumps(x.get("selection", {}).get("because"))[:200])
-        check(x.get("investigate") is None and x.get("tools_gate", {}).get(
-              "offer") is False, "x_yamadori: no investigation, gate closed",
+        check((x.get("investigate") or {}).get("job") == "plan"
+              and x.get("tools_gate", {}).get("offer") is False,
+              "x_yamadori: the plan job, gate closed",
               json.dumps({k: x.get(k) for k in ("investigate", "tools_gate")})[:200])
+        ran.clear()
         # Operator decision 2026-09-23: a code-writing task fans out at max
         # (selection._CODE_TASK). A puzzle is one: up to 3 candidates, the
         # original included (sequential via the second brain, 2026-09-23).
@@ -1694,11 +1785,11 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
               "brain's one candidate (prose: no tie-breaker)",
               f"{len(upstream)} {json.dumps(x.get('fanout'))[:200]}")
 
-        want = {"tier", "effort_sent", "tools_gate", "hints",
-                "suppressed_hints", "selection", "fanout", "investigate",
+        want = {"tier", "effort_sent", "tools_gate",
+                "selection", "fanout", "investigate",
                 "hops", "images", "budget", "check_code", "repair",
                 "sampling", "tools", "tool_turns",
-                # describe_image calls and the images a request carried
+                # yama_describe_image calls and the images a request carried
                 # (mcp/vision.py), 2026-09-23.
                 "vision", "attachments",
                 # client utility calls and the slot/cache record
@@ -1706,8 +1797,8 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
                 "utility", "tier_requested", "tier_overridden", "cache",
                 # the request's electricity (mcp/power.py), 2026-09-24.
                 "energy",
-                # skills, replacing hints (mcp/skill_select.py), 2026-09-24;
-                # `hints` / `suppressed_hints` stay one release as aliases.
+                # skills, the one knowledge system (mcp/skill_select.py);
+                # the `hints` aliases were retired with hints, 2026-09-26.
                 "skills",
                 # which kind of side call, and a compaction's budget record
                 # (selection.utility_kind, tiers.compaction_budget), 2026-09-24.
@@ -1715,12 +1806,15 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
                 # the code-work route and the tool-call code check
                 # (mcp/route.py, mcp/tool_code.py), 2026-09-24.
                 "route", "tool_code",
+                # a call whose image argument opened as image data, stopped
+                # at once (tool_code IMAGE GUARD, #46), 2026-09-26.
+                "image_guard",
                 # one model, one cache (2026-09-24): the fold-backs, what the
                 # ledger restored and decided, and the slot warm.
                 "fold_back", "ledger", "warm",
                 # the live gate of 2026-09-24: how much answer followed a
-                # deep-thinking fold-back, and whether it pointed at text the
-                # user never saw (proxy.fold_back_answer).
+                # deep-thinking fold-back (proxy.fold_back_answer; the
+                # hidden-text regex was removed 2026-09-27).
                 "fold_back_answer",
                 # docs/SELF-IMPROVEMENT-LOG.md, 2026-09-24: the previous
                 # warm's own numbers (#11), the template's markers in the
@@ -1728,12 +1822,48 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
                 # library-use injection keyed on the packages a conversation
                 # uses (#19).
                 "warm_before", "template_markers", "library_use",
+                # earlier attempts of this same request cancelled for it
+                # (server._supersede, #44), 2026-09-26.
+                "superseded",
+                # the overthinking switches, the project and agent-step
+                # thinking cap (mcp/progress.py, tiers.BEHAVIOURS),
+                # 2026-09-26.
+                "progress",
                 # every A4000 decision the request caused: what was loaded,
                 # fit or unloaded to make room (mcp/gpu_room.py, #16).
                 "gpu_room",
                 # deep thinking's triggers, the thresholds in force and
-                # think_deeply's calls (mcp/deep.py, Phase 0.6), 2026-09-24.
-                "deep"}
+                # yama_think_deeply's calls (mcp/deep.py, Phase 0.6), 2026-09-24.
+                "deep",
+                # which conversation: its explicit id and where it came from
+                # (mcp/session_id.py, #41), 2026-09-25.
+                "session",
+                # the client's prompt against its window (C1) and the
+                # per-generation usage + sums that left `usage` (U1/U2),
+                # docs/OPENAI-CONFORMANCE.md, 2026-09-25.
+                "context", "usage",
+                # how the client's instruction messages were mapped
+                # (`developer` as system; proxy.instruction_roles),
+                # docs/HARNESS-PI.md gap 1, 2026-09-26.
+                "roles",
+                # the slots this request emptied -- the second brain's
+                # after a run, the transient one after a side call -- and
+                # the switch (mcp/slots.py RELEASE, #58), 2026-09-26.
+                "slots",
+                # the craft index / yama_recall_craft offer and this request's
+                # reads, and the tools of ours withheld for a conflict with
+                # the client's (skill_select, proxy.tool_conflicts),
+                # 2026-09-27.
+                "craft", "tools_withheld",
+                # an agent step that stopped with no call, judged and
+                # continued once (proxy CONTINUE A STATED STEP), 2026-09-27.
+                "continued",
+                # the MCP host's tools: the switch, the offer kept for the
+                # conversation, this request's calls (mcp/mcp_host.py),
+                # 2026-09-28.
+                "mcp"}
+        # REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): "imitated_notes"
+        # (proxy._ImitatedNotes) and "tool_markup" (proxy._ToolMarkup).
         check(set(x) == want, "x_yamadori carries exactly the agreed keys",
               str(sorted(set(x) ^ want)))
         blob = json.dumps(x)
@@ -1746,23 +1876,30 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
               "tier, the effort actually sent, hops and the budget sent",
               json.dumps({k: x[k] for k in ("tier", "effort_sent", "hops",
                                             "budget")}))
-        h = (x.get("hints") or [{}])[0]
-        check(len(h.get("recipe", "")) == 120 and h.get("bucket") == "b1"
-              and h.get("score") == 0.71,
-              "hints: score, a 120-char recipe snippet and the bucket",
-              json.dumps(h)[:200])
-        s = (x.get("suppressed_hints") or [{}])[0]
-        check(len(s.get("recipe", "")) == 120 and s.get("bucket") == "b1",
-              "suppressed (bucket-collapsed) hints are listed, also cut at 120",
-              json.dumps(s)[:200])
+        sk = x.get("skills") or {}
+        check(sk.get("ids") == ["abc123def456"] and sk.get("versions") == [2]
+              and sk.get("names") == ["prefix-sums"] and sk.get("chars") == 42,
+              "skills: ids, versions, names and chars, no skill text",
+              json.dumps(sk)[:200])
 
         # CHANGED 2026-09-24 (Phase 0.6): a library question no longer runs
         # deep thinking by itself -- the library_question gate is gone. At
         # max it gets the definitions injection, like medium and high ...
+        # (asked mid-loop, after a tool result: a first user turn is a new
+        # task, and every new task is planned since 2026-09-27)
         q = "What is the default value of Object3D.DEFAULT_UP in the source?"
+
+        def mid(text):
+            return [{"role": "user", "content": "Fix the scene."},
+                    {"role": "assistant", "content": "", "tool_calls": [{
+                        "id": "m1", "type": "function", "function": {
+                            "name": "read_file",
+                            "arguments": '{"path": "scene.js"}'}}]},
+                    {"role": "tool", "tool_call_id": "m1", "content": "ok"},
+                    {"role": "user", "content": text}]
         upstream.clear()
         d = proxy.complete({"model": "yamadori", "reasoning_effort": "max",
-                            "messages": [{"role": "user", "content": q}],
+                            "messages": mid(q),
                             "_client_ip": "127.0.0.1"})
         x = d.get("x_yamadori") or {}
         first = upstream[0]["messages"] if upstream else []
@@ -1780,7 +1917,7 @@ def test_deep_thinking_is_selected_not_forced_by_the_tier():
         upstream.clear()
         try:
             d = proxy.complete({"model": "yamadori", "reasoning_effort": "max",
-                                "messages": [{"role": "user", "content": q2}],
+                                "messages": mid(q2),
                                 "_client_ip": "127.0.0.1"})
         finally:
             os.environ.pop("YAMADORI_UNSEEN_PACKAGES", None)

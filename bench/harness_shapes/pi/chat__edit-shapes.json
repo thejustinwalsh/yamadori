@@ -1,0 +1,229 @@
+{
+ "id": "pi/chat/edit-shapes",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "chat",
+ "source": "relay.jsonl #17 (captured edit(path, edits[{oldText,newText}])) plus the two other argument forms prepareEditArguments accepts (dist/core/tools/edit.js:43-73: edits as a JSON string, legacy top-level oldText/newText)",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_completion_tokens": 26419,
+  "store": false,
+  "messages": [
+   {
+    "role": "developer",
+    "content": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n[... Pi system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "Change hello to howdy in hello.py, three ways."
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "PmJtpedJszpAnUVERP6v2DstGWd2LGB1",
+      "type": "function",
+      "function": {
+       "name": "edit",
+       "arguments": "{\"path\": \"hello.py\", \"edits\": [{\"oldText\": \"return 'hello ' + name\", \"newText\": \"return 'howdy ' + name\"}]}"
+      }
+     },
+     {
+      "id": "PmJtpedJszpAnUVERP6v2DstGWd2LGB2",
+      "type": "function",
+      "function": {
+       "name": "edit",
+       "arguments": "{\"path\": \"hello.py\", \"edits\": \"[{\\\"oldText\\\": \\\"print(greet('pi'))\\\", \\\"newText\\\": \\\"print(greet('pi!'))\\\"}]\"}"
+      }
+     },
+     {
+      "id": "PmJtpedJszpAnUVERP6v2DstGWd2LGB3",
+      "type": "function",
+      "function": {
+       "name": "edit",
+       "arguments": "{\"path\": \"hello.py\", \"oldText\": \"def greet(name):\", \"newText\": \"def greet(name: str):\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "PmJtpedJszpAnUVERP6v2DstGWd2LGB1",
+    "content": "Successfully replaced 1 block(s) in hello.py."
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "PmJtpedJszpAnUVERP6v2DstGWd2LGB2",
+    "content": "Successfully replaced 1 block(s) in hello.py."
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "PmJtpedJszpAnUVERP6v2DstGWd2LGB3",
+    "content": "Successfully replaced 1 block(s) in hello.py."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "(read: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "bash",
+     "description": "(bash: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "timeout": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "edit",
+     "description": "(edit: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "edits": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "oldText": {
+           "type": "string"
+          },
+          "newText": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "oldText",
+          "newText"
+         ]
+        }
+       }
+      },
+      "required": [
+       "path",
+       "edits"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write",
+     "description": "(write: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "medium",
+  "prompt_cache_key": "pid1"
+ },
+ "expect": {
+  "accepted": true,
+  "route": "agent_step",
+  "roles": {
+   "one_system_first": true
+  },
+  "tool_code": [
+   {
+    "call": [
+     -1,
+     0
+    ],
+    "detected": "table",
+    "kind": "edit",
+    "language": "python",
+    "blocking": false
+   },
+   {
+    "call": [
+     -1,
+     1
+    ],
+    "detected": "table",
+    "kind": "edit",
+    "language": "python",
+    "blocking": false
+   },
+   {
+    "call": [
+     -1,
+     2
+    ],
+    "detected": "table",
+    "kind": "edit",
+    "language": "python",
+    "blocking": false
+   }
+  ]
+ },
+ "why": {
+  "tool_code": "Pi's edit shapes are VERIFIED from its source: a table row, not the shape fallback (docs/HARNESS-PI.md gap 4)"
+ }
+}

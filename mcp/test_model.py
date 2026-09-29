@@ -32,6 +32,23 @@ import budget  # noqa: E402
 import model  # noqa: E402
 import shomen  # noqa: E402
 import tiers  # noqa: E402
+import served_fixture  # noqa: E402
+# The served model's /props, pinned (mcp/served_fixture.py): budget and
+# tiers would otherwise ask the live stack (llama-swap reloads `bonsai`).
+served_fixture.pin()
+# This suite tests the budget MECHANICS, so it pins the split it was
+# written against (5/8 + 3/8) and turns the standing thinking caps off;
+# mcp/test_budget.py checks the shipped split, test_tiers the caps.
+import budget as _budget_pin  # noqa: E402
+import tiers as _tiers_pin  # noqa: E402
+_budget_pin.MAIN_SHARE, _budget_pin.HELPER_SHARE = 0.625, 0.375
+_budget_pin.HELPER_TOKENS = 0
+# ... and the SPLIT layout itself: the pinned /props now reports kv_vram_cells (the tiered cache, since the
+# 2026-09-28 kv-rank deploy), which puts budget in THE CAP LAYOUT (main = the line less the lane). The cap layout is
+# mcp/test_budget.py's to check; this suite's arithmetic is the split's.
+_budget_pin._LINE = None
+_budget_pin.MAIN_CAP = 0
+_tiers_pin.HELPER_THINKING, _tiers_pin.JOB_THINKING = 0, {}
 
 tiers._accepted = tiers.FALLBACK_EFFORTS     # no network for the template
 # budget.pool_size() would ask the live server for n_ctx. Pinned to the

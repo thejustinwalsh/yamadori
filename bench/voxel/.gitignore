@@ -1,0 +1,7 @@
+# Per-rep files are big (whole responses, pages, screenshots): local only.
+# Tracked: results/<tag>/manifest.json, summary.jsonl, checks.jsonl.
+results/*/reps/
+results/*/blind/
+results/*/index.html
+results/*/index_blind.html
+results/*/blind_key.json

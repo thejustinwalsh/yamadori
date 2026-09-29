@@ -238,7 +238,7 @@ export function Tokonoma({ vitals, datasets, fill }: { vitals: Vitals | null; da
           <Chip tone="cyan">FAN-OUT · {state.fanout.arity} · #{state.fanout.chosen} DELIVERED</Chip>
         ) : null}
         {state.foliage ? (
-          // The recall path is labelled: YAMADORI_RECALL picks hints or skills.
+          // The recall path is labelled (skills, the one knowledge system).
           <Chip tone="moss">FOLIAGE · {state.foliage.path.toUpperCase()} · {Math.round(state.foliage.density * 100)}%</Chip>
         ) : (
           <Chip tone="muted">FOLIAGE · INERT</Chip>

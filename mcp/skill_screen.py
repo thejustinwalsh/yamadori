@@ -12,9 +12,11 @@ that runs after it.
 
 What it looks for, in the order an attacker would reach for them:
 
-  invisible_chars  zero-width, bidi-control, Unicode tag and variation-
-                   selector-supplement characters: text a human reviewer
-                   cannot see and the model reads anyway (ASCII smuggling)
+  invisible_chars  bidi-control, Unicode tag and variation-selector-
+                   supplement characters: text a human reviewer cannot see
+                   and the model reads anyway (ASCII smuggling); zero-width
+                   TYPOGRAPHY (ZWSP, ZWNJ, ZWJ, word joiner, an inner BOM)
+                   is stripped and recorded instead (strip_typography)
   hidden_html      HTML comments and hidden elements that would reach the
                    model while a rendered page hides them
   ai_directed      text addressed to an AI about its instructions, identity,
@@ -106,9 +108,15 @@ TOOL_NAMES = (
     "delegate_investigation", "generate_image", "check_code",
     "describe_image",
     # Phase 0.6 (2026-09-24): main's think_deeply, the second brain's
-    # research tools (mcp/research_tools.py).
+    # research tools (mcp/research_tools.py). find_skills was folded into
+    # find_in_knowledge_base on 2026-09-25 and stays listed, like the names
+    # above it.
     "think_deeply", "find_skills", "find_in_knowledge_base",
     "read_web_page", "search_web",
+    # The yama_* names ours took on main on 2026-09-27; the old ones above
+    # stay listed.
+    "yama_think_deeply", "yama_plan", "yama_generate_image",
+    "yama_describe_image", "yama_recall_craft",
 )
 
 # ---------------------------------------------------------------------------
@@ -185,6 +193,48 @@ def check_invisible(text: str) -> list[dict]:
             f"{len(where)} {kind} character(s) ({', '.join(cps[:4])}): text "
             "a reader cannot see and the model reads", text, where[0]))
     return out
+
+
+# ZERO-WIDTH TYPOGRAPHY is STRIPPED, not quarantined (operator, 2026-09-27:
+# the screen quarantined three.js r185's docs/llms-full.txt for two U+200B
+# in "intermediate languages <U+200B><U+200B>that would ...", line 457 --
+# "sounds broken"). Judged by what a character CAN DO:
+#   quarantine  Unicode tag characters (U+E0000-E007F: each one is an
+#               invisible copy of an ASCII character, so a run of them IS an
+#               instruction the model reads and a person does not -- ASCII
+#               smuggling) and bidirectional overrides / isolates
+#               (U+202A-202E, U+2066-2069: they reorder what a person sees,
+#               so the text reviewed is not the text read). Unchanged, as are
+#               the other kinds _INVISIBLE lists.
+#   strip       ZWSP, ZWNJ, ZWJ, WORD JOINER and a BOM inside the text: they
+#               carry no character of their own -- line-break and joining
+#               hints. A pattern of them can encode bits, and removing them
+#               removes whatever they encode: the stripped text is what is
+#               screened and what the model reads (skill_pipeline.
+#               source_texts), and the removal is RECORDED (a NOTE).
+STRIP_TYPOGRAPHY = frozenset((0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF))
+
+
+def strip_typography(text: str) -> tuple[str, dict | None]:
+    """(text without zero-width typography, a NOTE finding recording what
+    was removed, or None). A byte-order mark at offset 0 is removed and not
+    counted (check_invisible never counted it)."""
+    text = text or ""
+    idx = [i for i, ch in enumerate(text) if ord(ch) in STRIP_TYPOGRAPHY]
+    if not idx:
+        return text, None
+    counted = [i for i in idx if not (i == 0 and text[0] == "\ufeff")]
+    drop = set(idx)
+    out = "".join(ch for i, ch in enumerate(text) if i not in drop)
+    if not counted:
+        return out, None
+    cps = sorted({f"U+{ord(text[i]):04X}" for i in counted})
+    f = _finding("invisible_chars", NOTE,
+                 f"stripped {len(counted)} zero-width typography "
+                 f"character(s) ({', '.join(cps)}): removed before the text "
+                 "was screened and read", text, counted[0])
+    f["stripped"] = len(counted)
+    return out, f
 
 
 # ---------------------------------------------------------------------------
@@ -773,10 +823,16 @@ def screen(raw: str, text: str | None = None, kind: str = "markdown") -> dict:
     is what the model will read (the extractor's output for HTML, else raw).
 
     {ok, quarantine: [finding], notes: [finding], rules: [...], chars}.
-    `ok` is False when any finding quarantines.
+    `ok` is False when any finding quarantines. Zero-width typography is
+    stripped from both first (strip_typography) and recorded as a note; the
+    stripped text is what every rule then screens.
     """
     text = raw if text is None else text
     found: list[dict] = []
+    raw, f_raw = strip_typography(raw)
+    text, f_text = strip_typography(text)
+    if f_raw or f_text:
+        found.append(f_raw or f_text)
     found += check_invisible(raw)
     found += check_hidden_html(raw, kind)
     for chk in (check_ai_directed, check_exfiltration, check_shell,
@@ -1028,10 +1084,13 @@ if __name__ == "__main__":
 #   screen_fetched   strip mode for research text: the SOURCE_RULES, but
 #                    the offending spans are removed (the line; the whole
 #                    fenced block when the line is in one; hidden elements
-#                    and comments; invisible characters) and recorded, and
-#                    a text more than STRIP_MAX_FRACTION stripped is dropped
-#                    whole. The caller keeps the "data, not instructions"
-#                    framing around what remains.
+#                    and comments; invisible characters) and recorded.
+#                    STRIP ONLY (2026-09-27): no share of stripped text
+#                    drops the rest (STRIP_MAX_FRACTION's 25% was ours,
+#                    docs/CONSTANTS-AUDIT.md); a text is dropped only when a
+#                    finding has no line to cut, or what is left still
+#                    fails the screen. The caller keeps the "data, not
+#                    instructions" framing around what remains.
 #   screen_handoff   the hand-off to main: AI-directed text and the other
 #                    SOURCE_RULES never cross; a shell command, install step
 #                    or URL that came from the web (it appears in what the
@@ -1044,12 +1103,9 @@ if __name__ == "__main__":
 #                    downloaded script or change credentials or config is
 #                    dropped, however politely it is phrased.
 #
-# The threshold is a CHOICE; mcp/test_deep.py runs every fixture in
-# bench/skills/fixtures through both paths and records the false-positive
-# rate on the clean ones.
+# mcp/test_deep.py runs every fixture in bench/skills/fixtures through both
+# paths and records the false-positive rate on the clean ones.
 # ===========================================================================
-STRIP_MAX_FRACTION = float(os.environ.get("YAMADORI_STRIP_MAX_FRACTION",
-                                          "0.25"))
 WEB_UNVERIFIED = "(from the web, unverified)"
 _FETCH_CHECKS = (check_ai_directed, check_exfiltration, check_shell,
                  check_credentials, check_remote_load, check_encoded)
@@ -1162,14 +1218,18 @@ def screen_fetched(raw: str, text: str | None = None,
     why = None
     if whole:
         why = "a finding with no line to cut"
-    elif fraction > STRIP_MAX_FRACTION:
-        why = (f"{fraction:.0%} of it was stripped (more than "
-               f"{STRIP_MAX_FRACTION:.0%})")
     else:
         again = [f for chk in _FETCH_CHECKS for f in chk(clean)
                  if f["action"] == QUARANTINE]
         if again:
             why = "it still failed the screen after stripping"
+        elif removed and not any(
+                ln.strip() and not ln.startswith("[removed by the screen")
+                and not re.match(r"^\s*#+\s", ln) for ln in out):
+            # Structural, not a fraction (STRIP_MAX_FRACTION is gone,
+            # 2026-09-27): a text whose every content line was cut has
+            # nothing left to pass on but its headings.
+            why = "nothing but headings is left after stripping"
     return {"ok": why is None, "text": "" if why else clean,
             "stripped": stripped, "fraction": fraction,
             "dropped": why is not None, "why": why}
@@ -1185,6 +1245,10 @@ _IMPERATIVE_RUN = re.compile(
     r"pip\s+install|npm\s+(?:i|install)|npx|pnpm|yarn\s+add|cargo\s+install|"
     r"brew\s+install|apt(?:-get)?\s+install|sudo|bash|sh|source|visit|open|"
     r"go\s+to|fetch)\b", re.I)
+
+
+_OWN_LOG = re.compile(r"^(\s*-\s*)(?:" + "|".join(TOOL_NAMES)
+                      + r")\b(?=.*\(search log[;)])")
 
 
 def screen_handoff(text: str, web_text: str = "",
@@ -1203,7 +1267,16 @@ def screen_handoff(text: str, web_text: str = "",
     text = text or ""
     lines = text.split("\n")
     hit: dict[int, str] = {}
-    for f in [f for chk in _FETCH_CHECKS for f in chk(text)
+    # OUR OWN SEARCH LOG (2026-09-26). shomen writes "- <tool> <argument>
+    # ... (search log)" lines itself, from the calls the run made; the tool's
+    # name there is by construction, not fetched text naming our tools. The
+    # tool-name finding took the FIRST such line (one finding per text), so
+    # every machine-built hand-off lost its first search (the deploy check's
+    # d28941fb: 1 of 15 facts removed as ai_directed), and a one-line log
+    # lost all of it. Only the name is masked for the scan: the argument --
+    # the model's query -- is still screened by every rule.
+    scan = "\n".join(_OWN_LOG.sub(r"\1a tool", ln) for ln in lines)
+    for f in [f for chk in _FETCH_CHECKS for f in chk(scan)
               if f["action"] == QUARANTINE] + check_invisible(text):
         if f.get("line"):
             hit.setdefault(f["line"] - 1, f["rule"])

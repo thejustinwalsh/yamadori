@@ -29,6 +29,26 @@ Status values:
 Test names are `mcp/test_live_stack.py --only <name>` unless another file
 is named.
 
+**Layout v2 (operator, 2026-09-29; AGENTS.md "Layout v2", WRITTEN, NOT RUN).**
+`images` follows the served projector (the pinned fixture the deploy
+re-records): after the deploy the look is `yama_describe_image` on
+`bonsai-vision`, and gpu_room records its load on the A4000. `slots` checks
+the lane KEPT after a side call (at most `budget.LANE_TOKENS` cells); the
+fix-up still empties it. New group `layout`: the advertised window is the
+served line less the lane, every request ranks the lane `slots.RANK_LANE`
+(`x_yamadori.cache.kv_ranks`), and the served main model has no projector.
+
+**One model per effort tier (operator, 2026-09-29; mcp/tier_models.py,
+mcp/max_mode.py; WRITTEN, NOT RUN).** New group `tier_models`: the walk
+medium -> xhigh -> max -> medium, each answer from its tier's model
+(`x_yamadori.capacity.model` and `why`), each swap loaded its model and left
+no other main model loaded (`capacity.swap.left_loaded == []`), the model's
+token profile applied (`x_yamadori.sampling.profile`: the effort sent and its
+class, the client's max_tokens recorded, not trusted), and a medium request
+while an xhigh one works is 503 `model_at_capacity` with the holder named.
+NOT RUN while the table is off. `tiers`' overhead check counts a swap's wait
+and load as model time.
+
 ## Summary
 
 76 features and mechanisms:
@@ -46,9 +66,10 @@ Added on 2026-09-24, all in `mcp/test_live_stack.py`: `agent_loop`,
 `router`, and `ledger_restart` (`--maintenance`). Together they took 25 rows
 from UNCOVERED or PARTIAL to COVERED. The largest gaps left are the code
 check beyond `write_file` (formatter, edit shapes, other harnesses' tool
-names, the final-answer repair pass), budget and cap landings, skills (not
-reachable while the proxy runs `YAMADORI_RECALL=hints`), and the draw-then-look
-image loop.
+names, the final-answer repair pass), budget and cap landings, the skill
+pipeline's model stages on the worker, and the draw-then-look image loop.
+(Skills replaced hints on 2026-09-26; the `skills` group is written, not yet
+run.)
 
 ## The map
 
@@ -57,6 +78,7 @@ image loop.
 | # | feature | status | live test |
 |---|---|---|---|
 | 1 | `/health` answers; a trivial request returns the model's answer | COVERED | `health` |
+| 1a | The served model's state that offline suites PIN (`mcp/served_fixture.py`: the chat template, its efforts, n_ctx, total_slots, eos_token) is what `bonsai` serves; offline suites never read it live (`scripts/offline_guard`, 2026-09-27) | WRITTEN, NOT RUN | `served` |
 | 2 | `/v1/models` advertises one model and the conversation window (the main share) | COVERED | `harness` |
 | 3 | Unknown model names resolve to `yamadori` (`catalog`) | UNCOVERED | tests only send `yamadori` |
 | 4 | Every `/v1` and `/dash/api` route needs a key (401 without one) | UNCOVERED | none |
@@ -99,6 +121,8 @@ image loop.
 | 26 | Side calls use the transient slot | PARTIAL | `harness` checks the utility record, not the slot id |
 | 27 | A conversation continues across a harness compaction (work log, slot, tools: `_continue_after_compaction`) | UNCOVERED | none |
 | 28 | `X-Yamadori-Session` names a session | UNCOVERED | none |
+| 89 | The second brain's slot is emptied after each run and the transient slot after each side call; a conversation's pinned slot never is (`slots.release_idle`, `x_yamadori.slots.released`, 2026-09-26) | COVERED (written 2026-09-26, not yet run) | `slots`: after a side call and after an xhigh fix-up, `x_yamadori.slots.released` names the slot and `/dash/api/vitals/pulse` (llama-server `/slots`) shows it holding <= 8 tokens |
+| 90 | An idle conversation's pinned slot (idle > `slots.IDLE_CLEAR_S`, 600 s) is cleared when another conversation generates; its pin is kept and its next request records `resumed_cold` (`x_yamadori.slots.cleared_idle` / `resumed_cold`, 2026-09-26) | COVERED (written 2026-09-26, not yet run) | `slots`: two of the test's own conversations, the threshold overridden to 2 s by the test-account-only header `idle_clear_s`; decode tok/s of the active one with the other's ~40k idle cells kept vs cleared, n=3 each (pass: cleared >= 95% of kept -- clearing never slows the active one; the gain depends on where the cells sit in the unified pool, #59, and is reported as evidence), and the cleared one's next turn records `resumed_cold` with `how`: `restored` (llama-server's host-RAM prompt cache brought it back: reused >= half the prompt) or `reprocessed` (processed >= half), agreeing with its counts, and its `prompt_ms`. First live run 2026-09-27: kept [29.3, 29.06, 28.05], cleared [45.36, 29.88, 27.51] tok/s; B came back in ~516 ms (restored) |
 
 ### One model, one cache (Phase 0.5)
 
@@ -151,21 +175,21 @@ image loop.
 
 | # | feature | status | live test |
 |---|---|---|---|
-| 56 | `generate_image`: the model calls it, `x_yamadori.images` records it | COVERED | `images` |
+| 56 | `yama_generate_image`: the model calls it, `x_yamadori.images` records it | COVERED | `images` |
 | 57 | The signed `/media` link serves the PNG with no key; a tampered one is 403 | COVERED | `images` |
 | 58 | `POST /v1/images/generations` | UNCOVERED | none |
 | 59 | Image model from the account preference, else the default (turbo) | UNCOVERED | `x_yamadori.images[].model` is printed, not asserted |
-| 60 | `describe_image` on an attached image | COVERED | `images` |
-| 61 | `describe_image` on an image drawn in the same request (the refine loop), and VRAM concern sequence 2 | UNCOVERED | the docs/IMAGEGEN.md live check, not yet a test |
+| 60 | `yama_describe_image` on an attached image | COVERED | `images` |
+| 61 | `yama_describe_image` on an image drawn in the same request (the refine loop), and VRAM concern sequence 2 | UNCOVERED | the docs/IMAGEGEN.md live check, not yet a test |
 | 62 | Peak A4000 VRAM recorded | COVERED | `images` (nvidia-smi every second) |
 
-### Skills and hints
+### Skills (the one knowledge system since 2026-09-26)
 
 | # | feature | status | live test |
 |---|---|---|---|
-| 63 | Legacy hints path: prefix-sums hint, Fenwick sibling suppressed | STALE (legacy, still the default) | `hints` |
-| 64 | Skills path (`YAMADORI_RECALL=skills`): selection, `x_yamadori.skills` | UNCOVERED | the proxy runs `hints`; no request can reach the skills path without an env change and a restart |
-| 65 | Skill pipeline jobs (fetch, screen, distil, arm) on the worker | UNCOVERED | none live |
+| 63 | The hints path | RETIRED 2026-09-26 (migrated into skills; mcp/skill_migrate.py) | -- |
+| 64 | Skill selection at `medium`: an authored skill reaches its target shape, `x_yamadori.skills` names it | WRITTEN, NOT RUN (needs the proxy restarted on this code) | `skills` |
+| 65 | Skill pipeline model stages (distil, decompose, tag, tests, faithful) on the worker | UNCOVERED (offline: fake-model tests; the frontier example ran with a hand-written stand-in reply) | none live |
 
 ### Tools API, MCP, internal generation
 
@@ -175,6 +199,7 @@ image loop.
 | 67 | `summarize_text` keeps identifiers, paths, numbers and errors verbatim | STALE | `mcp/test_tools_live.py` (in process, on a fixture index, internal generation to llama-swap; see below) |
 | 68 | `find_by_meaning`, `find_definition_opt`, `find_references`, `find_by_pattern`, `read_file_range`, `describe_index`, `run_check` | NO MODEL | `mcp/test_tools.py` offline; nothing live through `:1235` |
 | 69 | `delegate_investigation` (off by default: a benchmark arm) | STALE | `mcp/test_tools_live.py` |
+| 69a | The tools API's door (2026-09-26): no key 401 + `WWW-Authenticate` resource_metadata, foreign Origin 403, key 200 on `/mcp`, `/health` liveness only, RFC 9728 metadata unauthenticated | WRITTEN, NOT RUN (needs the tools API restarted on this code; until then its first check fails with 200) | `mcp/test_tools_live.py` `test_tools_api_door_live`; offline `mcp/test_tools_api_auth.py` |
 
 ### Ledgers, dashboard, Laya
 
@@ -188,13 +213,37 @@ image loop.
 | 75 | Rings work log written by the proxy and reinjected after a compaction | UNCOVERED | none |
 | 76 | Dataset pipeline (`clarify` is model-assisted) | UNCOVERED | none live |
 
+### OpenAI conformance (added 2026-09-25, `docs/OPENAI-CONFORMANCE.md` fixes 1-3)
+
+| # | feature | status | live test |
+|---|---|---|---|
+| 77 | Errors are OpenAI's four-field object with the right status (bad JSON 400, missing `messages` 400, `n: 2` 400, unknown `/v1` POST 404) | COVERED | `conformance` |
+| 78 | A prompt past the advertised window is 400 `context_length_exceeded`, counted by the model server, before any byte (blocking and streamed) | COVERED | `conformance` |
+| 79 | `stream_options.include_usage`: a last chunk with `choices: []` and usage (`cached_tokens` included) | COVERED | `conformance` |
+| 80 | `usage.prompt_tokens` is the final generation's on a multi-generation turn, not the sum | COVERED | `images` (the yama_generate_image turn) |
+| 81 | A failure after a stream's first byte is one SSE error event, never content | UNCOVERED (live) | offline only (`mcp/test_openai_conformance.py`): no cheap way to make the live model server fail mid-turn |
+
+### The Responses API (added 2026-09-26, `docs/OPENAI-CONFORMANCE.md` "Status: R1")
+
+| # | feature | status | live test |
+|---|---|---|---|
+| 82 | `POST /v1/responses` answers a plain request with a completed Response and usage | COVERED | `responses` |
+| 83 | The streamed event sequence (created, in_progress, ..., completed; sequence numbers; deltas = the message) | COVERED | `responses` |
+| 84 | A function-call round trip replayed as Codex replays it: same session (`prompt_cache_key`), the slot's cache reused | COVERED | `responses` |
+| 85 | `input_image` reaches the chat image path (an attachment; the answer names the colour) | COVERED | `responses` |
+| 86 | The hosted `image_generation` tool is our yama_generate_image; an `image_generation_call` item with the PNG | COVERED (NOT RUN when no image server) | `responses` |
+| 87 | `previous_response_id` is 400 `unsupported_parameter` | COVERED | `responses` |
+| 88 | A real Codex / Hermes `codex_responses` / OpenCode / Pi session against `:1234` | UNCOVERED | none: Codex CLI is not installed; the offline replay (`mcp/test_responses_api.py`) is built from codex-rs source |
+| 89 | CLM (`mcp/clm.py`, docs/CLM.md) through llama-swap's `clm-encoder` behind gpu_room reproduces the offline reference decisions (40/40 argmax and none-vs-pick), deterministic, and the selector's `clm` decider answers | WRITTEN, NOT RUN (needs the llama-swap restart that serves `clm-encoder`; measured on a standalone llama-server with the same flags, bench/clm/standalone.py) | `clm` |
+| 91 | PACKAGE ONBOARDING (docs/PACKAGE-ONBOARDING.md): a prompt with links submitted through `:1234`, run by the worker, resolved with its rules, the licence quoted, indexed, the vocabulary judged by the floor, completed | WRITTEN, NOT RUN; OPT-IN (writes live state -- a held package, its skills -- and fetches from npm and GitHub; the operator names the package and the wait) | `onboarding` (`--only onboarding --onboard "<prompt>" --onboard-wait S`; never in the default live run) |
+
 ## Stale live tests, and what should replace them
 
 | test | why it is stale | replacement |
 |---|---|---|
 | `mcp/test_tools_live.py` `test_delegate_investigation_live` | `delegate_investigation` is off by default: a benchmark arm (`YAMADORI_DELEGATE_TOOL=1`). The test runs in process on a fixture index, and its generation goes from `mcp/model.py` to llama-swap. Nothing crosses `:1234`. | `deep` (deep thinking as selection runs it, through `:1234`, citations checked against the held source). Keep the delegate test only as the benchmark arm's own check, outside the gate. |
 | `mcp/test_tools_live.py` summarize tests | In process against the fixture, not the running tools API. | `summarize` (through `:1235`). Its verbatim-token checks (`KEEP`) should move into `summarize`. |
-| `mcp/test_live_stack.py` `hints` | Tests the LEGACY recall path. Skills replace hints (operator, 2026-09-24); the proxy still runs `hints` by default. | When `YAMADORI_RECALL=skills` is switched on: a live test that a prompt a validated skill covers gets `x_yamadori.skills.path == "skills"` with that skill's id, and a sibling it excludes does not. Keep `hints` until the switch. |
+| `mcp/test_live_stack.py` `hints` | REPLACED 2026-09-26 by `skills` (the hints path is gone). | -- |
 | `bench/test_hint_collapse.py --live` (reranker checks) | Calls the reranker on `:11434` directly. The reranker is "not trusted, not used" (`docs/FINDINGS.md` #20). Its checks assert the serving BUG exists. | Keep as a regression probe of the bug, outside the deploy gate. See the result below. |
 
 ## Results of the first full run
@@ -226,7 +275,7 @@ Every NEW test passed on its first live run:
 | `deep` | 5/5 | 9 searches, hand-off prefilled (7 facts, 4 verified), opens "Today I was inspired by senang. After thinking deeply,". Cited `src/core/Object3D.js:714/716/720/724` and `src/math/Matrix4.js:483`, all present in the held three source |
 | `fanout` | 4/4 | code_generation, 3 steps (tie-breaker: both parse but disagree), "Compared two approaches", and the winner passed 10 bracket cases. **But** the winner's first line is `# humanidad`, the tie-breaker's seed word |
 | `compaction` | 10/10 | in place: mode `ledger` (the ledger's rendering extends the stored prompt byte for byte), reused 2660, processed 39. Flattened: mode `rewritten`, 4 of 4 turns mapped, reused 2697 of a 2560-token stored prompt, processed 287. Both kept `src/ledger/rollup.py` and `E_LEDGER_SKEW` |
-| `images` | 8/8 | generate_image (turbo, 4 steps, 25.2 s). The signed link served a 1.43 MB PNG with no key, and a tampered signature got 403. describe_image on an attached 256x256 PNG: `left=red, right=blue`, 5.93 s, 168 prompt tokens |
+| `images` | 8/8 | yama_generate_image (turbo, 4 steps, 25.2 s). The signed link served a 1.43 MB PNG with no key, and a tampered signature got 403. yama_describe_image on an attached 256x256 PNG: `left=red, right=blue`, 5.93 s, 168 prompt tokens |
 
 **A4000 VRAM during `images`** (nvidia-smi every second, 41 samples):
 baseline 12,457 MiB at the start of the test, peak 16,068 of 16,376 MiB,

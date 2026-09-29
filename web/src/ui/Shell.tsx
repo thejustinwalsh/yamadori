@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useShared } from '../api/data';
 import type { Vitals } from '../api/types';
+import { servedOnCard } from '../api/host';
 import { ago, gib, n } from '../format';
 import { href, type Route } from '../router';
 import { colors, space } from '../tokens/tokens.stylex';
@@ -208,11 +209,19 @@ const TABS: { route: Route['name']; kanji: string; label: string; to: string; id
   { route: 'sentei', kanji: '剪定', label: 'SENTEI', to: href.sentei, idx: '04' },
   { route: 'settings', kanji: '設定', label: 'SETTINGS', to: href.settings, idx: '05' },
   { route: 'skills', kanji: '技', label: 'SKILLS', to: href.skills, idx: '06' },
+  { route: 'harness', kanji: '道具箱', label: 'DOGUBAKO', to: href.harness, idx: '07' },
 ];
 
-/** The model actually being served: the gguf on the bonsai listener's port. */
+/**
+ * The model actually being served on the main card: from vitals.serving
+ * (llama-swap's /running, max mode aware: the max model's gguf while it
+ * holds the card), else -- a server older than that field -- the gguf on the
+ * bonsai listener's port.
+ */
 export function servedModel(v: Vitals | null): string | null {
   if (!v) return null;
+  const on = servedOnCard(v.serving);
+  if (on) return on.gguf ? (on.max ? `${on.gguf} · MAX MODE` : on.gguf) : on.model;
   const port = v.listeners?.find((l) => l.role === 'bonsai')?.port;
   const p = port ? v.processes?.find((x) => String(x.port) === String(port)) : null;
   return p?.what ? p.what.replace(/\.gguf$/i, '') : null;
@@ -242,7 +251,7 @@ function Header({ current }: { current: Route['name'] }) {
             <div {...stylex.props(s.brandRow)}>
               <h1 {...stylex.props(text.headlineSm, s.name)}>YAMADORI</h1>
               <span {...stylex.props(s.modelChip)}>
-                <Chip tone="moss" title="the gguf served on the bonsai listener, from /dash/api/vitals">
+                <Chip tone="moss" title="the gguf serving the main card: /dash/api/vitals serving (llama-swap /running), else the bonsai listener">
                   <span {...stylex.props(text.kanji)}>山採り</span> · {model ?? (v ? 'no model on the bonsai port' : '…')}
                 </Chip>
               </span>
@@ -348,7 +357,7 @@ function RoutesFab({ current }: { current: Route['name'] }) {
 }
 
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
-  const current = route.name === 'dataset' ? 'naedoko' : route.name;
+  const current = route.name === 'dataset' ? 'naedoko' : route.name === 'skill' || route.name === 'onboarding' ? 'skills' : route.name;
   const { vitals } = useShared();
   return (
     <div {...stylex.props(s.app)}>

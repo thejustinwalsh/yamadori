@@ -1,0 +1,60 @@
+{
+  "activation": {
+    "should": [
+      {
+        "files": [
+          "index.html",
+          "js/main.js"
+        ],
+        "text": "Build a small browser game: index.html loads js/input.js, js/world.js and js/main.js. Draw the player on a canvas and move it with the arrow keys."
+      },
+      {
+        "files": [
+          "index.html",
+          "js/game.js",
+          "js/render.js"
+        ],
+        "text": "The page loads with no errors in the console but the canvas stays blank and nothing moves. Find out why."
+      },
+      {
+        "files": [
+          "index.html",
+          "src/app.js",
+          "src/ui.js"
+        ],
+        "text": "Check that the app actually starts when index.html is opened."
+      }
+    ],
+    "should_not": [
+      {
+        "files": [
+          "scripts/totals.js"
+        ],
+        "text": "Write a Node.js command-line script that reads a CSV file and prints the column totals."
+      },
+      {
+        "text": "Make the heading in index.html blue and centre it.\n\n```css\nh1 { }\n```"
+      },
+      {
+        "files": [
+          "index.html",
+          "js/util.js"
+        ],
+        "text": "Review this module for naming problems."
+      },
+      {
+        "text": "Write a Python script that renames every file in a folder.\n\n```python\n# ...\n```"
+      }
+    ]
+  },
+  "behaviour": [
+    {
+      "check": {
+        "kind": "regex",
+        "pattern": "(DOMContentLoaded|window\\.onload|addEventListener\\(\\s*['\\\"]load|Game\\.init\\(\\))"
+      },
+      "prompt": "index.html loads js/a.js, js/b.js and js/game.js; game.js defines `const Game = { init() {...} }`. Nothing happens when the page opens. What is the fix?",
+      "why": "the answer wires an entry point that calls init"
+    }
+  ]
+}

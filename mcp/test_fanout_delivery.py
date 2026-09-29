@@ -51,8 +51,11 @@ os.environ.pop("YAMADORI_IMAGEGEN_URL", None)
 os.environ["CONCEPT_SEED_LAST"] = os.path.join(_TMP, "seed_last.json")
 
 import proxy  # noqa: E402
+import served_fixture  # noqa: E402
+# The served model's /props, pinned (mcp/served_fixture.py): budget and
+# tiers would otherwise ask the live stack (llama-swap reloads `bonsai`).
+served_fixture.pin()
 
-proxy.PREAMBLE = False
 _results: list[tuple[bool, str, str]] = []
 
 
@@ -152,7 +155,11 @@ def setup(original: str, *helper: str) -> None:
 
 
 def run_complete() -> dict:
+    # A client that names its conversation (X-Yamadori-Session): these
+    # checks read the delivered answer exactly, and a new conversation with
+    # no id would open it with our session line (#41, mcp/test_sessions.py).
     return proxy.complete({"model": "yamadori", "_client_ip": "127.0.0.1",
+                           "_session_token": "fanout-suite",
                            "_features": HEADER, "messages": list(QUESTION)})
 
 
@@ -160,6 +167,7 @@ def run_stream() -> tuple[str, dict]:
     events = []
     for b in proxy.stream_body({"model": "yamadori", "stream": True,
                                 "_client_ip": "127.0.0.1",
+                                "_session_token": "fanout-suite",
                                 "_features": HEADER,
                                 "messages": list(QUESTION)}, "yamadori"):
         if b.strip() == b"data: [DONE]":
@@ -238,20 +246,20 @@ def test_prose_keeps_the_original():
 
 
 def test_an_original_that_wins_is_left_alone():
+    # Both parse, so the tie-breaker runs (the "agreement" stop at AGREE
+    # 0.80 was removed 2026-09-27, docs/CONSTANTS-AUDIT.md). C writes a
+    # broken answer, so the medoid is chosen among A and B.
     good = "```python\ndef add_one(x):\n    return x + 1\n```"
-    setup(good, V_EVIDENCE)
+    setup(good, V_EVIDENCE, "```python\ndef add_one(x:\n```")
     d = run_complete()
     fan = (d.get("x_yamadori") or {}).get("fanout") or {}
     content = d["choices"][0]["message"]["content"]
-    check(fan.get("winner") == "original"
-          and fan.get("stop_reason") == "clear: agreement"
-          and fan.get("replaced") is False
-          and content.startswith(good + "\n\nToday I was inspired by lantern."
-                                 " Compared two approaches: clear: both "
-                                 "parse and agree"),
-          "both parse and agree: the original is delivered, and one line "
-          "says the second approach agreed", json.dumps(fan)[:300])
-    check(len(_seen) == 2, "and no tie-breaker ran", str(len(_seen)))
+    check(fan.get("winner") in ("original", "direct")
+          and fan.get("stop_reason") == "tie-breaker: both parse"
+          and content.lstrip().startswith("```python\ndef add_one("),
+          "both parse: the tie-breaker runs, a parsing answer is delivered",
+          json.dumps(fan)[:300] + " | " + content[:200])
+    check(len(_seen) == 3, "and the tie-breaker ran", str(len(_seen)))
 
 
 # --- THE FOLD-BACK (operator, 2026-09-24) -----------------------------------
@@ -304,9 +312,15 @@ def test_prose_is_weighed_by_main_in_its_own_turn():
     blob = json.dumps(d.get("x_yamadori"))
     check(B_POINT not in blob and "_handback" not in blob,
           "x_yamadori carries the counts, never the text", blob[:200])
-    check(d["usage"].get("hops") == 2,
-          "the continuation is banked in usage like any main generation",
-          json.dumps(d.get("usage")))
+    # U1/U2 (2026-09-25): `usage` is the answer's FINAL generation -- here
+    # the continuation -- and the per-generation count and sums moved from
+    # usage.hops to x_yamadori.usage.
+    xu = (d.get("x_yamadori") or {}).get("usage") or {}
+    check(xu.get("generations") == 2 and xu.get("final") == "continuation"
+          and "hops" not in (d.get("usage") or {}),
+          "the continuation is banked like any main generation, and usage "
+          "reports it as the answer's final generation",
+          json.dumps({"usage": d.get("usage"), "x": xu})[:300])
     check(not hasattr(proxy, "_weigh_alternative")
           and not hasattr(proxy, "ALT_VIEW_HEAD"),
           "the weigh turn and its head are gone")

@@ -10,18 +10,28 @@ existing queue like skill_learn, turns labelled rows into:
   (a) THRESHOLD ADJUSTMENTS, armed automatically within deep.BOUNDS:
       struggle_threshold  missed struggles (MISSED) pull it down by 1;
                           wasted struggle runs (WASTED) push it up by 1
-      kickoff_tokens      new tasks that later struggled with no plan pull it
-                          down 25%; wasted kickoff plans push it up 25%
+      (kickoff_tokens was retired 2026-09-27: every new task is planned,
+      whatever its size. Its old deep_adjustments rows stay listed by
+      adjustments() and set nothing; revert() refuses them.)
+      A struggle run's `helped` means HELPED_WINDOW (20) later requests
+      without the pattern it ran on (#45: with 5 and a reset episode it was
+      automatic, so `wasted > helped + missed` could never hold). The
+      same-pattern rule (label `missed_same_pattern`), the cooldown (label
+      `in_cooldown`) and the ENVIRONMENT table were removed 2026-09-27
+      (docs/CONSTANTS-AUDIT.md); old rows keep those labels, none are made.
       Each adjustment counts only the rows labelled since that parameter's
       last change, needs LEARN_MIN_N of the deciding label, and records its
       old and new value, its n and the counts -- and is reversible
       (revert(); POST /dash/api/deep/revert). An environment variable pins a
       parameter; the learner then records nothing for it.
-  (b) think_deeply DESCRIPTION VARIANTS, PROPOSED, NEVER ARMED: the user's
+  (b) yama_think_deeply DESCRIPTION VARIANTS, PROPOSED, NEVER ARMED: the user's
       "still broken" phrasings from missed rows where the model did not call
       the tool, added to the description's phrasing list. A description is
       a prompt (AGENTS.md); a variant is armed only after a paired, repeated
-      measurement (docs/PROTOCOL.md), by a person.
+      measurement (docs/PROTOCOL.md), by a person. INERT for new rows since
+      2026-09-27: the phrasings came from deep.STILL_BROKEN's
+      user_still_broken events, which were removed (docs/CONSTANTS-AUDIT.md);
+      only rows recorded before then carry a phrase.
   (c) E1 HEADS (mcp/e1.py, e1.learn): a head with enough labels its current
       version never saw is refitted; the candidate is promoted only if it
       beats the current version (or, untrained, the rule) on a held-out
@@ -30,7 +40,7 @@ existing queue like skill_learn, turns labelled rows into:
       (POST /dash/api/deep/e1/revert).
 
 Every rule and number here is a CHOICE, none measured: LEARN_MIN_N 5, the
-step sizes, the 25%. Only CLIENT traffic is learned from (test traffic is
+step size. Only CLIENT traffic is learned from (test traffic is
 recorded and labelled, never counted: corpus.account_traffic).
 
 WHEN IT RUNS: schedule() (the worker's loop, once a minute) enqueues one
@@ -55,7 +65,6 @@ import jobs  # noqa: E402
 LEARN = ("deep.learn", "cpu")
 LEARN_MIN_N = int(os.environ.get("YAMADORI_DEEP_LEARN_MIN_N", "5"))
 IDLE_MINUTES = float(os.environ.get("YAMADORI_DEEP_LEARN_IDLE_MINUTES", "15"))
-KICKOFF_STEP = 0.25
 # Labelled rows older than this that were never closed (the conversation
 # stopped coming back) are closed as `unobserved` and not learned from.
 STALE_SECONDS = 24 * 3600
@@ -115,25 +124,31 @@ def _last_change(con, param: str) -> float:
     return float(row[0] or 0.0)
 
 
+# RUN ROWS LABELLED UNDER THE OLD RULE ARE NOT LEARNED FROM (#52,
+# deep.LABEL_RULE): before rule 2 a run was `helped` whether or not anything
+# changed, so 10 of 11 Octopus client runs were. A run row counts only when
+# its label_rule is at least deep.LABEL_RULE; non-run rows are unchanged by
+# the rule and always count. `no_effect` (a run after which no project file
+# changed) counts with `wasted`: both say the run did not help (a CHOICE).
+# Checked 2026-09-26 on index/corpus.sqlite3 (read-only): deep_adjustments
+# held no rows -- the learner had adjusted nothing -- and E1's escalate and
+# kickoff heads had no promoted version, so nothing was learned from the
+# old-rule labels (8 struggle, 3 kickoff and 3 forced client runs `helped`).
+_RULE_OK = ("(ran=0 OR COALESCE(label_rule, 0) >= %d)" % deep.LABEL_RULE)
+
+
 def _counts(con, since: float) -> dict:
     """Labelled client rows since `since`, by (trigger, label), plus the
-    first-turn rows that were large enough to be near the kickoff line."""
+    missed rows where deep thinking was allowed."""
     out: dict = {}
     for r in con.execute(
             "SELECT trigger, label, allowed, signals FROM deep_decisions "
-            "WHERE traffic='client' AND label IS NOT NULL AND labelled_at > ?",
-            (since,)):
+            "WHERE traffic='client' AND label IS NOT NULL AND labelled_at > ?"
+            " AND " + _RULE_OK, (since,)):
         key = f"{r['trigger']}:{r['label']}"
         out[key] = out.get(key, 0) + 1
         if r["label"] == "missed" and r["allowed"]:
             out["missed_allowed"] = out.get("missed_allowed", 0) + 1
-            try:
-                ko = (json.loads(r["signals"] or "{}").get("kickoff") or {})
-            except ValueError:
-                ko = {}
-            if ko.get("new_task") and ko.get("tokens", 0) >= \
-                    0.5 * (ko.get("threshold") or deep.KICKOFF_TOKENS_DEFAULT):
-                out["missed_large_task"] = out.get("missed_large_task", 0) + 1
     return out
 
 
@@ -151,7 +166,7 @@ def learn_thresholds(con) -> list[dict]:
     """(a): at most one step per parameter per run. Returns the changes."""
     thr = deep.thresholds(fresh=True)
     made = []
-    for param in ("struggle_threshold", "kickoff_tokens"):
+    for param in deep.DEFAULTS:
         cur = thr[param]
         if cur["source"] == "env":
             continue
@@ -161,7 +176,8 @@ def learn_thresholds(con) -> list[dict]:
         new, why = old, None
         if param == "struggle_threshold":
             missed = c.get("missed_allowed", 0)
-            wasted = c.get("struggle:wasted", 0)
+            wasted = c.get("struggle:wasted", 0) + c.get(
+                "struggle:no_effect", 0)
             helped = c.get("struggle:helped", 0)
             n = missed + wasted + helped
             ev = {"missed": missed, "wasted": wasted, "helped": helped}
@@ -173,21 +189,6 @@ def learn_thresholds(con) -> list[dict]:
                 new = min(hi, old + 1)
                 why = (f"{wasted} wasted struggle runs against {helped} "
                        f"helped and {missed} missed: fire later")
-        else:
-            missed = c.get("missed_large_task", 0)
-            wasted = c.get("kickoff:wasted", 0)
-            helped = c.get("kickoff:helped", 0)
-            n = missed + wasted + helped
-            ev = {"missed_large_task": missed, "wasted": wasted,
-                  "helped": helped}
-            if missed >= LEARN_MIN_N and missed > wasted:
-                new = max(lo, int(old * (1 - KICKOFF_STEP)))
-                why = (f"{missed} new tasks at least half the kickoff size "
-                       f"later struggled with no plan: plan smaller specs")
-            elif wasted >= LEARN_MIN_N and wasted > helped:
-                new = min(hi, int(old * (1 + KICKOFF_STEP)))
-                why = (f"{wasted} kickoff plans went unused against "
-                       f"{helped} used: plan only larger specs")
         if why and new != old:
             aid = _adjust(con, param, old, new, n, ev, why)
             made.append({"id": aid, "param": param, "old": old, "new": new,
@@ -196,7 +197,7 @@ def learn_thresholds(con) -> list[dict]:
 
 
 def propose_descriptions(con, since: float) -> dict | None:
-    """(b): one proposed variant of the think_deeply description from the
+    """(b): one proposed variant of the yama_think_deeply description from the
     phrasings of missed rows where the model did not call it."""
     phrases: dict[str, int] = {}
     n = 0
@@ -241,8 +242,7 @@ def handle_learn(job: dict, ctx) -> dict:
             "UPDATE deep_decisions SET label='unobserved', labelled_at=? "
             "WHERE label IS NULL AND created < ?",
             (time.time(), time.time() - STALE_SECONDS)).rowcount
-        since = min(_last_change(con, "struggle_threshold"),
-                    _last_change(con, "kickoff_tokens"))
+        since = _last_change(con, "struggle_threshold")
         made = learn_thresholds(con)
         prop = propose_descriptions(con, since)
         n = con.execute(
@@ -279,7 +279,12 @@ def revert(adjustment_id: str, author: str = "operator") -> dict:
         if row["reverted_at"]:
             return {"ok": False, "error": f"{adjustment_id} is already "
                                           f"reverted"}
-        cur = deep.thresholds(fresh=True)[row["param"]]["value"]
+        thr = deep.thresholds(fresh=True)
+        if row["param"] not in thr:
+            return {"ok": False, "error": f"{row['param']} is retired; its "
+                                          f"adjustment {adjustment_id} sets "
+                                          f"nothing"}
+        cur = thr[row["param"]]["value"]
         con.execute("UPDATE deep_adjustments SET reverted_at=? WHERE id=?",
                     (time.time(), adjustment_id))
         aid = uuid.uuid4().hex[:12]
@@ -333,8 +338,12 @@ def overview() -> dict:
                 "trigger", "fired", "ran", "model_calls", "label", "outcome",
                 "traffic")} for r in deep.rows(30)],
             "learning": idle_state(),
-            "labels": ["helped", "not_helped", "wasted", "fine", "missed",
-                       "escalated_later", "skipped", "unobserved"],
+            # missed_same_pattern and in_cooldown are no longer made
+            # (2026-09-27); old rows still carry them.
+            "labels": ["helped", "not_helped", "wasted", "no_effect",
+                       "fine", "missed",
+                       "missed_same_pattern", "escalated_later", "skipped",
+                       "in_cooldown", "same_episode", "unobserved"],
             "e1": _e1_overview(),
             "note": "every threshold, rule and bound is a choice, unmeasured"}
 

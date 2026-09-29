@@ -19,9 +19,10 @@ handed to the second brain one step at a time:
   GRADE after two, with the code check (never execution):
      - exactly one parses                      -> it wins, stop
        ("clear: only one parses")
-     - both parse, similarity >= AGREE          -> A wins, stop
-       ("clear: agreement")
-     - otherwise (both parse and disagree, or neither parses) -> C
+     - otherwise (both parse, or neither parses) -> C
+       (the "agreement" stop at similarity >= AGREE 0.80 was REMOVED
+       2026-09-27, docs/CONSTANTS-AUDIT.md: an invented threshold; when
+       both parse the check does not separate them, so C runs)
   C  the TIE-BREAKER, helper role, the runner's `tiebreak` job. Its
      prompt is the task plus BOTH candidates' code and each one's check
      result (parses? which syntax errors, on which lines), and it asks for
@@ -54,11 +55,6 @@ request. The batching throughput that justified it (N=4 at 2.7x the wall
 clock of one, measured) bought candidates that each had less room to think.
 The sequential design gives every extra candidate the helper's whole 3/8 and
 stops after two when the check already separates them.
-
-AGREE is 0.80, a CHOICE, not a measurement: nothing in this repo has graded
-how often two parsing candidates at >= 0.80 similarity are both right. Measure
-it on benchmark data (bench/domain grades every candidate) before citing it,
-PROTOCOL rule 10.
 
 WHY AGREEMENT AND NOT A SCORER
 
@@ -114,7 +110,8 @@ candidates carry a fenced block in a code language (code_check.CODE_LANGS):
 
 If nothing parses, the path vote runs with ties to the LONGEST answer and the
 result says `selection: "fallback"`; a fallback is recorded, never delivered.
-SIM_TIE, NGRAM and AGREE are choices, not measurements.
+SIM_TIE and NGRAM are choices, not measurements (docs/CONSTANTS-AUDIT.md
+lists them as pending).
 """
 from __future__ import annotations
 
@@ -330,14 +327,6 @@ def _seeds(payload: dict, n: int) -> list[dict]:
 # second brain's answer (VARIANTS[0]); C is the second brain's tie-breaker.
 ORIGINAL = "original"
 TIEBREAK = "tiebreak"
-
-# Two candidates whose code parses and whose similarity (code_similarity, the
-# same measure the medoid uses) is at least this count as AGREEING, and the
-# original is kept without a tie-breaker. 0.80 is an UNMEASURED choice
-# (operator, 2026-09-23): nothing here has graded how often two parsing
-# candidates this similar are both right. bench/domain grades every candidate
-# and can measure it; until then do not cite it (PROTOCOL rule 10).
-AGREE = 0.80
 
 # The most steps the procedure runs: A, B and the tie-breaker C. A tier's
 # fanout above 3 allows nothing more.
@@ -683,19 +672,13 @@ def run(payload: dict, original: dict | None = None, n: int = MAX_STEPS,
                 results, w, "code_grade", f"clear: only candidate {w + 1}'s "
                 f"{lang} code parses (and is complete)", rows, lang),
                 stop_reason="clear: only one parses")
-        if ga["ok"] and sim is not None and sim >= AGREE:
-            return _out(base, _decided(
-                results, 0, "code_grade", f"clear: both parse and agree "
-                f"(similarity {sim:.2f} >= {AGREE}); the main brain's answer "
-                f"is kept", rows, lang),
-                stop_reason="clear: agreement")
 
-        verdict = (("Both parse but they disagree"
+        verdict = (("Both parse"
                     + (f" (similarity {sim:.2f})." if sim is not None
                        else "."))
                    if ga["ok"] else "Neither one is a complete solution that "
                    "parses as written.")
-        why_c = ("both parse but disagree" if ga["ok"]
+        why_c = ("both parse" if ga["ok"]
                  else "neither parses")
         if n_max < 3:
             return _out(base, _decided(
@@ -1321,27 +1304,10 @@ def break_tie(question: str, results: list[dict], timeout: int = 30) -> dict | N
 LAYA_URL_ = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
 
 
-def dissent_note(v: dict) -> str:
-    """What to tell the user when the variants did NOT agree.
-
-    Disagreement is information and hiding it is the failure mode that makes a
-    confident wrong answer indistinguishable from a confident right one.
-
-    But only disagreement that was OBSERVED. With no path votes cast there is
-    nothing the variants could have agreed on, and saying "0% agreed" about
-    that is a false claim appended to a correct answer
-    (docs/SELECTION-BUILD.md harm 2; the live suite's primes answer at `high`).
-    """
-    if not v or v.get("agreement") is None or not v.get("path_votes"):
-        return ""
-    if v["agreement"] >= 0.75:
-        return ""
-    alts = [p for p in (v.get("path_votes") or {}) if p != v.get("consensus_path")]
-    note = (f"\n\n> Answered {v['n']} ways; only {int(v['agreement'] * 100)}% "
-            f"agreed on the same file. Treat this as unsettled.")
-    if alts:
-        note += " Other candidates: " + ", ".join(alts[:3]) + "."
-    return note
+# dissent_note() REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): it fired
+# below an invented 0.75 agreement and appended "Treat this as unsettled." to
+# the user's answer; no operator decision or measurement backs either. The
+# agreement is still computed and recorded (x_yamadori.fanout.agreement).
 
 
 # ---------------------------------------------------------------------------
@@ -1360,15 +1326,15 @@ def dissent_note(v: dict) -> str:
 #          in a loser whose code parses (a broken tree cannot say which
 #          names it binds).
 #
-# Every threshold here is a CHOICE, not a measurement (PROTOCOL rule 10):
-# nothing in the repo has graded whether a handed-back point improves an
-# answer. bench/domain can.
+# ALT_MIN_WORDS and ALT_NOVELTY define "a point" and are CHOICES, not
+# measurements (PROTOCOL rule 10; pending in docs/CONSTANTS-AUDIT.md). The
+# caps that CUT the hand-back -- ALT_MAX_POINTS 6, ALT_MAX_CHARS 1200 and
+# CODE_NOTE_NAMES 5 -- were REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md):
+# invented, the same class as the MAX_FINDING_CHARS cut. Every differing
+# point and every differing name crosses; B's own answer bounds them.
 # ---------------------------------------------------------------------------
 ALT_MIN_WORDS = 4        # a sentence shorter than this is never "a point"
 ALT_NOVELTY = 0.5        # share of its content words absent from the original
-ALT_MAX_POINTS = 6
-ALT_MAX_CHARS = 1200
-CODE_NOTE_NAMES = 5      # names listed per loser in the one-line code note
 
 _LETTERS = "ABCDEFGH"
 _WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
@@ -1461,17 +1427,7 @@ def _prose_handback(results: list[dict]) -> dict | None:
                        for p in pts]
     if not points:
         return None
-    lines, used = [], 0
-    for p in points[:ALT_MAX_POINTS]:
-        line = f"- {p}"
-        if used + len(line) > ALT_MAX_CHARS:
-            break
-        lines.append(line)
-        used += len(line) + 1
-    if len(lines) < len(points):
-        lines.append(f"- (+{len(points) - len(lines)} more points not shown; "
-                     f"the limit is {ALT_MAX_POINTS} points or "
-                     f"{ALT_MAX_CHARS} characters)")
+    lines = [f"- {p}" for p in points]
     return {"kind": "prose", "text": "\n".join(lines), "from": sources,
             "points": len(points)}
 
@@ -1502,11 +1458,9 @@ def _code_handback(results: list[dict], winner: int | None,
         if not diff:
             continue
         who = "the original" if i == 0 else f"candidate {_LETTERS[i]}"
-        shown = ", ".join(f"`{d}`" for d in diff[:CODE_NOTE_NAMES])
-        more = (f" and {len(diff) - CODE_NOTE_NAMES} more"
-                if len(diff) > CODE_NOTE_NAMES else "")
+        shown = ", ".join(f"`{d}`" for d in diff)
         state = " (cut off before it finished)" if g["truncated"] else ""
-        parts.append(f"{who} used {shown}{more}{state}")
+        parts.append(f"{who} used {shown}{state}")
         sources.append(_LETTERS[i])
     if not parts:
         return None

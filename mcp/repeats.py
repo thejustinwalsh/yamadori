@@ -23,9 +23,9 @@ so it invites another retry. Measured directly: describing what failed made
 the decision model pick retry at margin 0.288, while asking which action
 progresses gave the right answer at 0.493.
 
-So a repeat still runs, and the result carries what has NOT been tried yet,
-phrased as available options. The agent is given somewhere to go rather than
-told where it has been.
+So a repeat still runs. (Until 2026-09-27 its result also carried what had
+NOT been tried yet, phrased as options; that text was removed with the
+constants audit, docs/CONSTANTS-AUDIT.md: its evidence was a Laya margin.)
 """
 from __future__ import annotations
 
@@ -89,46 +89,17 @@ class Turn:
         answer we already had. Re-running them bought nothing; it only meant
         the model spent a quarter of an hour to reach the same dead end.
 
-        The guidance still goes back, which is the part the model acts on.
+        The model gets the situation (proxy._EMPTY_AGAIN) and decides.
         """
         return normalise(name, args) in self.empty
 
-    def guidance(self, name: str, args: dict, all_tools: set[str]) -> str:
-        """What to append when a call repeats something already exhausted.
-
-        Positive throughout: it names what is available, never what failed.
-        """
-        key = normalise(name, args)
-        if key not in self.empty or self.seen.get(key, 0) < 2:
-            return ""
-        untried = sorted(all_tools - self.tools_used)
-        lines = [f"[This request has now been made {self.seen[key]} times with "
-                 f"the same effect.]"]
-        if untried:
-            lines.append("Still available this turn: " + ", ".join(untried) + ".")
-        hint = _forward_hint(name, untried)
-        if hint:
-            lines.append(hint)
-        return "\n\n" + "\n".join(lines)
-
-
-def _forward_hint(name: str, untried: list[str]) -> str:
-    """One concrete next step, phrased as an action that progresses."""
-    if name == "find_by_pattern":
-        return ("Searching without a glob covers every indexed library; "
-                "describe_index lists them. The user's own files are "
-                "searched with your client's own tools.")
-    if name == "find_definition_opt":
-        return ("find_by_pattern locates the name as a literal, including "
-                "places it is imported or re-exported rather than declared.")
-    if name == "find_by_meaning":
-        return ("find_by_pattern matches an exact string the code would "
-                "contain; describe_index shows what is covered.")
-    if name == "read_file_range":
-        return ("describe_index lists the libraries held; a path starts with "
-                "one of them. The user's own files are read with your "
-                "client's own file tools.")
-    return ""
+    # guidance() REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): it appended
+    # "[This request has now been made N times ...] Still available ..." and
+    # a per-tool next-step hint to our tool results. The wording's only
+    # evidence was a Laya margin (0.288 vs 0.493), not this model, and no
+    # operator decision backs it. The repeat itself is still recorded, and an
+    # identical empty search is still answered from the cache with the
+    # situation (proxy._EMPTY_AGAIN). proxy.py's three calls are gone too.
 
 
 def _empty(text: str) -> bool:

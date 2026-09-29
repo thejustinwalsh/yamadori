@@ -1,0 +1,394 @@
+From f047986265b5e8289f44ba5f3aa2480db28c788c Mon Sep 17 00:00:00 2001
+From: CarlGao4 <gaoweiqicarl1@163.com>
+Date: Thu, 24 Sep 2026 13:59:40 +0800
+Subject: [PATCH] vae conv uses weight dtype and add support for specifying vae
+ compute precision
+
+---
+ examples/common/common.cpp      |  7 +++
+ examples/common/common.h        |  1 +
+ include/stable-diffusion.h      |  1 +
+ src/core/ggml_extend.cpp        | 25 ++++++---
+ src/core/ggml_runner.cpp        |  1 +
+ src/core/ggml_runner.h          |  6 +++
+ src/model/common/ggml_block.hpp | 91 ++++++++++++++++++++++++++++-----
+ src/model/vae/wan_vae.hpp       |  8 ++-
+ src/pipeline/model_builders.cpp | 20 ++++++++
+ src/stable-diffusion.cpp        |  6 ++-
+ 10 files changed, 143 insertions(+), 23 deletions(-)
+
+diff --git a/examples/common/common.cpp b/examples/common/common.cpp
+index 25f78d3b1408ed43893989d9f77b9598ad920f7d..425759a0e6ff5bbc5f4a604cab6da0b45c2f0bcb 100644
+--- a/examples/common/common.cpp
++++ b/examples/common/common.cpp
+@@ -460,6 +460,11 @@ ArgOptions SDContextParams::get_options() {
+          "VAE latent format override: auto, flux, sd3, flux2, or wan (default: auto)",
+          0,
+          &vae_format},
++        {"",
++         "--vae-dtype",
++         "VAE/TAE inference precision, without this will use weight dtype (f16, f32 or bf16)",
++         0,
++         &vae_dtype},
+         {"",
+          "--audio-vae",
+          "path to standalone LTX audio vae model",
+@@ -912,6 +917,7 @@ std::string SDContextParams::to_string() const {
+         << "  embeddings_connectors_path: \"" << embeddings_connectors_path << "\",\n"
+         << "  vae_path: \"" << vae_path << "\",\n"
+         << "  vae_format: \"" << vae_format << "\",\n"
++        << "  vae_dtype: \"" << vae_dtype << "\",\n"
+         << "  audio_vae_path: \"" << audio_vae_path << "\",\n"
+         << "  audio_encoder_path: \"" << audio_encoder_path << "\",\n"
+         << "  taesd_path: \"" << taesd_path << "\",\n"
+@@ -1008,6 +1014,7 @@ sd_ctx_params_t SDContextParams::to_sd_ctx_params_t(bool taesd_preview) {
+     sd_ctx_params.vae_conv_direct                 = vae_conv_direct;
+     sd_ctx_params.force_sdxl_vae_conv_scale       = force_sdxl_vae_conv_scale;
+     sd_ctx_params.vae_format                      = str_to_vae_format(vae_format);
++    sd_ctx_params.vae_dtype                       = vae_dtype.c_str();
+     sd_ctx_params.max_vram                        = max_vram.c_str();
+     sd_ctx_params.disable_prefetch                = disable_prefetch;
+     sd_ctx_params.disable_segmented_compute       = disable_segmented_compute;
+diff --git a/examples/common/common.h b/examples/common/common.h
+index 0e5c50e3cb328f61f33fca78b9e618797ec9ee2e..3cf296712c03fbd8de719c622f5420c6bc99fa28 100644
+--- a/examples/common/common.h
++++ b/examples/common/common.h
+@@ -143,6 +143,7 @@ struct SDContextParams {
+     std::string pulid_weights_path;
+     sd_type_t wtype = SD_TYPE_COUNT;
+     std::string tensor_type_rules;
++    std::string vae_dtype;  // VAE/TAE inference precision: f16/f32/bf16; empty uses weight dtype
+     std::string lora_model_dir = ".";
+     std::string hires_upscalers_dir;
+ 
+diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
+index 9173240be67dbbcf507e1c66ae9063a28ad28a63..449bd8b03fe654f07486c710975c2df02ffb4763 100644
+--- a/include/stable-diffusion.h
++++ b/include/stable-diffusion.h
+@@ -247,6 +247,7 @@ typedef struct {
+     float attn_scale;                // Override flash-attention K/V scaling; 0 keeps the model default
+     const char* tokenizer;           // tokenizer.json path or main=FILE,clip-l=FILE,clip-g=FILE assignments; required for PiD and Lens
+     bool sage_attn;
++    const char* vae_dtype;  // VAE/TAE inference precision: "f16", "f32" or "bf16"; null or empty uses weight dtype
+ } sd_ctx_params_t;
+ 
+ typedef struct {
+diff --git a/src/core/ggml_extend.cpp b/src/core/ggml_extend.cpp
+index 74324169eec8ad6705edecb307ba6e7e0e898e7b..6597b9fda73a642cdc5b2eb4356b96a578e786d4 100644
+--- a/src/core/ggml_extend.cpp
++++ b/src/core/ggml_extend.cpp
+@@ -434,7 +434,17 @@ ggml_tensor* ggml_ext_conv_2d(ggml_context* ctx,
+         p1 = 0;
+     }
+ 
+-    if (direct) {
++    if (w->type == GGML_TYPE_F32) {
++        // ggml_conv_2d hardcodes the im2col dtype to f16 for non-bf16 weights,
++        // which would re-introduce f16 overflow in high-magnitude VAE decoder
++        // activations. Build the same im2col + mul_mat with explicit f32.
++        ggml_tensor* im2col = ggml_im2col(ctx, w, x, s0, s1, p0, p1, d0, d1, true, GGML_TYPE_F32);
++        x                   = ggml_mul_mat(ctx,
++                                           ggml_reshape_2d(ctx, im2col, im2col->ne[0], im2col->ne[3] * im2col->ne[2] * im2col->ne[1]),
++                                           ggml_reshape_2d(ctx, w, w->ne[0] * w->ne[1] * w->ne[2], w->ne[3]));
++        x                   = ggml_reshape_4d(ctx, x, im2col->ne[1], im2col->ne[2], im2col->ne[3], w->ne[3]);
++        x                   = ggml_cont(ctx, ggml_permute(ctx, x, 0, 1, 3, 2));
++    } else if (direct) {
+         x = ggml_conv_2d_direct(ctx, w, x, s0, s1, p0, p1, d0, d1);
+     } else {
+         x = ggml_conv_2d(ctx, w, x, s0, s1, p0, p1, d0, d1);
+@@ -466,11 +476,10 @@ ggml_tensor* ggml_ext_conv_3d(ggml_context* ctx,
+                               int d2,
+                               bool force_prec_f32,
+                               bool direct) {
+-    if (direct) {
+-        int64_t OC = w->ne[3] / IC;
+-        int64_t N  = x->ne[3] / IC;
+-        x          = ggml_conv_3d_direct(ctx, w, x, s0, s1, s2, p0, p1, p2, d0, d1, d2, (int)IC, (int)N, (int)OC);
+-    } else if (force_prec_f32) {
++    if (force_prec_f32 || w->type == GGML_TYPE_F32) {
++        // The f32-weight case must bypass ggml_conv_3d: its im2col dtype is
++        // hardcoded to f16 for non-bf16 weights, which saturates high-magnitude
++        // VAE decoder activations to inf.
+         ggml_tensor* im2col = ggml_im2col_3d(ctx, w, x, IC, s0, s1, s2, p0, p1, p2, d0, d1, d2, w->type);
+ 
+         int64_t OC = w->ne[3] / IC;
+@@ -484,6 +493,10 @@ ggml_tensor* ggml_ext_conv_3d(ggml_context* ctx,
+         x          = ggml_reshape_4d(ctx, x, im2col->ne[1] * im2col->ne[2], OD, N, OC);
+         x          = ggml_cont(ctx, ggml_permute(ctx, x, 0, 1, 3, 2));
+         x          = ggml_reshape_4d(ctx, x, im2col->ne[1], im2col->ne[2], OD, OC * N);
++    } else if (direct) {
++        int64_t OC = w->ne[3] / IC;
++        int64_t N  = x->ne[3] / IC;
++        x          = ggml_conv_3d_direct(ctx, w, x, s0, s1, s2, p0, p1, p2, d0, d1, d2, (int)IC, (int)N, (int)OC);
+     } else {
+         // ggml_conv_3d decomposes into GGML_OP_IM2COL_3D, which some backends
+         // (e.g. Metal, see #850) do not implement. Fall back to
+diff --git a/src/core/ggml_runner.cpp b/src/core/ggml_runner.cpp
+index 182fd098327e217a99936b72d34f442e38698c9e..a64d144cbc4a50d8350311752ca1d047f18168ad 100644
+--- a/src/core/ggml_runner.cpp
++++ b/src/core/ggml_runner.cpp
+@@ -527,6 +527,7 @@ GGMLRunnerContext GGMLRunner::get_context() {
+     runner_ctx.conv3d_direct_enabled = conv3d_direct_enabled;
+     runner_ctx.circular_x_enabled    = circular_x_enabled;
+     runner_ctx.circular_y_enabled    = circular_y_enabled;
++    runner_ctx.vae_compute_type      = vae_compute_type;
+     runner_ctx.weight_adapter        = weight_adapter;
+     runner_ctx.debug_tensors         = &debug_tensors;
+     runner_ctx.get_cache_tensor      = [this](const std::string& name) {
+diff --git a/src/core/ggml_runner.h b/src/core/ggml_runner.h
+index 9084db1097fde08def8d54d9e3bcdb50179d4caf..092c73717e80b68933e1fad1e34b0dac8fe5e577 100644
+--- a/src/core/ggml_runner.h
++++ b/src/core/ggml_runner.h
+@@ -77,6 +77,7 @@ struct GGMLRunnerContext {
+     bool circular_y_enabled                                          = false;
+     ggml_tensor* ip_context                                          = nullptr;
+     float ip_scale                                                   = 1.0f;
++    ggml_type vae_compute_type                                       = GGML_TYPE_COUNT;  // VAE/TAE conv compute precision; COUNT keeps the stored dtype
+     std::shared_ptr<WeightAdapter> weight_adapter                    = nullptr;
+     std::vector<std::pair<ggml_tensor*, std::string>>* debug_tensors = nullptr;
+     std::function<ggml_tensor*(const std::string&)> get_cache_tensor;
+@@ -185,6 +186,7 @@ protected:
+     bool conv3d_direct_enabled = false;
+     bool circular_x_enabled    = false;
+     bool circular_y_enabled    = false;
++    ggml_type vae_compute_type = GGML_TYPE_COUNT;
+ 
+     sd::ggml_graph_cut::PlanCache graph_cut_plan_cache_;
+     std::unordered_set<const ggml_tensor*> params_tensor_set_;
+@@ -355,6 +357,10 @@ public:
+         this->attn_scale   = attn_scale;
+     }
+ 
++    void set_vae_compute_type(ggml_type type) {
++        vae_compute_type = type;
++    }
++
+     void set_conv2d_direct_enabled(bool enabled) {
+         conv2d_direct_enabled = enabled;
+     }
+diff --git a/src/model/common/ggml_block.hpp b/src/model/common/ggml_block.hpp
+index 991b88f28b9a8852d80a8d9b2546b3b2811450f0..8dc7003f34a9422b23edaefa781b5a797fb29d84 100644
+--- a/src/model/common/ggml_block.hpp
++++ b/src/model/common/ggml_block.hpp
+@@ -427,6 +427,63 @@ public:
+     }
+ };
+ 
++// VAE/TAE conv weights keep their stored dtype so compute precision can be
++// decided per run (see --vae-dtype); other convs (UNet, ControlNet, patch
++// embeds, upscalers) stay on the historical hardcoded f16.
++static inline bool sd_conv_prefix_is_vae(const std::string& prefix) {
++    static const std::vector<std::string> kVaePrefixes = {"first_stage_model", "vae", "tae", "decoder"};
++    for (const auto& v : kVaePrefixes) {
++        if (prefix.size() >= v.size() && prefix.compare(0, v.size(), v) == 0 &&
++            (prefix.size() == v.size() || prefix[v.size()] == '.')) {
++            return true;
++        }
++    }
++    return false;
++}
++
++static inline bool sd_conv_type_computable(ggml_type t) {
++    return t == GGML_TYPE_F16 || t == GGML_TYPE_F32 || t == GGML_TYPE_BF16;
++}
++
++static inline ggml_type sd_vae_conv_param_type(const String2TensorStorage& map, const std::string& key) {
++    auto it = map.find(key);
++    if (it == map.end()) {
++        return GGML_TYPE_F16;
++    }
++    const TensorStorage& ts = it->second;
++    ggml_type t             = ts.expected_type != GGML_TYPE_COUNT ? ts.expected_type : ts.type;
++    if (sd_conv_type_computable(t)) {
++        return t;
++    }
++    // Block-quantized types need ne[0] % blck_size == 0, but conv weights have
++    // ne[0] = kernel width, so they cannot stay quantized in a conv param and
++    // keep the historical load-time f16 expansion. int8-tensorwise needs its
++    // weight_scale applied by dedicated kernels that conv paths do not have.
++    if (ggml_is_quantized(t) && !ts.is_int8_tensorwise && ts.ne[0] % ggml_blck_size(t) == 0) {
++        return t;
++    }
++    return GGML_TYPE_F16;
++}
++
++static inline ggml_type sd_conv_target_type(GGMLRunnerContext* ctx, ggml_type wtype) {
++    if (ctx->vae_compute_type != GGML_TYPE_COUNT) {
++        return ctx->vae_compute_type;
++    }
++    return sd_conv_type_computable(wtype) ? wtype : GGML_TYPE_F16;
++}
++
++// Quantized sources route through f32: backends only register direct
++// CPY kernels for quantized -> f32, not quantized -> f16/bf16.
++static inline ggml_tensor* sd_conv_cast_weight(ggml_context* ctx, ggml_tensor* w, ggml_type target) {
++    if (w->type == target) {
++        return w;
++    }
++    if (ggml_is_quantized(w->type) && target != GGML_TYPE_F32) {
++        w = ggml_cast(ctx, w, GGML_TYPE_F32);
++    }
++    return ggml_cast(ctx, w, target);
++}
++
+ class Conv2d : public UnaryBlock {
+ protected:
+     int64_t in_channels;
+@@ -440,9 +497,10 @@ protected:
+     std::string prefix;
+ 
+     void init_params(ggml_context* ctx, const String2TensorStorage& tensor_storage_map, const std::string prefix = "") override {
+-        this->prefix         = prefix;
+-        enum ggml_type wtype = GGML_TYPE_F16;
+-        params["weight"]     = ggml_new_tensor_4d(ctx, wtype, kernel_size.second, kernel_size.first, in_channels, out_channels);
++        this->prefix = prefix;
++        enum ggml_type wtype =
++            sd_conv_prefix_is_vae(prefix) ? sd_vae_conv_param_type(tensor_storage_map, prefix + "weight") : GGML_TYPE_F16;
++        params["weight"] = ggml_new_tensor_4d(ctx, wtype, kernel_size.second, kernel_size.first, in_channels, out_channels);
+         if (bias) {
+             enum ggml_type wtype = GGML_TYPE_F32;
+             params["bias"]       = ggml_new_tensor_1d(ctx, wtype, out_channels);
+@@ -475,6 +533,7 @@ public:
+ 
+     ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
+         ggml_tensor* w = params["weight"];
++        w              = sd_conv_cast_weight(ctx->ggml_ctx, w, sd_conv_target_type(ctx, w->type));
+         ggml_tensor* b = nullptr;
+         if (bias) {
+             b = params["bias"];
+@@ -525,9 +584,10 @@ protected:
+     std::string prefix;
+ 
+     void init_params(ggml_context* ctx, const String2TensorStorage& tensor_storage_map, const std::string prefix = "") override {
+-        this->prefix         = prefix;
+-        enum ggml_type wtype = GGML_TYPE_F16;
+-        params["weight"]     = ggml_new_tensor_4d(ctx, wtype, kernel_size.second, kernel_size.first, in_channels / groups, out_channels);
++        this->prefix = prefix;
++        enum ggml_type wtype =
++            sd_conv_prefix_is_vae(prefix) ? sd_vae_conv_param_type(tensor_storage_map, prefix + "weight") : GGML_TYPE_F16;
++        params["weight"] = ggml_new_tensor_4d(ctx, wtype, kernel_size.second, kernel_size.first, in_channels / groups, out_channels);
+         if (bias) {
+             enum ggml_type wtype = GGML_TYPE_F32;
+             params["bias"]       = ggml_new_tensor_1d(ctx, wtype, out_channels);
+@@ -562,6 +622,7 @@ public:
+ 
+     ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
+         ggml_tensor* w = params["weight"];
++        w              = sd_conv_cast_weight(ctx->ggml_ctx, w, sd_conv_target_type(ctx, w->type));
+         ggml_tensor* b = nullptr;
+         if (bias) {
+             b = params["bias"];
+@@ -682,14 +743,15 @@ protected:
+     std::string prefix;
+ 
+     void init_params(ggml_context* ctx, const String2TensorStorage& tensor_storage_map, const std::string prefix = "") override {
+-        this->prefix         = prefix;
+-        enum ggml_type wtype = GGML_TYPE_F16;
+-        params["weight"]     = ggml_new_tensor_4d(ctx,
+-                                                  wtype,
+-                                                  std::get<2>(kernel_size),
+-                                                  std::get<1>(kernel_size),
+-                                                  std::get<0>(kernel_size),
+-                                                  in_channels * out_channels);
++        this->prefix = prefix;
++        enum ggml_type wtype =
++            sd_conv_prefix_is_vae(prefix) ? sd_vae_conv_param_type(tensor_storage_map, prefix + "weight") : GGML_TYPE_F16;
++        params["weight"] = ggml_new_tensor_4d(ctx,
++                                              wtype,
++                                              std::get<2>(kernel_size),
++                                              std::get<1>(kernel_size),
++                                              std::get<0>(kernel_size),
++                                              in_channels * out_channels);
+         if (bias) {
+             params["bias"] = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, out_channels);
+         }
+@@ -715,6 +777,7 @@ public:
+ 
+     ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
+         ggml_tensor* w = params["weight"];
++        w              = sd_conv_cast_weight(ctx->ggml_ctx, w, sd_conv_target_type(ctx, w->type));
+         ggml_tensor* b = nullptr;
+         if (ctx->weight_adapter) {
+             w = ctx->weight_adapter->patch_weight(ctx->ggml_ctx, ctx->backend, w, prefix + "weight");
+diff --git a/src/model/vae/wan_vae.hpp b/src/model/vae/wan_vae.hpp
+index 035deae3246668d48757913017c4a2c2af90d847..975553e05411b108815ba95e325e38d845f0dc6b 100644
+--- a/src/model/vae/wan_vae.hpp
++++ b/src/model/vae/wan_vae.hpp
+@@ -33,8 +33,13 @@ namespace WAN {
+                 std::get<0>(kernel_size) = 1;
+                 std::get<0>(padding)     = 0;
+             }
++            // VAE conv weights keep their stored dtype so compute precision can
++            // be decided per run; the decoder residual stream can exceed the
++            // f16 range, so forcing f16 here saturates im2col output to inf.
++            ggml_type wtype  = sd_conv_prefix_is_vae(prefix) ? sd_vae_conv_param_type(tensor_storage_map, prefix + "weight")
++                                                             : GGML_TYPE_F16;
+             params["weight"] = ggml_new_tensor_4d(ctx,
+-                                                  GGML_TYPE_F16,
++                                                  wtype,
+                                                   std::get<2>(kernel_size),
+                                                   std::get<1>(kernel_size),
+                                                   std::get<0>(kernel_size),
+@@ -64,6 +69,7 @@ namespace WAN {
+             // x: [N*IC, ID, IH, IW]
+             // result: x: [N*OC, ID, IH, IW]
+             ggml_tensor* w = params["weight"];
++            w              = sd_conv_cast_weight(ctx->ggml_ctx, w, sd_conv_target_type(ctx, w->type));
+             ggml_tensor* b = nullptr;
+             if (bias) {
+                 b = params["bias"];
+diff --git a/src/pipeline/model_builders.cpp b/src/pipeline/model_builders.cpp
+index 626bdfee6033770dd94a7ebb591c02e9eba17438..96ce277ef725b0c84af755b7208f0397829c22f8 100644
+--- a/src/pipeline/model_builders.cpp
++++ b/src/pipeline/model_builders.cpp
+@@ -614,6 +614,26 @@ namespace sd::model_builders {
+                 result.preview->set_conv3d_direct_enabled(true);
+             }
+         }
++        {
++            ggml_type vae_compute_type = GGML_TYPE_COUNT;
++            if (SAFE_STR(sd_ctx_params->vae_dtype)[0] != '\0') {
++                const std::string dtype = sd_ctx_params->vae_dtype;
++                if (dtype == "f16" || dtype == "f32" || dtype == "bf16") {
++                    vae_compute_type = dtype == "f16"   ? GGML_TYPE_F16
++                                       : dtype == "f32" ? GGML_TYPE_F32
++                                                        : GGML_TYPE_BF16;
++                } else {
++                    LOG_WARN("invalid --vae-dtype '%s' (expected f16, f32 or bf16), using weight dtype", dtype.c_str());
++                }
++            }
++            if (vae_compute_type != GGML_TYPE_COUNT) {
++                LOG_INFO("VAE/TAE compute dtype: %s", ggml_type_name(vae_compute_type));
++                result.vae->set_vae_compute_type(vae_compute_type);
++                if (result.preview) {
++                    result.preview->set_vae_compute_type(vae_compute_type);
++                }
++            }
++        }
+         if (result.vae) {
+             result.vae->set_scale_overrides(sd_ctx_params->linear_scale, sd_ctx_params->attn_scale);
+         }
+diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+index c533f2cb25d30999f303fdd5ac180f997609c217..c38e2ba42ffa9622b7197fb5be6f500d439a5763 100644
+--- a/src/stable-diffusion.cpp
++++ b/src/stable-diffusion.cpp
+@@ -396,7 +396,8 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
+              "sage_attn: %s\n"
+              "linear_scale: %g\n"
+              "attn_scale: %g\n"
+-             "vae_format: %s\n",
++             "vae_format: %s\n"
++             "vae_dtype: %s\n",
+              SAFE_STR(sd_ctx_params->model_path),
+              SAFE_STR(sd_ctx_params->clip_l_path),
+              SAFE_STR(sd_ctx_params->clip_g_path),
+@@ -436,7 +437,8 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
+              BOOL_STR(sd_ctx_params->sage_attn),
+              sd_ctx_params->linear_scale,
+              sd_ctx_params->attn_scale,
+-             sd_vae_format_name(sd_ctx_params->vae_format));
++             sd_vae_format_name(sd_ctx_params->vae_format),
++             SAFE_STR(sd_ctx_params->vae_dtype));
+ 
+     return buf;
+ }

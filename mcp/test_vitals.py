@@ -103,6 +103,7 @@ def restore() -> None:
     urllib.request.urlopen = _blocked
     vitals._slot_prev.clear()
     vitals._slot_rate.clear()
+    vitals._running_cache = (-1e9, None)
 
 
 # ------------------------------------------------------------------- slots
@@ -110,7 +111,20 @@ def restore() -> None:
 def test_the_fixture_cannot_reach_a_server():
     r = vitals.slots()
     check(r["ok"] is False and "blocked" in r["error"], "an unreachable server is ok: False, not a raise", str(r))
-    check(_leaks and _leaks[-1].endswith("/slots"), "and the read went to /slots", str(_leaks[-1:]))
+    check(any(u.endswith("/slots") for u in _leaks), "and the read went to /slots", str(_leaks[-3:]))
+    # Why it does not answer (2026-09-28, the Flash-Next gate): a bench
+    # window's pause record on the gpu lane is named in the error, the
+    # underlying failure kept as `cause`.
+    import jobs
+    real = jobs.paused
+    jobs.paused = lambda lane: {"why": "Flash-Next gate (bench/flashnext_gate.py)"} if lane == "gpu" else None
+    try:
+        r = vitals.slots()
+    finally:
+        jobs.paused = real
+    check(r["ok"] is False and r.get("off_card") is True
+          and "Flash-Next gate" in r["error"] and "blocked" in r.get("cause", ""),
+          "a bench window holding the card is named, not a bare timeout", str(r))
     _leaks.clear()
 
 
@@ -274,6 +288,144 @@ def test_snapshot_carries_the_new_fields():
         check(k in s, f"snapshot carries {k}")
 
 
+# ------------------------------------------------ the dashboard fixup (2026-09-29)
+
+# test_snapshot_carries_the_new_fields replaces these on the module; keep the
+# real ones (this runs at import, before any test).
+_REAL = {n: getattr(vitals, n) for n in ("endpoints", "context_pool")}
+
+def test_process_start_times_parse():
+    # Windows PowerShell 5.1's ConvertTo-Json writes "/Date(<ms>)/"; the old
+    # [:19] cut put "/Date(1790680397077" on the page.
+    got = vitals._started("/Date(1790680397077)/")
+    check(len(got) == 19 and got[4] == "-" and got[10] == "T",
+          "a /Date(ms)/ start time becomes local ISO seconds", got)
+    check(vitals._started("2026-09-29T07:01:02.123+00:00") == "2026-09-29T07:01:02",
+          "an ISO start time is cut to seconds, as before")
+    check(vitals._started(None) == "" and vitals._started("/Date(nope)/") == "/Date(nope)/",
+          "nothing and a malformed value never raise")
+
+
+class _Ok(_Resp):
+    status = 200
+
+
+def test_watched_services():
+    roles = set(vitals.PORTS.values())
+    check({"proxy", "tools-api", "searxng", "llama-swap", "bonsai"} <= roles,
+          "the listeners cover every supervised service with a port", str(sorted(roles)))
+    check("laya" not in roles, "Laya (retired) is not watched")
+    names = [n for _, n in vitals.PROBES]
+    check(names == ["llama-swap", "tools-api", "searxng"], "the probed endpoints", str(names))
+    check(all(u.endswith(("/v1/models", "/health", "/healthz")) for u, _ in vitals.PROBES),
+          "each probe is a liveness route that loads nothing", str(vitals.PROBES))
+    seen = []
+
+    def fake(url, timeout=None):
+        seen.append((url if isinstance(url, str) else url.full_url, timeout))
+        if "8888" in (url if isinstance(url, str) else url.full_url):
+            raise OSError("searxng down")
+        return _Ok(b"{}")
+    urllib.request.urlopen = fake
+    rows = _REAL["endpoints"]()
+    by = {r["name"]: r for r in rows}
+    check(by["llama-swap"]["ok"] and by["tools-api"]["ok"], "answering services are ok", str(rows))
+    check(by["searxng"]["ok"] is False and by["searxng"]["code"] == 0,
+          "a service that does not answer is down, the others unaffected", str(by["searxng"]))
+    check(all(t is not None and t <= vitals.PROBE_TIMEOUT for _, t in seen),
+          "every probe carries a timeout", str(seen))
+
+
+def _running(rows):
+    import time as _t
+    vitals._running_cache = (_t.time(), rows)
+
+
+def test_serving_names_the_model_on_the_card():
+    import max_mode
+    _running([{"model": "bonsai", "state": "ready", "proxy": "http://127.0.0.1:10001",
+               "cmd": "llama-server --port 10001 -m C:\\models\\Ternary-Bonsai-2-27B.gguf --mmproj x-mmproj.gguf"},
+              {"model": "embed", "state": "ready", "proxy": "http://127.0.0.1:10006",
+               "cmd": "llama-server -m /m/Qwen3-Embedding-0.6B-Q8_0.gguf"}])
+    s = vitals.serving()
+    check(s["on_card"] == "bonsai" and s["main"] == "bonsai", "the main model is named on the card", str(s))
+    check(s["enabled"] is max_mode.ENABLED, "max mode's switch is max_mode's own", str(s["enabled"]))
+    row = [x for x in s["loaded"] if x["model"] == "bonsai"][0]
+    check(row["port"] == 10001 and row["gguf"] == "Ternary-Bonsai-2-27B.gguf",
+          "a loaded row carries its port and its -m gguf, not the mmproj", str(row))
+    _running(None)
+    s = vitals.serving()
+    check(s["loaded"] is None and s["on_card"] is None,
+          "llama-swap unreadable: loaded is None, nothing is claimed", str(s))
+    real = (max_mode.ENABLED, max_mode.MAX)
+    max_mode.ENABLED, max_mode.MAX = True, "flash-next"
+    real_snap, real_active = max_mode.snapshot, max_mode.max_active
+    max_mode.max_active = lambda: True
+    max_mode.snapshot = lambda: {"enabled": True, "main": "bonsai", "max": "flash-next",
+                                 "inflight": {"flash-next": 1}, "switching_to": None,
+                                 "last_max_end": 0.0, "idle_s": None}
+    try:
+        _running([{"model": "flash-next", "state": "ready", "proxy": "http://127.0.0.1:10009",
+                   "cmd": "llama-server -m /m/Qwen3.8-Flash-Next-IQ2_XS-00001-of-00002.gguf"}])
+        s = vitals.serving()
+    finally:
+        max_mode.ENABLED, max_mode.MAX = real
+        max_mode.snapshot, max_mode.max_active = real_snap, real_active
+    check(s["on_card"] == "flash-next" and s["max"] == "flash-next" and s["max_active"] is True,
+          "in max mode the max model is on the card and max mode is active", str(s))
+
+
+def test_max_mode_slots_and_off_card():
+    import max_mode
+    real = (max_mode.ENABLED, max_mode.MAX)
+    max_mode.ENABLED, max_mode.MAX = True, "flash-next"
+    try:
+        _running([{"model": "flash-next", "state": "ready", "proxy": "http://127.0.0.1:10009"}])
+        url, model = vitals._slots_target()
+        check(url == "http://127.0.0.1:10009/slots" and model == "flash-next",
+              "while the max model holds the card /slots is read from its port", url)
+        why = vitals.off_card_why()
+        check(why is not None and "max mode (flash-next)" in why,
+              "and the main model's absence is named as max mode", str(why))
+        _running([{"model": "bonsai", "state": "ready", "proxy": "http://127.0.0.1:10001"}])
+        check(vitals._slots_target() == (vitals.SLOTS_URL, vitals.MAIN_MODEL),
+              "the main model on the card: its own /slots")
+    finally:
+        max_mode.ENABLED, max_mode.MAX = real
+    _running([{"model": "flash-next", "state": "ready", "proxy": "http://127.0.0.1:10009"}])
+    check(vitals._slots_target() == (vitals.SLOTS_URL, vitals.MAIN_MODEL),
+          "max mode off: never another model's port")
+
+
+def test_slot_roles():
+    import slots as slot_map
+    real = slot_map.snapshot
+    slot_map.snapshot = lambda: {"pins": {"aaaaaaaa": 0, "bbbbbbbb": 1},
+                                 "ranks": {"primary": "bbbbbbbb"}}
+    urllib.request.urlopen = _serve(_slots_json(decoded=5))
+    try:
+        r = vitals.slots()
+    finally:
+        slot_map.snapshot = real
+    by = {x["id"]: x for x in r["slots"]}
+    check(by[2]["role"] == "child" and by[0]["role"] == by[1]["role"] == "conversation",
+          "three slots: the last is the child, the rest conversations", str(r["slots"]))
+    check(by[0]["pinned"] and by[1]["pinned"] and not by[2]["pinned"],
+          "pins mark the conversation slots in use", str(r["slots"]))
+    check(by[1]["primary"] and not by[0]["primary"], "the primary conversation's slot is marked")
+
+
+def test_context_carries_the_vram_line():
+    real = budget._LINE
+    budget._LINE = 141824
+    try:
+        c = vitals._with_line(budget.budgets())
+    finally:
+        budget._LINE = real
+    check(c.get("vram_line") == 141824, "context carries the served VRAM line", str(c))
+    check(vitals._with_line({"error": "x"}) == {"error": "x"}, "an error context is passed through")
+
+
 def main() -> int:
     for fn in (test_the_fixture_cannot_reach_a_server,
                test_slot_states_and_rates,
@@ -285,7 +437,13 @@ def main() -> int:
                test_lanes_follow_admission,
                test_pulse_and_its_route,
                test_pulse_caches_gpus,
-               test_snapshot_carries_the_new_fields):
+               test_snapshot_carries_the_new_fields,
+               test_process_start_times_parse,
+               test_watched_services,
+               test_serving_names_the_model_on_the_card,
+               test_max_mode_slots_and_off_card,
+               test_slot_roles,
+               test_context_carries_the_vram_line):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

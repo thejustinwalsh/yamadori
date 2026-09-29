@@ -1,0 +1,169 @@
+{
+ "id": "pi/chat/attached-image",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "chat",
+ "source": "relay.jsonl #20 (captured): a <file name=...> text part then an image_url part; path neutralised, image synthetic",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_completion_tokens": 26419,
+  "store": false,
+  "messages": [
+   {
+    "role": "developer",
+    "content": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n[... Pi system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "<file name=\"C:\\work\\project\\pitest.png\"></file>\nWhat does this image show?"
+     },
+     {
+      "type": "image_url",
+      "image_url": {
+       "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC"
+      }
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "(read: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "bash",
+     "description": "(bash: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "timeout": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "edit",
+     "description": "(edit: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "edits": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "oldText": {
+           "type": "string"
+          },
+          "newText": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "oldText",
+          "newText"
+         ]
+        }
+       }
+      },
+      "required": [
+       "path",
+       "edits"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write",
+     "description": "(write: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "medium",
+  "prompt_cache_key": "piv1"
+ },
+ "expect": {
+  "accepted": true,
+  "utility": {
+   "utility": false
+  },
+  "image": {
+   "forms": [
+    "user_part"
+   ]
+  },
+  "deep": {
+   "kickoff": true,
+   "speaking": true
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "image": "the user's own attachment"
+ }
+}

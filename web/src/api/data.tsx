@@ -8,7 +8,6 @@ export const PATHS = {
   vitals: '/dash/api/vitals',
   datasets: '/dash/api/datasets',
   results: '/dash/api/results',
-  stats: '/dash/api/stats',
   tiers: '/dash/api/tiers',
   dataset: (id: string) => `/dash/api/datasets/${encodeURIComponent(id)}`,
 } as const;

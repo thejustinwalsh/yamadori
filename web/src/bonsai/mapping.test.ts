@@ -328,7 +328,7 @@ describe('foliage <- recall injected lately (vitals.tree.recent.foliage)', () =>
   });
   it('a recent block with no turns in the window is sparse and live, not inert', () => {
     const st = treeState(VITALS);
-    expect(st.foliage).toEqual({ density: 0, path: 'hints' }); // the live YAMADORI_RECALL, from tree.moss.recall
+    expect(st.foliage).toEqual({ density: 0, path: 'hints' }); // the recall path the fixture's tree.moss.recall reports
     expect(inertChannels(st)).not.toContain('foliage');
   });
   it('absent: full matte pads, unlit, named inert', () => {

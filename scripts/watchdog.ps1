@@ -90,6 +90,10 @@ $Services = @(
     @{ Name = 'proxy';      Url = 'http://127.0.0.1:1234/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\server.py"); Log = "$root\logs\proxy.log"
        Match = 'mcp[\\/]server\.py'
+       # kv layout (bench/deploy_kv_rank.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '141824'; YAMADORI_CHILD_TOKENS = '65536' }
+       # max mode (bench/deploy_flash_next.py)
+       EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
        # start-stack.bat's `set` lines never reach a watchdog restart, which
        # inherits the watchdog's own environment. docs/IMAGEGEN.md.
        Env = @{ YAMADORI_IMAGEGEN_URL = 'http://127.0.0.1:11434'
@@ -100,9 +104,14 @@ $Services = @(
                 YAMADORI_SEARCH_URL = 'http://127.0.0.1:8888'
                 # E1 heads replace Laya (operator, 2026-09-24; docs/E1.md)
                 YAMADORI_E1 = '1' } }
+    # /health is the tools API's one unkeyed route, liveness only (2026-09-26)
     @{ Name = 'tools-api';  Url = 'http://127.0.0.1:1235/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\tools_api.py"); Log = "$root\logs\tools-api.log"
-       Match = 'tools_api\.py' }
+       Match = 'tools_api\.py'
+       # kv layout (bench/deploy_kv_rank.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '141824'; YAMADORI_CHILD_TOKENS = '65536' }
+       # max mode (bench/deploy_flash_next.py)
+       EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' } }
     # laya retired 2026-09-24 (docs/E1.md): E1 heads replace it
     # SearXNG web search (docs/SEARCH.md). Its own venv and source tree outside
     # the repo; the config path is the only thing it needs from the environment.
@@ -115,7 +124,11 @@ $Services = @(
     # script's business -- jobs.reclaim() hands a stale job to the next worker.
     @{ Name = 'worker';     Url = $null;                             Kind = 'process'
        Exe = $py; Args = @("$root\mcp\worker.py"); Log = "$root\logs\worker.log"
-       Match = 'mcp[\\/]worker\.py' }
+       Match = 'mcp[\\/]worker\.py'
+       # kv layout (bench/deploy_kv_rank.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '141824'; YAMADORI_CHILD_TOKENS = '65536' }
+       # max mode (bench/deploy_flash_next.py)
+       EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' } }
 )
 
 function Write-Log([string]$msg) {
@@ -303,6 +316,16 @@ function Restart-Service($svc) {
         return
     }
     Write-Log "restarting $($svc.Name)"
+    if ($svc.EnvMax) {
+        foreach ($k in $svc.EnvMax.Keys) {
+            [Environment]::SetEnvironmentVariable($k, $svc.EnvMax[$k], 'Process')
+        }
+    }
+    if ($svc.Env2) {
+        foreach ($k in $svc.Env2.Keys) {
+            [Environment]::SetEnvironmentVariable($k, $svc.Env2[$k], 'Process')
+        }
+    }
     if ($svc.Env) {
         foreach ($k in $svc.Env.Keys) {
             [Environment]::SetEnvironmentVariable($k, $svc.Env[$k], 'Process')

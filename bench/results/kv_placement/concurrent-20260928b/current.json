@@ -1,0 +1,243 @@
+{
+ "arm": "current",
+ "binary": "C:/Users/jwals/engines/llama-bonsai2-ada-92ffd4db/src/build/bin/llama-server.exe",
+ "cmd": [
+  "C:/Users/jwals/engines/llama-bonsai2-ada-92ffd4db/src/build/bin/llama-server.exe",
+  "--port",
+  "18092",
+  "-m",
+  "C:/Users/jwals/textgen/user_data/models/Ternary-Bonsai-2-27B-PTQ1_0-mtp-procreations.gguf",
+  "--spec-type",
+  "draft-mtp",
+  "--spec-draft-n-max",
+  "2",
+  "--mmproj",
+  "C:/Users/jwals/textgen/user_data/models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf",
+  "--spec-draft-n-max-tail",
+  "4",
+  "--kv-vram-cells",
+  "114432",
+  "-dev",
+  "CUDA0",
+  "-ngl",
+  "999",
+  "-c",
+  "262144",
+  "--cache-type-k",
+  "q8_0",
+  "--cache-type-v",
+  "q8_0",
+  "--cache-type-k-draft",
+  "q8_0",
+  "--cache-type-v-draft",
+  "q8_0",
+  "-fa",
+  "on",
+  "--cont-batching",
+  "-b",
+  "1024",
+  "-ub",
+  "512",
+  "--jinja",
+  "--no-cache-idle-slots",
+  "--reasoning-budget",
+  "32768",
+  "--reasoning-budget-message",
+  "Thinking budget reached. I will stop deliberating and write the final answer now.",
+  "--reasoning-format",
+  "deepseek",
+  "--no-context-shift",
+  "--temp",
+  "1.0",
+  "--top-p",
+  "0.95",
+  "--top-k",
+  "20",
+  "--min-p",
+  "0.0",
+  "--presence-penalty",
+  "0",
+  "--repeat-penalty",
+  "1.0",
+  "-lv",
+  "5"
+ ],
+ "env": {
+  "CUDA_VISIBLE_DEVICES": "GPU-de660e90-0e9c-d465-b389-6df63021b920",
+  "GGML_CUDA_BATCH_INVARIANT": "1",
+  "LLAMA_KV_CACHE_DEBUG": "1"
+ },
+ "started": "2026-09-28T07:36:29-0400",
+ "stages": {
+  "G_concurrent_slots_1_2": {
+   "tps": 18.150805863749515,
+   "per_slot": {
+    "1": {
+     "tps": 18.150805863749515,
+     "prompt_n": 8000,
+     "draft_n": 241,
+     "draft_n_accepted": 134
+    },
+    "2": {
+     "tps": 38.45623115361907,
+     "prompt_n": 8000,
+     "draft_n": 199,
+     "draft_n_accepted": 155
+    }
+   },
+   "symptoms": {
+    "1": {
+     "symptom_runs": [],
+     "long_runs": [],
+     "punct_runs": [],
+     "word_repeats": []
+    },
+    "2": {
+     "symptom_runs": [],
+     "long_runs": [],
+     "punct_runs": [],
+     "word_repeats": []
+    }
+   },
+   "find_slot_calls": 952,
+   "ours": [],
+   "ours_n": 0,
+   "pool_max_p1_last": 16508,
+   "pool_used_last": 16508,
+   "head_last": 16508,
+   "pool_max_p1_max": 16508,
+   "gpu": {
+    "used": 15016,
+    "free": 1035,
+    "util": 0
+   }
+  },
+  "G_clear_slot1": {
+   "slot": 1,
+   "prompt_n": 1,
+   "cache_n": 0,
+   "prompt_ms": 39.321,
+   "prompt_tps": 25.431703161160705,
+   "predicted_n": 1,
+   "tps": 0.0,
+   "draft_n": 0,
+   "draft_n_accepted": 0,
+   "wall": 0.26,
+   "content_head": "#",
+   "content": "#",
+   "find_slot_calls": 2,
+   "ours": [],
+   "ours_n": 0,
+   "pool_max_p1_last": 16488,
+   "pool_used_last": 8255,
+   "head_last": 0,
+   "pool_max_p1_max": 16488,
+   "gpu": {
+    "used": 15016,
+    "free": 1035,
+    "util": 0
+   }
+  },
+  "G_alone_slot1": {
+   "slot": 1,
+   "prompt_n": 7999,
+   "cache_n": 1,
+   "prompt_ms": 9189.778,
+   "prompt_tps": 870.4236380900604,
+   "predicted_n": 256,
+   "tps": 65.23697908272203,
+   "draft_n": 241,
+   "draft_n_accepted": 134,
+   "wall": 13.1,
+   "content_head": "\n  - the build and static checks on a hand-written project (the checks\n    themselves are the grader's, and the fixture ",
+   "content": "\n  - the build and static checks on a hand-written project (the checks\n    themselves are the grader's, and the fixture is a known answer)\n\n## What this is not\n\n- Not a finding. n=3, one prompt, one model.\n- Not a comparison. One arm at a time.\n- Not a measure of the model. It measures the page the model wrote.\n- Not a measure of the stack. The stack is the operator's, and the checks\n  only say whether it is present.\n\n## The operator's note\n\nThe operator's stack sentence is the only thing that changes between the two\ntasks. The rest of the prompt is public. The operator judges the result\nfrom a static page. No model grades it, and nothing the check finds is ever\nsent back to a model: graders only measure.\n\n\n# ==== docs\\BUILDS.md ====\n# Builds\n\n## The build\n\nThe build is the only thing that makes the stack usable. It is not a\ndeployment. It is a local machine, and it is the operator's.\n\n## What the build is\n\nA local machine with:\n\n- **The model.** Bonsai 2 27B tern",
+   "find_slot_calls": 396,
+   "ours": [],
+   "ours_n": 0,
+   "pool_max_p1_last": 16508,
+   "pool_used_last": 16508,
+   "head_last": 16508,
+   "pool_max_p1_max": 16508,
+   "gpu": {
+    "used": 15016,
+    "free": 1035,
+    "util": 0
+   },
+   "same_head_as_concurrent": true,
+   "concurrent_symptoms": {
+    "symptom_runs": [],
+    "long_runs": [],
+    "punct_runs": [],
+    "word_repeats": []
+   }
+  },
+  "G_clear_slot2": {
+   "slot": 2,
+   "prompt_n": 1,
+   "cache_n": 0,
+   "prompt_ms": 38.314,
+   "prompt_tps": 26.10012006055228,
+   "predicted_n": 1,
+   "tps": 0.0,
+   "draft_n": 0,
+   "draft_n_accepted": 0,
+   "wall": 0.25,
+   "content_head": "\n",
+   "content": "\n",
+   "find_slot_calls": 2,
+   "ours": [],
+   "ours_n": 0,
+   "pool_max_p1_last": 16508,
+   "pool_used_last": 8253,
+   "head_last": 7484,
+   "pool_max_p1_max": 16510,
+   "gpu": {
+    "used": 15016,
+    "free": 1035,
+    "util": 0
+   }
+  },
+  "G_alone_slot2": {
+   "slot": 2,
+   "prompt_n": 7999,
+   "cache_n": 1,
+   "prompt_ms": 9188.805,
+   "prompt_tps": 870.5158070064606,
+   "predicted_n": 256,
+   "tps": 79.38412859108115,
+   "draft_n": 197,
+   "draft_n_accepted": 156,
+   "wall": 12.41,
+   "content_head": " {k: tiers.TIERS[n].get(k) for k in\n                    (\"name\", \"sent_effort\", \"features\", \"reason\")}\n               fo",
+   "content": " {k: tiers.TIERS[n].get(k) for k in\n                    (\"name\", \"sent_effort\", \"features\", \"reason\")}\n               for n in tiers.TIERS}\n        return 200, \"application/json\", json.dumps(view).encode()\n    return None\n\n\ndef handle_post(path: str):\n    \"\"\"(status, content_type, body_bytes) or None if this is not ours.\"\"\"\n    p = path.rstrip(\"/\")\n    if p != \"/dash/api/recipe\":\n        return None\n    try:\n        body = json.loads(sys.stdin.buffer.read().decode(\"utf-8\"))\n    except Exception:\n        return 400, \"application/json\", json.dumps(\n            {\"ok\": False, \"error\": \"body is not JSON\"}).encode()\n    rid = body.get(\"id\")\n    if not rid or \":\" not in rid:\n        return 400, \"application/json\", json.dumps(\n            {\"ok\": False, \"error\": \"id must be file:line\"}).encode()\n    try:\n        row = save_one(rid, body)\n    except KeyError as e:\n        return 4",
+   "find_slot_calls": 331,
+   "ours": [],
+   "ours_n": 0,
+   "pool_max_p1_last": 16510,
+   "pool_used_last": 16508,
+   "head_last": 16484,
+   "pool_max_p1_max": 16510,
+   "gpu": {
+    "used": 15016,
+    "free": 1035,
+    "util": 0
+   },
+   "same_head_as_concurrent": true,
+   "concurrent_symptoms": {
+    "symptom_runs": [],
+    "long_runs": [],
+    "punct_runs": [],
+    "word_repeats": []
+   }
+  }
+ },
+ "load_s": 8.6,
+ "gpu_loaded": {
+  "used": 14946,
+  "free": 1105,
+  "util": 0
+ },
+ "gpu_min_free": 1035,
+ "guard": null,
+ "ended": "2026-09-28T07:37:34-0400"
+}

@@ -133,6 +133,19 @@ def running(lane: str) -> int:
 STATES = ("queued", "running", "done", "errored", "cancelled")
 
 
+def claimable(lane: str) -> int:
+    """Queued jobs of `lane` that claim() could hand out now: a deferred job
+    (defer()) waiting for its not_before is not one."""
+    con = _db()
+    try:
+        return con.execute(
+            "SELECT COUNT(*) FROM jobs WHERE state='queued' AND lane=? AND "
+            "(not_before IS NULL OR not_before <= ?)",
+            (lane, time.time())).fetchone()[0]
+    finally:
+        con.close()
+
+
 def _db() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(os.path.abspath(DB)), exist_ok=True)
     con = sqlite3.connect(DB, timeout=30, isolation_level=None)
@@ -163,7 +176,29 @@ def _db() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS jobs_claim ON jobs(state, lane, priority, created);
         CREATE INDEX IF NOT EXISTS jobs_dataset ON jobs(dataset, created);
     """)
+    _ensure_columns(con)
     return con
+
+
+# Columns added after the first schema: CREATE TABLE IF NOT EXISTS does not
+# add them to a database created before (the way datasets adds `assist`).
+#   not_before  a DEFERRED job is not claimed before this time (defer()).
+_ADDED = (("not_before", "REAL"),)
+
+
+def _ensure_columns(con: sqlite3.Connection) -> None:
+    # Checked on every open, like the CREATE TABLE above: a suite that
+    # replaces the database file at the same path (a copy of the live store)
+    # gets its columns too. One PRAGMA read.
+    cols = {r[1] for r in con.execute("PRAGMA table_info(jobs)")}
+    for col, ddl in _ADDED:
+        if col not in cols:
+            try:
+                con.execute(f"ALTER TABLE jobs ADD COLUMN {col} {ddl}")
+            except sqlite3.OperationalError as e:
+                # Another process added it between the read and the ALTER.
+                if "duplicate column" not in str(e).lower():
+                    raise
 
 
 def add(queue: str, payload: dict | None = None, *, lane: str = "cpu",
@@ -215,10 +250,14 @@ def claim(lane: str, worker: str | None = None) -> dict | None:
             if running >= limit:
                 con.execute("COMMIT")
                 return None
+        # A DEFERRED job (defer(): it asked to wait, e.g. for an idle
+        # stack) is not handed out before its `not_before`.
         row = con.execute(
             "SELECT id, queue, payload, attempts, dataset, stage FROM jobs "
             "WHERE state='queued' AND lane=? "
-            "ORDER BY priority DESC, created ASC LIMIT 1", (lane,)).fetchone()
+            "AND (not_before IS NULL OR not_before <= ?) "
+            "ORDER BY priority DESC, created ASC LIMIT 1",
+            (lane, time.time())).fetchone()
         if row is None:
             con.execute("COMMIT")
             return None
@@ -316,6 +355,32 @@ def fail(job_id: str, error: str, *, retry: bool = True) -> str:
             (state, error[:4000],
              time.time() if state == "errored" else None, job_id))
         return state
+    finally:
+        con.close()
+
+
+def defer(job_id: str, until: float, why: str) -> str:
+    """Return a RUNNING job to `queued`, not to be claimed before `until`,
+    WITHOUT counting an attempt: the claim that started it is given back.
+
+    For a job that found it may not run yet -- a gpu stage waiting for an
+    idle stack (mcp/idle.py), a fetch told to back off by the server's own
+    rate-limit headers. `fail(retry=True)` would count an attempt, so a stage
+    that found the stack busy three times would land in `errored`, which is
+    a statement about the work that nobody made. The row keeps its id, so the
+    dashboard shows one job waiting, with `progress` saying why."""
+    con = _db()
+    try:
+        row = _require(con, job_id)
+        if row["state"] != "running":
+            raise ValueError(f"job {job_id} is {row['state']}, not running; "
+                             "only a running job is deferred")
+        con.execute(
+            "UPDATE jobs SET state='queued', worker=NULL, heartbeat=NULL, "
+            "started=NULL, attempts=MAX(attempts-1, 0), not_before=?, "
+            "progress=? WHERE id=? AND state='running'",
+            (float(until), f"waiting: {why}"[:1000], job_id))
+        return "queued"
     finally:
         con.close()
 

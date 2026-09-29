@@ -1,0 +1,538 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Mon, 28 Sep 2026 05:30:00 -0400
+Subject: [PATCH] kv-cache: an attention op spans its batch's sequences, not the pool
+
+With a unified pool (-np > 1) llama_kv_cache::get_n_kv padded the POOL's
+highest used cell: every attention op of every sequence spanned [0,
+used_max_p1), reading every other sequence's cells (masked) and every hole
+below it. With the tiered cache (0028) that span decides what is staged
+over PCIe: ggml_cuda_tier_stage copies every host-backed byte of the K/V
+view, i.e. cells [--kv-vram-cells, n_kv), on every attention op, whoever
+owns them. One idle conversation parked high in the pool made every other
+conversation run from host RAM (pagoda-h6: 6-12 tok/s at 67k-113k).
+
+A token attends only to cells holding its own sequence
+(set_input_kq_mask), so the op needs to span only up to the highest cell of
+the ubatch's sequences. The cells now count, per sequence, the cells each
+256-cell block holds (seq_blk, kept by the same helpers as seq_pos), so
+that bound is found without a scan: llama_kv_cells::seq_span_p1(), and
+get_n_kv(sinfo, ubatch) pads the max over the ubatch's sequences instead
+of used_max_p1(). Exact: only masked cells leave the view. The one-argument
+get_n_kv (the pool bound) stays for its other caller (dsv4).
+
+Also here, used by 0039/0040: the cells keep a lowest-free hint
+(lowest_free(), amortised O(1)), a per-sequence cell count, seq_any() and
+swap_cells() (exchange two cells' state; (sequence, position) pairs and
+seq_pos unchanged).
+
+API: llama_memory_seq_span_p1(mem, seq_id) (kv cache, hybrid: its attention
+cache; other memory: 0). The server's tail draft size (0031, keyed on pool
+cells by our 0037) now keys on the slot's own span: the tail is read for a
+slot exactly when its span passes --kv-vram-cells.
+
+LLAMA_KV_SPAN_BY_SEQ=0 restores the pool bound. The find_slot debug line
+(LLAMA_KV_CACHE_DEBUG=1) prints each sequence's cells and span.
+---
+diff --git a/include/llama.h b/include/llama.h
+index f228f449..4c36bae1 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -817,6 +817,11 @@ extern "C" {
+     // cache (--kv-vram-cells N) reads its host tail exactly when this exceeds N, for every sequence of the pool
+     LLAMA_API uint32_t llama_memory_cells_used_max_p1(llama_memory_t mem);
+ 
++    // One past the highest KV cell that holds seq_id (whole blocks of 256 cells; 0 if none): an attention op for
++    // this sequence spans the cells below it, so a tiered cache reads its host tail for it exactly when this
++    // exceeds --kv-vram-cells
++    LLAMA_API uint32_t llama_memory_seq_span_p1(llama_memory_t mem, llama_seq_id seq_id);
++
+     // Check if the memory supports shifting
+     LLAMA_API bool llama_memory_can_shift(llama_memory_t mem);
+ 
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 0d79c1e5..207b0cf8 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -4320,6 +4320,14 @@ llama_pos llama_memory_seq_pos_max(
+     return mem->seq_pos_max(seq_id);
+ }
+ 
++uint32_t llama_memory_seq_span_p1(llama_memory_t mem, llama_seq_id seq_id) {
++    if (!mem) {
++        return 0;
++    }
++
++    return mem->seq_span_p1(seq_id);
++}
++
+ uint32_t llama_memory_cells_used_max_p1(llama_memory_t mem) {
+     if (!mem) {
+         return 0;
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 108d9533..203035da 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -168,6 +168,7 @@ llama_kv_cache::llama_kv_cache(
+     if (tier_cells > 0 && tier_cells < kv_size) {
+         LLAMA_LOG_INFO("%s: tiered KV: cells [0, %u) in VRAM, [%u, %u) in host memory\n",
+                 __func__, tier_cells, tier_cells, kv_size);
++        n_line = tier_cells;
+     }
+ 
+     for (uint32_t il = 0; il < n_layer; il++) {
+@@ -397,6 +398,12 @@ llama_kv_cache::llama_kv_cache(
+ 
+     const char * LLAMA_KV_CACHE_DEBUG = getenv("LLAMA_KV_CACHE_DEBUG");
+     debug = LLAMA_KV_CACHE_DEBUG ? atoi(LLAMA_KV_CACHE_DEBUG) : 0;
++
++    const char * LLAMA_KV_SPAN_BY_SEQ = getenv("LLAMA_KV_SPAN_BY_SEQ");
++    span_by_seq = !(LLAMA_KV_SPAN_BY_SEQ && atoi(LLAMA_KV_SPAN_BY_SEQ) == 0);
++
++    LLAMA_LOG_INFO("%s: kv placement: an attention op spans %s\n", __func__,
++            span_by_seq ? "the cells of its batch's sequences" : "the pool up to its highest used cell");
+ }
+ 
+ void llama_kv_cache::clear(bool data) {
+@@ -715,6 +722,12 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
+     return cells.seq_pos_max(seq_id);
+ }
+ 
++uint32_t llama_kv_cache::seq_span_p1(llama_seq_id seq_id) const {
++    GGML_ASSERT(seq_id >= 0 && (size_t) seq_id < seq_to_stream.size());
++
++    return v_cells[seq_to_stream[seq_id]].seq_span_p1(seq_id);
++}
++
+ uint32_t llama_kv_cache::cells_used_max_p1() const {
+     // TODO: refactor [TAG_KV_CACHE_SHARE_CELLS]
+     if (other) {
+@@ -952,8 +965,9 @@ llama_kv_cache::slot_info llama_kv_cache::find_slot(const llama_ubatch & ubatch,
+             const auto & cells = v_cells[stream_id];
+             const uint32_t head_cur = v_heads[stream_id];
+ 
+-            LLAMA_LOG_DEBUG("%s: stream[%d], n = %5d, used = %5d, head = %5d, size = %5d, n_swa = %5d\n",
+-                    __func__, stream_id, cells.used_max_p1(), cells.get_used(), head_cur, get_size(), n_swa);
++            LLAMA_LOG_DEBUG("%s: stream[%d], n = %5d, used = %5d, head = %5d, size = %5d, n_swa = %5d, seq %d: cells = %u, span = %u\n",
++                    __func__, stream_id, cells.used_max_p1(), cells.get_used(), head_cur, get_size(), n_swa,
++                    seq_id, cells.seq_n_cells(seq_id), cells.seq_span_p1(seq_id));
+ 
+             if ((debug == 2 && n_swa > 0) || debug > 2) {
+                 std::string ss;
+@@ -1298,6 +1312,38 @@ uint32_t llama_kv_cache::get_n_kv(const slot_info & sinfo) const {
+     return result;
+ }
+ 
++uint32_t llama_kv_cache::get_n_kv(const slot_info & sinfo, const llama_ubatch & ubatch) const {
++    uint32_t result = 0;
++
++    // pad the n_kv value so that the graph remains constant across batches and can be reused
++    // note: this also helps some backends with performance (f.ex https://github.com/ggml-org/llama.cpp/pull/16812#issuecomment-3455112220)
++    const uint32_t n_pad_cur = std::max(n_pad, 256u);
++
++    for (uint32_t s = 0; s < sinfo.n_stream(); ++s) {
++        const auto & cells = v_cells[sinfo.strm[s]];
++
++        // a token attends only to the cells of its own sequence (set_input_kq_mask masks every other cell), so
++        // the op needs to span the cells of this ubatch's sequences and no further. The pool's highest used
++        // cell may belong to another, idle sequence: spanning up to it reads its cells (masked) on every step,
++        // and in a tiered cache (0028) stages them over PCIe when they lie past the VRAM line
++        uint32_t span = 0;
++        if (span_by_seq) {
++            for (uint32_t i = 0; i < ubatch.n_seqs_unq; ++i) {
++                const llama_seq_id seq_id = ubatch.seq_id_unq[i];
++                if (seq_to_stream[seq_id] == sinfo.strm[s]) {
++                    span = std::max(span, cells.seq_span_p1(seq_id));
++                }
++            }
++        } else {
++            span = cells.used_max_p1();
++        }
++
++        result = std::max(std::min(cells.size(), std::max(n_pad_cur, GGML_PAD(span, n_pad_cur))), result);
++    }
++
++    return result;
++}
++
+ ggml_tensor * llama_kv_cache::get_k(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const {
+     const int32_t ikv = map_layer_ids.at(il);
+ 
+@@ -2810,7 +2856,7 @@ bool llama_kv_cache_context::apply() {
+     }
+ 
+     kv->apply_ubatch(sinfos[i_cur], ubatches[i_cur]);
+-    n_kv = kv->get_n_kv(sinfos[i_cur]);
++    n_kv = kv->get_n_kv(sinfos[i_cur], ubatches[i_cur]);
+ 
+     return true;
+ }
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index 9fc63d11..5331d38a 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -145,6 +145,8 @@ public:
+ 
+     uint32_t cells_used_max_p1() const override;
+ 
++    uint32_t seq_span_p1(llama_seq_id seq_id) const override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+@@ -175,6 +177,10 @@ public:
+ 
+     uint32_t get_n_kv(const slot_info & sinfo) const;
+ 
++    // the cells an attention op of this ubatch spans: [0, n_kv). It covers every cell that holds a sequence of
++    // the ubatch (padded), and no cell above that: cells of other sequences are masked for this ubatch anyway
++    uint32_t get_n_kv(const slot_info & sinfo, const llama_ubatch & ubatch) const;
++
+     // get views of the current state of the cache
+     ggml_tensor * get_k(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const;
+     ggml_tensor * get_v(ggml_context * ctx, int32_t il, uint32_t n_kv, const slot_info & sinfo) const;
+@@ -281,6 +287,12 @@ private:
+     // env: LLAMA_KV_CACHE_DEBUG
+     int debug = 0;
+ 
++    // env: LLAMA_KV_SPAN_BY_SEQ (0 = an attention op spans the whole pool up to its highest used cell, as before)
++    bool span_by_seq = true;
++
++    // the tiered-KV line (--kv-vram-cells, cells [0, n_line) in VRAM); 0 when the cache is not tiered
++    uint32_t n_line = 0;
++
+     // this is the SWA type of the cache - not to be confused with the model SWA type
+     const llama_swa_type swa_type = LLAMA_SWA_TYPE_NONE;
+ 
+diff --git a/src/llama-kv-cells.h b/src/llama-kv-cells.h
+index fddd31a0..af5e685a 100644
+--- a/src/llama-kv-cells.h
++++ b/src/llama-kv-cells.h
+@@ -3,6 +3,7 @@
+ #include "llama.h"
+ #include "llama-cparams.h"
+ 
++#include <algorithm>
+ #include <bitset>
+ #include <cassert>
+ #include <cstring>
+@@ -46,6 +47,11 @@ public:
+         for (uint32_t s = 0; s < LLAMA_MAX_SEQ; ++s) {
+             seq_pos[s].clear();
+         }
++
++        std::fill(seq_blk.begin(), seq_blk.end(), 0);
++        std::fill(std::begin(seq_n), std::end(seq_n), 0);
++
++        free_lo = 0;
+     }
+ 
+     void reset_shift() {
+@@ -66,6 +72,9 @@ public:
+         shift.resize(n);
+         seq.resize(n);
+ 
++        n_blk = (n + SPAN_BLK - 1)/SPAN_BLK;
++        seq_blk.assign((size_t) LLAMA_MAX_SEQ*n_blk, 0);
++
+         reset();
+     }
+ 
+@@ -96,6 +105,67 @@ public:
+         return has_shift;
+     }
+ 
++    // cells are counted per sequence in blocks of SPAN_BLK, so the cells a sequence spans are known without a scan
++    static constexpr uint32_t SPAN_BLK = 256;
++
++    // one past the highest cell that holds seq_id, rounded up to a whole block (0 if the sequence holds no cell):
++    // an attention op for this sequence has to span the cells below it, and none above it
++    uint32_t seq_span_p1(llama_seq_id seq_id) const {
++        assert(seq_id >= 0 && seq_id < LLAMA_MAX_SEQ);
++
++        const uint16_t * c = seq_blk.data() + (size_t) seq_id*n_blk;
++        for (uint32_t b = n_blk; b-- > 0;) {
++            if (c[b]) {
++                return std::min<uint32_t>((b + 1)*SPAN_BLK, size());
++            }
++        }
++
++        return 0;
++    }
++
++    // number of cells that hold seq_id
++    uint32_t seq_n_cells(llama_seq_id seq_id) const {
++        assert(seq_id >= 0 && seq_id < LLAMA_MAX_SEQ);
++
++        return seq_n[seq_id];
++    }
++
++    // the lowest empty cell (size() if none); amortized O(1): every cell that becomes empty lowers the hint
++    uint32_t lowest_free() const {
++        while (free_lo < pos.size() && pos[free_lo] != -1) {
++            free_lo++;
++        }
++
++        return free_lo;
++    }
++
++    // exchange the full state of cells i and j (either may be empty); the caller exchanges their K/V rows. The
++    // (sequence, position) pairs in the cache do not change, only the cells they live in
++    void swap_cells(uint32_t i, uint32_t j) {
++        assert(i < pos.size() && j < pos.size() && i != j);
++
++        const bool ui = pos[i] != -1;
++        const bool uj = pos[j] != -1;
++
++        if (ui) { seq_blk_upd(i, -1); }
++        if (uj) { seq_blk_upd(j, -1); }
++
++        std::swap(pos  [i], pos  [j]);
++        std::swap(ext  [i], ext  [j]);
++        std::swap(shift[i], shift[j]);
++        std::swap(seq  [i], seq  [j]);
++
++        if (uj) { seq_blk_upd(i, +1); }
++        if (ui) { seq_blk_upd(j, +1); }
++
++        if (ui != uj) {
++            used.erase (ui ? i : j);
++            used.insert(ui ? j : i);
++
++            free_lo = std::min(free_lo, ui ? i : j);
++        }
++    }
++
+     // move cell isrc to idst (used during defrag)
+     //void mv(uint32_t isrc, uint32_t idst) {
+     //    assert(isrc < pos.size());
+@@ -169,6 +239,8 @@ public:
+ 
+             if (pos[idx] != -1 && other.pos[j] == -1) {
+                 used.erase(i + j);
++
++                free_lo = std::min(free_lo, i + j);
+             }
+ 
+             if (pos[idx] != -1) {
+@@ -200,6 +272,8 @@ public:
+ 
+             if (pos[idx] != -1 && other.pos[j] == -1) {
+                 used.erase(idx);
++
++                free_lo = std::min(free_lo, idx);
+             }
+ 
+             if (pos[idx] != -1) {
+@@ -231,6 +305,8 @@ public:
+         shift[i] = 0;
+ 
+         used.erase(i);
++
++        free_lo = std::min(free_lo, i);
+     }
+ 
+     // note: call only if the cell has seq_id
+@@ -242,7 +318,7 @@ public:
+         assert(seq_id >= 0);
+ 
+         seq[i].reset(seq_id);
+-        seq_pos_dec(seq_id, pos[i]);
++        seq_pos_dec(seq_id, i);
+ 
+         if (seq[i].none()) {
+             pos[i] = -1;
+@@ -251,6 +327,8 @@ public:
+ 
+             used.erase(i);
+ 
++            free_lo = std::min(free_lo, i);
++
+             return true;
+         }
+ 
+@@ -266,7 +344,7 @@ public:
+             seq[i].reset();
+ 
+             seq[i].set(seq_id);
+-            seq_pos_inc(seq_id, pos[i]);
++            seq_pos_inc(seq_id, i);
+ 
+             return false;
+         }
+@@ -281,6 +359,8 @@ public:
+ 
+             used.erase(i);
+ 
++            free_lo = std::min(free_lo, i);
++
+             return true;
+         }
+ 
+@@ -297,6 +377,13 @@ public:
+         return seq[i].count();
+     }
+ 
++    // check if the cell holds any of the sequences in m
++    bool seq_any(uint32_t i, const std::bitset<LLAMA_MAX_SEQ> & m) const {
++        assert(i < pos.size());
++
++        return (seq[i] & m).any();
++    }
++
+     // check if the cell contains seq_id
+     bool seq_has(uint32_t i, llama_seq_id seq_id) const {
+         assert(i < pos.size());
+@@ -312,7 +399,7 @@ public:
+         assert(!seq[i].test(seq_id));
+ 
+         seq[i].set(seq_id);
+-        seq_pos_inc(seq_id, pos[i]);
++        seq_pos_inc(seq_id, i);
+     }
+ 
+     // return the sequence id of this cell
+@@ -428,6 +515,8 @@ public:
+ 
+             used.erase(i);
+ 
++            free_lo = std::min(free_lo, i);
++
+             return true;
+         }
+ 
+@@ -498,26 +587,57 @@ private:
+     //
+     std::map<llama_pos, int> seq_pos[LLAMA_MAX_SEQ];
+ 
+-    // helper functions for updating `seq_pos`, once cell at a time:
++    // seq_blk[s*n_blk + b]: how many cells of block b (cells [b*SPAN_BLK, (b + 1)*SPAN_BLK)) hold sequence s;
++    // seq_n[s]: how many cells hold sequence s. Kept by the same helpers as seq_pos
++    uint32_t n_blk = 0;
++    std::vector<uint16_t> seq_blk;
++    uint32_t seq_n[LLAMA_MAX_SEQ] = {};
+ 
+-    void seq_pos_dec(llama_seq_id s, llama_pos p) {
+-        auto it = seq_pos[s].find(p);
++    // no cell below this index is empty (a hint; lowest_free() advances it)
++    mutable uint32_t free_lo = 0;
++
++    // helper functions for updating `seq_pos`, `seq_blk` and `seq_n`, once cell at a time:
++
++    void seq_pos_dec(llama_seq_id s, uint32_t i) {
++        auto it = seq_pos[s].find(pos[i]);
+         assert(it != seq_pos[s].end());
+ 
+         if (--it->second == 0) {
+             seq_pos[s].erase(it);
+         }
++
++        if (!seq_blk.empty()) {
++            seq_blk[(size_t) s*n_blk + i/SPAN_BLK]--;
++        }
++        seq_n[s]--;
++    }
++
++    void seq_pos_inc(llama_seq_id s, uint32_t i) {
++        seq_pos[s][pos[i]]++;
++
++        if (!seq_blk.empty()) {
++            seq_blk[(size_t) s*n_blk + i/SPAN_BLK]++;
++        }
++        seq_n[s]++;
+     }
+ 
+-    void seq_pos_inc(llama_seq_id s, llama_pos p) {
+-        seq_pos[s][p]++;
++    // the block counts of cell i's sequences, seq_pos untouched (a swap keeps every position)
++    void seq_blk_upd(uint32_t i, int d) {
++        for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
++            if (seq[i].test(s)) {
++                if (!seq_blk.empty()) {
++                    seq_blk[(size_t) s*n_blk + i/SPAN_BLK] += d;
++                }
++                seq_n[s] += d;
++            }
++        }
+     }
+ 
+     // remove cell i
+     void seq_pos_rm(uint32_t i) {
+         for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
+             if (seq[i].test(s)) {
+-                seq_pos_dec(s, pos[i]);
++                seq_pos_dec(s, i);
+             }
+         }
+     }
+@@ -526,7 +646,7 @@ private:
+     void seq_pos_add(uint32_t i) {
+         for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
+             if (seq[i].test(s)) {
+-                seq_pos_inc(s, pos[i]);
++                seq_pos_inc(s, i);
+             }
+         }
+     }
+diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
+index 57b303df..5c85c0be 100644
+--- a/src/llama-memory-hybrid.cpp
++++ b/src/llama-memory-hybrid.cpp
+@@ -181,6 +181,11 @@ llama_pos llama_memory_hybrid::seq_pos_max(llama_seq_id seq_id) const {
+     return std::min(mem_attn->seq_pos_max(seq_id), mem_recr->seq_pos_max(seq_id));
+ }
+ 
++uint32_t llama_memory_hybrid::seq_span_p1(llama_seq_id seq_id) const {
++    // the recurrent part has no KV cells
++    return mem_attn->seq_span_p1(seq_id);
++}
++
+ uint32_t llama_memory_hybrid::cells_used_max_p1() const {
+     // the recurrent part has no KV cells: only the attention cache spans a tiered buffer
+     return mem_attn->cells_used_max_p1();
+diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
+index e3042dcb..ccb7de77 100644
+--- a/src/llama-memory-hybrid.h
++++ b/src/llama-memory-hybrid.h
+@@ -72,6 +72,8 @@ public:
+ 
+     uint32_t cells_used_max_p1() const override;
+ 
++    uint32_t seq_span_p1(llama_seq_id seq_id) const override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+diff --git a/src/llama-memory.h b/src/llama-memory.h
+index 16f2c5d5..e1fcac0f 100644
+--- a/src/llama-memory.h
++++ b/src/llama-memory.h
+@@ -120,6 +120,10 @@ struct llama_memory_i {
+     // attention op spans, which is what a tiered cache's VRAM line (--kv-vram-cells) is compared with
+     virtual uint32_t cells_used_max_p1() const { return 0; }
+ 
++    // one past the highest KV cell that holds seq_id (whole blocks of 256 cells; 0 = none, or a memory without KV
++    // cells): an attention op for this sequence spans the cells below it
++    virtual uint32_t seq_span_p1(llama_seq_id /*seq_id*/) const { return 0; }
++
+     virtual std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const = 0;
+ 
+     //
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index ce2505e2..6bbff6c8 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -464,11 +464,10 @@ struct server_slot {
+ 
+         // past the tiered-KV line a step is bound by reading the host tail over PCIe, and a wider verify
+         // batch reads it once for all columns: draft --spec-draft-n-max-tail there, --spec-draft-n-max below.
+-        // The line is on POOL CELLS, not this slot's position: with a unified pool (-np > 1) every sequence's
+-        // attention spans the cells below the pool's highest used cell, so the tail is read by every slot as
+-        // soon as any slot's cells reach it, and by none before -- whatever this slot's own depth.
++        // The line is on CELLS, not this slot's position: an attention op for this slot spans the cells below
++        // the highest cell its sequence holds (llama_memory_seq_span_p1), wherever in the pool they lie.
+         const bool tail = spec_tail_depth > 0 && spec_n_max_tail > 0 && ctx_tgt != nullptr &&
+-                llama_memory_cells_used_max_p1(llama_get_memory(ctx_tgt)) > (uint32_t) spec_tail_depth;
++                llama_memory_seq_span_p1(llama_get_memory(ctx_tgt), id) > (uint32_t) spec_tail_depth;
+         const int32_t cap = tail ? spec_n_max_tail : spec_n_max;
+         if (cap > 0) {
+             n_draft_max = std::min(n_draft_max, (int) cap);

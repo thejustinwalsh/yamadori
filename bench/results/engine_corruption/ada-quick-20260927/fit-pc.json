@@ -1,0 +1,34 @@
+{
+ "head": "pc",
+ "model": "C:/Users/jwals/textgen/user_data/models/Ternary-Bonsai-2-27B-Abliterated-PTQ1_0-mtp-procreations.gguf",
+ "margin_mib": 1000,
+ "display_active": "Disabled",
+ "per_cell_bytes": 34816,
+ "rounds": [
+  {
+   "n": 131072,
+   "min_free_mib": 1375,
+   "error": null
+  },
+  {
+   "n": 142336,
+   "min_free_mib": 991,
+   "error": null
+  },
+  {
+   "n": 141824,
+   "min_free_mib": 991,
+   "error": null
+  },
+  {
+   "n": 139264,
+   "min_free_mib": 1055,
+   "error": null,
+   "note": "manual 4th round: rounds 1-2 differed by 512 cells and showed the same free VRAM (allocation granularity), so the step down was taken as 3,072 cells"
+  }
+ ],
+ "n": 139264,
+ "per_slot_note": "the line is on POOL cells: all 4 slots share [0, N); a slot's cells go wherever the allocator puts them, and every slot reads the host tail while the pool's highest used cell is past N (0037 keys the tail draft size on that)",
+ "host_ram_gb": 4.55,
+ "free_ram_gb_at_fit": 28.52
+}

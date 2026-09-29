@@ -46,6 +46,10 @@ os.environ["CODE_INDEX_DB"] = os.path.join(_TMP, "code.sqlite3")
 import route  # noqa: E402
 import selection  # noqa: E402
 import tiers  # noqa: E402
+import served_fixture  # noqa: E402
+# The served model's /props, pinned (mcp/served_fixture.py): budget and
+# tiers would otherwise ask the live stack (llama-swap reloads `bonsai`).
+served_fixture.pin()
 
 tiers._accepted = ("low", "medium", "xhigh")
 
@@ -364,12 +368,11 @@ def test_the_features_read_the_class():
 
 def test_prepare_records_the_route_and_gates_repair():
     import proxy
-    proxy.PREAMBLE = False
-
+    
     def prep(text, effort="high", header=None, tools=None, msgs=None):
         body = {"model": "yamadori", "reasoning_effort": effort,
                 "messages": msgs or user(text), "_client_ip": "127.0.0.1",
-                "_features": json.dumps(header or {"hints": False,
+                "_features": json.dumps(header or {"skills": False,
                                                    "investigate": False})}
         if tools:
             body["tools"] = tools
@@ -382,7 +385,7 @@ def test_prepare_records_the_route_and_gates_repair():
     check(out["_route"]["class"] == "prose" and out["_repair"] is False,
           "a prose request at high: no repair pass", str(out["_repair"]))
     out = prep("Explain quicksort in three paragraphs.",
-               header={"hints": False, "investigate": False, "repair": True})
+               header={"skills": False, "investigate": False, "repair": True})
     check(out["_repair"] is True, "a header that forces repair still forces it")
     out = prep("Write a function.", effort="medium")
     check(out["_repair"] is False and out["_fixup"] is False

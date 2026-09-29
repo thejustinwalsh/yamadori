@@ -52,9 +52,34 @@ async def handler(conn):
         print(f"client disconnected: {peer}", flush=True)
 
 
+async def gate(path, request_headers):
+    """THE SAME DOOR AS THE TOOLS API (2026-09-26, SELF-IMPROVEMENT-LOG #48;
+    mcp/tools_api.py "THE DOOR"). This binds 0.0.0.0 too, and a browser
+    page can open a websocket to any host -- so a foreign Origin is 403 and
+    a missing or wrong account key is 401, before the upgrade. Nothing
+    starts this server today (not start-stack.bat, not the watchdog); it
+    was an unauthenticated read_file_range for whoever did. websockets 11's
+    legacy process_request: return (HTTPStatus, headers, body) to refuse --
+    a bare int is not written -- or None to go on."""
+    from http import HTTPStatus
+
+    import tools_api
+    if not tools_api.origin_allowed(request_headers.get("Origin")):
+        return (HTTPStatus.FORBIDDEN, [("Content-Type", "text/plain")],
+                b"Origin not allowed\n")
+    who, why = tools_api.authenticate(request_headers.get("Authorization"))
+    if who is None:
+        print(f"refused 401: {why}", flush=True)
+        return (HTTPStatus.UNAUTHORIZED,
+                [("Content-Type", "text/plain"), ("WWW-Authenticate", "Bearer")],
+                why.encode() + b"\n")
+    return None
+
+
 async def main() -> None:
     import websockets
-    async with websockets.serve(handler, HOST, PORT, max_size=32 * 1024 * 1024):
+    async with websockets.serve(handler, HOST, PORT, max_size=32 * 1024 * 1024,
+                                process_request=gate):
         print(f"MCP websocket on ws://{HOST}:{PORT}/mcp", flush=True)
         await asyncio.Future()
 

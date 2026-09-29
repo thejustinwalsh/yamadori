@@ -4,7 +4,10 @@
 The proxy already builds one record per request, `x_yamadori` (proxy.
 _x_yamadori), and hands it to the client. Nothing kept it. note() keeps the
 two parts the tree draws -- what fan-out did and what recall injected --
-from the most recent MAX_TURNS requests. No text, no account, no disk: it
+from the most recent MAX_TURNS requests, and the skills record (ids, names,
+sizes, the selector's reasons) for the skill factory's SELECTIONS view
+(`skills_recent`, GET /dash/api/skill-factory/recent). No text, no account,
+no disk: it
 lives in the proxy process and is gone on restart, which the tree shows as
 INERT until the next request.
 
@@ -53,17 +56,39 @@ def _fanout_of(fan) -> dict | None:
 
 
 def _recall_of(x: dict) -> dict:
-    """What recall put in this request: the path (YAMADORI_RECALL), how many
-    items, and their tokens where the path reports them."""
+    """What the skills put in this request: how many, and their tokens.
+    `path` is always "skills" (the one knowledge system since 2026-09-26;
+    the dashboard's tree still reads the key)."""
     sk = x.get("skills") if isinstance(x.get("skills"), dict) else {}
-    path = sk.get("path") or "hints"
-    if path == "skills":
-        ids = sk.get("ids") or []
-        tok = sk.get("tokens")
-        return {"path": "skills", "count": len(ids) if isinstance(ids, list) else 0,
-                "tokens": int(tok) if isinstance(tok, (int, float)) else None}
-    hints = x.get("hints") if isinstance(x.get("hints"), list) else []
-    return {"path": "hints", "count": len(hints), "tokens": None}
+    ids = sk.get("ids") or []
+    tok = sk.get("tokens")
+    return {"path": "skills", "count": len(ids) if isinstance(ids, list) else 0,
+            "tokens": int(tok) if isinstance(tok, (int, float)) else None}
+
+
+def _skills_of(x: dict) -> dict | None:
+    """x_yamadori.skills for the skill factory's SELECTIONS view: what was
+    injected, why, and its size against the per-turn cap. Ids, names,
+    counts and the selector's own reasons only -- never `signals` (terms
+    read from the request) or the fallback's free-text reason."""
+    sk = x.get("skills") if isinstance(x.get("skills"), dict) else None
+    if sk is None:
+        return None
+    keep = ("on", "route_class", "ids", "versions", "names", "chars",
+            "tokens", "why", "candidates", "armed", "cache", "replayed")
+    out = {k: sk.get(k) for k in keep if k in sk}
+    out["matched"] = [{k: m.get(k) for k in (
+        "id", "version", "name", "title", "decided_by", "strength", "cosine",
+        "confidence", "why")} for m in sk.get("matched") or []
+        if isinstance(m, dict)]
+    out["dropped"] = [{k: d.get(k) for k in ("id", "why")}
+                      for d in sk.get("dropped") or [] if isinstance(d, dict)]
+    fb = sk.get("fallback") if isinstance(sk.get("fallback"), dict) else None
+    out["fallback"] = {k: fb.get(k) for k in ("ran", "ok")} if fb else None
+    emb = sk.get("embedding") if isinstance(sk.get("embedding"), dict) \
+        else None
+    out["embedding"] = {k: emb.get(k) for k in ("ok", "why")} if emb else None
+    return out
 
 
 def note(x: dict | None, now: float | None = None) -> None:
@@ -73,7 +98,8 @@ def note(x: dict | None, now: float | None = None) -> None:
         rec = {"at": time.time() if now is None else float(now),
                "utility": bool(x.get("utility")),
                "fanout": _fanout_of(x.get("fanout")),
-               "recall": _recall_of(x)}
+               "recall": _recall_of(x),
+               "skills": _skills_of(x)}
         with _lock:
             _turns.append(rec)
     except Exception:                                            # noqa: BLE001
@@ -83,6 +109,15 @@ def note(x: dict | None, now: float | None = None) -> None:
 def reset() -> None:
     with _lock:
         _turns.clear()
+
+
+def skills_recent() -> list[dict]:
+    """The kept requests' x_yamadori.skills, newest first, each with its
+    time and whether it was a client's side call."""
+    with _lock:
+        turns = list(_turns)
+    return [{"at": t["at"], "utility": t["utility"], "skills": t["skills"]}
+            for t in reversed(turns) if t.get("skills") is not None]
 
 
 def summary(now: float | None = None) -> dict:

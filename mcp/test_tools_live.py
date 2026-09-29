@@ -12,6 +12,11 @@ call the model live here instead, behind an explicit flag.
     python mcp/test_tools_live.py --live
     YAMADORI_LIVE_TESTS=1 python mcp/test_tools_live.py
 
+The first group asks the RUNNING tools API on :1235 (YAMADORI_TOOLS) whether
+its door holds -- no key 401, a foreign Origin 403, the key 200 -- so it
+needs an account key: YAMADORI_TEST_KEY (scripts/run_tests.py passes it) or
+`--key-file PATH`. It uses no GPU.
+
 Without one of those it prints why it did nothing and exits 0. That is
 deliberate: this file is not a gate and must never fail a pipeline because a
 GPU was unavailable.
@@ -292,6 +297,80 @@ def test_delegate_investigation_live():
           out[-300:])
 
 
+TOOLS_URL = os.environ.get("YAMADORI_TOOLS", "http://127.0.0.1:1235")
+
+
+def _http(method: str, path: str, *, key: str = "", body: dict | None = None,
+          headers: dict | None = None) -> tuple[int, dict, dict | str]:
+    """(status, lower-cased headers, JSON or text) from the RUNNING tools
+    API. The key goes in the Authorization header only, never printed."""
+    import urllib.error
+    import urllib.request
+    h = dict(headers or {})
+    if key:
+        h["Authorization"] = f"Bearer {key}"
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        h["Content-Type"] = "application/json"
+    r = urllib.request.Request(TOOLS_URL + path, data=data, headers=h,
+                               method=method)
+    try:
+        with urllib.request.urlopen(r, timeout=120) as resp:
+            status, hd, raw = resp.status, dict(resp.headers), resp.read()
+    except urllib.error.HTTPError as e:
+        status, hd, raw = e.code, dict(e.headers), e.read()
+    hd = {k.lower(): v for k, v in hd.items()}
+    try:
+        return status, hd, json.loads(raw or b"null")
+    except ValueError:
+        return status, hd, raw.decode("utf-8", "replace")
+
+
+def test_tools_api_door_live(key: str):
+    """THE DOOR ON THE RUNNING :1235 (2026-09-26, SELF-IMPROVEMENT-LOG #48).
+    mcp/test_tools_api_auth.py gates the code offline over a socket; this
+    asks the process the watchdog actually runs. It needs no GPU. WRITTEN,
+    NOT YET RUN: until the tools API restarts on the new code, the first
+    check fails with HTTP 200 -- which is the hole, reported."""
+    if not check(bool(key), "a key for the tools API is set "
+                 "(YAMADORI_TEST_KEY or --key-file)",
+                 "without it nothing below can run"):
+        return
+    listing = {"jsonrpc": "2.0", "id": 1, "method": "tools/list",
+               "params": {}}
+    st, h, d = _http("POST", "/mcp", body=listing)
+    check(st == 401, f"{TOOLS_URL}/mcp without a key is 401", f"HTTP {st}")
+    www = h.get("www-authenticate", "")
+    check(www.startswith("Bearer ") and "resource_metadata=" in www,
+          "and carries WWW-Authenticate: Bearer resource_metadata", www[:200])
+    st, _, _ = _http("GET", "/status")
+    check(st == 401, "a REST route (/status) without a key is 401",
+          f"HTTP {st}")
+    st, _, _ = _http("POST", "/mcp", key=key, body=listing,
+                     headers={"Origin": "https://rebinding.invalid"})
+    check(st == 403, "a foreign Origin is 403 even with the key",
+          f"HTTP {st}")
+    st, _, d = _http("POST", "/mcp", key=key, body=listing)
+    names = [t.get("name") for t in ((d or {}).get("result") or {})
+             .get("tools", [])] if isinstance(d, dict) else []
+    check(st == 200 and "read_file_range" in names,
+          "with the key, /mcp tools/list is 200 and lists the tools",
+          f"HTTP {st} {names[:4]}")
+    st, _, d = _http("GET", "/status", key=key)
+    check(st == 200 and isinstance(d, dict) and "chunks" in d,
+          "with the key, /status answers", f"HTTP {st}")
+    st, _, d = _http("GET", "/health")
+    check(st == 200 and isinstance(d, dict) and d.get("ok") is True
+          and not ({"chunks", "files", "definitions", "references"} & set(d)),
+          "/health is liveness only, no key, no index statistics",
+          str(d)[:160])
+    st, _, d = _http("GET", "/.well-known/oauth-protected-resource")
+    check(st == 200 and isinstance(d, dict) and d.get("resource")
+          and d.get("bearer_methods_supported") == ["header"],
+          "the RFC 9728 metadata is served without a key", str(d)[:200])
+
+
 def main(argv: list[str]) -> int:
     if not enabled(argv):
         print(__doc__.strip().split("\n\n")[0])
@@ -309,13 +388,19 @@ def main(argv: list[str]) -> int:
         print("  FAIL  the doors are not the real stack; nothing below ran")
         return 1
 
-    for fn in (test_summarize_text_live,
+    key = os.environ.get("YAMADORI_TEST_KEY", "")
+    if "--key-file" in argv:
+        with open(argv[argv.index("--key-file") + 1], encoding="utf-8") as f:
+            key = f.read().strip()
+
+    for fn in (test_tools_api_door_live,
+               test_summarize_text_live,
                test_summarize_text_live_handles_a_trivial_input,
                test_delegate_investigation_live):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(T._results)
         try:
-            fn()
+            fn(key) if fn is test_tools_api_door_live else fn()
         except Exception:                                        # noqa: BLE001
             import traceback
             check(False, f"{fn.__name__} itself raised",

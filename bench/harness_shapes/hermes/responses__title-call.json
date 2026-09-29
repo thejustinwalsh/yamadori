@@ -1,0 +1,38 @@
+{
+ "id": "hermes/responses/title-call",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "responses",
+ "source": "scratchpad hcap/cap.jsonl #7 (captured): the title namer as instructions, no tools, its own prompt_cache_key",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "instructions": "You name chat sessions. Given the user's opening message, write a title that lets them find this conversation again in a list.\n\nRules:\n- 3 to 7 words, sentence case (capitalize only the first word and proper nouns).\n- Name what the user wants DONE, not that they asked a question.\n- Keep technical terms, filenames, numbers, and error codes exact.\n- Drop filler words: the, this, my, a, an.\n- No trailing punctuation, no quotes, no tool names, no 'Title:' prefix.\n- Never answer the message. Name it.\n- Always produce something, even for a bare greeting.\n- Write the title in the same language as the user's message.\nGood: {\"title\": \"Fix login button on mobile\"}\nGood: {\"title\": \"Postgres connection pool exhaustion\"}\nGood: {\"title\": \"Friendly greeting\"}\nToo vague: {\"title\": \"Code changes\"}\nToo long: {\"title\": \"Investigate and fix the issue where the login button does not respond on mobile devices\"}\n\nReply with JSON only: {\"title\": \"...\"}",
+  "input": [
+   {
+    "role": "user",
+    "content": "say ok"
+   }
+  ],
+  "store": false,
+  "stream": true,
+  "prompt_cache_key": "pck_1c0ab1c3754b7f58f9301f66"
+ },
+ "expect": {
+  "accepted": true,
+  "route": "utility",
+  "utility": {
+   "utility": true,
+   "kind": "title"
+  },
+  "session": {
+   "source": null
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "utility": "the title namer is a side call on any wire; its prompt_cache_key must not give it a session"
+ }
+}

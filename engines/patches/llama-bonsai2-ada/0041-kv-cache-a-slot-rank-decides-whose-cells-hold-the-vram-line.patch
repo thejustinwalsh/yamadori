@@ -1,0 +1,643 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Mon, 28 Sep 2026 14:00:00 -0400
+Subject: [PATCH] kv-cache: a slot's rank decides whose cells hold the VRAM line
+
+0040 moves a batch's cells below the tiered cache's VRAM line, but every
+sequence is equal: a sequence that ran in one of the last n_seq_max
+batches never moves, anything else may. With one model serving two
+conversations and a child context (operator, 2026-09-28: 3 slots, the
+first conversation never spills, the child swaps into VRAM while its
+conversation's main pauses), that is wrong three ways: a second
+conversation that arrives while the first is between two requests takes
+the first one's VRAM; a child cannot take its paused main's cells for
+n_seq_max batches (it spills meanwhile), nor the main its finished
+child's; and two running conversations both claim the lowest cells.
+
+Now each sequence has a RANK (higher keeps VRAM, default 0) and an ACTIVE
+flag, told by the server (llama_memory_seq_set_rank):
+
+- the request field `kv_rank` is the slot's rank from the moment its task
+  starts, kept after it ends; `kv_ranks` (an array by slot id, < 0 =
+  unchanged) sets the OTHER slots' ranks at the same moment, so a client
+  that ranks its slots can demote a slot nobody is using. A slot is active
+  from its task's launch to its release. /props reports `kv_vram_cells`.
+- plan_moves groups the batch's sequences by rank, highest first; the
+  first group whose span would pass the VRAM line and that can gain makes
+  the plan (the next batch plans the next group). Against group G of rank
+  r, a sequence keeps its cells (P) if its rank is higher -- running OR
+  idle: a primary conversation between two requests keeps its VRAM -- or
+  equal and active; everything else may move out: a lower rank even while
+  it runs (a second conversation spills first), an idle one of G's rank
+  (the main while its child runs, the child after it ends).
+- eviction order: the cells exchanged with G's cells (they land where
+  G's were, deepest in the host tier) are the lowest rank first, an idle
+  owner before an active one; the cells left over move to the lowest
+  empty cells just above G's new span, the highest rank first.
+
+A sequence never told keeps 0040's rule (active = in one of the last
+n_seq_max batches). LLAMA_KV_RANK=0 ranks every sequence alike and ignores
+the active flags: 0040 exactly. Moves still happen only when a span would
+pass the line (0040's determinism argument is unchanged). What this cannot
+do: two sequences decoded in ONE batch share every step, so a spilled
+lower-rank sequence's host staging still lengthens the step the higher
+rank waits for; placement keeps the higher rank's own cells in VRAM, and
+it runs at full speed alone. docs/ENGINES.md "KV rank".
+---
+diff --git a/include/llama.h b/include/llama.h
+index 4c36bae1..e8559529 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -822,6 +822,14 @@ extern "C" {
+     // exceeds --kv-vram-cells
+     LLAMA_API uint32_t llama_memory_seq_span_p1(llama_memory_t mem, llama_seq_id seq_id);
+ 
++    // A sequence's KV rank for a tiered cache (--kv-vram-cells). Before a batch whose span would pass the VRAM
++    // line, cells move so that the batch's highest-ranked sequences hold the cells below it: a sequence of a
++    // higher rank keeps its cells (running or idle), one of the same rank keeps them while it is active, and a
++    // lower rank moves out first. rank: higher keeps VRAM (default 0). active: the sequence is being decoded
++    // (a server slot with a task). A sequence never told is active while it was in one of the last n_seq_max
++    // batches. No effect on a cache that is not tiered
++    LLAMA_API void llama_memory_seq_set_rank(llama_memory_t mem, llama_seq_id seq_id, int32_t rank, bool active);
++
+     // Check if the memory supports shifting
+     LLAMA_API bool llama_memory_can_shift(llama_memory_t mem);
+ 
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 8dde2b2d..44893664 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -4339,6 +4339,14 @@ uint32_t llama_memory_seq_span_p1(llama_memory_t mem, llama_seq_id seq_id) {
+     return mem->seq_span_p1(seq_id);
+ }
+ 
++void llama_memory_seq_set_rank(llama_memory_t mem, llama_seq_id seq_id, int32_t rank, bool active) {
++    if (!mem) {
++        return;
++    }
++
++    mem->seq_set_rank(seq_id, rank, active);
++}
++
+ uint32_t llama_memory_cells_used_max_p1(llama_memory_t mem) {
+     if (!mem) {
+         return 0;
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 7cd36fa8..d9ec691b 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -11,6 +11,7 @@
+ #include <cinttypes>
+ #include <cmath>
+ #include <cstring>
++#include <functional>
+ #include <limits>
+ #include <map>
+ #include <stdexcept>
+@@ -422,10 +423,18 @@ llama_kv_cache::llama_kv_cache(
+     promote_verify = LLAMA_KV_PROMOTE_VERIFY && atoi(LLAMA_KV_PROMOTE_VERIFY) != 0;
+     seq_last_batch.assign(LLAMA_MAX_SEQ, 0);
+ 
++    // 0041: sequences carry a rank (llama_memory_seq_set_rank); LLAMA_KV_RANK=0 ranks them alike (0040)
++    const char * LLAMA_KV_RANK = getenv("LLAMA_KV_RANK");
++    ranked = !(LLAMA_KV_RANK && atoi(LLAMA_KV_RANK) == 0);
++    seq_rank.assign(LLAMA_MAX_SEQ, 0);
++
+     LLAMA_LOG_INFO("%s: kv placement: an attention op spans %s; new cells go to %s; a batch's cells %s\n", __func__,
+             span_by_seq ? "the cells of its batch's sequences" : "the pool up to its highest used cell",
+             place_low ? "the lowest free cells" : "the free cells after the search head",
+-            promote ? "move low before it runs when their span would pass the VRAM line" : "never move");
++            promote ? (ranked ? "move low before it runs when their span would pass the VRAM line, the "
++                                "highest-ranked sequences first"
++                              : "move low before it runs when their span would pass the VRAM line")
++                    : "never move");
+ }
+ 
+ void llama_kv_cache::clear(bool data) {
+@@ -990,6 +999,25 @@ void llama_kv_cache::set_next_batch(const std::vector<llama_seq_id> & seq_ids, u
+     next_n_ubatch = n_ubatch;
+ }
+ 
++void llama_kv_cache::seq_set_rank(llama_seq_id seq_id, int32_t rank, bool active) {
++    if (seq_id < 0 || seq_id >= LLAMA_MAX_SEQ) {
++        return;
++    }
++
++    seq_rank[seq_id] = rank;
++    seq_told.set(seq_id);
++    seq_active.set(seq_id, active);
++}
++
++bool llama_kv_cache::running(llama_seq_id s) const {
++    // told (seq_set_rank): whether it is being decoded. Never told: in one of the last n_seq_max batches (a draft
++    // context decodes each slot on its own, so a sequence absent from this batch may still be running)
++    if (ranked && seq_told.test(s)) {
++        return seq_active.test(s);
++    }
++    return seq_last_batch[s] > 0 && n_batches - seq_last_batch[s] < n_seq_max;
++}
++
+ void llama_kv_cache::plan_moves() {
+     pending = {};
+ 
+@@ -1011,133 +1039,199 @@ void llama_kv_cache::plan_moves() {
+         return;
+     }
+ 
+-    const auto & cells = v_cells[0];
+-    const uint32_t size = cells.size();
+-
+-    // S: the batch's sequences. P: sequences that were in one of the last n_seq_max batches but not in this one --
+-    // they are running too (a draft context decodes each slot on its own), so their cells stay where they are
+-    std::bitset<LLAMA_MAX_SEQ> in_s;
+-    std::bitset<LLAMA_MAX_SEQ> in_p;
+-
+-    uint32_t span0 = 0;
+-    uint64_t n_s   = 0;
+-    uint64_t n_p   = 0;
+-    std::string seqs;
+     for (const llama_seq_id s : seq_ids) {
+         if (s < 0 || s >= LLAMA_MAX_SEQ) {
+             return;
+         }
+-        in_s.set(s);
+-        span0 = std::max(span0, cells.seq_span_p1(s));
+-        n_s  += cells.seq_n_cells(s);
+-        seqs += (seqs.empty() ? "" : ",") + std::to_string(s);
+     }
+-    for (uint32_t s = 0; s < std::min<uint32_t>(n_seq_max, LLAMA_MAX_SEQ); ++s) {
+-        if (!in_s.test(s) && seq_last_batch[s] > 0 && n_batches - seq_last_batch[s] < n_seq_max) {
+-            in_p.set(s);
+-            n_p += cells.seq_n_cells(s);
++
++    const auto & cells = v_cells[0];
++    const uint32_t size = cells.size();
++    const uint32_t n_seq = std::min<uint32_t>(n_seq_max, LLAMA_MAX_SEQ);
++    const uint32_t blk = llama_kv_cells::SPAN_BLK;
++
++    // THE CLAIMANTS, highest rank first: the batch's sequences of one rank (G) claim the lowest cells at a time.
++    // The first group whose span would pass the VRAM line and that can gain makes this batch's plan; the next
++    // batch plans the next group. With every rank equal (the default, or LLAMA_KV_RANK=0) there is one group, the
++    // whole batch, and the plan is 0040's
++    std::vector<int32_t> ranks;
++    for (const llama_seq_id s : seq_ids) {
++        if (std::find(ranks.begin(), ranks.end(), rank_of(s)) == ranks.end()) {
++            ranks.push_back(rank_of(s));
++        }
++    }
++    std::sort(ranks.begin(), ranks.end(), std::greater<int32_t>());
++
++    for (const int32_t r : ranks) {
++        // G: the batch's sequences of rank r. P: sequences that keep their cells against G -- a higher rank
++        // (running or idle: a primary conversation between two of its requests keeps its VRAM), or the same rank
++        // while running (0040's rule: they are decoding too). Everything else is X, and moves out when G needs
++        // its cells: a lower rank first, even while it runs (a second concurrent conversation spills before the
++        // first), then an idle sequence of G's own rank (the conversation's main while its child runs, and back)
++        std::bitset<LLAMA_MAX_SEQ> in_s;
++        std::bitset<LLAMA_MAX_SEQ> in_p;
++
++        uint32_t span0 = 0;
++        uint64_t n_s   = 0;
++        uint64_t n_p   = 0;
++        std::string seqs;
++        for (const llama_seq_id s : seq_ids) {
++            if (rank_of(s) != r || in_s.test(s)) {
++                continue;
++            }
++            in_s.set(s);
++            span0 = std::max(span0, cells.seq_span_p1(s));
++            n_s  += cells.seq_n_cells(s);
++            seqs += (seqs.empty() ? "" : ",") + std::to_string(s) + (ranked ? "(r" + std::to_string(r) + ")" : "");
++        }
++        for (uint32_t s = 0; s < n_seq; ++s) {
++            if (in_s.test(s)) {
++                continue;
++            }
++            if (rank_of(s) > r || (rank_of(s) == r && running(s))) {
++                in_p.set(s);
++                n_p += cells.seq_n_cells(s);
++            }
+         }
+-    }
+ 
+-    // where the batch's span ends without a move: its highest cell, or the new cells placed from the lowest
+-    // free cell. The least it could be: every cell of S and P below it, and room for this batch's new cells
+-    // (at least a ubatch, so that the moves are made once per ubatch of new cells, not once per token)
+-    const uint64_t room  = std::max(next_n_tokens, next_n_ubatch);
+-    const uint32_t v0    = std::max<uint32_t>(span0, (uint32_t) std::min<uint64_t>(size, (uint64_t) cells.lowest_free() + next_n_tokens));
+-    const uint64_t ideal = std::min<uint64_t>(size, n_s + n_p + room);
++        // where G's span ends without a move: its highest cell, or the new cells placed from the lowest free cell.
++        // The least it could be: every cell of G and P below it, and room for this batch's new cells (at least a
++        // ubatch, so that the moves are made once per ubatch of new cells, not once per token)
++        const uint64_t room  = std::max(next_n_tokens, next_n_ubatch);
++        const uint32_t v0    = std::max<uint32_t>(span0, (uint32_t) std::min<uint64_t>(size, (uint64_t) cells.lowest_free() + next_n_tokens));
++        const uint64_t ideal = std::min<uint64_t>(size, n_s + n_p + room);
+ 
+-    const uint32_t blk = llama_kv_cells::SPAN_BLK;
+-    if (GGML_PAD(v0, blk) <= GGML_PAD(ideal, blk)) {
+-        return;
+-    }
++        if (GGML_PAD(v0, blk) <= GGML_PAD(ideal, blk)) {
++            continue;
++        }
+ 
+-    // the one moment a move pays: the batch's span would reach past the tiered cache's VRAM line, so every step
+-    // would stage the cells above it over PCIe. Below the line (and in a cache that is not tiered) the cells stay
+-    // where they are: a move there saves only masked VRAM reads, and changes the order the attention op reads
+-    // the cells in, and with it the rounding of its sums
+-    if (n_line == 0 || v0 <= n_line) {
+-        return;
+-    }
++        // the one moment a move pays: G's span would reach past the tiered cache's VRAM line, so every step would
++        // stage the cells above it over PCIe. Below the line (and in a cache that is not tiered) the cells stay
++        // where they are: a move there saves only masked VRAM reads, and changes the order the attention op reads
++        // the cells in, and with it the rounding of its sums
++        if (n_line == 0 || v0 <= n_line) {
++            continue;
++        }
+ 
+-    // the full plan: one pass over the cells
+-    enum { C_E, C_S, C_P, C_X };
+-    auto kind = [&](uint32_t i) {
+-        if (cells.is_empty(i))       return C_E;
+-        if (cells.seq_any(i, in_s))  return C_S;
+-        if (cells.seq_any(i, in_p))  return C_P;
+-        return C_X;
+-    };
++        // the full plan: one pass over the cells
++        enum { C_E, C_S, C_P, C_X };
++        auto kind = [&](uint32_t i) {
++            if (cells.is_empty(i))       return C_E;
++            if (cells.seq_any(i, in_s))  return C_S;
++            if (cells.seq_any(i, in_p))  return C_P;
++            return C_X;
++        };
+ 
+-    uint64_t n_s_cells = 0;
+-    for (uint32_t i = 0; i < size; ++i) {
+-        n_s_cells += kind(i) == C_S;
+-    }
++        uint64_t n_s_cells = 0;
++        for (uint32_t i = 0; i < size; ++i) {
++            n_s_cells += kind(i) == C_S;
++        }
+ 
+-    // R: the lowest K cells that are not P's; the batch's cells belong there
+-    const uint64_t K = std::min<uint64_t>(size, n_s_cells + room);
+-    uint32_t r_end = size;
+-    {
+-        uint64_t cnt = 0;
++        // R: the lowest K cells that are not P's; G's cells belong there
++        const uint64_t K = std::min<uint64_t>(size, n_s_cells + room);
++        uint32_t r_end = size;
++        {
++            uint64_t cnt = 0;
++            for (uint32_t i = 0; i < size; ++i) {
++                if (kind(i) != C_P && ++cnt == K) {
++                    r_end = i + 1;
++                    break;
++                }
++            }
++        }
++        if (GGML_PAD(r_end, blk) >= GGML_PAD(v0, blk)) {
++            continue;
++        }
++
++        // an X cell's owner: the highest rank among its sequences, and whether one of them runs
++        auto x_key = [&](uint32_t i) {
++            int32_t rk  = std::numeric_limits<int32_t>::min();
++            bool    run = false;
++            for (uint32_t s = 0; s < n_seq; ++s) {
++                if (cells.seq_has(i, s)) {
++                    rk  = std::max(rk, rank_of(s));
++                    run = run || running(s);
++                }
++            }
++            return std::make_pair(rk, run);
++        };
++
++        std::vector<uint32_t> s_out; // G cells above R, highest first
++        std::vector<uint32_t> x_in;  // cells of X inside R
++        std::vector<uint32_t> e_in;  // empty cells inside R, lowest first
++        std::vector<uint32_t> e_out; // empty cells above R, lowest first
+         for (uint32_t i = 0; i < size; ++i) {
+-            if (kind(i) != C_P && ++cnt == K) {
+-                r_end = i + 1;
++            const int c = kind(i);
++            if (i < r_end) {
++                if (c == C_X) { x_in.push_back(i); }
++                if (c == C_E) { e_in.push_back(i); }
++            } else {
++                if (c == C_S) { s_out.push_back(i); }
++                if (c == C_E) { e_out.push_back(i); }
++            }
++        }
++        std::reverse(s_out.begin(), s_out.end());
++
++        // THE EVICTION ORDER: X cells exchanged with G's cells land where those were (the highest first, deepest
++        // in the host tier), so the lowest rank goes first, and an idle owner before a running one; the X cells
++        // left over move to the lowest empty cells just above R, where the higher ranks among them may still be
++        // in VRAM. Ties keep the cell order (0040's)
++        if (ranked) {
++            std::vector<std::pair<std::pair<int32_t, bool>, uint32_t>> keyed;
++            keyed.reserve(x_in.size());
++            for (const uint32_t i : x_in) {
++                keyed.emplace_back(x_key(i), i);
++            }
++            std::stable_sort(keyed.begin(), keyed.end(), [](const auto & a, const auto & b) {
++                if (a.first.first != b.first.first) {
++                    return a.first.first < b.first.first;
++                }
++                return !a.first.second && b.first.second;
++            });
++            for (size_t k = 0; k < keyed.size(); ++k) {
++                x_in[k] = keyed[k].second;
++            }
++        }
++
++        move_plan plan;
++        size_t ie = 0;
++        size_t ix = 0;
++        for (const uint32_t s : s_out) {
++            if (ie < e_in.size()) {
++                plan.pairs.emplace_back(s, e_in[ie++]);
++                plan.n_moved++;
++            } else if (ix < x_in.size()) {
++                plan.pairs.emplace_back(s, x_in[ix++]);
++                plan.n_swapped++;
++            } else {
+                 break;
+             }
+         }
+-    }
+-    if (GGML_PAD(r_end, blk) >= GGML_PAD(v0, blk)) {
+-        return;
+-    }
++        // the rest of R's X cells make room for G's new cells: out to the lowest empty cells above R -- just past
++        // G's new span, never parked at the top of the pool (where an idle sequence's own span would reach deep
++        // into the host tier when it runs again). Ranked, the highest rank left takes the lowest of those cells
++        // (the likeliest to still be in VRAM); unranked, the cell order (0040's)
++        if (ranked && ix < x_in.size()) {
++            std::reverse(x_in.begin() + ix, x_in.end());
++        }
++        for (size_t io = 0; ix < x_in.size() && io < e_out.size(); ) {
++            plan.pairs.emplace_back(x_in[ix++], e_out[io++]);
++            plan.n_evicted++;
++        }
+ 
+-    std::vector<uint32_t> s_out; // S cells above R, highest first
+-    std::vector<uint32_t> x_in;  // cells of idle sequences inside R, lowest first
+-    std::vector<uint32_t> e_in;  // empty cells inside R, lowest first
+-    std::vector<uint32_t> e_out; // empty cells above R, lowest first
+-    for (uint32_t i = 0; i < size; ++i) {
+-        const int c = kind(i);
+-        if (i < r_end) {
+-            if (c == C_X) { x_in.push_back(i); }
+-            if (c == C_E) { e_in.push_back(i); }
+-        } else {
+-            if (c == C_S) { s_out.push_back(i); }
+-            if (c == C_E) { e_out.push_back(i); }
+-        }
+-    }
+-    std::reverse(s_out.begin(), s_out.end());
+-
+-    move_plan plan;
+-    size_t ie = 0;
+-    size_t ix = 0;
+-    for (const uint32_t s : s_out) {
+-        if (ie < e_in.size()) {
+-            plan.pairs.emplace_back(s, e_in[ie++]);
+-            plan.n_moved++;
+-        } else if (ix < x_in.size()) {
+-            plan.pairs.emplace_back(s, x_in[ix++]);
+-            plan.n_swapped++;
+-        } else {
+-            break;
++        if (plan.pairs.empty()) {
++            continue;
+         }
+-    }
+-    // the rest of R's idle cells make room for the batch's new cells: out to the lowest empty cells above R --
+-    // just past the batch's new span, never parked at the top of the pool (where an idle sequence's own span
+-    // would reach deep into the host tier when it runs again)
+-    for (size_t io = 0; ix < x_in.size() && io < e_out.size(); ) {
+-        plan.pairs.emplace_back(x_in[ix++], e_out[io++]);
+-        plan.n_evicted++;
+-    }
+ 
+-    if (plan.pairs.empty()) {
++        plan.n_ubatch    = std::max<uint32_t>(1, next_n_ubatch);
++        plan.n_seq_cells = (uint32_t) n_s_cells;
++        plan.span_before = GGML_PAD(v0, blk);
++        plan.span_after  = GGML_PAD(r_end, blk);
++        plan.seqs        = seqs;
++
++        pending = std::move(plan);
+         return;
+     }
+-
+-    plan.n_ubatch    = std::max<uint32_t>(1, next_n_ubatch);
+-    plan.n_seq_cells = (uint32_t) n_s_cells;
+-    plan.span_before = GGML_PAD(v0, blk);
+-    plan.span_after  = GGML_PAD(r_end, blk);
+-    plan.seqs        = seqs;
+-
+-    pending = std::move(plan);
+ }
+ 
+ llama_kv_cache::slot_info llama_kv_cache::find_slot(const llama_ubatch & ubatch, bool cont) const {
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index e6dc4398..42c9a703 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -149,6 +149,8 @@ public:
+ 
+     void set_next_batch(const std::vector<llama_seq_id> & seq_ids, uint32_t n_tokens, uint32_t n_ubatch) override;
+ 
++    void seq_set_rank(llama_seq_id seq_id, int32_t rank, bool active) override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+@@ -312,6 +314,17 @@ private:
+     uint64_t n_batches     = 0;
+     std::vector<uint64_t> seq_last_batch;
+ 
++    // env: LLAMA_KV_RANK (0 = every sequence ranks alike and "running" means a recent batch: 0040 exactly).
++    // Each sequence's rank (seq_set_rank; higher keeps VRAM, default 0) and whether it is being decoded. A
++    // sequence that was never told uses the recent-batches rule (in one of the last n_seq_max batches)
++    bool ranked = true;
++    std::vector<int32_t> seq_rank;
++    std::bitset<LLAMA_MAX_SEQ> seq_told;
++    std::bitset<LLAMA_MAX_SEQ> seq_active;
++
++    int32_t rank_of(llama_seq_id s) const { return ranked ? seq_rank[s] : 0; }
++    bool    running(llama_seq_id s) const;
++
+     struct move_plan {
+         // cells to exchange; the first of each pair is in use, the second is empty or in use
+         std::vector<std::pair<uint32_t, uint32_t>> pairs;
+diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
+index 85186c8c..ecc566ee 100644
+--- a/src/llama-memory-hybrid.cpp
++++ b/src/llama-memory-hybrid.cpp
+@@ -190,6 +190,11 @@ void llama_memory_hybrid::set_next_batch(const std::vector<llama_seq_id> & seq_i
+     mem_attn->set_next_batch(seq_ids, n_tokens, n_ubatch);
+ }
+ 
++void llama_memory_hybrid::seq_set_rank(llama_seq_id seq_id, int32_t rank, bool active) {
++    // the recurrent part has no cells to place: only the attention cache is tiered
++    mem_attn->seq_set_rank(seq_id, rank, active);
++}
++
+ uint32_t llama_memory_hybrid::cells_used_max_p1() const {
+     // the recurrent part has no KV cells: only the attention cache spans a tiered buffer
+     return mem_attn->cells_used_max_p1();
+diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
+index deb5407c..8a3685fc 100644
+--- a/src/llama-memory-hybrid.h
++++ b/src/llama-memory-hybrid.h
+@@ -76,6 +76,8 @@ public:
+ 
+     void set_next_batch(const std::vector<llama_seq_id> & seq_ids, uint32_t n_tokens, uint32_t n_ubatch) override;
+ 
++    void seq_set_rank(llama_seq_id seq_id, int32_t rank, bool active) override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+diff --git a/src/llama-memory.h b/src/llama-memory.h
+index 4eed4f54..1c2de7e9 100644
+--- a/src/llama-memory.h
++++ b/src/llama-memory.h
+@@ -127,6 +127,9 @@ struct llama_memory_i {
+     // the sequences of the next batch, told before its memory update (which may move their KV cells low)
+     virtual void set_next_batch(const std::vector<llama_seq_id> & /*seq_ids*/, uint32_t /*n_tokens*/, uint32_t /*n_ubatch*/) {}
+ 
++    // the sequence's KV rank for a tiered cache (higher keeps VRAM) and whether it is being decoded
++    virtual void seq_set_rank(llama_seq_id /*seq_id*/, int32_t /*rank*/, bool /*active*/) {}
++
+     virtual std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const = 0;
+ 
+     //
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 6bbff6c8..71fc89af 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -518,12 +518,27 @@ struct server_slot {
+         prompt.tokens.insert(spec_draft);
+     }
+ 
++    // 0041: this slot's KV rank (a tiered cache moves a lower rank out first). Set by a task's kv_rank, or by
++    // another slot's task's kv_ranks; kept after the task ends
++    int32_t kv_rank = 0;
++
++    // tell the memory the slot's rank and whether it is being decoded
++    void set_kv_rank(bool active) {
++        llama_memory_seq_set_rank(llama_get_memory(ctx_tgt), id, kv_rank, active);
++        if (ctx_dft) {
++            llama_memory_seq_set_rank(llama_get_memory(ctx_dft), id, kv_rank, active);
++        }
++    }
++
+     void release() {
+         if (is_processing()) {
+             GGML_ASSERT(task);
+ 
+             SLT_INF(*this, "stop processing: n_tokens = %d, truncated = %d\n", prompt.n_tokens(), truncated);
+ 
++            // 0041: its cells may now move out for a batch of the same rank (its child, the next turn)
++            set_kv_rank(false);
++
+             t_last_used = ggml_time_us();
+ 
+             state = SLOT_STATE_IDLE;
+@@ -1784,6 +1799,21 @@ private:
+ 
+         slot.task = std::make_unique<const server_task>(std::move(task));
+ 
++        // 0041: the slot's KV rank (tiered cache): this task's, active while it runs; and the other slots'
++        // ranks when the task names them (kv_ranks), each keeping whether it is being decoded
++        slot.kv_rank = slot.task->params.kv_rank;
++        slot.set_kv_rank(true);
++        {
++            const auto & ranks = slot.task->params.kv_ranks;
++            for (size_t i = 0; i < ranks.size() && i < slots.size(); ++i) {
++                if ((int) i == slot.id || ranks[i] < 0) {
++                    continue;
++                }
++                slots[i].kv_rank = ranks[i];
++                slots[i].set_kv_rank(slots[i].is_processing());
++            }
++        }
++
+         slot.state = slot.task->is_child()
+             ? SLOT_STATE_WAIT_OTHER // wait for the parent to process prompt
+             : SLOT_STATE_STARTED;
+@@ -4590,6 +4620,7 @@ static json get_res_props(const server_context_meta & meta, const common_params
+     json props = {
+         { "default_generation_settings", default_generation_settings_for_props },
+         { "total_slots",                 params.n_parallel },
++        { "kv_vram_cells",               params.n_kv_vram_cells },
+         { "model_alias",                 meta.model_name },
+         { "model_ftype",                 meta.model_ftype },
+         { "model_path",                  meta.model_path },
+diff --git a/tools/server/server-schema.cpp b/tools/server/server-schema.cpp
+index 990cd8ff..e72d510f 100644
+--- a/tools/server/server-schema.cpp
++++ b/tools/server/server-schema.cpp
+@@ -64,6 +64,19 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
+         ->add_alias("n") // alias "n" as fallback (OpenAI completions API)
+         ->set_desc("Number of completions to generate. If the input has multiple prompts, total outputs will be N prompts times n_cmpl"));
+ 
++    add((new field_num("kv_rank", params.kv_rank))
++        ->set_hard_limits(0, INT32_MAX)
++        ->set_desc("Tiered KV cache (--kv-vram-cells): the slot's rank. Before a batch whose cells would pass the "
++                   "VRAM line, the highest-ranked slots' cells move below it and a lower rank moves out first; the "
++                   "rank stays with the slot after the task (0 = lowest, the default)"));
++
++    add((new field_json("kv_ranks"))
++        ->set_desc("Tiered KV cache: the other slots' ranks, by slot id, set when this task starts (a value "
++                   "below 0 leaves that slot's rank unchanged; this slot's own entry is ignored: kv_rank)")
++        ->set_handler([&](field_eval_context & ctx, const json & data) {
++            ctx.params.kv_ranks = json_value(data, "kv_ranks", std::vector<int32_t>());
++        }));
++
+     add((new field_num("n_cache_reuse", params.n_cache_reuse))
+         ->set_hard_limits(0, INT32_MAX)
+         ->set_desc("Min chunk size to attempt reusing from the cache via KV shifting. See --cache-reuse arg"));
+diff --git a/tools/server/server-task.cpp b/tools/server/server-task.cpp
+index 0d3beb31..dcb9963f 100644
+--- a/tools/server/server-task.cpp
++++ b/tools/server/server-task.cpp
+@@ -69,6 +69,8 @@ json task_params::to_json(bool only_metrics) const {
+             {"n_predict",                 n_predict}, // TODO: deduplicate?
+             {"n_keep",                    n_keep},
+             {"n_discard",                 n_discard},
++            {"kv_rank",                   kv_rank},
++            {"kv_ranks",                  kv_ranks},
+             {"ignore_eos",                sampling.ignore_eos},
+             {"stream",                    stream},
+             {"n_probs",                   sampling.n_probs},
+@@ -123,6 +125,8 @@ json task_params::to_json(bool only_metrics) const {
+         {"n_predict",                 n_predict}, // TODO: deduplicate?
+         {"n_keep",                    n_keep},
+         {"n_discard",                 n_discard},
++        {"kv_rank",                   kv_rank},
++        {"kv_ranks",                  kv_ranks},
+         {"ignore_eos",                sampling.ignore_eos},
+         {"stream",                    stream},
+         {"logit_bias",                format_logit_bias(sampling.logit_bias)},
+diff --git a/tools/server/server-task.h b/tools/server/server-task.h
+index 9c99143f..3ab8bf3c 100644
+--- a/tools/server/server-task.h
++++ b/tools/server/server-task.h
+@@ -64,6 +64,9 @@ struct task_params {
+ 
+     int32_t n_cache_reuse = 0; // min chunk size to attempt reusing from the cache via KV shifting (0 = disabled)
+ 
++    int32_t kv_rank = 0; // the slot's KV rank while this task runs and after (llama_memory_seq_set_rank)
++    std::vector<int32_t> kv_ranks; // the OTHER slots' ranks, by slot id, set when this task starts (< 0 = unchanged)
++
+     int64_t t_max_prompt_ms  = -1; // TODO: implement
+     int64_t t_max_predict_ms = -1; // if positive, limit the generation phase to this time limit
+ 

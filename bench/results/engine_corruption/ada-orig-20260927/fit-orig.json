@@ -1,0 +1,59 @@
+{
+ "model": "C:/Users/jwals/textgen/user_data/models/Ternary-Bonsai-2-27B-PTQ1_0-mtp-procreations.gguf",
+ "mmproj": "C:/Users/jwals/textgen/user_data/models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf",
+ "margin_mib": 1000,
+ "display_active": "Disabled",
+ "rounds": [
+  {
+   "n": 120832,
+   "min_free_mib": 843,
+   "loaded": {
+    "used": 15138,
+    "free": 913,
+    "util": 32
+   },
+   "error": null
+  },
+  {
+   "n": 115968,
+   "min_free_mib": 971,
+   "loaded": {
+    "used": 15010,
+    "free": 1041,
+    "util": 0
+   },
+   "error": null
+  },
+  {
+   "n": 114944,
+   "min_free_mib": 1035,
+   "loaded": {
+    "used": 14946,
+    "free": 1105,
+    "util": 0
+   },
+   "error": null
+  },
+  {
+   "n": 115968,
+   "min_free_mib": 971,
+   "loaded": {
+    "used": 15010,
+    "free": 1041,
+    "util": 0
+   },
+   "error": null
+  }
+ ],
+ "n": 114944,
+ "args": {
+  "-c": "262144",
+  "--cache-type-k-draft": "q8_0",
+  "--cache-type-v-draft": "q8_0",
+  "--spec-draft-n-max": "2",
+  "--spec-draft-n-max-tail": "4",
+  "--kv-vram-cells": "114944",
+  "-m": "C:/Users/jwals/textgen/user_data/models/Ternary-Bonsai-2-27B-PTQ1_0-mtp-procreations.gguf",
+  "--mmproj": "C:/Users/jwals/textgen/user_data/models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+ }
+}

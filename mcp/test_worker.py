@@ -11,15 +11,18 @@ WHAT THIS IS GATING
      a job orphaned by a dead worker is reclaimed at startup and finished.
   4. THE PIPELINE RUNS ITSELF. A URL dataset goes fetch -> extract -> index
      -> complete with no human action after clarify, writes rows with their
-     provenance, drops rows whose evidence is not in the source, and builds a
-     hints cache whose vectors are not zero (PROTOCOL rule 1).
+     provenance, drops rows whose evidence is not in the source, EMITS
+     SKILLS from them (the Phase 0.7 unification: extract compiles the rows
+     into atomic skills that walk the skill pipeline and arm), and index
+     builds their trigger vectors, none of them zero (PROTOCOL rule 1).
 
 HOW IT IS ISOLATED
 
 `YAMADORI_JOBS_DB` points at a temp file before `jobs` is imported. The
-recipes dir, the datasets dir and the hints corpus/cache are redirected to
-temp paths. The model is `worker.ask_model`, replaced; the embedder is a fake
-`code_search` module in `sys.modules`, so `hints` never reaches :11434. The
+recipes dir and the datasets dir are redirected to temp paths, and the
+skill store and trigger cache follow the jobs DB (skills.STORE's rule). The
+model is `worker.ask_model`, replaced; the embedder is a fake `code_search`
+module in `sys.modules`, so nothing reaches :11434. The
 source is served by a local `http.server` on an ephemeral port.
 """
 from __future__ import annotations
@@ -44,7 +47,7 @@ os.environ["YAMADORI_POLL_SECONDS"] = "0.05"
 
 import numpy as np  # noqa: E402
 
-# The embedder, faked BEFORE hints can import the real one. Deterministic
+# The embedder, faked BEFORE anything can import the real one. Deterministic
 # unit vectors, unless a test flips ZERO to simulate a dead embedding server.
 _fake_cs = types.ModuleType("code_search")
 _fake_cs.ZERO = False
@@ -64,19 +67,18 @@ _fake_cs.embed = _embed
 sys.modules["code_search"] = _fake_cs
 
 import datasets  # noqa: E402
-import hints  # noqa: E402
 import jobs  # noqa: E402
+import skill_select  # noqa: E402
+import skills  # noqa: E402
 import worker  # noqa: E402
 
 RECIPES = os.path.join(_TMP, "recipes")
 os.makedirs(RECIPES, exist_ok=True)
 datasets.RECIPES = RECIPES
-hints.CORPUS = RECIPES
-hints.CACHE = os.path.join(_TMP, "hints.npz")
 worker.DATA_DIR = os.path.join(_TMP, "datasets")
 
 REAL = [os.path.abspath(os.path.join(HERE, "..", "index", n)) for n in
-        ("jobs.sqlite3", "hints.npz")]
+        ("jobs.sqlite3", "skills", "skill_triggers.npz")]
 
 ANSWERS = {
     "source_name": "Widget Handbook",
@@ -157,11 +159,13 @@ def drain() -> int:
 def test_the_fixture_is_isolated():
     check(os.path.abspath(jobs.DB).startswith(os.path.abspath(_TMP)),
           "the jobs database is a temp file", jobs.DB)
-    for p in (datasets.RECIPES, hints.CORPUS, hints.CACHE, worker.DATA_DIR):
+    for p in (datasets.RECIPES, skills.STORE, skill_select.TRIGGER_CACHE,
+              worker.DATA_DIR):
         check(os.path.abspath(p).startswith(os.path.abspath(_TMP)),
               f"{os.path.basename(p)} is redirected into the temp dir", p)
     check(os.path.abspath(jobs.DB) not in REAL
-          and os.path.abspath(hints.CACHE) not in REAL,
+          and os.path.abspath(skills.STORE) not in REAL
+          and os.path.abspath(skill_select.TRIGGER_CACHE) not in REAL,
           "and neither is the real index")
 
 
@@ -316,32 +320,48 @@ def test_a_url_dataset_runs_end_to_end_unattended():
     check(c.get("extract_proposed") == 2 and c.get("extract_kept") == 1
           and c.get("extract_dropped_unverified") == 1,
           "the dataset records what extract measured", json.dumps(c))
-    check(c.get("indexed_rows") == 1, "and what index embedded",
-          json.dumps(c))
-
-    z = np.load(hints.CACHE)
+    mine = [x for x in skills.listing()
+            if (x.get("meta") or {}).get("dataset") == ds["id"]]
+    check(c.get("skills_made") == 1 and c.get("skills_armed") == 1
+          and len(mine) == 1 and mine[0]["status"] == "armed"
+          and mine[0]["source_kind"] == "dataset",
+          "extract EMITS SKILLS: the kept row became an armed skill that "
+          "names its dataset", json.dumps(c))
+    if mine:
+        import skill_md
+        sk = skill_md.parse(skills.version(mine[0]["id"], 1)["text"])
+        check(sk["items"] and sk["items"][0]["quote"] == VERIFIED
+              and sk["yamadori"]["provenance"]["kind"] == "dataset"
+              and sk["license"] == "CC-BY-4.0",
+              "the skill's item carries the row's verified evidence, its "
+              "provenance and licence", json.dumps(sk["yamadori"][
+                  "provenance"])[:300])
+    check(c.get("skills") == 1 and c.get("skills_armed_now") == 1,
+          "and index counted the dataset's skills", json.dumps(c))
+    z = np.load(skill_select.TRIGGER_CACHE)
     norms = np.linalg.norm(z["mat"], axis=1)
     check(int(z["n"]) >= 1 and float(norms.min()) > 0.99,
-          "the hints cache exists and none of its vectors is zero",
+          "index built the skills' trigger vectors and none is zero",
           f"n={int(z['n'])} min={norms.min():.3f}")
     meta = os.path.join(worker.dataset_dir(ds["id"]), "source.json")
     check(os.path.exists(meta), "the fetched source is kept with its hash")
 
 
-def test_a_rejected_row_leaves_the_hints_corpus():
-    path = os.path.join(RECIPES, "reject_probe.jsonl")
-    with open(path, "w", encoding="utf-8") as f:
+def test_a_rejected_row_never_becomes_a_skill():
+    import skill_migrate
+    d = os.path.join(_TMP, "reject_corpus")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "reject_probe.jsonl"), "w",
+              encoding="utf-8") as f:
         f.write(json.dumps({"recipe": "kept row", "_state": "keep"}) + "\n")
         f.write(json.dumps({"recipe": "rejected row",
                             "_state": "reject"}) + "\n")
         f.write(json.dumps({"recipe": "unreviewed row"}) + "\n")
-    rows, _ = hints.refresh()
-    texts = {r["recipe"] for r in rows if r["_file"] == "reject_probe.jsonl"}
+    rows, _c = skill_migrate.load(d)
+    texts = {r["recipe"] for r in rows}
     check(texts == {"kept row", "unreviewed row"},
-          "a row marked reject is not served; unreviewed rows are",
+          "a row marked reject is not migrated; unreviewed rows are",
           str(sorted(texts)))
-    os.remove(path)
-    hints.refresh()
 
 
 def test_zero_vectors_fail_the_index_job():
@@ -532,7 +552,7 @@ def main() -> int:
                test_an_orphaned_job_is_reclaimed_and_finished,
                test_html_becomes_text_without_scripts,
                test_a_url_dataset_runs_end_to_end_unattended,
-               test_a_rejected_row_leaves_the_hints_corpus,
+               test_a_rejected_row_never_becomes_a_skill,
                test_zero_vectors_fail_the_index_job,
                test_extract_refuses_to_overwrite_a_hand_collected_file,
                test_a_fetch_404_is_permanent_and_blocks_clarify,

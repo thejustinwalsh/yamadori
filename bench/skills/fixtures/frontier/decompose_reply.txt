@@ -1,0 +1,40 @@
+=== SKILL ===
+section: 1. Read Error Messages Carefully
+name: read-the-whole-error
+description: Use when a test, build or run fails with an error message or stack trace and the cause is not yet known.
+phases: debug
+topics: stack trace
+# Read the Whole Error First
+- DO: read the whole error, warnings included, before changing code; it often names the fix.
+  source: "They often contain the exact solution"
+- DO: note the line numbers, file paths and error codes in the stack trace and open those places first.
+  source: "Note line numbers, file paths, error codes"
+=== SKILL ===
+section: 2. Build a Tight Feedback Loop
+name: tight-feedback-loop
+description: Use when debugging a failure that has no single command which reproduces it yet.
+phases: debug, verify
+topics: reproduce
+# Build a Tight Feedback Loop
+- DO: find or write one command that fails on the user's exact symptom and passes once the bug is fixed, before building a theory.
+  source: "that can go red on the user's exact symptom and green when the bug is fixed"
+- WHEN choosing that command: start from a failing test at the seam that reaches the bug before writing a new harness.
+  source: "at the seam that reaches the bug: unit, integration, or end-to-end"
+- WHEN the bug is intermittent: raise the reproduction rate first; a flaky loop cannot confirm a fix.
+  source: "the immediate goal is a higher reproduction rate, not perfection"
+=== SKILL ===
+section: Phase 3: Hypothesis and Testing / Phase 4: Implementation
+name: one-change-at-a-time
+description: Use when testing a hypothesis about a bug or applying a fix to it.
+phases: debug
+# One Change at a Time
+- DO: test the most likely hypothesis with the smallest probe, changing one thing at a time.
+  source: "Test the highest-ranked hypothesis with the smallest possible probe."
+- WHEN a fix did not work: form a new hypothesis instead of stacking another fix on top.
+  source: "Didn't work? → Form NEW hypothesis"
+- WHEN three fixes have failed: stop and question the design with the user before a fourth.
+  source: "STOP and question the architecture (step 5 below)"
+- DO: make each fix address the root cause you identified, one change at a time, with no unrelated refactoring.
+  source: "Address the root cause identified"
+- DO: tag every temporary debug log line with a unique prefix so removing them is one search.
+  source: "tag every temporary line with a unique prefix"

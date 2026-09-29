@@ -32,6 +32,16 @@ needed two conversations investigating at once -- mcp/budget.py. Before that,
 "main 88,473, helper 36,864" and one helper lane: the 60/25/15 split, which
 had no measurement behind it -- docs/CONSTRAINTS.md item 19.)
 
+THE THREE-SLOT LAYOUT (operator, 2026-09-28). llama-server runs `-np 3`: two
+conversation slots and one child slot (mcp/slots.py). MAIN_LANES = 2 is now
+also the number of conversation slots -- two conversations generate at once,
+a third waits for a lane -- and HELPER_LANES = 1 the one child slot's second
+brain (side calls, the decider and an as-sent compaction take no helper lane:
+they queue on the child slot at the server). Under budget.py's cap layout the
+pool is 2 x the main cap + the child, so `full_budget_ceiling` is 2: both
+lanes at full budget fit the pool, the second in host RAM when it must be
+(the engine keeps the primary's cells in VRAM, slots RANKS).
+
 OVERSUBSCRIPTION IS ALLOWED, AND STATED
 
 `MAIN_LANES` defaults to 2 rather than 1 because a typical turn is a few
@@ -186,6 +196,16 @@ class helper_lane:
     def __exit__(self, *exc) -> bool:
         if self.held:
             _helper_stats["inflight"] -= 1
+            # The run is over: release the second brain's slot (mcp/slots.py
+            # RELEASE) BEFORE the lane is let go, so the next run cannot send
+            # its first hop while the release is on its way. A no-op outside
+            # the proxy process and when the switch is off; never raises.
+            try:
+                import slots
+                slots.after_helper_run(self.what)
+            except Exception as e:                               # noqa: BLE001
+                print(f"  slot release after {self.what} failed: "
+                      f"{type(e).__name__}: {e}", flush=True)
             _helper_sem.release()
             self.held = False
         return False
@@ -209,7 +229,7 @@ def helper_active() -> int:
 # the one with the bug.
 #
 # Threading, not asyncio, for the helper lane's reason: the model's
-# generate_image tool runs inside the tool loop's worker thread, and the
+# yama_generate_image tool runs inside the tool loop's worker thread, and the
 # /v1/images/generations route runs its call in the threadpool. Both paths
 # take this one semaphore, so the count holds across them.
 # ---------------------------------------------------------------------------
@@ -248,6 +268,14 @@ class image_lane:
         return False
 
 
+def _conversation_slots() -> list[int] | None:
+    try:
+        import slots
+        return slots.conversation_slots(slots._known_n())
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
 def snapshot() -> dict:
     """For the vitals page: what the cap is and whether it is biting."""
     try:
@@ -262,6 +290,8 @@ def snapshot() -> dict:
         "image_lanes": IMAGE_LANES, "image": dict(_image_stats),
         **_stats,
         "pool": b.get("pool"), "main_budget": b.get("main"),
+        "layout": b.get("layout"), "child_budget": b.get("helper"),
+        "conversation_slots": _conversation_slots(),
         # The honest ceiling if every request used its full budget. When
         # MAIN_LANES exceeds this, the server is oversubscribed on purpose.
         "full_budget_ceiling": (b["pool"] // b["main"]) if b.get("main") else None,

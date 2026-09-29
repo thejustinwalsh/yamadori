@@ -1,0 +1,234 @@
+{
+ "id": "hermes/chat/skills-near-miss",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "chat",
+ "source": "the authored skill's should_not case, in Hermes' shape",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask. [... Hermes system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": "Write a Python script that renames every file in a folder to lowercase."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "terminal",
+     "description": "(terminal: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "background": {
+        "type": "boolean"
+       },
+       "timeout": {
+        "type": "integer"
+       },
+       "workdir": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read_file",
+     "description": "(read_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write_file",
+     "description": "(write_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "patch",
+     "description": "(patch: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "mode": {
+        "type": "string",
+        "enum": [
+         "replace",
+         "patch"
+        ]
+       },
+       "path": {
+        "type": "string"
+       },
+       "old_string": {
+        "type": "string"
+       },
+       "new_string": {
+        "type": "string"
+       },
+       "replace_all": {
+        "type": "boolean"
+       },
+       "patch": {
+        "type": "string"
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "search_files",
+     "description": "(search_files: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "target": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "file_glob": {
+        "type": "string"
+       },
+       "output_mode": {
+        "type": "string"
+       },
+       "context": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skills_list",
+     "description": "(skills_list: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_view",
+     "description": "(skill_view: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "vision_analyze",
+     "description": "(vision_analyze: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "image_url": {
+        "type": "string"
+       },
+       "question": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "image_url",
+       "question"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "medium"
+ },
+ "expect": {
+  "accepted": true,
+  "roles": {
+   "one_system_first": true
+  },
+  "skills": {
+   "excludes": [
+    "browser-app-entry-point",
+    "fix-located-defect-first",
+    "module-exports-match-callers"
+   ]
+  }
+ },
+ "why": {
+  "skills": "a single-file Python script: no JS/browser skill"
+ }
+}

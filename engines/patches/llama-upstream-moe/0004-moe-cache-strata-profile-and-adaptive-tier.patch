@@ -1,0 +1,497 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yamadori <operator> (port of Strata, Niko1221/Strata @ d551edf42c157f1c8c20f07f68c5dfe506b1edda)
+Date: Sun, 28 Sep 2026 09:00:00 -0400
+Subject: [PATCH] moe expert cache: Strata's expert profile, its adaptive tier,
+ and every CPU-computed batch
+
+On top of 0003 (PR #27861's mechanism). Ported from Strata (no licence
+file; used with the operator's authorisation, 2026-09-28), credit Niko1221:
+
+- LLAMA_MOE_CACHE_PROFILE=<STRP file>: the resident experts are chosen from
+  an expert profile, Strata's format and reader (src/core/expert_cache.cpp:
+  12-72 read_expert_profile; data/expert-profile.bin; tools/make_profile.py).
+  The cache takes n_slots x (host-resident expert layers) pairs in rank
+  order, so each layer gets as many slots as the ranking gives it, and they
+  are filled before the first decode (Strata's blocking startup fill,
+  include/strata/core/expert_cache.hpp:112-118). A layer given no slot is
+  not cached.
+- LLAMA_MOE_CACHE_POLICY=strata: promotions at deliberate moments --
+  Strata's adaptive tier (src/program/generate.cpp:2418-2457; usage counted
+  per routed id at src/core/expert_source.cpp:275-277): every
+  LLAMA_MOE_CACHE_ADAPT_EVERY steps (its --adapt-every 4, generate.cpp:246)
+  and only when the previous swaps have landed, per layer the missing experts
+  with usage >= 2 replace the least-used resident ones while the gain is
+  >= 1.5, the best LLAMA_MOE_CACHE_ADAPT_SWAPS (its --adapt-swaps 96, :258)
+  overall; the victim is evicted at once (the CPU computes it meanwhile), the
+  newcomer admitted when its copy lands; then usage *= 0.7 (:2456). Default
+  stays #27861's LRU.
+- Generalised beyond one token: the cache chain is built for every batch the
+  CPU computes, n_tokens < ggml-cuda's op-offload batch
+  (GGML_OP_OFFLOAD_MIN_BATCH, default 32), so MTP verify windows and several
+  slots decoding together are served (Strata serves its verify windows the
+  same way). Above that batch the op runs on the GPU with the experts copied
+  in, and the skip table would not be honoured, so the chain is not built.
+
+Any MoE model whose experts are separate gate/up/down with SiLU (the scope
+of #27861) benefits; the profile is per model (a Flash-Next profile is
+Strata's data/expert-profile.bin, 48 x 512; scripts/moe_profile.py builds
+one for any model from GGML_MOE_LOG traces).
+---
+ src/llama-graph.cpp    |   6 +-
+ src/llama-moecache.cpp | 265 ++++++++++++++++++++++++++++++++++++++++++++++---
+ src/llama-moecache.h   |  24 +++++
+ 3 files changed, 277 insertions(+), 18 deletions(-)
+
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index bdaeb1074..bb8998000 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -2172,7 +2172,9 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
+     // map to the cache's zero slot. The two outputs sum to the exact result.
+     const llama_moe_cache_layer * mcache = nullptr;
+     ggml_tensor * mc_slot_ids = nullptr;
+-    if (n_tokens == 1 && !gate_up_exps && gate_exps && down_exps &&
++    // 0004: every batch the CPU computes (below ggml-cuda's op-offload batch), not only one token: MTP verify
++    // windows and several slots decoding together read the same resident experts
++    if (n_tokens <= llama_moe_cache_max_tokens() && !gate_up_exps && gate_exps && down_exps &&
+         !up_exps_b && !gate_exps_b && !down_exps_b &&
+         !up_exps_s && !gate_exps_s && !down_exps_s &&
+         type_op == LLM_FFN_SILU && !weight_before_ffn && loras->empty()) {
+@@ -2180,7 +2182,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
+     }
+     if (mcache) {
+         mc_slot_ids = ggml_get_rows(ctx0, mcache->dev_table, selected_experts); // [1, n_expert_used, 1]
+-        mc_slot_ids = ggml_reshape_2d(ctx0, mc_slot_ids, n_expert_used, 1);
++        mc_slot_ids = ggml_reshape_2d(ctx0, mc_slot_ids, n_expert_used, n_tokens);
+         cb(mc_slot_ids, "ffn_moe_cache_slots", il);
+     }
+ 
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index 4e0732e80..5f657ed1c 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -6,8 +6,10 @@
+ #include "ggml.h"
+ #include "ggml-backend.h"
+ 
++#include <algorithm>
+ #include <cinttypes>
+ #include <condition_variable>
++#include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+ #include <deque>
+@@ -30,6 +32,8 @@ struct layer_state {
+ 
+     std::vector<bool>     slot_in_flight; // slot has an upload pending
+ 
++    std::vector<float>    usage;          // 0004 (Strata's adaptive tier): decayed routed count per expert
++
+     uint64_t n_hit  = 0;
+     uint64_t n_miss = 0;
+ };
+@@ -45,6 +49,13 @@ struct moe_cache {
+     int32_t n_slots     = 0;
+     int32_t max_inserts = 2;
+ 
++    // 0004: Strata's adaptive tier (generate.cpp:246 adapt_every = 4, :258 adapt_swaps = 96)
++    bool    policy_strata = false;
++    int32_t adapt_every   = 4;
++    int32_t adapt_swaps   = 96;
++    int64_t max_tokens    = 31;
++    size_t  in_flight     = 0;   // swaps queued and not yet published
++
+     uint64_t clock   = 0;
+     uint64_t n_steps = 0;
+ 
+@@ -84,7 +95,7 @@ void moe_obs_cb(const char * name, const struct ggml_tensor * ids, void * ud) {
+ 
+     const int64_t n_ids    = ids->ne[0];
+     const int64_t n_tokens = ids->ne[1];
+-    if (n_tokens > 4) {
++    if (n_tokens > mc->max_tokens) {
+         return; // batch/prefill: the cache graph is not built there, don't pollute the LRU
+     }
+ 
+@@ -108,6 +119,9 @@ void moe_obs_cb(const char * name, const struct ggml_tensor * ids, void * ud) {
+             if (id < 0 || id >= (int32_t) ls->expert_slot.size()) {
+                 continue;
+             }
++            if (!ls->usage.empty()) {
++                ls->usage[id] += 1.0f; // Strata expert_source.cpp:277: one per routed id
++            }
+             const int32_t slot = ls->expert_slot[id];
+             if (slot >= 0) {
+                 ls->n_hit++;
+@@ -136,6 +150,60 @@ void upload_slice(ggml_tensor * dst_c, const ggml_tensor * src, int32_t expert,
+     ggml_backend_tensor_set(dst_c, (const char *) src->data + (size_t) expert*sz, (size_t) slot*dst_c->nb[2], sz);
+ }
+ 
++// Strata's STRP expert profile (src/core/expert_cache.cpp:12-72, read_expert_profile): "STRP", then uint32
++// version, n_layers, n_expert, slots, n_ranked, then n_ranked (uint16 layer, uint16 expert) pairs ranked by
++// descending routing frequency, then (unread) the frequency table. Checked against the model's shape.
++bool read_expert_profile(const char * path, int64_t n_layers, int64_t n_expert,
++                         std::vector<std::pair<int32_t, int32_t>> & ranked, std::string & err) {
++    FILE * f = fopen(path, "rb");
++    if (!f) {
++        err = std::string("cannot open ") + path;
++        return false;
++    }
++    char magic[4] = {0, 0, 0, 0};
++    uint32_t hdr[5] = {0, 0, 0, 0, 0};
++    if (fread(magic, 1, 4, f) != 4 || fread(hdr, 4, 5, f) != 5 || memcmp(magic, "STRP", 4) != 0) {
++        fclose(f);
++        err = std::string(path) + " is not an STRP expert profile";
++        return false;
++    }
++    const uint32_t nl = hdr[1], ne = hdr[2], want = hdr[3], n_ranked = hdr[4];
++    if ((int64_t) nl != n_layers || (int64_t) ne != n_expert) {
++        fclose(f);
++        err = std::string(path) + " is " + std::to_string(nl) + "x" + std::to_string(ne) + " but this model is " +
++              std::to_string(n_layers) + "x" + std::to_string(n_expert) + ": a profile for a different model";
++        return false;
++    }
++    if (n_ranked > want) {
++        fclose(f);
++        err = "the header claims more ranked pairs than slots";
++        return false;
++    }
++    std::vector<uint16_t> raw((size_t) n_ranked * 2);
++    if (n_ranked > 0 && fread(raw.data(), 2, raw.size(), f) != raw.size()) {
++        fclose(f);
++        err = "the ranked list is truncated";
++        return false;
++    }
++    fclose(f);
++    ranked.clear();
++    ranked.reserve(n_ranked);
++    for (uint32_t i = 0; i < n_ranked; ++i) {
++        const int32_t l = raw[(size_t) i*2], e = raw[(size_t) i*2 + 1];
++        if (l >= n_layers || e >= n_expert) {
++            err = "pair " + std::to_string(i) + " is out of range";
++            return false;
++        }
++        ranked.emplace_back(l, e);
++    }
++    return true;
++}
++
++int env_int(const char * name, int def) {
++    const char * v = getenv(name);
++    return v && v[0] ? atoi(v) : def;
++}
++
+ void set_table_entry(llama_moe_cache_layer & pub, int32_t expert, int32_t slot_or_dummy) {
+     const int32_t v = slot_or_dummy;
+     ggml_backend_tensor_set(pub.dev_table,  &v, (size_t) expert*sizeof(int32_t), sizeof(int32_t));
+@@ -189,6 +257,59 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+             return;
+         }
+ 
++        // 0004: the slots each layer gets, and the experts that start resident (from the profile)
++        std::map<int, int32_t> slots_of;
++        std::map<int, std::vector<int32_t>> seed_of;
++        {
++            int64_t n_cached = 0;
++            for (auto & g : groups) {
++                for (auto & c : g.second) {
++                    slots_of[c.il] = n_slots;
++                    n_cached++;
++                }
++            }
++            const char * prof = getenv("LLAMA_MOE_CACHE_PROFILE");
++            if (prof && prof[0]) {
++                std::vector<std::pair<int32_t, int32_t>> ranked;
++                std::string err;
++                const int64_t n_expert = model.layers[slots_of.begin()->first].ffn_up_exps->ne[2];
++                if (!read_expert_profile(prof, (int64_t) model.hparams.n_layer(), n_expert, ranked, err)) {
++                    LLAMA_LOG_WARN("%s: LLAMA_MOE_CACHE_PROFILE: %s - uniform %d slots per layer, empty\n",
++                            __func__, err.c_str(), n_slots);
++                } else {
++                    int64_t budget = (int64_t) n_slots * n_cached;
++                    for (auto & kv : slots_of) {
++                        kv.second = 0;
++                    }
++                    for (const auto & p : ranked) {
++                        if (budget == 0) {
++                            break;
++                        }
++                        auto it = slots_of.find(p.first);
++                        if (it == slots_of.end()) {
++                            continue; // that layer's experts are on a device already
++                        }
++                        it->second++;
++                        seed_of[p.first].push_back(p.second);
++                        budget--;
++                    }
++                    int32_t lo = INT32_MAX, hi = 0;
++                    for (auto & kv : slots_of) {
++                        lo = std::min(lo, kv.second);
++                        hi = std::max(hi, kv.second);
++                    }
++                    LLAMA_LOG_INFO("%s: expert profile %s: %zu ranked pairs, %" PRId64 " slots over %" PRId64
++                            " layers (%d-%d per layer)\n", __func__, prof, ranked.size(),
++                            (int64_t) n_slots * n_cached - budget, n_cached, lo, hi);
++                }
++            }
++            // a layer the profile gives no slot is not cached at all
++            for (auto & g : groups) {
++                g.second.erase(std::remove_if(g.second.begin(), g.second.end(),
++                        [&](const cand & c) { return slots_of[c.il] <= 0; }), g.second.end());
++            }
++        }
++
+         // host buffer for the CPU-side tables
+         std::vector<cand> all;
+         for (auto & g : groups) {
+@@ -216,7 +337,7 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+                     mc->layers.push_back({});
+                     ls = &mc->layers.back();
+                     ls->pub.il       = c.il;
+-                    ls->pub.n_slots  = n_slots;
++                    ls->pub.n_slots  = slots_of[c.il];
+                     ls->pub.up_src   = c.l->ffn_up_exps;
+                     ls->pub.gate_src = c.l->ffn_gate_exps;
+                     ls->pub.down_src = c.l->ffn_down_exps;
+@@ -229,9 +350,10 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+                     const ggml_tensor * u = c.l->ffn_up_exps;
+                     const ggml_tensor * g = c.l->ffn_gate_exps;
+                     const ggml_tensor * d = c.l->ffn_down_exps;
+-                    ls->pub.up_c   = ggml_new_tensor_3d(ctx, u->type, u->ne[0], u->ne[1], n_slots + 1);
+-                    ls->pub.gate_c = ggml_new_tensor_3d(ctx, g->type, g->ne[0], g->ne[1], n_slots + 1);
+-                    ls->pub.down_c = ggml_new_tensor_3d(ctx, d->type, d->ne[0], d->ne[1], n_slots + 1);
++                    const int32_t ns = ls->pub.n_slots;
++                    ls->pub.up_c   = ggml_new_tensor_3d(ctx, u->type, u->ne[0], u->ne[1], ns + 1);
++                    ls->pub.gate_c = ggml_new_tensor_3d(ctx, g->type, g->ne[0], g->ne[1], ns + 1);
++                    ls->pub.down_c = ggml_new_tensor_3d(ctx, d->type, d->ne[0], d->ne[1], ns + 1);
+                     ls->pub.dev_table = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 1, u->ne[2]);
+                     ggml_format_name(ls->pub.up_c,      "moe_cache_up.%d",   c.il);
+                     ggml_format_name(ls->pub.gate_c,    "moe_cache_gate.%d", c.il);
+@@ -267,18 +389,50 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+             return;
+         }
+ 
+-        // init LRU state + tables (everything uncached -> dummy slot n_slots)
++        // 0004: Strata's adaptive tier instead of per-step LRU inserts
++        {
++            const char * pol = getenv("LLAMA_MOE_CACHE_POLICY");
++            mc->policy_strata = pol && strcmp(pol, "strata") == 0;
++            mc->adapt_every   = std::max(1, env_int("LLAMA_MOE_CACHE_ADAPT_EVERY", mc->adapt_every));
++            mc->adapt_swaps   = std::max(0, env_int("LLAMA_MOE_CACHE_ADAPT_SWAPS", mc->adapt_swaps));
++            // ggml-cuda offloads MUL_MAT_ID to the GPU from this batch up (ggml-cuda.cu, same variable and default)
++            mc->max_tokens    = std::max(1, env_int("GGML_OP_OFFLOAD_MIN_BATCH", 32)) - 1;
++        }
++
++        // init state + tables (everything uncached -> the layer's dummy slot, n_slots)
+         size_t vram = 0;
++        size_t n_seeded = 0;
+         for (auto & ls : mc->layers) {
+             const int64_t n_expert = ls.pub.up_src->ne[2];
+-            ls.slot_expert.assign(n_slots, -1);
++            const int32_t ns = ls.pub.n_slots;
++            ls.slot_expert.assign(ns, -1);
+             ls.expert_slot.assign(n_expert, -1);
+-            ls.slot_last_use.assign(n_slots, 0);
+-            ls.slot_in_flight.assign(n_slots, false);
++            ls.slot_last_use.assign(ns, 0);
++            ls.slot_in_flight.assign(ns, false);
++            if (mc->policy_strata) {
++                ls.usage.assign(n_expert, 0.0f);
++            }
+ 
+-            std::vector<int32_t> dummy(n_expert, n_slots);
+-            ggml_backend_tensor_set(ls.pub.dev_table,  dummy.data(), 0, n_expert*sizeof(int32_t));
+-            ggml_backend_tensor_set(ls.pub.host_table, dummy.data(), 0, n_expert*sizeof(int32_t));
++            std::vector<int32_t> table(n_expert, ns);
++            // 0004: the profile's experts start resident, in rank order (the highest rank is the last evicted
++            // by LRU); blocking copies before the first decode, as Strata's startup fill
++            const auto seeds = seed_of.find(ls.pub.il);
++            if (seeds != seed_of.end()) {
++                const int32_t n_seed = (int32_t) std::min<size_t>(seeds->second.size(), (size_t) ns);
++                for (int32_t s = 0; s < n_seed; ++s) {
++                    const int32_t e = seeds->second[s];
++                    upload_slice(ls.pub.up_c,   ls.pub.up_src,   e, s);
++                    upload_slice(ls.pub.gate_c, ls.pub.gate_src, e, s);
++                    upload_slice(ls.pub.down_c, ls.pub.down_src, e, s);
++                    ls.slot_expert[s]   = e;
++                    ls.expert_slot[e]   = s;
++                    ls.slot_last_use[s] = (uint64_t) (n_seed - s);
++                    table[e] = s;
++                    n_seeded++;
++                }
++            }
++            ggml_backend_tensor_set(ls.pub.dev_table,  table.data(), 0, n_expert*sizeof(int32_t));
++            ggml_backend_tensor_set(ls.pub.host_table, table.data(), 0, n_expert*sizeof(int32_t));
+ 
+             mc->by_up_src[ls.pub.up_src] = &ls - mc->layers.data();
+             vram += ggml_nbytes(ls.pub.up_c) + ggml_nbytes(ls.pub.gate_c) + ggml_nbytes(ls.pub.down_c);
+@@ -314,8 +468,13 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+         g_cache = mc;
+         g_init_done = true;
+ 
+-        LLAMA_LOG_INFO("%s: MoE expert cache enabled: %zu layers x %d slots, %d inserts/step, %.1f MiB device memory\n",
+-                __func__, mc->layers.size(), n_slots, mc->max_inserts, vram/1024.0/1024.0);
++        LLAMA_LOG_INFO("%s: MoE expert cache enabled: %zu layers, %d slots/layer requested, %zu seeded from a profile, "
++                "policy %s, batches up to %" PRId64 " tokens, %.1f MiB device memory\n",
++                __func__, mc->layers.size(), n_slots, n_seeded,
++                mc->policy_strata ? "strata (adaptive tier)" : "lru", mc->max_tokens, vram/1024.0/1024.0);
++        if (mc->policy_strata) {
++            LLAMA_LOG_INFO("%s: adaptive tier: every %d steps, up to %d swaps\n", __func__, mc->adapt_every, mc->adapt_swaps);
++        }
+     }();
+ }
+ 
+@@ -347,6 +506,9 @@ void llama_moe_cache_step() {
+             ls.slot_last_use[j.slot]   = ++mc->clock;
+             ls.slot_in_flight[j.slot]  = false;
+             set_table_entry(ls.pub, j.expert, j.slot);
++            if (mc->in_flight > 0) {
++                mc->in_flight--;
++            }
+         }
+         mc->done.clear();
+     }
+@@ -354,6 +516,72 @@ void llama_moe_cache_step() {
+     std::lock_guard<std::mutex> lock(mc->mtx);
+     mc->n_steps++;
+ 
++    // 0004: Strata's adaptive tier (generate.cpp:2418-2457), at deliberate moments only
++    if (mc->policy_strata) {
++        for (auto & ls : mc->layers) {
++            ls.pending.clear();
++        }
++        if (mc->n_steps % (uint64_t) mc->adapt_every != 0 || mc->in_flight > 0) {
++            return; // not this step, or the previous swaps are still in flight
++        }
++        struct swap { float gain; size_t li; int32_t in, out; };
++        std::vector<swap> swaps;
++        std::vector<std::pair<float, int32_t>> cand, vict;
++        for (size_t li = 0; li < mc->layers.size(); ++li) {
++            auto & ls = mc->layers[li];
++            cand.clear();
++            vict.clear();
++            for (int32_t e = 0; e < (int32_t) ls.usage.size(); ++e) {
++                const int32_t slot = ls.expert_slot[e];
++                if (slot < 0) {
++                    if (ls.usage[e] >= 2.0f) {
++                        cand.emplace_back(ls.usage[e], e);
++                    }
++                } else if (!ls.slot_in_flight[slot]) {
++                    vict.emplace_back(ls.usage[e], e);
++                }
++            }
++            if (cand.empty() || vict.empty()) {
++                continue;
++            }
++            std::sort(cand.begin(), cand.end(), [](const auto & a, const auto & b) { return a.first > b.first; });
++            const size_t nc = std::min(cand.size(), vict.size());
++            std::partial_sort(vict.begin(), vict.begin() + (ptrdiff_t) nc, vict.end(),
++                    [](const auto & a, const auto & b) { return a.first < b.first; });
++            for (size_t i = 0; i < nc; ++i) {
++                if (cand[i].first < vict[i].first + 1.5f) {
++                    break;
++                }
++                swaps.push_back({cand[i].first - vict[i].first, li, cand[i].second, vict[i].second});
++            }
++        }
++        std::sort(swaps.begin(), swaps.end(), [](const swap & a, const swap & b) { return a.gain > b.gain; });
++        if ((int32_t) swaps.size() > mc->adapt_swaps) {
++            swaps.resize((size_t) mc->adapt_swaps);
++        }
++        {
++            std::lock_guard<std::mutex> wlk(mc->wmtx);
++            for (const swap & s : swaps) {
++                auto & ls = mc->layers[s.li];
++                const int32_t slot = ls.expert_slot[s.out];
++                // evicted now: the CPU computes it meanwhile; the newcomer is resident once its copy has landed
++                ls.expert_slot[s.out] = -1;
++                ls.slot_expert[slot]  = -1;
++                set_table_entry(ls.pub, s.out, ls.pub.n_slots);
++                ls.slot_in_flight[slot] = true;
++                mc->todo.push_back({s.li, s.in, slot});
++                mc->in_flight++;
++            }
++        }
++        mc->wcv.notify_one();
++        for (auto & ls : mc->layers) {
++            for (float & v : ls.usage) {
++                v *= 0.7f;
++            }
++        }
++        return;
++    }
++
+     // 2) schedule new uploads: evict at a sync point (clear the victim's table
+     //    entry now), then hand the slice copies to the worker
+     for (size_t li = 0; li < mc->layers.size(); ++li) {
+@@ -372,7 +600,7 @@ void llama_moe_cache_step() {
+             // victim: an empty non-in-flight slot if any, else the LRU non-in-flight slot
+             int32_t slot = -1;
+             uint64_t best = UINT64_MAX;
+-            for (int32_t s = 0; s < mc->n_slots; ++s) {
++            for (int32_t s = 0; s < ls.pub.n_slots; ++s) {
+                 if (ls.slot_in_flight[s]) {
+                     continue;
+                 }
+@@ -387,12 +615,13 @@ void llama_moe_cache_step() {
+             if (victim >= 0) {
+                 ls.expert_slot[victim] = -1;
+                 ls.slot_expert[slot]   = -1;
+-                set_table_entry(ls.pub, victim, mc->n_slots);
++                set_table_entry(ls.pub, victim, ls.pub.n_slots);
+             }
+             ls.slot_in_flight[slot] = true;
+ 
+             std::lock_guard<std::mutex> wlk(mc->wmtx);
+             mc->todo.push_back({li, id, slot});
++            mc->in_flight++;
+         }
+         ls.pending.clear();
+     }
+@@ -405,3 +634,7 @@ void llama_moe_cache_step() {
+                 mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0);
+     }
+ }
++
++int64_t llama_moe_cache_max_tokens() {
++    return g_cache ? g_cache->max_tokens : 0;
++}
+diff --git a/src/llama-moecache.h b/src/llama-moecache.h
+index ed739f90c..036afc92f 100644
+--- a/src/llama-moecache.h
++++ b/src/llama-moecache.h
+@@ -24,6 +24,27 @@
+ //    uploads per layer per step via ggml_backend_tensor_set.
+ //
+ // Enabled via llama_context_params.n_moe_cache_slots (CLI: --moe-expert-cache).
++//
++// Yamadori 0004, ported from Strata (github.com/Niko1221/Strata @ d551edf4, no licence file; used with the
++// operator's authorisation, 2026-09-28):
++//  - LLAMA_MOE_CACHE_PROFILE=<file>: the resident experts are chosen from an expert profile (Strata's STRP
++//    format: src/core/expert_cache.cpp:12-72 read_expert_profile; data/expert-profile.bin;
++//    tools/make_profile.py). The profile ranks (layer, expert) pairs by routing frequency; the cache takes
++//    n_slots x (host-resident expert layers) pairs in rank order, so a layer holds as many slots as the ranking
++//    gives it, filled before the first decode (Strata's blocking startup fill,
++//    include/strata/core/expert_cache.hpp:112-118). Without a profile every layer gets n_slots, empty, as in
++//    #27861.
++//  - LLAMA_MOE_CACHE_POLICY=strata: promotions at deliberate moments instead of per-step LRU inserts --
++//    Strata's adaptive tier (src/program/generate.cpp:2418-2457, the `adapt` lambda; usage counted per routed
++//    id at src/core/expert_source.cpp:275-277): every LLAMA_MOE_CACHE_ADAPT_EVERY decode steps (Strata's
++//    --adapt-every, default 4) and only when the previous swaps have landed, per layer the missing experts with
++//    usage >= 2 replace the resident ones with the least usage while the gain is >= 1.5, the best
++//    LLAMA_MOE_CACHE_ADAPT_SWAPS (Strata's --adapt-swaps, default 96) swaps overall; the victim is evicted at
++//    once (the CPU computes it meanwhile) and the newcomer admitted when its upload has landed; then usage *=
++//    0.7. Every constant is Strata's (generate.cpp:246, 258, 2430, 2439, 2456).
++//  - the cache serves every batch the CPU computes: n_tokens < ggml-cuda's op-offload batch
++//    (GGML_OP_OFFLOAD_MIN_BATCH, default 32, ggml-cuda.cu), above which the op runs on the GPU with the
++//    experts copied in (and would ignore the skip table). #27861 served n_tokens == 1 only.
+ 
+ #include <cstdint>
+ 
+@@ -59,3 +80,6 @@ const llama_moe_cache_layer * llama_moe_cache_lookup(const ggml_tensor * up_exps
+ 
+ // apply throttled LRU updates; call between graph executions only
+ void llama_moe_cache_step();
++
++// the largest batch the cache chain is built for (0004): one less than ggml-cuda's op-offload batch
++int64_t llama_moe_cache_max_tokens();

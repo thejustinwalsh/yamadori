@@ -6,7 +6,7 @@
 // rather than inventing progress that was never measured.
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useRef } from 'react';
-import { kvSplit } from '../../api/kv';
+import { kvNames, kvSplit } from '../../api/kv';
 import type { ContextPool, Gpu, JobQueue, Lanes, Seed, Slot, Slots, Strata, ToolActivity } from '../../api/types';
 import { ago, gib, n } from '../../format';
 import { colors, space } from '../../tokens/tokens.stylex';
@@ -145,18 +145,24 @@ export function SlotsCard({ slots, lanes, context, since }: {
         ? undefined
         : `${busy} BUSY`;
   return (
-    <Card label="SLOTS · LLAMA-SERVER" right={laneText} wide flashKey={busy ? `b${busy}` : null} tone="moss">
+    <Card label={`SLOTS · ${slots?.model ? slots.model.toUpperCase() : 'LLAMA-SERVER'}`} right={laneText} wide flashKey={busy ? `b${busy}` : null} tone="moss">
       {!slots ? (
         <span {...stylex.props(text.labelXs, s.dim)}>slot state not reported by this server</span>
       ) : !slots.ok ? (
-        <span {...stylex.props(text.labelXs, s.dim)}>/slots not answering · {slots.error ?? 'no reason given'}</span>
+        <span {...stylex.props(text.labelXs, s.dim)}>
+          {slots.off_card ? '' : '/slots not answering · '}
+          {slots.error ?? 'no reason given'}
+        </span>
       ) : (
         slots.slots.map((x) => {
           const tone = STATE_TONE[x.state];
           const rate = x.state === 'decode' ? x.tps : x.state === 'prefill' ? x.pps : 0;
           return (
             <div key={x.id} {...stylex.props(text.labelXs, s.slotRow)}>
-              <span {...stylex.props(s.dim)}>S{x.id}</span>
+              <span {...stylex.props(s.dim)} title={x.role === 'child' ? 'the child slot: deep thinking, the decider, side calls' : x.role === 'conversation' ? `a conversation slot${x.pinned ? ', pinned' : ''}${x.primary ? ', the primary conversation (holds the VRAM line)' : ''}` : undefined}>
+                S{x.id}
+                {x.role === 'child' ? ' · CHILD' : x.primary ? ' · PRIMARY' : x.pinned ? ' · PINNED' : ''}
+              </span>
               <span {...stylex.props(s[tone])}>{x.state.toUpperCase()}</span>
               <Meter
                 value={x.state === 'idle' || !kv ? (x.state === 'idle' ? 0 : null) : Math.min(1, x.ctx / kv.main)}
@@ -269,7 +275,7 @@ export function GpuCard({ g }: { g: Gpu }) {
       <Meter value={g.util / 100} tone="cyan" label={`GPU${g.index} utilisation ${g.util}%`} />
       <Meter value={g.pct / 100} tone={tone} label={`GPU${g.index} ${g.used_mib} of ${g.total_mib} MiB used`} />
       <span {...stylex.props(text.labelXs, s.soft, text.num)}>
-        VRAM {gib(g.used_mib)} / {gib(g.total_mib)} GIB · {n(g.free_mib)} MIB FREE
+        VRAM {gib(g.used_mib)} / {gib(g.total_mib)} GIB · {n(g.free_mib)} MIB FREE{g.floor_mib != null ? ` / ${n(g.floor_mib)} FLOOR` : ''}
       </span>
     </Card>
   );
@@ -277,14 +283,15 @@ export function GpuCard({ g }: { g: Gpu }) {
 
 export function KvCard({ context }: { context: ContextPool | null | undefined }) {
   const kv = kvSplit(context);
+  const nm = kv ? kvNames(kv) : null;
   return (
     <Card label="KV POOL" right={kv ? `${n(kv.pool)} TOK` : undefined}>
-      {!kv ? (
+      {!kv || !nm ? (
         <span {...stylex.props(text.labelXs, s.dim)}>no context budget</span>
       ) : (
         <>
           <SplitBar
-            label={`main ${kv.main}, ${kv.helpers} deep thinking of ${kv.helper}, reserve ${kv.reserve}`}
+            label={`${nm.main.toLowerCase()} ${kv.main}, ${nm.helper.toLowerCase()} ${kv.helper}, ${nm.reserve.toLowerCase()} ${kv.reserve}`}
             parts={[
               { value: kv.main, tone: 'moss' },
               ...Array.from({ length: kv.helpers }, () => ({ value: kv.helper, tone: 'cyan' as const })),
@@ -292,7 +299,7 @@ export function KvCard({ context }: { context: ContextPool | null | undefined })
             ]}
           />
           <span {...stylex.props(text.labelXs, s.soft, text.num)}>
-            MAIN {n(kv.main)} · DEEP THINKING {kv.helpers}×{n(kv.helper)}
+            {kv.layout === 'cap' ? `MAIN ${n(kv.main)} · CHILD ${n(kv.helper)} · 2ND ${n(kv.reserve)}` : `MAIN ${n(kv.main)} · DEEP THINKING ${kv.helpers}×${n(kv.helper)}`}
           </span>
         </>
       )}

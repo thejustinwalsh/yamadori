@@ -19,6 +19,9 @@ const DatasetDetail = screens.dataset.Component;
 const Sentei = screens.sentei.Component;
 const Settings = screens.settings.Component;
 const Skills = screens.skills.Component;
+const SkillScreen = screens.skill.Component;
+const OnboardingScreen = screens.onboarding.Component;
+const Harness = screens.harness.Component;
 
 // The page background is set on <body> from a token, so there is no white
 // flash and no hex outside src/tokens.
@@ -52,7 +55,13 @@ function Screen() {
       case 'settings':
         return <Settings />;
       case 'skills':
-        return <Skills />;
+        return <Skills view={route.view} />;
+      case 'skill':
+        return <SkillScreen id={route.id} />;
+      case 'onboarding':
+        return <OnboardingScreen id={route.id} />;
+      case 'harness':
+        return <Harness />;
       case 'notfound':
         return <StateView kind="empty" title={`no screen at ${route.path}`} />;
       default:

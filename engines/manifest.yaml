@@ -1,0 +1,1801 @@
+# Every inference engine the Yamadori stack runs, pinned: upstream source at
+# a full SHA, our patches as files (engines/patches/<engine>/), the inputs a
+# build fetches, the toolchain and flags, and the SHA-256 of every file the
+# binary we SHIP loads. docs/ENGINES.md explains the fields and the workflow.
+#
+#   python scripts/build_engine.py --list
+#   python scripts/build_engine.py <engine> --jobs 8     # rebuild into a NEW dir
+#   python scripts/build_engine.py --verify-only         # what config.yaml runs
+#
+# scripts/deploy_check.py refuses a deploy whose config.yaml points at a
+# binary that is not some engine's `shipped.path`, or whose files do not
+# match `shipped.files` (sizes, SHA-256, and no loaded DLL left unpinned).
+#
+# A rebuild is SOURCE-reproducible, not bit-for-bit (link timestamps, nvcc
+# temp names, __FILE__ paths; GGML_NATIVE ties the CPU code to this
+# machine). That is why `shipped` records the hash of what runs, not of a
+# rebuild. Recorded 2026-09-25 from the files on disk; every value below was
+# read from the build trees (CMakeCache.txt, build.ninja, .ninja_log,
+# generated sources), not from notes.
+
+schema: 1
+
+defaults:
+  # Where build_engine.py builds when --out is not given:
+  # <engines_root>/<engine>-<8 hex of the manifest entry + patches>.
+  engines_root: C:/Users/jwals/engines
+
+vendoring:
+  # The SOURCE we build lives in this repo (operator, 2026-09-29: "carry the
+  # actual engine source here"): engines/src/<engine> is the engine's base
+  # commit, submodules flattened in, WITH ITS PATCH SERIES APPLIED, minus
+  # what its rule below excludes. Each vendored engine's `vendor:` block
+  # records the origin and the tree hashes; engines/patches/<engine>/ stays
+  # the patch series. docs/ENGINES.md "Vendored source".
+  #   python scripts/build_engine.py vendor <engine>        # regenerate (fetches upstream)
+  #   python scripts/build_engine.py check [--derive]       # offline proof
+  #   python scripts/build_engine.py build <engine>         # offline build
+  #   python scripts/build_engine.py update <engine> --to <sha> [--write]
+  # `vendor` and `update` keep fetched upstream objects outside the repo, in
+  # <engines_root>/.vendor-cache (`cache:` here overrides it).
+  # THE EXCLUSION RULE. Paths anchored at the tree root; `dir/` is that
+  # directory, `!pat` puts a path back, the last match wins. Only what the
+  # CMake build never reads: CI and packaging (.github, .devops, docker),
+  # documentation and media, benchmark logs, llama.cpp's tokenizer test
+  # vocabularies (models/*.gguf and their .inp/.out vectors; test-chat's
+  # models/templates stay), sd.cpp's README images and videos (assets/).
+  # A licence or notice file is kept whatever the rule says.
+  rules:
+    llama.cpp: [.github/, .devops/, docs/, media/, benches/, models/, "!models/templates/"]
+    stable-diffusion.cpp: [.github/, docker/, docs/, assets/]
+
+toolchains:
+  # The one toolchain every engine here was built with. Nothing was installed
+  # for it: VS 2022 Enterprise was present, CUDA is an isolated conda env.
+  msvc-cuda128:
+    vcvars: C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat
+    visual_studio: 17.7.7 (Enterprise, 17.7.34302.85)
+    msvc:
+      # vcvars64 picks 14.36 (Microsoft.VCToolsVersion.v143.default.txt),
+      # NOT the newest installed (14.37.32822). Every CMakeCache names 14.36.
+      toolset: 14.36.32532
+      cl_version: 19.36.32543.0
+    windows_sdk: 10.0.22621.0
+    cmake:
+      path: C:/Program Files/Microsoft Visual Studio/2022/Enterprise/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe
+      version: 3.26.4-msvc4
+    ninja:
+      path: C:/Program Files/Microsoft Visual Studio/2022/Enterprise/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe
+      version: 1.11.0
+    cuda:
+      version: 12.8.93            # nvcc V12.8.93, build cuda_12.8.r12.8/compiler.35583870_0
+      root: C:/Users/jwals/textgen/installer_files/cudabuild/Library
+      # conda-meta of that env; channel https://conda.anaconda.org/nvidia
+      packages:
+        cuda-nvcc_win-64: 12.8.93-0
+        cuda-nvcc-tools: 12.8.93-0
+        cuda-cudart: 12.8.90-0      # provides bin/cudart64_12.dll
+        libcublas: 12.8.5.5-h7203ec1_0   # provides bin/cublas64_12.dll, cublasLt64_12.dll
+    git:
+      path: C:/Program Files/Git/cmd/git.exe
+      version: 2.45.2.windows.1
+      # The originals are CRLF checkouts (user-global core.autocrlf=true).
+      # It matters: configure_file copies build-info.cpp.in's line endings,
+      # and a raw string literal spanning lines would carry them into code.
+      autocrlf: true
+    gzip:
+      # Git for Windows' gzip. llama.cpp's UI step gzips every web asset
+      # with whatever `gzip` is on PATH, and gzip's output (and so the
+      # embedded UI) depends on it being there at all.
+      path: C:/Program Files/Git/usr/bin/gzip.exe
+      version: "1.13"
+
+engines:
+
+  # ------------------------------------------------------------------------
+  llama-bonsai2:
+    description: >-
+      The main model's server (`bonsai`, macro server_nudge): sudoingX's
+      bonsai2 branch (PR #218 PTQ1_0 kernel + the qwen35 MTP Hadamard fix,
+      rebased on prism b10709) plus our reasoning-budget nudge.
+    kind: source
+    upstream: https://github.com/sudoingX/llama.cpp
+    branch: bonsai2
+    base_commit: 285542d98d37d0f07f491cd206aefa31f1848f33
+    clone:
+      # Full commit history (blob-less): llama.cpp embeds `rev-list --count
+      # HEAD` (10738) and `rev-parse --short HEAD`. The short hash in THIS
+      # build is 9 characters ("285542d98"): the checkout had grown enough
+      # objects by 2026-09-25 that git's auto-abbrev chose 9 (the 09-22 build
+      # of the same commit embedded 8). core.abbrev pins it.
+      mode: blobless
+      abbrev: 9
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patches:
+      - file: 0001-reasoning-budget-nudge.patch
+        sha256: 08dbca5a7fa8bcd0583de6383972920354b0aea0fe2d5f12acd95ab08ef646a0
+        # git diff of the uncommitted working tree against the base, exported
+        # read-only 2026-09-25: common/reasoning-budget.{h,cpp},
+        # common/common.h, common/sampling.cpp, tools/server/server-schema.cpp,
+        # tests/test-reasoning-budget.cpp, tests/test-chat.cpp (+494/-22).
+      - file: 0002-cuda-ptq1_0-pdl-sync.patch
+        sha256: a2ec297be20837ce8a9fd13993101091111908a66c84cd37a3d269cda52e8007
+        # A CORRECTNESS fix, third-party (LamplighterPaul / Paul Zammit),
+        # UNMERGED upstream at export. `mul_mat_vec_ptq1_0_pt` is launched
+        # through ggml_cuda_kernel_launch, which opts into Programmatic
+        # Dependent Launch on sm >= 90 (our 5060 Ti is sm_120; CUDA 12.8
+        # under MSVC defines GGML_CUDA_USE_PDL, common.cuh:118-121), but the
+        # kernel never called ggml_cuda_pdl_sync(). quantize_q8_1 -- the
+        # kernel that writes its q8_1 activations -- fires
+        # ggml_cuda_pdl_lc() as its FIRST statement (quantize.cu:63), so the
+        # mat-vec could start and read vy before it was written. Reported:
+        # output breaks into `!!!!` / `////` a few tokens in on an RTX 5080
+        # (sudoingX/bonsai2-small-gpu#3, PrismML-Eng/llama.cpp#218). The fix
+        # is one ggml_cuda_pdl_sync() at the top of the kernel, before any
+        # read, as mul_mat_vec_q (mmvq.cu:607) does; it compiles to nothing
+        # below Hopper (the A4000's sm_86 code is unchanged). Reviewed
+        # 2026-09-26: the PR's single commit, parent == our base_commit,
+        # 1 file +4/-0, blob baa90977 -> d70ae441; no other kernel launched
+        # through ggml_cuda_kernel_launch in this tree lacks the sync.
+        # Exported read-only: `gh api repos/sudoingX/llama.cpp/commits/<sha>
+        # -H "Accept: application/vnd.github.patch"` (git format-patch form).
+        source: https://github.com/sudoingX/llama.cpp/pull/1/commits/967d31271cc3f389fd362dc5cb0f2f9a634dec79
+        commit: 967d31271cc3f389fd362dc5cb0f2f9a634dec79
+      - file: 0003-cuda-fattn-vec-skip-masked-kv.patch
+        sha256: 62a94c73ab48a488de48207052aa50ae40860bf22a9ba5bd188684cd56dd3779
+        # OURS (2026-09-27; docs/ENGINES.md "Masked KV cells"). In
+        # flash_attn_ext_vec's KV loop a warp whose 32 cells are -inf for
+        # every valid query column skips its body: exact (exp(-inf) = 0, the
+        # running max unchanged). With the unified 4-slot pool every decode
+        # attends up to the highest used cell, so another slot's cells -- or
+        # the holes a released slot leaves below the active one -- taxed
+        # every token (pagoda-h4: 20-22 tok/s at 16-48k vs h1's 32-34 at the
+        # same depth and engine). Measured (n=3 medians, two runs): 32k with
+        # an idle 41k slot below, 29.7 -> 41.7; 32k with 3 x 40k above,
+        # 17.8 -> 39.9; a lone conversation ~3.5% slower at 32k. Deploy gate
+        # 2026-09-27 (bench/engine_corruption.py vs f1ef2064): greedy text
+        # identical on ts/bash/prose, 0/16 corruption symptoms, tools 10/10.
+    inputs: {}
+    toolchain: msvc-cuda128
+    # NO WEB UI (operator, 2026-09-25): nothing uses llama-server's own UI
+    # (the dashboard is the proxy's /dash). Both switches are needed:
+    # LLAMA_BUILD_UI=OFF only skips the npm build -- scripts/ui-assets.cmake
+    # still downloads the HF prebuilt while LLAMA_USE_PREBUILT_UI is ON. With
+    # both OFF the UI step fetches nothing and embeds an empty asset table
+    # (ui.h has no LLAMA_UI_HAS_ASSETS), so the server registers no "/" route.
+    path_tools: {}
+    absent_tools: [npm, pnpm]
+    configure:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_CURL=OFF
+      - -DLLAMA_BUILD_TESTS=OFF
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+      - -DLLAMA_BUILD_UI=OFF
+      - -DLLAMA_USE_PREBUILT_UI=OFF
+    expect_cache:
+      GGML_NATIVE: "ON"          # the default; see native_cpu
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: &native
+      GGML_NATIVE: "ON"
+      note: >-
+        GGML_NATIVE is ON (llama.cpp's default, never set explicitly). Under
+        MSVC it probes THIS machine's CPU at configure time; here it resolved
+        to /arch:AVX2 with GGML_AVX2, GGML_F16C and GGML_FMA for ggml-cpu (no
+        AVX-512). The CPU backend is therefore tied to this machine: a rebuild
+        on another CPU can differ, and the binary may not run on a CPU without
+        AVX2. The CUDA code is not affected (CMAKE_CUDA_ARCHITECTURES pins it).
+      resolved:
+        object: ggml-cpu.c.obj
+        arch: /arch:AVX2
+        defines: [GGML_AVX2, GGML_F16C, GGML_FMA]
+    expect_generated:
+      common/build-info.cpp:
+        sha256: ed5790a0754f5bc6ed0d326322c474e77a366a528651a8ff8c014dec1ababab8
+        stage: configure         # number 10738, commit "285542d98", MSVC 19.36.32543.0
+    expect_generated_lacks:
+      tools/ui/ui.h: LLAMA_UI_HAS_ASSETS   # no UI embedded
+    targets: [llama-server]
+    post_build_copies: &cuda_dlls
+      - from: cuda:bin/cudart64_12.dll
+        to: bin
+        sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344
+      - from: cuda:bin/cublas64_12.dll
+        to: bin
+        sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4
+      - from: cuda:bin/cublasLt64_12.dll
+        to: bin
+        sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47
+    tests:
+      # Windows skips these in a shared-library build (tests/CMakeLists.txt:
+      # "disabled on Windows because they use internal functions not exported
+      # with LLAMA_API"), so they run in a separate STATIC CPU tree -- as the
+      # patch's own tests were run (build-nudge-cpu). The shipped tree's flags
+      # are untouched.
+      configure_extra:
+        - -DGGML_CUDA=OFF
+        - -DBUILD_SHARED_LIBS=OFF
+        - -DLLAMA_BUILD_TESTS=ON
+      targets: [test-reasoning-budget, test-chat]
+      ctest_regex: ^(test-reasoning-budget|test-chat)$
+    output: bin/llama-server.exe
+    shipped:
+      # Built 2026-09-27 04:47 by scripts/build_engine.py from this entry:
+      # base + 0001 + 0002 + 0003-cuda-fattn-vec-skip-masked-kv.patch, NO web
+      # UI, into C:/Users/jwals/engines/llama-bonsai2-790071e8. Every check
+      # passed: 207 CMakeCache options equal, build-info byte-identical,
+      # engine tests 2/2 (docs/ENGINES.md "Masked KV cells"). Only
+      # ggml-cuda.dll and the llama/llama-common/impl/mtmd/ggml DLLs differ
+      # from f1ef2064's. Deploy gate: bench/engine_corruption.py 2026-09-27
+      # (the 0003 patch's comment above). DEPLOYED 2026-09-27.
+      path: C:/Users/jwals/engines/llama-bonsai2-790071e8/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-bonsai2-790071e8/src/build
+      built: 2026-09-27T04:47:33-04:00
+      built_with_patches: [0001-reasoning-budget-nudge.patch, 0002-cuda-ptq1_0-pdl-sync.patch, 0003-cuda-fattn-vec-skip-masked-kv.patch]
+      files:
+        llama-server.exe:      {sha256: dc411c74960c77e954a94d8c4f3aaa714d510430e388278829c84d5ff69110f9, size: 10240}
+        llama-server-impl.dll: {sha256: b244b2bdf3d53cd95d5cc484cf79b988bc2a6d0ea1106bcbf6ab456f970151c7, size: 3187712}
+        llama-common.dll:      {sha256: 8202eb41a020bd13399d78b5ec460af36c37672b401736f1728c43d626c23741, size: 8332288}
+        mtmd.dll:              {sha256: 9d37175ea72a3ec1445c50129cc7460bb96ac2b650be9e72d43f1ac6b3c1ab96, size: 2324992}
+        llama.dll:             {sha256: 0452229c570881927b6838e7d53d9f96a8be7408e68ba4816a21d30152c99c4e, size: 2529280}
+        ggml.dll:              {sha256: 9fbfef650a40738c588721afd59e9c833f759a40776784a0a14cb9aab2ac3ee0, size: 56832}
+        ggml-base.dll:         {sha256: c419102cb91fbfc42999b883ace5184fd62d51f3add3cfcbfea7aecd5fcfea95, size: 664064}
+        ggml-cpu.dll:          {sha256: 8bae99985dff56e2483b747c51c7226fe7bc2851414493e4a074b7204750cd57, size: 964096}
+        ggml-cuda.dll:         {sha256: b3c21691afaec68aae5427f74e456c44bdd12fd4b3f13d27e58d2f16e12e9212, size: 93095936}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    previous:
+        # Built 2026-09-26 by scripts/build_engine.py from this entry: base +
+        # 0001-reasoning-budget-nudge.patch + 0002-cuda-ptq1_0-pdl-sync.patch,
+        # NO web UI, into C:/Users/jwals/engines/llama-bonsai2-f1ef2064. Every
+        # check passed: all 207 CMakeCache options equal eebbaae2's (the build
+        # below); build-info.cpp byte-identical (ed5790a0...); ui.h has no
+        # assets; CUDA DLLs identical; engine tests 2/2 passed. Every file size
+        # equals eebbaae2's except ggml-cuda.dll (93,089,792 vs 93,097,472 B).
+        # DEPLOYED 2026-09-27 03:32 until 0003 replaced it the same day.
+        # T0 results on the 5060 Ti: docs/ENGINES.md "The PTQ1_0 PDL race".
+      - path: C:/Users/jwals/engines/llama-bonsai2-f1ef2064/src/build/bin/llama-server.exe
+        build_tree: C:/Users/jwals/engines/llama-bonsai2-f1ef2064/src/build    # its CMakeCache is compared on rebuild
+        built: 2026-09-26T21:38:09-04:00
+        built_with_patches: [0001-reasoning-budget-nudge.patch, 0002-cuda-ptq1_0-pdl-sync.patch]
+        files:
+          llama-server.exe:      {sha256: 8d6b9a2764b545ccc9fb79149c2e71eaa0ff5170aa4aa8ee433648da5717e47e, size: 10240}
+          llama-server-impl.dll: {sha256: 25fe0efbdd29a0a9f9211145a662ea1018fc2107d903004c7d3ac0c6263ce024, size: 3187712}
+          llama-common.dll:      {sha256: 52a3f39a34cada133d0e900bc46604b8509eed9cccfe22c16826d3699ae9ca70, size: 8332288}
+          mtmd.dll:              {sha256: 9fa1e28d1270a320bf304874fde4a8965451dda834518ec40502c0d403a6f1b6, size: 2324992}
+          llama.dll:             {sha256: c712ae732576a0da858c511be1c0c7899f3f78381ff2ca29e1e9e193f059925d, size: 2529280}
+          ggml.dll:              {sha256: ef8cf720f2b12ac511c9c586969c8b263f0b9dcacefc16ebdc6f3254c4fabf32, size: 56832}
+          ggml-base.dll:         {sha256: 936b6c839e7174f76207512503bbdf125467a52627642bec32836e2be181b94c, size: 664064}
+          ggml-cpu.dll:          {sha256: c80a8df36c7a55e77c16f4e276ac37bd86582460272331703b712f87f97d9722, size: 964096}
+          ggml-cuda.dll:         {sha256: 956abf9ae25c7ec6fbcaa2861944086d26477c0cf841bc436548168e76208c5b, size: 93089792}
+          cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+          cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+          cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+      # The build before f1ef2064 (nothing runs it since 2026-09-27 03:32):
+      # base + 0001 only, WITHOUT 0002 (the PTQ1_0 PDL
+      # race is in it). Its recipe is this entry without the 0002 patch.
+      # Remove this block once nothing runs it.
+      - path: C:/Users/jwals/engines/llama-bonsai2-eebbaae2/src/build/bin/llama-server.exe
+        build_tree: C:/Users/jwals/engines/llama-bonsai2-eebbaae2/src/build
+        built: 2026-09-25T10:27:43-04:00
+        built_with_patches: [0001-reasoning-budget-nudge.patch]
+        files:
+          llama-server.exe:      {sha256: dec92c886b482c2c20f2ba03b1b2c02edea0ff81801059ee9866802a38d43426, size: 10240}
+          llama-server-impl.dll: {sha256: ddf5cdd57dede5b85fbf68c6a028913e4ffcb71ecc1685df09f922544069c221, size: 3187712}
+          llama-common.dll:      {sha256: 90448883929771500839d12c898f7aac91fc1a0c6504af18c13af4a962d32817, size: 8332288}
+          mtmd.dll:              {sha256: 4aa8bd8218d1d63ff0def02a7a966a4d9140d68defbeca7533f8df5a8d73419e, size: 2324992}
+          llama.dll:             {sha256: 89a200200756c4fcd73f6cb631c664ded6f3466eda3ec510e1ff197c634fd879, size: 2529280}
+          ggml.dll:              {sha256: 6c9161bd25aff3c6f3b16aab5e36bd0381f756536f2a6434ac8385d63eb7f3f2, size: 56832}
+          ggml-base.dll:         {sha256: 15074ba4aa904a8fc500eb6f5956122809c1502573e98dc84e0b5383914ea502, size: 664064}
+          ggml-cpu.dll:          {sha256: 18c9bcbb1f8b012ec52cd499654901af529074b1d55a02532e253311dcd0433e, size: 964096}
+          ggml-cuda.dll:         {sha256: 39517111cb968ef9566f1c48c0cc930bd92993b7a224672d7bac09790b87fcd9, size: 93097472}
+          cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+          cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+          cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+      # The first nudge build (build-nudge/, before eebbaae2; config.yaml no
+      # longer runs it), WITH the npm-built web UI embedded. Pinned and
+      # verified by deploy_check while config.yaml points at it, but NOT
+      # rebuildable from this manifest any more: its UI archive was deleted
+      # with the decision to ship no UI (2026-09-25). Remove this block once
+      # nothing runs it.
+      - rebuildable: false
+        path: C:/Users/jwals/llamacpp-sudoingx-bonsai2/build-nudge/bin/llama-server.exe
+        build_tree: C:/Users/jwals/llamacpp-sudoingx-bonsai2/build-nudge
+        built: 2026-09-25T09:00:03-04:00
+        built_with_patches: [0001-reasoning-budget-nudge.patch]
+        deviations:
+          - >-
+            LLAMA_USE_PREBUILT_UI=OFF (every other cache option equals
+            build/'s) with npm on PATH: npm built the UI from tools/ui at the
+            base, with a build timestamp (_app/version.json 1790341111259),
+            and gzip was on PATH, so it is embedded gzipped. Its dist archive,
+            which reproduced ui.cpp exactly, was deleted 2026-09-25 with the
+            no-UI decision; that is why this build is not rebuildable.
+          - >-
+            cudart64_12 / cublas64_12 / cublasLt64_12 were copied from build/bin,
+            not from the toolkit; they are byte-identical to the toolkit's
+            (post_build_copies hashes).
+          - >-
+            common/reasoning-budget.cpp was compiled with LF line endings (the
+            patch author's editor); a rebuild checks it out CRLF. No raw string
+            literal in the patched files, so the generated code does not depend
+            on it.
+        files:
+          llama-server.exe:      {sha256: 58cd1004c7ae76467dc625ed827ee328a5df8698945cca97bdc38e4b100fcc9f, size: 10240}
+          llama-server-impl.dll: {sha256: fded25c8d827414fea18822d57d15b9f1d342f37fea93395cb90a4d2467eb31d, size: 6310400}
+          llama-common.dll:      {sha256: a0222e10ef7351001ccc010c67873c8a1e477093d28f7bd413f90858c62818d0, size: 8332288}
+          mtmd.dll:              {sha256: 3739c014c1b3ed282f6d22e8449dab39128816a193eed6e83dad6d2893b7d401, size: 2324480}
+          llama.dll:             {sha256: 9c255b9f95745788d0a1fc7007b743dfe919ae8d4464ec619f8ef8e5cf5259b7, size: 2527744}
+          ggml.dll:              {sha256: 64c2f6e7ed2796ce187915903a2402d25f7ed190ca91e1480a9663c6096eeacb, size: 56832}
+          ggml-base.dll:         {sha256: 50f076308572eb92ddc4b3288bbfd615ebfc7b393a10ea5a0e51bcc0c8d595ca, size: 664064}
+          ggml-cpu.dll:          {sha256: 15229b196faa98276bc1b531b9364bc5bae6e27b2e43bf3b18557fafe1b66c83, size: 964096}
+          ggml-cuda.dll:         {sha256: 2429d0e5f98998bd0d4539206c7e0fd170829c00df2478915a49044b0976a827, size: 93102080}
+          cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+          cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+          cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: []   # replaced by llama-bonsai2-ada; kept for rollback
+
+  # ------------------------------------------------------------------------
+  llama-bonsai2-ada:
+    description: >-
+      CANDIDATE, NOT IN config.yaml (2026-09-27; docs/ENGINES.md
+      "bonsai-ada-surgery merge"). PrismML-Eng/llama.cpp `prism` at adfffbe
+      (tag prism-b10743-adfffbe) + Cary Palmer's bonsai-ada-surgery series
+      (33 patches, MIT: q8_0 K/V read in place by the MMA flash-attention
+      kernel, quantized-KV GQA decode on MMA, SoA/multi-column PTQ1_0
+      mat-vec, MTP fixes, tiered KV, --spec-draft-window, harness flags) +
+      our reasoning-budget nudge (0034 = llama-bonsai2's 0001, same bytes) +
+      our FA-vec masked-KV skip (0035 = llama-bonsai2's 0003, same bytes).
+      llama-bonsai2's 0002 (PDL sync) is NOT here: the series' 0026 is the
+      same one-line fix at the same place.
+    kind: source
+    upstream: https://github.com/PrismML-Eng/llama.cpp
+    branch: prism
+    base_commit: adfffbe41b2cabcd51fff326ab045662265062bb
+    clone:
+      # Blob-less full history, as llama-bonsai2: llama.cpp embeds
+      # `rev-list --count HEAD` (10743 here, the tag's number) and the short
+      # hash; core.abbrev pins the short hash at 9 characters ("adfffbe41").
+      mode: blobless
+      abbrev: 9
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patch_source:
+      # Where 0001-0033 come from, read-only, pinned. The files are the
+      # bundle's patches/ blobs byte for byte (the bundle marks *.patch
+      # -text); each file's `From <sha>` line is the commit below, and the
+      # series applied to adfffbe (git am) reproduces the tree of
+      # llama.cpp-ada-ternary branch bonsai-q8-product @ c8b8993a EXACTLY
+      # (tree hash equal, checked 2026-09-27). Their 0001-0005 are sudoingX's
+      # #218 commits e148e857c..e724b07ff, identical (git range-diff `=`).
+      bundle: https://github.com/professorpalmer/bonsai-ada-surgery
+      bundle_commit: 5158a8df3bc4c8b9375ed521021eb6118feda78d
+      bundle_path: patches/
+      series_repo: https://github.com/professorpalmer/llama.cpp-ada-ternary
+      series_branch: bonsai-q8-product
+      series_head: c8b8993a6211db9edc4df9de9e1f8b1915d183df
+      licence: MIT (Copyright (c) 2026 Cary Palmer; engines/patches/llama-bonsai2-ada/LICENSE.bonsai-ada-surgery). Patches 0001-0005 are sudoingX's.
+    patches:
+      - file: 0001-Add-planar-transposed-activation-layout-for-the-PTQ1.patch
+        sha256: df8170976535c39823eeadf2e71132617d2d1480fd32bc8d6e595c422bb737fc
+        commit: 24c7f90889bc8ed1eae0187198e3cd17a5683441
+      - file: 0002-Add-dedicated-PTQ1_0-mat-vec-kernel-with-full-lane-u.patch
+        sha256: c894b4b9b1b5ee519144cff8984a17eb0aa1e6c237d810512fc7cd44a711b693
+        commit: 118445b08f6a4531b9be9e590f11ce1e8d9548b2
+      - file: 0003-Test-add-Bonsai-2-projection-shapes-to-the-mul_mat-p.patch
+        sha256: 097a558ea9c8caf7490364349c9004f3f2cc21f28ea3b3ab586779cf368754b5
+        commit: 423418ea6e0ed81aa1e8eb9a704624551c0bc06c
+      - file: 0004-Add-GGML_CUDA_BATCH_INVARIANT-for-batch-invariant-sm.patch
+        sha256: a48e9aa99771baf84e5c2c76afaa948e3d92af4baf2d4714592b1af60cb7ccb3
+        commit: cee4fa6b0da04ee34c1e4b7b88833c72a5875797
+      - file: 0005-Fix-use-the-mat-vec-kernel-for-bf16-matrices-under-6.patch
+        sha256: 9b3ce292646769ebaaa8c88c030db84e86d8745c4ae20f658878b536330b7b63
+        commit: 9e2449be657280becdc6912ac839d60aff7e4b19
+      - file: 0006-cuda-fold-the-recurrent-state-gather-into-the-GATED_.patch
+        sha256: b86d7c04117aa046afc7b0186af0a9db48bf5728515714cc388ee432c72ae273
+        commit: 06ae2d6d5839e08a2d114e62f8622b7b74d4a1e0
+      - file: 0007-cuda-PTQ1_0-decode-on-consumer-Ampere-Ada-SoA-q8-act.patch
+        sha256: a2c8ee04585aa56d07b41931e06cf0d43e1dcbebcc3ee42c63c1e94469cf4d86
+        commit: 5f9bed66627e0b7087a7ab42f71e6672b6c23d35
+      - file: 0008-cuda-PTQ1_0-hybrid-dispatch-template-y_soa-MMQ-from-.patch
+        sha256: ace395dce452f1f217dc55424873f3d91205fb63502d6d59c8749515066444d9
+        commit: 156b9f38b3191d1a9dca687e5cc3e90eea52e735
+      - file: 0009-cuda-flash-attention-MMA-reads-q4_0-q8_0-K-V-in-plac.patch
+        sha256: 85c26e6a49afecf8969834a7750fe4b6d0e25509c691f4f6069bc27bb5850685
+        commit: a5c11f57d258dddeecfbd5abec43476a0da556a0
+      - file: 0010-cuda-PTQ1_0-multi-column-mat-vec-raw-digits-with-exa.patch
+        sha256: ff15092d5c4ccbe550c57d909a6954ab926ff94ff020a1d642496dd086f77fdd
+        commit: 9ce36a0d62064c8d6ab569ee5afd4728ed5c27f1
+      - file: 0011-qwen35-MTP-graph-publishes-only-the-output-rows-of-h.patch
+        sha256: ef612c6698ed55410cb548997f9efdda4827943373052e94ba2fc5521e58a0d3
+        commit: dc7b4f00d5f750cdc88bb9296d2a9d3a8c7dbed7
+      - file: 0012-speculative-draft-mtp-decodes-the-catch-up-rows-toge.patch
+        sha256: 17d75ce9fe8255d09fb4e7ba504599e59148155e487ec83e7303a57eb79255ed
+        commit: 8662c8c0d280f8244c24c82ef9b0a28e3102dc3d
+      - file: 0013-cuda-Hadamard-transform-quantizes-its-own-output-whe.patch
+        sha256: 269cf3ba114f681ba74dd299d7fef6c4576099afb500e690c15c022f1e123772
+        commit: 275ef5554165b917f0fa9a43dee3d331d3f64e82
+      - file: 0014-sampling-reject-out-of-vocab-token-ids-from-the-back.patch
+        sha256: 05b9ae6f55f2bf957ff5eaafde512a759b7a6e623a4f3df77f3ce3a76ef80e3d
+        commit: 19646bf7d8af932f34d54c7d1c0d4e617c7b07c9
+      - file: 0015-speculative-draft-mtp-drops-stale-deferred-rows-when.patch
+        sha256: c3e67077dc21010459f867998d5afa6b44207ac962f2247dd8ba05205ccd01dd
+        commit: 865b539a5c12ecf5f02652cc1d27cde37fa370cc
+      - file: 0016-cuda-release-the-FWHT-q8-held-pool-blocks-LIFO-and-b.patch
+        sha256: d87c11dcba1165163eba20f53a1e617d8e36b0644284c451eeb422390f75f26f
+        commit: ea92f2b6e227629d4910c0d3b6a17791f96ac854
+      - file: 0017-server-spec-draft-depth-max-stops-drafting-once-the-.patch
+        sha256: 58a32aa040a79e735787ff540b47f6d1d6088bb8e728f40006cef3d4e1cfc2ec
+        commit: 42d4b94c494e5f458e30db567bba9db2b43afdfc
+      - file: 0018-cuda-restrict-off-PTQ1_0-kernel-params-Ampere-uses-t.patch
+        sha256: f173f45d423a956ccd7bf64326c21edd33f8566ebe8e4afd828f8ed93c30f209
+        commit: b2439ea686cd087c063f3f370801185430e95e74
+      - file: 0019-cuda-address-Copilot-review-on-native-q4-q8-FA-MTP-c.patch
+        sha256: a969fbc16c32f11c2f65ff154505f49625196d88660d3272c834b7704f99ed9c
+        commit: 5c2ba59972e45f4c7b7864958bebb18228b37a5d
+      - file: 0020-cuda-share-the-PTQ1_0-mat-vec-smem-budget-between-gu.patch
+        sha256: 1f5b8934f702849a7e1e6cb5835e5b3c47ec6246ad6f93d3646dfb765ec7c272
+        commit: 8736068011bd5a6ce036e17b76a1da18279d542f
+      - file: 0021-spec-flush-MTP-catch-up-when-it-plus-anchors-would-o.patch
+        sha256: eb9157c4412977e9f29572c2a6c49a06faa52494dc77bb4ea2665acbe4965919
+        commit: 5421dac4668a762f64e5fcded89485d29caad1b6
+      - file: 0022-cuda-restore-the-scalar-PTQ1_0-vec-dot-on-MUSA.patch
+        sha256: aae43db701f4ab216c942c44367b04143fcfcaa27f2a8440852631f3e5fe4d21
+        commit: 24df81eedaa464ee79e622029e42835525285b9c
+      - file: 0023-spec-keep-MTP-catch-up-across-a-failed-draft-decode.patch
+        sha256: 017948846e01f3404a311c755f5fb360cf35abdb8486f3d2418bcddaf15f6565
+        commit: 8ee1aad69ede4efe980a68db975537b246c482d6
+      - file: 0024-cuda-define-the-PTQ1_0-layout-helper-after-ggml_cuda.patch
+        sha256: 21307d0dc37ce670912e38a11eb45237f27ea3c272c5227eafb4d6f402a3fbfd
+        commit: 12cfd4b32e43e7e822fc71dbf175d0ea37b26800
+      - file: 0025-cuda-land-remaining-221-review-notes-pass-q8-layout-.patch
+        sha256: e939d500c33d6cfb74cb3e4c191b4ee3941887bc7477ead260be7e1c6c491450
+        commit: cb9dd03e31bb303394768e21ac1dd036cb575021
+      - file: 0026-cuda-wait-on-the-PDL-dependency-in-the-PTQ1_0-planar.patch
+        sha256: ff77007251f0d763bf30805708d3b26f91de82b964da31d5e8eba56d517b62ff
+        commit: fea3a8f7afc2e7f38533427e8b657b9eb51d8ff3
+      - file: 0027-cuda-restore-warp-reduce-epilogue-under-BATCH_INVARI.patch
+        sha256: 32a0a8ccf41f10162c3be173240047d18e42bd7dd6b928b35aea6a1bc7f7b138
+        commit: 8ecc788d518725f99b2e6c65f18ef66ddadf6293
+      - file: 0028-llama-cuda-tiered-KV-cache-kv-vram-cells-VRAM-head-p.patch
+        sha256: b6af9e3ba8382247dd379cd54110c2b75548e377fbb295f234ed1f7e168e9958
+        commit: 1f19305d125194b90a46f830c4626c3c1f882323
+      - file: 0029-cuda-quantized-KV-GQA-decode-on-the-in-place-MMA-fla.patch
+        sha256: 6fadfb87e7630c4a6680fcf5f61624365c502a175b462a9426f1206d197bec56
+        commit: a20f9a6e07aa3af4d6b173d49d3e64ae9cc749f8
+      - file: 0030-cuda-BATCH_INVARIANT-occupancy-independent-FA-KV-spl.patch
+        sha256: b9a486de7955db4091d330df7048b5c9be74736e0e10c4295fe5c9fccdcbc4ba
+        commit: efe20ad51af0f2f7ab41205a8e554940463b3fc6
+      - file: 0031-speculative-spec-draft-window-and-spec-draft-n-max-t.patch
+        sha256: eb2328a62d915f2ccdd44a6e511df59b90b10495ba7ef5b297269e2a743204e6
+        commit: 414ec9b801a84ed91e56a6b627c2836c88629542
+      - file: 0032-server-reasoning-effort-allow-fallback-and-reasoning.patch
+        sha256: 9cf6d551ca047ba07a5c71b9cf0b00709bf03aa09fe709f309c6e1423dd0e955
+        commit: d8fa9565ab85f83ab6efc8c25d26e51a86236156
+      - file: 0033-cuda-GGML_CUDA_OP_TIMING-1-per-node-GPU-time-breakdo.patch
+        sha256: 90dd2102ce57d76c289a0ac8d057db9fc55309ae99dfa14431e07fcc7c0ef878
+        commit: c8b8993a6211db9edc4df9de9e1f8b1915d183df
+      - file: 0034-reasoning-budget-nudge.patch
+        sha256: 08dbca5a7fa8bcd0583de6383972920354b0aea0fe2d5f12acd95ab08ef646a0
+        # OURS: llama-bonsai2's 0001-reasoning-budget-nudge.patch, the same
+        # bytes. Applies to the series with offsets only (8 files, +513/-22);
+        # the series' own common/sampling.cpp change (0014, an out-of-vocab
+        # guard) does not touch the budget sampler.
+      - file: 0035-cuda-fattn-vec-skip-masked-kv.patch
+        sha256: 62a94c73ab48a488de48207052aa50ae40860bf22a9ba5bd188684cd56dd3779
+        # OURS: llama-bonsai2's 0003, the same bytes; exact (a skipped warp's
+        # cells are -inf for every query). On this stack decode with q8_0 K/V
+        # and >= 256 KV cells takes the MMA kernel (series 0029), not the
+        # vec kernel, so 0035 acts only below 256 cells or with
+        # GGML_CUDA_FA_MMA_DECODE_MIN_KV=0 -- kept so that route does not
+        # regress to the #59 tax, and so PHASE 2 can compare the two routes
+        # in one binary. The MMA kernel still reads masked KV tiles
+        # (docs/ENGINES.md "bonsai-ada-surgery merge").
+      - file: 0036-spec-draft-window-per-sequence.patch
+        sha256: dbafd79b9e391ffa268e53ee70c063c9b7ef222b1522bc59f7fb2bf48f996312
+        # OURS (2026-09-27). The series' 0031 trims the draft context of EVERY
+        # slot by the batch's lowest position minus --spec-draft-window: with
+        # 4 slots a deep conversation's batch erases a shallow one's recent
+        # draft rows. Now each sequence in the batch is trimmed by its OWN
+        # lowest position in it, and a sequence with no token in the batch is
+        # not touched (seq ids read from batch_view.seq_id only). Identical to
+        # 0031 with one slot; no effect without --spec-draft-window.
+      - file: 0037-tiered-kv-tail-by-pool-cells.patch
+        sha256: b94b3b8fad4e42a6dbfd0fa776ca7f4f21e4be23aebfd771f96f5c8c4c965c51
+        # OURS (2026-09-27). 0031 drafts --spec-draft-n-max-tail once a
+        # slot's POSITION reaches --kv-vram-cells; 0028's line is on pool
+        # CELLS. With the unified 4-slot pool every slot's attention spans
+        # the pool's highest used cell, so the tail is read by all slots or
+        # none: the tail draft size now keys on
+        # llama_memory_cells_used_max_p1() (new API: the quantity get_n_kv
+        # pads). Draft size only; storage and arithmetic unchanged.
+        # (0038 re-keys it on the slot's own span.)
+      - file: 0038-kv-cache-attention-spans-the-batch-sequences.patch
+        sha256: 985cb8c6d6f09894a73fd033596fc812db1b507289967fbf342556230d7afdd1
+        # OURS (2026-09-28, pagoda-h6; docs/ENGINES.md "KV placement"). An
+        # attention op spanned the POOL's highest used cell, so an idle
+        # sequence parked high made every sequence stage the tiered cache's
+        # host tail (0028) on every step. Now n_kv covers the ubatch's own
+        # sequences (per-sequence 256-cell block counts in llama_kv_cells;
+        # exact: only masked cells leave the view). API
+        # llama_memory_seq_span_p1(); the server's tail draft keys on the
+        # slot's span. LLAMA_KV_SPAN_BY_SEQ=0 = the pool bound.
+      - file: 0039-kv-cache-new-cells-go-to-the-lowest-free-cells.patch
+        sha256: 41bc361fc764dfa429e5fd9e9aafe2122c5d9d8cecaa4c4c1a5824900c4bf572
+        # OURS (2026-09-28). A sequence grows in place (the cell after its
+        # own highest cell), else find_slot starts at the lowest empty cell
+        # (a hint, amortised O(1)) instead of the head; not for SWA caches.
+        # LLAMA_KV_PLACE_LOW=0 = the head search.
+      - file: 0040-kv-cache-promote-the-batch-sequences-to-the-lowest-cells.patch
+        sha256: 2b6078cb02e3ee30e82e643642bd6a14fde4ec95123f28253cf255ce7a0a0a45
+        # OURS (2026-09-28). Tiered caches only: before a batch whose span
+        # would pass the VRAM line, the cells of its sequences move to the
+        # lowest cells of the pool and idle sequences' cells move to the
+        # lowest empty cells above them: get_rows/set_rows over a raw
+        # 32-bit alias of each K/V tensor (bytes, not values), chunks of one
+        # ubatch of rows, cells' state swapped after each graph. Sequences
+        # used in the last n_seq_max batches never move. Measured: docs/
+        # ENGINES.md "KV placement" (bench/kv_placement.py).
+        # LLAMA_KV_PROMOTE=0 = off; LLAMA_KV_PROMOTE_VERIFY=1 = byte check.
+      - file: 0041-kv-cache-a-slot-rank-decides-whose-cells-hold-the-vram-line.patch
+        sha256: 565a04a3ec429a9039ed12b7558b808e6b197205aba7ba1ae6392d3b8a56ba74
+        # OURS (2026-09-28, operator: 3 slots, "the first conversation never
+        # spills"; docs/ENGINES.md "KV rank"). 0040's plan by RANK: each
+        # sequence has a rank (request field `kv_rank`, and `kv_ranks` for
+        # the other slots by id; higher keeps VRAM) and an active flag (a
+        # slot's task launch to its release). A higher rank keeps its cells
+        # running or idle, an equal rank while active; a lower rank moves out
+        # first, even running; exchanges take the lowest rank first. The
+        # batch's rank groups plan highest first. /props reports
+        # `kv_vram_cells`. LLAMA_KV_RANK=0 = 0040 exactly. NOT RUN ON A GPU.
+    vendor:
+      # Written by `python scripts/build_engine.py vendor llama-bonsai2-ada`;
+      # `check` verifies the tree against it offline. Do not edit.
+      rule: llama.cpp
+      path: engines/src/llama-bonsai2-ada
+      repo: https://github.com/PrismML-Eng/llama.cpp
+      commit: adfffbe41b2cabcd51fff326ab045662265062bb
+      upstream_tree: f701dae3247ff1ba55db24d1fd83dff0cd2edff8
+      patches: 41
+      patches_digest: 0a47208086dd7b350b9a535fef9ccecdfdd19a8d7eb28ea8e27c1cdaa40ba308
+      patched_tree: c2d6044baf1a1568f69cb16c3c566305eaaceab2
+      base_tree: 339bad835c77c724415bf4ef471bebd288d9d104
+      tree: e682d374328c84508561c1da784ee2af5a0ddaf7
+      files: 3334
+      bytes: 50809793
+      excluded_files: 230
+      excluded_bytes: 116854999
+      executable_files: 123
+      licences:
+      - LICENSE
+      - cmake/license.cmake
+      - gguf-py/LICENSE
+      - licenses/LICENSE-jsonhpp
+      - tools/ui/src/lib/vendors/big-integer/LICENSE
+      - tools/ui/src/lib/vendors/decimal.js/LICENCE.md
+      - tools/ui/src/lib/vendors/nerdamer-prime/LICENSE
+      - vendor/cpp-httplib/LICENSE
+      - vendor/hash/rotate-bits/LICENSE.md
+      - vendor/hash/sha256/LICENSE
+      - vendor/hash/xxhash/LICENSE
+      build_info:
+        number: 10743
+        commit: adfffbe41
+        source: the shipped build's common/build-info.cpp
+    inputs: {}
+    toolchain: msvc-cuda128
+    path_tools: {}
+    absent_tools: [npm, pnpm]
+    configure:
+      # llama-bonsai2's flags exactly: sm_86 (A4000) and sm_120 (5060 Ti)
+      # native code, no web UI.
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_CURL=OFF
+      - -DLLAMA_BUILD_TESTS=OFF
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+      - -DLLAMA_BUILD_UI=OFF
+      - -DLLAMA_USE_PREBUILT_UI=OFF
+    expect_cache:
+      GGML_NATIVE: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    # Pinned from the first build (51d64e6f, 2026-09-27): number 10743,
+    # commit "adfffbe41", MSVC 19.36.32543.0.
+    expect_generated:
+      common/build-info.cpp:
+        sha256: 0b14858b7619523ab33ade2094fd2f447f061765649dc1878cef7326151d61d0
+        stage: configure
+    expect_generated_lacks:
+      tools/ui/ui.h: LLAMA_UI_HAS_ASSETS   # no UI embedded
+    targets: [llama-server]
+    post_build_copies: *cuda_dlls
+    tests:
+      # As llama-bonsai2: 0034's own tests, in a static CPU tree.
+      configure_extra:
+        - -DGGML_CUDA=OFF
+        - -DBUILD_SHARED_LIBS=OFF
+        - -DLLAMA_BUILD_TESTS=ON
+      targets: [test-reasoning-budget, test-chat]
+      ctest_regex: ^(test-reasoning-budget|test-chat)$
+    output: bin/llama-server.exe
+    shipped:
+      # Built by scripts/build_engine.py from this entry (base + 0001-0033 + 0034-0041, no UI)
+      # into C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d. 0041: KV rank (docs/ENGINES.md "KV rank").
+      # DEPLOYED 2026-09-29 by bench/deploy_kv_rank.py: -np 3 --kv-unified, -c 349184, --kv-vram-cells 141824, --spec-draft-window 16384.
+      path: C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d/src/build
+      built: 2026-09-28T08:07:23-0400
+      built_with_patches: ["0001-0033 (bonsai-ada-surgery)", 0034-reasoning-budget-nudge.patch, 0035-cuda-fattn-vec-skip-masked-kv.patch, 0036-spec-draft-window-per-sequence.patch, 0037-tiered-kv-tail-by-pool-cells.patch, 0038-kv-cache-attention-spans-the-batch-sequences.patch, 0039-kv-cache-new-cells-go-to-the-lowest-free-cells.patch, 0040-kv-cache-promote-the-batch-sequences-to-the-lowest-cells.patch, 0041-kv-cache-a-slot-rank-decides-whose-cells-hold-the-vram-line.patch]
+      files:
+        llama-server.exe:      {sha256: 0aea2925955a3fb82465f15d8efe3dd17721176abf4c5335d11b4b1075e1b2ee, size: 10240}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        ggml-base.dll:         {sha256: a96e894a6e1c4fb3a817e7bdaeaf68c38675fefb0f153872e5165852b06b5a20, size: 664064}
+        ggml-cpu.dll:          {sha256: 0396deacae249eb6493d3c4132bdc3676a5a17b384d311af67d3eed2777e2b62, size: 964608}
+        ggml-cuda.dll:         {sha256: a0a3b4d946da768936c88029612f36ab386a65148ebe0b86c26f9567d65b5392, size: 111772160}
+        ggml.dll:              {sha256: b97431c30b6941913ef5653888892d76b8f48dde2f33906b8742b0ba63497933, size: 56832}
+        llama-common.dll:      {sha256: c45bbcf6f086806daad079877648b2931dbf6111eb23b9f181fbaf8c5cdef8ac, size: 8357376}
+        llama-server-impl.dll: {sha256: 9b10929152826a161a10fde0c8fc18942a3d1eb4d5bf2e3d122a2d2d92584737, size: 3198976}
+        llama.dll:             {sha256: 6c93c8d7bac4619e671542692f341463f5a7cf2d489db8cc04d65c0c14bf9a2b, size: 2576896}
+        mtmd.dll:              {sha256: 33bc70c636c90cbc817ab25f93f7846822a4955c507297a0f4ff3ac4eced96a0, size: 2324992}
+    previous:
+      # REPLACED 2026-09-29 by llama-bonsai2-ada-80d2c60d (0041, the three-slot KV layout; kept for rollback)
+      # Built 2026-09-28 by scripts/build_engine.py from this entry (base + 0001-0033 +
+      # 0034-0040, NO web UI) into C:/Users/jwals/engines/llama-bonsai2-ada-746c8af6. Every check
+      # passed, engine tests 2/2. 0038-0040: KV placement (docs/ENGINES.md "KV placement").
+      # DEPLOYED 2026-09-28: `bonsai`, the argv unchanged (only the binary).
+      - path: C:/Users/jwals/engines/llama-bonsai2-ada-746c8af6/src/build/bin/llama-server.exe
+        build_tree: C:/Users/jwals/engines/llama-bonsai2-ada-746c8af6/src/build
+        built: 2026-09-28T07:14:08-0400
+        built_with_patches: ["0001-0033 (bonsai-ada-surgery)", 0034-reasoning-budget-nudge.patch, 0035-cuda-fattn-vec-skip-masked-kv.patch, 0036-spec-draft-window-per-sequence.patch, 0037-tiered-kv-tail-by-pool-cells.patch, 0038-kv-cache-attention-spans-the-batch-sequences.patch, 0039-kv-cache-new-cells-go-to-the-lowest-free-cells.patch, 0040-kv-cache-promote-the-batch-sequences-to-the-lowest-cells.patch]
+        files:
+          llama-server.exe:      {sha256: d6a66af8e9876feb402be180b45acf1a20eafa1daab5abe6e3e9284888bc4552, size: 10240}
+          cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+          cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+          cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+          ggml-base.dll:         {sha256: d101f201ca50ddec02f75e0913266293d75ba3dfb9897f4ea08043a8352ee03a, size: 664064}
+          ggml-cpu.dll:          {sha256: 14696badcd0dad588e36a0e7e1d559d0def4609a5523dd9d6f99e4974e29e3db, size: 964608}
+          ggml-cuda.dll:         {sha256: 8eb82b13cd476b6ef383e6ef0622e41beecb306d2b24d710f27c7df2444cff01, size: 111766528}
+          ggml.dll:              {sha256: 480968e2028ce9fa185361a2503c2b6859623df865e1045d05fa6a487a0a5cd5, size: 56832}
+          llama-common.dll:      {sha256: 7a59e191ebc3f2137a270a5f356f56ce3c9e456549bcf419bfa089e96b0b7f31, size: 8357376}
+          llama-server-impl.dll: {sha256: 27fb9af5405c3c8eb22d287c8dbb8b757e4234781afcaff0ff0b34c21fd5e5b3, size: 3195904}
+          llama.dll:             {sha256: 1a8eb1aaac1310b87f6495e0a07b5f2b0462c2442677d89e84064586b7f6d4cd, size: 2563072}
+          mtmd.dll:              {sha256: 08e259657a1321edefee590fe3f5189ecd0c6c9c79597a10228f52adf2110e54, size: 2324992}
+      # Built 2026-09-27 ~20:40 by scripts/build_engine.py from this entry
+      # (base + 0001-0033 + 0034-0037, NO web UI) into
+      # C:/Users/jwals/engines/llama-bonsai2-ada-92ffd4db. Every check passed:
+      # 37/37 patches applied, all 208 CMakeCache options equal 51d64e6f's,
+      # build-info.cpp byte-identical to the pin, ui.h without assets, CUDA
+      # DLLs hash-checked, engine tests 2/2. DEPLOYED 2026-09-27, REPLACED 2026-09-28 by 746c8af6 (0038-0040; kept for rollback) (operator's
+      # quick path, docs/ENGINES.md "bonsai-ada-surgery merge"): `bonsai`,
+      # original trunk + ProCreations head + mmproj, -c 262144,
+      # --kv-vram-cells 114432, q8_0 draft K/V, draft 2 / tail 4.
+      - path: C:/Users/jwals/engines/llama-bonsai2-ada-92ffd4db/src/build/bin/llama-server.exe
+        build_tree: C:/Users/jwals/engines/llama-bonsai2-ada-92ffd4db/src/build
+        built: 2026-09-27T20:40:00-04:00
+        built_with_patches: ["0001-0033 (bonsai-ada-surgery)", 0034-reasoning-budget-nudge.patch, 0035-cuda-fattn-vec-skip-masked-kv.patch, 0036-spec-draft-window-per-sequence.patch, 0037-tiered-kv-tail-by-pool-cells.patch]
+        files:
+          llama-server.exe:      {sha256: beac021e2818708abc9187c6554db465372074b3eaa16f5db6db2275daa5540f, size: 10240}
+          llama-server-impl.dll: {sha256: a78bf64a5f86bdd05d4195f19a6f17d5b83fd1a31fe25145da3e2ca4c7e4652c, size: 3195904}
+          llama-common.dll:      {sha256: 7a90e98ca7cedf679c5a498094d538f48fb3f4942154193723fae9c03c116985, size: 8357376}
+          mtmd.dll:              {sha256: 024f7ffe6f3ef25acbbea581b856e953a8aca0531722d09c2f0f396d7c0e5b85, size: 2324992}
+          llama.dll:             {sha256: 7b57733a788eec89015122d8ca949e851dbad57967862683def8d175f889e49c, size: 2541056}
+          ggml.dll:              {sha256: 49234d0ad289f57defc993a2660543ac93f80e0fa6f1ff430c643f90d059d651, size: 56832}
+          ggml-base.dll:         {sha256: eb479abf692f344eb97c9a6478e7e74a97f6f3c1ac84bb2a45957fc306162b9b, size: 664064}
+          ggml-cpu.dll:          {sha256: 4963a283ba8457ff20e7465295d393f652f0bc42fd780ae7daa8406ef1f31fff, size: 964608}
+          ggml-cuda.dll:         {sha256: 40ebb0bf54b5ef5633efd05749fbfa564c4a14925b30c934ebe03050b75b8dc9, size: 111764480}
+          cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+          cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+          cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+      # The first build (2026-09-27 19:15): 0001-0035, WITHOUT 0036/0037, i.e.
+      # the series' 0031 draft-window trim as shipped. Kept ONLY as PHASE 2's
+      # `ada-window-0031` arm (the multi-slot trim hazard, measured). Never
+      # deploy it; delete this block after PHASE 2.
+      - path: C:/Users/jwals/engines/llama-bonsai2-ada-51d64e6f/src/build/bin/llama-server.exe
+        build_tree: C:/Users/jwals/engines/llama-bonsai2-ada-51d64e6f/src/build
+        built: 2026-09-27T19:14:50-04:00
+        built_with_patches: ["0001-0033 (bonsai-ada-surgery)", 0034-reasoning-budget-nudge.patch, 0035-cuda-fattn-vec-skip-masked-kv.patch]
+        files:
+          llama-server.exe:      {sha256: b97e805c607e181c250b6849e805deb9135046ad3649ff11097eade22eb84f1a, size: 10240}
+          llama-server-impl.dll: {sha256: 3b696623f0937761f076fe3b7b52533599f7d7b2c7e7f21d69ea114f48c3ce07, size: 3194880}
+          llama-common.dll:      {sha256: fd828f61ad02e76e80176761a1333de687365f49469e8405cb54b8ec7c1340da, size: 8357376}
+          mtmd.dll:              {sha256: a033b3909f98fda891e8ab1155135d667183bb19d56ed1da08e32fe88239e0ea, size: 2324992}
+          llama.dll:             {sha256: f914f1f6c243f27624dc656b9f6bbd2c8bc376743b11d2c61d25ba63baeb7a70, size: 2540032}
+          ggml.dll:              {sha256: 266f1777e246b45ff8610eea0c28b7a6f9bc77f17fd2f2812b8e3573097baa60, size: 56832}
+          ggml-base.dll:         {sha256: f132e2a85b10f0cd701989091141193885afe7b1ca151e5cb9f93a0baf2b9c50, size: 664064}
+          ggml-cpu.dll:          {sha256: 03b4e38fdb59a884b0d763025a051a6cb06e7063336e767ae23a2cf9606d6748, size: 964608}
+          ggml-cuda.dll:         {sha256: cc18112c140cee1649fd588a63dd0199906d66e71604977fa586381a49633c29, size: 111760896}
+          cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+          cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+          cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: [bonsai]
+
+  # ------------------------------------------------------------------------
+  llama-upstream:
+    description: >-
+      CANDIDATE, NOT IN config.yaml (2026-09-27; docs/ENGINES.md "Flash-Next
+      on upstream llama.cpp"). The max tier's model, Qwen3.8-Flash-Next
+      (arch qwen4exp: Gated DeltaNet + Qwen Sparse Attention, 512-expert
+      MoE, hyper-connections, the PLE n-gram table), which neither of our
+      forks can load: PrismML's prism branched from upstream on 2026-08-25
+      (merge base 5ea87dda), two days before qwen4exp landed (#27742,
+      6c84c7d5d). ggml-org/llama.cpp master at the pin (build 11223; every
+      qwen4exp commit through #28770 "CUDA: enable sparse fa for qwen4",
+      3cf03257f -- Strata's own pin -- plus a week of master after it) +
+      our reasoning-budget nudge (0001 = llama-bonsai2's 0001, same bytes;
+      upstream already serves reasoning_budget_tokens/_message per request,
+      the nudge is ours). NO MTP (llama-upstream-mtp has it). No PTQ1_0:
+      this engine cannot run Bonsai, and the ada engine cannot run this.
+    kind: source
+    upstream: https://github.com/ggml-org/llama.cpp
+    branch: master
+    base_commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a
+    clone:
+      # Blob-less full history: llama.cpp embeds `rev-list --count HEAD`
+      # (11223) and the short hash; core.abbrev pins it at 9 ("4da633776").
+      # The tree's longest path is 161 characters (tools/ui/...), which fits
+      # MAX_PATH under engines_root (52 + 161); a longer --out may not.
+      mode: blobless
+      abbrev: 9
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patches:
+      - file: 0001-reasoning-budget-nudge.patch
+        sha256: 08dbca5a7fa8bcd0583de6383972920354b0aea0fe2d5f12acd95ab08ef646a0
+        # OURS: llama-bonsai2's 0001, the same bytes. Applies to this base
+        # with offsets only (common.h +1, test-chat.cpp +402,
+        # server-schema.cpp +4; checked with git apply --check 2026-09-27).
+        # Upstream's own per-request fields (reasoning_budget_tokens,
+        # reasoning_budget_message, the _start_tag/_end_tags) are unchanged
+        # by it; it adds reasoning_budget_nudge / _nudge_at.
+    # NOT TAKEN (2026-09-27): ggml-org/llama.cpp#27902 ("Blackwell IQ
+    # Failures", open, 8d78a813): byte loads in get_int_b2 for sm_100-129.
+    # Its evidence is CUDA 13.2 (IQ3_S MUL_MAT 0/11 on an RTX PRO 6000);
+    # the issue it fixes (#27763) was closed as a CUDA 13.2 toolkit fault
+    # (13.0 and 13.3 builds coherent), as was #21289 (13.3 fixed it). We
+    # build with 12.8. The IQ2_XS file carries exactly the affected types
+    # (IQ2_S x68, IQ3_S x44, IQ1_M x6), so PHASE 2's first step is
+    # test-backend-ops MUL_MAT / MUL_MAT_ID on the 5060 Ti (sm_120) for
+    # them; a failure there brings the patch in (it applies cleanly here).
+    vendor:
+      # Written by `python scripts/build_engine.py vendor llama-upstream`;
+      # `check` verifies the tree against it offline. Do not edit.
+      rule: llama.cpp
+      path: engines/src/llama-upstream
+      repo: https://github.com/ggml-org/llama.cpp
+      commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a
+      upstream_tree: a88a734cc4dc51d8687b4e27c32163108b2311f5
+      patches: 1
+      patches_digest: 31b6cd293bb870a0a8abd877fac3a6c0a49f7c1b2a4b29846aa32e77bb3d91c3
+      patched_tree: d890459dcd0e23cd3eceabcf8f5dee15dd216244
+      base_tree: a5da89fe0834db2912af39df1bc5129332c47329
+      tree: 48c73a0d4add0ba4780e8dbf54a8c476651386c2
+      files: 3410
+      bytes: 52646235
+      excluded_files: 237
+      excluded_bytes: 120705095
+      executable_files: 123
+      licences:
+      - LICENSE
+      - cmake/license.cmake
+      - gguf-py/LICENSE
+      - licenses/LICENSE-jsonhpp
+      - tools/ui/src/lib/vendors/big-integer/LICENSE
+      - tools/ui/src/lib/vendors/decimal.js/LICENCE.md
+      - tools/ui/src/lib/vendors/nerdamer-prime/LICENSE
+      - vendor/cpp-httplib/LICENSE
+      - vendor/hash/rotate-bits/LICENSE.md
+      - vendor/hash/sha256/LICENSE
+      - vendor/hash/xxhash/LICENSE
+      build_info:
+        number: 11223
+        commit: 4da633776
+        source: the shipped build's common/build-info.cpp
+    inputs: {}
+    toolchain: msvc-cuda128
+    path_tools: {}
+    absent_tools: [npm, pnpm]
+    configure:
+      # llama-bonsai2's flags, with three upstream differences: LLAMA_CURL
+      # is deprecated upstream (a warning; HTTPS now comes from
+      # LLAMA_OPENSSL, which we turn off: nothing here downloads a model),
+      # and the TESTS are on in this tree so test-backend-ops is built with
+      # the CUDA backend (PHASE 2's kernel check); only the listed targets
+      # are built.
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_OPENSSL=OFF
+      - -DLLAMA_BUILD_TESTS=ON
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+      - -DLLAMA_BUILD_UI=OFF
+      - -DLLAMA_USE_PREBUILT_UI=OFF
+    expect_cache:
+      GGML_NATIVE: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    expect_generated_lacks:
+      # Upstream's ui.h.in names the macro in a comment and writes
+      # `/* #undef LLAMA_UI_HAS_ASSETS */` when nothing is embedded, so the
+      # needle is the define itself (the first build, e14de24d, failed the
+      # bare-name check with no assets embedded).
+      tools/ui/ui.h: "#define LLAMA_UI_HAS_ASSETS"   # no UI embedded
+    # llama-bench (PHASE 2 speed rows), llama-quantize (the MTP draft's
+    # quantisation is llama-upstream-mtp's; kept here so both trees can
+    # quantize), test-backend-ops (kernel correctness on sm_120 / sm_86).
+    targets: [llama-server, llama-bench, llama-quantize, test-backend-ops]
+    post_build_copies: *cuda_dlls
+    tests:
+      # 0001's own tests, in a static CPU tree (Windows skips them in a
+      # shared build), as llama-bonsai2.
+      configure_extra:
+        - -DGGML_CUDA=OFF
+        - -DBUILD_SHARED_LIBS=OFF
+        - -DLLAMA_BUILD_TESTS=ON
+      targets: [test-reasoning-budget, test-chat]
+      ctest_regex: ^(test-reasoning-budget|test-chat)$
+    output: bin/llama-server.exe
+    # build-info.cpp of the first build (1b446647): number 11223, commit
+    # "4da633776", MSVC 19.36.32543.0, sha256
+    # eaa07321e4b048724acf744a4e297f42443b6f16e2842f3dc6a62383fb69f857. Not
+    # yet an `expect_generated` pin: adding it changes this entry's build
+    # hash (the directory name); pin it with the next rebuild, as
+    # llama-bonsai2-ada did.
+    shipped:
+      # Built 2026-09-27 ~23:30 by scripts/build_engine.py from this entry
+      # into C:/Users/jwals/engines/llama-upstream-1b446647 (the first
+      # attempt, e14de24d, compiled but failed the old no-UI needle; see
+      # expect_generated_lacks). Every check passed: source 4da63377, 0001
+      # applied, every configure flag in the CMakeCache, /arch:AVX2, ui.h
+      # without the define, CUDA DLLs hash-checked, engine tests 2/2
+      # (test-reasoning-budget + test-chat on this base). `--version` with
+      # no GPU visible: "0.5.0-dev (build 11223, commit 4da633776)". NOT RUN
+      # ON ANY GPU, NOT IN config.yaml.
+      path: C:/Users/jwals/engines/llama-upstream-1b446647/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-upstream-1b446647/src/build
+      built: 2026-09-27T23:30:00-04:00
+      built_with_patches: [0001-reasoning-budget-nudge.patch]
+      files:
+        llama-server.exe:      {sha256: 5aba8a5622846e08309693380097707507191d4c126986aabbbbdd1d14b48e9c, size: 10240}
+        llama-server-impl.dll: {sha256: b0d349ecbc2a2199cd1d4f4943f00db555e3431b1835ac2bdf2de694301ec27b, size: 3271680}
+        llama-common.dll:      {sha256: 5e2d33246e69b6fbcefed8d54baa0fe4954294d25e17dfdc08175065c6e045c0, size: 8260096}
+        mtmd.dll:              {sha256: 0f6ed776dd2b8ed12931f143f563682ec8188110c967fd349aa131f0076d3539, size: 2362880}
+        llama.dll:             {sha256: 9de31bc31ef7a187b3c483959a9c840c2c7b35878667b8469a9971de0f59feba, size: 2620928}
+        ggml.dll:              {sha256: d8b1f9220e2baebfc1f686efe31d2edc8ef68673689d5f68389834a3f5513928, size: 52736}
+        ggml-base.dll:         {sha256: 4cf5599c65f0ae9e08a886297485d7eeee9bf502a7e2bd161ebb8bf71f55c53e, size: 656384}
+        ggml-cpu.dll:          {sha256: 9c74cba74fce8e7a5c58a222b00022fe9cae8366d7562f32ccf50b85ffc3f3ca, size: 1071104}
+        ggml-cuda.dll:         {sha256: 06051b8b3965517514fda654dd6e15d707ec1694368bff2434a1f851a64325c0, size: 92178432}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: [flash-next]
+
+  # ------------------------------------------------------------------------
+  llama-upstream-mtp:
+    description: >-
+      CANDIDATE, NOT IN config.yaml (2026-09-27). llama-upstream + the
+      Flash-Next MTP draft head, ggml-org/llama.cpp PR #28243 (open, head
+      6fcaa16f, "Enables 1.3 to 2x faster MTP"), taken as its net diff. A
+      separate engine because the PR rewrites src/models/qwen4exp.cpp
+      (+290/-48) -- the TRUNK's graph file, not only the draft's -- so the
+      no-MTP gate runs on llama-upstream, untouched by it, and this build is
+      a PHASE 2 arm. Known upstream hazards for our 4 slots: #28286
+      (draft-mtp with --parallel > 1 mixes content across slots, on the
+      #27836 code this PR builds on) and #28019 (multi-seq split replay of
+      the recurrent state). The draft is a separate GGUF made from Qwen's
+      BF16 mtp.* tensors with this PR's converter (--mtp --mtp-shared-embd):
+      models/manifest.yaml flash-next-mtp-*.
+    kind: source
+    upstream: https://github.com/ggml-org/llama.cpp
+    branch: master
+    base_commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a
+    clone:
+      mode: blobless
+      abbrev: 9
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patch_source:
+      pr: https://github.com/ggml-org/llama.cpp/pull/28243
+      head: 6fcaa16f4b360649933a54d1f91ad40ed35c0e11
+      merge_base: bb3c853c300323913d8535eb371fe906cae9b932
+      licence: MIT (llama.cpp)
+    patches:
+      - file: 0001-reasoning-budget-nudge.patch
+        sha256: 08dbca5a7fa8bcd0583de6383972920354b0aea0fe2d5f12acd95ab08ef646a0
+        # llama-upstream's 0001, the same bytes.
+      - file: 0002-qwen4exp-mtp-pr28243.patch
+        sha256: c39dbfc04dcf3655b7554034aaec7151bc46221cab3509caaeda17f734d8fde2
+        # `git diff bb3c853c30 6fcaa16f4b` with a format-patch header: 18
+        # files, +408/-77. Applies to this base on top of 0001 (git apply
+        # --check, 2026-09-27); the PR is 139 commits behind master there.
+    inputs: {}
+    toolchain: msvc-cuda128
+    path_tools: {}
+    absent_tools: [npm, pnpm]
+    configure:
+      # llama-upstream's flags exactly.
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_OPENSSL=OFF
+      - -DLLAMA_BUILD_TESTS=ON
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+      - -DLLAMA_BUILD_UI=OFF
+      - -DLLAMA_USE_PREBUILT_UI=OFF
+    expect_cache:
+      GGML_NATIVE: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    expect_generated_lacks:
+      tools/ui/ui.h: "#define LLAMA_UI_HAS_ASSETS"   # as llama-upstream
+    targets: [llama-server, llama-bench, llama-quantize, test-backend-ops]
+    post_build_copies: *cuda_dlls
+    tests:
+      configure_extra:
+        - -DGGML_CUDA=OFF
+        - -DBUILD_SHARED_LIBS=OFF
+        - -DLLAMA_BUILD_TESTS=ON
+      targets: [test-reasoning-budget, test-chat]
+      ctest_regex: ^(test-reasoning-budget|test-chat)$
+    output: bin/llama-server.exe
+    shipped:
+      # Built 2026-09-27 ~23:45 by scripts/build_engine.py into
+      # C:/Users/jwals/engines/llama-upstream-mtp-3534183c (the first attempt,
+      # 2dfecd16, was stopped: same old no-UI needle). Every check passed,
+      # 0001 + 0002 applied, engine tests 2/2. NOT RUN ON ANY GPU, NOT IN
+      # config.yaml. ggml-cuda.dll differs from llama-upstream's (92,174,848
+      # vs 92,178,432 B) though 0002 touches no CUDA source: nvcc output is
+      # not bit-reproducible here (docs/ENGINES.md "How reproducible").
+      path: C:/Users/jwals/engines/llama-upstream-mtp-3534183c/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-upstream-mtp-3534183c/src/build
+      built: 2026-09-27T23:45:00-04:00
+      built_with_patches: [0001-reasoning-budget-nudge.patch, 0002-qwen4exp-mtp-pr28243.patch]
+      files:
+        llama-server.exe:      {sha256: b6806ed2393e6022bc709aab22b849daa0ab64272f7d22445ca8052c86f5e6ee, size: 10240}
+        llama-server-impl.dll: {sha256: 7f2ba3bdf7f3a6394b1213eef529124982a0d4cc5c47d091d2e61d447b7a7394, size: 3271680}
+        llama-common.dll:      {sha256: cb836799c12113df1c79daac4e0197eff04f755f3e87d98832dcb0bf2d3bdf40, size: 8260096}
+        mtmd.dll:              {sha256: db14acc1b801d17bfe21d766146563ac29cfd9c1aa2783ead74668ddf8839879, size: 2362880}
+        llama.dll:             {sha256: c4365ab6941b2e85755f802d3efb4bc7b28be229349a3df720cd1972d67b15bf, size: 2628608}
+        ggml.dll:              {sha256: 5424841bc43b1212bfd4664fefea346b0a4c9c1c174a2707c72a31e4950981fa, size: 52736}
+        ggml-base.dll:         {sha256: 5f89f5f3c7c1b191c06285cdeef558ca1b1b38093bd316a787fe84d731c0ea95, size: 656384}
+        ggml-cpu.dll:          {sha256: a0261cd9ae0e1da267dcbe20442a4b1d33cf7e833903524becece7acac73cb9f, size: 1071104}
+        ggml-cuda.dll:         {sha256: dcfdd4781fb50d6c6118b91a2112137b60bd4a69c77d335c977af06b53fc15f8, size: 92174848}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: []   # config.yaml does not run it (a [bonsai] here, 2026-09-28, was an edit slip)
+
+  # ------------------------------------------------------------------------
+  llama-upstream-moe:
+    description: >-
+      CANDIDATE, NOT IN config.yaml (2026-09-28; docs/ENGINES.md "Strata's
+      MoE work, ported"). llama-upstream + the MoE-offload work Strata
+      shipped as its "2x" engine 0.1.13-0.1.15 (Niko1221/Strata d551edf4),
+      ported faithfully and generalised to any MoE model with CPU-placed
+      experts (operator, 2026-09-28: "faithfully porting in to keep our own
+      version"; Strata's code may be used, as separate attributed patches):
+      the expert streaming ring as upstream's own shape of it (#28414,
+      rebased), the GPU expert cache (#27861's exact CPU/GPU split, rebased)
+      with Strata's expert-profile selection and adaptive promotion tier
+      (0004), pinned experts and Strata's large-page arena (0005). No MTP:
+      the arms combine with llama-upstream-mtp's 0002 later, once each is
+      gated on its own.
+    kind: source
+    upstream: https://github.com/ggml-org/llama.cpp
+    branch: master
+    base_commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a
+    clone:
+      mode: blobless
+      abbrev: 9
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patch_source:
+      strata: {repo: https://github.com/Niko1221/Strata, commit: d551edf42c157f1c8c20f07f68c5dfe506b1edda, licence: "none (no LICENSE file); used with the operator's authorisation, 2026-09-28"}
+      pr28414: {pr: https://github.com/ggml-org/llama.cpp/pull/28414, head: b43a3c63c4a2788b775640c50ab70256a539df60, base: 427291b5b34cd914a31b3fd3b61a68f6184f4b9f, licence: MIT}
+      pr27861: {pr: https://github.com/ggml-org/llama.cpp/pull/27861, head: bccbacdb8945680f1cfc7e6bffd1e59014705750, base: 4e97ac86ebe2c4cb8212d98d2641ad6768810896, licence: MIT}
+    patches:
+      - file: 0001-reasoning-budget-nudge.patch
+        sha256: 08dbca5a7fa8bcd0583de6383972920354b0aea0fe2d5f12acd95ab08ef646a0
+        # llama-upstream's 0001, the same bytes.
+      - file: 0002-ggml-prefetch-experts-slots-pr28414.patch
+        sha256: 7a0b26fca1aba5590ad8941d4f439d55bdf18c7649d9861a4357dbca49690ea0
+        # PR #28414 (leshchukandrej, draft), rebased: --prefetch-experts-slots N
+        # (>= 2): prefill uploads of host-resident experts one split ahead on
+        # a second CUDA stream into rotating staging buffers -- the role of
+        # Strata's streaming ring (928b0e07, src/prefill/prefill.cpp). Off by
+        # default. One hunk re-applied by hand (same line).
+      - file: 0003-llama-moe-expert-cache-pr27861.patch
+        sha256: fc0a66384b38f766d86432477eadbe3691dbf797d609f9d8c0b4770bdb6c9f4f
+        # PR #27861 (csantiago78, draft), rebased: --moe-expert-cache N, the
+        # exact split (a second mul_mat_id over VRAM slots; the CPU op skips
+        # cached ids via src[3]). Two hunks re-applied by hand; the
+        # GGML_MOE_LOG diagnostic's POSIX flockfile made MSVC-portable.
+      - file: 0004-moe-cache-strata-profile-and-adaptive-tier.patch
+        sha256: bc910c2311f35865586896ca630eba0f26f98ddf08a414ba92b95a18b44ceeb2
+        # Strata port: LLAMA_MOE_CACHE_PROFILE (the STRP profile picks the
+        # resident experts; per-layer slot counts from the global ranking;
+        # filled before the first decode), LLAMA_MOE_CACHE_POLICY=strata (the
+        # adaptive tier: every 4 steps, usage >= 2, gain >= 1.5, <= 96
+        # swaps, decay 0.7 -- all Strata's), and every CPU-computed batch
+        # (< GGML_OP_OFFLOAD_MIN_BATCH) instead of one token.
+      - file: 0005-pinned-experts-and-large-page-host-buffer.patch
+        sha256: 0a737a6bd9bb1f5f4a219eff2f43465868e39ec8bde6296a2771011e4db6880d
+        # Strata port: LLAMA_PIN_EXPERTS=1 (experts in the pinned host buffer
+        # under mmap), GGML_CUDA_HOST_LARGE_PAGES=1 (VirtualAlloc
+        # MEM_LARGE_PAGES + SeLockMemoryPrivilege + GetLargePageMinimum
+        # rounding + cudaHostRegister, falling back with the reason logged).
+    vendor:
+      # Written by `python scripts/build_engine.py vendor llama-upstream-moe`;
+      # `check` verifies the tree against it offline. Do not edit.
+      rule: llama.cpp
+      path: engines/src/llama-upstream-moe
+      repo: https://github.com/ggml-org/llama.cpp
+      commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a
+      upstream_tree: a88a734cc4dc51d8687b4e27c32163108b2311f5
+      patches: 5
+      patches_digest: ea57e67d77dbe8d96cfca93588a70192bf31f78ef47ece7c5c9d39a43e9863ea
+      patched_tree: a3012460d0bd8452dc4f909d7d167e32cceffba2
+      base_tree: a5da89fe0834db2912af39df1bc5129332c47329
+      tree: cd937f94af2de2eb60732cda4bff97958e6792a8
+      files: 3412
+      bytes: 52708072
+      excluded_files: 237
+      excluded_bytes: 120705095
+      executable_files: 123
+      licences:
+      - LICENSE
+      - cmake/license.cmake
+      - gguf-py/LICENSE
+      - licenses/LICENSE-jsonhpp
+      - tools/ui/src/lib/vendors/big-integer/LICENSE
+      - tools/ui/src/lib/vendors/decimal.js/LICENCE.md
+      - tools/ui/src/lib/vendors/nerdamer-prime/LICENSE
+      - vendor/cpp-httplib/LICENSE
+      - vendor/hash/rotate-bits/LICENSE.md
+      - vendor/hash/sha256/LICENSE
+      - vendor/hash/xxhash/LICENSE
+      build_info:
+        number: 11223
+        commit: 4da633776
+        source: the shipped build's common/build-info.cpp
+    inputs: {}
+    toolchain: msvc-cuda128
+    path_tools: {}
+    absent_tools: [npm, pnpm]
+    configure:
+      # llama-upstream's flags exactly.
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_OPENSSL=OFF
+      - -DLLAMA_BUILD_TESTS=ON
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+      - -DLLAMA_BUILD_UI=OFF
+      - -DLLAMA_USE_PREBUILT_UI=OFF
+    expect_cache:
+      GGML_NATIVE: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    expect_generated_lacks:
+      tools/ui/ui.h: "#define LLAMA_UI_HAS_ASSETS"
+    # + llama-perplexity: the gate's teacher-forced KL / top-1 (--kl-divergence),
+    # Strata's quality check in llama.cpp's own tool.
+    targets: [llama-server, llama-bench, llama-quantize, llama-perplexity, test-backend-ops]
+    post_build_copies: *cuda_dlls
+    tests:
+      configure_extra:
+        - -DGGML_CUDA=OFF
+        - -DBUILD_SHARED_LIBS=OFF
+        - -DLLAMA_BUILD_TESTS=ON
+      targets: [test-reasoning-budget, test-chat]
+      ctest_regex: ^(test-reasoning-budget|test-chat)$
+    output: bin/llama-server.exe
+    shipped:
+      # Built 2026-09-28 by scripts/build_engine.py into
+      # C:/Users/jwals/engines/llama-upstream-moe-2c8dbf5f (the first attempt,
+      # 65e8b890, failed to compile 0004: hparams.n_layer is a method on this
+      # base). Every check passed: 0001-0005 applied in order, every flag in
+      # the CMakeCache, /arch:AVX2, no UI, CUDA DLLs hash-checked, engine tests
+      # 2/2; build-info.cpp = llama-upstream's (eaa07321...). --help lists
+      # --prefetch-experts-slots, --moe-expert-cache(-inserts). NOT RUN ON ANY
+      # GPU, NOT IN config.yaml.
+      path: C:/Users/jwals/engines/llama-upstream-moe-2c8dbf5f/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-upstream-moe-2c8dbf5f/src/build
+      built: 2026-09-28T09:30:00-04:00
+      built_with_patches: [0001-reasoning-budget-nudge.patch, 0002-ggml-prefetch-experts-slots-pr28414.patch, 0003-llama-moe-expert-cache-pr27861.patch, 0004-moe-cache-strata-profile-and-adaptive-tier.patch, 0005-pinned-experts-and-large-page-host-buffer.patch]
+      files:
+        llama-server.exe:      {sha256: f503978dd68b6a6698fe66fd96644d1c8bd665df8d24b800a3be381320be1c64, size: 10240}
+        llama-server-impl.dll: {sha256: 35c54c70854799bdfcfc829f459a34a5b6464b9cb43cdba4d9d2b2588bd57554, size: 3271680}
+        llama-common.dll:      {sha256: b50b52243204b85b8260ae6eedc8817b62a77eb185566f9a94f43f1e1fd48296, size: 8261120}
+        mtmd.dll:              {sha256: 3ebafd3e10692298c59c70b289fb149fcbaca60be346e676fe4cbcd3880ffdd6, size: 2362880}
+        llama.dll:             {sha256: ef61aadb3d9ea38566b21d0ba831b2ee371df3800ea632a708a35ec90071875c, size: 2658816}
+        ggml.dll:              {sha256: 4b95aa4d4dae82d9656b5acfa29f8124f04f6bc7650f635085fc7c95019f5eeb, size: 52736}
+        ggml-base.dll:         {sha256: 65b7d5336b60bdf11f049999867651eb1033bdfa4bf58a4d81fbfa1b66996748, size: 662016}
+        ggml-cpu.dll:          {sha256: db003151ada7d01f87b0a969ddbe383463ffa155443b7bd7538f6db0f431d171, size: 1071616}
+        ggml-cuda.dll:         {sha256: 034c86cf14cd260d4dbd758f117bd1ecbf780ad3ba6a8c0fd1717e9738f43758, size: 92168192}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: []
+
+  # ------------------------------------------------------------------------
+  llama-upstream-flash:
+    description: >-
+      CANDIDATE (2026-09-29; docs/FLASH-NEXT.md section 8, docs/ENGINES.md).
+      Qwen3.8-Flash-Next at speed: llama-upstream-moe's series (the nudge,
+      #28414's prefetch, #27861's expert cache, Strata's profile + adaptive
+      tier, pinned experts + large pages) + MTP (#28243) + the fixes and
+      kernels the 18 tok/s evidence named: the cache's multi-token slot
+      lookup (0007: the GGML_ASSERT(a->ne[2] == b->ne[1]) crash of the
+      cache-strata arm), an AVX2 Q2_0 x Q8_0 dot (0008: x86 had only the
+      scalar one; the Q2_0 down experts were two thirds of the CPU time),
+      and multi-token expert rows for the CPU mul_mat_id (0009: Strata's AVX2
+      i-quant kernels + ours for Q2_0). Operator, 2026-09-29: "I approve
+      strata engine source patches"; "Port kernels we are not re-writing
+      everything from scratch". Every header From: Justin Walsh; the
+      original authors are credited in each body.
+    kind: source
+    upstream: https://github.com/ggml-org/llama.cpp
+    branch: master
+    base_commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a
+    clone:
+      mode: blobless
+      abbrev: 9
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patch_source:
+      strata: {repo: https://github.com/Niko1221/Strata, commit: 3ce2523c2823687de5372be3af58534f56cbf286, licence: "MIT since c0107c3 (2026-09-28); LICENSE blob 6687a423dde6b7aff1b748c07f5ee93ff788089c, Copyright (c) 2026 Niko1221 and the Strata contributors; engines/patches/llama-upstream-flash/LICENSE.strata", used_in: [0004, 0005, 0009]}
+      pr28414: {pr: https://github.com/ggml-org/llama.cpp/pull/28414, head: b43a3c63c4a2788b775640c50ab70256a539df60, base: 427291b5b34cd914a31b3fd3b61a68f6184f4b9f, licence: MIT}
+      pr27861: {pr: https://github.com/ggml-org/llama.cpp/pull/27861, head: bccbacdb8945680f1cfc7e6bffd1e59014705750, base: 4e97ac86ebe2c4cb8212d98d2641ad6768810896, licence: MIT}
+      pr28243: {pr: https://github.com/ggml-org/llama.cpp/pull/28243, head: 6fcaa16f4b360649933a54d1f91ad40ed35c0e11, merge_base: bb3c853c300323913d8535eb371fe906cae9b932, licence: MIT}
+      dev_tree: "C:/Users/jwals/engines/dev-flash/src, branch series (one commit per patch; `git format-patch 4da63377..series` then the headers set to From: Justin Walsh, originals credited); the series applied to a clean 4da63377 gives the same tree (checked 2026-09-29)"
+    patches:
+      - file: 0001-reasoning-budget-nudge.patch
+        sha256: cb4c344cd66194309d3a9107d995ffbc320fd7b03798b7547b99a4da381d5519
+        # llama-upstream-moe's 0001, the same diff (header regenerated)
+      - file: 0002-ggml-prefetch-experts-slots-pr28414.patch
+        sha256: aad2b951d2ac94ccea606892e484613c68ccae973f6803955c69e2d7fbd8519a
+        # PR #28414 rebased (llama-upstream-moe's 0002, the same diff)
+      - file: 0003-llama-moe-expert-cache-pr27861.patch
+        sha256: a94ab759eb6d1ab2848e563e815d27f729f4d8765234a5467705a7c2d56e6051
+        # PR #27861 rebased (llama-upstream-moe's 0003, the same diff)
+      - file: 0004-moe-cache-strata-profile-and-adaptive-tier.patch
+        sha256: 5257ac48493436e40746554d29f3052415be0d7c8e4abb081dd50a771ab107ac
+        # llama-upstream-moe's 0004 with the MIT attribution in the code comment
+      - file: 0005-pinned-experts-and-large-page-host-buffer.patch
+        sha256: a05f76291f99b94b004461d0bfd4938baf6d17ec10d4a035f1cf1cf02d60bf35
+        # llama-upstream-moe's 0005 with the MIT attribution in the code comment
+      - file: 0006-qwen4exp-mtp-pr28243.patch
+        sha256: d5415f3f4dc08fdaf8204a3e6eb409e0ad4c2d5f0b26abfefa1ee201ab3ec301
+        # PR #28243's net diff (llama-upstream-mtp's 0002, the same diff); applies after 0005 unchanged
+      - file: 0007-moe-cache-multi-token-slot-lookup.patch
+        sha256: 543d6d0c4c1cab45337d6cf05fd280c971d36e5f5ded794ed3508ba311e56b1e
+        # ours: the cache chain's ids looked up as one flat row (the crash)
+      - file: 0008-ggml-cpu-avx2-q2_0-dot.patch
+        sha256: d75149130b381fa02744b5422d149d9333c58c444266057f5a1090dd95601528
+        # ours: AVX2 ggml_vec_dot_q2_0_q8_0 (0.575 -> 0.118 ms per Flash-Next down layer, moe_cpu_bench, n=300)
+      - file: 0009-ggml-cpu-mmid-multi-token-rows-strata.patch
+        sha256: 0c6dd7ff0ad86da9aafc7d7596e82b187a5f444146dc4434a40b33e0c4a72723
+        # Strata's iq_avx2.cpp @ 3ce2523c (ed14227, pipeob0; MIT notice in the file) + our Q2_0 rows;
+        # GGML_CPU_MMID_MT=0/1/2
+    inputs: {}
+    toolchain: msvc-cuda128
+    path_tools: {}
+    absent_tools: [npm, pnpm]
+    configure:
+      # llama-upstream's flags exactly.
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_OPENSSL=OFF
+      - -DLLAMA_BUILD_TESTS=ON
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+      - -DLLAMA_BUILD_UI=OFF
+      - -DLLAMA_USE_PREBUILT_UI=OFF
+    expect_cache:
+      GGML_NATIVE: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    expect_generated_lacks:
+      tools/ui/ui.h: "#define LLAMA_UI_HAS_ASSETS"
+    targets: [llama-server, llama-bench, llama-quantize, llama-perplexity, test-backend-ops]
+    post_build_copies: *cuda_dlls
+    tests:
+      configure_extra:
+        - -DGGML_CUDA=OFF
+        - -DBUILD_SHARED_LIBS=OFF
+        - -DLLAMA_BUILD_TESTS=ON
+      targets: [test-reasoning-budget, test-chat]
+      ctest_regex: ^(test-reasoning-budget|test-chat)$
+    output: bin/llama-server.exe
+    shipped:
+      # Built 2026-09-29 by scripts/build_engine.py into
+      # C:/Users/jwals/engines/llama-upstream-flash-3906c076: 0001-0009 applied in
+      # order, every flag in the CMakeCache, /arch:AVX2, no UI, CUDA DLLs
+      # hash-checked, engine tests 2/2. --help lists --moe-expert-cache,
+      # --prefetch-experts-slots, --spec-type draft-mtp, -devd. NOT RUN ON ANY
+      # GPU YET, NOT IN config.yaml.
+      path: C:/Users/jwals/engines/llama-upstream-flash-3906c076/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-upstream-flash-3906c076/src/build
+      built: 2026-09-29T13:10:00-04:00
+      built_with_patches: [0001-reasoning-budget-nudge.patch, 0002-ggml-prefetch-experts-slots-pr28414.patch, 0003-llama-moe-expert-cache-pr27861.patch, 0004-moe-cache-strata-profile-and-adaptive-tier.patch, 0005-pinned-experts-and-large-page-host-buffer.patch, 0006-qwen4exp-mtp-pr28243.patch, 0007-moe-cache-multi-token-slot-lookup.patch, 0008-ggml-cpu-avx2-q2_0-dot.patch, 0009-ggml-cpu-mmid-multi-token-rows-strata.patch]
+      files:
+        llama-server.exe:      {sha256: c1f464c0d0a9902e9941b0d0dc93c5482ef8d57e37783b15ca12d75cbccfe8cf, size: 10240}
+        llama-server-impl.dll: {sha256: 8c63dd00a6502c89835a18a3d2693938cfe86dbce082c2d3ff445ee5a350b20f, size: 3271680}
+        llama-common.dll:      {sha256: 45c7d348f2da9cbb40d0a5515bb0129d582f8507a2e804f5bae14c627963e45f, size: 8261120}
+        mtmd.dll:              {sha256: d20c32d71d99294adad5ce2aa1c09c50cfd3e1c78d551024ea47f14afeeeaca3, size: 2362880}
+        llama.dll:             {sha256: 277c565a1052a7f883cea582255d759c3db18019c752f4e60835d3d30e818b1d, size: 2666496}
+        ggml.dll:              {sha256: 8132b603499296e43da1868a3accf9b100b959cefbbded0865d9a9c00f61f5dc, size: 52736}
+        ggml-base.dll:         {sha256: 61dcc8d7a79826d4614988d1be03d85d88714caae5d8118858a4837a2fe91276, size: 662016}
+        ggml-cpu.dll:          {sha256: 2b161b94065be1f3b3c69a03d3cec5a44ac48a2a8c13cd761679663f647d05e7, size: 1124352}
+        ggml-cuda.dll:         {sha256: 3167451246610c9d5d8ccdf7807a6e7a86d4c93f7f95b87140523931c9e096fe, size: 92183552}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: []
+
+  # ------------------------------------------------------------------------
+  llama-bonsai2-base:
+    description: >-
+      The same base as llama-bonsai2 with NO patches, built 2026-09-22 into
+      build/ (macro server_mtp). `bonsai` ran it until the nudge build; the
+      context-trial entries (bonsai-q4kv, bonsai-q4kv-196k) still do; kept
+      pinned while config.yaml uses it.
+    embeds_ui: >-
+      Reproduces the 09-22 binary, which embeds the HF prebuilt web UI. The
+      no-UI default does not apply to it; do not rebuild it for deployment --
+      move its users to llama-bonsai2 instead.
+    kind: source
+    upstream: https://github.com/sudoingX/llama.cpp
+    branch: bonsai2
+    base_commit: 285542d98d37d0f07f491cd206aefa31f1848f33
+    clone:
+      # Cloned 2026-09-22 22:06 with --filter=blob:none (reflog); this build
+      # embedded the 8-character short hash "285542d9".
+      mode: blobless
+      abbrev: 8
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patches: []
+    vendor:
+      # Written by `python scripts/build_engine.py vendor llama-bonsai2-base`;
+      # `check` verifies the tree against it offline. Do not edit.
+      rule: llama.cpp
+      path: engines/src/llama-bonsai2-base
+      repo: https://github.com/sudoingX/llama.cpp
+      commit: 285542d98d37d0f07f491cd206aefa31f1848f33
+      upstream_tree: ea23ebd36502a3651d811224511bbb5d4a6e63df
+      patches: 0
+      patches_digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+      patched_tree: ea23ebd36502a3651d811224511bbb5d4a6e63df
+      base_tree: 659ef82846eeb96129ea95a20c3226f5ec512a3e
+      tree: 659ef82846eeb96129ea95a20c3226f5ec512a3e
+      files: 3301
+      bytes: 50529490
+      excluded_files: 229
+      excluded_bytes: 116851752
+      executable_files: 123
+      licences:
+      - LICENSE
+      - cmake/license.cmake
+      - gguf-py/LICENSE
+      - licenses/LICENSE-jsonhpp
+      - tools/ui/src/lib/vendors/big-integer/LICENSE
+      - tools/ui/src/lib/vendors/decimal.js/LICENCE.md
+      - tools/ui/src/lib/vendors/nerdamer-prime/LICENSE
+      - vendor/cpp-httplib/LICENSE
+      - vendor/hash/rotate-bits/LICENSE.md
+      - vendor/hash/sha256/LICENSE
+      - vendor/hash/xxhash/LICENSE
+      build_info:
+        number: 10738
+        commit: 285542d9
+        source: the shipped build's common/build-info.cpp
+    inputs:
+      ui_dist:
+        # LLAMA_USE_PREBUILT_UI=ON: the UI step downloaded ggml-org/llama-ui
+        # b10738 (b + this fork's commit count, which names an UPSTREAM
+        # ggml-org build) from the Hugging Face bucket. Pinned here by the
+        # same URL and its SHA-256 (build/tools/ui/.ui-stamp = b10738).
+        url: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/b10738/dist.tar.gz?download=true
+        sha256: 34a51a54024e6c371d483eb72c9394b9942e1c5e191bcd9cd138d0c7beb788f8
+        extract_to: tools/ui/dist
+    toolchain: msvc-cuda128
+    path_tools:
+      gzip: null                 # NOT on PATH: the UI is embedded uncompressed
+    absent_tools: [npm, pnpm]
+    configure:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_CURL=OFF
+      - -DLLAMA_BUILD_TESTS=OFF
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+    expect_cache:
+      GGML_NATIVE: "ON"
+      LLAMA_BUILD_UI: "ON"
+      LLAMA_USE_PREBUILT_UI: "ON"
+      LLAMA_UI_GZIP: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    expect_generated:
+      common/build-info.cpp:
+        sha256: 91dc36c27cc37d20d145cb600ca793fc64823be33f6a9907f5cf67aa39afa8a1
+        stage: configure         # number 10738, commit "285542d9"
+      tools/ui/ui.cpp:
+        sha256: e29c84c9d9309b8076efec3ef769c31fbab41e4e79fb34b0e5183649223003e9
+        stage: build
+    # docs/MTP-STAGING.md section 2: `llama-server` and `llama-bench`, -j 12.
+    # (.ninja_log also shows llama-kv-mean-center, built 2026-09-23 on its own.)
+    targets: [llama-server, llama-bench]
+    post_build_copies: *cuda_dlls
+    tests: {}
+    output: bin/llama-server.exe
+    shipped:
+      path: C:/Users/jwals/llamacpp-sudoingx-bonsai2/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/llamacpp-sudoingx-bonsai2/build    # its CMakeCache is compared on rebuild
+      built: 2026-09-22T22:15:27-04:00
+      built_with_patches: []
+      files:
+        llama-server.exe:      {sha256: 63747e07e8de347d74445edc0e9c6042f31d16468503d3946d088e4f7b539839, size: 10240}
+        llama-server-impl.dll: {sha256: 4ce1bce6e8de3abe99b83e02e582a579529c60e8b6c50569df803844878dc361, size: 13106688}
+        llama-common.dll:      {sha256: e931f84dcd593158551b939ffbe6fed352c2f6e950e8b8b6e47450c7f7f7e717, size: 8329216}
+        mtmd.dll:              {sha256: 5a47ae881b9524bb30cfb34af4a53261b451329f588283221108211850dc4626, size: 2324480}
+        llama.dll:             {sha256: ade13fa7b1e049a1c8989b7ceb8270637ead6ec5b106a7b87c062f247274487f, size: 2527744}
+        ggml.dll:              {sha256: c7a4a6775b109347f0504b8600835811cf717eea1808a4b29690779e2bdaccd0, size: 56832}
+        ggml-base.dll:         {sha256: 6490193c16a7a5803b3f1dcd31d76713f4933b2dee83b9e43bd49325f2de85ec, size: 664064}
+        ggml-cpu.dll:          {sha256: 664fd43d260cdc0ea6133c96f7e4ce2f57932b2530646eaaf5d529c2ca1bf282, size: 964096}
+        ggml-cuda.dll:         {sha256: 21897980471dc4acf8bd755204bc1d30d27caf7bb59c19bd842278011c62fd3f, size: 93089792}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: [bonsai-q4kv, bonsai-q4kv-196k]
+
+  # ------------------------------------------------------------------------
+  llama-mirai-s:
+    description: >-
+      CANDIDATE, NOT IN config.yaml (2026-09-29; operator: "pull and get
+      ready to try Mirai S"). Mirai Labs' Mirai S Qwen3.8-27B (2.4-bit
+      QTIP-style trellis codes, trymirai/Qwen3.8-27B-S-experimental) as
+      alesha-pro's GGUF (models/manifest.yaml mirai-s-*), which neither
+      mainline llama.cpp nor our PTQ1_0 forks can load: the fork adds four
+      ggml types (ids 90-93: MS_V4T8, MS_V2T4, MS_V2T6, MS_I3) and two ops
+      (MIRAI_QUANTIZE, MIRAI_MUL_MAT). alesha-pro/llama.cpp-mirai-s (MIT; 5
+      commits): 550620c = a SNAPSHOT of ggml-org/llama.cpp d834d44e6 as a
+      parentless commit (checked 2026-09-29: its tree equals upstream
+      d834d44e6's minus 3 files -- benches/dgx-spark/*.log,
+      build-xcframework.sh, one Xcode plist -- nothing added or changed);
+      fdb1e81 = the whole Mirai change (36 files +3166/-78: the codec on
+      CPU and CUDA, ports of Mirai's vLLM plugin mirai_s 0.2.1, Apache-2.0;
+      qwen35 split q/gate and ssm_out column order; plus three GENERAL
+      changes with env off-switches: GQA-packed FA vec kernel
+      GGML_CUDA_FA_VEC_GQA=0, chunked gated-delta-net prefill
+      GGML_CUDA_GDN_CHUNKED=0, prompt cache matched by text
+      LLAMA_SERVER_TEXT_ALIGN=0); d1c5a69, 102331b, b59ae80 = README only.
+      Audited 2026-09-29: nothing downloads, executes or phones home in
+      the built targets (getenv of the switches only; cuBLASLt linked for
+      the int8 GEMM). d834d44e6 is 28 commits behind llama-upstream's pin
+      4da63377 (an ancestor of it). + our reasoning-budget nudge (0001 =
+      llama-upstream's 0001, same bytes; applies with the same offsets).
+      The author's tests are on sm_86 (RTX 3090) only: sm_120 is the gate's
+      first question (test-backend-ops -o 'MIRAI.*').
+    kind: source
+    upstream: https://github.com/alesha-pro/llama.cpp-mirai-s
+    branch: master
+    base_commit: b59ae80f419a5415cb950f2a7b2284a500fe74cb
+    clone:
+      # Blob-less full history: 5 commits (the snapshot is parentless), so
+      # llama.cpp embeds build number 5, not upstream's count.
+      mode: blobless
+      abbrev: 9
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patch_source:
+      fork: https://github.com/alesha-pro/llama.cpp-mirai-s
+      head: b59ae80f419a5415cb950f2a7b2284a500fe74cb
+      snapshot_of: ggml-org/llama.cpp d834d44e643681f7b046a22d357335f6f4ff6107
+      licence: MIT (llama.cpp and the fork); the ported kernels Apache-2.0 (tools/mirai-s/NOTICE)
+    patches:
+      - file: 0001-reasoning-budget-nudge.patch
+        sha256: 08dbca5a7fa8bcd0583de6383972920354b0aea0fe2d5f12acd95ab08ef646a0
+        # OURS: llama-upstream's 0001, the same bytes. `git apply --cached
+        # --check` on b59ae80, 2026-09-29: clean, offsets only (common.h +1,
+        # test-chat.cpp +402, server-schema.cpp +4), no fuzz.
+    vendor:
+      # Written by `python scripts/build_engine.py vendor llama-mirai-s`;
+      # `check` verifies the tree against it offline. Do not edit.
+      rule: llama.cpp
+      path: engines/src/llama-mirai-s
+      repo: https://github.com/alesha-pro/llama.cpp-mirai-s
+      commit: b59ae80f419a5415cb950f2a7b2284a500fe74cb
+      upstream_tree: fa1915724ccef86d1a38ed03e230ef1988c12df2
+      patches: 1
+      patches_digest: 31b6cd293bb870a0a8abd877fac3a6c0a49f7c1b2a4b29846aa32e77bb3d91c3
+      patched_tree: 0a70ed93d666109efb94af0a9333a3b6b94ba299
+      base_tree: 4a46fec06684ff79edb3789a4c705f765b12c255
+      tree: 242d82acf2ad5867e57cc962efbae9a1008aeed4
+      files: 3417
+      bytes: 52691848
+      excluded_files: 236
+      excluded_bytes: 120469910
+      executable_files: 122
+      licences:
+      - LICENSE
+      - cmake/license.cmake
+      - gguf-py/LICENSE
+      - licenses/LICENSE-jsonhpp
+      - tools/mirai-s/LICENSE-mirai_s-plugin
+      - tools/mirai-s/NOTICE
+      - tools/ui/src/lib/vendors/big-integer/LICENSE
+      - tools/ui/src/lib/vendors/decimal.js/LICENCE.md
+      - tools/ui/src/lib/vendors/nerdamer-prime/LICENSE
+      - vendor/cpp-httplib/LICENSE
+      - vendor/hash/rotate-bits/LICENSE.md
+      - vendor/hash/sha256/LICENSE
+      - vendor/hash/xxhash/LICENSE
+      build_info:
+        number: 5
+        commit: b59ae80f4
+        source: the shipped build's common/build-info.cpp
+    inputs: {}
+    toolchain: msvc-cuda128
+    path_tools: {}
+    absent_tools: [npm, pnpm]
+    configure:
+      # llama-upstream's flags exactly (the fork's README builds with
+      # -DCMAKE_CUDA_ARCHITECTURES=86 only; we add 120 for the 5060 Ti).
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_OPENSSL=OFF
+      - -DLLAMA_BUILD_TESTS=ON
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+      - -DLLAMA_BUILD_UI=OFF
+      - -DLLAMA_USE_PREBUILT_UI=OFF
+    expect_cache:
+      GGML_NATIVE: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    expect_generated_lacks:
+      tools/ui/ui.h: "#define LLAMA_UI_HAS_ASSETS"   # as llama-upstream
+    # llama-bench (the gate's speed rows), test-backend-ops (the MIRAI.*,
+    # FLASH_ATTN_EXT and GATED_DELTA_NET cases the fork adds, on sm_120).
+    targets: [llama-server, llama-bench, test-backend-ops]
+    post_build_copies: *cuda_dlls
+    tests:
+      configure_extra:
+        - -DGGML_CUDA=OFF
+        - -DBUILD_SHARED_LIBS=OFF
+        - -DLLAMA_BUILD_TESTS=ON
+      targets: [test-reasoning-budget, test-chat]
+      ctest_regex: ^(test-reasoning-budget|test-chat)$
+    output: bin/llama-server.exe
+    # build-info.cpp of the first build (a409701e): number 5, commit
+    # "b59ae80f4", MSVC 19.36.32543.0, sha256
+    # bd02898fed728ad0ae07f2b0ca9285f2b33d2af5f7c576137654c5e9a41806c0. Not
+    # yet an `expect_generated` pin (it would change the directory hash), as
+    # llama-upstream.
+    shipped:
+      # Built 2026-09-29 ~07:50 by scripts/build_engine.py from this entry
+      # into C:/Users/jwals/engines/llama-mirai-s-a409701e. Every check
+      # passed: source b59ae80f, 0001 applied (7 files), every configure
+      # flag in the CMakeCache, /arch:AVX2, nvcc --generate-code for
+      # compute_86/sm_86 and compute_120a/sm_120a, ui.h without the define,
+      # CUDA DLLs hash-checked (cuBLASLt, which the Mirai int8 GEMM links,
+      # is the same pinned cublasLt64_12.dll), engine tests 2/2
+      # (test-reasoning-budget + test-chat). `--version` with no GPU
+      # visible: "0.5.0-dev (build 5, commit b59ae80f4)". NOT RUN ON ANY
+      # GPU, NOT IN config.yaml (bench/mirai_s_gate.py is the gate).
+      path: C:/Users/jwals/engines/llama-mirai-s-a409701e/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-mirai-s-a409701e/src/build
+      built: 2026-09-29T07:50:00-04:00
+      built_with_patches: [0001-reasoning-budget-nudge.patch]
+      files:
+        llama-server.exe:      {sha256: d1d87ba6dc44795db36862e4c72cf8639089461b4d230eae76a9d6339480271a, size: 10240}
+        llama-server-impl.dll: {sha256: 2210d4067347e6bb8eb663c0fb751eb6098d881797de8b1ce8e0261d3a0e99ca, size: 3273728}
+        llama-common.dll:      {sha256: 4f6a89449da2c459bc4a70572f28c59e78ae7b363ff2cd7f686f47a8152da398, size: 8255488}
+        mtmd.dll:              {sha256: dd24515188f2c4ee3a508dc639c9d1d7b0f45819dd75ee644cf8d05a3aad5278, size: 2362368}
+        llama.dll:             {sha256: 0b464e7cb09927e6e0eea2dcd7132bc33ff637bf737874d8d79dc7cff99ab1e6, size: 2621952}
+        ggml.dll:              {sha256: cb38bf3e6bfca894d226166d9ca34cbcb226aac38bfe1b1522fda4475057830b, size: 52736}
+        ggml-base.dll:         {sha256: 2a5a6aa64b254c3b1aee596dc6a5db1a849f4ca4a5eac62ef7d5b1e1445a0ba0, size: 662016}
+        ggml-cpu.dll:          {sha256: 49e18487c9c989d4d5dcaec69a782acd199828d7b8cc8ef03568a0feccea7a42, size: 1085440}
+        ggml-cuda.dll:         {sha256: 5f280b487d11f347520802b4b141041f44da089bb561b7810c46edd13ad27427, size: 94791680}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: []
+
+  # ------------------------------------------------------------------------
+  llama-prism:
+    description: >-
+      Everything else on llama.cpp (macro server): bonsai-vision, embeddings,
+      reranker, critic-disabled. PrismML's official fork, release
+      prism-b10709-9a9394a, unmodified.
+    embeds_ui: >-
+      Reproduces the shipped binary, which embeds the HF prebuilt web UI
+      (b11065). Live, serving vision, embeddings and the reranker: not
+      rebuilt now.
+    next_rebuild: >-
+      Drop the UI (operator, 2026-09-25): add -DLLAMA_BUILD_UI=OFF and
+      -DLLAMA_USE_PREBUILT_UI=OFF, remove inputs.ui_dist, the gzip path_tool,
+      the expect_cache UI keys and the ui.cpp pin, add
+      expect_generated_lacks {tools/ui/ui.h: LLAMA_UI_HAS_ASSETS}, remove
+      embeds_ui -- as llama-bonsai2 did. Then record the new shipped block.
+    kind: source
+    upstream: https://github.com/PrismML-Eng/llama.cpp
+    branch: prism
+    base_commit: 9a9394a895b96003ca842a6041cb28ac49a108f7
+    clone:
+      # The original is a --depth 1 clone, so it embeds build number 1 and
+      # the 7-character short hash "9a9394a". A shallow fetch of the SHA
+      # reproduces both.
+      mode: shallow
+      abbrev: 7
+      autocrlf: true
+      keep_git: true
+    submodules: {}
+    patches: []
+    vendor:
+      # Written by `python scripts/build_engine.py vendor llama-prism`;
+      # `check` verifies the tree against it offline. Do not edit.
+      rule: llama.cpp
+      path: engines/src/llama-prism
+      repo: https://github.com/PrismML-Eng/llama.cpp
+      commit: 9a9394a895b96003ca842a6041cb28ac49a108f7
+      upstream_tree: 3c46eab9090d7c6d484852d383b6f7547a2fccb0
+      patches: 0
+      patches_digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+      patched_tree: 3c46eab9090d7c6d484852d383b6f7547a2fccb0
+      base_tree: 3e5a4c742ad46677c00c02a4cbdc9fba7c5c002a
+      tree: 3e5a4c742ad46677c00c02a4cbdc9fba7c5c002a
+      files: 3297
+      bytes: 50418482
+      excluded_files: 229
+      excluded_bytes: 116851752
+      executable_files: 123
+      licences:
+      - LICENSE
+      - cmake/license.cmake
+      - gguf-py/LICENSE
+      - licenses/LICENSE-jsonhpp
+      - tools/ui/src/lib/vendors/big-integer/LICENSE
+      - tools/ui/src/lib/vendors/decimal.js/LICENCE.md
+      - tools/ui/src/lib/vendors/nerdamer-prime/LICENSE
+      - vendor/cpp-httplib/LICENSE
+      - vendor/hash/rotate-bits/LICENSE.md
+      - vendor/hash/sha256/LICENSE
+      - vendor/hash/xxhash/LICENSE
+      build_info:
+        number: 1
+        commit: 9a9394a
+        source: a depth-1 clone embeds build number 1
+    inputs:
+      ui_dist:
+        # The UI step looked for b1 (build number 1), found nothing, and fell
+        # back to "latest" (build/tools/ui/.ui-stamp = latest) -- a moving
+        # target. Its SHA-256 identifies it: "latest" at the build
+        # (2026-09-21 03:12 UTC) was b11065, uploaded 2026-09-20 22:01 UTC,
+        # whose dist.tar.gz has exactly this hash. Pinned by version.
+        url: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/b11065/dist.tar.gz?download=true
+        sha256: ffeb0450588305f1247bb1015a15f4c558abec2408e0210b81da130dfebce348
+        extract_to: tools/ui/dist
+    toolchain: msvc-cuda128
+    path_tools:
+      # gzip WAS on PATH (build-cuda.bat run from Git Bash): the UI is
+      # embedded gzipped. Reproduces build/tools/ui/ui.cpp exactly.
+      gzip: C:/Program Files/Git/usr/bin
+    absent_tools: [npm, pnpm]
+    configure:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DGGML_CUDA=ON
+      - -DCMAKE_CUDA_ARCHITECTURES=86;120
+      - -DLLAMA_CURL=OFF
+      - -DLLAMA_BUILD_TESTS=OFF
+      - -DLLAMA_BUILD_EXAMPLES=OFF
+      - -DLLAMA_BUILD_SERVER=ON
+    expect_cache:
+      GGML_NATIVE: "ON"
+      LLAMA_BUILD_UI: "ON"
+      LLAMA_USE_PREBUILT_UI: "ON"
+      LLAMA_UI_GZIP: "ON"
+      BUILD_SHARED_LIBS: "ON"
+    native_cpu: *native
+    expect_generated:
+      common/build-info.cpp:
+        sha256: b98186cc303975f71811aa0b50b8d307810051db706abbfc9133f8321ba3ab07
+        stage: configure         # number 1, commit "9a9394a"
+      tools/ui/ui.cpp:
+        sha256: a48809d1099794beb18e139de2d4693231109b555d72ef30d02a1a057aae0fcc
+        stage: build
+    targets: []                  # build-cuda.bat builds everything
+    post_build_copies: *cuda_dlls
+    tests: {}
+    output: bin/llama-server.exe
+    shipped:
+      path: C:/Users/jwals/llamacpp-prism-official/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/llamacpp-prism-official/build    # its CMakeCache is compared on rebuild
+      built: 2026-09-20T23:12:27-04:00
+      built_with_patches: []
+      files:
+        llama-server.exe:      {sha256: 6df514166a9a7aadcf5d42e727b6ad557f933b36a634c67d0335e779902c9e3c, size: 10240}
+        llama-server-impl.dll: {sha256: c632fe9446e96fb5d7e641f37c0d6d9af3b716f0b1a13b00914392734be667fe, size: 6308864}
+        llama-common.dll:      {sha256: faa6491b96790570f123bc8273935537f022cd921b89137470965984f77696f4, size: 8328704}
+        mtmd.dll:              {sha256: b61bfc722b7f619221caa59b18ebe956b13012ef7dd409012952849a945c2f47, size: 2324480}
+        llama.dll:             {sha256: a1eae703879ef4c0e456a11815850c72b808301c93ed938e34ff6d3fff815e6e, size: 2524160}
+        ggml.dll:              {sha256: 9cea17108f6e65552340f7d0193504b980be8c495ab09f024f4192dd09d52833, size: 56832}
+        ggml-base.dll:         {sha256: 2ba3e2df80af8a428f2477579ba480b089b75b29896c1c961fe680427367b3ea, size: 664064}
+        ggml-cpu.dll:          {sha256: 3be9d029c490e24c61536f57864bf7555c8f44c23a4bdbf37ed1418175146bd5, size: 925696}
+        ggml-cuda.dll:         {sha256: f837508292b2adce832b5f4294c9fb8b5b3b621fc25affa9ad18af4dfc13bc4b, size: 91840512}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: [bonsai-vision, embeddings, reranker, critic-disabled]
+
+  # ------------------------------------------------------------------------
+  sd-cpp:
+    description: >-
+      Image generation (imagegen, imagegen-turbo): stable-diffusion.cpp
+      c92d73c plus PR #2043's fix commit f047986 (open upstream, CarlGao4,
+      "vae conv uses weight dtype and add support for specifying vae compute
+      precision"; the --vae-dtype bf16 white-block fix, SELF-IMPROVEMENT-LOG
+      #25).
+    kind: source
+    upstream: https://github.com/leejet/stable-diffusion.cpp
+    base_commit: c92d73c408515c94beef32161bb5960764fde7a0
+    clone:
+      # The shipped binary was built in C:/Users/jwals/sdcpp-pr2043, a COPY
+      # of a c92d73c checkout with no .git, so it embeds version "unknown"
+      # and commit "unknown". keep_git: false removes .git after patching
+      # and fences git out (GIT_CEILING_DIRECTORIES) so a rebuild does too.
+      mode: blobless
+      autocrlf: true
+      keep_git: false
+    submodules:
+      ggml: 4bf5f6000653b7881d00963cd6ddb665ccd62a8d
+      examples/server/frontend: c4bce3d6b3f236614cca21014f076083b7270ba8
+      thirdparty/libwebm: 5bf12267eea773a32fcf4949de52b0add158a8d5
+      thirdparty/libwebp: 0c9546f7efc61eac7f79ae115c3f99c91c21c443
+    patches:
+      - file: 0001-vae-conv-weight-dtype-and-vae-compute-precision.patch
+        sha256: be7ba874883126579ba243f5b20081885430100f6a5c9a0a44ff7060c5092e0d
+        # `git format-patch -1 f047986` (PR #2043, head 39a89d6 at export,
+        # base 88411ef). PINNED EXACTLY: the snapshot equals c92d73c's tree
+        # with this commit's diff (a16ee97..f047986) applied -- the ten files
+        # it touches are byte-identical to the snapshot after a CRLF
+        # checkout, and `diff -r` against the clean c92d73c checkout (with
+        # its submodules) shows no other difference. Only this commit of the
+        # PR is in the build: not the alpha-channel commits before it, not
+        # the upstream merge after it.
+        source: https://github.com/leejet/stable-diffusion.cpp/pull/2043/commits/f047986265b5e8289f44ba5f3aa2480db28c788c
+    vendor:
+      # Written by `python scripts/build_engine.py vendor sd-cpp`;
+      # `check` verifies the tree against it offline. Do not edit.
+      rule: stable-diffusion.cpp
+      path: engines/src/sd-cpp
+      repo: https://github.com/leejet/stable-diffusion.cpp
+      commit: c92d73c408515c94beef32161bb5960764fde7a0
+      upstream_tree: b721691fb4987a2e0559dbd2e20617a1123ec727
+      submodules:
+        examples/server/frontend:
+          repo: https://github.com/leejet/sdcpp-webui.git
+          commit: c4bce3d6b3f236614cca21014f076083b7270ba8
+        ggml:
+          repo: https://github.com/leejet/ggml.git
+          commit: 4bf5f6000653b7881d00963cd6ddb665ccd62a8d
+        thirdparty/libwebm:
+          repo: https://github.com/webmproject/libwebm.git
+          commit: 5bf12267eea773a32fcf4949de52b0add158a8d5
+        thirdparty/libwebp:
+          repo: https://github.com/webmproject/libwebp.git
+          commit: 0c9546f7efc61eac7f79ae115c3f99c91c21c443
+      patches: 1
+      patches_digest: 85100cfbc2b9718072b418bf05c037b982b561c6563ab9cd2e2b260ba237241e
+      patched_tree: 2359999dd650ee84f0c512bcc4fadfbfae7fb1c0
+      base_tree: 4852f7db24eb4f174ab491c180947d8feb47c368
+      tree: 4f57a24c3f089776468f98762f1f53f4c815ac96
+      files: 3740
+      bytes: 190993877
+      excluded_files: 191
+      excluded_bytes: 105779374
+      executable_files: 31
+      licences:
+      - LICENSE
+      - examples/server/frontend/LICENSE
+      - ggml/LICENSE
+      - ggml/src/ggml-cuda/sageattention/LICENSE
+      - thirdparty/LICENSE.darts_clone.txt
+      - thirdparty/libwebm/LICENSE.TXT
+      - thirdparty/libwebp/COPYING
+      - thirdparty/oniguruma/COPYING
+      - thirdparty/utf8proc/LICENSE.md
+      eol_converted:
+      - thirdparty/libwebp/gradlew.bat
+      build_info: null
+    inputs: {}
+    toolchain: msvc-cuda128
+    path_tools: {}
+    # pnpm absent -> "frontend build disabled" (SD_SERVER_BUILD_FRONTEND=ON).
+    absent_tools: [pnpm]
+    configure:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSD_CUDA=ON
+      # A4000 only (build-pr2043.bat); build-cuda.bat's "86;120" is NOT what
+      # shipped.
+      - -DCMAKE_CUDA_ARCHITECTURES=86
+    expect_cache:
+      GGML_NATIVE: "ON"
+      SD_BUILD_SHARED_LIBS: "OFF"
+      SD_SERVER_BUILD_FRONTEND: "ON"
+      SD_WEBM: "ON"
+      SD_WEBP: "ON"
+    expect_configure_log:
+      - stable-diffusion.cpp version unknown
+      - stable-diffusion.cpp commit unknown
+      - pnpm not found; frontend build disabled.
+      - "ggml commit:  unknown"  # ggml/.git in the copy was a dangling gitlink
+    native_cpu: *native
+    expect_generated: {}
+    targets: [sd-server]
+    post_build_copies: *cuda_dlls
+    tests: {}
+    output: bin/sd-server.exe
+    shipped:
+      path: C:/Users/jwals/sdcpp-pr2043/build/bin/sd-server.exe
+      build_tree: C:/Users/jwals/sdcpp-pr2043/build    # its CMakeCache is compared on rebuild
+      built: 2026-09-24T17:34:10-04:00
+      built_with_patches: [0001-vae-conv-weight-dtype-and-vae-compute-precision.patch]
+      files:
+        sd-server.exe:     {sha256: 75349c74ddbe2d903282de7844a0aac2ec355441ece0f4ce8496cafade38d6c4, size: 88427008}
+        cudart64_12.dll:   {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:   {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll: {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    config_refs: [imagegen, imagegen-turbo]
+
+  # ------------------------------------------------------------------------
+  llama-swap:
+    description: >-
+      The router behind the proxy (loopback :11434), started by
+      scripts/start-stack.bat from bin/ (gitignored). The upstream release
+      binary, unmodified: not built here.
+    kind: release
+    upstream: https://github.com/mostlygeek/llama-swap
+    version: v256
+    base_commit: 6701d0d9d9dce7d698bcb6738ccacb75b0c27731   # tag v256
+    asset:
+      url: https://github.com/mostlygeek/llama-swap/releases/download/v256/llama-swap_256_windows_amd64.zip
+      sha256: fced13d1f05ee13c2ebd8c2c020b9cd2504e59c27ff732c7eb25892445461241
+    output: llama-swap.exe
+    shipped:
+      path: C:/Users/jwals/llama-stack/bin/llama-swap.exe
+      # Checked 2026-09-25: the release zip's llama-swap.exe is this file.
+      built: 2026-09-17T07:14:28Z   # release published
+      files:
+        llama-swap.exe: {sha256: 46472a94606b35f61db1157be435d38cd1cd7e474d10031fd7e475f644ea91ed, size: 42112512}
+    config_refs: []
+
+# Not pinned here, loaded from the system at run time (PE imports): the MSVC
+# runtime (vcruntime140, msvcp140, vcomp140 for OpenMP -- the VC++
+# redistributable) and nvcuda.dll (the NVIDIA driver). A driver or
+# redistributable update changes what runs without changing any hash above.

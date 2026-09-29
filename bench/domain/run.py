@@ -138,6 +138,35 @@ import traceback
 import urllib.error
 import urllib.request
 
+# The hard-stop message's opening words, old (before 2026-09-25) and new
+# (tiers.BUDGET_MESSAGE since the thinking nudge), so rows of either era read
+# the same.
+CAP_MARKERS = ("Thinking budget reached", "Thinking limit reached")
+
+
+
+def billed_usage(d: dict) -> dict:
+    """What a request spent, the way this script has always summed it.
+
+    Since 2026-09-25 (OpenAI conformance U1) the proxy's `usage` describes the
+    FINAL generation only, and `usage.hops` moved: the whole turn's totals
+    are `x_yamadori.usage.summed` and the generation count
+    `x_yamadori.usage.generations`. Rows keep the old meaning (every hop
+    summed, `hops` = generations); a server without that block falls back to
+    `usage` as sent. Reasoning-token details stay on the top-level block."""
+    usage = dict(d.get("usage") or {})
+    xu = (d.get("x_yamadori") or {}).get("usage") or {}
+    if isinstance(xu.get("summed"), dict):
+        details = usage.get("completion_tokens_details")
+        usage = dict(xu["summed"], hops=xu.get("generations"))
+        if details:
+            usage["completion_tokens_details"] = details
+    return usage
+
+def hit_thinking_cap(reasoning: str) -> bool:
+    return any(m in (reasoning or "") for m in CAP_MARKERS)
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 MCP = os.path.join(ROOT, "mcp")
@@ -250,17 +279,26 @@ def arm_manifest(arm: str, effort: str) -> dict:
     return m
 
 
+def _skills_flag(d: dict):
+    """An arm's (or a selection record's) skills flag: `skills`, or its old
+    name `hints` (skills replaced hints on 2026-09-26; the header alias
+    lasts one release)."""
+    return d.get("skills", d.get("hints"))
+
+
 def expected(arm: str) -> dict:
     """What `x_yamadori` must show for this arm. Keys absent = not constrained."""
     forced = ARMS[arm]
-    exp: dict = {"forced": sorted(k for k in ("hints", "investigate", "fanout")
-                                  if k in forced)}
+    exp: dict = {"forced": sorted(
+        ("skills" if k == "hints" else k)
+        for k in ("hints", "skills", "investigate", "fanout") if k in forced)}
     # retrieval is not a selection flag: the tier's retrieval decides whether
     # the tool gate is consulted at all (proxy.prepare).
     exp["gate_consulted"] = bool(forced.get("retrieval", True))
-    for k in ("hints", "investigate"):
-        if k in forced:
-            exp[k] = forced[k]
+    if _skills_flag(forced) is not None:
+        exp["skills"] = _skills_flag(forced)
+    if "investigate" in forced:
+        exp["investigate"] = forced["investigate"]
     if "fanout" in forced:
         exp["fanout_n"] = forced["fanout"]
     if "reasoning_cap" in forced:
@@ -295,19 +333,24 @@ def verify(arm: str, effort: str, x: dict | None, *, finish: str,
     if not isinstance(sel, dict):
         return bad + ["no selection record"]
     sig = sel.get("signals") or {}
-    got_forced = sorted(k for k in (sig.get("forced") or [])
-                        if k in ("hints", "investigate", "fanout"))
+    got_forced = sorted(("skills" if k == "hints" else k)
+                        for k in (sig.get("forced") or [])
+                        if k in ("hints", "skills", "investigate", "fanout"))
     if got_forced != exp["forced"]:
         bad.append(f"selection saw forced={sig.get('forced')}, arm forces "
                    f"{exp['forced']} (header not applied?)")
     if twin(arm) == "A5":
         allowed = sig.get("allowed") or {}
-        if not (allowed.get("hints") and allowed.get("investigate")
+        if not (_skills_flag(allowed) and allowed.get("investigate")
                 and int(allowed.get("fanout") or 1) > 1):
             bad.append(f"A5 must allow everything; selection saw allowed={allowed}")
-    for k in ("hints", "investigate"):
-        if k in exp and bool(sel.get(k)) != exp[k]:
-            bad.append(f"selection.{k}={sel.get(k)}, arm forces {exp[k]}")
+    if "skills" in exp and bool(_skills_flag(sel)) != exp["skills"]:
+        bad.append(f"selection.skills={_skills_flag(sel)}, arm forces "
+                   f"{exp['skills']}")
+    if "investigate" in exp and bool(sel.get("investigate")) != \
+            exp["investigate"]:
+        bad.append(f"selection.investigate={sel.get('investigate')}, arm "
+                   f"forces {exp['investigate']}")
     if "fanout_n" in exp and int(sel.get("fanout_n") or 0) != exp["fanout_n"]:
         bad.append(f"selection.fanout_n={sel.get('fanout_n')}, arm forces "
                    f"{exp['fanout_n']}")
@@ -326,8 +369,10 @@ def verify(arm: str, effort: str, x: dict | None, *, finish: str,
             bad.append(f"repair forced on but x_yamadori.repair={json.dumps(rp)[:80]}")
 
     # What the selection chose must then have HAPPENED.
-    if not sel.get("hints") and (x.get("hints") or []):
-        bad.append(f"hints off but {len(x['hints'])} emitted")
+    emitted = ((x.get("skills") or {}).get("ids") or []) \
+        if isinstance(x.get("skills"), dict) else []
+    if not _skills_flag(sel) and emitted:
+        bad.append(f"skills off but {len(emitted)} injected")
     inv = x.get("investigate")
     if sel.get("investigate"):
         if not isinstance(inv, dict):
@@ -569,7 +614,7 @@ def run_one(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
         reasoning = msg.get("reasoning_content") or ""
         finish = ch.get("finish_reason") or ""
         x = d.get("x_yamadori")
-        usage = d.get("usage") or {}
+        usage = billed_usage(d)
     elif d is not None and error is None and status != 200:
         error = None                     # a non-JSON error body: status says it
     row["finish_reason"] = finish
@@ -580,7 +625,7 @@ def run_one(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
     row["reasoning_chars"] = len(reasoning)
     row["reasoning_tokens"] = ((usage.get("completion_tokens_details") or {})
                                .get("reasoning_tokens"))
-    row["hit_thinking_cap"] = "Thinking budget reached" in reasoning
+    row["hit_thinking_cap"] = hit_thinking_cap(reasoning)
     row["x_yamadori"] = x
     row["content_chars"] = len(content)
     row["empty_content"] = not content.strip()
@@ -629,7 +674,7 @@ def _parse(d) -> dict:
         out.update(content=msg.get("content") or "",
                    reasoning=msg.get("reasoning_content") or "",
                    finish=ch.get("finish_reason") or "",
-                   x=d.get("x_yamadori"), usage=d.get("usage") or {},
+                   x=d.get("x_yamadori"), usage=billed_usage(d),
                    calls=list(msg.get("tool_calls") or []))
     return out
 
@@ -805,7 +850,7 @@ def run_self_check(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
     rt = [x for x in rt if isinstance(x, int)]
     row["reasoning_chars"] = sum(len(r["reasoning_content"]) for r in rounds)
     row["reasoning_tokens"] = sum(rt) if rt else None
-    row["hit_thinking_cap"] = any("Thinking budget reached" in r["reasoning_content"]
+    row["hit_thinking_cap"] = any(hit_thinking_cap(r["reasoning_content"])
                                   for r in rounds)
     row["x_yamadori"] = p["x"]
     row["x_rounds"] = x_rounds
@@ -1302,19 +1347,17 @@ def _check_laya() -> tuple[bool, str, str]:
         return False, "laya_route_in", f"{LAYA}/heads: {type(e).__name__}: {e}"
 
 
-def _check_hints_cache() -> tuple[bool, str, str]:
-    path = os.environ.get("YAMADORI_HINT_CACHE",
-                          os.path.join(ROOT, "index", "hints.npz"))
+def _check_skill_store() -> tuple[bool, str, str]:
+    """The skills arm needs armed skills (the hints corpus was migrated into
+    the skill store on 2026-09-26; mcp/skill_migrate.py)."""
     try:
-        import numpy as np
-        mat = np.load(path, allow_pickle=False)["mat"]
-        norms = np.linalg.norm(mat.astype("float32"), axis=1)
-        zero = int((norms <= 1e-6).sum())
-        return (mat.shape[0] > 0 and zero == 0, "hints_cache",
-                f"{mat.shape[0]} vectors, {zero} zero-norm, "
-                f"min norm {float(norms.min()) if len(norms) else 0:.4f}")
+        sys.path.insert(0, os.path.join(ROOT, "mcp"))
+        import skills
+        n = len(skills.armed())
+        return (n > 0, "skill_store", f"{n} armed skills in "
+                f"{os.path.basename(os.path.abspath(skills.STORE))}")
     except Exception as e:                                       # noqa: BLE001
-        return False, "hints_cache", f"{path}: {type(e).__name__}: {e}"
+        return False, "skill_store", f"{type(e).__name__}: {e}"
 
 
 # The packages the graded tasks are pinned to (grade.py). Above this share of
@@ -1474,7 +1517,7 @@ def preflight(key_file: str, log=print,
     for c in _check_listener_and_freshness():
         add(c)
     add(_check_laya())
-    add(_check_hints_cache())
+    add(_check_skill_store())
     add(_check_package_vectors())
     add(_check_no_task_leak())
     add_cmd("run_tests", [PY, os.path.join("scripts", "run_tests.py")])

@@ -44,14 +44,14 @@ def test_fanout():
     rt.reset()
     now = 10_000.0
     check(rt.summary(now)["fanout"] is None, "no request yet: no fan-out (inert)")
-    rt.note({"fanout": fan(), "skills": {"path": "hints"}, "hints": []}, now=now - 30)
+    rt.note({"fanout": fan(), "skills": {"ids": []}}, now=now - 30)
     f = rt.summary(now)["fanout"]
     check(f and f["arity"] == 3 and f["chosen"] == 2 and f["culled"] == [0, 1]
           and f["fade"] == 1.0, "arity, chosen and culled from x_yamadori.fanout", str(f))
     f = rt.summary(now + rt.FANOUT_HOLD_S - 30 + rt.FANOUT_DECAY_S / 2)["fanout"]
     check(f and near(f["fade"], 0.5, 1e-3), "after the hold it decays", str(f and f["fade"]))
     check(rt.summary(now + 1000)["fanout"] is None, "and is gone after hold + decay")
-    rt.note({"fanout": None, "hints": []}, now=now)
+    rt.note({"fanout": None, "skills": {"ids": []}}, now=now)
     check(rt.summary(now + 1)["fanout"]["arity"] == 3,
           "a later request without fan-out does not cut the hold short")
     rt.note({"fanout": {"n": 0, "error": "RuntimeError"}}, now=now + 2)
@@ -72,13 +72,14 @@ def test_foliage():
     rt.reset()
     now = 50_000.0
     check(rt.summary(now)["foliage"] is None, "no turns: foliage inert")
-    rt.note({"skills": {"path": "hints"}, "hints": [{}, {}, {}]}, now=now - 60)
-    rt.note({"skills": {"path": "hints"}, "hints": []}, now=now - 30)
-    rt.note({"skills": {"path": "hints"}, "hints": [{}] * 5, "utility": True}, now=now - 10)
+    rt.note({"skills": {"ids": ["a", "b", "c"]}}, now=now - 60)
+    rt.note({"skills": {"ids": []}}, now=now - 30)
+    rt.note({"skills": {"ids": ["a"] * 5}, "utility": True}, now=now - 10)
     f = rt.summary(now)["foliage"]
     check(f["turns"] == 2 and f["items"] == 3 and near(f["density"], 0.5)
-          and f["path"] == "hints" and f["tokens"] is None,
-          "hints path: items per task turn / FOLIAGE_FULL, utility excluded, no tokens", str(f))
+          and f["path"] == "skills" and f["tokens"] is None,
+          "skills: items per task turn / FOLIAGE_FULL, utility excluded; no "
+          "tokens when the record gives none", str(f))
     rt.reset()
     rt.note({"skills": {"path": "skills", "ids": ["a", "b", "c", "d"], "tokens": 900}}, now=now)
     f = rt.summary(now)["foliage"]
@@ -132,7 +133,7 @@ def test_measure():
         ages = m["moss"]["ages_s"]
         check(ages["skills_last_arm"] == 2 * 86400 and ages["packages"] is not None
               and ages["code"] is not None, "moss ages: packages, code, last arm", str(ages))
-        check(m["moss"]["recall"] in ("hints", "skills"), "the live recall path is labelled")
+        check(m["moss"]["recall"] == "skills", "the recall path is labelled: skills, the one knowledge system")
         ts._cache.clear()
         s1 = ts.snapshot(now)
         mkindex(os.path.join(p, "c@3.sqlite3"), 10_000, 0)

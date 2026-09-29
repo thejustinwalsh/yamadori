@@ -38,17 +38,61 @@ import sqlite3
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 
 # Laya retired 2026-09-24 (operator; docs/E1.md): E1 heads replace it.
 SINGLETONS = ("server.py", "proxy.py", "llama-swap.exe")
-PORTS = {1234: "proxy", 11434: "llama-swap", 10001: "bonsai"}
-# Below this much free VRAM a card shows red ("tight"). 1280 MiB, the
-# operator's call on 2026-09-23: the old 2048 was the floor for a card that
-# also drove the Windows display, whose apps take VRAM without asking. The
-# display now runs on the iGPU, and the MTP build at -c 163840 idles at
-# ~1.7 GB free, so 2048 painted a healthy card red.
-TIGHT_MIB = 1280
+# The ports of the services scripts/watchdog.ps1 supervises (the job worker
+# has no port; its process is in processes()): the proxy, the tools API
+# (mcp/tools_api.py TOOLS_API_PORT), SearXNG (docs/SEARCH.md, loopback) and
+# llama-swap, plus the main model's llama-server (config.yaml startPort).
+TOOLS_API_PORT = int(os.environ.get("TOOLS_API_PORT", "1235"))
+SEARCH_URL = (os.environ.get("YAMADORI_SEARCH_URL") or "http://127.0.0.1:8888").rstrip("/")
+
+
+def _port_of(url: str, default: int) -> int:
+    m = re.search(r":(\d+)(?:/|$)", url)
+    return int(m.group(1)) if m else default
+
+
+PORTS = {1234: "proxy", TOOLS_API_PORT: "tools-api",
+         _port_of(SEARCH_URL, 8888): "searxng", 11434: "llama-swap",
+         10001: "bonsai"}
+# What endpoints() probes: (url, name). Each is a liveness route that never
+# loads a model or starts work: llama-swap's model list, the tools API's
+# /health (the one route it answers without a key, docs/TOOLS-API.md) and
+# SearXNG's /healthz (the watchdog's own probe).
+PROBES = (("http://127.0.0.1:11434/v1/models", "llama-swap"),
+          (f"http://127.0.0.1:{TOOLS_API_PORT}/health", "tools-api"),
+          (f"{SEARCH_URL}/healthz", "searxng"))
+PROBE_TIMEOUT = 4
+# A card shows red ("tight") below ITS OWN free-VRAM floor, read live, never
+# a number the dashboard has to be retuned for (operator, 2026-09-25: "the
+# dashboard should be aware of live membudgets"). The floor is the same
+# target the card is sized to:
+#   main card   YAMADORI_MAIN_FREE_TARGET_MIB, default 600 -- the peak target
+#               `-c` is sized against in config.yaml (2026-09-25: 600 MB)
+#   others      gpu_room.HEADROOM_MIB (YAMADORI_A4000_HEADROOM_MIB, 1,331) --
+#               what the A4000 coordinator keeps free
+# Each row carries `floor_mib`, so the UI reads it instead of knowing it.
+# History: a fixed TIGHT_MIB of 2048, then 1280 (2026-09-23).
+MAIN_FREE_TARGET_MIB = 600
+
+
+def floor_mib(main: bool) -> int:
+    """The free-VRAM floor for a card, read per call."""
+    if main:
+        try:
+            return int(os.environ.get("YAMADORI_MAIN_FREE_TARGET_MIB", "")
+                       or MAIN_FREE_TARGET_MIB)
+        except ValueError:
+            return MAIN_FREE_TARGET_MIB
+    try:
+        import gpu_room
+        return int(gpu_room.HEADROOM_MIB)
+    except Exception:                                            # noqa: BLE001
+        return 1331
 
 
 def _sh(cmd: list[str], timeout: int = 25) -> str:
@@ -86,7 +130,6 @@ def gpus(timeout: int = 25) -> list[dict]:
         rows.append({"index": int(p[0]), "name": p[1], "used_mib": used,
                      "total_mib": total, "free_mib": total - used,
                      "pct": round(100 * used / max(total, 1)),
-                     "tight": (total - used) < TIGHT_MIB,
                      "util": int(p[4] or 0),
                      "uuid": p[5] if len(p) > 5 and p[5] else None,
                      "watts": _float_or_none(p[6]) if len(p) > 6 else None,
@@ -98,6 +141,8 @@ def gpus(timeout: int = 25) -> list[dict]:
                                "GPU-de660e90-0e9c-d465-b389-6df63021b920")
     for r in rows:
         r["main"] = r.get("uuid") == main_uuid
+        r["floor_mib"] = floor_mib(r["main"])
+        r["tight"] = r["free_mib"] < r["floor_mib"]
     return rows
 
 
@@ -146,8 +191,23 @@ def processes() -> list[dict]:
                     "what": (gguf.group(1) if gguf else
                              (script.group(1) if script else p.get("Name"))),
                     "port": port.group(1) if port else "",
-                    "started": str(p.get("CreationDate") or "")[:19]})
+                    "started": _started(p.get("CreationDate"))})
     return sorted(out, key=lambda x: str(x["what"]))
+
+
+def _started(v) -> str:
+    """A process's start time as local ISO seconds. Windows PowerShell 5.1's
+    ConvertTo-Json writes a DateTime as "/Date(<epoch ms>)/", which the old
+    [:19] cut left as "/Date(1790680397077" on the page."""
+    s = str(v or "")
+    m = re.match(r"^/Date\((-?\d+)(?:[+-]\d{4})?\)/$", s)
+    if m:
+        try:
+            return time.strftime("%Y-%m-%dT%H:%M:%S",
+                                 time.localtime(int(m.group(1)) / 1000))
+        except (OverflowError, OSError, ValueError):
+            return ""
+    return s[:19]
 
 
 def duplicates(procs: list[dict]) -> list[dict]:
@@ -221,24 +281,56 @@ def listeners() -> list[dict]:
     return rows
 
 
+def _probe(url: str, name: str) -> dict:
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(url, timeout=PROBE_TIMEOUT) as r:
+            ok, code = r.status == 200, r.status
+    except urllib.error.HTTPError as e:
+        ok, code = False, e.code
+    except Exception:                                            # noqa: BLE001
+        ok, code = False, 0
+    return {"name": name, "ok": ok, "code": code,
+            "ms": round((time.time() - t0) * 1000)}
+
+
 def endpoints() -> list[dict]:
-    out = []
-    for url, name in (("http://127.0.0.1:11434/v1/models", "llama-swap"),):
-        t0 = time.time()
-        try:
-            with urllib.request.urlopen(url, timeout=8) as r:
-                ok, code = r.status == 200, r.status
-        except Exception:                                        # noqa: BLE001
-            ok, code = False, 0
-        out.append({"name": name, "ok": ok, "code": code,
-                    "ms": round((time.time() - t0) * 1000)})
-    return out
+    """One row per PROBES entry, probed in parallel so a service that is
+    down costs the snapshot one PROBE_TIMEOUT, not one per service."""
+    out: list[dict | None] = [None] * len(PROBES)
+
+    def run(i: int, url: str, name: str) -> None:
+        out[i] = _probe(url, name)
+    ts = [threading.Thread(target=run, args=(i, u, n), daemon=True)
+          for i, (u, n) in enumerate(PROBES)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(PROBE_TIMEOUT + 1)
+    return [r if r is not None else {"name": PROBES[i][1], "ok": False,
+                                     "code": 0, "ms": (PROBE_TIMEOUT + 1) * 1000}
+            for i, r in enumerate(out)]
+
+
+def _with_line(ctx: dict) -> dict:
+    """budget.budgets() plus the tiered cache's VRAM line as the model
+    server reported it (/props `kv_vram_cells`, engine patch 0041: 0 when
+    the pool is not tiered, None when the server does not say). Read from
+    mcp/budget.py's own cache of that /props answer; nothing is asked."""
+    try:
+        import budget
+        line = getattr(budget, "_LINE", None)
+    except Exception:                                            # noqa: BLE001
+        line = None
+    if isinstance(ctx, dict) and "error" not in ctx:
+        ctx = dict(ctx, vram_line=line if isinstance(line, int) else None)
+    return ctx
 
 
 def context_pool() -> dict:
     try:
         import budget
-        return budget.budgets(budget.pool_size(refresh=True))
+        return _with_line(budget.budgets(budget.pool_size(refresh=True)))
     except Exception as e:                                       # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"}
 
@@ -263,6 +355,7 @@ def context_pool() -> dict:
 # Read-only throughout: nothing here writes a file, a row or a request.
 # ---------------------------------------------------------------------------
 
+MAIN_MODEL = os.environ.get("YAMADORI_MODEL", "bonsai")
 SLOTS_URL = os.environ.get("YAMADORI_MODEL_SERVER", "http://127.0.0.1:10001") + "/slots"
 SLOTS_TIMEOUT = 1.0
 PULSE_GPU_TTL = 1.0
@@ -307,26 +400,178 @@ def _slot_row(s: dict, now: float) -> dict:
             "tps": round(tps, 1), "pps": round(pps, 1)}
 
 
+RUNNING_TTL_S = 2.0
+_running_cache: tuple[float, list | None] = (-1e9, None)
+
+
+def running_rows(max_age: float = RUNNING_TTL_S) -> list[dict] | None:
+    """llama-swap's GET /running rows (gpu_room.running: it reports, it
+    never loads anything), at most one read per `max_age` seconds. None when
+    it cannot be read."""
+    global _running_cache
+    now = time.time()
+    with _lock:
+        t, rows = _running_cache
+        if now - t < max_age:
+            return rows
+    try:
+        import gpu_room
+        rows = gpu_room.running(gpu_room.default_upstream())
+    except Exception:                                            # noqa: BLE001
+        rows = None
+    with _lock:
+        _running_cache = (now, rows)
+    return rows
+
+
+def _gguf(cmd: str) -> str | None:
+    """The model file a llama-swap row runs: the basename after -m/--model."""
+    m = re.search(r"(?:^|\s)(?:-m|--model)\s+\"?([^\s\"]+\.gguf)", cmd or "")
+    return re.split(r"[\\/]", m.group(1))[-1] if m else None
+
+
+def _live_row(r: dict) -> bool:
+    return str(r.get("state") or "ready") != "stopped"
+
+
+def _max_mode():
+    """mcp/max_mode.py, or None where it cannot be imported."""
+    try:
+        import max_mode
+        return max_mode
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def serving() -> dict:
+    """Which main model holds the main card (docs/FLASH-NEXT.md,
+    mcp/max_mode.py): tier `max` is served by the max model when
+    YAMADORI_MAX_MODEL is set, every other tier by the main model, one of
+    them loaded at a time. `loaded` is llama-swap's /running (model, state,
+    port, gguf), None when it could not be read; the in-flight counts and
+    the switch are max_mode's own, real only in the proxy process."""
+    rows = running_rows()
+    loaded = None if rows is None else [
+        {"model": str(r.get("model")), "state": str(r.get("state") or "ready"),
+         "port": _port_of(str(r.get("proxy") or ""), 0) or None,
+         "gguf": _gguf(str(r.get("cmd") or ""))} for r in rows]
+    mm = _max_mode()
+    snap: dict = {}
+    active = False
+    err = None
+    if mm is not None:
+        try:
+            snap = mm.snapshot()
+            active = bool(snap.get("enabled")) and bool(mm.max_active())
+        except Exception as e:                                   # noqa: BLE001
+            err = f"{type(e).__name__}: {e}"[:200]
+    main = str(snap.get("main") or MAIN_MODEL)
+    mx = str(snap.get("max") or "") or None
+    names = {x["model"] for x in loaded or [] if x["state"] != "stopped"}
+    on_card = (mx if mx and mx in names else main if main in names else None)
+    return {"enabled": bool(snap.get("enabled")), "main": main, "max": mx,
+            "max_tier": getattr(mm, "MAX_TIER", "max") if mm else "max",
+            "on_card": on_card, "max_active": active,
+            "inflight": snap.get("inflight") or {},
+            "switching_to": snap.get("switching_to"),
+            "last_max_end": snap.get("last_max_end") or None,
+            "idle_s": snap.get("idle_s"), "loaded": loaded, "error": err}
+
+
+def _slots_target() -> tuple[str, str]:
+    """(the /slots URL, the model it belongs to): the main model's server,
+    or the max model's while it holds the card -- llama-swap gives it its
+    own port, so SLOTS_URL would only say the main model is not loaded."""
+    mm = _max_mode()
+    if mm is not None and getattr(mm, "ENABLED", False):
+        for r in running_rows() or []:
+            if str(r.get("model")) == mm.MAX and _live_row(r) and r.get("proxy"):
+                return str(r["proxy"]).rstrip("/") + "/slots", mm.MAX
+    return SLOTS_URL, MAIN_MODEL
+
+
+def off_card_why() -> str | None:
+    """Why the main model is not answering, when the reason is known and not
+    an outage: a bench window holds the card (the gpu lane's pause record,
+    jobs.pause: its `why`), max mode's model holds it, or llama-swap has the
+    model unloaded (its GET /running, which never loads anything). None when
+    none says so. The dashboard printed "/slots not answering . URLError:
+    timed out" through the Flash-Next gate (2026-09-28) with nothing saying
+    the gate held the card."""
+    held = None
+    try:
+        import jobs
+        rec = jobs.paused("gpu")
+        if rec:
+            held = str(rec.get("why") or rec.get("by") or "a bench window")
+    except Exception:                                            # noqa: BLE001
+        held = None
+    rows = running_rows()
+    loaded = None if rows is None else any(
+        str(r.get("model")) == MAIN_MODEL and _live_row(r) for r in rows)
+    mm = _max_mode()
+    mx = getattr(mm, "MAX", "") if mm is not None and getattr(mm, "ENABLED", False) else ""
+    if mx and rows is not None and loaded is False and any(
+            str(r.get("model")) == mx and _live_row(r) for r in rows):
+        return f"{MAIN_MODEL} is off the card: max mode ({mx}) holds it"
+    if held and loaded is not True:
+        return f"{MAIN_MODEL} is off the card: {held} holds it"
+    if loaded is False:
+        return f"{MAIN_MODEL} is not loaded (llama-swap loads it on the next request)"
+    return None
+
+
+def _slot_roles(rows: list[dict]) -> None:
+    """Each slot's role in the slot layout (mcp/slots.py: conversations on
+    0..n-2, the CHILD slot n-1 shared by deep thinking, the decider, side
+    calls and an as-sent compaction), and -- in the proxy process, where
+    the pins live -- whether a conversation is pinned to it and whether it
+    is the primary conversation's (slots RANKS). Read-only: child_slot()
+    and snapshot() are mcp/slots.py's own accessors."""
+    try:
+        import slots as slot_map
+        child = slot_map.child_slot(len(rows))
+        snap = slot_map.snapshot()
+    except Exception:                                            # noqa: BLE001
+        return
+    pins = snap.get("pins") or {}
+    pinned = set(pins.values())
+    primary = (snap.get("ranks") or {}).get("primary")
+    primary_slot = pins.get(primary) if primary else None
+    for r in rows:
+        r["role"] = "child" if r["id"] == child else "conversation"
+        r["pinned"] = r["id"] in pinned
+        r["primary"] = primary_slot is not None and r["id"] == primary_slot
+
+
 def slots(url: str | None = None) -> dict:
     """Per-slot state from llama-server: idle / prefill / decode, context
     held, and decode and prefill tokens per second (from the change in
     n_decoded since the last read). {"ok": False, "error": ...} when the
     server does not answer within SLOTS_TIMEOUT -- a model swapped out by
-    llama-swap is not listening, which is a state, not an outage."""
+    llama-swap is not listening, which is a state, not an outage. `model`
+    names whose server answered (the max model's while it holds the card)."""
     t0 = time.time()
+    target, model = (url, None) if url else _slots_target()
     try:
-        with urllib.request.urlopen(url or SLOTS_URL, timeout=SLOTS_TIMEOUT) as r:
+        with urllib.request.urlopen(target, timeout=SLOTS_TIMEOUT) as r:
             data = json.load(r)
     except Exception as e:                                       # noqa: BLE001
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:200],
-                "slots": [], "ms": round((time.time() - t0) * 1000)}
+        why = off_card_why()
+        return {"ok": False,
+                "error": (why or f"{type(e).__name__}: {e}")[:200],
+                "cause": f"{type(e).__name__}: {e}"[:200], "off_card": bool(why),
+                "model": model, "slots": [],
+                "ms": round((time.time() - t0) * 1000)}
     if not isinstance(data, list):
         return {"ok": False, "error": "unexpected /slots shape", "slots": [],
-                "ms": round((time.time() - t0) * 1000)}
+                "model": model, "ms": round((time.time() - t0) * 1000)}
     now = time.time()
     with _lock:
         rows = [_slot_row(s, now) for s in data if isinstance(s, dict)]
+    _slot_roles(rows)
     return {"ok": True, "slots": rows, "ms": round((now - t0) * 1000),
+            "model": model,
             "decoding": sum(1 for s in rows if s["state"] == "decode"),
             "prefilling": sum(1 for s in rows if s["state"] == "prefill"),
             "tps": round(sum(s["tps"] for s in rows), 1)}
@@ -460,7 +705,7 @@ def pulse() -> dict:
             _strata_cache = (now, st)
     try:
         import budget
-        ctx = budget.budgets()        # cached pool: no request unless unset
+        ctx = _with_line(budget.budgets())   # cached pool: no request unless unset
     except Exception as e:                                       # noqa: BLE001
         ctx = {"error": f"{type(e).__name__}: {e}"}
     return {"at": now, "gpus": _gpu_cache[1], "slots": slots(),
@@ -477,7 +722,8 @@ def snapshot() -> dict:
     for x in g:
         if x["tight"]:
             warnings.append(f"GPU{x['index']} has only {x['free_mib']} MiB "
-                            f"free (under {TIGHT_MIB}); a large prefill spike may not fit")
+                            f"free (under its {x.get('floor_mib')} MiB floor); a large "
+                            f"prefill spike may not fit")
     for d in dups:
         # Context, not an alarm: a second tree is only a fault if it has
         # also taken a port, which `listeners()` reports separately.
@@ -494,6 +740,7 @@ def snapshot() -> dict:
             "context": context_pool(), "seed": seed(), "strata": strata(),
             "slots": slots(), "lanes": lanes(), "tools": tools(),
             "queue": queue(), "power": power_live(), "tree": tree(),
+            "serving": serving(),
             "warnings": warnings}
 
 

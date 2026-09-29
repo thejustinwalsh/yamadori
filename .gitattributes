@@ -1,0 +1,4 @@
+# engines/src holds vendored engine source stored byte for byte as upstream
+# commits it (scripts/engine_vendor.py): no end-of-line conversion, so its
+# tree hash is the same on every machine and every checkout.
+engines/src/** -text

@@ -1,0 +1,13 @@
+{
+  "_what": "The served model's /props, PINNED for offline suites (mcp/served_fixture.py). The chat template is the sibling file bonsai_chat_template.jinja (captured from llama-server /props on 2026-09-24, build b10738-285542d9). SERVED LAYOUT (2026-09-28, 746c8af6): -c 262144, 4 slots, no kv_vram_cells in /props. The planned 3-slot layout (-np 3, kv_vram_cells, n_ctx 2 x cap + 65,536) is recorded by bench/deploy_kv_rank.py from the served /props at its deploy; until then this file matches what runs. eos_token is the template's end-of-turn token (proxy.END_OF_TURN). modalities.vision: true because config.yaml launches `bonsai` with --mmproj. When the live check fails after a deploy, re-record this file and the template from the live server, not the other way round.",
+  "recorded": "2026-09-29",
+  "model": "bonsai",
+  "chat_template_file": "bonsai_chat_template.jinja",
+  "n_ctx": 262144,
+  "total_slots": 3,
+  "eos_token": "<|im_end|>",
+  "modalities": {
+    "vision": true
+  },
+  "kv_vram_cells": 141824
+}

@@ -332,11 +332,14 @@ def test_distil_verdict_does_not_work(d: dict) -> None:
 
 
 def test_primitive_matches_hemisphere() -> None:
-    """The copied primitive must still agree with the one that ships.
+    """The copied primitive no longer has a shipped twin.
 
-    bench/laya_calibration.py reimplements mcp/shomen.py:_choice_averaged
-    so these numbers do not silently change when that file is edited. The
-    price of the copy is that it can drift, so the drift is tested.
+    bench/laya_calibration.py reimplemented mcp/shomen.py:_choice_averaged
+    so these numbers would not silently change when that file was edited,
+    and the drift was tested here. shomen's copy -- with route_in, distil,
+    MARGIN_GATE (0.3) and LAYA_PERMUTATIONS (2) -- was deleted on 2026-09-27
+    (docs/CONSTANTS-AUDIT.md: no production caller), so the bench copy is
+    now the only one and describes what shipped until then.
     """
     print("\n[contract] the copied primitive vs mcp/shomen.py")
     try:
@@ -345,17 +348,11 @@ def test_primitive_matches_hemisphere() -> None:
     except Exception as e:                                       # noqa: BLE001
         check("mcp/shomen.py importable", False, f"{type(e).__name__}: {e}")
         return
-    check("shomen still exposes _choice_averaged",
-          hasattr(shomen, "_choice_averaged"))
-    check("shomen still exposes route_in and distil",
-          hasattr(shomen, "route_in") and hasattr(shomen, "distil"))
-    check("the gate this doc reports against is still shomen's gate",
-          abs(getattr(shomen, "MARGIN_GATE", -1) - L.SHIPPED_GATE) < 1e-9,
-          f"shomen.MARGIN_GATE={getattr(shomen, 'MARGIN_GATE', None)} "
-          f"vs reported {L.SHIPPED_GATE}")
-    check("shomen still averages over 2 orderings by default",
-          getattr(shomen, "LAYA_PERMUTATIONS", None) == 2,
-          f"LAYA_PERMUTATIONS={getattr(shomen, 'LAYA_PERMUTATIONS', None)}")
+    check("shomen no longer ships the Laya primitive (the bench copy is the "
+          "record of what shipped)",
+          not any(hasattr(shomen, n) for n in (
+              "_choice_averaged", "route_in", "distil", "MARGIN_GATE",
+              "LAYA_PERMUTATIONS")))
 
 
 def test_no_shared_state_written() -> None:

@@ -2,6 +2,20 @@
 """Continuous assessment of one Octopus run WHILE it runs.
 
     python bench/octopus/watch.py pilot-V0-xhigh-1 [--interval 30] [--once]
+    python bench/octopus/watch.py v0b-V0-xhigh-1 --wait --detach
+
+RUN IT DETACHED (v0b-V0, 2026-09-25: the watcher died when the orchestrating
+agent stopped -- it was a child of the agent's shell, in its process tree and
+job, and printing to a pipe that closed). `--detach` re-launches this script
+as a process of its own and returns at once: on Windows with
+DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB, and
+when the parent's job forbids breakaway, through WMI (Win32_Process.Create:
+the process then belongs to the WMI service, outside any job); elsewhere in
+a new session (setsid). Its stdout and stderr go to logs/<run>/watch.out
+(appended), its pid to logs/<run>/watch.pid. Stop it with
+`Stop-Process -Id (Get-Content <logs>/<run>/watch.pid)`. Without --detach,
+a closed stdout no longer kills it: the files are still rewritten every pass
+(`say`). Restarting is always safe: every pass reads from scratch.
 
 Reads, every interval, from scratch (so it is idempotent and can be restarted):
   - the relay's rows, logs/<run>/relay.jsonl: per request x_yamadori (tier,
@@ -26,8 +40,16 @@ reader can disagree with a number rather than with a hidden rule):
   cache_miss        a step reused < 95% of the PREVIOUS step's prompt tokens
                     (the conversation only grows; anything else re-read the
                     past, not just the new tail)
+  warm_lost         a step reused fewer tokens than the warm before it loaded,
+                    minus WARM_LOST_SLACK (16): the request diverged inside
+                    the warmed turn (the checkpoint 4 tokens before the end
+                    is the expected loss)
   warm_reread       a warm processed more than max(4000, 1.5 x that step's
-                    completion tokens): it re-read the prompt, not its delta
+                    completion tokens): it re-read the prompt, not its delta.
+                    `warm_prefill_reread` (not proxy-suspect) when the turn
+                    opened with a prefill the client drops: the re-read back
+                    to the server's nearest checkpoint is inherent and the
+                    proxy judges it itself (warm_short; v0f step 25)
   repeat_call       a tool call identical (name + arguments) to an earlier one
   reread_file       read_file of a path already read, with no write between
   replan            word 8-gram overlap (Jaccard) >= 0.30 between this step's
@@ -49,8 +71,20 @@ reader can disagree with a number rather than with a hidden rule):
                     V0's 13,923 / 12,175 / 13,232 (summary, not a defect)
   warm_short        x_yamadori.warm_before.short is true: the previous turn's
                     warm reused less than the prompt the slot had just generated
-  template_markers  x_yamadori.template_markers present (source model / ours)
+  template_markers  x_yamadori.template_markers present: in_content or stripped
+                    (source model / ours)
   gpu_room          x_yamadori.gpu_room entries (recorded, summarised)
+  repairs           x_yamadori.tool_code records with a file whose
+                    errors_before > 0 AND a fix-up that was written
+                    (fixup.written > 0), counted PER FILE (repairs_by_file);
+                    the relay's record is the only evidence of a repair
+  imitated_note     a "Repaired <path> (...)" line in the transcript that no
+                    tool_code record of that step backs: the MODEL wrote it,
+                    imitating our notes (v0b-V0 to step 45: 6 of the 8 "Repaired" lines,
+                    steps 9, 9, 15, 15, 19, 23; the relay records two repairs,
+                    steps 8 and 45). Since 2026-09-26 the proxy removes
+                    them (any phrase) and records x_yamadori.imitated_notes:
+                    `imitated_note_removed`; one found here is a LEAK
   wrap_up           Hermes' run-budget wrap-up notice reached the model (a
                     request whose last message mentions the budget / wrap up);
                     what follows it is summarised
@@ -64,6 +98,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import sqlite3
 import sys
 import time
@@ -85,6 +120,9 @@ LAST_V0 = {"run": "pilot-V0-xhigh-1", "hours": 1.14, "js_files": 5, "context_pea
            "depth_by_step": [9457, 23436, 35758, 48988, 52923, 56288, 59609, 59823,
                              65058, 68938, 76251, 86394, 87270, 87715, 88116, 89116]}
 
+
+
+WARM_LOST_SLACK = 16
 
 def jl(path: str) -> list[dict]:
     out = []
@@ -160,6 +198,30 @@ def _deep_of(x: dict) -> dict | None:
             "think_offered": tt.get("offered"), "think_calls": len(tt.get("calls") or [])}
 
 
+# tool_code's note (mcp/tool_code.py finish): "<Phrase> <path> (<lang>[,
+# edit]): ...". The same shape in the model's own words is an imitation.
+NOTE_RX = re.compile(r"\b(Repaired|Verified|Checked) (\S+) \(([a-z+#]+)(, edit)?\): "
+                     r"([^\n]*?)(?=\.(?:\s|$)|$)")
+
+
+def repaired_files(tc: dict) -> list[str]:
+    """The files one x_yamadori.tool_code record says were REPAIRED: errors
+    before, and a fix-up that was written back."""
+    if not tc or not int(((tc.get("fixup") or {}).get("written")) or 0):
+        return []
+    return [f.get("path") for f in tc.get("files") or []
+            if int(f.get("errors_before") or 0) > 0]
+
+
+def say(line: str) -> None:
+    """stdout, when there is one. A parent that died closed the pipe; the
+    watcher's job is the files, so it carries on (v0b-V0: it died instead)."""
+    try:
+        print(line, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
 def ngrams(text: str, n: int = 8) -> set:
     w = re.findall(r"\w+", (text or "").lower())
     return {tuple(w[i:i + n]) for i in range(len(w) - n + 1)} if len(w) >= 200 else set()
@@ -168,15 +230,29 @@ def ngrams(text: str, n: int = 8) -> set:
 def assess(run_id: str) -> dict:
     log_dir = os.path.join(runmod.LOGS_DIR, run_id)
     run_dir = os.path.join(runmod.RUNS_DIR, run_id)
-    relay = [r for r in jl(os.path.join(log_dir, "relay.jsonl"))
-             if r.get("method") == "POST" and r.get("path", "").endswith("/chat/completions")]
-    events = jl(os.path.join(log_dir, "hermes.jsonl"))
+    # An iterative run writes each later prompt's logs beside the first
+    # (relay.p2.jsonl, hermes.p2.jsonl, ...): read them all, in prompt order.
+    def _all(base: str) -> list[dict]:
+        stem, ext = os.path.splitext(base)
+        extra = sorted((f for f in os.listdir(log_dir)
+                        if re.fullmatch(re.escape(stem) + r"\.p(\d+)" + re.escape(ext), f)),
+                       key=lambda f: int(re.search(r"\.p(\d+)\.", f).group(1))) \
+            if os.path.isdir(log_dir) else []
+        rows = jl(os.path.join(log_dir, base))
+        for f in extra:
+            rows += jl(os.path.join(log_dir, f))
+        return rows
+    relay = [r for r in _all("relay.jsonl")
+             if r.get("method") == "POST" and r.get("path", "").endswith(("/chat/completions", "/responses"))]
+    events = _all("hermes.jsonl")
     sid = next((e.get("session_id") for e in events if e.get("session_id")), None)
     msgs = session_messages(sid)
     ws = warms(proxy_offset(run_id, log_dir))
     done = os.path.isfile(os.path.join(log_dir, "meta.json"))
 
     steps, defects = [], []
+    repairs_by_file: dict[str, int] = {}
+    stamps = [(e.get("timestamp") or 0) / 1000 for e in events]
 
     def flag(kind, step, evidence, proxy=False):
         defects.append({"kind": kind, "step": step, "evidence": evidence,
@@ -226,18 +302,61 @@ def assess(run_id: str) -> dict:
             st["warm"] = ws[wi]
             wi += 1
         steps.append(st)
+        for pth in repaired_files(tc):
+            repairs_by_file[pth] = repairs_by_file.get(pth, 0) + 1
         if util:
             continue
+        # "Repaired" notes in this step's streamed text that its record does
+        # not back: the model's own imitation of the note.
+        fixed_here = set(repaired_files(tc))
+        # Since 2026-09-26 the proxy removes them from the client's copy
+        # (proxy._ImitatedNotes) and records them: the rate per run is read
+        # from here; one still in the transcript below is a leak.
+        if x.get("imitated_notes"):
+            flag("imitated_note_removed", i,
+                 json.dumps(x["imitated_notes"])[:240])
+        for e, ts in zip(events, stamps):
+            if e.get("type") != "text" or not (r["t0"] <= ts <= r["t_end"] + 2):
+                continue
+            for m in NOTE_RX.finditer(e.get("text") or ""):
+                if m.group(1) == "Repaired" and m.group(2) not in fixed_here:
+                    flag("imitated_note", i, f"{m.group(0)[:200]!r}: x_yamadori.tool_code "
+                                             f"of this step repaired "
+                                             f"{sorted(fixed_here) or 'nothing'}")
         # --- detectors
         if prev_prompt and c.get("reused") is not None and c["reused"] < 0.95 * prev_prompt:
             flag("cache_miss", i, f"reused {c['reused']} of prompt {prompt}; previous step's "
                                   f"prompt was {prev_prompt} (processed {c.get('processed')})",
                  proxy=True)
+        # The warm before THIS request loaded the delivered turn; a request
+        # that reuses less than it loaded diverged inside that turn (live
+        # 2026-09-25, v0e: tool-call argument KEY ORDER -- Hermes sends past
+        # calls with sorted keys, the warm rendered the model's order -- cost
+        # ~27K re-read tokens in 7 requests, and every warm reported success).
+        wb = x.get("warm_before") or {}
+        if (wb.get("sent") and isinstance(wb.get("reused"), int)
+                and isinstance(wb.get("processed"), int)
+                and c.get("reused") is not None
+                and c["reused"] < wb["reused"] + wb["processed"] - WARM_LOST_SLACK):
+            flag("warm_lost", i, f"the warm before this step loaded "
+                                 f"{wb['reused'] + wb['processed']} tokens; this step "
+                                 f"reused {c['reused']} (re-read "
+                                 f"{wb['reused'] + wb['processed'] - c['reused']})",
+                 proxy=True)
         w = st["warm"]
         if w and w["processed"] > max(4000, 1.5 * comp):
-            flag("warm_reread", i, f"warm after step {i} on slot {w['slot']}: reused "
-                                   f"{w['reused']} processed {w['processed']} (step wrote {comp} "
-                                   f"tokens); repair: {st['repair']}", proxy=True)
+            # A PREFILLED turn's warm re-reads the conversation back to the
+            # server's nearest surviving checkpoint (proxy A PREFILL
+            # MID-CONVERSATION, v0f step 25): inherent, not a proxy defect.
+            # The proxy judges it (warm_before.short on the next step, which
+            # warm_short flags) and measures it (reread_before_turn).
+            pre = bool((x.get("warm") or {}).get("prefilled"))
+            flag("warm_prefill_reread" if pre else "warm_reread", i,
+                 f"warm after step {i} on slot {w['slot']}: reused "
+                 f"{w['reused']} processed {w['processed']} (step wrote {comp} "
+                 f"tokens); repair: {st['repair']}"
+                 + ("; the turn opened with a prefill the client drops"
+                    if pre else ""), proxy=not pre)
         if comp > 10_000:
             flag("long_reasoning", i, f"{comp} completion tokens, {st['reasoning_chars']} "
                                       f"reasoning chars, {st['seconds']} s, for "
@@ -251,7 +370,10 @@ def assess(run_id: str) -> dict:
         if any(mk in content for mk in MARKERS):
             flag("template_marker", i, repr(content[:160]), proxy=True)
         tm = x.get("template_markers")
-        if tm and tm.get("in_content"):
+        # Since 2026-09-25 the proxy strips the model's stray markers from the
+        # delivered content and records them (`stripped`): still the model's
+        # rate, so still flagged.
+        if tm and (tm.get("in_content") or tm.get("stripped")):
             flag("template_markers_x", i, f"x_yamadori.template_markers {json.dumps(tm)[:240]}",
                  proxy=(tm.get("source") == "ours"))
         wb = x.get("warm_before") or {}
@@ -336,6 +458,21 @@ def assess(run_id: str) -> dict:
             pass
     comp_total = sum(s["completion"] for s in real)
     files = []
+    # Files the model wrote OUTSIDE /workspace (v0b: /root/space-shooter, a
+    # tmpfs in the sandbox) are mirrored read-only by octo/mirror_root.sh into
+    # logs/<run>/root_mirror/; counted too, prefixed "root:".
+    mirror = os.path.join(log_dir, "root_mirror")
+    for dp, dn, fn in os.walk(mirror):
+        dn[:] = [d for d in dn if d not in ("node_modules", "dist")]
+        for f in fn:
+            if f in ("last_copy.txt", "verify.json"):
+                continue
+            p = os.path.join(dp, f)
+            try:
+                files.append(("root:" + os.path.relpath(p, mirror).replace("\\", "/"),
+                              sum(1 for _ in open(p, encoding="utf-8", errors="replace"))))
+            except OSError:
+                pass
     for dp, dn, fn in os.walk(run_dir):
         dn[:] = [d for d in dn if d not in ("node_modules", "dist")]
         for f in fn:
@@ -364,7 +501,8 @@ def assess(run_id: str) -> dict:
         "tok_s_by_depth": by_depth, "ref_tok_s": [REF["tok_s_fresh"], REF["tok_s_avg"]],
         "wh": round(sum(s["wh"] or 0 for s in real), 1),
         "warm_processed": sum((s["warm"] or {}).get("processed", 0) for s in steps),
-        "repairs": sum(1 for s in real if (s["repair"] or "").startswith("fixed")),
+        "repairs": sum(repairs_by_file.values()),
+        "repairs_by_file": repairs_by_file,
         "compactions": sum(1 for s in steps if s["compaction"]),
         "routes": sorted({s["route"] for s in real if s["route"]}),
         "tiers": sorted({s["tier"] for s in real if s["tier"]}),
@@ -384,7 +522,8 @@ def assess(run_id: str) -> dict:
                  "think_deeply_calls": sum((s["deep"] or {}).get("think_calls") or 0
                                            for s in real)},
         "warm_short": sum(1 for s in real if (s["warm_before"] or {}).get("short")),
-        "template_markers": sum(1 for s in real if (s["markers"] or {}).get("in_content")),
+        "template_markers": sum(1 for s in real if (s["markers"] or {}).get("in_content")
+                                or (s["markers"] or {}).get("stripped")),
         "gpu_room_entries": sum(s["gpu_room"] for s in real),
     }
     return {"summary": summary, "steps": steps, "defects": defects, "files": files,
@@ -431,6 +570,38 @@ def write(run_id: str, a: dict) -> list[dict]:
     return new
 
 
+def detach(argv: list[str], log_dir: str) -> int:
+    """Re-launch this watcher outside the caller's process tree and job (see
+    RUN IT DETACHED). Returns the child's pid."""
+    import subprocess
+    os.makedirs(log_dir, exist_ok=True)
+    cmd = [sys.executable, os.path.abspath(__file__)] + [a for a in argv if a != "--detach"]
+    out_path = os.path.join(log_dir, "watch.out")
+    out = open(out_path, "ab")
+    if os.name == "nt":
+        flags = 0x00000008 | 0x00000200          # DETACHED_PROCESS | NEW_PROCESS_GROUP
+        try:
+            pid = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                   creationflags=flags | 0x01000000,   # BREAKAWAY_FROM_JOB
+                                   close_fds=True).pid
+        except OSError:
+            # The job forbids breakaway: WMI starts it as nobody's child.
+            line = subprocess.list2cmdline(cmd) + f' >> "{out_path}" 2>&1'
+            ps = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+                  "-Arguments @{CommandLine='cmd.exe /c " + line.replace("'", "''")
+                  + "'}; $r.ProcessId")
+            res = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps],
+                                 capture_output=True, text=True, timeout=60)
+            pid = int(((res.stdout or "").strip().splitlines() or ["0"])[-1] or 0)
+    else:
+        pid = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                               start_new_session=True, close_fds=True).pid
+    out.close()
+    with open(os.path.join(log_dir, "watch.pid"), "w") as f:
+        f.write(str(pid))
+    return pid
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run_id")
@@ -438,19 +609,30 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--wait", action="store_true",
                     help="wait for the run's first relay row before assessing")
+    ap.add_argument("--detach", action="store_true",
+                    help="run in the background, outside this shell's process tree "
+                         "(logs/<run>/watch.out, watch.pid)")
     a = ap.parse_args()
+    if a.detach:
+        log_dir = os.path.join(runmod.LOGS_DIR, a.run_id)
+        pid = detach(sys.argv[1:], log_dir)
+        say(f"[{a.run_id}] watcher detached: pid {pid}; output in "
+            f"{os.path.join(log_dir, 'watch.out')}")
+        return 0
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)   # a closed terminal
     relay_path = os.path.join(runmod.LOGS_DIR, a.run_id, "relay.jsonl")
     while a.wait and not os.path.isfile(relay_path):
         time.sleep(5)
-    print(f"[{a.run_id}] assessment started", flush=True)
+    say(f"[{a.run_id}] assessment started")
     while True:
         res = assess(a.run_id)
         for d in write(a.run_id, res):
-            print(f"[{a.run_id}] step {d['step']} {d['kind']}"
-                  f"{' PROXY?' if d['proxy_suspect'] else ''}: {d['evidence'][:300]}", flush=True)
+            say(f"[{a.run_id}] step {d['step']} {d['kind']}"
+                f"{' PROXY?' if d['proxy_suspect'] else ''}: {d['evidence'][:300]}")
         if a.once or res["done"]:
             if res["done"]:
-                print(f"[{a.run_id}] run finished: {json.dumps(res['summary'])[:600]}", flush=True)
+                say(f"[{a.run_id}] run finished: {json.dumps(res['summary'])[:600]}")
             return 0
         time.sleep(a.interval)
 

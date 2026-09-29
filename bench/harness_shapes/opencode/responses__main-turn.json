@@ -1,0 +1,252 @@
+{
+ "id": "opencode/responses/main-turn",
+ "harness": "opencode",
+ "harness_version": "opencode-ai 1.18.32",
+ "wire": "responses",
+ "source": "scratchpad occap/cap.jsonl #1 (captured, @ai-sdk/openai): a leading developer item, prompt_cache_key = the ses_ id, max_output_tokens",
+ "headers": {
+  "x-session-affinity": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "x-session-id": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "user-agent": "opencode/1.18.32 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+ },
+ "body": {
+  "model": "yamadori",
+  "input": [
+   {
+    "role": "developer",
+    "content": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.\n\n[... OpenCode system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "\"say ok\""
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "name": "bash",
+    "description": "(bash: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "command": {
+       "type": "string"
+      },
+      "timeout": {
+       "type": "integer"
+      },
+      "workdir": {
+       "type": "string"
+      },
+      "description": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "command"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "read",
+    "description": "(read: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "filePath": {
+       "type": "string"
+      },
+      "offset": {
+       "type": "integer"
+      },
+      "limit": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "filePath"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "glob",
+    "description": "(glob: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "pattern": {
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pattern"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "grep",
+    "description": "(grep: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "pattern": {
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      },
+      "include": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pattern"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "edit",
+    "description": "(edit: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "filePath": {
+       "type": "string"
+      },
+      "oldString": {
+       "type": "string"
+      },
+      "newString": {
+       "type": "string"
+      },
+      "replaceAll": {
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "filePath",
+      "oldString",
+      "newString"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "write",
+    "description": "(write: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "filePath": {
+       "type": "string"
+      },
+      "content": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "filePath",
+      "content"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "task",
+    "description": "(task: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "description": {
+       "type": "string"
+      },
+      "prompt": {
+       "type": "string"
+      },
+      "subagent_type": {
+       "type": "string"
+      }
+     },
+     "required": []
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "todowrite",
+    "description": "(todowrite: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "todos": {
+       "type": "array",
+       "items": {
+        "type": "object"
+       }
+      }
+     },
+     "required": []
+    },
+    "type": "function",
+    "strict": false
+   },
+   {
+    "name": "skill",
+    "description": "(skill: description trimmed)",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "name"
+     ]
+    },
+    "type": "function",
+    "strict": false
+   }
+  ],
+  "tool_choice": "auto",
+  "store": false,
+  "stream": true,
+  "max_output_tokens": 26419,
+  "include": [
+   "reasoning.encrypted_content"
+  ],
+  "prompt_cache_key": "ses_0a0b0c0d0e0fTESTsessionAAAA"
+ },
+ "expect": {
+  "accepted": true,
+  "utility": {
+   "utility": false
+  },
+  "session": {
+   "source": "prompt_cache_key"
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "roles": "the developer item is the system prompt (responses_api docstring)"
+ }
+}

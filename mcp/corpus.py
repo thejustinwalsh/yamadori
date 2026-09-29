@@ -111,7 +111,19 @@ TEST_ACCOUNT_LABELS = ("live-test", "claude-dogfood")
 LEGACY_TEST_SPANS = ({"from_id": 3787, "from_turn": "fa48a951d3164db7",
                       "to_id": 3916, "to_turn": "b8810ebe686347df",
                       "why": "live gate 2026-09-24, live-test account, "
-                             "before log_turn recorded accounts"},)
+                             "before log_turn recorded accounts"},
+                     # 2026-09-25 01:18:45-01:19:07: an OFFLINE test_ledger
+                     # run (a HEAD-vs-now comparison that imported proxy
+                     # before the suite pointed YAMADORI_CORPUS_DB at its
+                     # temp dir) wrote its fixture turns here, accounts
+                     # "ledger-acct*", recorded as "client". Two live Hermes
+                     # turns (the V0 run) share the id range, so only turns
+                     # whose account starts with the prefix are test.
+                     {"from_id": 4519, "from_turn": "5c1ed6171fef4f44",
+                      "to_id": 4671, "to_turn": "7ce47a745bf04485",
+                      "account_prefix": "ledger-acct",
+                      "why": "offline test_ledger fixtures leaked into the "
+                             "real corpus, 2026-09-25"})
 
 
 def account_traffic(account: str | None) -> str:
@@ -150,9 +162,17 @@ def test_turns(con: sqlite3.Connection) -> set[str]:
                                 "(?, ?)", (s["from_id"], s["to_id"])))
         if ends.get(s["from_id"]) == s["from_turn"] and \
                 ends.get(s["to_id"]) == s["to_turn"]:
-            out.update(t for (t,) in con.execute(
+            span = {t for (t,) in con.execute(
                 "SELECT DISTINCT turn FROM events WHERE id BETWEEN ? AND ?",
-                (s["from_id"], s["to_id"])))
+                (s["from_id"], s["to_id"]))}
+            pre = s.get("account_prefix")
+            if pre:
+                span = {t for t, raw in con.execute(
+                    "SELECT turn, payload FROM events WHERE kind='turn' AND "
+                    "id BETWEEN ? AND ?", (s["from_id"], s["to_id"]))
+                    if str(json.loads(raw).get("account") or "").startswith(
+                        pre)}
+            out.update(span)
     return out
 
 

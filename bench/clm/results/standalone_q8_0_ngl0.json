@@ -1,0 +1,92 @@
+{
+ "argv": [
+  "C:/Users/jwals/llamacpp-prism-official/build/bin/llama-server.exe",
+  "--port",
+  "10991",
+  "-m",
+  "C:/Users/jwals/textgen/user_data/models/Qwen3-8B-Q8_0.gguf",
+  "-dev",
+  "CUDA0",
+  "-ngl",
+  "0",
+  "-c",
+  "2048",
+  "-np",
+  "1",
+  "--embeddings",
+  "--pooling",
+  "last",
+  "-b",
+  "2048",
+  "-ub",
+  "2048"
+ ],
+ "determinism_max_abs": 0.0,
+ "fidelity": {
+  "ms_total": 194551,
+  "out": "C:\\Users\\jwals\\llama-stack\\index\\clm\\fidelity\\served_q8_0_ngl0.npz",
+  "tag": "q8_0_ngl0",
+  "texts": 185,
+  "tokenize_mismatch": []
+ },
+ "fidelity_states_ms": {
+  "max": 1460.8,
+  "n": 108,
+  "p50": 1346.8,
+  "p90": 1373.7,
+  "tokens_max": 283,
+  "tokens_p50": 40
+ },
+ "file_mib": 8306,
+ "first_call_ms": 525.4,
+ "free_after_full_window_mib": 9457,
+ "free_before_mib": 11532,
+ "free_end_mib": 9457,
+ "free_loaded_mib": 9537,
+ "gguf": "Qwen3-8B-Q8_0.gguf",
+ "load_s": 2.82,
+ "per_call_ms": {
+  "1500": {
+   "all": [
+    2209.1,
+    2080.7,
+    2062.5
+   ],
+   "median": 2080.7
+  },
+  "300": {
+   "all": [
+    1489.3,
+    1472.8,
+    1461.4
+   ],
+   "median": 1472.8
+  },
+  "40": {
+   "all": [
+    1377.7,
+    1365.0,
+    1355.6
+   ],
+   "median": 1365.0
+  },
+  "800": {
+   "all": [
+    1807.2,
+    1759.0,
+    1729.6
+   ],
+   "median": 1759.0
+  }
+ },
+ "prefix_cache": {
+  "recomputed_max_abs": 0.0,
+  "repeat_cached_cos": 0.9999668598175049,
+  "repeat_cached_max_abs": 0.0013567209243774414,
+  "tokens": 54
+ },
+ "stop_s": 0.79,
+ "tag": "q8_0_ngl0",
+ "vram_idle_mib": 1995,
+ "vram_peak_mib": 2075
+}

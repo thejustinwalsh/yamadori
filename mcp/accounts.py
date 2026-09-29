@@ -36,6 +36,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -76,16 +77,66 @@ def _load() -> dict:
     return d
 
 
+# THE REGISTRY IS WRITTEN RARELY (2026-09-25). identify() used to rewrite
+# accounts.json on EVERY authenticated request to bump a usage counter. Two
+# concurrent requests then shared one ".tmp" path, and on Windows os.replace
+# fails with WinError 5 while another process has the file open -- live, two
+# requests came back HTTP 500 (logs/proxy.err.log). Usage is now counted in
+# memory and flushed at most every USAGE_FLUSH_SECONDS; a write uses its own
+# temp file and retries a refused replace; a failed usage flush never fails a
+# request (the counts are kept for the next flush).
+USAGE_FLUSH_SECONDS = 60
+_REPLACE_TRIES = 6
+_LOCK = threading.Lock()
+_USAGE: dict[str, list] = {}      # key hash -> [uses since flush, last_seen]
+_last_flush = 0.0
+
+
 def _save(d: dict) -> None:
     os.makedirs(STORE, exist_ok=True)
-    tmp = REGISTRY + ".tmp"
+    tmp = f"{REGISTRY}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(d, f, indent=2)
-    os.replace(tmp, REGISTRY)
+    for i in range(_REPLACE_TRIES):
+        try:
+            os.replace(tmp, REGISTRY)
+            break
+        except PermissionError:
+            if i == _REPLACE_TRIES - 1:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.05 * (2 ** i))
     try:
         os.chmod(REGISTRY, 0o600)
     except OSError:
         pass
+
+
+def _record_use(h: str, now: float | None = None) -> None:
+    """Count one use in memory; flush the counts to the registry at most once
+    per USAGE_FLUSH_SECONDS. Never raises."""
+    global _last_flush
+    now = time.time() if now is None else now
+    with _LOCK:
+        u = _USAGE.setdefault(h, [0, now])
+        u[0] += 1
+        u[1] = now
+        if now - _last_flush < USAGE_FLUSH_SECONDS:
+            return
+        try:
+            d = _load()
+            for k, (n, seen) in _USAGE.items():
+                if k in d:
+                    d[k]["uses"] = d[k].get("uses", 0) + n
+                    d[k]["last_seen"] = seen
+            _save(d)
+            _USAGE.clear()
+            _last_flush = now
+        except (OSError, RegistryUnreadable):
+            pass
 
 
 def _hash(key: str) -> str:
@@ -132,9 +183,7 @@ def identify(auth_header: str | None) -> tuple[str | None, str]:
                       "accounts.json from a backup.")
     for known, meta in d.items():
         if hmac.compare_digest(known, h):
-            meta["uses"] = meta.get("uses", 0) + 1
-            meta["last_seen"] = time.time()
-            _save(d)
+            _record_use(known)
             return known[:16], f"account {meta.get('label', '?')}"
     return None, "unrecognised API key"
 

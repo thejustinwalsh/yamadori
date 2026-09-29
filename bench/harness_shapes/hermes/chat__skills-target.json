@@ -1,0 +1,272 @@
+{
+ "id": "hermes/chat/skills-target",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "chat",
+ "source": "shape: Hermes write_file calls; request from the authored skill's activation test (skills/authored/module-exports-match-callers/tests.json)",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask. [... Hermes system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": "Build a small canvas game."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_1a2b3c4d5e6f_00000028",
+      "type": "function",
+      "function": {
+       "name": "write_file",
+       "arguments": "{\"path\": \"js/audio.js\", \"content\": \"const AUDIO = (function () {\\n  function play(name) {\\n    return name;\\n  }\\n  return { beep: play };\\n})();\\n\"}"
+      }
+     },
+     {
+      "id": "call_1a2b3c4d5e6f_00000029",
+      "type": "function",
+      "function": {
+       "name": "write_file",
+       "arguments": "{\"path\": \"js/player.js\", \"content\": \"const PLAYER = {\\n  shoot() {\\n    AUDIO.play('shot');\\n  }\\n};\\n\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_1a2b3c4d5e6f_00000028",
+    "content": "{\"bytes_written\": 90}"
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_1a2b3c4d5e6f_00000029",
+    "content": "{\"bytes_written\": 60}"
+   },
+   {
+    "role": "assistant",
+    "content": "Done: js/audio.js and js/player.js are written."
+   },
+   {
+    "role": "user",
+    "content": "Uncaught TypeError: AUDIO.play is not a function when the player shoots. Fix it."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "terminal",
+     "description": "(terminal: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "background": {
+        "type": "boolean"
+       },
+       "timeout": {
+        "type": "integer"
+       },
+       "workdir": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read_file",
+     "description": "(read_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write_file",
+     "description": "(write_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "patch",
+     "description": "(patch: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "mode": {
+        "type": "string",
+        "enum": [
+         "replace",
+         "patch"
+        ]
+       },
+       "path": {
+        "type": "string"
+       },
+       "old_string": {
+        "type": "string"
+       },
+       "new_string": {
+        "type": "string"
+       },
+       "replace_all": {
+        "type": "boolean"
+       },
+       "patch": {
+        "type": "string"
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "search_files",
+     "description": "(search_files: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "target": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "file_glob": {
+        "type": "string"
+       },
+       "output_mode": {
+        "type": "string"
+       },
+       "context": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skills_list",
+     "description": "(skills_list: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_view",
+     "description": "(skill_view: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "vision_analyze",
+     "description": "(vision_analyze: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "image_url": {
+        "type": "string"
+       },
+       "question": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "image_url",
+       "question"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "medium"
+ },
+ "expect": {
+  "accepted": true,
+  "roles": {
+   "one_system_first": true
+  },
+  "skills": {
+   "includes": [
+    "module-exports-match-callers"
+   ]
+  }
+ },
+ "why": {
+  "skills": "two JS modules written with the harness's own tool, then 'X.y is not a function': the authored skill's target shape"
+ }
+}

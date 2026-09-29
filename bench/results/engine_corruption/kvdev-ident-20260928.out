@@ -1,0 +1,28 @@
+[06:59:07] waiting: running `bonsai` is not config.yaml's command ('') | card busy (89% mean utilisation over 10 s)
+[06:59:41] [dev-dbg] attempt 1: unload bonsai: HTTP 200 OK
+[06:59:44] [dev-dbg] card empty of llama-server: {'used': 5940, 'free': 10111, 'util': 17}
+[06:59:44] [dev-dbg] start: C:/Users/jwals/AppData/Local/Temp/claude/C--Users-jwals-llama-stack/d16e1f09-4699-483b-a257-1ba77b329ce7/scratchpad/kvdev/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1', 'LLAMA_KV_CACHE_DEBUG': '1'}
+[06:59:45] GUARD: llama-swap started ['bonsai'] on the card; killing the arm
+[06:59:47] [dev-dbg] ERROR RuntimeError("server exited 1 during load (llama-swap started ['bonsai'] on the card)")
+[06:59:47] [dev-dbg] stopped; min free 8121 MiB
+[06:59:48] restore: {'lane_resumed': True, 'bonsai_state': 'starting', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 9250, 'free': 6801, 'util': 32}}
+[06:59:48] [dev-dbg] attempt 1 aborted by the guard (llama-swap started ['bonsai'] on the card); production restored
+[07:00:09] waiting: card busy (27% mean utilisation over 10 s)
+[07:00:43] [dev-dbg] attempt 2: unload bonsai: HTTP 200 OK
+[07:00:46] [dev-dbg] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[07:00:46] [dev-dbg] start: C:/Users/jwals/AppData/Local/Temp/claude/C--Users-jwals-llama-stack/d16e1f09-4699-483b-a257-1ba77b329ce7/scratchpad/kvdev/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1', 'LLAMA_KV_CACHE_DEBUG': '1'}
+[07:00:57] [dev-dbg] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 56248, C:\Users\jwals\AppData\Local\Temp\claude\C--Users-jwals-llama-stack\d16e1f09-4699-483b-a257-1ba77b329ce7\scratchpad\kvdev\src\build\bin\llama-server.exe; build b10747-91230814
+[07:01:03] [dev-dbg] greedy ts rep0: n=425 84.78 tok/s acc 261/326 finish=stop symptom=[]
+[07:01:09] [dev-dbg] greedy bash rep0: n=512 80.48 tok/s acc 306/409 finish=length symptom=[]
+[07:01:14] [dev-dbg] greedy prose rep0: n=346 68.65 tok/s acc 183/328 finish=stop symptom=[]
+[07:01:19] [dev-dbg] greedy ts rep1: n=404 82.52 tok/s acc 245/318 finish=stop symptom=[]
+[07:01:26] [dev-dbg] greedy bash rep1: n=512 79.44 tok/s acc 301/418 finish=length symptom=[]
+[07:01:33] [dev-dbg] greedy prose rep1: n=429 65.41 tok/s acc 215/430 finish=stop symptom=[]
+[07:01:38] [dev-dbg] greedy ts rep2: n=404 82.66 tok/s acc 244/318 finish=stop symptom=[]
+[07:01:44] [dev-dbg] greedy bash rep2: n=512 80.25 tok/s acc 304/414 finish=length symptom=[]
+[07:01:51] [dev-dbg] greedy prose rep2: n=461 69.46 tok/s acc 245/430 finish=stop symptom=[]
+[07:01:53] [dev-dbg] stopped; min free 1047 MiB
+[07:02:03] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+| arm | greedy decode tok/s median (min-max), n | greedy reps 1..n identical | plain: with `!!!!`/`////` | plain: 10+ `!`/`/` | plain: 6+ punct run | plain: 5x word | plain finish | tools valid | error |
+|---|---|---|---|---|---|---|---|---|---|
+| dev-dbg | 80.25 (65.41-84.78), n=9 | ts yes, bash NO, prose NO | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |

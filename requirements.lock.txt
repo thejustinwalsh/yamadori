@@ -1,0 +1,188 @@
+# Lock for runtime `stack-python` -- written by scripts/verify_artifacts.py --write-locks; checked by verify().
+# interpreter: C:/Users/jwals/textgen/installer_files/env/python.exe
+# python: 3.13.15 | packaged by conda-forge | (main, Sep  2 2026, 21:52:43) [MSC v.1944 64 bit (AMD64)]
+# method: pip freeze
+# written: 2026-09-25
+# conda packages (conda-meta; not installed by pip):
+#   bzip2-1.0.8-h0ad9c76_10
+#   ca-certificates-2026.7.22-h4c7d964_0
+#   git-2.55.0-h57928b3_3
+#   libexpat-2.8.1-hac47afa_1
+#   libffi-3.7.0-h3d046cb_1
+#   liblzma-5.8.3-hfd05255_1
+#   libmpdec-4.0.0-hfd05255_2
+#   libpython-3.13.15-h4f90d01_103_cp313
+#   libsqlite-3.53.4-hf5d6505_1
+#   libzlib-1.3.2-hfd05255_3
+#   ninja-1.13.2-h477610d_1
+#   openssl-3.6.4-hf411b9b_0
+#   pip-26.2.1-pyh145f28c_0
+#   python-3.13.15-h254dcb4_103_cp313
+#   python_abi-3.13-9_cp313
+#   tk-8.6.13-h967ab96_4
+#   tzdata-2026c-h151e31d_0
+#   ucrt-10.0.26100.0-h57928b3_0
+#   vc-14.5-ha367084_41
+#   vc14_runtime-14.51.36247-habf1de7_41
+#   vcomp14-14.51.36247-habf1de7_41
+absl-py==2.5.0
+accelerate==1.13.0
+aiofiles==23.2.1
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.3
+aiosignal==1.4.0
+altair==5.5.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+attrs==26.1.0
+audioop-lts==0.2.2
+babel==2.18.0
+bitsandbytes==0.49.2
+blinker==1.9.0
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+colorama==0.4.6
+courlan==1.4.0
+cryptography==50.0.1
+datasets==5.0.1
+dateparser==1.4.3
+ddgs==9.14.1
+diffusers==0.37.1
+dill==0.4.1
+einops==0.8.2
+exllamav3 @ https://github.com/turboderp-org/exllamav3/releases/download/v0.0.34/exllamav3-0.0.34+cu128.torch2.9.0-cp313-cp313-win_amd64.whl#sha256=cdede3db75966c1d28d1a14e5e481440e2032b2e0831ab9b952b55560e082fb1
+fastapi==0.112.4
+ffmpy==1.0.0
+filelock==4.0.1
+fla-core==0.4.2
+flash-linear-attention==0.4.2
+flash_attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.13/flash_attn-2.8.3+cu128torch2.9-cp313-cp313-win_amd64.whl#sha256=a7a618dc7809aacadd43c765161faf506354f3e7b62b5eba5d3d9bdc15ab716f
+flask-cloudflared==0.0.15
+Flask==3.1.3
+formatron==0.5.0
+frozendict==2.4.7
+frozenlist==1.8.0
+fsspec==2026.6.0
+general_sam==1.0.5
+googleapis-common-protos==1.75.3
+gradio @ https://github.com/oobabooga/gradio/releases/download/4.37.2-custom.21/gradio-4.37.2+custom.21-py3-none-any.whl#sha256=ff1727d4cc0c97231170697c3ee805b4707e9d022a4abc2f619815fda4be1a7e
+gradio_client @ https://github.com/oobabooga/gradio/releases/download/4.37.2-custom.21/gradio_client-1.0.2+custom.21-py3-none-any.whl#sha256=3678bad98c33489fbd461edf1632871404e69d8a8146ae0654934786e646aad3
+grpcio==1.84.0
+h11==0.16.0
+hf-xet==1.6.0
+htmldate==1.10.0
+httpcore==1.0.9
+httpx-sse==0.4.3
+httpx==0.28.1
+huggingface_hub==1.5.0
+idna==3.20
+ik_llama_cpp_binaries @ https://github.com/oobabooga/llama-cpp-binaries/releases/download/v0.138.0/ik_llama_cpp_binaries-0.138.0+cu124-py3-none-win_amd64.whl#sha256=78ca94f15d39bdecf97865d1cc582f0c1cd74cbf2085d8715d3d4c418e4c0c00
+importlib_metadata==9.0.1
+importlib_resources==6.5.2
+itsdangerous==2.2.0
+Jinja2==3.1.6
+jsonschema-specifications==2025.9.1
+jsonschema==4.26.0
+jusText==3.0.2
+kbnf==0.4.2
+llama_cpp_binaries @ https://github.com/oobabooga/llama-cpp-binaries/releases/download/v0.138.0/llama_cpp_binaries-0.138.0+cu124-py3-none-win_amd64.whl#sha256=fdef460de68ae1de251ddc3950ae1fd35a743d84e7396d9cde927b25a6d1f322
+lxml==6.1.3
+lxml_html_clean==0.4.5
+marisa-trie==1.4.1
+markdown-it-py==4.2.0
+Markdown==3.10.3
+MarkupSafe==2.1.5
+mcp==1.27.0
+mdurl==0.1.2
+mpmath==1.3.0
+multidict==6.9.0
+multiprocess==0.70.19
+narwhals==2.26.0
+networkx==3.6.1
+ninja==1.13.2
+numpy==2.2.6
+nvidia-cublas-cu12==12.8.5.5
+nvidia-cuda-cccl-cu12==12.9.27
+nvidia-cuda-nvcc-cu12==12.8.93
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cuda-runtime-cu12==12.8.90
+opentelemetry-api==1.44.0
+opentelemetry-exporter-otlp-proto-common==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-proto==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-semantic-conventions==0.65b0
+orjson==3.12.0
+packaging==26.3
+pandas==3.0.6
+peft==0.18.1
+pillow==12.3.0
+#local: pip @ file:///home/conda/feedstock_root/build_artifacts/pip_1785914395273/work
+platformdirs==4.11.11
+primp==2.0.1
+propcache==0.5.4
+protobuf==7.36.2
+psutil==7.2.2
+pyarrow==25.0.1
+pycparser==3.0
+pydantic-settings==2.15.0
+pydantic==2.11.0
+pydantic_core==2.33.0
+pydub==0.25.1
+Pygments==2.21.0
+PyJWT==2.14.0
+PyMuPDF==1.27.2.3
+python-dateutil==2.9.0.post0
+python-docx==1.1.2
+python-dotenv==1.2.3
+python-multipart==0.0.32
+pytz==2026.3.post1
+pywin32==312
+PyYAML==6.0.3
+referencing==0.37.0
+regex==2026.9.10
+requests==2.34.2
+rich==15.0.0
+rpds-py==2026.6.3
+ruff==0.16.8
+safetensors==0.7.0
+scipy==1.18.1
+semantic-version==2.10.0
+sentencepiece==0.2.2
+setuptools==84.0.0
+shellingham==1.5.4
+six==1.17.0
+sse-starlette==1.6.5
+starlette==0.38.6
+sympy==1.14.0
+tensorboard-data-server==0.7.2
+tensorboard==2.21.0
+tiktoken==0.14.0
+tld==0.13.2
+tokenizers==0.22.2
+tomlkit==0.12.0
+torch==2.9.0+cu128
+torchao==0.15.0
+tqdm==4.70.1
+trafilatura==2.0.0
+transformers==5.6.2
+tree-sitter-language-pack==1.20.0
+tree-sitter==0.26.0
+triton-windows==3.5.1.post24
+typer==0.27.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.4
+tzlocal==5.4.4
+urllib3==2.8.0
+uvicorn==0.53.0
+wandb==0.30.0
+websockets==11.0.3
+Werkzeug==3.1.8
+xformers @ https://download.pytorch.org/whl/cu128/xformers-0.0.33-cp39-abi3-win_amd64.whl#sha256=d5635ceac32c8216744a18fb328c0eafdcdb45aaab3de415edf9b1caf6fa9dcc
+xxhash==4.0.1
+yarl==1.25.1
+zipp==4.1.0

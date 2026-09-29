@@ -350,6 +350,20 @@ re-indexing with an 8B model that claims nothing for retrieval. The `judge`
 role (`scripts/eval_judge.py`, 10 items) could be tried in one call, but
 `noul` is built on similarity, and that is the mechanism that failed there.
 
+## 6. The skill selector's CLM arm (added 2026-09-27)
+
+Skill selection is now successive filter rounds and then one typed question
+per area (docs/SKILL-FACTORY.md, "The selector"). That is CLM's shape --
+a FIXED state, a handful of options, a `choice` with NONE -- so the
+selector has a `clm` decider (`mcp/skill_deciders.ClmDecider`) on the client
+`mcp/clm.py`: all of a turn's skill questions share one instruction, so the
+state is encoded once; options are the skills' descriptions, cached per
+text; `ClmUnavailable` makes it abstain and the evidence stub answers. It
+is **not run live**. Its gate is the daily eval with `--decider clm` beside
+the stub (464/464) and the text-only lexical stub (455/464), under the
+same rules as §5: paired, the same rows, a MUST-NOT count no worse than the
+stub's, and a repeat.
+
 ## Sources
 
 Read 2026-09-24.

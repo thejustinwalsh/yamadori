@@ -29,6 +29,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -141,10 +142,32 @@ def test_the_right_key_identifies_its_account():
           "the scheme is case-insensitive and surrounding space is ignored",
           f"got {who2!r}")
 
+    # Usage is counted in memory and flushed at most every
+    # USAGE_FLUSH_SECONDS (2026-09-25: a write per request 500'd on Windows).
+    accounts._record_use(h, now=time.time() + accounts.USAGE_FLUSH_SECONDS + 1)
     meta = json.loads(raw_registry())[h]
-    check(meta.get("uses") == 2, "each identification is counted",
-          str(meta.get("uses")))
+    check(meta.get("uses") == 3, "each identification is counted (flushed "
+          "from memory: 2 identifies + 1 forced flush)", str(meta.get("uses")))
     check(isinstance(meta.get("last_seen"), float), "and last_seen is recorded")
+
+    before = raw_registry()
+    for _ in range(5):
+        accounts.identify("Bearer " + key)
+    check(raw_registry() == before,
+          "identify() does not rewrite the registry on every request")
+
+    real = accounts.os.replace
+
+    def refused(*_a, **_k):
+        raise PermissionError(5, "Access is denied")
+    accounts.os.replace = refused
+    try:
+        accounts._record_use(h, now=time.time() + 10 * accounts.USAGE_FLUSH_SECONDS)
+        who3, _ = accounts.identify("Bearer " + key)
+        check(who3 == who, "a registry write refused by Windows (WinError 5) "
+              "never fails the request", str(who3))
+    finally:
+        accounts.os.replace = real
 
 
 def test_two_accounts_are_told_apart():

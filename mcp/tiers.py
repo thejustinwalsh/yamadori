@@ -3,7 +3,7 @@
 
 WHY OVERLOAD AN EXISTING FIELD
 
-Everything this stack adds -- retrieval, skills (formerly hints), fan-out, a second
+Everything this stack adds -- retrieval, skills, fan-out, a second
 investigating context -- costs latency and tokens, and none of it is worth
 paying for on "rename this variable". So a caller needs a way to say how hard
 to try.
@@ -63,8 +63,8 @@ with a plausible ordering.
   minimal   thinking off, the vendor's instruct sampling, nothing of ours.
   low       the model AS IT SHIPS: thinking at medium, none of our
             augmentation. The benchmark baseline (see the note on TIERS).
-  medium    adds library definitions (a tail injection), skills (formerly
-            recipe hints) and the write check (a note, no fix).
+  medium    adds library definitions (a tail injection), skills (the one
+            knowledge system) and the write check (a note, no fix).
   high      adds the second brain's repair (writes and answers), fan-out
             (sequential, via the second brain) and the static addendum.
   xhigh     adds the second investigating context, at medium effort.
@@ -128,7 +128,7 @@ ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"]
 # hitting it with repeated empty calls reads as a tool defect.
 #
 # THE FLAGS BELOW MEAN "ALLOWED", NOT "ON" (2026-09-22, docs/SELECTION-BUILD.md
-# step 5). `hints`, `fanout` and `investigate` are the most a caller at this
+# step 5). `skills`, `fanout` and `investigate` are the most a caller at this
 # tier can get; mcp/selection.py decides per request whether each one fires,
 # and never exceeds them. Only a flag set in X-Yamadori-Features forces a
 # system on or off, for experiments. `retrieval` is gated separately, by
@@ -143,7 +143,16 @@ ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"]
 # final answer's code, and the static addendum describes it -- `high`,
 # `xhigh` and `max`. Neither needs an index, so neither follows `retrieval`;
 # a header forces either one either way.
+
 TIERS = {
+    # SKILLS ARE OFF AT EVERY TIER (operator, 2026-09-29: "Stop skills until
+    # we have a good skill injector." -- "Skills are still valuable we just
+    # haven't found the unlock yet. TBD."). `skills` is False below, so
+    # nothing of the skills system reaches the model's context: no skill
+    # bodies, no recall lines, no yama_recall_craft offer or craft index.
+    # The skills CODE (pipeline and serving) stays; a header forcing
+    # {"skills": true} still reaches it (how the offline suites test it).
+    #
     # `minimal` IS THINKING OFF; `low` IS THE BASELINE (operator, 2026-09-23).
     #
     # `minimal` is the fast tier: thinking off, the vendor's instruct sampling
@@ -158,37 +167,41 @@ TIERS = {
     #     tier; never the one for an agent reading untrusted input.
     #
     # `low` is the model AS IT SHIPS -- its own thinking at medium, none of
-    # our retrieval, hints, checks, fan-out or second context. It is the
+    # our retrieval, skills, checks, fan-out or second context. It is the
     # honest benchmark baseline (it used to be `minimal`, with thinking on at
     # low effort; switching thinking OFF would cripple the thing we compare
     # against, and any arm beating it would bank thinking-beats-no-thinking).
     "minimal": {
         "thinks": False, "effort": "low",
-        "retrieval": False, "hints": False, "fanout": 1, "investigate": False,
+        "retrieval": False, "skills": False, "fanout": 1, "investigate": False,
         "check_code": False, "repair": False,
+        "mcp_tools": False,
         "why": "thinking off, the vendor's instruct sampling, nothing of ours",
     },
     "low": {
         "thinks": True, "effort": "medium",
-        "retrieval": False, "hints": False, "fanout": 1, "investigate": False,
+        "retrieval": False, "skills": False, "fanout": 1, "investigate": False,
         "check_code": False, "repair": False,
+        "mcp_tools": False,
         "why": "the model as it ships -- its own thinking, none of "
                "our augmentation. The benchmark baseline.",
     },
     "medium": {
         "thinks": True, "effort": "medium",
-        "retrieval": True, "hints": True, "fanout": 1, "investigate": False,
+        "retrieval": True, "skills": False, "fanout": 1, "investigate": False,
         "check_code": True, "repair": False,
-        "why": "skills that apply (silent when none clearly does), library "
-               "definitions for a library question, and a note when a "
-               "client write does not parse",
+        "mcp_tools": True,
+        "why": "library definitions for a library question and a note when "
+               "a client write does not parse (skills: off at every tier "
+               "since 2026-09-29)",
     },
     # Medium effort, not xhigh (operator, 2026-09-23): xhigh thinking is
     # confined to `max`. Same evidence as the `xhigh` tier note below.
     "high": {
         "thinks": True, "effort": "medium",
-        "retrieval": True, "hints": True, "fanout": 3, "investigate": False,
+        "retrieval": True, "skills": False, "fanout": 3, "investigate": False,
         "check_code": True, "repair": True,
+        "mcp_tools": True,
         "why": "the second brain: code that does not parse is repaired "
                "(writes and answers), code answers are compared with an "
                "independent second approach, and the addendum says so",
@@ -204,15 +217,17 @@ TIERS = {
     # speed and accuracy". No result in this repo says xhigh helps.
     "xhigh": {
         "thinks": True, "effort": "medium",
-        "retrieval": True, "hints": True, "fanout": 3, "investigate": True,
+        "retrieval": True, "skills": False, "fanout": 3, "investigate": True,
         "check_code": True, "repair": True,
+        "mcp_tools": True,
         "why": "everything, deep thinking included, at medium thinking: the "
                "effort-matched pair to max",
     },
     "max": {
         "thinks": True, "effort": "xhigh",
-        "retrieval": True, "hints": True, "fanout": 3, "investigate": True,
+        "retrieval": True, "skills": False, "fanout": 3, "investigate": True,
         "check_code": True, "repair": True,
+        "mcp_tools": True,
         "why": "everything at xhigh thinking; deep thinking's hand-off "
                "becomes this answer's thinking",
     },
@@ -243,7 +258,7 @@ def features(name: str, doc: str = "AGENTS.md") -> dict:
         # A tail injection of held-symbol definitions (proxy.
         # _library_definitions), not tools on main (2026-09-24).
         "library help": "definitions" if t.get("retrieval") else "–",
-        "skills": "yes" if t.get("hints") else "–",
+        "skills": "yes" if t.get("skills") else "–",
         # medium: client writes checked, a note; high and up: repaired by
         # the second brain.
         "code check": ("repair" if t.get("repair") else
@@ -313,29 +328,63 @@ DEFAULT = os.environ.get("YAMADORI_TIER_DEFAULT", "medium")
 EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh"]
 FALLBACK_EFFORTS = ("low", "medium", "xhigh")
 _accepted: tuple[str, ...] | None = None
+# per model (MAX MODE, mcp/max_mode.py): each main model's served template is read once, and only while it serves
+_accepted_of: dict[str, tuple[str, ...]] = {}
+
+
+def efforts_in_template(tpl: str) -> tuple[str, ...]:
+    """The efforts a chat template's guard clause accepts (`reasoning_effort
+    not in ('xhigh', 'medium', 'low')`), or () when it has none. One parser
+    for the served template and its pinned fixture (mcp/served_fixture.py)."""
+    import re
+    m = re.search(r"reasoning_effort\s+not\s+in\s+\(([^)]*)\)", tpl or "")
+    return tuple(re.findall(r"'([a-z]+)'", m.group(1))) if m else ()
 
 
 def accepted_efforts(refresh: bool = False) -> tuple[str, ...]:
     """The reasoning_effort values the served chat template accepts."""
     global _accepted
-    if _accepted is not None and not refresh:
+    import max_mode
+    model = max_mode.current(os.environ.get("YAMADORI_MODEL", "bonsai"))
+    if max_mode.ENABLED:
+        if model in _accepted_of and not refresh:
+            return _accepted_of[model]
+        if max_mode.blocks(model) and max_mode.bound_model() != model:
+            # MAX MODE: reading /props would load a model that is off the card; the template's set is read once it
+            # serves (both templates accept the same three today: docs/FLASH-NEXT.md section 2)
+            return FALLBACK_EFFORTS
+    elif _accepted is not None and not refresh:
         return _accepted
     found: tuple[str, ...] = ()
+    upstream = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
+    # A READ NEVER LOADS THE MODEL. /upstream/<model>/props makes llama-swap
+    # start a model that is off the card, and a dashboard view (/dash/api/
+    # tiers -> safe_effort) did exactly that on 2026-09-28 11:47, in the
+    # Flash-Next gate's window: the gate's guard saw bonsai start and killed
+    # its arm. llama-swap's GET /running never loads; when it says the model
+    # is not loaded, the fallback is answered and NOT kept, so the template
+    # is read once the model serves.
+    try:
+        import gpu_room
+        rows = gpu_room.running(upstream)
+    except Exception:                                            # noqa: BLE001
+        rows = None
+    if rows is not None and model not in {
+            str(r.get("model")) for r in rows
+            if str(r.get("state", "ready")) != "stopped"}:
+        return FALLBACK_EFFORTS
     try:
         import json
-        import re
         import urllib.request
-        upstream = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
-        model = os.environ.get("YAMADORI_MODEL", "bonsai")
         with urllib.request.urlopen(f"{upstream}/upstream/{model}/props",
                                     timeout=5) as r:
             tpl = json.load(r).get("chat_template") or ""
-        m = re.search(r"reasoning_effort\s+not\s+in\s+\(([^)]*)\)", tpl)
-        if m:
-            found = tuple(re.findall(r"'([a-z]+)'", m.group(1)))
+        found = efforts_in_template(tpl)
     except Exception:                                            # noqa: BLE001
         found = ()
     _accepted = found or FALLBACK_EFFORTS
+    if max_mode.ENABLED and found:
+        _accepted_of[model] = _accepted
     return _accepted
 
 
@@ -385,7 +434,7 @@ def check_code_offered(tier: dict) -> bool:
 
 
 def images_offered(tier: dict) -> bool:
-    """Is generate_image offered? Always, wherever an image server is
+    """Is yama_generate_image offered? Always, wherever an image server is
     configured (proxy.image_tools checks that): it is a capability, not a
     gate or an augmentation of the answer (operator, 2026-09-23). Every tier,
     `minimal` included, and header-forced benchmark arms too. Deep thinking
@@ -456,17 +505,190 @@ def resolve(body: dict, overrides: dict | None = None) -> dict:
 # in the answer channel, finish=length, no answer; with it, 2 of 2 clean).
 A_MIN = int(os.environ.get("YAMADORI_ANSWER_MIN", "2048"))
 MIN_THINKING = 1024
+# THINKING CAPS (operator, 2026-09-25: "this model overthinks pretty quickly").
+# Octopus v0b-V0 (88 agent steps, n=1 run): reasoning was 96% of the output;
+# median step 730 completion tokens, p90 3,713, max 24,620 (48 min to choose a
+# file search). A 4,096 cap would have cut 6 steps and ~38K tokens (~70 min at
+# ~9 tok/s). CHOICES, not measurements of quality under the cap:
+#   AGENT_STEP_THINKING  main's thinking on a request routed `agent_step`
+#                        (a step in the client's own tool loop). A user turn,
+#                        the kickoff plan and compaction keep their budgets.
+#   JOB_THINKING         each second-brain hop, by job (shomen.run passes it
+#                        as the hop's step cap). The same run's second-brain
+#                        output was 83,031 tokens in 35 generations after
+#                        midnight vs main's 107,935 (index/token_ledger, n=1
+#                        run); three struggle runs took 756-2,658 s.
+#   HELPER_THINKING      any other helper-role request (no job named).
+# The helper SHARE is 0.30 now (mcp/budget.py). A benchmark's
+# X-Yamadori-Features {"reasoning_cap": N} still wins over all of these.
+AGENT_STEP_THINKING = int(os.environ.get("YAMADORI_AGENT_STEP_THINKING", "6144"))
+# The cap BY WHAT THE STEP ANSWERS (#53: AGENT_STEP_THINKING_READ 2,048 after
+# a read / search / inspect, AGENT_STEP_THINKING_ERROR 6,144 after an error,
+# progress.step_kind, switch step_thinking) was REMOVED 2026-09-27
+# (docs/CONSTANTS-AUDIT.md: chosen from one Octopus run). Every agent step
+# thinks at most AGENT_STEP_THINKING.
+# USER_TURN_THINKING: every other main turn (a question, a task start, a code
+# request). ~3x the longest NATURAL finish measured (682-2,826 tokens, 5 of 7
+# runs, docs/CONSTRAINTS.md 1b); the other 2 of 3 on one prompt ran past
+# 20,000 without stopping, and a 95-fold verbatim loop is on record
+# (docs/TRANSCRIPT-REVIEW-2026-09-23.md). Was 12,288 (operator, 2026-09-25).
+# 20,480 since 2026-09-27 (operator: "Yes bump user turn, and I trust their
+# numbers more than ours"): professorpalmer/bonsai-ada-surgery's measured
+# recipe for this model at medium effort, a 20,480-token thinking budget with a
+# force-close message (docs/QUALITY.md there: Killy's HumanEval-164 grid,
+# medium 161/164; docs/ENGINES.md "Token floor and thinking budget"). Their grid
+# is a total-cap measurement, not our force-closed cap: the source, not a
+# measurement of this proxy. The 0.6 nudge now fires at 12,288.
+USER_TURN_THINKING = int(os.environ.get("YAMADORI_USER_TURN_THINKING", "20480"))
+# All five are 1.5x their first values (operator, 2026-09-25: "1.5 those
+# numbers above and dial it in"): 4,096 / 8,192 / 4,096 and jobs 2,048 /
+# 4,096 / 8,192. V0's watcher counts cap hits to dial them in.
+HELPER_THINKING = int(os.environ.get("YAMADORI_HELPER_THINKING", "6144"))
+# THE PLAN'S CAP (#60 in docs/SELF-IMPROVEMENT-LOG.md, 2026-09-26): 12,288
+# -> 4,096. Octopus v0f-V0-xhigh-1 prompt 1: the kickoff plan took 508 s of
+# a 537.5 s first turn, three hops of 171 / 168 / 169 s (llama-swap log).
+# Every hop thought to the nudge (0.6 x 12,288 = 7,373 tokens; 29.5k / 31.7k
+# / 25.8k characters of reasoning before it, ~4.0 characters a token) and
+# stopped within ~40-870 tokens after it: the nudge, not the task, set each
+# hop's length (~45 tok/s decode). Hop 1 had a complete four-section draft
+# ~5,100 tokens in, and spent the rest re-reading two prompt defects fixed
+# in shomen PLAN_SYSTEM_V2 (85 word-count passages, 8 "the engineer gets
+# ... nothing else" readings; 10-12 drafts in all). 4,096 puts the nudge at
+# ~2,460 tokens (~55 s) and the hard stop at ~90 s. That 4,096 was a CHOICE
+# from one run (n=1), and it is REVERTED (docs/CONSTANTS-AUDIT.md,
+# 2026-09-27): the plan is back on 12,288, the 1.5x value it had under the
+# operator's "1.5 those numbers above and dial it in". YAMADORI_PLAN_THINKING
+# pins it.
+JOB_THINKING = {"fixup": 3072, "investigate": 6144,
+                "plan": int(os.environ.get("YAMADORI_PLAN_THINKING", "12288")),
+                "alternative": 6144, "tiebreak": 6144}
+# REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md: CHOICES from one v0f run,
+# n=1): the plan job's own budget, PLAN_TOOL_TURNS (2) and PLAN_SECONDS
+# (150 s), and its switch plan_budget. The plan keeps tool_turn_limit, as
+# investigate does.
+# THE THINKING NUDGE (operator, 2026-09-25). Once thinking has used NUDGE_AT
+# of its budget, the served fork (llamacpp-sudoingx-bonsai2, common/
+# reasoning-budget.cpp) forces NUDGE_MESSAGE into the reasoning at the next
+# token that carries a newline, then lets the model keep thinking; the nudge's
+# own tokens count against the budget. It fires at most once per generation,
+# never when thinking ends first, and not at all when fewer than ~64 tokens
+# plus the nudge would remain -- the hard stop (BUDGET_MESSAGE) then works as
+# before. The nudge OPENS a short converging summary in the model's own voice
+# that the model completes, and the hard-stop message points back at that
+# summary, so a forced close lands on a finished conclusion rather than
+# mid-thought. Both texts are UNMEASURED WORDING -- prompts, to be A/B'd --
+# kept positive (AGENTS.md: prohibitions degrade this model). NUDGE_MESSAGE
+# ends on a newline so the model's summary starts cleanly on the next line.
+# NUDGE_AT 0.8 is the operator's choice, not a measurement. Off with
+# YAMADORI_THINKING_NUDGE=0. A llama-server without the patch ignores both
+# fields (unknown request keys are not evaluated), so the proxy can ship
+# first; BUDGET_MESSAGE then points at a summary that was never opened, so
+# switch the binary with it.
+# Reworded 2026-09-25 (operator): "What I know, and the single best next
+# step:" asked for a plan, and at 60% the model re-planned and switched
+# approach instead of finishing (live, n=1). This matches the original
+# hard-stop line's voice: a heads-up to wrap up, then the stop.
+# Reworded again the same day (operator): in the model's own voice -- Qwen
+# thinking opens "The user ..." and acts with "Let me ..." (8 samples of
+# Bonsai's reasoning: "Let me" 57, "So" 50, "I'll" 24) -- and the one reason
+# to keep going is honesty: round 3 (no nudge) hit the hard stop and then
+# claimed a verification it never did.
+NUDGE_MESSAGE = ("\n\nThe user is waiting for a response. Let me go with the "
+                 "best answer I've already worked out, and only keep thinking "
+                 "if that answer would be misleading.\n")
+NUDGE_AT = 0.6   # operator 2026-09-25 (was 0.8); live round 5, n=1: converged, no hard stop
+# THE AGENT-STEP NUDGE (#53; APPROVED by the operator as written, 2026-09-26). The
+# nudge above stays the operator's for every other turn. A step in the
+# client's own tool loop ends in a CALL, not an answer, and after a read the
+# model deliberated to the nudge and then asked to read again (T4); the
+# located-defect runs stated the fix and never applied it (#50, T1). This
+# variant is the same voice -- "The user is waiting", "Let me", the honesty
+# clause kept -- and names the action: the call it has worked out, the edit
+# when it knows the fix. UNMEASURED WORDING. Off: YAMADORI_AGENT_STEP_NUDGE=0
+# or X-Yamadori-Features {"step_nudge": false}: agent steps then get
+# NUDGE_MESSAGE as before.
+AGENT_STEP_NUDGE_MESSAGE = (
+    "\n\nThe user is waiting for a response. Let me make the call I've "
+    "already worked out -- the edit itself, if I know the fix -- and only "
+    "keep thinking if that call would be misleading.\n")
+# THE SECOND BRAIN'S NUDGE (operator, 2026-09-26, chosen over "no nudge" and
+# "your nudge everywhere"). A research job's hop (investigate, plan) ends in
+# a SEARCH or the HAND-OFF, never in an answer; NUDGE_MESSAGE ("go with the
+# best answer") there plausibly made hop 5 of handle d28941fb "answer"
+# inside its reasoning and stop with no call (deploy check 2026-09-26, n=1,
+# a hypothesis; before that day helper hops had no nudge). Same voice, the
+# action named. UNMEASURED WORDING. The other jobs (fixup, alternative,
+# tiebreak) end in an answer and keep NUDGE_MESSAGE. Off:
+# YAMADORI_HELPER_NUDGE=0 (research hops then get NUDGE_MESSAGE).
+HELPER_NUDGE_MESSAGE = (
+    "\n\nThe user is waiting for a response. Let me make the search I've "
+    "already worked out, or write the hand-off now, and only keep thinking "
+    "if that would be misleading.\n")
+HELPER_NUDGE_JOBS = ("investigate", "plan")
+
+
+def helper_nudge(job: str | None) -> str | None:
+    """The nudge text for a second-brain hop of `job`: HELPER_NUDGE_MESSAGE
+    for a research job, None (NUDGE_MESSAGE) otherwise or when switched
+    off."""
+    v = (os.environ.get("YAMADORI_HELPER_NUDGE") or "1").strip().lower()
+    if v in ("0", "off", "false", "no") or job not in HELPER_NUDGE_JOBS:
+        return None
+    return HELPER_NUDGE_MESSAGE
+
+
+# The hard stop keeps its ORIGINAL line (operator, 2026-09-25: the variant
+# "Thinking limit reached. I'll act on the summary above now." was tried
+# live, n=1, and the model then acted on an invented path; "the original
+# text ... seemed to work better").
 BUDGET_MESSAGE = ("\n\nThinking budget reached. I will stop deliberating and "
                   "write the final answer now.\n")
 
 
+def nudge_on() -> bool:
+    """YAMADORI_THINKING_NUDGE, read per call (default on)."""
+    v = os.environ.get("YAMADORI_THINKING_NUDGE")
+    return (v if v is not None else "1").strip().lower() not in (
+        "0", "", "off", "false", "no")
+
+
+def nudge_fields(message: str | None = None, at: float | None = None) -> dict:
+    """The nudge's request fields, or {} when it is off. Only for a request
+    that thinks with a finite budget (the fork ignores it otherwise).
+    `message`: the text to force (AGENT_STEP_NUDGE_MESSAGE for an agent
+    step); NUDGE_MESSAGE when None."""
+    if not nudge_on():
+        return {}
+    # YAMADORI_NUDGE_AT overrides the fraction (read per call; 0 < x < 1),
+    # for the operator's 0.6 vs 0.8 vs off comparison (2026-09-25).
+    # `at`: a model's token profile (mcp/tier_models.py) names its own fraction; the env var still wins (the
+    # operator's comparison knob).
+    default_at = at if at is not None and 0 < float(at) < 1 else NUDGE_AT
+    try:
+        at = float(os.environ.get("YAMADORI_NUDGE_AT", "") or default_at)
+    except ValueError:
+        at = default_at
+    if not 0 < at < 1:
+        at = default_at
+    return {"reasoning_budget_nudge": message or NUDGE_MESSAGE,
+            "reasoning_budget_nudge_at": at}
+
+
 def _shares() -> dict:
+    """{main, helper, pool, capped}. `pool` is the most ONE request may
+    occupy: the whole pool under the split, the main cap under the cap layout
+    (budget.py THE CAP LAYOUT: nothing runs past the VRAM line), where
+    `capped` is True and a running child does not shrink it (the child swaps
+    in while its conversation's main pauses)."""
     try:
         import budget as _budget
         b = _budget.budgets()
-        return {"main": b["main"], "helper": b["helper"], "pool": b["pool"]}
+        return {"main": b["main"], "helper": b["helper"],
+                "pool": b.get("window") or b["pool"],
+                "capped": b.get("layout") == "cap"}
     except Exception:                                            # noqa: BLE001
-        return {"main": 102400, "helper": 61440, "pool": 163840}
+        return {"main": 114688, "helper": 49152, "pool": 163840,
+                "capped": False}
 
 
 def estimate_prompt_tokens(body: dict) -> int:
@@ -477,9 +699,16 @@ def estimate_prompt_tokens(body: dict) -> int:
     share. The exact count would cost a /tokenize round trip per request.
     """
     import json as _json
+    import image_input
     n = 0
     for key in ("messages", "tools"):
         v = body.get(key)
+        if key == "messages" and v:
+            # an image part passed to the main model (vision.normalise) counts
+            # as the projector's tokens for it (image_input.image_tokens),
+            # never as its base64 text
+            v, image_tok = image_input.without_image_bytes(v)
+            n += 3 * image_tok
         if v:
             try:
                 n += len(_json.dumps(v, ensure_ascii=False))
@@ -490,31 +719,79 @@ def estimate_prompt_tokens(body: dict) -> int:
 
 def budget(client_max_tokens, thinks: bool = True, cap: int | None = None,
            role: str = "main", share_n: int = 1,
-           prompt_tokens: int = 0) -> dict:
+           prompt_tokens: int = 0, step_cap: int | None = None,
+           nudge: str | None = None, profile: dict | None = None) -> dict:
     """The upstream token fields for one request, derived from its share.
 
     `cap` overrides the derived thinking room for ONE request -- the
     benchmark sets it through X-Yamadori-Features {"reasoning_cap": N} to
     measure whether longer thinking helps. Clamped to [MIN_THINKING, pool].
+
+    `profile` (resolved by apply() from the model's token profile,
+    mcp/tier_models.py): {answer, turn_min, force_close, nudge_at, sized,
+    job_caps}. `step_cap` and `nudge` then already carry the profile's
+    values for the route; `sized` (a client request) means the client's
+    max_tokens does not size the turn -- the profile's answer allowance does.
+    Without a profile (no table) everything is as before.
     """
+    prof = profile or {}
     try:
         answer = int(client_max_tokens or 0)
     except (TypeError, ValueError):
         answer = 0
-    answer = max(answer, A_MIN)
+    floor = int(prof.get("answer") or A_MIN)
+    answer = floor if prof.get("sized") else max(answer, floor)
+    turn_min = int(prof.get("turn_min") or 0)
     if not thinks:
-        return {"max_tokens": answer}
+        if prof.get("sized"):
+            s = _shares()
+            window = s["helper" if role == "helper" else "main"] // max(int(share_n), 1)
+            # THE PROFILE SIZES A CLIENT'S TURN (operator, 2026-09-29: "This is stuff the user and the harness will
+            # just get wrong"): thinking off, the turn is the whole room the window leaves, never below the
+            # profile's turn floor -- as a thinking turn's max_tokens is its whole room.
+            return {"max_tokens": max(window - int(prompt_tokens or 0), answer, turn_min)}
+        return {"max_tokens": max(answer, turn_min)}
     s = _shares()
     window = s["helper" if role == "helper" else "main"] // max(int(share_n), 1)
     thinking = max(window - int(prompt_tokens or 0) - answer, MIN_THINKING)
+    # THE STANDING CAPS LIMIT THINKING ONLY (operator, 2026-09-25). The
+    # helper's hops always, main's agent steps when the proxy passes step_cap;
+    # never below MIN_THINKING. max_tokens stays the whole room the share
+    # leaves, so the ANSWER -- a whole-file write_file is ~7K tokens (Octopus
+    # game.js, 709 lines) -- is never squeezed by a thinking cap: a capped
+    # step sending thinking + A_MIN = 6,144 in total would cut such a write
+    # off even with no thinking at all.
+    room = thinking
+    # MAX MODE (mcp/max_mode.py): the max model thinks as its card says, not under Bonsai's caps. Qwen3.8-Flash-Next's
+    # card (Qwen/Qwen3.8-Flash-Next @ de4b8e4d, README "Best Practices": up to 262,144 tokens of reasoning, 131,072 of
+    # answer) -- the whole room the share leaves is the budget. USER_TURN_THINKING, AGENT_STEP_THINKING,
+    # JOB_THINKING and HELPER_THINKING were derived on Bonsai (Octopus v0b, bonsai-ada-surgery) and do not apply.
+    # The nudge still fires at its fraction of whatever budget is sent. A benchmark's reasoning_cap still wins.
+    # With a PROFILE (the table, mcp/tier_models.py) the caps are already the model's own: apply() resolved
+    # step_cap from it, and `job_caps` says whether Bonsai's second-brain caps apply to this model.
+    import max_mode
+    if profile is not None:
+        if role == "helper" and prof.get("job_caps") and HELPER_THINKING > 0 and not step_cap:
+            thinking = min(thinking, max(HELPER_THINKING, MIN_THINKING))
+    elif max_mode.at_max():
+        step_cap = None
+    elif role == "helper" and HELPER_THINKING > 0 and not step_cap:
+        thinking = min(thinking, max(HELPER_THINKING, MIN_THINKING))
+    if step_cap:
+        thinking = min(thinking, max(int(step_cap), MIN_THINKING))
+    total = max(room + answer, turn_min)
     if cap is not None:
+        # A benchmark's header cap keeps its measured meaning: thinking +
+        # answer is the whole allowance.
         try:
             thinking = min(max(int(cap), MIN_THINKING), s["pool"])
+            total = thinking + answer
         except (TypeError, ValueError):
             pass
-    return {"max_tokens": thinking + answer,
+    return {"max_tokens": total,
             "reasoning_budget_tokens": thinking,
-            "reasoning_budget_message": BUDGET_MESSAGE}
+            "reasoning_budget_message": prof.get("force_close") or BUDGET_MESSAGE,
+            **nudge_fields(nudge, prof.get("nudge_at"))}
 
 
 # THE COMPACTION BUDGET (operator, 2026-09-24). A client's compaction
@@ -523,10 +800,13 @@ def budget(client_max_tokens, thinks: bool = True, cap: int | None = None,
 # -- at every effort, medium included -- with the conversation's own
 # sampling; thinking is off only where the conversation itself runs with it
 # off (compaction.prefix_fields; interim defaults of 2026-09-24 until
-# docs/COMPACTION-RESEARCH.md's eval runs). Its thinking budget is
-# COMPACTION_THINKING, 2,048: from docs/CONSTRAINTS.md, 5 of the 7
-# self-finished thinking runs fit in 2,048, on coding prompts, n=1 each -- NOT
-# a compaction measurement. Its answer allowance is at least
+# docs/COMPACTION-RESEARCH.md's eval runs). Its thinking budget is what its
+# own window leaves -- window - prompt - answer, never below MIN_THINKING --
+# the one budget rule (budget() above) applied to the compaction's window
+# (compaction_budget's `thinking_tokens`). COMPACTION_THINKING (2,048, "5 of the 7
+# self-finished thinking runs" on coding prompts, NOT a compaction
+# measurement) was REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md). Its answer
+# allowance is at least
 # COMPACTION_BUDGET, "4-5K" by the operator's call, 5,120 unless set. NOT
 # MEASURED as sufficient: the corpus's 12 Hermes compaction answers ran
 # 7,733-41,702 characters (median ~20,700), one of them (35,425) repetitive
@@ -551,8 +831,6 @@ def budget(client_max_tokens, thinks: bool = True, cap: int | None = None,
 # and the record says so. The prompt is tiers.estimate_prompt_tokens' HIGH
 # estimate (chars / 3), so a fallback is reported early rather than late.
 COMPACTION_BUDGET = int(os.environ.get("YAMADORI_COMPACTION_BUDGET", "5120"))
-COMPACTION_THINKING = int(os.environ.get("YAMADORI_COMPACTION_THINKING",
-                                         "2048"))
 
 
 def compaction_budget(client_max_tokens, prompt_tokens: int,
@@ -560,7 +838,9 @@ def compaction_budget(client_max_tokens, prompt_tokens: int,
                       shares: dict | None = None) -> dict:
     """The answer allowance for one compaction, and the record of why:
     {budget, cap, client_max_tokens, answer, prompt_estimate, main_share,
-    pool, helper_active, window, room, fits, draws_on_spare}."""
+    pool, helper_active, window, room, fits, draws_on_spare,
+    thinking_tokens}. `thinking_tokens`: what the window it runs in leaves after the prompt and the
+    answer, never below MIN_THINKING (the one budget rule)."""
     s = shares or _shares()
     b = max(int(COMPACTION_BUDGET), A_MIN)
     # No fixed ceiling (2026-09-24): the client's target, bounded by the pool
@@ -573,22 +853,28 @@ def compaction_budget(client_max_tokens, prompt_tokens: int,
     answer = min(max(client, b), cap) if client > 0 else b
     prompt = max(int(prompt_tokens or 0), 0)
     active = max(int(helper_active or 0), 0)
-    window = s["pool"] - (s["helper"] if active else 0)
+    window = s["pool"] - (s["helper"] if active and not s.get("capped")
+                          else 0)
     rec = {"budget": b, "cap": cap, "client_max_tokens": client or None,
            "prompt_estimate": prompt, "main_share": s["main"],
            "pool": s["pool"], "helper_active": active, "window": window}
     if prompt + answer <= window:
         rec.update(answer=answer, fits=True,
-                   room=("pool: no second brain running, its share is spare"
+                   room=("the main cap: nothing runs past the VRAM line"
+                         if s.get("capped") else
+                         "pool: no second brain running, its share is spare"
                          if not active else
                          "pool less the running second brain's share"),
                    draws_on_spare=prompt + answer > s["main"])
+        rec["thinking_tokens"] = max(window - prompt - answer, MIN_THINKING)
     else:
         rec.update(answer=max(min(answer, s["main"] - prompt), A_MIN),
                    fits=False, draws_on_spare=False,
                    room=(f"main share: prompt ~{prompt} + answer {answer} "
                          f"exceed the {window}-token window"
                          + (" with a second brain running" if active else "")))
+        rec["thinking_tokens"] = max(s["main"] - prompt - rec["answer"],
+                              MIN_THINKING)
     return rec
 
 
@@ -613,25 +899,125 @@ VENDOR_SAMPLING_INSTRUCT = {"temperature": 0.7, "top_p": 0.80, "top_k": 20,
                             "repeat_penalty": 1.0}
 
 
-def enforce_sampling(body: dict, thinks: bool = True) -> tuple[dict, dict]:
+def enforce_sampling(body: dict, thinks: bool = True,
+                     values: dict | None = None) -> tuple[dict, dict]:
     """(sampling fields to send, the record for x_yamadori.sampling).
 
     The record is {enforced: {...}, client_overridden: {key: client value}}
-    -- only keys the caller set to something else appear in the second."""
-    want = dict(VENDOR_SAMPLING if thinks else VENDOR_SAMPLING_INSTRUCT)
+    -- only keys the caller set to something else appear in the second.
+    `values`: a model's token profile sampling (mcp/tier_models.py)."""
+    want = dict(values or (VENDOR_SAMPLING if thinks else VENDOR_SAMPLING_INSTRUCT))
     over = {k: body[k] for k in want
             if k in body and body[k] is not None and body[k] != want[k]}
     return want, {"enforced": dict(want), "client_overridden": over}
 
 
+# THE TOKEN PROFILE (operator, 2026-09-29: "Token settings, thinking efforts, etc. ... it is mostly about tuning
+# how big of a turn we allow, and what the thinking budget should be. This is stuff the user and the harness will
+# just get wrong, the proxy makes this atomic agent style"). With the tier -> model table on (mcp/tier_models.py),
+# every request gets its MODEL's one profile whatever the client sends: the effort sent to the template, the
+# thinking budget and nudge by route (a user turn / a step of the client's own tool loop), the answer allowance,
+# the turn floor, the force-close message and the sampling. The client's reasoning_effort picks the tier and so the
+# model; its max_tokens does not size the turn. A benchmark's X-Yamadori-Features (`effort`, `reasoning_cap`) still
+# wins -- the header is how a paired measurement varies one thing. Without the table nothing here changes.
+ROUTES = ("user_turn", "agent_step", "job", "none")
+
+
+def _route_of(role: str, step_cap: int | None, turn: str | None) -> str:
+    """Which of the profile's routes a request is. `turn` when the caller names it; else read from what it passed:
+    proxy.prepare passes AGENT_STEP_THINKING for an agent step, USER_TURN_THINKING for any other turn, None for a
+    side call or a compaction; the second brain passes its job's cap with role helper."""
+    if turn in ROUTES:
+        return turn
+    if role == "helper":
+        return "job"
+    if step_cap is None:
+        return "none"
+    if step_cap == AGENT_STEP_THINKING:
+        return "agent_step"
+    if step_cap == USER_TURN_THINKING:
+        return "user_turn"
+    return "job"
+
+
+def resolve_profile(body: dict, tier: dict, role: str = "main", step_cap: int | None = None,
+                    nudge: str | None = None, turn: str | None = None) -> dict | None:
+    """The model's token profile for this request, resolved to the values apply() and budget() send, and the record
+    for x_yamadori.sampling.profile. None when the table is off (one model: every constant as before)."""
+    import max_mode
+    import tier_models
+    if not tier_models.profiles_on():
+        return None
+    model = max_mode.current(body.get("model") if max_mode.is_main(body.get("model")) else None)
+    p = tier_models.profile(model)
+
+    def val(k):
+        return (p.get(k) or {}).get("value")
+
+    def cls(k):
+        return {"class": (p.get(k) or {}).get("class"), "source": (p.get(k) or {}).get("source")}
+    route = _route_of(role, step_cap, turn)
+    forced = set(tier.get("overridden") or [])
+    effort = tier.get("effort")
+    effort_from = "tier"
+    if val("effort") and "effort" not in forced:
+        effort, effort_from = val("effort"), "profile"
+    elif "effort" in forced:
+        effort_from = "header"
+    cap = step_cap
+    msg = nudge
+    cap_key = "job_caps"
+    nudge_key = "nudge_user_turn"
+    if route == "user_turn":
+        cap, cap_key = val("user_turn_thinking"), "user_turn_thinking"
+        msg = val("nudge_user_turn") or nudge
+    elif route == "agent_step":
+        cap, cap_key = val("agent_step_thinking"), "agent_step_thinking"
+        # the agent-step nudge only where the caller chose it (switch step_nudge); else the user-turn text
+        if nudge:
+            nudge_key = "nudge_agent_step"
+        msg = val(nudge_key) or nudge
+    elif route == "job" and not val("job_caps"):
+        cap = None
+    client = bool(body.get("_client")) and role == "main"
+    rec = {"model": model, "table": tier_models.table().source, "route": route,
+           "effort": {"sent": effort, "from": effort_from, **cls("effort")},
+           "thinking_cap": {"value": cap, **cls(cap_key)},
+           "nudge": {"at": val("nudge_at"), "chars": len(msg or "") or None, **cls(nudge_key)},
+           "answer_tokens": {"value": val("answer_tokens"), **cls("answer_tokens")},
+           "turn_min_tokens": {"value": val("turn_min_tokens"), **cls("turn_min_tokens")},
+           "force_close": {"chars": len(val("force_close") or ""), **cls("force_close")},
+           "sampling": cls("sampling_thinking" if tier.get("thinks") else "sampling_instruct"),
+           "client_sized": client}
+    return {"effort": effort, "step_cap": cap, "nudge": msg,
+            "sampling": val("sampling_thinking") if tier.get("thinks") else val("sampling_instruct"),
+            "budget": {"answer": val("answer_tokens"), "turn_min": val("turn_min_tokens"),
+                       "force_close": val("force_close"), "nudge_at": val("nudge_at"), "sized": client,
+                       "job_caps": bool(val("job_caps"))},
+            "record": rec}
+
+
+def _client_effort(body: dict):
+    if body.get("reasoning_effort") is not None:
+        return body.get("reasoning_effort")
+    r = body.get("reasoning")
+    return r.get("effort") if isinstance(r, dict) else None
+
+
 def apply(body: dict, tier: dict, role: str = "main",
-          share_n: int = 1) -> dict:
+          share_n: int = 1, step_cap: int | None = None,
+          nudge: str | None = None, turn: str | None = None) -> dict:
     """Write the tier's sampling settings into the upstream request.
 
     The augmentation flags are NOT written here -- they are read by the proxy,
     which decides what to run. Only what the model server itself understands
     is set: the effort, whether it thinks, and the token budget, derived from
     the request's share of the pool (role, share_n) and its own prompt.
+
+    With the tier -> model table on, the model's TOKEN PROFILE (above,
+    resolve_profile) supplies the effort, the caps, the nudge, the answer
+    allowance, the turn floor, the force-close and the sampling; `turn`
+    names the route when the caller knows it ("user_turn" / "agent_step").
     """
     out = dict(body)
     # `max_completion_tokens` is OpenAI's newer name for the same answer
@@ -642,12 +1028,47 @@ def apply(body: dict, tier: dict, role: str = "main",
     if client_max is None:
         client_max = body.get("max_completion_tokens")
     out.pop("max_completion_tokens", None)
-    fields, record = enforce_sampling(body, bool(tier["thinks"]))
+    prof = resolve_profile(body, tier, role=role, step_cap=step_cap, nudge=nudge, turn=turn)
+    if prof is not None:
+        step_cap, nudge = prof["step_cap"], prof["nudge"]
+    fields, record = enforce_sampling(body, bool(tier["thinks"]),
+                                      prof["sampling"] if prof else None)
     out.update(fields)
+    if prof is not None:
+        # x_yamadori.sampling.profile: the profile applied (values, their class and source) and what the client
+        # asked for
+        record["profile"] = dict(prof["record"], client={"max_tokens": client_max,
+                                                         "reasoning_effort": _client_effort(body)})
+        out["_profile"] = prof["budget"]
     out["_sampling"] = record
     out.update(budget(client_max, tier["thinks"],
                       tier.get("reasoning_cap"), role=role, share_n=share_n,
-                      prompt_tokens=estimate_prompt_tokens(body)))
+                      prompt_tokens=estimate_prompt_tokens(body),
+                      step_cap=step_cap, nudge=nudge,
+                      profile=prof["budget"] if prof else None))
+    if tier["thinks"]:
+        # The answer allowance, kept: max_tokens is now the whole room (the
+        # caps limit thinking only), so rebudget cannot recover it by
+        # subtraction any more.
+        floor = int(((prof or {}).get("budget") or {}).get("answer") or A_MIN)
+        if prof is not None and prof["budget"].get("sized"):
+            out["_answer"] = floor
+        else:
+            try:
+                out["_answer"] = max(int(client_max or 0), floor)
+            except (TypeError, ValueError):
+                out["_answer"] = floor
+    if step_cap:
+        # rebudget() re-derives the budget for later hops; it keeps the cap.
+        out["_step_cap"] = int(step_cap)
+    if nudge:
+        # rebudget() keeps the agent-step nudge for later hops.
+        out["_nudge"] = nudge
+    if tier.get("reasoning_cap") is not None and tier["thinks"]:
+        # The same for a benchmark's X-Yamadori-Features reasoning_cap: live
+        # 2026-09-25 it was lost on the main loop's rebudget (128,244 sent
+        # for a cap of 1,200).
+        out["_reasoning_cap"] = int(tier["reasoning_cap"])
     # The chat template reads enable_thinking from chat_template_kwargs; the
     # top-level field is kept because the proxy's own loops read it
     # (rebudget). Before 2026-09-23 only the top-level field was written, and
@@ -658,13 +1079,15 @@ def apply(body: dict, tier: dict, role: str = "main",
     ctk["enable_thinking"] = bool(tier["thinks"])
     out["chat_template_kwargs"] = ctk
     if tier["thinks"]:
-        out["reasoning_effort"] = safe_effort(tier["effort"])
+        out["reasoning_effort"] = safe_effort(prof["effort"] if prof else tier["effort"])
         out["enable_thinking"] = True
     else:
         out["enable_thinking"] = False
         out.pop("reasoning_effort", None)
         out.pop("reasoning_budget_tokens", None)
         out.pop("reasoning_budget_message", None)
+        out.pop("reasoning_budget_nudge", None)
+        out.pop("reasoning_budget_nudge_at", None)
     return out
 
 
@@ -674,7 +1097,8 @@ def rebudget(payload: dict, role: str = "main", share_n: int = 1) -> dict:
     (role="helper", share_n=1), and its prompt now includes whatever it was
     given -- the tie-breaker's carries both candidates. share_n > 1 splits a
     share n ways, for n concurrent samples; nothing in the proxy runs those
-    since fan-out went sequential (2026-09-23)."""
+    since fan-out went sequential (2026-09-23). A payload shaped under a
+    token profile keeps it (`_profile`)."""
     if not payload.get("enable_thinking", True) or \
             "reasoning_budget_tokens" not in payload or \
             payload.get("_fixed_budget"):
@@ -682,10 +1106,18 @@ def rebudget(payload: dict, role: str = "main", share_n: int = 1) -> dict:
         # was given (proxy._serve_compaction), not the share's.
         return dict(payload)
     out = dict(payload)
-    answer = max(int(out.get("max_tokens") or 0)
-                 - int(out.get("reasoning_budget_tokens") or 0), A_MIN)
-    out.update(budget(answer, True, role=role, share_n=share_n,
-                      prompt_tokens=estimate_prompt_tokens(out)))
+    answer = out.get("_answer") or max(
+        int(out.get("max_tokens") or 0)
+        - int(out.get("reasoning_budget_tokens") or 0), A_MIN)
+    prof = out.get("_profile")
+    if prof is not None:
+        # the answer is already the profile's; a later hop is not re-sized from a client value
+        prof = dict(prof, sized=False, answer=answer)
+    out.update(budget(answer, True, out.get("_reasoning_cap"), role=role,
+                      share_n=share_n,
+                      prompt_tokens=estimate_prompt_tokens(out),
+                      step_cap=out.get("_step_cap"),
+                      nudge=out.get("_nudge"), profile=prof))
     return out
 
 
@@ -696,7 +1128,7 @@ def describe() -> str:
         bits = []
         if t["retrieval"]:
             bits.append("search")
-        if t["hints"]:
+        if t["skills"]:
             bits.append("skills")
         if t["fanout"] > 1:
             bits.append(f"fan-out x{t['fanout']}")
@@ -710,6 +1142,12 @@ def describe() -> str:
 
 
 if __name__ == "__main__":
+    if os.environ.get("YAMADORI_SERVED_FIXTURE") == "1":
+        # mcp/test_tiers.py runs this self-test OFFLINE: the pinned /props
+        # (mcp/served_fixture.py), never the live server's.
+        import sys
+        import served_fixture
+        served_fixture.pin(sys.modules[__name__])
     print(describe())
     print()
     for v in ("xhigh", "HIGH", "none", None, "nonsense", "med"):
@@ -734,11 +1172,11 @@ if __name__ == "__main__":
 # and nobody can say which half did it.
 #
 # These are the two arms that isolate it. Same effort, same floor, same
-# template, same preamble -- only the injected tools and hints differ.
+# template, same preamble -- only the injected tools and skills differ.
 AB_ARMS = {
-    "aug_off": {"retrieval": False, "hints": False, "fanout": 1,
+    "aug_off": {"retrieval": False, "skills": False, "fanout": 1,
                 "investigate": False},
-    "aug_on": {"retrieval": True, "hints": True, "fanout": 1,
+    "aug_on": {"retrieval": True, "skills": True, "fanout": 1,
                "investigate": False},
 }
 
@@ -782,11 +1220,186 @@ def from_header(value: str | None) -> dict | None:
     # `utility` forces the client-utility-call decision (proxy.utility_of,
     # selection.utility_call) either way: true -> the bare model at minimal,
     # false -> a task turn whatever the request looks like.
-    types_ok = {"retrieval": bool, "hints": bool, "investigate": bool,
+    # `hints` is the flag's old name (skills replaced hints, 2026-09-26):
+    # benchmarks still send it, so it is read as `skills` for ONE release.
+    if "hints" in d and "skills" not in d:
+        d = dict(d, skills=d["hints"])
+    d.pop("hints", None)
+    types_ok = {"retrieval": bool, "skills": bool, "investigate": bool,
                 "fanout": int, "effort": str, "delegate": bool,
                 "reasoning_cap": int, "check_code": bool, "repair": bool,
-                "utility": bool}
+                "utility": bool,
+                # IDLE CLEAR's threshold for one request, in seconds: the
+                # live `slots` test's override. The proxy honours it for a
+                # TEST account only, and then clears only that account's
+                # own idle conversations (mcp/slots.py clear_idle).
+                "idle_clear_s": int}
+    # The overthinking switches (BEHAVIOURS below), each forced either way.
+    types_ok.update({k: bool for k in BEHAVIOURS})
     out = {k: v for k, v in d.items()
            if k in types_ok and isinstance(v, types_ok[k])
            and not (types_ok[k] is int and isinstance(v, bool))}
     return out or None
+
+
+# THE OVERTHINKING SWITCHES (operator, 2026-09-26; docs/research/
+# OVERTHINKING.md, docs/SELF-IMPROVEMENT-LOG.md #50-#56). Every behaviour
+# built for them is ON by default and can be switched off -- for a paired
+# control arm -- by X-Yamadori-Features {"<name>": false} or its environment
+# variable (=0). A header forces it either way and wins over the variable;
+# `allow` names the tier flag that must be true when no header forces it
+# (None: wherever the mechanism it changes runs).
+# REMOVED 2026-09-27 (operator: task-targeted steering in prompts; skills
+# are the channel): progress_note (#50), unchanged_read (#54) and
+# plan_entry_first (#55), with the text they injected.
+#   work_log_reinject   the work log after a compaction of a conversation
+#                       whose session id did not change (#41 made the old
+#                       new-key link unreachable for Hermes; #54)
+#   step_nudge         the agent-step nudge wording (#53)
+#   seed_frame          the research jobs' seed line says the word is random
+#                       and unrelated to the task (#52, remedy 7)
+#   helped_needs_change a deep-thinking run is `helped` only if a project
+#                       file changed after it (#52, remedy 7)
+#   slot_release       not an overthinking switch, the same mechanism: the
+#                       second brain's slot is emptied after each run and
+#                       the transient slot after each side call (mcp/slots.py
+#                       RELEASE; #58, an idle slot's cache slows every decode)
+#   idle_clear          the same, for an idle CONVERSATION's pinned slot:
+#                       cleared for an active request after IDLE_CLEAR_S,
+#                       pin and ledger kept (mcp/slots.py IDLE CLEAR; #59)
+#   plan_prompt         PLAN_SYSTEM_V2: the engineer has the task; no word
+#                       target; the tools line matches what is offered (#60)
+BEHAVIOURS = {
+    "work_log_reinject": ("YAMADORI_WORK_LOG_REINJECT", None),
+    "step_nudge": ("YAMADORI_AGENT_STEP_NUDGE", None),
+    "seed_frame": ("YAMADORI_SEED_FRAME", None),
+    "helped_needs_change": ("YAMADORI_DEEP_HELPED_NEEDS_CHANGE", None),
+    "slot_release": ("YAMADORI_SLOT_RELEASE", None),
+    "idle_clear": ("YAMADORI_IDLE_CLEAR", None),
+    "plan_prompt": ("YAMADORI_PLAN_PROMPT_V2", None),
+    #   deep_tool_hop   OFF BY DEFAULT (operator deciding, 2026-09-27): deep
+    #                   thinking run BEFORE main by a struggle, a known-hard
+    #                   area or a header is delivered like the initial
+    #                   prompt's plan -- an inserted yama_think_deeply call
+    #                   and its hand-off as the TOOL RESULT, a hidden hop --
+    #                   instead of the visible "After thinking deeply,"
+    #                   prefill. YAMADORI_DEEP_TOOL_HOP=1 or
+    #                   X-Yamadori-Features {"deep_tool_hop": true} turns
+    #                   it on (proxy._deep_thinking).
+    "deep_tool_hop": ("YAMADORI_DEEP_TOOL_HOP", None),
+    #   restore_reasoning  PAST REASONING IS RESTORED (operator, 2026-09-27:
+    #                   "Keeping thinking across turns seems useful, fuck
+    #                   Hermes, Hermes can do whatever it wants."). The
+    #                   ledger records the slot's own reasoning for every
+    #                   assistant turn it delivers and puts it back into each
+    #                   past turn whose reasoning the client dropped; a
+    #                   client's echo is kept as sent. The served template
+    #                   renders every past turn's think block
+    #                   (`preserve_thinking` undefined = on), so with it
+    #                   restored each request EXTENDS the slot again
+    #                   (proxy.ledger_restore; AGENTS.md "Past reasoning is
+    #                   restored"). Off (YAMADORI_RESTORE_REASONING=0 or the
+    #                   header): the 2026-09-24 pass-through.
+    "restore_reasoning": ("YAMADORI_RESTORE_REASONING", None),
+    #   continue_stated_step  CONTINUE A STATED STEP (operator-approved,
+    #                   2026-09-27: "planning without action"). An agent
+    #                   step that ends finish=stop with NO tool call while
+    #                   the client offered tools is judged by the Bonsai
+    #                   decider (decide_turn.judge_stop); when it only said
+    #                   what it is about to do, main's turn is continued
+    #                   ONCE from its own text plus proxy.CONTINUE_LINE, the
+    #                   client's tools still offered (proxy CONTINUE A
+    #                   STATED STEP). Not at `minimal`/`low` (the model as
+    #                   it ships). YAMADORI_CONTINUE_STATED_STEP=0 or the
+    #                   header turns it off.
+    "continue_stated_step": ("YAMADORI_CONTINUE_STATED_STEP", None),
+    #   auto_triggers   THE SERVER-TOOL TRIGGERS (operator, 2026-09-27,
+    #                   after pagoda-h5: "we should decide when to fire it,
+    #                   and be more heavy handed"): a package probe or
+    #                   scratch test runs deep thinking on the package, a new
+    #                   piece / a finished plan / a build request after an
+    #                   answer runs yama_plan -- by the proxy, before main,
+    #                   as a hidden hop, then a directive line in the model's
+    #                   voice (deep.decide kind "auto", proxy.auto_directive).
+    #                   Where deep thinking is allowed (xhigh, max).
+    #                   YAMADORI_AUTO_TRIGGERS=0 or the header turns it off.
+    "auto_triggers": ("YAMADORI_AUTO_TRIGGERS", None),
+    #   verify_directive  THE VERIFY DIRECTIVE (operator, 2026-09-27;
+    #                   mcp/verify_moment.py): when the work's entry file is
+    #                   first written or a plan's files are all written, main's
+    #                   turn opens with a line naming the client tool the
+    #                   decider picked to run it (or a generic line). Where
+    #                   deep thinking is allowed. YAMADORI_VERIFY_DIRECTIVE=0
+    #                   or the header turns it off.
+    "verify_directive": ("YAMADORI_VERIFY_DIRECTIVE", None),
+    #   mcp_tools       THE MCP TOOLS (operator, 2026-09-28: "the proxy
+    #                   provides MCP servers to the model zero-config for
+    #                   every harness, starting with PackageLens"): the
+    #                   yama_* tools the proxy's MCP host backs
+    #                   (mcp/mcp_host.py) and their one system line, offered
+    #                   on a conversation's first request and kept. Allowed
+    #                   where the tier's `mcp_tools` flag is set -- `medium`
+    #                   and up (the operator's "offered at medium and up by
+    #                   default") -- so `medium` with {"skills": false} is the
+    #                   model plus our MCP tools only. YAMADORI_MCP_TOOLS=0 or
+    #                   the header turns it off; {"mcp_tools": true} forces it
+    #                   on at any tier.
+    "mcp_tools": ("YAMADORI_MCP_TOOLS", "mcp_tools"),
+}
+PLAN_SWITCHES = ("plan_prompt",)
+# The switches that are OFF unless their variable (=1) or a header turns
+# them on; every other switch is on unless switched off.
+# plan_tools and plan_budget (#60), step_thinking (#53) and
+# fixup_project_only (#56) were switched off on 2026-09-27
+# (docs/CONSTANTS-AUDIT.md: their numbers and rules were picked to steer
+# single Octopus runs, n=1, not decided by the operator, derived or
+# measured) and then REMOVED with the code that read them. The plan job
+# keeps investigate's tools (less run_check with no repository) and
+# tool-turn limit.
+OFF_BY_DEFAULT = frozenset({"deep_tool_hop"})
+
+
+def plan_switches(tier: dict | None) -> dict:
+    """{switch: on} for the plan job (#60), from the request's tier (a
+    header forces one) or, with no tier, the environment."""
+    return {n: behaviour(tier, n) for n in PLAN_SWITCHES}
+
+
+def _env_on(var: str, default: bool = True) -> bool:
+    v = os.environ.get(var)
+    return (v if v is not None else ("1" if default else "0")
+            ).strip().lower() not in ("0", "", "off", "false", "no")
+
+
+def behaviour(tier: dict | None, name: str) -> bool:
+    """Is overthinking switch `name` on for this request (BEHAVIOURS)?"""
+    return behaviour_source(tier, name)[0]
+
+
+def behaviour_source(tier: dict | None, name: str) -> tuple[bool, str]:
+    """(on, why): `header` when X-Yamadori-Features forced it, `env` when
+    its variable switched it off, `tier` when the tier does not allow it,
+    `default` otherwise."""
+    env, allow = BEHAVIOURS[name]
+    tier = tier or {}
+    if name in (tier.get("overridden") or []) and name in tier:
+        return bool(tier[name]), "header"
+    if not _env_on(env, default=name not in OFF_BY_DEFAULT):
+        return False, ("default" if name in OFF_BY_DEFAULT
+                       and os.environ.get(env) is None else "env")
+    if allow and not tier.get(allow):
+        return False, "tier"
+    return True, "default"
+
+
+def behaviour_of_header(features, name: str) -> tuple[bool, str]:
+    """behaviour_source for a switch read BEFORE the tier is resolved (the
+    ledger restore in proxy.prepare): only the header's forced values."""
+    feats = from_header(features) or {}
+    return behaviour_source(dict(feats, overridden=sorted(feats)), name)
+
+
+def behaviours(tier: dict | None) -> dict:
+    """{name: {on, source}} for x_yamadori.progress.switches."""
+    return {n: dict(zip(("on", "source"), behaviour_source(tier, n)))
+            for n in BEHAVIOURS}

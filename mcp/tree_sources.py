@@ -9,8 +9,7 @@
            a thousand items is a bare root plate, a million is full spread.
   moss     index freshness. Ages: the package indexes (median file age),
            the code index, the skill store's last arm (skill_versions.
-           armed_at in the jobs DB) and, while YAMADORI_RECALL=hints, the
-           recipe index (index/hints.npz). moss = mean over the ages that
+           armed_at in the jobs DB). moss = mean over the ages that
            exist of clamp(log2(1 + days) / log2(1 + MOSS_FULL_DAYS)): a day
            old is a trace, a month old is full cover.
   recent   fan-out and recall from the last requests (mcp/recent_turns.py,
@@ -32,7 +31,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX = os.path.abspath(os.path.join(HERE, "..", "index"))
 PACKAGES = os.environ.get("YAMADORI_PACKAGES_DIR", os.path.join(INDEX, "packages"))
-HINTS_NPZ = os.path.join(INDEX, "hints.npz")
 CACHE_S = 60.0
 MOSS_FULL_DAYS = 30.0
 SPREAD_LO, SPREAD_HI = 3.0, 6.0          # log10 of items: bare .. full
@@ -110,11 +108,9 @@ def _last_arm() -> float | None:
 
 
 def _recall_path() -> str:
-    try:
-        import skill_select
-        return skill_select.recall_path()
-    except Exception:                                            # noqa: BLE001
-        return (os.environ.get("YAMADORI_RECALL") or "hints").strip().lower()
+    """Skills are the one knowledge system (2026-09-26); the key stays for
+    the dashboard, which labels the path."""
+    return "skills"
 
 
 def measure(now: float | None = None) -> dict:
@@ -135,8 +131,6 @@ def measure(now: float | None = None) -> dict:
     ages = {"packages": statistics.median(pk_ages) if pk_ages else None,
             "code": _age(code, now) if code else None,
             "skills_last_arm": (now - arm) if arm else None}
-    if recall == "hints":
-        ages["recipes"] = _age(HINTS_NPZ, now)
     return {
         "nebari": {"packages": {"indexes": len(pc),
                                 "chunks": sum(c["chunks"] for c in pc),

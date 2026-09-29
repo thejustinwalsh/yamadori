@@ -36,7 +36,7 @@ record() is an UPSERT that adds. There is no delete and no rewrite path.
                               (selection.utility_call)
                 internal      the stack's own generation through
                               mcp/model.py: summarize_text, skills, the
-                              worker, describe_image
+                              worker, yama_describe_image
                 warm          proxy._warm_now's zero-token prefill; its
                               prompt tokens are real GPU work but no hosted
                               API would bill them, so savings exclude them

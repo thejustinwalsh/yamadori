@@ -87,6 +87,8 @@ INTERNAL = {
     "yamadori-fast": ("bonsai", "low"),
     "yamadori-xhigh": ("bonsai", "xhigh"),
     "yamadori-max": ("bonsai", "max"),
+    # the A4000 vision copy again since layout v2 (2026-09-29; the main model
+    # saw from 2026-09-27 until then)
     "yamadori-vision": ("bonsai-vision", None),
     "yamadori-embed": ("embeddings", None),
     "yamadori-rerank": ("reranker", None),
@@ -126,18 +128,35 @@ def resolve_image(name) -> str | None:
     return IMAGE_MODELS.get(name.strip())
 
 
-def context_window() -> int:
-    """The conversation window a client may plan for: the MAIN share of the
-    KV pool (mcp/budget.py, 5/8 -- 102,400 at -c 163840), read at runtime so
-    it follows the pool when `-c` changes.
+def context_window(model: str | None = None) -> int:
+    """The conversation window a client may plan for: the MAIN share
+    (mcp/budget.py), read at runtime. Under the cap layout (operator,
+    2026-09-28) it is the main CAP -- the measured VRAM line of the tiered KV
+    pool -- and every conversation is advertised all of it; under the split
+    it is the pool less the second brain's share.
 
-    Not the pool: the other 3/8 is the second brain's, and a conversation
-    that grows past its share is landed (proxy.context_full). Not the
-    per-slot n_ctx either, which is a ceiling four slots share. A harness
-    reads this to decide when to compact; advertising nothing left Hermes to
-    guess."""
+    Not the pool: the rest is the child's and a second conversation's. It is THE LIMIT ENFORCED
+    (2026-09-25, docs/OPENAI-CONFORMANCE.md C1): a request whose prompt,
+    counted by the model server, leaves less than the generation floor in
+    this window is refused with 400 context_length_exceeded
+    (proxy.check_client_prompt, proxy.window_limit reads the same share) --
+    it is no longer landed. Not the per-slot n_ctx either, which is a
+    ceiling four slots share. A harness reads this to decide when to
+    compact; advertising nothing left Hermes to guess."""
     import budget
+    # the per-model window only when the table gives this model one (budget.model_window); otherwise the call is the
+    # one it always was, budget.budgets() -- callers and suites that stand in for budgets(pool=None) keep working
+    if model and budget.model_window(model):
+        return int(budget.budgets(model=model)["main"])
     return int(budget.budgets()["main"])
+
+
+def tier_window(tier: str | None) -> int:
+    """ONE MODEL PER EFFORT TIER (mcp/tier_models.py): the window of the model that serves `tier` (the default tier
+    when None). The same number proxy.window_limit enforces for a request at that tier."""
+    import tier_models
+    import tiers
+    return context_window(tier_models.model_for(tiers.normalise(tier or tiers.DEFAULT)))
 
 
 # The field names clients read for a model's window: OpenRouter and most
@@ -203,13 +222,57 @@ SUPPORTED_PARAMETERS = ("max_tokens", "max_completion_tokens", "tools",
                         "response_format", "stop", "stream")
 
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_vision_cache: dict = {}
+
+
+def swap_config() -> str:
+    """llama-swap's config: YAMADORI_SWAP_CONFIG, else the repo's config.yaml
+    (scripts/start-stack.bat starts llama-swap on %CD%\\config.yaml)."""
+    return (os.environ.get("YAMADORI_SWAP_CONFIG") or "").strip() or \
+        os.path.join(_ROOT, "config.yaml")
+
+
+def vision_configured() -> bool:
+    """Is a model that can see in llama-swap's config WITH its projector
+    (`--mmproj` in its cmd): the vision copy (model.VISION_MODEL,
+    `bonsai-vision` on the A4000 since layout v2), or the main model itself
+    (the 2026-09-27 fold, which a config before the layout-v2 deploy still
+    has)? Read from the file, cached by its mtime; never from the network.
+    An unreadable config is False: the card never promises what cannot be
+    checked. Kept out of mcp/vision.py, whose contract is that it opens no
+    file (test_vision)."""
+    path = swap_config()
+    try:
+        import model
+        names = (model.VISION_MODEL, model.MODEL)
+        key = (path, os.path.getmtime(path), names)
+    except Exception:                                            # noqa: BLE001
+        return False
+    if key in _vision_cache:
+        return _vision_cache[key]
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        ok = any(isinstance(e, dict) and "--mmproj" in str(e.get("cmd") or "")
+                 for e in ((cfg.get("models") or {}).get(n) for n in names))
+    except Exception:                                            # noqa: BLE001
+        ok = False
+    _vision_cache.clear()
+    _vision_cache[key] = ok
+    return ok
+
+
 def image_input() -> bool:
-    """Do chat requests accept image parts? Yes while vision is on
-    (mcp/vision.py: each image is held for this request and the text model
-    reads it through describe_image). Read per call, like vision.enabled."""
+    """Do chat requests accept image parts? Yes while vision is AVAILABLE:
+    on (YAMADORI_VISION is not 0; mcp/vision.py holds each image for this
+    request and the text model reads it through yama_describe_image) AND the
+    vision model configured with its projector (vision_configured). Read per
+    call."""
     try:
         import vision
-        return bool(vision.enabled())
+        return bool(vision.enabled()) and vision_configured()
     except Exception:                                            # noqa: BLE001
         return False
 
@@ -238,11 +301,17 @@ def _chat_card(window: int | None) -> dict:
     # number anyway.
     card.update({f: window for f in CONTEXT_FIELDS})
     card.update({f: out for f in OUTPUT_FIELDS})
+    # Two conventions, the same lists (docs/VISION.md 4a): OpenRouter's and
+    # llama.cpp router-mode's `architecture`, and models.dev's `modalities`,
+    # which OpenCode's and Pi's catalog code map from. NO harness reads
+    # either from a custom endpoint today (VISION.md 2a): configuration is
+    # the switch (docs/VISION.md 4b); these say what is true.
     card["architecture"] = {
         "modality": "+".join(inputs) + "->text",
         "input_modalities": inputs,
         "output_modalities": ["text"],
     }
+    card["modalities"] = {"input": list(inputs), "output": ["text"]}
     card["top_provider"] = {"context_length": window,
                             "max_completion_tokens": out}
     # Local, so free. OpenRouter-shaped clients compute cost from these.
@@ -257,6 +326,15 @@ def _chat_card(window: int | None) -> dict:
                              "ceiling": tiers.normalise(tiers.CEILING)},
         "answer_allowance_floor": tiers.A_MIN,
     }
+    try:
+        import tier_models
+        if tier_models.profiles_on():
+            # ONE MODEL PER EFFORT TIER: each effort is served by its own model with its own window; the tokens a
+            # conversation at that effort may occupy (the limit enforced). Model names stay internal.
+            card["x_yamadori"]["reasoning_effort"]["tokens_by_value"] = {
+                t: _window_or_none(t) for t in tiers.ORDER}
+    except Exception:                                            # noqa: BLE001
+        pass
     return card
 
 
@@ -271,13 +349,18 @@ def _row(name: str, created: int, window: int | None) -> dict:
     row = {"id": name, "object": "model", "created": created,
            "owned_by": OWNER}
     if _is_chat(name):
+        # THE WINDOW IS PER MODEL (one model per effort tier): a name with a tier hint advertises the window of the
+        # model that serves that tier; `yamadori` (no hint) the default tier's.
+        hint = CATALOG.get(name, LEGACY.get(name, (None, None)))[1]
+        if hint:
+            window = _window_or_none(hint) or window
         row.update(_chat_card(window))
     return row
 
 
-def _window_or_none() -> int | None:
+def _window_or_none(tier: str | None = None) -> int | None:
     try:
-        return context_window()
+        return tier_window(tier)
     except Exception:                                            # noqa: BLE001
         return None
 

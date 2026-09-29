@@ -1,0 +1,269 @@
+{
+ "id": "hermes/chat/agent-step-write-js",
+ "harness": "hermes",
+ "harness_version": "hermes-agent ee5ee84 (0.21.5)",
+ "wire": "chat",
+ "source": "shape: Octopus v0e hermes.jsonl write_file(path, content) and its JSON result; ids in our carrier form (session_id.CALL_ID)",
+ "headers": {},
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask. [... Hermes system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": "Build a small canvas game split into js/audio.js and js/player.js; index.html loads both."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_1a2b3c4d5e6f_00000001",
+      "type": "function",
+      "function": {
+       "name": "write_file",
+       "arguments": "{\"path\": \"/work/project/js/audio.js\", \"content\": \"const AUDIO = (function () {\\n  function play(name) {\\n    return name;\\n  }\\n  return { beep: play };\\n})();\\n\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_1a2b3c4d5e6f_00000001",
+    "content": "{\"bytes_written\": 105, \"dirs_created\": true, \"lint\": {\"status\": \"ok\", \"output\": \"\"}}"
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "terminal",
+     "description": "(terminal: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "background": {
+        "type": "boolean"
+       },
+       "timeout": {
+        "type": "integer"
+       },
+       "workdir": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read_file",
+     "description": "(read_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write_file",
+     "description": "(write_file: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "patch",
+     "description": "(patch: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "mode": {
+        "type": "string",
+        "enum": [
+         "replace",
+         "patch"
+        ]
+       },
+       "path": {
+        "type": "string"
+       },
+       "old_string": {
+        "type": "string"
+       },
+       "new_string": {
+        "type": "string"
+       },
+       "replace_all": {
+        "type": "boolean"
+       },
+       "patch": {
+        "type": "string"
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "search_files",
+     "description": "(search_files: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "target": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "file_glob": {
+        "type": "string"
+       },
+       "output_mode": {
+        "type": "string"
+       },
+       "context": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skills_list",
+     "description": "(skills_list: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skill_view",
+     "description": "(skill_view: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "vision_analyze",
+     "description": "(vision_analyze: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "image_url": {
+        "type": "string"
+       },
+       "question": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "image_url",
+       "question"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "xhigh"
+ },
+ "expect": {
+  "accepted": true,
+  "route": "agent_step",
+  "session": {
+   "source": "tool_call_id"
+  },
+  "deep": {
+   "kickoff": false,
+   "speaking": false,
+   "struggle_max": 0
+  },
+  "roles": {
+   "one_system_first": true
+  },
+  "tool_code": [
+   {
+    "call": [
+     -1,
+     0
+    ],
+    "detected": "table",
+    "kind": "file",
+    "language": "javascript",
+    "blocking": false
+   }
+  ]
+ },
+ "why": {
+  "route": "ends on a client tool result",
+  "session": "Hermes echoes tool_calls[].id verbatim (agent/message_sanitization.py)",
+  "tool_code": "write_file(path, content) is Hermes' write (tools/file_tools.py:1155)"
+ }
+}

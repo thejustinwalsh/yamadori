@@ -48,7 +48,7 @@ os.environ["RINGS_DB"] = os.path.join(_TMP, "rings.sqlite3")
 os.environ["LLAMA_STACK_URL"] = "http://127.0.0.1:9"
 os.environ["LAYA_URL"] = "http://127.0.0.1:9"
 os.environ.pop("YAMADORI_E1", None)
-for k in ("YAMADORI_STRUGGLE_THRESHOLD", "YAMADORI_KICKOFF_TOKENS",
+for k in ("YAMADORI_STRUGGLE_THRESHOLD",
           "YAMADORI_UNSEEN_PACKAGES", "YAMADORI_SEEN_PACKAGES"):
     os.environ.pop(k, None)
 
@@ -277,12 +277,11 @@ def test_the_proxy_never_calls_laya_with_e1_on():
               "selection.laya_signal sends nothing")
         check(skill_select.laya_pick("s", {"a": "x", "b": "y"}) is None,
               "skill_select.laya_pick sends nothing")
-        try:
-            shomen._laya("s", {})
-            ok = False
-        except RuntimeError as e:
-            ok = "YAMADORI_E1" in str(e)
-        check(ok, "shomen._laya refuses (its contract is to raise)")
+        # shomen._laya (route_in / distil's Laya call) was deleted
+        # 2026-09-27 with them: no production caller (CONSTANTS-AUDIT).
+        check(not any(hasattr(shomen, n) for n in (
+                  "_laya", "route_in", "distil", "_choice_averaged")),
+              "shomen has no Laya call left")
         check(fanout._choice_averaged("s", "i", {"a": "x", "b": "y"}) is None,
               "fanout._choice_averaged sends nothing")
         check(not _OPENED, "and none of them opened a URL", str(_OPENED))
@@ -307,7 +306,9 @@ _deep_decide.n = 0
 
 def test_phase06_consults_trained_heads_only():
     import deep
-    fail = "npm ERR! Test failed.\nexit code 1"
+    # Structured: only structured fields make a failure (2026-09-27).
+    fail = json.dumps({"output": "npm ERR! Test failed.", "exit_code": 1,
+                       "error": None})
     msgs = [{"role": "system", "content": "agent"},
             {"role": "user", "content": "Make the ESCALATE tests pass."},
             {"role": "assistant", "content": "", "tool_calls": [
@@ -359,7 +360,16 @@ def test_phase06_consults_trained_heads_only():
         check(all("e1_state" not in x for x in deep.rows(50)),
               "deep.rows never reports it")
         e1.revert("escalate", 0)
-        q = [{"role": "user", "content": "What does INVESTIGATE default to "
+        # A question asked mid-loop (after a tool result), not a new task:
+        # every new task is planned (2026-09-27), and a kickoff outranks an
+        # area.
+        q = [{"role": "user", "content": "Fix the scene."},
+             {"role": "assistant", "content": "", "tool_calls": [{
+                 "id": "r1", "type": "function", "function": {
+                     "name": "read_file",
+                     "arguments": "{\"path\": \"scene.js\"}"}}]},
+             {"role": "tool", "tool_call_id": "r1", "content": "ok"},
+             {"role": "user", "content": "What does INVESTIGATE default to "
                                          "in three r185?"}]
         r = _deep_decide(q, "library_question")
         check(r["fire"] and r["kind"] == "area"

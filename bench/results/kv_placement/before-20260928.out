@@ -1,0 +1,49 @@
+[04:33:46] waiting: test suites running: 58628 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_ledger.py
+[04:40:36] [current] unload bonsai: HTTP 200
+[04:40:52] [current] loaded in 12.6 s; card {'used': 14946, 'free': 1105, 'util': 0}
+[04:40:53] [current] A_deep_slot0 ...
+[04:46:52] [current] A_deep_slot0: prompt_n=160000 (464 tok/s) decode 19.86 tok/s acc 186/272 pool_max_p1=160249 used=160249 ours=[]
+[04:46:52] [current] B_new_slot1_while_slot0_holds ...
+[04:51:29] [current] B_new_slot1_while_slot0_holds: prompt_n=60000 (233 tok/s) decode 9.20 tok/s acc 116/224 pool_max_p1=220426 used=220426 ours=[]
+[04:51:29] [current] C_clear_slot0 ...
+[04:51:32] [current] C_clear_slot0: prompt_n=1 (3 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=220426 used=60171 ours=[]
+[04:51:32] [current] D_slot1_continues_after_clear ...
+[04:52:00] [current] D_slot1_continues_after_clear: prompt_n=257 (162 tok/s) decode 7.75 tok/s acc 121/312 pool_max_p1=220427 used=60628 ours=[]
+[04:52:00] [current] E_clear_slot1 ...
+[04:52:02] [current] E_clear_slot1: prompt_n=1 (16 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=1 used=1 ours=[]
+[04:52:02] [current] E_same_prompt_from_empty_pool_slot2 ...
+[04:53:24] [current] E_same_prompt_from_empty_pool_slot2: prompt_n=60000 (757 tok/s) decode 64.11 tok/s acc 106/150 pool_max_p1=60182 used=60182 ours=[]
+[04:53:24] [current] F_clear_slot2 ...
+[04:53:26] [current] F_clear_slot2: prompt_n=1 (20 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=2 used=2 ours=[]
+[04:53:26] [current] F_idle_40000_slot0 ...
+[04:54:14] [current] F_idle_40000_slot0: prompt_n=39999 (837 tok/s) decode 59.41 tok/s acc 4/4 pool_max_p1=40005 used=40005 ours=[]
+[04:54:14] [current] F_clear_slot1_before_8000 ...
+[04:54:15] [current] F_clear_slot1_before_8000: prompt_n=1 (32 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=40008 used=40007 ours=[]
+[04:54:15] [current] F_active_8000_slot1 ...
+[04:54:32] [current] F_active_8000_slot1: prompt_n=7999 (659 tok/s) decode 58.55 tok/s acc 136/238 pool_max_p1=48260 used=48260 ours=[]
+[04:54:32] [current] F_clear_slot1_before_32000 ...
+[04:54:33] [current] F_clear_slot1_before_32000: prompt_n=1 (19 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=48008 used=40008 ours=[]
+[04:54:33] [current] F_active_32000_slot1 ...
+[04:55:32] [current] F_active_32000_slot1: prompt_n=31999 (602 tok/s) decode 54.04 tok/s acc 134/242 pool_max_p1=72260 used=72260 ours=[]
+[04:55:32] [current] F_clear_slot1_before_64000 ...
+[04:55:33] [current] F_clear_slot1_before_64000: prompt_n=1 (14 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=48008 used=40008 ours=[]
+[04:55:33] [current] F_active_64000_slot1 ...
+[04:57:27] [current] F_active_64000_slot1: prompt_n=59999 (543 tok/s) decode 55.83 tok/s acc 105/152 pool_max_p1=100188 used=100188 ours=[]
+[04:57:29] [current] stopped; min free 1035 MiB
+[04:57:39] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 33}}
+| arm | stage | prompt_n | prompt tok/s | decode tok/s | draft acc | pool max+1 | used |
+|---|---|---|---|---|---|---|---|
+| current | A_deep_slot0 | 160000 | 464 | 19.86 | 186/272 | 160249 | 160249 |
+| current | B_new_slot1_while_slot0_holds | 60000 | 233 | 9.20 | 116/224 | 220426 | 220426 |
+| current | C_clear_slot0 | 1 | 3 | 0.00 | - | 220426 | 60171 |
+| current | D_slot1_continues_after_clear | 257 | 162 | 7.75 | 121/312 | 220427 | 60628 |
+| current | E_clear_slot1 | 1 | 16 | 0.00 | - | 1 | 1 |
+| current | E_same_prompt_from_empty_pool_slot2 | 60000 | 757 | 64.11 | 106/150 | 60182 | 60182 |
+| current | F_clear_slot2 | 1 | 20 | 0.00 | - | 2 | 2 |
+| current | F_idle_40000_slot0 | 39999 | 837 | 59.41 | 4/4 | 40005 | 40005 |
+| current | F_clear_slot1_before_8000 | 1 | 32 | 0.00 | - | 40008 | 40007 |
+| current | F_active_8000_slot1 | 7999 | 659 | 58.55 | 136/238 | 48260 | 48260 |
+| current | F_clear_slot1_before_32000 | 1 | 19 | 0.00 | - | 48008 | 40008 |
+| current | F_active_32000_slot1 | 31999 | 602 | 54.04 | 134/242 | 72260 | 72260 |
+| current | F_clear_slot1_before_64000 | 1 | 14 | 0.00 | - | 48008 | 40008 |
+| current | F_active_64000_slot1 | 59999 | 543 | 55.83 | 105/152 | 100188 | 100188 |

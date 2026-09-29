@@ -1,0 +1,220 @@
+# ONE MODEL PER EFFORT TIER -- the table's one place (loader: mcp/tier_models.py; the swaps: mcp/max_mode.py).
+#
+# The operator (2026-09-29): "If we get clean swaps and a decider on each model that actually works, we should make
+# mirai xhigh flash-next max, and bonsai everything else. These models seem to do better on one reasoning level, so
+# we pick the best reasoning level and capability is now the model swap." And, for the profiles: "Token settings,
+# thinking efforts, etc. Are all going to need to be really dialed in from the research we have ... it is mostly
+# about tuning how big of a turn we allow, and what the thinking budget should be. This is stuff the user and the
+# harness will just get wrong, the proxy makes this atomic agent style, no thinking just solid work coming out of
+# the box."
+#
+# READ ONLY WHEN YAMADORI_TIER_MODELS NAMES THIS FILE (bench/deploy_tier_models.py sets it for the proxy, the tools
+# API and the worker). Unset, the stack runs one model and nothing below applies.
+#
+# Every profile value carries its CLASS (AGENTS.md "Claims carry their evidence"):
+#   operator     an operator decision, quoted with its date
+#   measurement  a script and its n (ours, or the source repo's, named)
+#   vendor       the model's card, at a pinned commit, until a measurement replaces it
+#   derived      from a real constraint, the derivation beside it
+# A key a model does not set falls back to today's constant in mcp/tiers.py (tier_models.defaults()).
+#
+# Sources pinned here:
+#   professorpalmer/bonsai-ada-surgery @ 5158a8df3bc4c8b9375ed521021eb6118feda78d (2026-09-27): the last Bonsai tune
+#     (the operator's "Fresh bonsai tune incoming!!!", 2026-09-27)
+#   sudoingX/bonsai2-small-gpu @ 1d6c7ec03cdd86c801782a3d39024edd961d8822 (2026-09-28): secondary evidence only
+#   Qwen/Qwen3.8-27B @ 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 (the base Mirai S quantises; README "Best Practices")
+#   trymirai/Qwen3.8-27B-S-experimental @ 32d4c0422a14353808659f2f2333b207bc1dd12a (Mirai's card)
+#   Qwen/Qwen3.8-Flash-Next @ de4b8e4d43b917e7706784d8bb445c9af86a3540 (README "Best Practices")
+
+version: 1
+default: bonsai
+
+# Every tier not named here is the default model's (minimal, low, medium, high -> bonsai).
+#
+# SWAP ORDER (operator decision, 2026-09-29, verbatim: "swap order is fine"): max > xhigh > the Bonsai tiers. A
+# higher tier's request waits for lower-tier work and never cancels it, then takes the card; a lower tier's request
+# gets 503 model_at_capacity with Retry-After while a higher one holds it (mcp/max_mode.py decide / wait_ready).
+tiers:
+  xhigh: mirai-s
+  max: flash-next
+
+models:
+  bonsai:
+    # Its window is its own served /props (mcp/budget.py: the cap layout, YAMADORI_MAIN_CAP), as before.
+    # THE TUNE: professorpalmer/bonsai-ada-surgery @ 5158a8df (the operator's "Fresh bonsai tune incoming!!!",
+    # 2026-09-27; our engine llama-bonsai2-ada comes from it). sudoingX/bonsai2-small-gpu @ 1d6c7ec is secondary
+    # evidence only (coordinator's correction, 2026-09-29).
+    profile:
+      effort:
+        value: medium
+        class: measurement
+        source: >-
+          bonsai-ada-surgery@5158a8df start-server.ps1:70 (BONSAI_EFFORT default medium) and docs/QUALITY.md section 2:
+          Killy's HumanEval grid -- medium beats thinking-off from a 2k cap up and beats low and xhigh at every cap,
+          160-161 of 164 at 8k-uncapped (README: medium 161/164 replayed on their server). Secondary: sudoingX
+          kernel/reasoning_effort.md (greedy, 3 tasks x 2 caps x 2 runs: xhigh ran away inside <think>, medium
+          finished). Agrees with tiers.TIERS (operator 2026-09-23).
+      user_turn_thinking:
+        value: 20480
+        class: measurement
+        source: >-
+          bonsai-ada-surgery@5158a8df start-server.ps1:73 (BONSAI_THINK_BUDGET 20480) and docs/QUALITY.md:138 ("first
+          cap in his table where medium wins"; Killy's MBPP medium 35.44 -> 42.22 at 10,224 -> 20,488). Adopted by the
+          operator 2026-09-27 ("Yes bump user turn, and I trust their numbers more than ours"). Their grid caps the
+          TOTAL output; ours force-closes thinking with the answer room separate (docs/ENGINES.md).
+      agent_step_thinking:
+        value: 6144
+        class: operator
+        source: >-
+          operator 2026-09-25 ("this model overthinks pretty quickly"; tiers.AGENT_STEP_THINKING); h4's agent steps
+          median 128, p90 3,737 reasoning tokens. DIFFERS from bonsai-ada-surgery@5158a8df, whose agents run with
+          thinking OFF (docs/QUALITY.md:142-146: write_file at medium spent 10-17k thinking; off parsed 8/9 vs 6/9) --
+          not taken: thinking off exfiltrated 5/5 in our injection test (config.yaml, n=5), the operator's call.
+      nudge_at:
+        value: 0.6
+        class: operator
+        source: "operator 2026-09-25 (tiers.NUDGE_AT, was 0.8). bonsai-ada-surgery has no nudge (our engine patch 0001)."
+      answer_tokens:
+        value: 2048
+        class: operator
+        source: >-
+          tiers.A_MIN: the answer allowance reserved beside the thinking budget; the turn's max_tokens is the whole
+          room the window leaves, so the answer itself is never cut by it. The client's max_tokens no longer sizes it
+          (operator 2026-09-29: "This is stuff the user and the harness will just get wrong").
+      turn_min_tokens:
+        value: 24576
+        class: measurement
+        source: >-
+          bonsai-ada-surgery@5158a8df start-server.ps1:89 (--reasoning-max-tokens-floor = the think budget + 4096 =
+          24,576) and :171 (-n 24576); docs/QUALITY.md:150-162 ("Client max_tokens counts thinking ... Chat needs
+          max_tokens >= 20k when thinking is on"; bench/reason_ab.py, 4 SVG + 1 code task: a 4,096 cap blanked 4/4 at
+          low and xhigh). The proxy applies it as the turn's floor; the turn is otherwise the whole room the window
+          leaves. (sudoingX's README says >= 8,192 for code.)
+      force_close:
+        value: "\n\nThinking budget reached. I will stop deliberating and write the final answer now.\n"
+        class: operator
+        source: >-
+          tiers.BUDGET_MESSAGE (operator 2026-09-25: "the original text ... seemed to work better"; 2 of 2 clean
+          closes; kept 2026-09-27 when only the user-turn row of docs/ENGINES.md's merge proposal was applied).
+          DIFFERS from bonsai-ada-surgery@5158a8df start-server.ps1:75 ("Now produce the complete answer."); ours
+          follows the nudge's converging summary (engine patch 0001), which theirs has no counterpart for.
+      sampling_thinking:
+        value: {temperature: 1.0, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repeat_penalty: 1.0}
+        class: vendor
+        source: >-
+          bonsai-ada-surgery@5158a8df start-server.ps1:189-191 (--temp 1.0 --top-p 0.95 --top-k 20) and
+          docs/QUALITY.md:193 ("the recommended temp 1.0 / top-p 0.95 / top-k 20"); = Qwen/Qwen3.8-27B@1d4bf0f2
+          thinking mode (min_p 0, presence 0, repetition 1.0); operator: temperature stays 1.0.
+      sampling_instruct:
+        value: {temperature: 0.7, top_p: 0.80, top_k: 20, min_p: 0.0, presence_penalty: 1.5, repeat_penalty: 1.0}
+        class: vendor
+        source: >-
+          Qwen/Qwen3.8-27B@1d4bf0f2 non-thinking mode (bonsai-ada-surgery states none; sudoingX
+          results/MODEL_CARD.md:85 quotes the same values).
+      job_caps:
+        value: true
+        class: operator
+        source: "tiers.JOB_THINKING / HELPER_THINKING (operator 2026-09-25, 1.5x)"
+
+  # MIRAI S AND FLASH-NEXT: NO BORROWED OR ARBITRARY CAPS (operator, 2026-09-29, verbatim: "they need to be based on
+  # what makes them perform the best and how much memory we have, so if we cap them and it gives us bad signal it
+  # poisons the entire point of offering more capable models"). Until bench/tier_effort.py measures them, each
+  # budget is bounded ONLY by memory -- the budget rule applied to the model's own window:
+  #     window    = this row's window.main_cap (derived below from its -c and the decider lane)
+  #     thinking  = window - prompt - answer          (tiers.budget; never below MIN_THINKING)
+  #     max_tokens = window - prompt                  (the turn is the whole room the window leaves)
+  # No number is chosen: `null` means "the window decides".
+  mirai-s:
+    # Written by bench/deploy_tier_models.py from the gate's fit (the same -c it writes into config.yaml).
+    window: null
+    # Written by the deploy: true when the llama-swap entry carries --mmproj; false sends images to bonsai-vision on
+    # the A4000 (layout v2's rule for the main card: "the point is to get more context at speed in vram").
+    vision: null
+    profile:
+      effort:
+        value: xhigh
+        class: vendor
+        source: >-
+          Qwen/Qwen3.8-27B@1d4bf0f2 README: "xhigh (default): complex tasks requiring thorough analysis; medium:
+          balances accuracy and speed; low: optimizes for speed and cost" -- the card's default, NOT a measurement on
+          Mirai S. bench/tier_effort.py (uncapped, n named) replaces it.
+      user_turn_thinking:
+        value: null
+        class: derived
+        source: >-
+          memory only (operator 2026-09-29): thinking = window.main_cap - prompt - answer (tiers.budget), the window
+          derived from this model's -c; no chosen cap until bench/tier_effort.py's curve says where the score stops
+          improving. (The card allows up to 262,144 of reasoning; Mirai's card asks for at least 4,000.)
+      agent_step_thinking:
+        value: null
+        class: derived
+        source: "memory only, the same derivation (operator 2026-09-29)"
+      answer_tokens:
+        value: 2048
+        class: derived
+        source: >-
+          the room reserved for the answer beside the thinking budget = the generation floor the proxy's own window
+          check already enforces (proxy.check_client_prompt / GENERATION_FLOOR: a prompt that leaves less than
+          tiers.A_MIN of answer is refused 400 context_length_exceeded), so every admitted prompt has it. It bounds
+          where the force-close lands, not the answer: max_tokens is the whole room. bench/tier_effort.py records
+          each answer's natural length; a measured value replaces this.
+      turn_min_tokens:
+        value: null
+        class: derived
+        source: "memory only: the turn is the whole room the window leaves (no chosen floor)"
+      sampling_thinking:
+        value: {temperature: 1.0, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repeat_penalty: 1.0}
+        class: vendor
+        source: "Qwen/Qwen3.8-27B@1d4bf0f2 thinking mode (Mirai's card gives none)"
+      sampling_instruct:
+        value: {temperature: 0.7, top_p: 0.80, top_k: 20, min_p: 0.0, presence_penalty: 1.5, repeat_penalty: 1.0}
+        class: vendor
+        source: "Qwen/Qwen3.8-27B@1d4bf0f2 non-thinking mode"
+      job_caps:
+        value: false
+        class: operator
+        source: "operator 2026-09-29: no borrowed caps -- Bonsai's second-brain caps (derived on Bonsai) do not apply"
+
+  flash-next:
+    window:
+      ctx: 262144
+      slots: 4
+      main_cap: 259072
+      source: >-
+        derived: config.yaml `flash-next` -c 262144 -np 4 --kv-unified (bench/deploy_flash_next.py, the gate's fit);
+        the main cap is layout v2's rule (the line less the decider lane, budget.LANE_TOKENS 3,072) with the line =
+        the whole pool, since this engine has no tiered KV cache
+    vision: true
+    profile:
+      effort:
+        value: xhigh
+        class: vendor
+        source: >-
+          Qwen/Qwen3.8-Flash-Next@de4b8e4d README: xhigh is the default effort (docs/FLASH-NEXT.md section 3; the
+          llama-swap filter's default too). NOT a measurement; bench/tier_effort.py (uncapped) replaces it.
+      user_turn_thinking:
+        value: null
+        class: derived
+        source: >-
+          memory only (operator 2026-09-29): thinking = 259,072 (window.main_cap) - prompt - answer (tiers.budget).
+          (The card allows reasoning up to 262,144, answer 131,072.)
+      agent_step_thinking:
+        value: null
+        class: derived
+        source: "memory only, the same derivation (operator 2026-09-29)"
+      answer_tokens:
+        value: 2048
+        class: derived
+        source: "as mirai-s: the generation floor proxy.check_client_prompt enforces; max_tokens is the whole room"
+      turn_min_tokens:
+        value: null
+        class: derived
+        source: "memory only: the turn is the whole room the window leaves"
+      sampling_thinking:
+        value: {temperature: 1.0, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repeat_penalty: 1.0}
+        class: vendor
+        source: "Qwen/Qwen3.8-Flash-Next@de4b8e4d (docs/FLASH-NEXT.md section 3: 1.0 / 0.95 / 20 / 0 / 0 / 1.0)"
+      job_caps:
+        value: false
+        class: operator
+        source: "operator 2026-09-29: no borrowed caps (and 2026-09-28: max follows the card)"

@@ -4,8 +4,11 @@
 import { lazy, type ComponentType } from 'react';
 import { peek, prefetch } from './api/cache';
 import { PATHS } from './api/data';
+import { NEBARI_PATH } from './api/nebari';
 import { IMAGE_SETTINGS_PATH } from './api/settings';
-import { SKILLS_PATH } from './api/skills';
+import { HARNESS_KIT_PATH } from './api/harness';
+import { ONBOARDING_PATH, onboardingPath } from './api/onboarding';
+import { PROMPTS_PATH, RECENT_PATH, SELECTIONS_PATH, SKILLS_PATH, skillPath } from './api/skills';
 import type { Route } from './router';
 
 type Chunk<P> = { Component: ComponentType<P>; preload: () => Promise<void>; loaded: () => boolean };
@@ -45,6 +48,9 @@ export const screens = {
   sentei: chunk(() => import('./screens/Sentei').then((m) => m.Sentei)),
   settings: chunk(() => import('./screens/Settings').then((m) => m.Settings)),
   skills: chunk(() => import('./screens/Skills').then((m) => m.Skills)),
+  skill: chunk(() => import('./screens/SkillDetail').then((m) => m.SkillScreen)),
+  onboarding: chunk(() => import('./screens/Onboarding').then((m) => m.OnboardingScreen)),
+  harness: chunk(() => import('./screens/Harness').then((m) => m.Harness)),
   phase0: chunk(() => import('./phase0/Phase0').then((m) => m.Phase0)),
 };
 
@@ -55,7 +61,7 @@ export const screens = {
 export function dataFor(route: Route): string[] {
   switch (route.name) {
     case 'nebari':
-      return [PATHS.stats, PATHS.results];
+      return [NEBARI_PATH, PATHS.results];
     case 'dataset':
       return [PATHS.dataset(route.id)];
     case 'sentei':
@@ -63,7 +69,13 @@ export function dataFor(route: Route): string[] {
     case 'settings':
       return [IMAGE_SETTINGS_PATH];
     case 'skills':
-      return [SKILLS_PATH];
+      return route.view === 'selections' ? [SKILLS_PATH, RECENT_PATH, SELECTIONS_PATH] : route.view === 'prompts' ? [PROMPTS_PATH] : route.view === 'create' ? [SKILLS_PATH, ONBOARDING_PATH] : [SKILLS_PATH];
+    case 'skill':
+      return [SKILLS_PATH, skillPath(route.id)];
+    case 'onboarding':
+      return [onboardingPath(route.id)];
+    case 'harness':
+      return [HARNESS_KIT_PATH];
     default:
       return [];
   }
@@ -77,6 +89,9 @@ function chunkFor(route: Route): Pick<Chunk<object>, 'preload' | 'loaded'> | nul
     case 'sentei':
     case 'settings':
     case 'skills':
+    case 'skill':
+    case 'onboarding':
+    case 'harness':
     case 'phase0':
       return screens[route.name];
     default:

@@ -1,0 +1,293 @@
+{
+ "id": "opencode/chat/skills-target",
+ "harness": "opencode",
+ "harness_version": "opencode-ai 1.18.32",
+ "wire": "chat",
+ "source": "shape: OpenCode write(filePath, content); request from the authored skill's activation test",
+ "headers": {
+  "x-session-affinity": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "x-session-id": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "user-agent": "opencode/1.18.32 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_tokens": 26419,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.\n\n[... OpenCode system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": "Build a small canvas game."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_4b1a6b4fe4f0_0000003c",
+      "type": "function",
+      "function": {
+       "name": "write",
+       "arguments": "{\"filePath\": \"C:\\\\work\\\\project\\\\js\\\\audio.js\", \"content\": \"const AUDIO = (function () {\\n  function play(name) {\\n    return name;\\n  }\\n  return { beep: play };\\n})();\\n\"}"
+      }
+     },
+     {
+      "id": "call_4b1a6b4fe4f0_0000003d",
+      "type": "function",
+      "function": {
+       "name": "write",
+       "arguments": "{\"filePath\": \"C:\\\\work\\\\project\\\\js\\\\player.js\", \"content\": \"const PLAYER = {\\n  shoot() {\\n    AUDIO.play('shot');\\n  }\\n};\\n\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_4b1a6b4fe4f0_0000003c",
+    "content": "Wrote file successfully."
+   },
+   {
+    "role": "tool",
+    "tool_call_id": "call_4b1a6b4fe4f0_0000003d",
+    "content": "Wrote file successfully."
+   },
+   {
+    "role": "assistant",
+    "content": "Done."
+   },
+   {
+    "role": "user",
+    "content": "Uncaught TypeError: AUDIO.play is not a function when the player shoots. Fix it."
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "bash",
+     "description": "(bash: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "timeout": {
+        "type": "integer"
+       },
+       "workdir": {
+        "type": "string"
+       },
+       "description": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "(read: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "filePath": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "filePath"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "glob",
+     "description": "(glob: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "grep",
+     "description": "(grep: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "pattern": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "include": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "pattern"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "edit",
+     "description": "(edit: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "filePath": {
+        "type": "string"
+       },
+       "oldString": {
+        "type": "string"
+       },
+       "newString": {
+        "type": "string"
+       },
+       "replaceAll": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "filePath",
+       "oldString",
+       "newString"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write",
+     "description": "(write: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "filePath": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "filePath",
+       "content"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "task",
+     "description": "(task: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "description": {
+        "type": "string"
+       },
+       "prompt": {
+        "type": "string"
+       },
+       "subagent_type": {
+        "type": "string"
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "todowrite",
+     "description": "(todowrite: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "todos": {
+        "type": "array",
+        "items": {
+         "type": "object"
+        }
+       }
+      },
+      "required": []
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "skill",
+     "description": "(skill: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     }
+    }
+   }
+  ],
+  "tool_choice": "auto"
+ },
+ "expect": {
+  "accepted": true,
+  "roles": {
+   "one_system_first": true
+  },
+  "skills": {
+   "includes": [
+    "module-exports-match-callers"
+   ]
+  }
+ },
+ "why": {
+  "skills": "the same work as Hermes' target, in OpenCode's shape (Windows paths, filePath)"
+ }
+}

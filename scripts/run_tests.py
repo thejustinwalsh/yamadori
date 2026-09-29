@@ -15,7 +15,8 @@
 
 WHAT IT RUNS
 
-Every `mcp/test_*.py` and `bench/test_*.py`, one process each, sequentially --
+Every `mcp/test_*.py` and `bench/test_*.py` (and bench/domain, longctx,
+swebench, octopus, sandbox, voxel and skills'), one process each, sequentially --
 several suites build fixtures at fixed temp paths, and the live ones share one
 GPU, so running them concurrently would produce the interference this stack
 already lost a benchmark to. Then `ruff check mcp bench scripts --select=E9,F`,
@@ -35,6 +36,56 @@ LIVE SUITES ARE OPT-IN
 without `--live` it is skipped and the skip is printed. With `--live`, every
 suite that accepts `--live` gets it -- except the live arms retired with Laya
 (RETIRED_LIVE, 2026-09-24, docs/E1.md), which run offline only.
+
+OFFLINE SUITES NEVER REACH THE STACK
+
+Every Python process an offline suite starts imports
+scripts/offline_guard/sitecustomize.py (first on PYTHONPATH, switched on by
+YAMADORI_OFFLINE_GUARD=1): a connect to a stack port -- 1234, 1235, 1237,
+1238, 8888, 11434, 10001-10099 -- raises ConnectionRefusedError and is
+logged, and the suite FAILS here with the frames that asked, whatever its
+own fallback made of the outage. Found 2026-09-27: twelve suites read
+llama-swap's /props (which loads `bonsai`), /running or the embedder. A suite
+that needs the served model's state pins it (mcp/served_fixture.py);
+mcp/test_live_stack.py `served` checks the pins against the live server.
+
+OFFLINE SUITES NEVER WRITE THE LIVE STATE
+
+Found 2026-09-27: an offline suite (mcp/test_domains.py, proxy.prepare with
+no YAMADORI_JOBS_DB) wrote 21 skill fallback records into the live
+index/jobs.sqlite3 between 2026-09-26 14:28 and 09-27 01:06, and the worker
+learned from them. Two layers, because a live proxy and worker write the
+same files while the suites run, so "the file changed" alone cannot say who
+changed it:
+
+  1. THE WRITE GUARD (exact attribution). The same sitecustomize refuses and
+     logs every write the suite's own Python processes make under index/ or
+     logs/: a writing open, a rename/remove/mkdir, and any write STATEMENT
+     on a sqlite connection to a live database (a read-write connection
+     may read; an authorizer refuses INSERT/UPDATE/DELETE/CREATE/DROP/
+     ALTER and the file-changing PRAGMAs, and it never checkpoints on
+     close; a suite that reads a live database should open it
+     `file:...?mode=ro`). The audit hook runs in the suite's process, so a
+     row in its log IS the suite -- never the stack running beside it. The
+     suite fails and the frames that asked are printed.
+  2. THE SNAPSHOT (a backstop for what the hook cannot see: a non-Python
+     child such as node or a shell, or a process started with a cleared
+     environment). Before and after each offline suite, every live-state
+     file (LIVE_STATE_GLOBS) is stat'ed; one whose size or mtime moved is
+     hashed and compared with its sha from the start of the run (files over
+     SNAPSHOT_HASH_MAX are compared by size+mtime only). A change is then
+     ATTRIBUTED by who else writes the file (LIVE_WRITERS):
+       - files the running stack writes while it serves (the proxy's and the
+         worker's databases, the seed, slot and power files, the trigger
+         cache): reported as a note, never a failure -- the stack is the
+         likelier writer, and a Python write by the suite is layer 1's;
+       - files only a WORKER JOB writes (the skill library, the package
+         registry history, the router labels): a failure unless the jobs
+         database (read-only) shows a job active during the suite;
+       - everything else (logs/deploy_check.jsonl, the embeddings, the pairs,
+         the static indexes): a failure.
+     `-shm` files are not compared: SQLite rewrites a WAL database's
+     shared-memory index on ANY read, read-only included; it holds no rows.
 
 The proxy on :1234 requires auth. An API key for it is read from
 YAMADORI_TEST_KEY and handed to live suites in their environment under that
@@ -140,6 +191,14 @@ RETIRED_LIVE = {
     "bench/test_laya_head.py": "Laya's alternate-port service (--serve)",
 }
 
+# SUITES RETIRED WITH THEIR COMPONENT: skipped in every mode, named in the
+# notes every run. CLM (operator, 2026-09-28: "We retired Laya and CLM and
+# went all in on custom bonsai / flash implementation in the server"; the
+# decider is mcp/decider_bonsai.py).
+RETIRED_SUITES = {
+    "mcp/test_clm.py": "CLM, retired 2026-09-28 for the Bonsai decider",
+}
+
 _LAYA_IMPORT = re.compile(
     r"^\s*(?:import|from)\s+(?:torch|transformers|laya_head|train_laya)\b", re.M)
 
@@ -157,6 +216,192 @@ _COUNTS = (
 
 def rel(p: str) -> str:
     return os.path.relpath(p, ROOT).replace(os.sep, "/")
+
+
+GUARD_DIR = os.path.join(ROOT, "scripts", "offline_guard")
+
+
+def guard_hits(path: str) -> list[dict]:
+    """The connects the offline guard refused, from its log at `path`
+    (scripts/offline_guard/sitecustomize.py). Any row fails the suite."""
+    import json
+    rows = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    rows.append(json.loads(ln))
+                except ValueError:
+                    rows.append({"port": "?", "host": "?", "stack": [ln[:200]]})
+    except OSError:
+        pass
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# LIVE STATE: the snapshot layer (the docstring, "OFFLINE SUITES NEVER WRITE
+# THE LIVE STATE").
+# ---------------------------------------------------------------------------
+LIVE_STATE_GLOBS = (
+    "index/*.sqlite3", "index/*.sqlite3-wal", "index/*.json", "index/*.jsonl",
+    "index/*.npz", "index/*.key", "index/skills/**/*",
+    "index/packages/registry_history.json", "index/packages/*.sqlite3",
+    "index/accounts/**/*", "logs/deploy_check.jsonl")
+# Who else writes a file (fnmatch on its repo-relative path, first match
+# wins). "stack": the running proxy / worker / tools API write it while they
+# serve -- a change is a note. "job": only a worker JOB writes it -- a change
+# fails unless a job was active during the suite. Anything unlisted fails.
+LIVE_WRITERS = (
+    ("index/jobs.sqlite3*", "stack", "proxy + worker (jobs, skill records, "
+                                     "deep decisions, selection counters)"),
+    ("index/corpus.sqlite3*", "stack", "proxy (every request's turn)"),
+    ("index/nebari.sqlite3*", "stack", "proxy (sessions, the ledger)"),
+    ("index/rings.sqlite3*", "stack", "proxy (the work log)"),
+    ("index/token_ledger.sqlite3*", "stack", "proxy (token accounting)"),
+    ("index/concept_seed_last.json", "stack", "proxy (the seed it drew)"),
+    ("index/slots_state.json", "stack", "proxy (slot pins)"),
+    ("index/gpu_room.json", "stack", "proxy / tools API / worker (A4000)"),
+    ("index/power_ledger.json", "stack", "proxy (power sampling)"),
+    # mcp/max_mode.py _write_state: the proxy's max-mode lease state, for
+    # the worker and tools API to read (gpu_room.state_dir()/max_mode.json),
+    # rewritten whenever a lease changes -- i.e. while the stack serves.
+    ("index/max_mode.json", "stack", "proxy (max-mode lease state for the "
+                                     "worker and tools API)"),
+    ("index/skill_triggers.npz", "stack", "proxy / worker (trigger vectors "
+                                          "rebuilt when the armed set moves)"),
+    ("index/accounts/*", "stack", "proxy (keys created on the dashboard)"),
+    ("index/harness_kit.sqlite3*", "stack", "proxy (HARNESS TOOLS entries, "
+                                            "written through the dashboard API)"),
+    ("index/skills/*", "job", "worker skill jobs (arm, learn: labels)"),
+    ("index/packages/registry_history.json", "job", "worker deps jobs"),
+    ("index/packages/*.sqlite3", "job", "worker deps jobs (package index)"),
+)
+SNAPSHOT_HASH_MAX = 64 * 1024 * 1024
+
+
+def _live_files() -> list[str]:
+    out: set[str] = set()
+    for g in LIVE_STATE_GLOBS:
+        for p in glob.glob(os.path.join(ROOT, g), recursive=True):
+            if os.path.isfile(p) and not p.endswith("-shm"):
+                out.add(os.path.normpath(p))
+    return sorted(out)
+
+
+def _sha(path: str) -> str | None:
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+class LiveState:
+    """Size, mtime and (for files up to SNAPSHOT_HASH_MAX) sha of every
+    live-state file, carried from suite to suite: a suite is compared with
+    the state right before it, so a change the stack made between suites is
+    never charged to the next one."""
+
+    def __init__(self):
+        self.seen: dict[str, tuple] = {}
+        for p in _live_files():
+            self.seen[p] = self._entry(p, None)
+
+    @staticmethod
+    def _entry(p: str, old: tuple | None) -> tuple:
+        try:
+            st = os.stat(p)
+        except OSError:
+            return (None, None, None)
+        size, mt = st.st_size, st.st_mtime_ns
+        if old and old[0] == size and old[1] == mt:
+            return old
+        sha = _sha(p) if size <= SNAPSHOT_HASH_MAX else None
+        return (size, mt, sha)
+
+    def diff(self) -> list[tuple[str, str]]:
+        """[(repo-relative path, what changed)] since the last call; the
+        state is advanced."""
+        now = set(_live_files()) | set(self.seen)
+        changed = []
+        for p in sorted(now):
+            old = self.seen.get(p)
+            new = self._entry(p, old)
+            self.seen[p] = new
+            if old is None:
+                if new[0] is not None:
+                    changed.append((rel(p), "created"))
+                continue
+            if old == new:
+                continue
+            if new[0] is None:
+                changed.append((rel(p), "deleted"))
+            elif old[2] and new[2]:
+                if old[2] != new[2]:
+                    changed.append((rel(p), f"content changed ({old[0]} -> "
+                                            f"{new[0]} bytes)"))
+            elif (old[0], old[1]) != (new[0], new[1]):
+                changed.append((rel(p), f"size/mtime changed ({old[0]} -> "
+                                        f"{new[0]} bytes; not hashed)"))
+        return changed
+
+
+def live_writer(path: str) -> tuple[str | None, str]:
+    import fnmatch
+    for pat, kind, who in LIVE_WRITERS:
+        if fnmatch.fnmatch(path, pat):
+            return kind, who
+    return None, "nothing else writes it"
+
+
+def jobs_active(t0: float, t1: float) -> list[str]:
+    """Worker jobs active in [t0, t1], read from the live jobs database
+    READ-ONLY; [] when it cannot be read (the change then fails)."""
+    import sqlite3
+    db = os.path.join(ROOT, "index", "jobs.sqlite3")
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+        try:
+            rows = con.execute(
+                "SELECT id, queue FROM jobs WHERE started IS NOT NULL AND "
+                "started <= ? AND COALESCE(finished, heartbeat, ?) >= ?",
+                (t1, t1, t0)).fetchall()
+        finally:
+            con.close()
+    except Exception:                                            # noqa: BLE001
+        return []
+    return [f"{q} {i}" for i, q in rows]
+
+
+def attribute(changes: list[tuple[str, str]], t0: float, t1: float,
+              suite_writes: set[str]) -> tuple[list[str], list[str]]:
+    """(failures, notes) for the files a suite's window changed."""
+    fails, notes = [], []
+    jobs = None
+    for path, what in changes:
+        if path in suite_writes:
+            continue                     # layer 1 already named it
+        kind, who = live_writer(path)
+        if kind == "stack":
+            notes.append(f"{path} {what} -- {who} writes it; not charged "
+                         f"to the suite")
+            continue
+        if kind == "job":
+            if jobs is None:
+                jobs = jobs_active(t0, t1)
+            if jobs:
+                notes.append(f"{path} {what} -- a worker job was active "
+                             f"({', '.join(jobs[:3])}); not charged")
+                continue
+            fails.append(f"{path} {what} (only a worker job writes it, and "
+                         f"none was active)")
+            continue
+        fails.append(f"{path} {what} ({who})")
+    return fails, notes
 
 
 def needs_laya(path: str) -> bool:
@@ -292,6 +537,14 @@ def main(argv: list[str]) -> int:
     # be able to unload a real model. mcp/test_gpu_room.py turns it back on
     # against its own fake stack.
     offline_env["YAMADORI_GPU_ROOM"] = "0"
+    # THE OFFLINE GUARD (scripts/offline_guard/sitecustomize.py, 2026-09-27):
+    # every Python process an offline suite runs refuses a connect to a port
+    # the stack serves on, and records it; the suite then FAILS, whatever its
+    # fallback did (see guard_hits). Offline suites read the served template
+    # through llama-swap's /props, which reloads `bonsai` (docs/ENGINES.md).
+    offline_env["YAMADORI_OFFLINE_GUARD"] = "1"
+    offline_env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (GUARD_DIR, offline_env.get("PYTHONPATH", "")) if p)
 
     # bench/domain holds the benchmark's own graders and runner. Their proofs
     # (every reference passes, every wrong answer fails at its stage) are what
@@ -303,7 +556,18 @@ def main(argv: list[str]) -> int:
                     # proofs for the long-context benchmark (no GPU).
                     + glob.glob(os.path.join(ROOT, "bench", "longctx", "test_*.py"))
                     # bench/swebench: the SWE-bench results parser (no GPU).
-                    + glob.glob(os.path.join(ROOT, "bench", "swebench", "test_*.py")))
+                    + glob.glob(os.path.join(ROOT, "bench", "swebench", "test_*.py"))
+                    # bench/octopus: the run watcher's detectors (no GPU).
+                    + glob.glob(os.path.join(ROOT, "bench", "octopus", "test_*.py"))
+                    # bench/voxel: request, extraction, statuses, the check's
+                    # measures and the compare page (fakes; no GPU, no docker).
+                    + glob.glob(os.path.join(ROOT, "bench", "voxel", "test_*.py"))
+                    # bench/sandbox: the shared sandbox network and the
+                    # harness box (no GPU, no docker).
+                    + glob.glob(os.path.join(ROOT, "bench", "sandbox", "test_*.py"))
+                    # bench/skills: the daily-work selection gate (a copy
+                    # of the live skill store, deterministic stages).
+                    + glob.glob(os.path.join(ROOT, "bench", "skills", "test_*.py")))
     suites = [s for s in suites if args.k in rel(s)]
 
     print(f"  main interpreter  {MAIN_PY}")
@@ -319,6 +583,10 @@ def main(argv: list[str]) -> int:
 
     rows: list[dict] = []
     notes: list[str] = []
+    # The live-state snapshot (layer 2), taken once, advanced per suite.
+    live_state = (LiveState() if not args.list and not args.live_only
+                  else None)
+    stack_notes = 0
     for path in suites:
         name = rel(path)
         live_only = name in LIVE_ONLY
@@ -326,6 +594,10 @@ def main(argv: list[str]) -> int:
             notes.append(f"skipped {name}: opt-in, needs the GPU "
                          f"(run with --live)")
             print(f"  skip  {name}  (opt-in, needs the GPU; pass --live)")
+            continue
+        if name in RETIRED_SUITES:
+            notes.append(f"skipped {name}: retired ({RETIRED_SUITES[name]})")
+            print(f"  skip  {name}  (retired: {RETIRED_SUITES[name]})")
             continue
         py = LAYA_PY if needs_laya(path) else MAIN_PY
         extra: list[str] = []
@@ -357,10 +629,36 @@ def main(argv: list[str]) -> int:
             print(f"          {py} -X utf8 {name} {' '.join(extra)}".rstrip())
             continue
         cmd = [py, "-X", "utf8", path, *extra]
+        hits: list[dict] = []
+        state_fails: list[str] = []
         if is_live_run:
             rc, out, secs = run_streamed(cmd, env, timeout, mask)
         else:
-            rc, out, secs = run(cmd, env, timeout)
+            import tempfile
+            fd, guard_log = tempfile.mkstemp(prefix="offline_guard_",
+                                             suffix=".jsonl")
+            os.close(fd)
+            if live_state is not None:
+                live_state.diff()       # what the stack wrote before now
+            t0 = time.time()
+            try:
+                rc, out, secs = run(cmd, dict(
+                    env, YAMADORI_OFFLINE_GUARD_LOG=guard_log), timeout)
+                hits = guard_hits(guard_log)
+                if live_state is not None:
+                    state_fails, snotes = attribute(
+                        live_state.diff(), t0, time.time(),
+                        {h.get("path") for h in hits
+                         if h.get("kind") == "write"})
+                    stack_notes += len(snotes)
+                    if args.verbose:
+                        for n in snotes:
+                            print(f"        live state (note): {n}")
+            finally:
+                try:
+                    os.remove(guard_log)
+                except OSError:
+                    pass
         out = mask(out)
         c = counts(out)
         nr = not_run(out) if is_live_run else 0
@@ -388,6 +686,26 @@ def main(argv: list[str]) -> int:
             if missing and name in EXPECTED_FAIL and is_live_run:
                 notes.append(f"{name}: an EXPECTED failure now passes -- "
                              f"re-read its finding: " + "; ".join(missing))
+        conns = [h for h in hits if h.get("kind", "connect") == "connect"]
+        writes = [h for h in hits if h.get("kind") == "write"]
+        if conns:
+            # Whatever the suite's own verdict: its fallback may have hidden
+            # the attempt, and a result that depends on whether the stack is
+            # up is not an offline result.
+            ports = sorted({str(h.get("port")) for h in conns})
+            ok, why = False, (f"reached the live stack ({len(conns)} "
+                              f"connect(s) to port {', '.join(ports)} refused "
+                              f"by the offline guard)")
+        if writes:
+            paths = sorted({str(h.get("path")) for h in writes})
+            ok, why = False, ((why + "; " if not ok and conns else "")
+                              + f"wrote the live state ({len(writes)} "
+                              f"write(s) refused by the offline guard: "
+                              f"{', '.join(paths[:4])})")
+        if state_fails:
+            ok, why = False, ((why + "; " if not ok and hits else "")
+                              + f"changed the live state: "
+                              f"{'; '.join(state_fails[:4])}")
         rows.append({"suite": name + (" " + " ".join(extra) if extra else ""),
                      "passed": c[0] if c else None, "total": c[1] if c else None,
                      "secs": secs, "ok": ok, "why": why,
@@ -397,9 +715,30 @@ def main(argv: list[str]) -> int:
         if args.verbose or not ok:
             tail = out if args.verbose else "\n".join(out.strip().splitlines()[-40:])
             print("\n".join("        " + ln for ln in tail.splitlines()))
+        seen_at: set[tuple] = set()
+        for h in hits:
+            key_at = (h.get("host"), h.get("port"), h.get("path"),
+                      tuple(h.get("stack") or ()))
+            if key_at in seen_at:
+                continue
+            seen_at.add(key_at)
+            target = (f"write {h.get('op')} {h.get('path')}"
+                      if h.get("kind") == "write"
+                      else f"{h.get('host')}:{h.get('port')}")
+            print(f"        OFFLINE GUARD: {target} "
+                  f"(pid {h.get('pid')}, {h.get('argv', '')[:80]})")
+            for fr in (h.get("stack") or [])[-6:]:
+                print(f"            {fr}")
+        for f in state_fails:
+            print(f"        LIVE STATE CHANGED: {f}")
 
     if args.list:
         return 0
+    if stack_notes:
+        notes.append(f"{stack_notes} change(s) to files the running stack "
+                     f"writes happened during offline suites and were not "
+                     f"charged to them (layer 1, the write guard, is what "
+                     f"attributes a suite's own writes; -v lists them)")
 
     if not args.no_ruff and not args.live_only:
         cmd = [MAIN_PY, "-m", "ruff", "check", "mcp", "bench", "scripts",

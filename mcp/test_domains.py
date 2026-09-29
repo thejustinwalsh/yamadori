@@ -32,8 +32,11 @@ store, opened read-only. If any of those files is missing that test says
 SKIPPED, loudly, and does not count as a pass.
 
 NOTHING HERE WRITES OUTSIDE A TEMP DIRECTORY. `YAMADORI_NEBARI_DB`,
-`CODE_INDEX_DB` and `RINGS_DB` are pointed at temp files BEFORE the proxy is
-imported, because those modules read their paths at import time.
+`CODE_INDEX_DB`, `RINGS_DB` and every store in offline_stores.STORES (the
+jobs database above all: skill selection's records) are pointed at temp
+files BEFORE the proxy is imported, because those modules read their paths
+at import time. (Until 2026-09-27 the jobs database was not, and this file
+wrote the live one.)
 """
 from __future__ import annotations
 
@@ -53,10 +56,21 @@ _TMP = tempfile.mkdtemp(prefix="yamadori_test_domains_")
 os.environ["YAMADORI_NEBARI_DB"] = os.path.join(_TMP, "nebari.sqlite3")
 os.environ["CODE_INDEX_DB"] = os.path.join(_TMP, "code.sqlite3")
 os.environ["RINGS_DB"] = os.path.join(_TMP, "rings.sqlite3")
+# And every other store proxy.prepare can write (2026-09-27: without
+# YAMADORI_JOBS_DB, prepare's skill selection wrote 21 fallback records --
+# this file's "where is Object3D defined?" -- into the live
+# index/jobs.sqlite3, and the worker learned from them).
+import offline_stores  # noqa: E402
+offline_stores.isolate("yamadori_test_domains_stores_")
 
 import domains  # noqa: E402
 import nebari  # noqa: E402
 import proxy  # noqa: E402
+import served_fixture  # noqa: E402
+# The served model's /props, pinned (mcp/served_fixture.py): budget and
+# tiers would otherwise ask the live stack (llama-swap reloads `bonsai`).
+served_fixture.pin()
+served_fixture.no_embedder()   # skill selection's embedder: an outage
 
 REAL_STORE = os.path.join(REPO, "index", "packages")
 REAL_NEBARI = os.path.abspath(os.path.join(REPO, "index", "nebari.sqlite3"))
@@ -306,6 +320,19 @@ def test_a_package_is_not_named_by_an_ordinary_word():
                  "pmndrs/postprocessing v6", "postprocessing@6.39.5"):
         check("postprocessing" in domains._named(text, held),
               f"but a module spelling does: {text!r}")
+    # pmndrs/math (held 2026-09-27): the word, and Python's stdlib, do not
+    # name it; it has a hand-mapped domain, since it imports nothing to
+    # derive one from (an unmapped held package reopens the gate).
+    s = store_with(("math", "0.1.0", 1))
+    held = domains.held_sources(s)
+    check(domains._named("Print the answer modulo 998244353 using math. "
+                         "import math", held) == [],
+          "the word 'math' does not name the pmndrs package")
+    check(all("math" in domains._named(t, held) for t in
+              ("pmndrs/math", "from 'math/noise'", "math@0.1.0")),
+          "but its repo, a subpath and a version pin do")
+    check(domains.PACKAGE_DOMAINS.get("math") == {"gpu", "web-frontend"},
+          "and it is mapped by hand to skill_classify's pmndrs_math domains")
 
 
 def test_a_word_counts_only_in_its_domain_sense():
@@ -359,18 +386,26 @@ def test_prepare_hands_the_clients_tools_to_selection():
         check(sel["signals"]["client_tools"] == 2,
               "the client's tools reach selection, ours (re-sent by name) "
               "excluded", json.dumps(sel["signals"].get("client_tools")))
-        check(sel["investigate"] is False and sel["fanout_n"] == 1
-              and sel["signals"]["acts_locally"],
-              "act locally: no deep thinking, no fan-out at max",
-              json.dumps(sel["because"])[:240])
-        # Since Phase 0.6 (2026-09-24) one tool of ours rides at max, after
-        # the client's: think_deeply, the model-chosen deep-thinking trigger.
-        check(out["_ours"] == ["think_deeply"]
+        # The conversation's INITIAL prompt is always planned (operator,
+        # 2026-09-27; deep.kickoff): the one pre-main run an act-locally
+        # request gets, delivered as an inserted yama_plan hop.
+        check(sel["fanout_n"] == 1 and sel["signals"]["acts_locally"]
+              and (sel["investigate"] is False or (
+                  out["_deep"].get("kind") == "kickoff"
+                  and out["_deep"].get("job") == "plan")),
+              "act locally: no fan-out at max, and no deep thinking but the "
+              "initial prompt's plan", json.dumps(sel["because"])[:240])
+        # Since Phase 0.6 (2026-09-24) tools of ours ride at max, after the
+        # client's: yama_think_deeply, the model-chosen deep-thinking
+        # trigger, and yama_plan (2026-09-27).
+        check(sorted(out["_ours"]) == ["yama_plan", "yama_think_deeply"]
               and [t["function"]["name"] for t in out["tools"]]
-              == ["write_file", "terminal", "find_by_meaning", "think_deeply"],
+              == ["write_file", "terminal", "find_by_meaning",
+                  "yama_think_deeply", "yama_plan"],
               "main gets the client's tools untouched and first -- its own "
-              "find_by_meaning included -- and of ours only think_deeply at "
-              "max (the code tools are the second brain's since 2026-09-24)",
+              "find_by_meaning included -- and of ours only yama_think_deeply "
+              "and yama_plan at max (the code tools are the second brain's "
+              "since 2026-09-24)",
               json.dumps([t["function"]["name"] for t in out["tools"]]))
     finally:
         domains.PACKAGE_STORE, selection.LAYA_URL = prev, prev_laya
@@ -562,6 +597,11 @@ def test_prepare_withholds_offers_and_keeps():
               and out["_tools_gate"]["offer"],
               "an opening with no evidence is offered",
               out["_tools_gate"]["situation"])
+        # The opening is a new conversation (#41); its answer made no tool
+        # call, so the proxy records the id with it when it delivers it
+        # (_run_turn, THE ANSWER RECORD) -- done here by hand, since
+        # prepare() alone delivers nothing.
+        proxy._record_answer_session(out, opening, "Go ahead.", [])
         later = opening + [{"role": "assistant", "content": "Go ahead."},
                            {"role": "user", "content": LCB_PROMPT}]
         check(not domains.tool_admission(later, None, store=HELD)["offer"],

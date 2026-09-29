@@ -1,0 +1,12 @@
+{
+ "lane_resumed": true,
+ "reload_s": 12.4,
+ "bonsai_state": "ready",
+ "bonsai_cmd_is_config": true,
+ "proxy_health": 200,
+ "gpu": {
+  "used": 14946,
+  "free": 1105,
+  "util": 0
+ }
+}

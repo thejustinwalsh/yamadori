@@ -186,7 +186,7 @@ body.stale .stalebar{display:block}
     <h1>VITALS</h1>
     <div class="sub">One page of measured hardware and process state. Every
       figure comes from a single <code>vitals.snapshot()</code>; nothing here is
-      defaulted or smoothed. &middot; <a href="/dash">recipe corpus</a></div>
+      defaulted or smoothed.</div>
   </div>
   <div class="clock">
     <span class="dot" id="dot" aria-hidden="true"></span>
@@ -375,24 +375,34 @@ function renderCtx(c){
     return;
   }
   const pct=v=>(100*v/Math.max(c.pool,1)).toFixed(2);
+  // THE CAP LAYOUT (mcp/budget.py, 2026-09-28): main is the VRAM line, the
+  // child slot has its own window, the rest is a second conversation's room.
+  const cap=c.layout==='cap';
+  const L=cap?{main:'main, the VRAM line',helper:'child',reserve:'second conversation',
+    kmain:'main, the window every conversation gets'+(c.cap_source?' ('+esc(c.cap_source)+')':''),
+    khelper:'child: deep thinking, the decider and side calls; its own window',
+    kreserve:'the rest: a second concurrent conversation, in host RAM when it spills'}
+   :{main:'main',helper:'helper, each',reserve:'reserve',kmain:'main, the conversation',
+    khelper:'deep thinking, one helper at a time',
+    kreserve:'reserve, whatever the shares leave unclaimed'};
   el.className='';
   el.innerHTML=`
     <div class="stats">
       <div class="stat"><div class="label">pool</div><div class="v num">${n(c.pool)}</div></div>
-      <div class="stat"><div class="label">main</div><div class="v num">${n(c.main)}</div></div>
-      <div class="stat"><div class="label">helper, each</div><div class="v num">${n(c.helper)}</div></div>
-      <div class="stat"><div class="label">reserve</div><div class="v num">${n(c.reserve)}</div></div>
+      <div class="stat"><div class="label">${L.main}</div><div class="v num">${n(c.main)}</div></div>
+      <div class="stat"><div class="label">${L.helper}</div><div class="v num">${n(c.helper)}</div></div>
+      <div class="stat"><div class="label">${L.reserve}</div><div class="v num">${n(c.reserve)}</div></div>
       <div class="stat"><div class="label">KV</div><div class="v num">${c.gib} GiB</div></div>
     </div>
-    <div class="split" role="img" aria-label="main ${n(c.main)}, helper ${n(c.helper)}, reserve ${n(c.reserve)} of ${n(c.pool)} tokens">
+    <div class="split" role="img" aria-label="${L.main} ${n(c.main)}, ${L.helper} ${n(c.helper)}, ${L.reserve} ${n(c.reserve)} of ${n(c.pool)} tokens">
       <span class="main" style="width:${pct(c.main)}%"></span>
       <span class="helper" style="width:${pct(c.helper)}%"></span>
       <span class="reserve" style="width:${pct(c.reserve)}%"></span>
     </div>
     <div class="key">
-      <span><i style="background:var(--primary)"></i>main, the conversation</span>
-      <span><i style="background:var(--tertiary)"></i>deep thinking, one helper at a time</span>
-      <span><i style="background:var(--highest)"></i>reserve, whatever the shares leave unclaimed</span>
+      <span><i style="background:var(--primary)"></i>${L.kmain}</span>
+      <span><i style="background:var(--tertiary)"></i>${L.khelper}</span>
+      <span><i style="background:var(--highest)"></i>${L.kreserve}</span>
     </div>
     ${c.pool===131072?'<div class="note">This pool is exactly 131072, which '+
       'is also the value <code>budget.pool_size()</code> falls back to when '+

@@ -1,0 +1,20 @@
+[05:50:11] [line-0] attempt 1: unload bonsai: HTTP 200
+[05:50:23] [line-0] loaded in 9.1 s, build b10743-adfffbe41, card {'used': 16022, 'free': 29, 'util': 0}
+[05:55:19] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+[05:55:19] [line] round 0: N=147456 -c 360448: min free 21 MiB (margin 1000, display_active Disabled)
+[05:55:33] [line-1] attempt 1: unload bonsai: HTTP 200
+[05:55:43] [line-1] loaded in 6.6 s, build b10743-adfffbe41, card {'used': 16004, 'free': 47, 'util': 75}
+[06:00:19] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 15000, 'free': 1051, 'util': 0}}
+[06:00:19] [line] round 1: N=119552 -c 304640: min free 29 MiB (margin 1000, display_active Disabled)
+[06:00:30] waiting: card busy (78% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:01:02] waiting: card busy (81% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:01:33] waiting: card busy (79% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:02:04] waiting: card busy (86% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:02:35] waiting: card busy (83% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:03:06] waiting: card busy (82% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:03:38] waiting: card busy (80% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:04:09] waiting: card busy (33% mean utilisation over 10 s)
+[06:04:40] waiting: card busy (83% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:05:11] waiting: card busy (77% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:05:43] waiting: card busy (82% mean utilisation over 10 s) | bonsai slots processing: [3]
+[06:06:14] waiting: card busy (83% mean utilisation over 10 s) | bonsai slots processing: [3]

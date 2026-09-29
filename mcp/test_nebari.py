@@ -30,6 +30,11 @@ import nebari  # noqa: E402
 nebari.DB = os.path.join(_TMP, "nebari.sqlite3")
 
 import proxy  # noqa: E402
+import served_fixture  # noqa: E402
+
+# prepare() asks what the served model sees (vision.main_sees): pinned,
+# never the live /props (2026-09-28: one refused connect).
+served_fixture.pin()
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -182,12 +187,25 @@ def test_ledger_misses_cost_no_connection_and_no_ddl():
     nebari.ledger_reset()
 
 
+def test_a_large_state_is_saved_whole():
+    """save() cut the JSON text at 200,000 characters, so a larger state
+    was stored as invalid JSON and load() silently returned {} for it
+    (docs/CONSTANTS-AUDIT.md, 2026-09-27)."""
+    state = {"counts": {f"pkg-{i}": i for i in range(30000)},
+             "note": "x" * 250000}
+    nebari.save("large-state-key", state)
+    got = nebari.load("large-state-key")
+    check(got == state, "a state over 200,000 characters of JSON reloads "
+          "whole", f"{len(got)} keys back")
+
+
 def main() -> int:
     for fn in (test_the_fixture_is_not_the_real_database,
                test_the_key_is_scoped_to_the_account,
                test_the_proxy_threads_the_account_into_the_session,
                test_an_explicit_session_token_separates_identical_openings,
-               test_ledger_misses_cost_no_connection_and_no_ddl):
+               test_ledger_misses_cost_no_connection_and_no_ddl,
+               test_a_large_state_is_saved_whole):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

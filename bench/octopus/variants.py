@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Octopus Invaders variants: one game spec, four tech stacks.
+"""Octopus Invaders variants: one game spec, five tech stacks.
 
     python bench/octopus/variants.py            # build index/octopus/prompts/V*.md
     python bench/octopus/variants.py --check    # verify only, write nothing
@@ -27,7 +27,7 @@ was not named in a pair is checked to be present, in order, byte for byte:
 the gameplay and visual requirements are word for word by construction, and
 the manifest records how many lines were kept vs replaced.
 
-The replaced lines are the stack: the one-line tech statement, PROJECT
+In V1-V3 the replaced lines are the stack: the one-line tech statement, PROJECT
 STRUCTURE, CANVAS SETUP, the fillRect/ctx instructions for the octopi and the
 particle draw call, "canvas-drawn", requestAnimationFrame, and the run/serve
 instructions. Nothing about what the game does or looks like is replaced;
@@ -61,6 +61,22 @@ PROTOCOL rule 16):
   @types/react 19.2.18   @types/react-dom 19.2.7   @types/three 0.185.4
   font (V3)              JetBrains Mono v2.304 Regular TTF (glyph loads
                          ttf/otf; it ships no default font)
+  V4                     NO pins (2026-09-27, below): the model picks the
+                         versions, the layout and the build.
+
+V4 IS DIFFERENT (operator, 2026-09-27: "So I just said build the pagoda and
+octopus-invaders with r3f (react-three-fiber) v10 and Koota and pmndrs math."
+... "That changes the prompt."). V4 is the original with ONE line replaced --
+the one-line tech statement (O_TECH) becomes V4_TECH, the operator's own
+sentence -- and nothing else: PROJECT STRUCTURE, CANVAS SETUP, ctx.fillRect,
+requestAnimationFrame, "in game.js init()" and the python http.server lines
+all stay, verbatim. A user who pastes a spec and adds one sentence expects
+the model to adapt the canvas-specific details; whether it adapts sensibly is
+part of the test, so the GRADER judges V4 by behaviour and intent, not by
+canvas API or file names (grade.py, GRADER_CHANGES[4]). The first V4
+(2026-09-26) swapped every stack line for ours -- pins, a file layout, a
+renderer / koota / TSL / math architecture -- which wrote the model's
+architecture for it; it was never run.
 """
 from __future__ import annotations
 
@@ -107,6 +123,19 @@ VERSIONS["V3"] = {
     "dependencies": {**VERSIONS["V1"]["dependencies"], "@pmndrs/glyph": "0.1.0"},
     "devDependencies": dict(VERSIONS["V1"]["devDependencies"]),
 }
+# V4 pins NOTHING (2026-09-27): the prompt names the stack in one sentence and
+# the model chooses versions. What the registry held when V4 was written
+# (read 2026-09-26, whole packuments, narrowed while reading -- PROTOCOL rule
+# 16), because the grader's r3f check depends on it:
+#   @react-three/fiber  v10 exists ONLY as prereleases: dist-tag alpha =
+#                       10.0.0-alpha.5 (2026-09-08), newer 10.0.0-canary.*
+#                       builds; latest = 9.8.1 (v9). `npm i @react-three/fiber`
+#                       installs v9, so "v10" needs the model to ask for it.
+#   koota               latest = 0.6.6 (2026-04-09).
+#   math                latest = 0.1.0 (2026-09-11), pmndrs/math, MIT. The NAME
+#                       is older: js-math (kaleb/js-math) published 0.0.0 and
+#                       0.0.3 in 2011 -- another project (`name_reused`).
+VERSIONS["V4"] = {}
 
 # The node image every run's terminal (and the grader's build) uses.
 # Vite 8 needs node ^20.19 || >=22.12. Pinned by digest in run.py's manifest.
@@ -258,6 +287,22 @@ TEXT (@pmndrs/glyph):
     ]
 
 
+# ------------------------------------------------------------------------ V4
+# The original one-line tech statement with ONLY its stack words replaced by
+# the operator's request (2026-09-27: "build the pagoda and octopus-invaders
+# with r3f (react-three-fiber) v10 and Koota and pmndrs math"): "vanilla
+# JavaScript and canvas. no libraries. no frameworks." -> the stack. The
+# sentence's subject ("build a space shooter game") and "multi-file project
+# structure." stay (replacing the whole line left "Build it" with no
+# antecedent). Nothing else of ours is added and nothing else of the original
+# is removed (the module docstring, "V4 IS DIFFERENT").
+V4_TECH = "build a space shooter game with r3f (react-three-fiber) v10 and Koota and pmndrs math. multi-file project structure."
+
+
+def _v4() -> list[tuple[str, str]]:
+    return [(O_TECH, V4_TECH)]
+
+
 _FLAT_STRUCTURE = """PROJECT STRUCTURE:
 space-shooter/
   index.html          -- entry point: a #game container for the renderer's canvas, a #ui overlay div for HUD and screens, <script type="module" src="/src/main.ts">
@@ -325,6 +370,10 @@ VARIANTS = {
     "V2": {"name": "three.js + three-flatland + Vite + TypeScript",
            "pairs": _flatland(), "ts": True},
     "V3": {"name": "V1 + @pmndrs/glyph for all text", "pairs": _r3f("V3"), "ts": True},
+    # ts None: the model chooses the language, layout and build (grade.py
+    # build_mode reads what it produced)
+    "V4": {"name": "the original + one sentence: r3f v10, Koota, pmndrs math",
+           "pairs": _v4(), "ts": None},
 }
 
 # ------------------------------------------------------------------ build
@@ -343,11 +392,23 @@ def fetch(force: bool = False) -> str:
     got = hashlib.sha256(data).hexdigest()
     if got != SOURCE_SHA256:
         raise SystemExit(f"original prompt sha256 {got} != pinned {SOURCE_SHA256}")
-    with open(os.path.join(STORE, "SOURCE.json"), "w", encoding="utf-8") as f:
-        json.dump({"url": SOURCE_URL, "repo": SOURCE_REPO, "path": SOURCE_PATH,
-                   "commit": SOURCE_SHA, "sha256": SOURCE_SHA256,
-                   "words": len(data.decode("utf-8").split()),
-                   "note": "third-party text; never commit it"}, f, indent=2)
+    meta = json.dumps({"url": SOURCE_URL, "repo": SOURCE_REPO,
+                       "path": SOURCE_PATH, "commit": SOURCE_SHA,
+                       "sha256": SOURCE_SHA256,
+                       "words": len(data.decode("utf-8").split()),
+                       "note": "third-party text; never commit it"}, indent=2)
+    # Written only when it differs: a READ of the pinned original must not
+    # rewrite the store (2026-09-27: every offline grade_checks run
+    # rewrote index/octopus/SOURCE.json; the offline guard refuses it).
+    src = os.path.join(STORE, "SOURCE.json")
+    try:
+        with open(src, encoding="utf-8") as f:
+            same = f.read() == meta
+    except OSError:
+        same = False
+    if not same:
+        with open(src, "w", encoding="utf-8") as f:
+            f.write(meta)
     return data.decode("utf-8")
 
 

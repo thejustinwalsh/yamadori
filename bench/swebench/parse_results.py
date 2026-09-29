@@ -134,9 +134,11 @@ def _traj_stats(traj: dict) -> dict:
             continue
         x["turns"] += 1
         x["tiers"][str(xy.get("tier"))] += 1
-        if xy.get("hints"):
+        sk = xy.get("skills") if isinstance(xy.get("skills"), dict) else {}
+        injected = list(sk.get("ids") or []) or xy.get("hints") or []
+        if injected:
             x["hint_turns"] += 1
-            x["hints_injected"] += len(xy["hints"])
+            x["hints_injected"] += len(injected)
         inv = xy.get("investigate")
         if isinstance(inv, dict):
             x["investigate_ran"] += bool(inv.get("ran"))
@@ -205,6 +207,9 @@ def parse_arm(arm_dir: str, run_id: str, arm: str) -> list[dict]:
                          "empty_patch": False, "agent_error": False}.get(ev),
             "eval_status": ev,
             "seconds": t.get("seconds"),
+            # wsl_side: the instance's sandbox network did not come up, so
+            # the agent never ran (fail closed, SELF-IMPROVEMENT-LOG #49)
+            "not_run": t.get("not_run"),
             "patch_chars": len(patch),
             "proxy_error_lines": errs.get(iid, 0),
             "rate_limited_retries": rl.get(iid),

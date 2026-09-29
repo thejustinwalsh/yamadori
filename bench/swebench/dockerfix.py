@@ -105,6 +105,23 @@ def _patch_sdk() -> None:
 
 
 # ------------------------------------------------------------ mini-swe-agent
+def network_of(run_args: list[str]) -> str:
+    """The network a model-command container joins: the value of the LAST
+    `--network X` / `--network=X` / `--net X` in mini's run_args, or "none"
+    when there is none. The stock class passes run_args to `docker run`, so
+    the same overlay means the same network on the WSL path."""
+    net = None
+    args = list(run_args or [])
+    for i, a in enumerate(args):
+        if a in ("--network", "--net") and i + 1 < len(args):
+            net = args[i + 1]
+        elif a.startswith(("--network=", "--net=")):
+            net = a.split("=", 1)[1]
+    if not net or net in ("bridge", "default", "host"):
+        return "none"
+    return net
+
+
 def _env_class():
     import docker
     from minisweagent.environments.docker import DockerEnvironment
@@ -120,8 +137,13 @@ def _env_class():
                 self._api.inspect_image(img)
             except docker.errors.NotFound:
                 self._api.pull(img)
+            # The network: `--network X` from run_args (wsl_side's overlay puts
+            # the instance's sandbox network there, SELF-IMPROVEMENT-LOG #49),
+            # else NONE -- never Docker's default bridge, which reaches the
+            # Windows host's loopback services (#48). Fail closed.
             hc = self._api.create_host_config(
-                auto_remove="--rm" in self.config.run_args)
+                auto_remove="--rm" in self.config.run_args,
+                network_mode=network_of(self.config.run_args))
             c = self._api.create_container(
                 img, ["sleep", self.config.container_timeout], name=name,
                 working_dir=self.config.cwd, host_config=hc)
@@ -339,8 +361,61 @@ def selftest(image: str) -> int:
     return 0 if ok == n else 1
 
 
+def netcheck(image: str) -> int:
+    """The SWE-bench sandbox, live (Docker, no model; SELF-IMPROVEMENT-LOG
+    #49). The instance network and gate come up exactly as wsl_side.cmd_agent
+    brings them up; the model-command container is started by THIS module's
+    LowLevelDockerEnvironment with the overlay's `environment` merged onto the
+    leaderboard yaml's (mini's recursive_merge), and bench/sandbox's probe
+    runs through env.execute -- the path every model command takes. Passes
+    when no host address:port opens directly, the gate refuses every host
+    target, and pip and git over https reach the public registries."""
+    import json
+    import shlex
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, here)
+    sys.path.insert(0, os.path.join(os.path.dirname(here), "sandbox"))
+    import sandbox_net
+    import wsl_side
+    import yaml
+    from minisweagent.utils.serialize import recursive_merge
+    _install_env()
+    cls = sys.modules[__name__].LowLevelDockerEnvironment
+    with open(wsl_side.default_config(), encoding="utf-8") as f:
+        base = yaml.safe_load(f)["environment"]
+    tag = f"netcheck-{os.getpid()}"
+    network = sandbox_net.names(tag, wsl_side.SANDBOX_PREFIX)["network"]
+    seen: dict = {}
+
+    def runner(spec: dict) -> tuple[int, str]:
+        cfg = recursive_merge(base, wsl_side.sandbox_environment(network))
+        cfg.pop("environment_class", None)
+        seen["run_args"], seen["network_mode"] = cfg["run_args"], network_of(cfg["run_args"])
+        env = cls(image=image, **cfg)
+        try:
+            cmd = ("cat > /tmp/probe.py <<'PROBE_EOF'\n" + sandbox_net.PROBE + "\nPROBE_EOF\n"
+                   "PY=$(command -v python3 || command -v python); \"$PY\" /tmp/probe.py "
+                   + shlex.quote(json.dumps(spec)))
+            out = env.execute({"command": cmd}, timeout=900)
+            return out["returncode"], out["output"]
+        finally:
+            env.cleanup()
+
+    res = sandbox_net.verify(tag, tools=("pip", "git"), prefix=wsl_side.SANDBOX_PREFIX,
+                             runner=runner)
+    print(f"image {image}\nmini run_args {seen.get('run_args')} -> network_mode "
+          f"{seen.get('network_mode')} (expected {network})")
+    sandbox_net.report(res)
+    ok = res["verdict"]["ok"] and seen.get("network_mode") == network
+    print("netcheck " + ("PASSED" if ok else "FAILED"))
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     mode, rest = sys.argv[1], sys.argv[2:]
+    if mode == "netcheck":
+        sys.exit(netcheck(rest[0] if rest else
+                          "docker.io/swebench/sweb.eval.x86_64.sympy_1776_sympy-17655:latest"))
     if mode == "mini":
         sys.exit(run_mini(rest))
     if mode == "eval":

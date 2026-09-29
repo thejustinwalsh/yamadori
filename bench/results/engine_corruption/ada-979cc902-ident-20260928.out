@@ -1,0 +1,149 @@
+[05:41:56] waiting: test suites running: 53800 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_image_emit.py
+[05:42:58] waiting: test suites running: 52472 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_image_guard.py
+[05:43:29] waiting: test suites running: 60284 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_images.py
+[05:44:01] waiting: test suites running: 56124 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_ledger.py
+[05:51:21] [current] attempt 1: unload bonsai: HTTP 200 OK
+[05:51:24] [current] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[05:51:24] [current] start: C:/Users/jwals/engines/llama-bonsai2-ada-92ffd4db/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1'}
+[05:51:35] [current] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 58224, C:\Users\jwals\engines\llama-bonsai2-ada-92ffd4db\src\build\bin\llama-server.exe; build b10743-adfffbe41
+[05:51:40] [current] greedy ts rep0: n=425 84.43 tok/s acc 261/326 finish=stop symptom=[]
+[05:51:47] [current] greedy bash rep0: n=512 81.03 tok/s acc 306/409 finish=length symptom=[]
+[05:51:54] [current] greedy prose rep0: n=460 69.08 tok/s acc 243/432 finish=stop symptom=[]
+[05:51:59] [current] greedy ts rep1: n=417 85.03 tok/s acc 257/318 finish=stop symptom=[]
+[05:52:05] [current] greedy bash rep1: n=512 80.88 tok/s acc 306/409 finish=length symptom=[]
+[05:52:12] [current] greedy prose rep1: n=460 69.62 tok/s acc 245/428 finish=stop symptom=[]
+[05:52:17] [current] greedy ts rep2: n=417 84.92 tok/s acc 257/318 finish=stop symptom=[]
+[05:52:24] [current] greedy bash rep2: n=512 80.94 tok/s acc 306/409 finish=length symptom=[]
+[05:52:30] [current] greedy prose rep2: n=460 69.62 tok/s acc 246/428 finish=stop symptom=[]
+[05:52:32] [current] stopped; min free 1047 MiB
+[05:52:42] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+[05:52:53] waiting: test suites running: 50660 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_responses_api.py
+[05:53:25] waiting: test suites running: 55368 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_selection.py
+[05:53:56] waiting: test suites running: 59716 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_sessions.py
+[05:54:59] waiting: test suites running: 59148 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_skill_factory.py
+[05:55:30] waiting: test suites running: 43020 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_skill_questions.py
+[05:56:01] waiting: test suites running: 58992 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_skills.py
+[05:56:33] waiting: test suites running: 60848 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_stray_markers.py
+[06:01:46] waiting: test suites running: 60972 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_stream.py
+[06:02:18] waiting: test suites running: 60424 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_tools.py
+[06:02:49] waiting: test suites running: 59716 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_vision.py
+[06:03:20] waiting: test suites running: 55872 C:\Users\jwals\textgen\installer_files\env\python.exe bench/skills/test_daily_eval.py
+[06:03:52] waiting: test suites running: 40984 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_ledger.py
+[06:11:42] waiting: test suites running: 45052 C:\Users\jwals\textgen\installer_files\env\python.exe bench/skills/test_daily_eval.py
+[06:12:14] [kv-a] attempt 1: unload bonsai: HTTP 200 OK
+[06:12:18] [kv-a] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[06:12:18] [kv-a] start: C:/Users/jwals/engines/llama-bonsai2-ada-979cc902/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1'}
+[06:12:28] [kv-a] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 336, C:\Users\jwals\engines\llama-bonsai2-ada-979cc902\src\build\bin\llama-server.exe; build b10743-adfffbe41
+[06:12:34] [kv-a] greedy ts rep0: n=425 84.91 tok/s acc 261/326 finish=stop symptom=[]
+[06:12:40] [kv-a] greedy bash rep0: n=512 81.28 tok/s acc 306/409 finish=length symptom=[]
+[06:12:46] [kv-a] greedy prose rep0: n=344 68.38 tok/s acc 181/328 finish=stop symptom=[]
+[06:12:51] [kv-a] greedy ts rep1: n=417 84.91 tok/s acc 257/318 finish=stop symptom=[]
+[06:12:57] [kv-a] greedy bash rep1: n=512 80.61 tok/s acc 305/411 finish=length symptom=[]
+[06:13:04] [kv-a] greedy prose rep1: n=461 69.93 tok/s acc 245/430 finish=stop symptom=[]
+[06:13:09] [kv-a] greedy ts rep2: n=404 81.99 tok/s acc 245/318 finish=stop symptom=[]
+[06:13:16] [kv-a] greedy bash rep2: n=512 80.01 tok/s acc 303/414 finish=length symptom=[]
+[06:13:22] [kv-a] greedy prose rep2: n=395 67.61 tok/s acc 205/382 finish=stop symptom=[]
+[06:13:23] [kv-a] stopped; min free 1047 MiB
+[06:13:33] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+[06:13:47] [kv-b] attempt 1: unload bonsai: HTTP 200 OK
+[06:13:50] [kv-b] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[06:13:50] [kv-b] start: C:/Users/jwals/engines/llama-bonsai2-ada-979cc902/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1'}
+[06:14:01] [kv-b] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 53700, C:\Users\jwals\engines\llama-bonsai2-ada-979cc902\src\build\bin\llama-server.exe; build b10743-adfffbe41
+[06:14:07] [kv-b] greedy ts rep0: n=425 84.86 tok/s acc 261/326 finish=stop symptom=[]
+[06:14:13] [kv-b] greedy bash rep0: n=512 81.14 tok/s acc 306/409 finish=length symptom=[]
+[06:14:18] [kv-b] greedy prose rep0: n=344 67.97 tok/s acc 181/328 finish=stop symptom=[]
+[06:14:23] [kv-b] greedy ts rep1: n=417 84.75 tok/s acc 257/318 finish=stop symptom=[]
+[06:14:30] [kv-b] greedy bash rep1: n=512 80.47 tok/s acc 305/411 finish=length symptom=[]
+[06:14:37] [kv-b] greedy prose rep1: n=461 69.89 tok/s acc 245/430 finish=stop symptom=[]
+[06:14:42] [kv-b] greedy ts rep2: n=404 82.42 tok/s acc 245/318 finish=stop symptom=[]
+[06:14:48] [kv-b] greedy bash rep2: n=512 79.66 tok/s acc 303/414 finish=length symptom=[]
+[06:14:54] [kv-b] greedy prose rep2: n=395 67.35 tok/s acc 205/382 finish=stop symptom=[]
+[06:14:56] [kv-b] stopped; min free 1047 MiB
+[06:15:06] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+[06:15:17] waiting: test suites running: 52788 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_route.py
+[06:15:51] [place0] attempt 1: unload bonsai: HTTP 200 OK
+[06:15:54] [place0] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[06:15:54] [place0] start: C:/Users/jwals/engines/llama-bonsai2-ada-979cc902/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1', 'LLAMA_KV_PLACE_LOW': '0'}
+[06:16:05] [place0] loaded in 8.5 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 44992, C:\Users\jwals\engines\llama-bonsai2-ada-979cc902\src\build\bin\llama-server.exe; build b10743-adfffbe41
+[06:16:10] [place0] greedy ts rep0: n=425 84.74 tok/s acc 261/326 finish=stop symptom=[]
+[06:16:17] [place0] greedy bash rep0: n=512 80.90 tok/s acc 306/409 finish=length symptom=[]
+[06:16:23] [place0] greedy prose rep0: n=343 58.04 tok/s acc 179/330 finish=stop symptom=[]
+[06:16:28] [place0] greedy ts rep1: n=417 84.24 tok/s acc 256/320 finish=stop symptom=[]
+[06:16:36] [place0] greedy bash rep1: n=512 68.22 tok/s acc 300/420 finish=length symptom=[]
+[06:16:43] [place0] greedy prose rep1: n=461 67.52 tok/s acc 247/426 finish=stop symptom=[]
+[06:16:49] [place0] greedy ts rep2: n=404 71.12 tok/s acc 245/318 finish=stop symptom=[]
+[06:16:55] [place0] greedy bash rep2: n=512 80.86 tok/s acc 306/408 finish=length symptom=[]
+[06:17:02] [place0] greedy prose rep2: n=391 55.48 tok/s acc 194/394 finish=stop symptom=[]
+[06:17:04] [place0] stopped; min free 1047 MiB
+[06:17:14] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+[06:17:28] [span0] attempt 1: unload bonsai: HTTP 200 OK
+[06:17:31] [span0] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[06:17:31] [span0] start: C:/Users/jwals/engines/llama-bonsai2-ada-979cc902/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1', 'LLAMA_KV_SPAN_BY_SEQ': '0'}
+[06:17:42] [span0] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 53556, C:\Users\jwals\engines\llama-bonsai2-ada-979cc902\src\build\bin\llama-server.exe; build b10743-adfffbe41
+[06:17:47] [span0] greedy ts rep0: n=425 85.20 tok/s acc 261/326 finish=stop symptom=[]
+[06:18:37] [span0] greedy bash rep0: n=512 10.35 tok/s acc 306/409 finish=length symptom=[]
+[06:19:37] [span0] greedy prose rep0: n=343 5.73 tok/s acc 179/330 finish=stop symptom=[]
+[06:20:37] [span0] greedy ts rep1: n=425 7.11 tok/s acc 259/330 finish=stop symptom=[]
+[06:21:52] [span0] greedy bash rep1: n=512 6.87 tok/s acc 306/409 finish=length symptom=[]
+[06:23:10] [span0] greedy prose rep1: n=461 5.92 tok/s acc 245/430 finish=stop symptom=[]
+[06:24:08] [span0] greedy ts rep2: n=404 7.00 tok/s acc 245/318 finish=stop symptom=[]
+[06:25:23] [span0] greedy bash rep2: n=512 6.90 tok/s acc 307/407 finish=length symptom=[]
+[06:26:41] [span0] greedy prose rep2: n=429 5.53 tok/s acc 216/428 finish=stop symptom=[]
+[06:26:42] [span0] stopped; min free 1047 MiB
+[06:26:53] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+[06:27:04] waiting: test suites running: 59984 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_harness_decisions.py
+[06:33:51] waiting: test suites running: 58160 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_harness_forms.py
+[06:34:54] waiting: test suites running: 58200 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_image_emit.py
+[06:35:25] waiting: test suites running: 56692 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_image_guard.py
+[06:35:57] waiting: test suites running: 35152 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_images.py
+[06:36:28] waiting: test suites running: 57812 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_ledger.py
+[06:44:18] waiting: test suites running: 55144 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_pmndrs_stack.py
+[06:44:49] waiting: test suites running: 57816 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_responses_api.py
+[06:45:51] waiting: test suites running: 57756 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_selection.py
+[06:46:23] waiting: test suites running: 336 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_sessions.py
+[06:47:25] waiting: test suites running: 51880 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_skill_factory.py
+[06:47:57] waiting: test suites running: 58748 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_skill_questions.py
+[06:48:28] waiting: test suites running: 55872 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_skills.py
+[06:48:59] waiting: test suites running: 56688 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_stray_markers.py
+[06:55:48] waiting: test suites running: 27456 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_tool_code.py
+[06:56:19] waiting: test suites running: 49740 C:\Users\jwals\textgen\installer_files\env\python.exe mcp/test_utility.py
+[06:56:55] [promote0] attempt 1: unload bonsai: HTTP 200 OK
+[06:56:58] [promote0] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[06:56:58] [promote0] start: C:/Users/jwals/engines/llama-bonsai2-ada-979cc902/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1', 'LLAMA_KV_PROMOTE': '0'}
+[06:57:09] [promote0] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 56608, C:\Users\jwals\engines\llama-bonsai2-ada-979cc902\src\build\bin\llama-server.exe; build b10743-adfffbe41
+[06:57:15] [promote0] greedy ts rep0: n=425 84.98 tok/s acc 261/326 finish=stop symptom=[]
+[06:57:21] [promote0] greedy bash rep0: n=512 81.51 tok/s acc 306/409 finish=length symptom=[]
+[06:57:28] [promote0] greedy prose rep0: n=460 69.57 tok/s acc 243/432 finish=stop symptom=[]
+[06:57:33] [promote0] greedy ts rep1: n=425 85.44 tok/s acc 261/326 finish=stop symptom=[]
+[06:57:40] [promote0] greedy bash rep1: n=512 81.49 tok/s acc 306/409 finish=length symptom=[]
+[06:57:46] [promote0] greedy prose rep1: n=460 69.58 tok/s acc 243/432 finish=stop symptom=[]
+[06:57:51] [promote0] greedy ts rep2: n=425 83.71 tok/s acc 259/330 finish=stop symptom=[]
+[06:57:58] [promote0] greedy bash rep2: n=512 79.96 tok/s acc 305/411 finish=length symptom=[]
+[06:58:05] [promote0] greedy prose rep2: n=460 68.91 tok/s acc 243/432 finish=stop symptom=[]
+[06:58:06] [promote0] stopped; min free 1047 MiB
+[06:58:17] restore: {'lane_resumed': True, 'reload_s': 10.4, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+| arm | greedy decode tok/s median (min-max), n | greedy reps 1..n identical | plain: with `!!!!`/`////` | plain: 10+ `!`/`/` | plain: 6+ punct run | plain: 5x word | plain finish | tools valid | error |
+|---|---|---|---|---|---|---|---|---|---|
+| current | 80.94 (69.08-85.03), n=9 | ts yes, bash yes, prose yes | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |
+| kv-a | 80.61 (67.61-84.91), n=9 | ts NO, bash NO, prose NO | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |
+| kv-b | 80.47 (67.35-84.86), n=9 | ts NO, bash NO, prose NO | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |
+| place0 | 71.12 (55.48-84.74), n=9 | ts NO, bash NO, prose NO | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |
+| span0 | 6.90 (5.53-85.20), n=9 | ts NO, bash yes, prose NO | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |
+| promote0 | 81.49 (68.91-85.44), n=9 | ts yes, bash yes, prose yes | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |
+
+Greedy text identity between arms (rep 0 of each prompt; first differing character):
+- current vs kv-a: ts identical; bash identical; prose differs @869
+- current vs kv-b: ts identical; bash identical; prose differs @869
+- current vs place0: ts identical; bash identical; prose differs @869
+- current vs span0: ts identical; bash identical; prose differs @869
+- current vs promote0: ts identical; bash identical; prose identical
+- kv-a vs kv-b: ts identical; bash identical; prose identical
+- kv-a vs place0: ts identical; bash identical; prose differs @1578
+- kv-a vs span0: ts identical; bash identical; prose differs @1578
+- kv-a vs promote0: ts identical; bash identical; prose differs @869
+- kv-b vs place0: ts identical; bash identical; prose differs @1578
+- kv-b vs span0: ts identical; bash identical; prose differs @1578
+- kv-b vs promote0: ts identical; bash identical; prose differs @869
+- place0 vs span0: ts identical; bash identical; prose identical
+- place0 vs promote0: ts identical; bash identical; prose differs @869
+- span0 vs promote0: ts identical; bash identical; prose differs @869

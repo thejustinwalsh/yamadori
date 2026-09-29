@@ -576,7 +576,9 @@ def _median(xs: list) -> float | None:
 
 # --------------------------------------------------------------------------
 # The arms legend: one row per arm, in the columns of README "Effort tiers"
-# (thinking sent, retrieval, hints, fan-out, deep thinking) plus check_code.
+# (thinking sent, retrieval, skills, fan-out, deep thinking) plus check_code.
+# The legend's key is still `hints` (the dashboard reads it; skills replaced
+# hints on 2026-09-26); an arm table may say either.
 # A value is "on", "off" or "auto" (the tier allows it and mcp/selection.py
 # decides per request). Built from each harness's own arm table, never typed
 # here, so a renamed or re-specified arm cannot drift from its legend.
@@ -597,7 +599,8 @@ def legend_from_features(arm: str, feats: dict, note: str = "",
     fan = feats.get("fanout")
     return {"arm": arm, "kind": "features", "note": note,
             "thinking_sent": feats.get("effort"),
-            "retrieval": onoff("retrieval"), "hints": onoff("hints"),
+            "retrieval": onoff("retrieval"),
+            "hints": onoff("skills" if "skills" in feats else "hints"),
             "fanout": ("auto" if fan is None else str(fan)),
             "deep_thinking": onoff("investigate"),
             "check": ("on" if feats.get("check_code") or client_tool else "off"),
@@ -614,7 +617,7 @@ def legend_from_tier(arm: str, tier: str, effort_sent: str | None,
     return {"arm": arm, "kind": "tier", "tier": tier, "note": note,
             "thinking_sent": effort_sent,
             "retrieval": "on" if t.get("retrieval") else "off",
-            "hints": "on" if t.get("hints") else "off",
+            "hints": "on" if t.get("skills") else "off",
             "fanout": f"auto, up to {fan}" if fan > 1 else "1",
             "deep_thinking": "auto" if t.get("investigate") else "off",
             "check": "on" if t.get("check_code") else "off",

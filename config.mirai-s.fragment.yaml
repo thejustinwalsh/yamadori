@@ -1,0 +1,84 @@
+# The llama-swap entry for Mirai S, PREPARED, NOT ENABLED (2026-09-29; operator: "pull and get ready to try Mirai S").
+# Nothing reads this file at run time. It goes into config.yaml only after bench/mirai_s_gate.py passes on "GPU free",
+# with {{CTX}} (and the MTP lines) filled from the gate's measured fit, and after the operator decides how it is
+# offered (below). Engine: engines/manifest.yaml llama-mirai-s. Weights: models/manifest.yaml mirai-s-*.
+#
+# macros:  (added under config.yaml `macros:`)
+  server_mirai_s: "C:/Users/jwals/engines/llama-mirai-s-a409701e/src/build/bin/llama-server.exe"
+
+# models:  (added after the `bonsai` block)
+  "mirai-s":
+    # Mirai Labs' Mirai S Qwen3.8-27B (2.4-bit trellis; alesha-pro's third-party GGUF) on the fork that adds its
+    # codec. Same architecture, tokenizer and embedded chat template as Bonsai (hash-equal, read from both files):
+    # the decider's label ids, tiers.accepted_efforts (low / medium / xhigh) and the served-template tests carry over.
+    # It shares the 5060 Ti with `bonsai`: ONE big model on the card at a time, so the two SWAP in `primary`
+    # (as the Flash-Next fragment proposes). Clients never see this name.
+    name: "Mirai S Qwen3.8-27B 2.4-bit (5060 Ti) -- CANDIDATE"
+    filters:
+      params:
+        reasoning_effort?: "medium"      # as bonsai; the proxy sends the tier's effort
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-de660e90-0e9c-d465-b389-6df63021b920"
+      # The fork's three general changes are ON by default; each has an off switch the gate's `switches` / `align`
+      # arms measure. Uncomment one only if the gate shows it costs correctness:
+      # - "GGML_CUDA_FA_VEC_GQA=0"       # GQA-packed FA vec kernel (decode with q8_0/q4_0 K/V)
+      # - "GGML_CUDA_GDN_CHUNKED=0"      # chunked gated-delta-net prefill
+      # - "LLAMA_SERVER_TEXT_ALIGN=0"    # prompt cache matched by text across re-tokenization
+    cmd: |
+      ${server_mirai_s}
+      --port ${PORT}
+      -m ${models}/mirai-s/Qwen3.8-27B-S-mirai.gguf
+      # vision is the main model's (operator, 2026-09-27): Qwen's base encoder, on the 5060 Ti with it. The card's
+      # alternative, --no-mmproj-offload (encoder on the CPU, 0 VRAM), buys ~37K more cells at ~7 s per screenshot
+      # on the author's 48-core EPYC (slower on our desktop CPU): the operator's choice, measured by the gate if asked.
+      --mmproj ${models}/mirai-s/mmproj-Qwen3.8-27B-base-f16.gguf
+      -dev CUDA0
+      -ngl 999
+      # FIT (derived, to be MEASURED by the gate's fit step -- not a claim). The card: 128K, q8_0 K/V, MTP 3, -np 1,
+      # 14.6 GB peak on an RTX 3090 WITHOUT the mmproj (its vision line is a separate --no-mmproj-offload add-on; the
+      # card: "On the GPU the encoder adds 0.8 GB of VRAM (1.3 GB at peak)"). Ours adds the mmproj on the GPU and
+      # two more slots' DeltaNet state (48 GDN layers x 48 heads x 128 x 128 x f32 = 144 MiB + ~6 MiB conv state
+      # per slot; the card's own "-np 1 matters ... about 450 MB" for 3 extra slots agrees). K/V per cell at q8_0:
+      # 17 attention layers (16 + MTP blk.64, read from the file) x 4 KV heads x 256 x (K+V) x 34/32 B = 36,992 B.
+      # Weights on the card: every tensor but token_embd (host-side lookups) = 8,220 MiB (read from the file).
+      # Inside 16,311 - 1,000 MiB (docs/ENGINES.md "The VRAM line"), carrying the card's non-weight / non-K/V
+      # overhead over: 94,208 cells if its "GB" is GiB, 125,952 if 10^9 B (132,096 / 161,792 with the mmproj on
+      # the CPU). The gate measures two launches and sets {{CTX}} from the slope (bench/mirai_s_gate.py derive_fit).
+      -c {{CTX}}
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      -fa on
+      # bonsai's layout at deploy time (2026-09-28, bench/deploy_kv_rank.py): two conversation slots + the child
+      # slot, one unified pool. Our tiered-KV / placement / rank patches (llama-bonsai2-ada 0028, 0037-0041) are
+      # NOT in this engine (they do not apply to it: see docs, the fork audit), so no --kv-vram-cells here and
+      # the proxy's kv_rank fields are ignored by this server.
+      -np 3
+      --kv-unified
+      -b 2048
+      -ub 1024
+      # MTP: the file carries its own head (blk.64, Q8_0, from Mirai's bf16 checkpoint). The card runs it with
+      # --spec-type draft-mtp --spec-draft-n-max 3; the gate's `mtp` arm decides whether it ships:
+      # --spec-type draft-mtp
+      # --spec-draft-n-max 3
+      --jinja
+      --reasoning-format deepseek
+      --no-context-shift
+      --no-cache-idle-slots
+      --reasoning-budget 32768
+      --reasoning-budget-message "Thinking budget reached. I will stop deliberating and write the final answer now."
+      ${sampling}
+    ttl: 0
+
+# groups:  `primary` (canopy) becomes swap: true with members [bonsai, mirai-s] -- the same change the Flash-Next
+# fragment proposes; with Flash-Next as well, [bonsai, mirai-s, flash-next].
+#
+# HOW IT WOULD BE OFFERED (proposal; nothing is wired into the proxy):
+#   1. First, a BENCHMARK ARM only: the proxy's upstream model chosen per request for test accounts
+#      (corpus.account_traffic == "test"), e.g. X-Yamadori-Features {"upstream_model": "mirai-s"}, riding the
+#      max_mode swap machinery (mcp/max_mode.py: leases, 503 model_at_capacity while the other model serves, no
+#      Bonsai reload while it serves). Same tier, same effort, same proxy features as the Bonsai arm, so the
+#      comparison is the model alone (a pagoda run at xhigh on each).
+#   2. If it wins, it REPLACES bonsai as the canopy model (same architecture, template and tokenizer: the decider,
+#      accepted efforts and the served-template tests carry over; mcp/budget.py re-derives the pool from /props).
+#      Not a tier of its own: a tier that changes the model mixes the model with the tier's features, which the
+#      tier ladder's "effort-matched pair" rule exists to avoid.

@@ -1,0 +1,63 @@
+[07:21:09] [kvplace2] unload bonsai: HTTP 200
+[07:21:21] [kvplace2] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 75}
+[07:21:22] [kvplace2] A_deep_slot0 ...
+[07:27:19] [kvplace2] A_deep_slot0: prompt_n=160000 (465 tok/s) decode 20.02 tok/s acc 186/272 pool_max_p1=160249 used=160249 ours=[]
+[07:27:19] [kvplace2] B_new_slot1_while_slot0_holds ...
+[07:28:53] [kvplace2] B_new_slot1_while_slot0_holds: prompt_n=60000 (667 tok/s) decode 62.47 tok/s acc 106/150 pool_max_p1=220763 used=220435 ours=['kv promote: seqs 1: 59392 cells, span 219904 -> 59904 (VRAM line 114432): 0 moved, 0 exchanged with idle cells, 512 idle cells moved out; 512 rows (1.1 MiB) in 1 graph(s), 0.6 ms', 'kv promote: seqs 1: 59996 cells, span 220416 -> 60672 (VRAM line 114432): 0 moved, 92 exchanged with idle cells, 512 idle cells moved out; 696 rows (23.1 MiB) in 1 graph(s), 3.5 ms', 'kv promote: seqs 1: 59996 cells, span 220416 -> 60672 (VRAM line 114432): 0 moved, 92 exchanged with idle cells, 512 idle cells moved out; 696 rows (1.4 MiB) in 1 graph(s), 0.6 ms']
+[07:28:53] [kvplace2] C_clear_slot0 ...
+[07:28:55] [kvplace2] C_clear_slot0: prompt_n=1 (10 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=60180 used=60180 ours=[]
+[07:28:55] [kvplace2] D_slot1_continues_after_clear ...
+[07:29:01] [kvplace2] D_slot1_continues_after_clear: prompt_n=257 (402 tok/s) decode 59.98 tok/s acc 142/225 pool_max_p1=60692 used=60692 ours=[]
+[07:29:01] [kvplace2] E_clear_slot1 ...
+[07:29:03] [kvplace2] E_clear_slot1: prompt_n=1 (16 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=60181 used=1 ours=[]
+[07:29:03] [kvplace2] E_same_prompt_from_empty_pool_slot2 ...
+[07:30:25] [kvplace2] E_same_prompt_from_empty_pool_slot2: prompt_n=60000 (757 tok/s) decode 63.93 tok/s acc 106/150 pool_max_p1=60182 used=60182 ours=[]
+[07:30:25] [kvplace2] F_clear_slot2 ...
+[07:30:26] [kvplace2] F_clear_slot2: prompt_n=1 (20 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=60181 used=2 ours=[]
+[07:30:26] [kvplace2] F_idle_40000_slot0 ...
+[07:31:46] [kvplace2] F_idle_40000_slot0: prompt_n=39999 (508 tok/s) decode 50.57 tok/s acc 4/4 pool_max_p1=100183 used=40005 ours=[]
+[07:31:46] [kvplace2] F_clear_slot1_before_8000 ...
+[07:31:46] [kvplace2] F_clear_slot1_before_8000: prompt_n=1 (36 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=100186 used=40007 ours=[]
+[07:31:46] [kvplace2] F_active_8000_slot1 ...
+[07:31:59] [kvplace2] F_active_8000_slot1: prompt_n=7999 (1000 tok/s) decode 70.03 tok/s acc 141/226 pool_max_p1=100187 used=48260 ours=[]
+[07:31:59] [kvplace2] F_clear_slot1_before_32000 ...
+[07:31:59] [kvplace2] F_clear_slot1_before_32000: prompt_n=1 (27 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=100187 used=40008 ours=[]
+[07:31:59] [kvplace2] F_active_32000_slot1 ...
+[07:32:41] [kvplace2] F_active_32000_slot1: prompt_n=31999 (876 tok/s) decode 61.95 tok/s acc 135/240 pool_max_p1=100188 used=72260 ours=[]
+[07:32:41] [kvplace2] F_clear_slot1_before_64000 ...
+[07:32:42] [kvplace2] F_clear_slot1_before_64000: prompt_n=1 (20 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=100187 used=40008 ours=[]
+[07:32:42] [kvplace2] F_active_64000_slot1 ...
+[07:34:05] [kvplace2] F_active_64000_slot1: prompt_n=59999 (756 tok/s) decode 63.04 tok/s acc 106/150 pool_max_p1=100188 used=100188 ours=[]
+[07:34:05] [kvplace2] G_concurrent_slots_1_2 ...
+[07:34:30] [kvplace2] G_concurrent_slots_1_2: prompt_n=None (0 tok/s) decode 18.02 tok/s acc None/None pool_max_p1=100187 used=56515 ours=[]
+[07:34:30] [kvplace2] G_clear_slot1 ...
+[07:34:31] [kvplace2] G_clear_slot1: prompt_n=1 (26 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=100187 used=48262 ours=[]
+[07:34:31] [kvplace2] G_alone_slot1 ...
+[07:34:44] [kvplace2] G_alone_slot1: prompt_n=7999 (999 tok/s) decode 64.39 tok/s acc 136/238 pool_max_p1=100188 used=56514 ours=[]
+[07:34:44] [kvplace2] G_clear_slot2 ...
+[07:34:44] [kvplace2] G_clear_slot2: prompt_n=1 (20 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=100187 used=48259 ours=[]
+[07:34:44] [kvplace2] G_alone_slot2 ...
+[07:34:57] [kvplace2] G_alone_slot2: prompt_n=7999 (908 tok/s) decode 83.18 tok/s acc 164/182 pool_max_p1=100188 used=56514 ours=[]
+[07:34:59] [kvplace2] stopped; min free 1035 MiB
+[07:35:09] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+| arm | stage | prompt_n | prompt tok/s | decode tok/s | draft acc | pool max+1 | used |
+|---|---|---|---|---|---|---|---|
+| kvplace2 | A_deep_slot0 | 160000 | 465 | 20.02 | 186/272 | 160249 | 160249 |
+| kvplace2 | B_new_slot1_while_slot0_holds | 60000 | 667 | 62.47 | 106/150 | 220763 | 220435 |
+| kvplace2 | C_clear_slot0 | 1 | 10 | 0.00 | - | 60180 | 60180 |
+| kvplace2 | D_slot1_continues_after_clear | 257 | 402 | 59.98 | 142/225 | 60692 | 60692 |
+| kvplace2 | E_clear_slot1 | 1 | 16 | 0.00 | - | 60181 | 1 |
+| kvplace2 | E_same_prompt_from_empty_pool_slot2 | 60000 | 757 | 63.93 | 106/150 | 60182 | 60182 |
+| kvplace2 | F_clear_slot2 | 1 | 20 | 0.00 | - | 60181 | 2 |
+| kvplace2 | F_idle_40000_slot0 | 39999 | 508 | 50.57 | 4/4 | 100183 | 40005 |
+| kvplace2 | F_clear_slot1_before_8000 | 1 | 36 | 0.00 | - | 100186 | 40007 |
+| kvplace2 | F_active_8000_slot1 | 7999 | 1000 | 70.03 | 141/226 | 100187 | 48260 |
+| kvplace2 | F_clear_slot1_before_32000 | 1 | 27 | 0.00 | - | 100187 | 40008 |
+| kvplace2 | F_active_32000_slot1 | 31999 | 876 | 61.95 | 135/240 | 100188 | 72260 |
+| kvplace2 | F_clear_slot1_before_64000 | 1 | 20 | 0.00 | - | 100187 | 40008 |
+| kvplace2 | F_active_64000_slot1 | 59999 | 756 | 63.04 | 106/150 | 100188 | 100188 |
+| kvplace2 | G_concurrent_slots_1_2 | None | 0 | 18.02 | - | 100187 | 56515 |
+| kvplace2 | G_clear_slot1 | 1 | 26 | 0.00 | - | 100187 | 48262 |
+| kvplace2 | G_alone_slot1 | 7999 | 999 | 64.39 | 136/238 | 100188 | 56514 |
+| kvplace2 | G_clear_slot2 | 1 | 20 | 0.00 | - | 100187 | 48259 |
+| kvplace2 | G_alone_slot2 | 7999 | 908 | 83.18 | 164/182 | 100188 | 56514 |

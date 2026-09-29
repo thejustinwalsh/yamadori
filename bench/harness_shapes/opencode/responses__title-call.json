@@ -1,0 +1,69 @@
+{
+ "id": "opencode/responses/title-call",
+ "harness": "opencode",
+ "harness_version": "opencode-ai 1.18.32",
+ "wire": "responses",
+ "source": "scratchpad occap/cap.jsonl #0 (captured): developer title generator, two user items, reasoning low, no tools",
+ "headers": {
+  "x-session-affinity": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "x-session-id": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "user-agent": "opencode/1.18.32 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+ },
+ "body": {
+  "model": "yamadori",
+  "input": [
+   {
+    "role": "developer",
+    "content": "You are a title generator. You output ONLY a thread title. Nothing else.\n\n<task>\nGenerate a brief title that would help the user find this conversation later.\n\nFollow all rules in <rules>\nUse the <examples> so you know what a good title looks like.\nYour output must be:\n- A single line\n- ≤50 characters\n- No explanations\n</task>\n\n<rules>\n- you MUST use the same language as the user message you are summarizing\n- Title must be grammatically correct and read naturally - no word salad\n- Never include tool names in the title (e.g. \"read tool\", \"bash tool\", \"edit tool\")\n- Focus on the main topic or question the user needs to retrieve\n- Vary your phrasing - avoid repetitive patterns like always starting with \"Analyzing\"\n- When a file is mentioned, focus on WHAT the user wants to do WITH the file, not just that they shared it\n- Keep exact: technical terms, numbers, filenames, HTTP codes\n- Remove: the, this, my, a, an\n- Never assume tech stack\n- Never use tools\n- NEVER respond to questions, just generate a title for the conversation\n- The title should NEVER include \"summarizing\" or \"generating\" when generating a title\n- DO NOT SAY YOU CANNOT GENERATE A TITLE OR COMPLAIN ABOUT THE INPUT\n- Always output something meaningful, even if the input is minimal.\n- If the user message is short or conversational (e.g. \"hello\", \"lol\", \"what's up\", \"hey\"):\n  → create a title that reflects the user's tone or intent (such as Greeting, Quick check-in, Light chat, Intro message, etc.)\n</rules>\n\n<examples>\n[... trimmed ...]\n</examples>"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "Generate a title for this conversation:\n"
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "input_text",
+      "text": "\"say ok\""
+     }
+    ]
+   }
+  ],
+  "reasoning": {
+   "effort": "low",
+   "summary": "auto"
+  },
+  "store": false,
+  "stream": true,
+  "max_output_tokens": 26419,
+  "include": [
+   "reasoning.encrypted_content"
+  ]
+ },
+ "expect": {
+  "accepted": true,
+  "route": "utility",
+  "utility": {
+   "utility": true,
+   "kind": "title"
+  },
+  "compaction": {
+   "none": true
+  },
+  "session": {
+   "source": null
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "utility": "the title generator on the Responses wire"
+ }
+}

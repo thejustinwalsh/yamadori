@@ -668,11 +668,17 @@ def test_the_tier_bounds_and_the_header_forces():
                                OPEN)["fanout_n"] == 1,
               "and off on a design question")
 
-        check(selection.decide(user(lookup), tier("low"), OPEN)["hints"] is False
-              and selection.decide(user(lookup), tier("medium"), OPEN)["hints"] is True
-              and selection.decide(user(lookup), tier("medium", '{"hints": false}'),
-                                   OPEN)["hints"] is False,
-              "hints: allowed from medium, forced off by the header")
+        # skills are off at every tier (operator, 2026-09-29: "Stop skills
+        # until we have a good skill injector."); a header forces them on
+        check(selection.decide(user(lookup), tier("low"), OPEN)["skills"] is False
+              and selection.decide(user(lookup), tier("medium"), OPEN)["skills"] is False
+              and selection.decide(user(lookup), tier("max"), OPEN)["skills"] is False
+              and selection.decide(user(lookup), tier("medium", '{"skills": true}'),
+                                   OPEN)["skills"] is True
+              and selection.decide(user(lookup), tier("medium", '{"skills": false}'),
+                                   OPEN)["skills"] is False,
+              "skills: off at every tier since 2026-09-29; the header forces them "
+              "on (or off)")
 
         d = selection.select(user(RULE_YES), tier("max"), OPEN, laya_url=LAYA)
         check(d["investigate"] is False and "nothing to read" in
@@ -688,7 +694,7 @@ def test_the_tier_bounds_and_the_header_forces():
                 d = selection.decide(user(q), t, OPEN)
                 if (d["investigate"] and not t["investigate"]) \
                         or d["fanout_n"] > t["fanout"] \
-                        or (d["hints"] and not t["hints"]):
+                        or (d["skills"] and not t["skills"]):
                     worst.append(f"{effort}:{q[:20]}")
         check(not worst, "no decision exceeds its tier, any tier, any question",
               ", ".join(worst))
@@ -710,7 +716,7 @@ def test_the_proxy_path_decides_by_trigger_and_never_asks_laya():
         _route_seen.clear()
         lib = {"class": "library_question", "because": "a question"}
         none = {"fire": False, "kind": None, "because": "no trigger fired: "
-                "struggle 0/3; the model may call think_deeply"}
+                "struggle 0/3; the model may call yama_think_deeply"}
         d = selection.select(user(RULE_YES), tier("max"), BOUND,
                              laya_url=LAYA, route=lib, trigger=none)
         check(d["investigate"] is False and not _route_seen

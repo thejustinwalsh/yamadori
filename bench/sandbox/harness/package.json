@@ -1,0 +1,15 @@
+{
+  "name": "yamadori-harness-box",
+  "private": true,
+  "description": "The three harnesses harness_box.py runs, at the exact versions of the host tests, plus their default loadout's tools: the Playwright MCP server (browser), typescript-language-server + typescript + pyright (language-server diagnostics: OpenCode's lsp, and tsc/pyright for the others), agent-browser (Pi's browser CLI). docs/HARNESS-SANDBOX.md, docs/HARNESSES.md. Official npm packages only; package-lock.json pins every tarball by sha512.",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@openai/codex": "0.157.1",
+    "@playwright/mcp": "0.0.82",
+    "agent-browser": "0.26.0",
+    "opencode-ai": "1.18.32",
+    "pyright": "1.1.414",
+    "typescript": "5.9.3",
+    "typescript-language-server": "6.0.1"
+  }
+}

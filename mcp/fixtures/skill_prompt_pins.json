@@ -1,0 +1,46 @@
+{
+ "decompose": {
+  "sha256": "a887931d9441b288",
+  "version": "decompose/5"
+ },
+ "distil": {
+  "sha256": "04f285d5f65197ef",
+  "version": "distil/6"
+ },
+ "faithful": {
+  "sha256": "dda511048f342b64",
+  "version": "faithful/1"
+ },
+ "probe": {
+  "sha256": "2c5d6a86c02da233",
+  "version": "probe/1"
+ },
+ "prove_answer": {
+  "sha256": "285e61a29552efd1",
+  "version": "prove_answer/1"
+ },
+ "prove_judge": {
+  "sha256": "4f37b385daa9f6f2",
+  "version": "prove_judge/1"
+ },
+ "quote_repair": {
+  "sha256": "d2f161a5f5c8e608",
+  "version": "quote_repair/1"
+ },
+ "review": {
+  "sha256": "b9fd3feea27e51d1",
+  "version": "review/1"
+ },
+ "screen": {
+  "sha256": "9e756adb58e6aaa3",
+  "version": "screen/1"
+ },
+ "tag": {
+  "sha256": "9ee390f11f93e794",
+  "version": "tag/6"
+ },
+ "tests": {
+  "sha256": "ae40eaf5b0b30999",
+  "version": "tests/3"
+ }
+}

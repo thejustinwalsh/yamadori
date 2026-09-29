@@ -1,0 +1,154 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Sun, 27 Sep 2026 20:30:00 -0400
+Subject: [PATCH] server: the tiered-KV draft tail keys on pool cells, not the slot position
+
+The series' 0031 drafts --spec-draft-n-max-tail once a slot's POSITION
+reaches --kv-vram-cells. The VRAM line of 0028 is on CELLS: cells [0, N)
+of each layer's K/V are in VRAM. With one slot a position and a cell
+count agree; with a unified pool (-np > 1) they do not: every sequence's
+attention spans n_kv = pad(used_max_p1) cells of the one stream, so the
+host tail is read by EVERY slot as soon as ANY slot's cells reach it, and
+by none before, whatever the slot's own depth.
+
+New: llama_memory_cells_used_max_p1() (llama_kv_cache: the max of
+v_cells[s].used_max_p1() over streams, the quantity get_n_kv() pads;
+hybrid memory: its attention cache; any other memory: 0), and the server
+drafts the tail size while that exceeds --kv-vram-cells. Tail drafting
+only; nothing about what is stored or computed changes.
+---
+diff --git a/include/llama.h b/include/llama.h
+index 555ff32dc..f228f449a 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -813,6 +813,10 @@ extern "C" {
+             llama_memory_t mem,
+               llama_seq_id seq_id);
+ 
++    // One past the highest KV cell in use (0 if none): an attention op spans the cells below it, so a tiered
++    // cache (--kv-vram-cells N) reads its host tail exactly when this exceeds N, for every sequence of the pool
++    LLAMA_API uint32_t llama_memory_cells_used_max_p1(llama_memory_t mem);
++
+     // Check if the memory supports shifting
+     LLAMA_API bool llama_memory_can_shift(llama_memory_t mem);
+ 
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 6daf5c674..0d79c1e5d 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -4320,6 +4320,14 @@ llama_pos llama_memory_seq_pos_max(
+     return mem->seq_pos_max(seq_id);
+ }
+ 
++uint32_t llama_memory_cells_used_max_p1(llama_memory_t mem) {
++    if (!mem) {
++        return 0;
++    }
++
++    return mem->cells_used_max_p1();
++}
++
+ bool llama_memory_can_shift(llama_memory_t mem) {
+     if (!mem) {
+         return false;
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 723737acb..108d9533b 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -715,6 +715,21 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
+     return cells.seq_pos_max(seq_id);
+ }
+ 
++uint32_t llama_kv_cache::cells_used_max_p1() const {
++    // TODO: refactor [TAG_KV_CACHE_SHARE_CELLS]
++    if (other) {
++        return other->cells_used_max_p1();
++    }
++
++    // the same quantity get_n_kv() pads into n_kv, over every stream
++    uint32_t result = 0;
++    for (const auto & cells : v_cells) {
++        result = std::max(result, cells.used_max_p1());
++    }
++
++    return result;
++}
++
+ std::map<ggml_backend_buffer_type_t, size_t> llama_kv_cache::memory_breakdown() const {
+     std::map<ggml_backend_buffer_type_t, size_t> ret;
+     for (const auto & [ctx, buf] : ctxs_bufs) {
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index ee66e5c1f..9fc63d11a 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -143,6 +143,8 @@ public:
+     llama_pos seq_pos_min(llama_seq_id seq_id) const override;
+     llama_pos seq_pos_max(llama_seq_id seq_id) const override;
+ 
++    uint32_t cells_used_max_p1() const override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
+index a0fe07e6b..57b303dfc 100644
+--- a/src/llama-memory-hybrid.cpp
++++ b/src/llama-memory-hybrid.cpp
+@@ -181,6 +181,11 @@ llama_pos llama_memory_hybrid::seq_pos_max(llama_seq_id seq_id) const {
+     return std::min(mem_attn->seq_pos_max(seq_id), mem_recr->seq_pos_max(seq_id));
+ }
+ 
++uint32_t llama_memory_hybrid::cells_used_max_p1() const {
++    // the recurrent part has no KV cells: only the attention cache spans a tiered buffer
++    return mem_attn->cells_used_max_p1();
++}
++
+ std::map<ggml_backend_buffer_type_t, size_t> llama_memory_hybrid::memory_breakdown() const {
+     std::map<ggml_backend_buffer_type_t, size_t> mb = mem_attn->memory_breakdown();
+     for (const auto & buft_size : mem_recr->memory_breakdown()) {
+diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
+index 52ea297ab..e3042dcb3 100644
+--- a/src/llama-memory-hybrid.h
++++ b/src/llama-memory-hybrid.h
+@@ -70,6 +70,8 @@ public:
+     llama_pos seq_pos_min(llama_seq_id seq_id) const override;
+     llama_pos seq_pos_max(llama_seq_id seq_id) const override;
+ 
++    uint32_t cells_used_max_p1() const override;
++
+     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const override;
+ 
+     // state write/load
+diff --git a/src/llama-memory.h b/src/llama-memory.h
+index db8253966..16f2c5d5b 100644
+--- a/src/llama-memory.h
++++ b/src/llama-memory.h
+@@ -116,6 +116,10 @@ struct llama_memory_i {
+     virtual llama_pos seq_pos_min(llama_seq_id seq_id) const = 0;
+     virtual llama_pos seq_pos_max(llama_seq_id seq_id) const = 0;
+ 
++    // one past the highest KV cell in use in any stream (0 = none, or a memory without KV cells): the cells an
++    // attention op spans, which is what a tiered cache's VRAM line (--kv-vram-cells) is compared with
++    virtual uint32_t cells_used_max_p1() const { return 0; }
++
+     virtual std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const = 0;
+ 
+     //
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index f1c158864..ce2505e28 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -463,8 +463,12 @@ struct server_slot {
+         }
+ 
+         // past the tiered-KV line a step is bound by reading the host tail over PCIe, and a wider verify
+-        // batch reads it once for all columns: draft --spec-draft-n-max-tail there, --spec-draft-n-max below
+-        const bool tail = spec_tail_depth > 0 && spec_n_max_tail > 0 && prompt.n_tokens() >= spec_tail_depth;
++        // batch reads it once for all columns: draft --spec-draft-n-max-tail there, --spec-draft-n-max below.
++        // The line is on POOL CELLS, not this slot's position: with a unified pool (-np > 1) every sequence's
++        // attention spans the cells below the pool's highest used cell, so the tail is read by every slot as
++        // soon as any slot's cells reach it, and by none before -- whatever this slot's own depth.
++        const bool tail = spec_tail_depth > 0 && spec_n_max_tail > 0 && ctx_tgt != nullptr &&
++                llama_memory_cells_used_max_p1(llama_get_memory(ctx_tgt)) > (uint32_t) spec_tail_depth;
+         const int32_t cap = tail ? spec_n_max_tail : spec_n_max;
+         if (cap > 0) {
+             n_draft_max = std::min(n_draft_max, (int) cap);

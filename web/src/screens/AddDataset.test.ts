@@ -29,7 +29,8 @@ describe('AddDatasetPanel', () => {
     expect(html).toContain('URL OR PASTED TEXT');
     expect(html).toContain('<textarea');
     expect(html).toContain('value="recipes"');
-    expect(html).toContain('value="laya"');
+    // Laya retired 2026-09-24 (docs/E1.md): its training-set kind is not offered.
+    expect(html).not.toContain('value="laya"');
   });
   it('cannot submit an empty paste', () => {
     expect(html).toMatch(/<button type="submit" disabled=""/);

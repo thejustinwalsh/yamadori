@@ -18,6 +18,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GRADES = os.path.join(HERE, "results", "grades.jsonl")
 
 
+def assisted(r: dict) -> str | None:
+    """Operator, 2026-09-26: a grade of prompt n >= 2 of an iterative run was
+    steered by a follow-up built from the grader's failed checks (the answer
+    key): ASSISTED, never the headline. The row's own field (grade.py v3), or
+    the id's @p<n>, or an annotation of an older row."""
+    if r.get("assisted"):
+        return r["assisted"]
+    _run, _, pn = str(r.get("grade_id", "")).partition("@p")
+    if pn.isdigit() and int(pn) >= 2:
+        return "assisted: graded follow-up"
+    return None
+
+
 # The prompt author's own run, as he reported it (x.com/sudoingX/status/
 # 2102829187581317225, 2026-09-23; relayed by the coordinator, not
 # re-verified here): Bonsai 2 27B + MTP via Hermes Agent on an RTX 3060 12 GB,
@@ -49,7 +62,9 @@ def line(r: dict) -> dict:
     st = r.get("stack") or {}
     led = st.get("ledger") or {}
     spec = r.get("spec") or []
-    rt_checks = [x for x in spec if x.get("method") in ("runtime", "pixel", "runtime+pixel")]
+    # v3: flaky checks (grade.FLAKY) are out of the headline, listed apart
+    rt_checks = [x for x in spec if x.get("method") in ("runtime", "pixel", "runtime+pixel")
+                 and not x.get("flaky")]
     tok = {"completion": 0, "prompt_processed": 0, "prompt_cached": 0}
     for _acct, roles in (led.get("tokens") or {}).items():
         for _role, d in roles.items():
@@ -69,6 +84,10 @@ def line(r: dict) -> dict:
     cache = st.get("cache") or {}
     return {
         "run": r.get("grade_id"),
+        "assisted": assisted(r),
+        "grader": (r.get("grader") or {}).get("version") if isinstance(r.get("grader"), dict)
+        else 1,
+        "flaky": [f.get("check") for f in r.get("spec_flaky") or []],
         "completed": c.get("outcome"),
         "files": f"{b.get('files_present')}/{b.get('files_expected')}",
         "build": build,
@@ -104,7 +123,7 @@ def main() -> int:
     if not a.md:
         print(json.dumps(out, indent=1))
         return 0
-    cols = ["run", "completed", "files", "build", "runtime", "spec", "model_calls",
+    cols = ["run", "assisted", "grader", "completed", "files", "build", "runtime", "spec", "model_calls",
             "minutes", "tokens_completion", "peak_context", "wh_requests", "gpu_wh_ledger", "repairs", "deep_thinking",
             "compactions", "cache_reuse_pct"]
     print("| " + " | ".join(cols) + " |")

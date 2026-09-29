@@ -1,0 +1,175 @@
+{
+ "id": "pi/chat/after-compaction",
+ "harness": "pi",
+ "harness_version": "@earendil-works/pi-coding-agent 0.87.1",
+ "wire": "chat",
+ "source": "relay.jsonl #36 (captured shape): the summary as the first user message; summary text a stand-in",
+ "headers": {
+  "user-agent": "pi (win32 10.0.26200; x64)",
+  "session_id": "pid1",
+  "x-session-affinity": "pid1"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_completion_tokens": 26419,
+  "store": false,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n[... Pi system prompt trimmed ...]"
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "The conversation history before this point was compacted into the following summary:\n\n<summary>\n## Goal\n1. hello.py with greet(name).\n</summary>"
+     }
+    ]
+   },
+   {
+    "role": "assistant",
+    "content": "Understood."
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "What does greet return now? One line."
+     }
+    ]
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "read",
+     "description": "(read: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer"
+       },
+       "limit": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "path"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "bash",
+     "description": "(bash: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string"
+       },
+       "timeout": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "command"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "edit",
+     "description": "(edit: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "edits": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "oldText": {
+           "type": "string"
+          },
+          "newText": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "oldText",
+          "newText"
+         ]
+        }
+       }
+      },
+      "required": [
+       "path",
+       "edits"
+      ]
+     }
+    }
+   },
+   {
+    "type": "function",
+    "function": {
+     "name": "write",
+     "description": "(write: description trimmed)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ]
+     }
+    }
+   }
+  ],
+  "reasoning_effort": "low",
+  "prompt_cache_key": "pid1"
+ },
+ "expect": {
+  "accepted": true,
+  "utility": {
+   "utility": false
+  },
+  "compaction": {
+   "none": true
+  },
+  "session": {
+   "source": "prompt_cache_key"
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "utility": "the turn after a compaction is the conversation itself, not a side call"
+ }
+}

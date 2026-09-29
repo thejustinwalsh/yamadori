@@ -62,6 +62,15 @@ def chunk(cid: str, model: str, delta: dict, finish: str | None = None,
     return b"data: " + json.dumps(payload).encode() + b"\n\n"
 
 
+def usage_chunk(cid: str, model: str, usage: dict) -> bytes:
+    """The last chunk when the client asked stream_options.include_usage:
+    `choices` EMPTY and `usage` set, as the spec describes it."""
+    payload = {"id": cid, "object": "chat.completion.chunk",
+               "created": int(time.time()), "model": model, "choices": [],
+               "usage": usage}
+    return b"data: " + json.dumps(payload).encode() + b"\n\n"
+
+
 def text_chunk(cid: str, model: str, text: str) -> bytes:
     return chunk(cid, model, {"content": text})
 
@@ -97,23 +106,42 @@ DONE = b"data: [DONE]\n\n"
 
 
 class UpstreamError(RuntimeError):
-    """The model server reported an error INSIDE a stream that began with 200."""
+    """The model server refused a request or failed inside its stream.
+
+    `upstream_status` is the HTTP status it answered with (None inside a
+    stream that began with 200) and `upstream_error` its error object
+    (`{message, type, code, ...}`; llama-server adds n_prompt_tokens and
+    n_ctx to an exceed_context_size_error). mcp/api_errors.of_exception reads
+    both, so a refusal reaches the client as the matching 4xx -- never a 502,
+    never assistant content."""
+
+    def __init__(self, message: str, status: int | None = None,
+                 error: dict | None = None):
+        super().__init__(message)
+        self.upstream_status = status
+        self.upstream_error = error
 
 
 def _raise_if_error(d: dict) -> None:
     """Turn an in-stream error event into an exception.
 
-    llama-server can fail after the headers are sent -- context exceeded,
-    slot killed -- and says so as `data: {"error": {...}}` with no `choices`.
-    Both stream readers used to read that as an empty delta and carry on, so
-    the caller received a stream that ended cleanly with nothing in it: an
-    outage delivered as an empty answer. Raising puts it on the proxy's
-    existing `[stream error: ...]` path instead.
+    llama-server can fail after the headers are sent -- a slot killed -- and
+    says so as `data: {"error": {...}}` with no `choices` (a failure BEFORE
+    its first result is an HTTP error instead: server-context.cpp "the first
+    error must be treated as non-stream response"). Both stream readers used
+    to read that as an empty delta and carry on, so the caller received a
+    stream that ended cleanly with nothing in it: an outage delivered as an
+    empty answer. Raising puts it on the proxy's one error path
+    (mcp/api_errors.py), with the server's own error object.
     """
     if isinstance(d, dict) and d.get("error") and not d.get("choices"):
         e = d["error"]
         msg = e.get("message") if isinstance(e, dict) else str(e)
-        raise UpstreamError(f"upstream reported an error mid-stream: {msg}")
+        code = e.get("code") if isinstance(e, dict) else None
+        raise UpstreamError(f"upstream reported an error mid-stream: {msg}",
+                            status=code if isinstance(code, int) else None,
+                            error=e if isinstance(e, dict) else
+                            {"message": str(e)})
 
 
 def new_id() -> str:
@@ -133,7 +161,10 @@ def describe_call(name: str, args: dict) -> str:
     # AttributeError inside the stream, killing the reply over a label.
     if not isinstance(args, dict):
         return name
-    for key in ("symbol", "pattern", "query", "path", "check", "prompt"):
+    # `package`: the MCP-backed package lookups (mcp/mcp_host.py);
+    # `packages`: yama_resolve_packages (mcp/npm_resolve.py).
+    for key in ("symbol", "pattern", "query", "path", "check", "prompt",
+                "package", "packages"):
         if args.get(key):
             return f"{name} {json.dumps(args[key])[:80]}"
     return name

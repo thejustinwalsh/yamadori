@@ -19,10 +19,15 @@ asked again two messages later has learned that the service does not listen.
 
 THE SESSION KEY
 
-Remote clients do not reliably send a session id, so one is derived from the
-opening of the conversation -- the system prompt and the first user message,
-which are fixed for the life of a session and differ between sessions. It is a
-hash, so no prompt text is stored to compute it.
+A conversation is named by an EXPLICIT id (#41, 2026-09-25: mcp/session_id.py,
+proxy.session_identity) -- prompt_cache_key, the X-Yamadori-Session header, or
+our own id, carried in the tool-call ids the proxy returns (or on a
+compaction summary's line). `key_of` below, a hash of the opening (the system
+prompt and the first user message), keys the header's conversations (with
+the token); it is no longer a fallback for a request with no id -- that is a
+new conversation. Two conversations that open alike got one key there, which
+is how Octopus v0d inherited v0c's deep-thinking state. It is a hash, so no
+prompt text is stored to compute it.
 
 WHAT IS AND IS NOT KEPT
 
@@ -160,9 +165,15 @@ def load(key: str) -> dict:
 
 
 def save(key: str, state: dict) -> None:
-    """Never let memory break a request. A dropped write costs one re-derivation."""
+    """Never let memory break a request. A dropped write costs one re-derivation.
+
+    The state is stored WHOLE (2026-09-27, docs/CONSTANTS-AUDIT.md): the
+    JSON text used to be cut at 200,000 characters, so a larger state was
+    saved as invalid JSON and `load` silently returned {} for it. SQLite's
+    own TEXT limit (SQLITE_MAX_LENGTH, 1,000,000,000 bytes by default) is
+    the only bound."""
     try:
-        blob = json.dumps(state)[:200000]
+        blob = json.dumps(state)
         with _lock:
             con = _db()
             now = time.time()
@@ -262,18 +273,20 @@ def forget(key: str) -> None:
 # ONE TABLE, `additions`, keyed (account, session, msg_key, kind). What is
 # stored is only what the proxy or the MODEL produced -- injections (skills,
 # retrieval, the work log), a turn's delivered content when it differs from
-# what the client echoes, image-tool hops (their reasoning emptied), concept
-# seeds. NOT reasoning: since 2026-09-24 past reasoning passes through as the
-# client sends it, and proxy.ledger_record_turn writes none. The
+# what the client echoes, hidden hops, concept seeds, and -- since
+# 2026-09-27 (operator; switch restore_reasoning) -- the MODEL's reasoning for
+# each delivered assistant turn (kind "reasoning"), put back where the client
+# dropped it (proxy.ledger_restore). The largest kind: pagoda-h4's 2.8 h run
+# would have written ~0.45 MB of it, one row at most ~18k characters. The
 # caller's own messages are never stored: `msg_key` is a hash of them, and
 # the client resends them every turn anyway (the module docstring: "Not
 # kept: the caller's code"). Every query names the account; forgetting an
 # account is one DELETE.
 #
 # YAMADORI_LEDGER_PERSIST_REASONING (default on) gates persisting the kinds
-# that can quote the caller -- "reasoning" (no longer written: see above)
-# and "hops" (image-tool hops, reasoning emptied) -- so a harness can resume
-# a conversation days later with its hidden hops rendered as before.
+# that can quote the caller -- "reasoning", "hops" and "hop_echo" -- so a
+# harness can resume a conversation days later with its reasoning and hidden
+# hops rendered as before; off, they live in memory only.
 #
 # MEMORY IS THE HOT LAYER: a read-through LRU over the table. A miss reads
 # sqlite; every write goes to both.
@@ -381,7 +394,8 @@ def _read_con() -> sqlite3.Connection:
 def _persisted(kind: str) -> bool:
     """Reasoning and image-tool hops can quote the caller; they follow the
     YAMADORI_LEDGER_PERSIST_REASONING flag. Everything else is persisted."""
-    return LEDGER_PERSIST_REASONING or kind not in ("reasoning", "hops")
+    return LEDGER_PERSIST_REASONING or kind not in ("reasoning", "hops",
+                                                        "hop_echo")
 
 
 def ledger_put(account: str, session: str, msg_key: str, kind: str,

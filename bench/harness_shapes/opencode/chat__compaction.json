@@ -1,0 +1,47 @@
+{
+ "id": "opencode/chat/compaction",
+ "harness": "opencode",
+ "harness_version": "opencode-ai 1.18.32",
+ "wire": "chat",
+ "source": "FROM SOURCE, not captured live (OpenCode compacts only with limit.context set): session/compaction buildPrompt as read from the binary (quoted in mcp/compaction.py); content synthetic",
+ "headers": {
+  "x-session-affinity": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "x-session-id": "ses_0a0b0c0d0e0fTESTsessionAAAA",
+  "user-agent": "opencode/1.18.32 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14"
+ },
+ "body": {
+  "model": "yamadori",
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "max_tokens": 26419,
+  "messages": [
+   {
+    "role": "user",
+    "content": "Here is the conversation so far:\n\n<conversation>\n[User]: Create hello.py that prints hello.\n\n[Assistant reasoning]: A one-line script.\n[Assistant tool call]: write({\"filePath\":\"hello.py\",\"content\":\"print('hello')\"})\n\n[Tool result]: Wrote file successfully.\n\n[Assistant]: Done: hello.py prints hello.\n</conversation>\n\nCreate a new anchored summary from the conversation history in the <conversation> tags above so another coding agent can continue the work.\n\nOutput exactly the Markdown structure shown inside <template> and keep the section order unchanged. [... OpenCode's template trimmed ...]"
+   }
+  ]
+ },
+ "expect": {
+  "accepted": true,
+  "route": "utility",
+  "utility": {
+   "utility": true,
+   "kind": "compaction"
+  },
+  "compaction": {
+   "harness": "opencode",
+   "records_min": 3
+  },
+  "session": {
+   "source": null
+  },
+  "roles": {
+   "one_system_first": true
+  }
+ },
+ "why": {
+  "compaction": "OpenCode's own summariser, recognised and parsed"
+ }
+}

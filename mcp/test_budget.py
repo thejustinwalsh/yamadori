@@ -8,7 +8,7 @@ into ONE unified KV pool. The numbers in its docstring are the contract:
 
   pool 147,456 -> main 92,160 + 1 helper x 55,296 + reserve 0, summing exactly
 
-(the operator's split of 2026-09-22: 5/8 for the conversation, 3/8 for ONE
+(the operator's split of 2026-09-25: 0.70 for the conversation, 0.30 for ONE
 second brain. It replaced, the same day, 1/2 + 2 x 1/4 -- main 73,728 and
 36,864 for each of up to two helpers -- whose second helper needed two
 conversations investigating at once. That in turn replaced 60/25/15 -- main
@@ -44,7 +44,8 @@ sys.path.insert(0, HERE)
 
 import budget  # noqa: E402
 
-SHIPPED_POOL = 147456   # config.yaml, `-c 147456`
+SHIPPED_POOL = 147456   # the pool the mechanics tests were written at
+LIVE_POOL = 163840      # config.yaml `-c 163840` (q8_0, 2026-09-25)
 
 _results: list[tuple[bool, str, str]] = []
 _calls: list[str] = []
@@ -84,12 +85,14 @@ def restore() -> None:
 
 
 def with_shares(main: float, helper: float, floor: float,
-                helpers: int | None = None):
+                helpers: int | None = None, helper_tokens: int = 0):
     """Set the shares (and optionally the helper count); returns what to pass
-    back to restore them."""
+    back to restore them. The fixed helper size is off unless given, so the
+    fractions are what is tested."""
     old = (budget.MAIN_SHARE, budget.HELPER_SHARE, budget.MAIN_FLOOR,
-           budget.HELPERS)
+           budget.HELPERS, budget.HELPER_TOKENS)
     budget.MAIN_SHARE, budget.HELPER_SHARE, budget.MAIN_FLOOR = main, helper, floor
+    budget.HELPER_TOKENS = helper_tokens
     if helpers is not None:
         budget.HELPERS = helpers
     return old
@@ -114,28 +117,43 @@ def test_the_fixture_cannot_reach_a_server():
 
 
 def test_the_shipped_split_is_the_documented_one():
+    check(budget.HELPER_TOKENS == 49152,
+          "the shipped helper is a fixed 49,152 tokens (main gets the rest)",
+          str(budget.HELPER_TOKENS))
+    b = budget.budgets(181248)
+    check((b["main"], b["helper"], b["reserve"]) == (132096, 49152, 0),
+          "at -c 181,248 the new tokens go to main: 132,096 + 49,152",
+          json.dumps(b))
     check((budget.MAIN_SHARE, budget.HELPER_SHARE, budget.HELPERS,
-           budget.MAIN_FLOOR) == (0.625, 0.375, 1, 0.50),
-          "the shipped shares are 5/8 main, 3/8 for one helper, floor 1/2",
+           budget.MAIN_FLOOR) == (0.70, 0.30, 1, 0.50),
+          "the fallback shares are 0.70 main, 0.30 for one helper, floor 1/2",
           str((budget.MAIN_SHARE, budget.HELPER_SHARE,
                             budget.HELPERS, budget.MAIN_FLOOR)))
-    b = budget.budgets(SHIPPED_POOL)
-    check(set(b) == {"pool", "main", "helper", "helpers", "reserve", "gib"},
-          "budgets() reports pool, main, helper, helpers, reserve, gib",
+    b = budget.budgets(LIVE_POOL)
+    check(set(b) == {"pool", "main", "helper", "helpers", "reserve", "gib",
+                     "window", "layout", "cap_source", "child"}
+          and b["child"]["role"] == "decider lane"
+          and b["child"]["tokens"] == budget.LANE_TOKENS,
+          "budgets() reports pool, main, helper, helpers, reserve, gib, the "
+          "child slot's role (layout v2: the decider lane), and "
+          "the window, layout and cap source",
           str(sorted(b)))
-    check(b["pool"] == SHIPPED_POOL, "the pool is the one passed in", str(b["pool"]))
-    check(b["main"] == 92160, "main is 92,160 at the shipped pool", str(b["main"]))
-    check(b["helper"] == 55296, "the helper is 55,296", str(b["helper"]))
+    check(b["layout"] == "split" and b["window"] == LIVE_POOL,
+          "with no cap known (no served line, no YAMADORI_MAIN_CAP) the split "
+          "applies and one request may use the pool", str(b))
+    check(b["pool"] == LIVE_POOL, "the pool is the one passed in", str(b["pool"]))
+    check(b["main"] == 114688, "main is 114,688 at the shipped pool", str(b["main"]))
+    check(b["helper"] == 49152, "the helper is 49,152", str(b["helper"]))
     check(b["helpers"] == 1, "there is one helper", str(b["helpers"]))
     check(b["reserve"] == 0, "nothing is left unclaimed (reserve 0)",
           str(b["reserve"]))
-    check(b["main"] + b["helpers"] * b["helper"] + b["reserve"] == SHIPPED_POOL,
+    check(b["main"] + b["helpers"] * b["helper"] + b["reserve"] == LIVE_POOL,
           "and main + 1 x helper + reserve sum to the pool exactly", json.dumps(b))
-    check(b["gib"] == 6.19, "the KV at 44 KiB/token is 6.19 GiB, as documented",
+    check(b["gib"] == 6.88, "the KV at 44 KiB/token is 6.88 GiB at 163,840",
           str(b["gib"]))
     b = budget.budgets(163840)
-    check((b["main"], b["helper"], b["reserve"]) == (102400, 61440, 0),
-          "at the live 163,840 (config.yaml -c) it is 102,400 + 61,440, "
+    check((b["main"], b["helper"], b["reserve"]) == (114688, 49152, 0),
+          "at the live 163,840 (config.yaml -c) it is 114,688 + 49,152, "
           "reserve 0", json.dumps(b))
 
 
@@ -249,28 +267,28 @@ def test_pool_size_reads_the_server_and_caches():
 
 
 def test_cap_for_answers_only_main_or_helper():
-    budget._POOL = SHIPPED_POOL
-    check(budget.cap_for("main") == 92160, "cap_for('main') is the main budget")
-    check(budget.cap_for("helper") == 55296,
+    budget._POOL = LIVE_POOL
+    check(budget.cap_for("main") == 114688, "cap_for('main') is the main budget")
+    check(budget.cap_for("helper") == 49152,
           "cap_for('helper') is the helper's budget")
     for other in ("pool", "gib", "reserve", "helpers", "nonsense", ""):
         v = budget.cap_for(other)
-        check(v == 92160, f"cap_for({other!r}) falls back to main, not a "
+        check(v == 114688, f"cap_for({other!r}) falls back to main, not a "
               f"report field", repr(v))
 
 
 def test_fits_is_inclusive_and_explains_a_refusal():
-    budget._POOL = SHIPPED_POOL
-    ok, why = budget.fits(92160, "main")
+    budget._POOL = LIVE_POOL
+    ok, why = budget.fits(114688, "main")
     check(ok and why == "", "exactly the budget fits")
-    ok, why = budget.fits(92161, "main")
+    ok, why = budget.fits(114689, "main")
     check(not ok, "one token over does not")
-    check("92161" in why and "92160" in why and "147456" in why,
+    check("114689" in why and "114688" in why and "163840" in why,
           "the refusal names the size, the budget and the pool", why)
     check("raise -c" in why or "Trim" in why, "and says what to do", why)
     ok, _ = budget.fits(60000, "helper")
     check(not ok, "a helper is held to the helper budget, not main's")
-    ok, _ = budget.fits(55296, "helper")
+    ok, _ = budget.fits(49152, "helper")
     check(ok, "and exactly the helper budget fits")
 
 
@@ -279,17 +297,124 @@ def test_what_if_includes_the_live_pool():
     table = budget.what_if()
     rows = [ln.split() for ln in table.splitlines()[1:]]
     pools = [int(r[0]) for r in rows]
-    check(SHIPPED_POOL in pools, "what_if() has a row for 147456", str(pools))
+    check(LIVE_POOL in pools, "what_if() has a row for 163840", str(pools))
     check(pools == sorted(pools), "rows are in ascending pool order", str(pools))
-    live = next((r for r in rows if int(r[0]) == SHIPPED_POOL), None)
+    live = next((r for r in rows if int(r[0]) == LIVE_POOL), None)
     if live:
-        check(live[2:5] == ["92160", "55296", "0"],
+        check(live[2:5] == ["114688", "49152", "0"],
               "and that row shows the documented split", " ".join(live))
         check(live[5] == "yes", "and says it fits the 16.3 GB card", " ".join(live))
     big = next((r for r in rows if int(r[0]) == 262144), None)
     check(big is not None and big[5] == "NO",
           "262144 is reported as NOT fitting, as documented",
           " ".join(big) if big else "missing")
+
+
+def test_the_cap_layout():
+    """Operator, 2026-09-28: always run from VRAM. The main share is the
+    tiered cache's VRAM line (the served kv_vram_cells, engine 0041, or
+    YAMADORI_MAIN_CAP), every conversation is advertised all of it, and the
+    child's window is its own size -- not taken from main. (The 2026-09-28
+    rule: the lane unranked, slots.LANE_RANK off; layout v2's lane is
+    test_the_lane_comes_out_of_the_line.)"""
+    import slots
+    old = (budget._LINE, budget.MAIN_CAP, budget.CHILD_TOKENS)
+    old_lr = slots.LANE_RANK
+    slots.LANE_RANK = False
+    try:
+        budget._LINE, budget.MAIN_CAP, budget.CHILD_TOKENS = 163840, 0, 65536
+        b = budget.budgets(393216)
+        check(b["layout"] == "cap" and b["main"] == 163840
+              and b["helper"] == 65536 and b["window"] == 163840
+              and b["reserve"] == 393216 - 163840 - 65536
+              and b["cap_source"] == "llama-server /props kv_vram_cells",
+              "a served line of 163,840 in a pool of 393,216 (2 x cap + "
+              "child): main = the line, the child 65,536, one request's "
+              "window = the line, the rest a second conversation's", str(b))
+        budget.MAIN_CAP = 158720
+        b = budget.budgets(393216)
+        check(b["main"] == 158720 and b["cap_source"] == "YAMADORI_MAIN_CAP",
+              "YAMADORI_MAIN_CAP (the deploy's measured value) wins over the "
+              "served line", str(b))
+        budget.MAIN_CAP = 0
+        budget._LINE = 0
+        b = budget.budgets(163840)
+        check(b["layout"] == "split",
+              "kv_vram_cells 0 (a pool that is all VRAM): the split", str(b))
+        budget._LINE = 400000
+        b = budget.budgets(393216)
+        check(b["layout"] == "split",
+              "a line at or past the pool is no cap (nothing is tiered)",
+              str(b))
+        fake_server({f"{budget.DIRECT}/props": {
+            "default_generation_settings": {"n_ctx": 393216},
+            "total_slots": 3, "kv_vram_cells": 163840}})
+        budget._LINE = None
+        try:
+            budget.pool_size(refresh=True)
+            check(budget._LINE == 163840 and budget._SLOTS == 3,
+                  "pool_size reads kv_vram_cells and total_slots from /props",
+                  str((budget._LINE, budget._SLOTS)))
+        finally:
+            restore()
+        import catalog
+        import tiers
+        budget._POOL, budget._LINE = 393216, 163840
+        check(catalog.context_window() == 163840,
+              "the advertised context_length is the main cap",
+              str(catalog.context_window()))
+        sh = tiers._shares()
+        check(sh == {"main": 163840, "helper": 65536, "pool": 163840,
+                     "capped": True},
+              "tiers' shares: main, the child, one request's window (the cap)",
+              str(sh))
+        c = tiers.compaction_budget(12000, 120000, helper_active=1)
+        check(c["window"] == 163840 and c["fits"],
+              "a compaction's window is the cap, a running child or not (it "
+              "swaps in while its conversation's main pauses)", str(c))
+    finally:
+        budget._LINE, budget.MAIN_CAP, budget.CHILD_TOKENS = old
+        budget._POOL = None
+        slots.LANE_RANK = old_lr
+
+
+def test_the_lane_comes_out_of_the_line():
+    """LAYOUT V2 (operator, 2026-09-29): "decider was the only thing that
+    needed room". The lane (LANE_TOKENS, ranked above the primary so it is
+    kept in VRAM) comes off the served line; YAMADORI_MAIN_CAP -- which the
+    deploy writes as N - LANE -- is taken as it is."""
+    import catalog
+    import slots
+    old = (budget._LINE, budget.MAIN_CAP, budget._POOL, slots.LANE_RANK)
+    try:
+        slots.LANE_RANK = True
+        check(budget.LANE_TOKENS == 3072,
+              "the lane is 3,072 cells: STATE_TOKENS 2,048 + the decider's "
+              "measured non-state maximum (999) rounded up to 256-cell blocks",
+              str(budget.LANE_TOKENS))
+        budget._LINE, budget.MAIN_CAP = 166400, 0
+        b = budget.budgets(262144)
+        check(b["main"] == 166400 - 3072 and b["lane"] == 3072
+              and b["window"] == 166400 - 3072
+              and "less the lane" in b["cap_source"],
+              "a served line of 166,400: main = the line less the lane",
+              str(b))
+        budget._POOL = 262144
+        check(catalog.context_window() == 166400 - 3072,
+              "the advertised context_length is the line less the lane",
+              str(catalog.context_window()))
+        budget.MAIN_CAP = 163328
+        b = budget.budgets(262144)
+        check(b["main"] == 163328 and b["cap_source"] == "YAMADORI_MAIN_CAP",
+              "YAMADORI_MAIN_CAP (already N - LANE) is not reduced again",
+              str(b))
+        budget.MAIN_CAP = 0
+        slots.LANE_RANK = False
+        check(budget.budgets(262144)["main"] == 166400,
+              "the lane unranked (slots.LANE_RANK off): not reserved; main is "
+              "the line")
+    finally:
+        budget._LINE, budget.MAIN_CAP, budget._POOL, slots.LANE_RANK = old
 
 
 def main() -> int:
@@ -300,7 +425,9 @@ def main() -> int:
                test_pool_size_reads_the_server_and_caches,
                test_cap_for_answers_only_main_or_helper,
                test_fits_is_inclusive_and_explains_a_refusal,
-               test_what_if_includes_the_live_pool):
+               test_what_if_includes_the_live_pool,
+               test_the_cap_layout,
+               test_the_lane_comes_out_of_the_line):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

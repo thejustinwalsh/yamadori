@@ -26,6 +26,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 import threading
 from dataclasses import dataclass
 
@@ -1180,12 +1181,124 @@ def _near_miss(symbol: str, names: list[str], kind: str) -> str:
     return out
 
 
+def is_package_index(db: str | None) -> bool:
+    """A HELD PACKAGE's index (deps.db_path: the package store), as opposed
+    to the bound repository's (repos.db_path) or INDEX_DB."""
+    if not db:
+        return False
+    import deps
+    try:
+        return os.path.normcase(os.path.dirname(os.path.abspath(db))) == \
+            os.path.normcase(os.path.abspath(deps.STORE))
+    except (TypeError, ValueError):
+        return False
+
+
+# The screen's recent verdicts on package source, for inspection (the
+# dashboard and a suite read it; a process-local ring, gone on a restart).
+SCREENED: list[dict] = []
+SCREENED_KEEP = 200
+_FENCE_LINE = re.compile(r"^\s{0,3}(```|~~~)")    # skill_screen's own
+
+
+def screen_package_result(resp: dict | None, db: str, tool: str | None
+                          ) -> dict | None:
+    """FETCHED CONTENT IS DATA (AGENTS.md; operator, 2026-09-27): a held
+    package's source is third-party text, so what the index tools return
+    from a HELD PACKAGE's index passes the one screen for fetched text
+    (skill_screen.screen_fetched): an offending span is removed ("[removed by
+    the screen]") and recorded in the result's `screen` field and in
+    SCREENED; a text the screen cannot cut clean is withheld as a
+    QUARANTINED error. The bound repository is the user's own and is not
+    screened here. A tool's own error text (isError) is ours and passes."""
+    try:
+        res = (resp or {}).get("result") or {}
+        content = res.get("content")
+        if res.get("isError") or not isinstance(content, list):
+            return resp
+        import skill_screen
+        rec: dict = {"package_index": os.path.basename(db), "tool": tool,
+                     "stripped": [], "dropped": False}
+        out = []
+        for part in content:
+            text = part.get("text") if isinstance(part, dict) else None
+            if not isinstance(text, str) or not text:
+                out.append(part)
+                continue
+            # A tool's output wraps the source in code fences, and the screen
+            # cuts a WHOLE fence around a finding (right for a document's
+            # example block, wrong for a file read: the whole file would go).
+            # The fence lines are held aside, so the cut is the offending
+            # line, and put back after.
+            lines = text.split("\n")
+            fences = {}
+            for i, ln in enumerate(lines):
+                if _FENCE_LINE.match(ln):
+                    tok = f"yamadori-fence-line-{i}"
+                    fences[tok] = ln
+                    lines[i] = tok
+            v = skill_screen.screen_fetched("\n".join(lines),
+                                            "\n".join(lines), "text")
+            if v["ok"] and fences:
+                v = dict(v, text="\n".join(fences.get(ln, ln) for ln in
+                                           v["text"].split("\n")))
+            rec["stripped"] += v["stripped"]
+            if not v["ok"]:
+                rec.update(dropped=True, why=v["why"])
+                rules = ", ".join(sorted({x.get("rule") or "?"
+                                          for x in v["stripped"]}))
+                out.append(dict(part, text=error_result(
+                    tool or "tool", "QUARANTINED",
+                    f"The package source this call returned failed the "
+                    f"exploit screen ({v['why']}; {rules}). Its text was "
+                    "not passed on.", retryable=False,
+                    remedies=[{"fixable_by": "agent",
+                               "action": "read another part of the "
+                                         "package, or answer from what is "
+                                         "already known",
+                               "effect": "text that passes the screen is "
+                                         "read"}])))
+                res = dict(res, isError=True)
+                continue
+            out.append(dict(part, text=v["text"]))
+        if rec["stripped"] or rec["dropped"]:
+            rec["at"] = time.time()
+            SCREENED.append(rec)
+            del SCREENED[:-SCREENED_KEEP]
+            print(f"[code_search] screened {tool} on {rec['package_index']}:"
+                  f" {len(rec['stripped'])} finding(s)"
+                  + (" -- withheld" if rec["dropped"] else ""),
+                  file=sys.stderr, flush=True)
+        res = dict(res, content=out)
+        if rec["stripped"] or rec["dropped"]:
+            res["screen"] = rec
+        return dict(resp, result=res)
+    except Exception as e:                                       # noqa: BLE001
+        # The screen failing is not a pass: withhold the package text.
+        return {"jsonrpc": "2.0", "id": (resp or {}).get("id"),
+                "result": {"content": [{"type": "text", "text": error_result(
+                    tool or "tool", "SCREEN_FAILED",
+                    f"The package source could not be screened "
+                    f"({type(e).__name__}: {e}); it was not passed on.",
+                    retryable=True, remedies=[{
+                        "fixable_by": "operator",
+                        "action": "check the server log"}])}],
+                    "isError": True}}
+
+
 def handle(req: dict, db: str | None = None) -> dict | None:
     """One JSON-RPC request. `db`: the index this call reads (a package's or
-    a repository's), bound for this thread only; None reads INDEX_DB."""
+    a repository's), bound for this thread only; None reads INDEX_DB. A
+    HELD PACKAGE's results pass the fetched-content screen
+    (screen_package_result)."""
     if db:
         with bound_index(db):
-            return _handle(req)
+            resp = _handle(req)
+        if is_package_index(db) and (req or {}).get("method") == \
+                "tools/call":
+            resp = screen_package_result(
+                resp, db, ((req or {}).get("params") or {}).get("name"))
+        return resp
     return _handle(req)
 
 
@@ -1573,6 +1686,7 @@ def _handle(req: dict) -> dict | None:
                 # allowance is now the summary's own size -- ~1.6 tokens per
                 # word covers identifiers and paths -- with thinking on top.
                 import model
+                import max_mode
                 try:
                     text = model.ask(
                         [{"role": "user", "content": prompt}],
@@ -1594,6 +1708,17 @@ def _handle(req: dict) -> dict | None:
                                       {"fixable_by": "operator",
                                        "action": "check logs/proxy.log for this call",
                                        "why_not_the_agent": "the model's output is outside this conversation"}])
+                except max_mode.ModelAtCapacity as e:
+                    # MAX MODE (mcp/max_mode.py): the summarising model is off the card; asking would load it
+                    text = error_result(
+                        "summarize_text", "MODEL_AT_CAPACITY",
+                        ("The stack is in max mode: the summarising model is not loaded, and loading it would take "
+                         "the card from max mode. Nothing was compressed; your text is unchanged."),
+                        retryable=True,
+                        detail=f"{e}; retry in about {getattr(e, 'retry_after', 30)} s",
+                        remedies=[{"fixable_by": "agent",
+                                   "action": "continue without compacting, or try again after max mode frees",
+                                   "effect": "the original text is still in context"}])
                 except model.BudgetEvent as e:
                     text = error_result(
                         "summarize_text", "TOKEN_LIMIT",

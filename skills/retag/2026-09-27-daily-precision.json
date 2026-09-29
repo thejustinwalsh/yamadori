@@ -1,0 +1,114 @@
+{
+ "note": "Precision fixes found by bench/skills/replay_selection.py --daily (2026-09-27). The emscripten skills were filed under C/C++ alone, so an ask for emscripten found no emscripten area (the framework term existed; the migration's counts missed it); web-gpu-precision-14 carried React 19 topics (startTransition, useActionState, ...) from a mismatched source and injected on a React form request; the auth-token skill's only topics were localStorage/sessionStorage (platform APIs, now plain words): JWT, HttpOnly and RBAC say what it is about. Applied by mcp/skill_offline.py --retag as operator edits (screen -> classify -> tests -> validate -> arm), items untouched.",
+ "author": "operator:retag",
+ "edits": {
+  "emscripten-interacting-with-code-jslib-key-prefix-4": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-embind-base-class-bindings-1": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-interacting-with-code-string-conversion-5": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-embind-raw-pointers-3": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-interacting-with-code-c-function-exporting": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-interacting-with-code-c-js-interop-2": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-embind-typescript-generation-4": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-interacting-with-code-64-bit-integer-handling-1": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-interacting-with-code-js-c-interop-3": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-embind-e-g": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "emscripten-embind-explicit-deletion-2": {
+   "frameworks": [
+    "emscripten"
+   ],
+   "topics_remove": [
+    "e.g"
+   ]
+  },
+  "web-gpu-precision-14": {
+   "frameworks": [
+    "threejs"
+   ],
+   "topics_remove": [
+    "startTransition",
+    "useActionState",
+    "useFormStatus",
+    "useFormState",
+    "React.memo",
+    "forwardRef"
+   ]
+  },
+  "bulletproof-react-security-auth-token-persistence": {
+   "topics_add": [
+    "JWT",
+    "HttpOnly",
+    "RBAC"
+   ]
+  }
+ }
+}

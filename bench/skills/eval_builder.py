@@ -103,7 +103,7 @@ def one(name: str, url: str, model_screen: bool) -> dict:
                     skill_screen.SCREEN_SYSTEM,
                     skill_screen.screen_user(part, name),
                     max_tokens=skill_pipeline.SCREEN_MAX_TOKENS,
-                    temperature=0.0, purpose="screen")
+                    purpose="screen")
                 verdicts.append(skill_screen.read_verdict(
                     skill_pipeline.parse_object(reply),
                     skill_builder._norm(text))["verdict"])
@@ -146,9 +146,6 @@ def one(name: str, url: str, model_screen: bool) -> dict:
         verified=sum(1 for it in items if it.get("quote")
                      and skill_builder._norm(it["quote"]) in norm),
         do_not_proposed=sum(1 for it in items if it["form"] == "DO NOT"),
-        do_not_justified=sum(1 for it in items if it["form"] == "DO NOT"
-                             and skill_builder.ABSOLUTE.search(
-                                 it.get("quote") or "")),
         stray=len(merged["stray"]))
     res = skill_builder.validate(merged, source=text,
                                  applies_when=rule.get("text") or "")

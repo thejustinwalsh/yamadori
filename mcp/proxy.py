@@ -78,6 +78,16 @@ import compaction  # noqa: E402
 import power  # noqa: E402
 import deep  # noqa: E402
 import research_tools  # noqa: E402
+import skill_prompts  # noqa: E402
+import cancel  # noqa: E402
+import max_mode  # noqa: E402
+import session_id  # noqa: E402
+import system_roles  # noqa: E402
+import message_text  # noqa: E402
+import image_input  # noqa: E402
+import api_errors  # noqa: E402
+import progress  # noqa: E402
+import mcp_host  # noqa: E402
 
 # The defaults ARE the configuration. llama-swap listens on 11434 and the
 # proxy takes 1234, because 1234 is the port every OpenAI client is already
@@ -87,7 +97,6 @@ import research_tools  # noqa: E402
 # when launched with environment variables that were not written down.
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 PORT = int(os.environ.get("YAMADORI_PROXY_PORT", "1234"))
-PREAMBLE = os.environ.get("YAMADORI_PREAMBLE", "1") == "1"
 # Seconds between empty deltas while a streamed answer's fan-out variants run.
 FANOUT_HEARTBEAT = float(os.environ.get("YAMADORI_FANOUT_HEARTBEAT", "5"))
 
@@ -136,31 +145,50 @@ work reaches you:
 | when | what it does | what you see |
 |---|---|---|
 | you write or patch a file with a tool | checks the code before the call leaves, and repairs it if it does not parse | a line before the call: "Verified <file> ..." or "Repaired <file> ..." |
-| the user asks about a library's API | reads that library's source | definitions after the user's message, or your answer opens "After thinking deeply," with the facts, each with file:line, in your thinking |
+| the user asks about a library's API, or you use a library newer than your training | reads that library's source | definitions after the user's message, or your answer opens "After thinking deeply," with the facts, each with file:line, in your thinking |
 | your answer contains code | checks it, and may write an independent second answer | a line after your answer: "Verified ...", "Repaired ..." or "Compared two approaches ..." |
 | it drew a concept seed for its work | names the word | "Today I was inspired by <word>." |
 
 Text that opens with these phrases was written for you by that model:
 continue from it, and cite what it cites."""
 
-# THE think_deeply ROW (Phase 0.6, operator 2026-09-24): one more row, only
-# where main has the tool (deep.think_tool_offered: xhigh and max, kept for
-# the whole conversation), so every row stays true and the text is still the
-# same on every turn of a conversation. Its wording is a CHOICE.
+# WHERE MAIN HAS THE SERVER TOOLS (deep.think_tool_offered: xhigh and max,
+# kept for the whole conversation, so the text is the same on every turn of a
+# conversation). Two parts:
+#   ADDENDUM_THINK_ROW -- the automatic row: the first task is planned.
+#   ADDENDUM_TOOLS -- a table that NAMES the server tools and says when to call
+#     each, at the END of the system text (the part nearest the conversation).
+# Operator, 2026-09-27: "we need to steer them a bit ... the statement names
+# them and helps the agent use them". Evidence: pagoda-h4 (n=1 run), 0 calls
+# of any yama_* tool in 84 requests, while the model spent ~15 minutes writing
+# scratch files and reading node_modules to learn how pmndrs `math` resolves
+# -- the case yama_think_deeply exists for. Before this, the addendum only
+# said what happens WHEN the model calls one. A decision table, no
+# prohibition (AGENTS.md "Prompting this model"). The wording is UNMEASURED.
 ADDENDUM_THINK_ROW = (
-    "| you call think_deeply: stuck, unsure of an API or version, a fix "
-    "failed twice, or the user says it is still broken | researches the "
-    "question in library source, skills, notes and the web | its hand-off as "
-    "the tool result, then your answer opens \"After thinking deeply,\" |\n")
+    "| the conversation's first task | plans the files, the order of the "
+    "steps, the key decisions and the constraints | the plan as a "
+    "yama_plan tool "
+    "result; you carry it out with your own tools |\n")
+ADDENDUM_TOOLS = """
+
+Server tools: call these yourself when the work needs them. Each runs on the
+Yamadori server, takes minutes, and leaves your workspace alone; you go on with
+your own tools from what it returns.
+
+| when you are | call | what you get back |
+|---|---|---|
+| about to start a new app, a multi-file feature, a migration or a rewrite; or reaching a large piece of the work the plan you have does not cover | yama_plan | the files, the order of the steps, the key decisions, the constraints the code holds |
+| unsure of a library's API or version; reading a package's installed files, or writing scratch files, to find out how it works; on a fix that has failed twice | yama_think_deeply | facts from the library's own source, this service's knowledge base and the web, each with its source, and a next step; your answer then opens "After thinking deeply," |"""
 
 
 def addendum_text(think: bool = False) -> str:
-    """ADDENDUM, with the think_deeply row before the seed row when main
-    has the tool."""
+    """ADDENDUM; where main has the server tools, the first-task row before
+    the seed row and the server-tools table at the end."""
     if not think:
         return ADDENDUM
     at = ADDENDUM.index("| it drew a concept seed")
-    return ADDENDUM[:at] + ADDENDUM_THINK_ROW + ADDENDUM[at:]
+    return ADDENDUM[:at] + ADDENDUM_THINK_ROW + ADDENDUM[at:] + ADDENDUM_TOOLS
 
 
 def add_addendum(messages: list[dict], think: bool = False) -> list[dict]:
@@ -169,15 +197,49 @@ def add_addendum(messages: list[dict], think: bool = False) -> list[dict]:
     At the end of the system text, never at the end of the conversation:
     this model's chat template raises "System message must be at the
     beginning" outright, so a trailing system message is a hard 500."""
-    text = addendum_text(think)
+    return add_system_tail(messages, addendum_text(think))
+
+
+def add_system_tail(messages: list[dict], text: str) -> list[dict]:
+    """`text` at the end of the client's system message (or a system
+    message of its own when there is none): the addendum, and the craft
+    index after it (skill_select PROGRESSIVE DISCLOSURE)."""
     out = list(messages)
-    for i, m in enumerate(out):
-        if isinstance(m, dict) and m.get("role") == "system"                 and isinstance(m.get("content"), str):
-            out[i] = dict(m, content=m["content"] + text)
+    # The FIRST message only, and `developer` as well as `system` (Pi and any
+    # OpenAI-SDK client with a reasoning model send `developer`; 2026-09-26,
+    # docs/HARNESS-PI.md gap 1: a second system message in front of it was a
+    # deterministic 502 at high and up). system_roles.one_system already
+    # made the client's own a `system` message; this is the belt to that
+    # brace.
+    m = out[0] if out else None
+    if isinstance(m, dict) and m.get("role") in INSTRUCTION_ROLES:
+        c = m.get("content")
+        if isinstance(c, str):
+            out[0] = dict(m, role="system", content=c + text)
+            return out
+        if isinstance(c, list):
+            # Text parts render back to back (the template's render_content),
+            # so one more part is the same text as a string would be.
+            out[0] = dict(m, role="system",
+                          content=list(c) + [{"type": "text", "text": text}])
             return out
     # No system message: add one rather than prepending to the user's turn,
     # which would put our text in their words.
     return [{"role": "system", "content": text.strip()}] + out
+
+
+# ONE SYSTEM MESSAGE (2026-09-26, docs/HARNESS-PI.md gap 1). OpenAI's
+# `developer` role is the system message for reasoning models; Pi sends it
+# whenever a model has `reasoning: true`. The served template knows only
+# `system`, and only first ("System message must be at the beginning").
+# mcp/system_roles.one_system -- the ONE helper both wires use (the
+# Responses adapter too) -- makes the leading system/developer run one
+# `system` message and a later one a user turn. The chat path applies it ON
+# THE WAY IN (_run_turn, prepare), once, before anything reads the messages
+# -- the addendum, skills, the utility rule, compaction, the session, the
+# ledger's chain keys -- so every request of a conversation is mapped alike
+# and the prefix is the same on every turn.
+INSTRUCTION_ROLES = system_roles.SYSTEM_ROLES
 
 
 def _post(path: str, payload: dict, timeout: int = 3600,
@@ -251,12 +313,28 @@ def _post_events(path: str, payload: dict, timeout: int = 3600,
     # AFFINITY), and every answered request records it for the next one.
     fp = (slots.fingerprint(payload)
           if isinstance(want, dict) and slots.ENABLED else None)
+    # `prompt`: a conversation key with no pin adopts the slot whose prompt
+    # this one continues (slots ADOPTION, #38).
     grant = (slots.acquire(want.get("key"), bool(want.get("transient")),
-                           prefix=fp if want.get("prefix") else None)
+                           prefix=fp if want.get("prefix") else None,
+                           prompt=(fp if want.get("key") and not
+                                   want.get("transient") else None),
+                           inherits=want.get("inherits"))
              if isinstance(want, dict) else None)
     send = payload
     if grant and grant.get("slot") is not None:
-        send = dict(payload, id_slot=grant["slot"], cache_prompt=True)
+        # id_slot, cache_prompt, and the slots' KV ranks (slots RANKS)
+        send = dict(payload, **slots.upstream_fields(grant))
+        # IDLE CLEAR (mcp/slots.py): this generation is about to run, so
+        # other conversations' slots idle past IDLE_CLEAR_S go now. A no-op
+        # when none qualifies.
+        ic = payload.get("_idle_clear") or {}
+        slots.clear_idle(
+            grant, on=ic.get("on"), log=payload.get("_slots_cleared"),
+            key=(want.get("key") if want.get("key") != slots.HELPER
+                 else None), model=payload.get("model"),
+            after_s=ic.get("override_s"),
+            account=want.get("account") or None)
     try:
         for kind, item in _post_events_raw(path, send, timeout, retries):
             if kind == "done":
@@ -282,6 +360,33 @@ def _post_events(path: str, payload: dict, timeout: int = 3600,
             yield kind, item
     finally:
         slots.release(grant)
+        rel = payload.get("_slot_release") or {}
+        if grant and grant.get("mode") == "transient" \
+                and isinstance(want, dict) and want.get("transient"):
+            # A side call on the child slot. LAYOUT V2: that slot is THE
+            # LANE, kept between the decider's turns and side calls (its
+            # head stays cached; slots THE LANE) -- recorded, not released.
+            # (slots.LANE_KEEP off, the offline suites' hook: released --
+            # slots RELEASE.)
+            if slots.lane_kept() and not want.get("prefix"):
+                slots.lane_kept_note(grant["slot"], "side call ended",
+                                     log=payload.get("_slots_released"))
+            else:
+                slots.release_idle(
+                    grant["slot"], "side call ended"
+                    if not want.get("prefix") else "compaction sent as is ended",
+                    model=payload.get("model"), on=rel.get("on"),
+                    log=payload.get("_slots_released"))
+        elif grant and grant.get("mode") == "compaction":
+            # LAYOUT V2: a compaction sent up as is ran on the least recently
+            # used conversation slot (slots._compaction_slot). Its transcript
+            # is reused by nothing (the continuation opens with the tools and
+            # the summary) and the conversation pinned there lost its cache
+            # to it, so the slot is emptied, pin or not.
+            slots.release_idle(
+                grant["slot"], "compaction sent as is ended",
+                model=payload.get("model"), on=rel.get("on"),
+                log=payload.get("_slots_released"), pinned_ok=True)
 
 
 def _http_error_detail(e) -> str:
@@ -290,12 +395,35 @@ def _http_error_detail(e) -> str:
     llama-server says exactly what it rejected ("Field 'x': ...") and that
     text was being discarded: minimal-tier requests failed with HTTP 400 in
     under 60 ms on 2026-09-23 and the proxy logged only "dropped with nothing
-    in hand", so the trigger could not be found from the log."""
-    try:
-        body = e.read()[:300].decode("utf-8", "replace")
-    except Exception:                                            # noqa: BLE001
-        body = ""
+    in hand", so the trigger could not be found from the log.
+
+    The body is read ONCE and kept on the exception (`_yamadori_body`), so
+    mcp/api_errors.py can hand the client the server's own error object."""
+    raw = getattr(e, "_yamadori_body", None)
+    if raw is None:
+        try:
+            raw = e.read()[:8192]
+        except Exception:                                        # noqa: BLE001
+            raw = b""
+        try:
+            e._yamadori_body = raw
+        except Exception:                                        # noqa: BLE001
+            pass
+    body = raw[:300].decode("utf-8", "replace")
     return f"HTTP {getattr(e, 'code', '?')}: {' '.join(body.split()) or '(no body)'}"
+
+
+def _upstream_error_of(e) -> dict:
+    """An upstream HTTPError's error object (after _http_error_detail)."""
+    raw = getattr(e, "_yamadori_body", b"") or b""
+    try:
+        d = json.loads(raw.decode("utf-8", "replace"))
+    except (ValueError, AttributeError):
+        return {"message": " ".join(raw.decode("utf-8", "replace").split())
+                [:500]} if raw else {}
+    if isinstance(d, dict) and isinstance(d.get("error"), dict):
+        return d["error"]
+    return d if isinstance(d, dict) else {"message": str(d)[:500]}
 
 
 def _request_shape(payload: dict) -> str:
@@ -332,6 +460,13 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
     # `_tier` and `_client_ip` are this proxy's own bookkeeping. llama-server
     # rejects unknown fields on some builds, and shipping them upstream would
     # also make them part of the cached prompt.
+    # A request whose client went away starts nothing more (mcp/cancel.py).
+    cancel.check()
+    # THE IMAGE GUARD (tool_code, #46): main's generations only (_run_turn
+    # sets it); a call whose IMAGE argument opens as image data is stopped
+    # here, at its first characters, and handed back marked `_image_arg`.
+    guard = payload.get("_image_guard")
+    watch = tool_code.ImageArgWatch(payload.get("tools")) if guard else None
     payload = {k: v for k, v in payload.items() if not k.startswith("_")}
     payload = dict(payload, stream=True,
                    stream_options={"include_usage": True})
@@ -351,6 +486,9 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
     first = None
     gap = 0.0
     last = t0
+    beat_at = t0
+    stopped = None                  # the image guard's hit, when it fired
+    arg_deltas = 0                  # tool-call argument deltas read (~tokens)
 
     def assemble(reason: str, note: str = "") -> dict:
         msg: dict = {"role": "assistant",
@@ -426,6 +564,22 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
                         reasoning.append(delta["reasoning_content"])
                     if delta.get("content") or delta.get("reasoning_content"):
                         yield "delta", delta
+                        beat_at = now
+                    elif delta.get("tool_calls") and \
+                            now - beat_at >= HEARTBEAT:
+                        # A CALL BEING WRITTEN IS NOT SILENCE (#44). Its
+                        # arguments are assembled here and go to the client
+                        # whole, at the end -- which took 40 minutes when
+                        # the model transcribed a screenshot's base64 into
+                        # one (Octopus v0e-V0-xhigh-1): no byte reached
+                        # Hermes, its 900 s stale detector killed the
+                        # request, and the relay in between never learned
+                        # the client had gone, so the abandoned turn kept
+                        # its main lane. A "beat" is an empty delta the
+                        # streamed turn forwards (_run_turn); every other
+                        # reader skips it (it carries no text).
+                        beat_at = now
+                        yield "beat", {}
                     for tc in delta.get("tool_calls") or []:
                         i = tc.get("index", 0)
                         slot = calls.setdefault(
@@ -438,7 +592,27 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
                             slot["function"]["name"] = fn["name"]
                         if fn.get("arguments"):
                             slot["function"]["arguments"] += fn["arguments"]
+                            if watch is not None:
+                                arg_deltas += 1
+                                stopped = watch.feed(
+                                    i, slot["function"]["name"],
+                                    fn["arguments"])
+                                if stopped is not None:
+                                    break
+                    if stopped is not None:
+                        break
+                if stopped is not None:
+                    # THE IMAGE GUARD: stop reading. Leaving the `with`
+                    # closes the upstream connection now, and llama-server
+                    # cancels the generation when it sees it closed (the
+                    # same path as a client hang-up, mcp/cancel.py) -- it
+                    # does not run to completion.
+                    break
     except Exception as e:                                       # noqa: BLE001
+        if cancel.cancelled():
+            # Its client went away and the socket was shut on purpose
+            # (mcp/cancel.py): not a drop to retry or to report as one.
+            raise cancel.Cancelled(cancel.current().why) from e
         if isinstance(e, urllib.error.HTTPError):
             # The server ANSWERED, with a refusal. Its body says what it
             # refused, and it is logged with the request's shape (never its
@@ -448,9 +622,18 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
             print(f"  upstream refused after {time.time() - t0:.2f}s: "
                   f"{detail}\n    request shape: {_request_shape(payload)}",
                   flush=True)
-            if 400 <= int(getattr(e, "code", 0) or 0) < 500:
+            # 501 (llama-server's not_supported_error) is the request's too.
+            if 400 <= int(getattr(e, "code", 0) or 0) < 500 or \
+                    int(getattr(e, "code", 0) or 0) == 501:
                 raise streaming.UpstreamError(
-                    f"the model server rejected the request ({detail})") from e
+                    f"the model server rejected the request ({detail})",
+                    status=int(e.code), error=_upstream_error_of(e)) from e
+        if isinstance(e, streaming.UpstreamError):
+            # The model server SAID it failed (an HTTP refusal, or its
+            # in-stream error event): not a drop to paper over with the
+            # partial text. Raised with its error object, for the one error
+            # path (mcp/api_errors.py) -- whatever had arrived.
+            raise
         if not (content or reasoning or calls):
             # Nothing arrived, so nothing was generated and nothing is lost by
             # asking again -- and the prompt is still in the prefix cache, so
@@ -461,8 +644,9 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
                 print(f"  upstream dropped with nothing in hand after "
                       f"{time.time() - t0:.1f}s ({type(e).__name__}: "
                       f"{str(e)[:160]}); retrying once", flush=True)
-                yield from _post_events_raw(path, payload, timeout,
-                                            retries - 1)
+                yield from _post_events_raw(
+                    path, dict(payload, _image_guard=guard) if guard
+                    else payload, timeout, retries - 1)
                 return
             raise
         took = time.time() - t0
@@ -476,13 +660,41 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
         out["_transport"]["dropped_after"] = round(took)
         yield "done", out
         return
+    if cancel.cancelled():
+        # A shut socket can also read as a clean end of the stream.
+        raise cancel.Cancelled(cancel.current().why)
+    if stopped is not None:
+        # The generation as far as it went, the stopped call's image value
+        # replaced (valid JSON: it is rendered back into the next hop), and
+        # no call after it. `_image_arg` tells _run_turn to hand it back as
+        # NOT EXECUTED.
+        idx = stopped["index"]
+        c = calls[idx]
+        stop = tool_code.image_stopped(c["function"]["name"],
+                                       c["function"]["arguments"], stopped)
+        c["function"]["arguments"] = stop.pop("arguments")
+        for k in [k for k in calls if k > idx]:
+            del calls[k]
+        for k in calls:
+            # Each call is answered by a tool result, which names its id.
+            calls[k]["id"] = calls[k]["id"] or f"call_img_{int(t0)}_{k}"
+        stop.update(index=idx, call_id=c["id"], deltas=arg_deltas,
+                    seconds=round(time.time() - t0, 2))
+        print(f"  image guard: stopped the {stop['tool']!r} call after "
+              f"{arg_deltas} argument deltas ({stop['seconds']}s): its "
+              f"{stop['argument']!r} argument opened as {stop['kind']}; the "
+              f"upstream connection was closed", flush=True)
+        out = assemble("tool_calls")
+        out["_image_arg"] = stop
+        yield "done", out
+        return
     yield "done", assemble(finish or "stop")
 
 
 # OUR TOOLS LIVE ON THE SECOND BRAIN, NOT ON MAIN (operator, 2026-09-24).
 #
 # Main -- the model the client talks to -- gets the client's tools untouched,
-# plus only generate_image and describe_image where they are offered. The
+# plus only yama_generate_image and yama_describe_image where they are offered. The
 # code-intelligence tools (find_*, read_file_range, describe_index, ...) are
 # the second brain's (mcp/shomen.py): it searches library source in its own
 # context and folds a short result back (the hand-off, prefilled as main's
@@ -497,7 +709,7 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
 # `_log_turn`) and the capability block that described them all.
 #
 # DEEP THINKING HAS ONE TOOL ON MAIN SINCE PHASE 0.6 (operator, 2026-09-24):
-# `think_deeply` (deep.THINK_TOOL) at xhigh and max, the model-chosen trigger
+# `yama_think_deeply` (deep.THINK_TOOL) at xhigh and max, the model-chosen trigger
 # -- the one non-image tool of ours on main -- run by _think_deeply as a
 # hidden hop. The other three triggers run before main (mcp/deep.py).
 # `delegate_investigation` is KEPT only as a header-forced benchmark arm
@@ -508,24 +720,28 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
 DELEGATE_TOOL = os.environ.get("YAMADORI_DELEGATE_TOOL", "0") == "1"
 
 
-def image_tools() -> list[dict]:
-    """`generate_image` and `describe_image`, only where an image server is
-    configured.
+def image_tools(main: bool = False) -> list[dict]:
+    """`yama_generate_image` and `yama_describe_image`, only where an image server is
+    configured. `main`: main's copy of yama_generate_image (images.MAIN_TOOL),
+    whose description says the proxy shows the picture itself (IMAGES REACH
+    THE CHAT, _run_turn); deep thinking's copy asks for the markdown line in
+    its hand-off.
 
     Gated on YAMADORI_IMAGEGEN_URL so no request pays prompt tokens for a tool
     that cannot run. Read per request, so the gate follows the environment.
-    `describe_image` (mcp/vision.py) goes wherever `generate_image` goes, so
+    `yama_describe_image` (mcp/vision.py) goes wherever `yama_generate_image` goes, so
     the model can look at what it drew; YAMADORI_VISION=0 withholds it. A
     request carrying an attached image gets it even without an image server
     (prepare, `vision_tools`).
     """
     if not images.configured():
         return []
-    return [images.TOOL] + ([vision.TOOL] if vision.enabled() else [])
+    return ([images.MAIN_TOOL if main else images.TOOL]
+            + ([vision.TOOL] if vision.enabled() else []))
 
 
 def vision_tools(att: dict | None) -> list[dict]:
-    """`describe_image` for a request that carries something to look at: a
+    """`yama_describe_image` for a request that carries something to look at: a
     readable attached image, or a signed link to one this server made."""
     if not vision.enabled() or not att:
         return []
@@ -533,24 +749,121 @@ def vision_tools(att: dict | None) -> list[dict]:
     return [vision.TOOL] if readable or att.get("media") else []
 
 
+# NO CONFLICTS WITH THE HARNESS'S TOOLS (operator, 2026-09-27: "Make sure
+# proxy tools do not conflict with harness tools"). Before a tool of ours
+# goes on main it is compared with the client's list; it is WITHHELD on
+#   - the same name, normalised (case, `-`/`_`, a plural s), or
+#   - a DECLARED OVERLAP: a client tool that answers the same question.
+# Each row names the harness tool and why (from bench/harness_shapes and the
+# harnesses' own sources); rows decided NOT to overlap are listed too, so
+# the decision is visible. The withheld set is kept for the conversation
+# with the craft offer (skill_select's state), like yama_think_deeply's offer:
+# the tool list never changes mid-conversation.
+TOOL_OVERLAPS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    # Since the `yama_*` rename (2026-09-27) no harness tool can share one
+    # of our names; a client tool under our OLD name (describe_image,
+    # generate_image) is the same question, so it is a declared overlap.
+    (vision.TOOL_NAME, ("vision_analyze", vision.LEGACY_TOOL_NAME),
+     "Hermes' vision_analyze answers the same question (what is in this "
+     "image) with its own vision call, and reads our signed /media links "
+     "(AGENTS.md yama_describe_image); two tools for one question split the "
+     "model's choice"),
+    (images.TOOL_NAME, ("image_generation", "create_image", "image_gen",
+                        "text_to_image", "generate_images",
+                        images.LEGACY_TOOL_NAME),
+     "the client generates images itself (Codex's hosted image_generation)"),
+    ("delegate_investigation", ("task", "multi_agent_v1", "spawn_agent",
+                                "subagent"),
+     "the client delegates to its own sub-agent (OpenCode task, Codex "
+     "multi_agent_v1): one delegation tool, the harness's"),
+)
+# Decided NOT to overlap (kept on main):
+#   yama_describe_image vs Codex view_image -- view_image ATTACHES a local image
+#     to the conversation; this text-only model sees it only through
+#     yama_describe_image (proxy.prepare's placeholder names its id).
+#   yama_recall_craft vs Hermes skills_list / skill_view / skill_manage and
+#     OpenCode `skill` -- those read the HARNESS's skills; ours are this
+#     service's craft, named apart so neither is mistaken for the other.
+#   yama_think_deeply vs OpenCode task / Codex multi_agent_v1 -- a sub-agent
+#     works in the user's project with the harness's tools; yama_think_deeply
+#     researches library source, the craft library and the web.
+
+
+def _norm_tool(name: str) -> str:
+    n = re.sub(r"[-\s]+", "_", str(name or "").strip().lower())
+    return n[:-1] if n.endswith("s") and len(n) > 3 else n
+
+
+def tool_conflicts(ours: list[dict], client_tools: list | None
+                   ) -> tuple[list[dict], list[dict]]:
+    """(the tools of ours that may go on main, [{ours, because,
+    client_tool}] withheld)."""
+    names = [((t.get("function") or {}).get("name") or t.get("name") or "")
+             for t in client_tools or [] if isinstance(t, dict)]
+    norm = {_norm_tool(n): n for n in names if n}
+    keep, withheld = [], []
+    for t in ours:
+        n = t["function"]["name"]
+        hit = norm.get(_norm_tool(n))
+        if hit:
+            withheld.append({"ours": n, "because": "same name",
+                             "client_tool": hit})
+            continue
+        # The MCP-backed tools' rows come from their server's configuration
+        # (mcp_config: each tool's `overlaps`, e.g. a client that hosts
+        # PackageLens itself).
+        row = next(((cl, why) for o, cl, why in
+                    (*TOOL_OVERLAPS, *mcp_host.overlap_rows())
+                    if o == n and set(cl) & set(names)), None)
+        if row:
+            withheld.append({"ours": n, "because": row[1],
+                             "client_tool": sorted(set(row[0])
+                                                   & set(names))[0]})
+            continue
+        keep.append(t)
+    return keep, withheld
+
+
 def main_tools(client_tools: list | None, att: dict | None = None,
                delegate: bool = False, images_on: bool = True,
-               think: bool = False) -> tuple[list, set]:
+               think: bool = False, craft: bool = False,
+               withheld: list | None = None,
+               keep_withheld: list | None = None,
+               mcp: list | None = None) -> tuple[list, set]:
     """(the tool list main is sent, the names of ours in it).
 
     The client's own list first and untouched, so its rendering -- the
     template prints tools first in the system block -- never depends on what
-    we add. Ours after it, dropped on a name the client already uses: the
+    we add. Ours after it, WITHHELD on a conflict with the client's
+    (tool_conflicts: the same normalised name, or a declared overlap); the
     client's version is the one with side effects the client can handle.
-    `think`: think_deeply (Phase 0.6, deep.THINK_TOOL), the one non-image
-    tool of ours on main, where deep.think_tool_offered says so."""
+    `think`: yama_think_deeply (Phase 0.6, deep.THINK_TOOL), where
+    deep.think_tool_offered says so. `craft`: yama_recall_craft
+    (skill_select.READ_TOOL), where the conversation's craft offer says so.
+    `withheld` collects what was withheld; `keep_withheld` names tools of
+    ours withheld earlier in the conversation, kept out. `mcp`: the
+    MCP-backed tools the conversation was offered (mcp_host; the offer is
+    decided on its first request and kept by name, _mcp_offer)."""
+    import skill_select
     client_tools = list(client_tools or [])
     taken = {t.get("function", {}).get("name") for t in client_tools
              if isinstance(t, dict)}
+    cand = ((image_tools(main=True) if images_on else []) + vision_tools(att)
+            + ([deep.THINK_TOOL, deep.PLAN_TOOL] if think else [])
+            + ([skill_select.READ_TOOL] if craft else [])
+            + list(mcp or [])
+            + ([shomen.TOOL] if delegate else []))
+    ok, held = tool_conflicts(cand, client_tools)
+    # A name stored before the `yama_*` rename is read as its new name.
+    for n in [canonical_tool_name(x) for x in keep_withheld or []]:
+        if any(t["function"]["name"] == n for t in ok):
+            ok = [t for t in ok if t["function"]["name"] != n]
+            held.append({"ours": n, "because": "withheld earlier in this "
+                         "conversation", "client_tool": None})
+    if withheld is not None:
+        withheld.extend(held)
     mine: list[dict] = []
-    for t in ((image_tools() if images_on else []) + vision_tools(att)
-              + ([deep.THINK_TOOL] if think else [])
-              + ([shomen.TOOL] if delegate else [])):
+    for t in ok:
         name = t["function"]["name"]
         if name not in taken:
             taken.add(name)
@@ -565,20 +878,21 @@ def deep_thinking_tools(att: dict | None = None) -> list[dict]:
     request's `tools` -- those are the CLIENT's, which only the client can
     execute. Not `delegate_investigation`: it would recurse, unbounded.
 
-    `generate_image` IS included (operator, 2026-09-23): deep thinking makes
+    `yama_generate_image` IS included (operator, 2026-09-23): deep thinking makes
     mockups, designs and sketches while it works, and the image's markdown
-    crosses back in the hand-off. `describe_image` comes with it: Bonsai is
+    crosses back in the hand-off. `yama_describe_image` comes with it: Bonsai is
     text-only, and the vision copy (mcp/vision.py) is how it looks at what it
     drew and refines it. `att`, the request's attachment register, adds
-    `describe_image` when the user attached an image and no image server is
+    `yama_describe_image` when the user attached an image and no image server is
     configured.
     """
     tools = [{"type": "function",
               "function": {"name": t["name"], "description": t["description"],
                            "parameters": t["inputSchema"]}}
              for t in cs.ALL_TOOLS] + image_tools()
-    # Phase 0.6: skills, the knowledge base, the web (mcp/research_tools.py).
-    # Never think_deeply: it would recurse.
+    # Phase 0.6: the knowledge base (the armed skills), the web
+    # (mcp/research_tools.py).
+    # Never yama_think_deeply: it would recurse.
     tools += list(research_tools.TOOLS)
     names = {t["function"]["name"] for t in tools}
     return tools + [t for t in vision_tools(att)
@@ -589,7 +903,40 @@ def deep_thinking_tools(att: dict | None = None) -> list[dict]:
 # tools and the delegate arm.
 OUR_NAMES = ({t["name"] for t in cs.ALL_TOOLS}
              | {"delegate_investigation", images.TOOL_NAME, vision.TOOL_NAME,
-                deep.TOOL_NAME} | set(research_tools.NAMES))
+                deep.TOOL_NAME, deep.PLAN_TOOL_NAME,
+                skill_prompts.CRAFT_TOOL_NAME}
+             | set(research_tools.NAMES)
+             # The MCP-backed tools (mcp_host; every name a configured
+             # server backs, read at import).
+             | mcp_host.mcp_config.all_tool_names())
+
+# THE `yama_*` RENAME (operator, 2026-09-27): every tool the proxy adds to
+# main is named `yama_*`, a name no harness offers. The names before it, as
+# stored ledger rows (hidden hops), the craft state's withheld list and old
+# records still carry them: each is read as its new name (the hops replay
+# byte for byte as stored; a call the model makes by an old name -- copied
+# from a replayed hop -- runs as the new tool).
+LEGACY_TOOL_NAMES = {
+    deep.LEGACY_TOOL_NAME: deep.TOOL_NAME,
+    images.LEGACY_TOOL_NAME: images.TOOL_NAME,
+    vision.LEGACY_TOOL_NAME: vision.TOOL_NAME,
+    skill_prompts.LEGACY_CRAFT_TOOL_NAME: skill_prompts.CRAFT_TOOL_NAME,
+}
+LEGACY_TOOL_NAMES.update(mcp_host.mcp_config.legacy_names())
+
+
+def canonical_tool_name(name: str) -> str:
+    """A tool name as this proxy runs it: an old name of ours
+    (LEGACY_TOOL_NAMES) read as its `yama_*` name, anything else as is."""
+    return LEGACY_TOOL_NAMES.get(name, name) if isinstance(name, str) \
+        else name
+
+
+def is_ours(name: str, ours: set | frozenset) -> bool:
+    """Is a call by `name` one of OUR tools offered on this request (`ours`,
+    prepare's list) -- by its name, or by the old name of one of them?"""
+    return name in ours or (name in LEGACY_TOOL_NAMES
+                            and LEGACY_TOOL_NAMES[name] in ours)
 
 # Tools that read the code index, and therefore cannot work without one.
 # Everything else -- the work log, summarisation -- is independent of it and
@@ -677,72 +1024,10 @@ def is_first_turn(messages: list[dict]) -> bool:
     return not any(m.get("role") == "assistant" for m in messages)
 
 
-def preamble_for(info: dict | None, checks: list[str], how: str = "") -> str:
-    """A line prepended to the first answer, or nothing at all.
-
-    THE BAR: it must tell the reader something they can act on.
-
-    This used to open every first answer with
-
-        `yamadori` · no repository detected in this conversation ·
-        code tools available, retrieval limited
-
-    on every request that did not carry a repo. For a remote service that is
-    not a warning, it is the NORMAL state -- most callers never bind a repo --
-    and there is nothing in it for the reader to do: binding project context
-    is the MODEL's job, through bind_project_context, not theirs. So it spent
-    a line at the top of every answer to report that nothing was wrong.
-
-    The other branches stay, because each one names something that changes
-    what you would do next:
-
-        indexing now              results are thin this turn; ask again later
-        predates current commit   the index is behind; reindex
-        not indexed               search will find nothing; index it
-        checks: lint, test        these commands exist in this repo
-
-    A healthy, current, bound index with no checks says nothing either. If
-    the answer to "what should I do differently" is "nothing", the correct
-    length for this line is zero.
-    """
-    if not info:
-        return ""
-    name = os.path.basename(info["root"])
-    state = ""
-    if info["building"]:
-        state = "indexing now, search will be thin this turn"
-    elif not info["chunks"]:
-        state = "not indexed"
-    elif info.get("stale"):
-        state = f"{info['chunks']:,} chunks indexed, predates current commit"
-
-    head = f"`yamadori` · **{name}**"
-    bits = []
-    if state:
-        bits.append(f"{head} · {state}")
-    if checks:
-        # Worth a line on its own when it is the only actionable fact: these
-        # commands exist in this repo and can be run.
-        bits.append("checks: " + ", ".join(checks) if bits
-                    else head + " · checks: " + ", ".join(checks))
-    if not bits:
-        return ""
-    return " · ".join(bits) + "\n\n"
-
-def available_checks(root: str) -> list[str]:
-    pkg = os.path.join(root, "package.json")
-    found = []
-    try:
-        with open(pkg, encoding="utf-8") as f:
-            scripts = (json.load(f).get("scripts") or {})
-        for want in ("lint", "test", "typecheck", "build"):
-            if want in scripts:
-                found.append(want)
-    except (OSError, json.JSONDecodeError):
-        pass
-    if os.path.exists(os.path.join(root, "Cargo.toml")):
-        found.append("cargo test")
-    return found
+# preamble_for / available_checks / PREAMBLE (YAMADORI_PREAMBLE): a status
+# line prepended to the first answer. REMOVED 2026-09-27
+# (docs/CONSTANTS-AUDIT.md): dead since resolve_repo always returns no
+# repository (2026-09-22), so it never wrote anything.
 
 
 # Tools whose result is not a pure function of their arguments. These always
@@ -961,10 +1246,12 @@ def _run_our_tool(name: str, args: dict, db: str | None,
     #
     # Tools with effects are excluded: for record_step and
     # bind_project_context, "same arguments" does not mean "same outcome".
+    # An old name of ours runs as its `yama_*` tool (LEGACY_TOOL_NAMES).
+    name = canonical_tool_name(name)
     if (turn is not None and name not in _STATEFUL
             and turn.cached_empty(name, args)):
         turn.record(name, args, _EMPTY_AGAIN)
-        return _EMPTY_AGAIN + turn.guidance(name, args, OUR_NAMES)
+        return _EMPTY_AGAIN
 
     if name == images.TOOL_NAME:
         # The proxy runs it, on CUDA1, in its own lane (admission.image_lane).
@@ -973,8 +1260,11 @@ def _run_our_tool(name: str, args: dict, db: str | None,
         st = state if state is not None else {}
         out = images.run_tool(args, st.get("_public_base") or images.public_base(),
                               st.setdefault("_images", []),
-                              account=st.get("_account") or None)
-        # What it drew may now be looked at (describe_image), by url or sha.
+                              account=st.get("_account") or None,
+                              # A Responses image_generation tool's size
+                              # (mcp/responses_api.py), for this request.
+                              options=st.get("_image_options"))
+        # What it drew may now be looked at (yama_describe_image), by url or sha.
         vision.note_generated(out, st.setdefault("_attached", vision.empty()))
         return out
 
@@ -987,25 +1277,54 @@ def _run_our_tool(name: str, args: dict, db: str | None,
         return vision.run_tool(args, st.setdefault("_attached", vision.empty()),
                                st.setdefault("_vision", []))
 
-    if name == deep.TOOL_NAME:
-        # think_deeply runs inside a chat turn (_run_turn -> _think_deeply),
-        # where its hand-off becomes the next hop's context; anywhere else
-        # there is no turn to hand it to.
+    if mcp_host.is_mcp_tool(name):
+        # An MCP-backed tool (mcp/mcp_host.py): the proxy is the MCP client
+        # of the server behind it (PackageLens, in its gated container). The
+        # result is fetched content, rendered, screened and framed as data
+        # there; each call is recorded for x_yamadori.mcp.
+        st = state if state is not None else {}
+        return mcp_host.run_tool(name, args, st.setdefault("_mcp_calls", []))
+
+    if name == skill_prompts.CRAFT_TOOL_NAME:
+        # yama_recall_craft (skill_select PROGRESSIVE DISCLOSURE): one craft in
+        # full, by name or topic, as a hidden hop the ledger replays. What
+        # it returned counts as GIVEN for the per-turn engine (a later need
+        # gets a recall line, not the body again).
+        import skill_select
+        st = state if state is not None else {}
+        text, rec = skill_select.read_craft(args)
+        st.setdefault("_craft_reads", []).append(rec)
+        lineage = session_lineage(st) if st else ""
+        if rec.get("found") and lineage:
+            account = st.get("_account") or ""
+            with skill_select_lock(account, lineage):
+                sk = _skill_state(account, lineage)
+                sk.setdefault("given", {}).setdefault(rec["found"], {
+                    "chars": int(sk.get("chars") or 0),
+                    "req": int(sk.get("req") or 0), "via": "read"})
+                _save_skill_state(account, lineage, sk)
+        return text
+
+    if name in (deep.TOOL_NAME, deep.PLAN_TOOL_NAME):
+        # yama_think_deeply and yama_plan run inside a chat turn (_run_turn
+        # -> _think_deeply / _plan_task), where the result becomes the next
+        # hop's context; anywhere else there is no turn to hand it to.
         return cs.error_result(
             name, "NOT_IN_A_TURN",
-            "think_deeply runs only inside a chat turn, where its hand-off "
-            "is folded into the answer. Nothing was run.", retryable=False,
+            f"{name} runs only inside a chat turn, where its result is the "
+            f"next step's context. Nothing was run.", retryable=False,
             remedies=[{"fixable_by": "agent",
-                       "action": "ask the question in a chat turn at "
-                                 "reasoning_effort xhigh or max",
-                       "effect": "the model can call think_deeply there"}])
+                       "action": "ask in a chat turn at reasoning_effort "
+                                 "xhigh or max",
+                       "effect": f"the model can call {name} there"}])
 
     if name in research_tools.NAMES:
-        # The second brain's other sources (Phase 0.6): skills, the knowledge
-        # base (docs + this conversation's work log), the web. Never on main.
-        # One deep-thinking run's search budget (research_tools.
-        # SEARCHES_PER_RUN), reset by each run (_deep_thinking,
-        # _think_deeply).
+        # The second brain's other sources (Phase 0.6): the knowledge base
+        # (the armed skills, nothing else: operator 2026-09-25/26), the web.
+        # Never on main.
+        # One deep-thinking run's web budget (research_tools.
+        # SEARCHES_PER_RUN, READS_PER_RUN) and seen URLs, reset by each run
+        # (_deep_thinking, _think_deeply).
         return research_tools.run(
             name, args, session_lineage(state) if state else "",
             budget=(state.setdefault("_research_budget", {})
@@ -1115,7 +1434,6 @@ def _run_our_tool(name: str, args: dict, db: str | None,
         if alt:
             if turn is not None:
                 turn.record(name, args, alt)
-                alt += turn.guidance(name, args, OUR_NAMES)
             return alt
         return cs.no_index_error(name, _held_labels())
     if root is None and name in ROOT_TOOLS:
@@ -1183,14 +1501,12 @@ def _run_our_tool(name: str, args: dict, db: str | None,
         if alt:
             text = (text.rstrip() + "\n\n" + alt) if text.strip() else alt
 
-    # A repeat still runs. Refusing it would be a negation, and this model
-    # family reads negation as topic rather than constraint -- measured,
-    # describing what failed made the decision model pick retry at margin
-    # 0.288, while asking which action progresses answered correctly at 0.493.
-    # So the result carries what has NOT been tried instead.
+    # A repeat still runs, and is recorded (the empty-search cache above).
+    # The "what has NOT been tried" guidance appended here was removed
+    # 2026-09-27 (docs/CONSTANTS-AUDIT.md: its evidence was Laya's margins,
+    # not this model's).
     if turn is not None:
         turn.record(name, args, text)
-        text += turn.guidance(name, args, OUR_NAMES)
 
     # A TOOL NEVER RETURNS NOTHING.
     #
@@ -1255,7 +1571,7 @@ def resolve_repo(messages, client_ip: str = ""):
     name any directory on the server and read it back through the tools. The
     contract is the opposite: the caller's source reaches the model only
     through the caller's own harness tools; the server serves only what it
-    holds (package indexes, hints, deep thinking, fan-out). Nothing in a
+    holds (package indexes, skills, deep thinking, fan-out). Nothing in a
     request may select a directory on this disk.
     """
     return None, False, "none"
@@ -1263,7 +1579,8 @@ def resolve_repo(messages, client_ip: str = ""):
 
 def session_context(messages: list[dict], account: str = "",
                     session: str = "",
-                    utility: dict | None = None) -> tuple[str, dict]:
+                    utility: dict | None = None, cache_key: str = "",
+                    minted: str | None = None) -> tuple[str, dict]:
     """What this caller is working with, learned from the code they sent.
 
     Code always arrives, and code names its own libraries. Imports are parsed
@@ -1301,15 +1618,246 @@ def session_context(messages: list[dict], account: str = "",
         if (utility.get("signals") or {}).get("form") == "summarise_conversation":
             _note_compaction(account)
         return "", {"_key": "", "_utility": True}
-    key = nebari.key_of(messages, account, session)
+    # WHICH CONVERSATION (#41, mcp/session_id.py): an explicit id, never
+    # inferred -- prompt_cache_key, the header, or our own id (carried in
+    # the tool-call ids we return, or on a compaction summary's line).
+    key, ses = session_identity(messages, account, session, cache_key, minted)
     fresh = not nebari.load(key)
     state = nebari.observe(key, discover.scan(messages))
     if fresh and not is_first_turn(messages):
-        state = _continue_after_compaction(key, state, account)
+        state = _continue_after_compaction(key, state, account, messages)
+    # Our id -- or, for a conversation the client named by prompt_cache_key,
+    # the CARRIER of its key (session_id.carrier_of), so its compaction
+    # summary carries a line too and a continuation under a new key is
+    # recognised by it (the alias rule, session_identity).
+    keep = ses["id"] if ses["source"] in session_id.OURS else \
+        ses.get("carrier")
+    if keep and state.get("session_id") != keep:
+        # Kept with the conversation, so a compaction of it (mapped by
+        # _serve_compaction to its lineage) can carry the same id on its
+        # summary line.
+        cur = nebari.load(key)
+        cur.update(session_id=keep, session_source="token")
+        nebari.save(key, cur)
+        state.update(session_id=keep, session_source="token")
     state["_key"] = key
+    state["_session"] = ses
+    if ses.get("forked_from") and not state.get("continues"):
+        # A FORK -- or a compaction whose summary line never reached the
+        # client (pagoda-h6: Hermes hung up on its summariser after 600 s,
+        # compacted on its own, and its prompt_cache_key changed): its
+        # history is the other conversation's, so what that conversation
+        # did once per key stays done (deep.INHERITED). Once per fork.
+        _inherit_once_per_key(account, state, ses["forked_from"])
     with _SESSIONS_LOCK:
-        _LAST_SESSION[account] = (key, time.time())
+        pend = _PENDING_COMPACTION.get(account)
+        if pend and pend.get("lineage") == session_lineage(state):
+            # The compacted conversation came back BY ITS ID (its session
+            # line): the pending link is spent -- it must not attach a later
+            # conversation that happens to arrive inside the window.
+            _PENDING_COMPACTION.pop(account, None)
+    # The ledger's chain keys are salted with an explicit conversation's key
+    # (chain_keys): two conversations that open alike hash their opening
+    # alike, and one's decisions on it were replayed into the other. The
+    # fallback (no id) keeps the unsalted keys it was recorded under.
+    state["_chain_salt"] = key if ses["source"] != "none" else ""
+    with _SESSIONS_LOCK:
+        _LAST_SESSION[account] = (key, time.time(), session_lineage(state))
     return key, state
+
+
+def session_identity(messages: list[dict], account: str = "",
+                     header: str = "", cache_key: str = "",
+                     minted: str | None = None) -> tuple[str, dict]:
+    """(key, {id, source, why}) of the conversation this request belongs
+    to, from the first explicit id present (mcp/session_id.py):
+
+      prompt_cache_key  the body's field
+      header            X-Yamadori-Session (the key as it always was:
+                        nebari.key_of with the token)
+      tool_call_id      our id, carried in a tool-call id we returned (an
+                        assistant tool_calls[].id or a tool_call_id of our
+                        form anywhere in the history; the first found wins)
+      summary_line      our id on the line of a compaction summary we wrote
+      answer_record     our id, RECORDED with an answer of ours that carried
+                        nothing (no client tool call), keyed by the whole
+                        conversation through that answer as the client
+                        stores it (_session_of_answers) -- our own bytes,
+                        never the opening alone
+      minted            none of these: a NEW conversation. Its id rides out
+                        in this turn's tool-call ids (or its answer's
+                        record). `minted` is the id when this request
+                        already minted one (session_context runs twice per
+                        request: _run_turn, then prepare).
+    `id` is ours in full; a client's own id is shown as a hash prefix. Our
+    sources key a conversation alike (conversation_key with "token"), so it
+    keeps its key whichever carrier brought the id back. The old fallback
+    -- `none`, nebari.key_of on the first two messages -- is no longer
+    reached: nothing is inferred."""
+    if cache_key:
+        # A key that CHANGES mid-conversation (session_id.py, Hermes'
+        # Responses key): a key seen before keeps the conversation it named
+        # first; a NEW key whose history carries one of our ids continues
+        # that conversation (no session header: an explicit per-conversation
+        # header, e.g. OpenCode's fork, keeps its own); else its own.
+        ref = session_id.cache_key_ref(cache_key)
+        own = session_id.conversation_key(account, "prompt_cache_key",
+                                          cache_key)
+        info = {"id": session_id.short(cache_key),
+                "source": "prompt_cache_key",
+                "why": "the request's prompt_cache_key"}
+        key = session_id.alias_get(account, ref)
+        # Only COMPACTION evidence joins a new key to a conversation: our
+        # summary line. Our id in tool-call ids alone is a fork (a fork
+        # keeps the full history): a new conversation, `forked_from`.
+        summ = None if header else session_id.summary_of(messages)
+        if key is None:
+            key = session_id.conversation_of_id(account, summ) if summ \
+                else own
+            session_id.alias_put(account, key, ref)
+        if key != own:
+            # (Also the second session_context of a request, which sees the
+            # alias the first recorded.)
+            info.update(aliased_to=summ or True, why=(
+                f"a prompt_cache_key new to this server, whose history "
+                f"carries our summary line ({summ}): the compacted "
+                f"conversation continues under the new key" if summ else
+                "the request's prompt_cache_key, an alias of the "
+                "conversation it continued"))
+        elif not header:
+            sid, where = session_id.from_messages(messages)
+            if sid and where == "tool_call_id" and \
+                    session_id.conversation_of_id(account, sid) != own:
+                info.update(forked_from=sid, why=(
+                    f"the request's prompt_cache_key; its history carries "
+                    f"our id {sid} in tool-call ids only (no summary line): "
+                    f"a fork, a new conversation"))
+        # The id of ours its tool-call ids carry, so a later key change can
+        # find it (_carry_session).
+        info["carrier"] = session_id.carrier_of(key)
+        cref = session_id.carrier_ref(info["carrier"])
+        if session_id.alias_get(account, cref) != key:
+            session_id.alias_put(account, key, cref)
+        return key, info
+    if header:
+        return (nebari.key_of(messages, account, header),
+                {"id": session_id.short(header), "source": "header",
+                 "why": "the X-Yamadori-Session header"})
+    sid, where = session_id.from_messages(messages)
+    if sid:
+        # The carrier of a client-named conversation names THAT one.
+        return (session_id.conversation_of_id(account, sid),
+                {"id": sid, "source": where,
+                 "why": ("our id, carried in a tool-call id of the history"
+                         if where == "tool_call_id" else
+                         "our id, on the session line of a compaction "
+                         "summary")})
+    sid = None if is_first_turn(messages) else \
+        _session_of_answers(messages, account)
+    if sid:
+        return (session_id.conversation_key(account, "token", sid),
+                {"id": sid, "source": "answer_record",
+                 "why": "our id, recorded with an answer of ours in the "
+                        "history that made no tool call (nothing carried "
+                        "it)"})
+    sid = minted or session_id.mint()
+    return (session_id.conversation_key(account, "token", sid),
+            {"id": sid, "source": "minted",
+             "why": ("no prompt_cache_key, no header and no id of ours in "
+                     "the history: a new conversation"
+                     + ("" if is_first_turn(messages) else
+                        " (it has answers, none of them ours on record)")
+                     + "; the id rides in this turn's tool-call ids")})
+
+
+# THE ANSWER RECORD (#41, 2026-09-25). A conversation whose answers make no
+# client tool call has no carrier, and the literal rule -- "its next request
+# is a new session" -- broke the slot's cache on every such turn
+# (mcp/test_ledger.py, run on the carrier alone: the second request salted
+# its chain with a new id, so the first turn's recorded skill injection was
+# not replayed and the prompt diverged at turn 1; at xhigh the new
+# conversation decided yama_think_deeply's offer afresh and the tool list itself
+# changed; the known-hard-area trigger would re-fire on every such request).
+# So the proxy records, with every answer it delivers for a conversation with
+# our id that carries nothing, that id under the UNSALTED chain key of the
+# conversation through that answer as the client stores it (roles, text,
+# call ids; reasoning excluded -- chain_keys). A later request with no
+# carrier looks its assistant messages up, first found wins. The key covers
+# our own generated answer, not only the opening, so two runs that open
+# alike are two conversations unless the model answered them byte for byte
+# alike (the same argument as slots._adopt "through an answer").
+SESSION_KIND = "session"
+
+
+def _answer_key(prev: str, text: str) -> str | None:
+    """The record's key for an answer: the unsalted chain key of the message
+    before it and the answer's text, stripped (a client may trim it)."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    return "session:" + _hashlib.sha256(
+        (prev + "\x00" + text).encode("utf-8", "replace")).hexdigest()
+
+
+def _session_of_answers(messages: list[dict], account: str) -> str | None:
+    """Our id recorded with an assistant message of this history, or None;
+    the first found wins."""
+    keys = None
+    for i, m in enumerate(messages or []):
+        if not (isinstance(m, dict) and m.get("role") == "assistant"):
+            continue
+        keys = keys or chain_keys(messages, "")
+        k = _answer_key(keys[i - 1] if i else "", _msg_text(m))
+        sid = nebari.ledger_get(account, k, SESSION_KIND) if k else None
+        if isinstance(sid, str) and re.fullmatch(r"[0-9a-f]{12}", sid):
+            return sid
+    return None
+
+
+def _record_answer_session(payload: dict, messages: list[dict],
+                           text: str, calls: list[dict]) -> bool:
+    """Record our id with a delivered answer that carries nothing (see THE
+    ANSWER RECORD). `text`: the answer's content as the client stores it."""
+    ses = (payload.get("_ledger") or {}).get("conversation") or {}
+    if calls or ses.get("source") not in session_id.OURS \
+            or not ses.get("id"):
+        return False
+    k = _answer_key(chain_keys(messages, "")[-1] if messages else "", text)
+    if not k:
+        return False
+    account, session = ledger_scope(payload)
+    nebari.ledger_put(account, session, k, SESSION_KIND, ses["id"])
+    return True
+
+
+def _carry_session(payload: dict, calls: list[dict],
+                   slot_msg: dict | None = None) -> list[dict]:
+    """The client calls this turn returns, their ids rewritten to carry the
+    conversation's id (#41, session_id.carry: `call_<id>_<8 hex>`), when the
+    id is ours. A client's own id (prompt_cache_key, the header) needs no
+    carrier: the client sends it again. Every OpenAI-compatible client
+    echoes a call's id and its result's tool_call_id verbatim, and the
+    served template renders neither, so the model never sees them and the
+    slot's prompt is the same whatever they are.
+
+    `slot_msg` (what the slot generated) gets the same ids, so the warm's
+    comparison (_same_turn) does not mistake a renamed call for a changed
+    turn."""
+    ses = (payload.get("_ledger") or {}).get("conversation") or {}
+    # Our own id; or, for a conversation the client named with
+    # prompt_cache_key, its carrier (session_id.carrier_of), so a history
+    # replayed under a CHANGED key still names it (Hermes' Responses key).
+    sid = ses.get("id") if ses.get("source") in session_id.OURS else \
+        ses.get("carrier")
+    if not calls or not sid:
+        return calls
+    new, ids = session_id.carry(calls, sid)
+    if isinstance(slot_msg, dict) and slot_msg.get("tool_calls"):
+        slot_msg["tool_calls"] = [
+            dict(c, id=ids.get(c.get("id"), c.get("id")))
+            if isinstance(c, dict) else c for c in slot_msg["tool_calls"]]
+    payload["_session_carried"] = len(new)
+    return new
 
 
 # COMPACTION CONTINUITY. A conversation whose key is NEW but which already has
@@ -1321,34 +1869,152 @@ def session_context(messages: list[dict], account: str = "",
 # alone says nothing about which request comes next. In-process only; a
 # restart between the compaction and the next turn loses the link (the old
 # behaviour, not a wrong one).
-COMPACTION_LINK_SECONDS = int(os.environ.get("YAMADORI_COMPACTION_LINK_S", "1800"))
+#
+# WHOSE COMPACTION IT WAS, AND THE LINK (Octopus v0b-V0-xhigh-1, 2026-09-25,
+# docs/SELF-IMPROVEMENT-LOG.md #38). No guess:
+#   - a compaction this proxy MAPPED to a stored conversation (flattened:
+#     "136 of 136 turns map"; in place: its own slot key) names that
+#     conversation's lineage itself;
+#   - the continuation is recognised by CONTENT: it carries the summary the
+#     compaction produced (Hermes puts it in a message behind its prefix);
+#   - or it names the conversation explicitly (session_id: our id in its
+#     tool-call ids, the summary line, a key or header), which
+#     session_identity resolves before this is reached.
+# REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): COMPACTION_LINK_SECONDS
+# (1,800 s, YAMADORI_COMPACTION_LINK_S), the recency guess that linked a
+# new-key request to the account's last conversation, and linked an unmapped
+# compaction to it -- a 2,903 s turn had already defeated it (#38), and the
+# operator: "we can't assume a new session is a resumable one" (2026-09-25).
+# The summary probes are held in memory only, like the compaction store.
 _SESSIONS_LOCK = threading.Lock()
-_LAST_SESSION: dict[str, tuple[str, float]] = {}      # account -> (key, when)
-_PENDING_COMPACTION: dict[str, tuple[str, float]] = {}  # account -> (key, when)
+# account -> (key, when, lineage): the account's last conversation request.
+_LAST_SESSION: dict[str, tuple[str, float, str]] = {}
+# account -> {key, lineage, when, probes, how}: a compaction awaiting its
+# continuation.
+_PENDING_COMPACTION: dict[str, dict] = {}
+# Summary probes: whitespace-normalised windows of the compaction's answer.
+PROBE_CHARS = 96
+PROBE_MIN_SUMMARY = 200
 
 
-def _note_compaction(account: str) -> None:
-    """A summarise-the-conversation call: remember whose conversation it was."""
+def _norm_ws(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def _summary_probes(summary: str) -> list[str]:
+    """Up to three windows from inside the summary (a quarter, half and three
+    quarters in), whitespace-normalised: a harness that prefixes it, appends a
+    footer or re-wraps it still carries them."""
+    s = _norm_ws(summary)
+    if len(s) < PROBE_MIN_SUMMARY:
+        return []
+    out = []
+    for f in (0.25, 0.5, 0.75):
+        i = min(int(len(s) * f), len(s) - PROBE_CHARS)
+        p = s[i:i + PROBE_CHARS]
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
+def _carries_summary(messages: list[dict], probes: list[str] | None) -> bool:
+    if not probes:
+        return False
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        t = _norm_ws(_msg_text(m))
+        if t and any(p in t for p in probes):
+            return True
+    return False
+
+
+def _note_compaction(account: str, lineage: str | None = None) -> None:
+    """A summarise-the-conversation call: remember whose conversation it was.
+    `lineage`: the conversation the compaction was MAPPED to (the stored
+    prompt it was served on) -- exact, so no recency guess is needed."""
+    if not lineage:
+        # Unmapped: whose conversation it summarised is unknown, and nothing
+        # is guessed (no recency link, 2026-09-27).
+        return
+    now = time.time()
     with _SESSIONS_LOCK:
         last = _LAST_SESSION.get(account)
-        if last and time.time() - last[1] <= COMPACTION_LINK_SECONDS:
-            _PENDING_COMPACTION[account] = (last[0], time.time())
+        key = last[0] if last and last[2] == lineage else None
+        _PENDING_COMPACTION[account] = {
+            "key": key, "lineage": lineage, "when": now, "probes": [],
+            "how": "mapped"}
 
 
-def _continue_after_compaction(key: str, state: dict, account: str) -> dict:
+def _compaction_done(account: str, lineage: str | None, summary: str) -> None:
+    """The compaction answered: its window starts NOW (a 12k-token summary
+    can take most of an hour), and the continuation will carry `summary`.
+    The conversation's next request carries the work log, whatever its key
+    (progress.note_compaction; #54)."""
+    _compaction_counted(account, lineage)
+    with _SESSIONS_LOCK:
+        pend = _PENDING_COMPACTION.get(account)
+        if pend is None or (lineage and pend.get("lineage") != lineage):
+            if not lineage:
+                return
+            last = _LAST_SESSION.get(account)
+            pend = {"key": last[0] if last and last[2] == lineage else None,
+                    "lineage": lineage, "how": "mapped"}
+        pend = dict(pend, when=time.time(), probes=_summary_probes(summary))
+        _PENDING_COMPACTION[account] = pend
+
+
+def _compaction_counted(account: str, lineage: str | None) -> None:
+    """Count a finished compaction against the conversation it summarised:
+    the mapped lineage, else the one the pending link names (an unmapped
+    flattened compaction of the account's last conversation)."""
+    lin = lineage
+    if not lin:
+        with _SESSIONS_LOCK:
+            lin = (_PENDING_COMPACTION.get(account) or {}).get("lineage")
+    if lin:
+        try:
+            progress.note_compaction(account, lin)
+        except Exception as e:                                   # noqa: BLE001
+            print(f"  work log: compaction not counted ({type(e).__name__}: "
+                  f"{e})", flush=True)
+
+
+def _session_touch(account: str, key: str) -> None:
+    """A conversation turn ENDED: the account's last activity is now. A turn
+    can run most of an hour (deep thinking, a long generation)."""
+    if not key:
+        return
+    with _SESSIONS_LOCK:
+        last = _LAST_SESSION.get(account)
+        if last and last[0] == key:
+            _LAST_SESSION[account] = (key, time.time(), last[2])
+
+
+def _continue_after_compaction(key: str, state: dict, account: str,
+                               messages: list[dict] | None = None) -> dict:
     """Carry a compacted conversation's session over to its new key: the work
     log (`lineage`, which record_step / read_rings and the slot pin use), the
-    offered-tools flag, versions and packages. One link per compaction."""
+    offered-tools flag, versions and packages. One link per compaction.
+
+    Linked only when the request CARRIES the compaction's summary (the
+    recency window was removed 2026-09-27). A request that does not carry
+    it leaves the link pending for the continuation that does."""
     with _SESSIONS_LOCK:
-        pend = _PENDING_COMPACTION.pop(account, None)
-    if not pend or pend[0] == key or time.time() - pend[1] > COMPACTION_LINK_SECONDS:
-        return state
-    prev = nebari.load(pend[0])
+        pend = _PENDING_COMPACTION.get(account)
+        if not pend or pend.get("key") == key:
+            return state
+        carried = _carries_summary(messages or [], pend.get("probes"))
+        if not carried:
+            return state
+        _PENDING_COMPACTION.pop(account, None)
+    lineage = pend["lineage"]
+    prev = nebari.load(pend["key"]) if pend.get("key") else {}
     if not prev:
-        return state
+        prev = nebari.load(lineage)
     cur = nebari.load(key)
-    cur["lineage"] = prev.get("lineage") or pend[0]
-    cur["continues"] = pend[0]
+    cur["lineage"] = prev.get("lineage") or lineage
+    cur["continues"] = pend.get("key") or lineage
     if prev.get("tools_offered"):
         cur["tools_offered"] = True
     for field in ("versions", "asked", "counts"):
@@ -1357,10 +2023,52 @@ def _continue_after_compaction(key: str, state: dict, account: str) -> dict:
         cur[field] = merged
     counts = cur.get("counts") or {}
     cur["packages"] = sorted(counts, key=lambda p: (-counts[p], p))
+    cur["linked_by"] = "summary"
     nebari.save(key, cur)
-    print(f"  session {key[:8]} continues {pend[0][:8]} after a compaction "
-          f"(work log {cur['lineage'][:8]})", flush=True)
+    print(f"  session {key[:8]} continues {cur['continues'][:8]} after a "
+          f"compaction (work log {cur['lineage'][:8]}; linked by "
+          f"{cur['linked_by']})", flush=True)
     return cur
+
+
+def _inherit_once_per_key(account: str, state: dict, sid: str) -> None:
+    """The deep-thinking state a conversation did once per key (the
+    server-tool triggers' fired keys, the areas researched, the verify
+    moments passed) carried from the conversation our id `sid` names into
+    this one's lineage (deep.inherit_state; idempotent)."""
+    parent_key = session_id.conversation_of_id(account, sid)
+    lineage = session_lineage(state)
+    if not parent_key or parent_key == state.get("_key"):
+        return
+    parent = session_lineage(dict(nebari.load(parent_key) or {},
+                                  _key=parent_key))
+    try:
+        got = deep.inherit_state(account, lineage, parent)
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  deep: once-per-key state not inherited ({type(e).__name__}"
+              f": {e})", flush=True)
+        return
+    if got:
+        print(f"  session {lineage[:8]} inherits {parent[:8]}'s once-per-key "
+              f"state ({len(got['fired'])} trigger keys, "
+              f"{len(got['areas'])} areas)", flush=True)
+
+
+def _fork_parent_lineage(account: str, state: dict | None,
+                         ses: dict | None) -> str | None:
+    """The lineage key of the conversation this one FORKED from (session
+    `forked_from`), or None. Never raises."""
+    sid = (ses or {}).get("forked_from")
+    if not sid:
+        return None
+    try:
+        parent_key = session_id.conversation_of_id(account, sid)
+        if not parent_key or parent_key == (state or {}).get("_key"):
+            return None
+        return session_lineage(dict(nebari.load(parent_key) or {},
+                                    _key=parent_key)) or None
+    except Exception:                                            # noqa: BLE001
+        return None
 
 
 def session_lineage(state: dict | None) -> str:
@@ -1406,46 +2114,53 @@ def strip_thinking(messages: list[dict]) -> list[dict]:
 # slot reuses all of it. STEP 0 measured why it matters on this build: a
 # request that diverges anywhere before the end of the slot's sequence rolls
 # back to a context checkpoint (448 tokens in, wherever the edit was), so one
-# missing hint on an early user turn re-prefills everything after it. The
+# missing injection on an early user turn re-prefills everything after it. The
 # compaction agent measured exactly that on Hermes: 87% of the prompt shared
-# on an ordinary turn, because the hint attached to the previous user turn was
+# on an ordinary turn, because the text attached to the previous user turn was
 # not in the client's resent copy.
 #
 # What is recorded, and under which key (storage: nebari's `additions`
 # table, memory in front of it -- see nebari.py LEDGER):
 #
-#   user turn        "inject"     skills / hints, library definitions, the
+#   user turn        "inject"     skills, library definitions, the
 #                                 work log after a compaction: decided ONCE,
 #                                 on the request whose last message is that
 #                                 user turn, and replayed after its content
 #   tool result      "inject"     LIBRARY USE (#19): the same, on the tool
 #                                 result a request ended on
-#   assistant turn   (reasoning)  NOT RECORDED, NOT RESTORED (design change,
-#                                 coordinator/operator 2026-09-24). What a
-#                                 client sends is what the model sees: a
-#                                 client that drops past reasoning (Hermes
-#                                 does, for any provider that does not
-#                                 require the echo: agent/message_sanitization
-#                                 .py apply_reasoning_content_policy) gets no
-#                                 past reasoning -- the reference run
-#                                 (sudoingX: plain llama-server + Hermes +
-#                                 Bonsai 2, 5 h, 125k context) ran exactly so
-#                                 -- and one that echoes it gets its echo,
-#                                 unchanged. Restoring it cost 6-10k tokens of
-#                                 context per step (V0 pilot, rows of 25-41k
-#                                 chars). The price: the next request diverges
-#                                 at the previous turn's think block, which the
-#                                 slot generated in full; the reuse then rests
-#                                 on the checkpoint at the previous prompt's
-#                                 end -- to be measured live.
+#   assistant turn   "reasoning"  RESTORED (operator, 2026-09-27, reversing
+#                                 the 2026-09-24 pass-through: "Keeping
+#                                 thinking across turns seems useful, fuck
+#                                 Hermes, Hermes can do whatever it wants.").
+#                                 The slot's own reasoning for the delivered
+#                                 turn (a prefilled hand-off included), keyed
+#                                 like its content, put back into every past
+#                                 turn the client sent without reasoning
+#                                 (Hermes strips it: agent/
+#                                 message_sanitization.py
+#                                 apply_reasoning_content_policy); a client's
+#                                 echo is kept as sent. Bonsai 2's base,
+#                                 Qwen3.8-27B, keeps thinking across turns by
+#                                 default (its card: `preserve_thinking`
+#                                 "enabled by default", for consistency and
+#                                 "improved KV cache utilization"), and the
+#                                 served template renders every past turn's
+#                                 think block (`preserve_thinking` undefined),
+#                                 so each request EXTENDS the slot again. The
+#                                 cost is context: every past turn's
+#                                 reasoning, on every request (V0 pilot: 6-10k
+#                                 tokens a step), counted by the window check
+#                                 (check_client_prompt). Switch
+#                                 `restore_reasoning` (tiers.BEHAVIOURS,
+#                                 default on); off, the pass-through.
 #                    "content"    a turn with tool calls whose delivered
 #                                 content (the check note) a client may drop
-#                    "hops"       the image-tool hops the proxy ran inside the
-#                                 turn, which the client never sees -- with
-#                                 their reasoning EMPTIED: reasoning lives
-#                                 within the one request whose hops these are
-#                                 (a prefilled hand-off included), never
-#                                 replayed
+#                    "hops"       the hidden hops the proxy ran inside the
+#                                 turn, which the client never sees, with the
+#                                 reasoning they were generated with: kept
+#                                 when past reasoning is restored, emptied
+#                                 when it is not (and the client does not
+#                                 echo)
 #   the request      "seed:<job>" the concept seed a second-brain job drew,
 #                                 so a retry or replay uses the same word
 #
@@ -1454,9 +2169,11 @@ def strip_thinking(messages: list[dict]) -> list[dict]:
 # excluded), so the same words at two points of a conversation -- "continue"
 # -- are two keys, and two conversations cannot share one. An assistant
 # turn's key is its tool-call ids, else its content: what the client echoes.
-# The key does not use the session key, which changes between turn 1 and 2
-# for a conversation with no system message (nebari.key_of, KNOWN GAP); the
-# `session` column is for pruning only.
+# A conversation with an explicit id (#41, session_identity) salts the chain
+# with its key, which is fixed from its first request (the id is minted
+# there); one with no id keeps the unsalted chain, which does not depend on
+# nebari.key_of (it changes between turn 1 and 2 for a conversation with no
+# system message). The `session` column is for pruning only.
 import hashlib as _hashlib  # noqa: E402
 
 
@@ -1465,6 +2182,67 @@ def _args_norm(raw) -> str:
     try:
         v = json.loads(raw) if isinstance(raw, str) else raw
         return json.dumps(v, sort_keys=True, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(raw)
+
+
+# ONE ORDER FOR TOOL-CALL ARGUMENTS (Octopus v0e-V0-xhigh-1, 2026-09-25,
+# step 6: reused 16187 of 25487 right after a warm that had loaded 25258). The
+# served template renders a call's arguments in KEY ORDER
+# (`tool_call.arguments|items`; llama-server keeps the object's order), and
+# Hermes re-serialises every historical call with sorted keys on its send
+# path (agent/conversation_loop.py _canonicalize_tool_call_arguments:
+# json.dumps(..., sort_keys=True)). The model wrote patch as path, old_string,
+# new_string; the warm rendered that order, the next request rendered
+# new_string first, and the slot fell back past the divergence to a
+# checkpoint 6.3K tokens earlier still. So every copy the proxy renders -- the
+# request (prepare), the warm and the compaction store -- sorts the keys
+# (recursively, as Hermes does): a client that sorts and one that keeps the
+# model's order render alike, and the warm renders what the next request
+# will. The chain keys already hash the sorted form (_args_norm).
+def _args_sorted(raw):
+    """`raw` (a JSON string or an object) with its keys sorted; the input
+    unchanged when it is not a JSON object."""
+    try:
+        v = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return raw
+    if not isinstance(v, dict):
+        return raw
+    s = json.dumps(v, sort_keys=True, ensure_ascii=False)
+    return s if isinstance(raw, str) else json.loads(s)
+
+
+def sort_call_arguments(messages: list) -> list:
+    """The messages with every assistant tool call's arguments in sorted key
+    order (see ONE ORDER FOR TOOL-CALL ARGUMENTS). Messages that need no
+    change are the same objects."""
+    out = []
+    for m in messages or []:
+        calls = m.get("tool_calls") if isinstance(m, dict) else None
+        if isinstance(calls, list) and calls:
+            new = []
+            for c in calls:
+                fn = c.get("function") if isinstance(c, dict) else None
+                if isinstance(fn, dict) and "arguments" in fn:
+                    a = _args_sorted(fn["arguments"])
+                    if a != fn["arguments"] or (
+                            isinstance(a, dict) and list(a) != list(
+                                fn["arguments"])):
+                        c = dict(c, function=dict(fn, arguments=a))
+                new.append(c)
+            if any(x is not y for x, y in zip(new, calls)):
+                m = dict(m, tool_calls=new)
+        out.append(m)
+    return out
+
+
+def _args_as_rendered(raw) -> str:
+    """Tool-call arguments as the template renders them: parsed, in THEIR
+    key order (unlike _args_norm)."""
+    try:
+        v = json.loads(raw) if isinstance(raw, str) else raw
+        return json.dumps(v, ensure_ascii=False)
     except (TypeError, ValueError):
         return str(raw)
 
@@ -1488,10 +2266,16 @@ def _canon(m: dict) -> str:
         ensure_ascii=False)
 
 
-def chain_keys(messages: list[dict]) -> list[str]:
+def chain_keys(messages: list[dict], salt: str = "") -> list[str]:
     """One key per message: the hash of the conversation up to and including
-    it, as the client sent it."""
-    out, h = [], ""
+    it, as the client sent it.
+
+    `salt`: the conversation's key when it has an explicit id (#41,
+    session_context). Two conversations that open alike hash their opening
+    alike; unsalted, the second replayed the first one's decisions on it
+    (its skills, its concept seeds). "" -- a conversation with no id --
+    keeps the keys it was always recorded under."""
+    out, h = [], salt or ""
     for m in messages:
         m = m if isinstance(m, dict) else {}
         h = _hashlib.sha256((h + _canon(m)).encode("utf-8", "replace")
@@ -1527,37 +2311,65 @@ def ledger_scope(payload: dict | None) -> tuple[str, str]:
 
 
 def ledger_restore(messages: list[dict], account: str,
-                   skip: frozenset | set = frozenset()) -> tuple[list, dict]:
+                   skip: frozenset | set = frozenset(),
+                   salt: str = "", restore_reasoning: bool = False
+                   ) -> tuple[list, dict]:
     """The client's messages with every recorded addition put back.
 
     Returns (messages, counts). Messages the ledger has nothing for are the
     client's own objects, unchanged. `skip`: message keys whose recorded
     injection is NOT put back -- a retryable decision this request decides
-    again (_inject_retry)."""
-    keys = chain_keys(messages)
+    again (_inject_retry). `salt`: the conversation's (chain_keys).
+
+    `restore_reasoning` (switch `restore_reasoning`, PAST REASONING IS
+    RESTORED, operator 2026-09-27): a past assistant turn whose reasoning the
+    client dropped gets the slot's own back (kind `reasoning`), and hidden
+    hops keep theirs; a turn the client sent with reasoning keeps it as sent.
+    Off: the 2026-09-24 pass-through.
+
+    OUR SESSION LINE (#41, mcp/session_id.py) is never rendered. Since
+    2026-09-25 only a compaction summary we wrote carries it (answers carry
+    the id in their tool-call ids, which the template never renders): the
+    summary turn is restored to what the slot generated (its recorded
+    content), and a copy the ledger has no record for -- the summary in a
+    continuation, a pruned record, an answer stored while answers carried
+    the line -- has the line taken out. The model never reads it, so it
+    cannot imitate or alter it."""
+    keys = chain_keys(messages, salt)
     out: list = []
     n = {"inject": 0, "content": 0, "hops": 0, "echoed_reasoning": 0,
-         "markers_in_echo": 0}
+         "markers_in_echo": 0, "session_line": 0}
     for i, m in enumerate(messages):
         if not isinstance(m, dict):
             out.append(m)
             continue
         role = m.get("role")
+        # The ledger's keys are the client's copy, line included.
+        mk = _memo_keys(m, keys[i - 1] if i else "") \
+            if role == "assistant" else []
+        if role in ("user", "assistant") and isinstance(m.get("content"), str) \
+                and session_id.PREFIX in m["content"]:
+            bare = session_id.strip(m["content"])
+            if bare != m["content"]:
+                m = dict(m, content=bare)
+                n["session_line"] += 1
         # A user turn's injection, or a tool result's (LIBRARY USE, #19).
-        if role in ("user", "tool") and isinstance(m.get("content"), str) \
+        # Its text may be a list of text parts (Pi, Responses input_text):
+        # the addition is one more part, as it was decided (message_text).
+        if role in ("user", "tool") and message_text.has_text(m) \
                 and keys[i] not in skip:
             add = nebari.ledger_get(account, keys[i], "inject")
             if add:
-                m = dict(m, content=m["content"] + add)
+                m = message_text.append_text(m, add)
                 n["inject"] += 1
         elif role == "assistant":
-            mk = _memo_keys(m, keys[i - 1] if i else "")
-            # REASONING PASSES THROUGH (see the block above): the client's
-            # echo, or nothing. Counted, and a template marker inside an echo
-            # is counted too (#12) -- not scrubbed: it is what the client
-            # sent.
+            # A CLIENT'S ECHO IS KEPT AS SENT (see the block above): counted,
+            # and a template marker inside an echo is counted too (#12) --
+            # not scrubbed: it is what the client sent. A turn with no echo
+            # gets the slot's own reasoning back below (restore_reasoning).
             r = m.get("reasoning_content")
-            if isinstance(r, str) and r.strip():
+            echoed = isinstance(r, str) and bool(r.strip())
+            if echoed:
                 n["echoed_reasoning"] += 1
                 n["markers_in_echo"] += sum(template_markers(r).values())
             # A call turn's delivered content (the check note a client may
@@ -1574,24 +2386,89 @@ def ledger_restore(messages: list[dict], account: str,
                 hops = nebari.ledger_get(account, k, "hops")
                 if hops:
                     try:
-                        out.extend(json.loads(hops))
-                        n["hops"] += 1
+                        hl = json.loads(hops)
                     except ValueError:
-                        pass
+                        break
+                    # HIDDEN HOPS AND AN ECHOING CLIENT (2026-09-26, the
+                    # cache after a yama_describe_image hop, docs/HARNESS-PI.md
+                    # gap 5). When this turn's reasoning is EXACTLY the
+                    # echo of what the client was shown (the hops'
+                    # reasoning, their call lines and the answer's, run
+                    # together), the turn is rendered as the slot holds it:
+                    # each hop with its own reasoning, the answer with its
+                    # own -- the same text, split where it was generated,
+                    # as #10 does for content. Anything else: the hops keep
+                    # their own reasoning when past reasoning is restored
+                    # (the slot generated it), else it is emptied; the
+                    # client's copy of the turn as sent.
+                    er = _hop_echo(account, k)
+                    r = m.get("reasoning_content")
+                    if er and isinstance(r, str) and r.strip() and \
+                            er.get("shown") == _echo_hash(r):
+                        m = dict(m, reasoning_content=er.get("slot") or "")
+                        n["hop_reasoning"] = n.get("hop_reasoning", 0) + 1
+                    elif not restore_reasoning:
+                        hl = [dict(h, reasoning_content="")
+                              if isinstance(h, dict)
+                              and h.get("role") == "assistant" else h
+                              for h in hl]
+                    out.extend(hl)
+                    n["hops"] += 1
                     break
+            # PAST REASONING IS RESTORED (operator, 2026-09-27): the turn the
+            # client sent without reasoning gets what the slot generated for
+            # it, so the rendering is the slot's sequence again. A turn the
+            # ledger has no reasoning for (recorded before the switch, pruned,
+            # another server's) is counted: it still diverges there.
+            if restore_reasoning and not echoed:
+                got = next((g for g in (nebari.ledger_get(
+                    account, k, "reasoning") for k in mk) if g), None)
+                if got:
+                    m = dict(m, reasoning_content=got)
+                    n["reasoning"] = n.get("reasoning", 0) + 1
+                    n["reasoning_chars"] = n.get("reasoning_chars", 0) \
+                        + len(got)
+                elif not (m.get("reasoning_content") or "").strip():
+                    n["reasoning_missing"] = n.get("reasoning_missing", 0) + 1
         out.append(m)
     return out, n
 
 
+def _echo_hash(text: str) -> str:
+    """The reasoning an echoing client sends back, whitespace-normalised."""
+    import hashlib
+    return hashlib.sha1(" ".join((text or "").split()).encode(
+        "utf-8")).hexdigest()
+
+
+def _hop_echo(account: str, key: str) -> dict | None:
+    raw = nebari.ledger_get(account, key, "hop_echo")
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
 def ledger_record_turn(account: str, session: str, msg: dict,
                        hops: list[dict] | None = None,
-                       stored: dict | None = None, prev: str = "") -> int:
+                       stored: dict | None = None, prev: str = "",
+                       echo: str | None = None,
+                       slot_reasoning: str | None = None,
+                       reasoning: str | None = None) -> int:
     """Record what the proxy delivered for one assistant turn: its content
     when it carries tool calls (or differs from what the client stores), and
-    the image-tool hops before it, their reasoning emptied. NOT its
-    reasoning: past reasoning is the client's to keep or drop (the block
-    above). Returns the bytes written, for the size record
-    (mcp/test_ledger.py).
+    the hidden hops before it, with the reasoning they were generated with
+    (ledger_restore empties it unless the client echoes or past reasoning is
+    restored). `reasoning`: the turn's own reasoning as the slot holds it (a
+    prefilled hand-off included), recorded as kind `reasoning` when past
+    reasoning is restored (switch `restore_reasoning`; None when it is off).
+    Returns the bytes written, for the size record (mcp/test_ledger.py).
+
+    `echo`: the reasoning this client will send back for the turn when it
+    echoes (what it was shown), with `slot_reasoning`, what the slot
+    generated for it: recorded with the hops (kind `hop_echo`, a hash of the
+    echo and the slot's text) so an echoed turn renders as the slot holds
+    it (2026-09-26, HIDDEN HOPS AND AN ECHOING CLIENT in ledger_restore).
 
     `stored`: the turn as the CLIENT will store it, when that differs from
     `msg` -- a stream that carried an earlier hop's content (#10). The keys
@@ -1605,10 +2482,20 @@ def ledger_record_turn(account: str, session: str, msg: dict,
     restore_content = bool(msg.get("tool_calls")) or (
         (keyed.get("content") or "").strip()
         != (msg.get("content") or "").strip())
-    if hops:
-        hops = [dict(h, reasoning_content="") if isinstance(h, dict)
-                and h.get("role") == "assistant" else h for h in hops]
+    echo_rec = (json.dumps({"shown": _echo_hash(echo),
+                            "slot": slot_reasoning or ""},
+                           ensure_ascii=False)
+                if hops and echo and echo.strip() else None)
     for k in keys:
+        # Under the FIRST key only (ledger_restore reads any of the turn's
+        # keys): a turn of three parallel calls would store it three times,
+        # and reasoning is the ledger's largest kind.
+        if reasoning and reasoning.strip() and k == keys[0]:
+            nebari.ledger_put(account, session, k, "reasoning", reasoning)
+            written += len(reasoning)
+        if echo_rec:
+            nebari.ledger_put(account, session, k, "hop_echo", echo_rec)
+            written += len(echo_rec)
         if restore_content:
             nebari.ledger_put(account, session, k, "content",
                               msg.get("content") or "")
@@ -1620,12 +2507,14 @@ def ledger_record_turn(account: str, session: str, msg: dict,
     return written
 
 
-def scope_reasoning(messages: list[dict], account: str = "") -> list[dict]:
+def scope_reasoning(messages: list[dict], account: str = "",
+                    features=None) -> list[dict]:
     """The client's messages with the ledger's additions put back
-    (ledger_restore, messages only). The name is historical: since
-    2026-09-24 it restores no reasoning -- past reasoning passes through as
-    the client sent it."""
-    return ledger_restore(messages, account)[0]
+    (ledger_restore, messages only), past reasoning included when switch
+    `restore_reasoning` is on (the default; `features`: a request's
+    X-Yamadori-Features)."""
+    on = tiers.behaviour_of_header(features, "restore_reasoning")[0]
+    return ledger_restore(messages, account, restore_reasoning=on)[0]
 
 
 def ledger_seed(payload: dict | None, job: str,
@@ -1662,7 +2551,10 @@ def _draw_seed(prompt: str | None) -> dict | None:
 # Names this proxy injected on main before 2026-09-24. The corpus recorded
 # the UPSTREAM tool list, ours included, so a replay of it (mcp/test_utility.py)
 # must not count them as the client's.
-_LEGACY_NAMES = {"bind_project_context", code_check.TOOL_NAME}
+_LEGACY_NAMES = {"bind_project_context", code_check.TOOL_NAME} | set(
+    # And the names ours had before the `yama_*` rename (2026-09-27): the
+    # corpus recorded them in upstream tool lists.
+    LEGACY_TOOL_NAMES)
 
 
 def client_tool_names(body: dict) -> list[str]:
@@ -1676,7 +2568,7 @@ def client_tool_names(body: dict) -> list[str]:
 
 # X-Yamadori-Features flags that, forced ON, mean a benchmark asked for an
 # augmentation -- and then a utility-shaped request still gets it.
-_AUGMENTATIONS = ("retrieval", "hints", "investigate", "check_code", "repair",
+_AUGMENTATIONS = ("retrieval", "skills", "investigate", "check_code", "repair",
                   "delegate")
 
 
@@ -1715,10 +2607,10 @@ def _utility_selection(util: dict, requested_tier: str) -> dict:
     why = ("a client utility call gets the bare model (tier minimal, from "
            f"{requested_tier}): {util['because']}")
     print(f"  utility call: tier {requested_tier} -> minimal, no block, no "
-          f"tools, no hints -- {util['because']}", flush=True)
-    return {"hints": False, "investigate": False, "fanout_n": 1,
+          f"tools, no skills -- {util['because']}", flush=True)
+    return {"skills": False, "investigate": False, "fanout_n": 1,
             "utility": True,
-            "because": {"utility": util["because"], "hints": why,
+            "because": {"utility": util["because"], "skills": why,
                         "investigate": why, "fanout": why},
             "signals": {"utility": util.get("signals"),
                         "tier_requested": requested_tier}}
@@ -1732,7 +2624,11 @@ def prepare(body: dict) -> dict:
     ways; otherwise a comparison measures prompt differences rather than the
     thing being tested.
     """
-    raw = body.get("messages") or []
+    # Idempotent: _run_turn mapped them already; a direct caller (a bench
+    # arm, a test) gets the same mapping (system_roles.one_system).
+    raw, roles_rec = system_roles.one_system(body.get("messages") or [])
+    if raw is not body.get("messages"):
+        body = dict(body, messages=raw, _roles=roles_rec)
     account = body.get("_account") or ""
     root, trusted, how = resolve_repo(raw, body.get("_client_ip", ""))
     # A client's own side call (an approval check, a title, a compaction):
@@ -1741,37 +2637,56 @@ def prepare(body: dict) -> dict:
     utility = bool(util.get("utility"))
     _key, state = session_context(raw, account,
                                    body.get("_session_token") or "",
-                                   utility=util)
+                                   utility=util,
+                                   cache_key=session_id.cache_key_of(body),
+                                   minted=body.get("_session_minted"))
     lineage = "" if utility else session_lineage(state)
+    # THE CONVERSATION'S ID (#41): where it came from, and the salt of the
+    # ledger's chain keys (session_context).
+    ses = None if utility else state.get("_session")
+    salt = "" if utility else (state.get("_chain_salt") or "")
     # THE LEDGER (see above): everything this proxy added to the
     # conversation on earlier requests -- reasoning, injections, the
     # delivered content of checked calls, image-tool hops -- put back, so this
     # request's rendering EXTENDS what the pinned slot holds. A utility call
     # is not a conversation and gets the client's messages as sent.
-    keys = chain_keys(raw)
+    keys = chain_keys(raw, salt)
     # A RETRYABLE decision on the message this request ends on (a part came
     # out empty because something was unavailable) is decided again below,
     # so it is not put back here (_inject_retry).
     retry_key, retry_meta = (None, {}) if utility else _inject_retry(
         raw, keys, account)
+    # PAST REASONING IS RESTORED (switch `restore_reasoning`, operator
+    # 2026-09-27): read before the tier, from the header and the environment.
+    rr_on, rr_src = tiers.behaviour_of_header(body.get("_features"),
+                                              "restore_reasoning")
     if utility:
         messages, restored = list(raw), {}
     else:
         messages, restored = ledger_restore(
-            raw, account, skip={retry_key} if retry_key else frozenset())
+            raw, account, skip={retry_key} if retry_key else frozenset(),
+            salt=salt, restore_reasoning=rr_on)
+        # ONE ORDER FOR TOOL-CALL ARGUMENTS: rendered sorted, whatever order
+        # this client keeps (the warm renders the same).
+        messages = sort_call_arguments(messages)
         nebari.ledger_touch(account, lineage)
-    # ATTACHED IMAGES. The chat model is text-only, and llama-server refuses an
-    # image part for a model without a projector, so the turn used to fail.
-    # Each image part becomes a text placeholder naming an id; the image stays
-    # in `att` for describe_image (mcp/vision.py), which sends it to the
-    # vision copy. After session_context on purpose: the session key hashes
-    # the messages as the client sent them.
+    # ATTACHED IMAGES. When the main model has its projector
+    # (vision.main_sees(), its /props: `bonsai` from 2026-09-27 until layout
+    # v2, the max-mode model), a readable image in a user turn goes to it as
+    # an image part -- a data: URI vision builds from the bytes, never a
+    # client's URL -- with a label naming its id. Any other image (a tool
+    # result's, one printed as text, and EVERY image while the main model has
+    # no projector: layout v2, operator 2026-09-29, "Vision can go to second
+    # card and swap in and out") becomes a text placeholder naming its id,
+    # for yama_describe_image (mcp/vision.py), which asks `bonsai-vision` on
+    # the A4000 (or the main model when it sees). After session_context on
+    # purpose: the session key hashes the messages as the client sent them.
     # An image part carrying OUR signed /media link (a client looking at an
     # image we drew, e.g. Hermes' vision_analyze) is read from the media
     # store as an attachment when its host is ours: YAMADORI_PUBLIC_BASE, the
     # address this request reached us on, or loopback. Nothing is fetched.
     messages, att = vision.extract(messages, vision.our_hosts(
-        body.get("_public_base") or ""))
+        body.get("_public_base") or ""), see=vision.main_sees())
     # `reasoning_effort` doubles as the product dial: it decides the thinking
     # budget AND which augmentations run. See mcp/tiers.py for why an existing
     # field is overloaded rather than a new one invented -- a new parameter is
@@ -1788,6 +2703,12 @@ def prepare(body: dict) -> dict:
 
     tier = tiers.resolve(body, tiers.from_header(body.get("_features")))
     requested_tier = tier["name"]
+    # RELEASE (mcp/slots.py): read before a utility call's tier is replaced
+    # by `minimal`, so the header's switch holds for side calls too.
+    slot_release = dict(zip(("on", "source"),
+                            tiers.behaviour_source(tier, "slot_release")))
+    idle_clear = dict(zip(("on", "source"),
+                          tiers.behaviour_source(tier, "idle_clear")))
     if utility:
         # The CLIENT cannot choose per situation: Hermes sends its approval
         # checks, titles and compactions to the same model name as its main
@@ -1810,19 +2731,19 @@ def prepare(body: dict) -> dict:
     elif gate:
         print(f"  library source NOT reachable: {gate['situation']} -- "
               f"{gate['because']}", flush=True)
-    # MAIN'S TOOLS: the client's, untouched, plus generate_image /
-    # describe_image where offered (a capability on every tier, operator
+    # MAIN'S TOOLS: the client's, untouched, plus yama_generate_image /
+    # yama_describe_image where offered (a capability on every tier, operator
     # 2026-09-23), plus the delegate benchmark arm when a header forces it.
     # A utility call gets the client's list and nothing of ours.
     delegate = (bool(tier.get("delegate")) or DELEGATE_TOOL) and not utility
-    # think_deeply (Phase 0.6, trigger 1): where deep thinking is allowed and
+    # yama_think_deeply (Phase 0.6, trigger 1): where deep thinking is allowed and
     # not forced off, decided on the conversation's first request and kept
     # (deep.think_tool_offered: a tool list that changes between turns would
     # change the system block the slot caches).
+    continuing = any(isinstance(m, dict) and m.get("role") == "assistant"
+                     for m in raw)
     think_on = deep.think_tool_offered(
-        tier, account, lineage, utility,
-        continuing=any(isinstance(m, dict) and m.get("role") == "assistant"
-                       for m in raw))
+        tier, account, lineage, utility, continuing=continuing)
     tools, ours = main_tools(body.get("tools"), None if utility else att,
                              delegate=delegate,
                              images_on=tiers.images_offered(tier)
@@ -1863,18 +2784,38 @@ def prepare(body: dict) -> dict:
     # DEEP THINKING'S TRIGGERS (Phase 0.6, mcp/deep.py): struggle, a task
     # kickoff, a known-hard area -- decided here from what the client sent,
     # on any route class; recorded whether or not one fires. Laya is not
-    # consulted. The model's own think_deeply call is the fourth, at
+    # consulted. The model's own yama_think_deeply call is the fourth, at
     # generation time (_think_deeply).
+    # THE SERVER-TOOL TRIGGERS (operator, 2026-09-27): where main has
+    # yama_think_deeply / yama_plan, the moments they were recalled at now
+    # run them (deep.decide kind "auto"); build intent on a user turn is
+    # the decider's (decide_turn.build_intent), the rule its fallback.
+    # THE VERIFY DIRECTIVE (mcp/verify_moment.py) is decided with them:
+    # its moment reads the same plan tracking. Each has its switch
+    # (tiers.BEHAVIOURS auto_triggers, verify_directive).
+    auto_on = tiers.behaviour(tier, "auto_triggers")
+    verify_on = tiers.behaviour(tier, "verify_directive")
+    auto_in = None if (utility or inplace or not (auto_on or verify_on)) \
+        else {"think_ok": auto_on and deep.TOOL_NAME in ours,
+              "plan_ok": auto_on and deep.PLAN_TOOL_NAME in ours,
+              "plan_files": _plan_files(ours, messages),
+              "verify": verify_on,
+              "intent": lambda _instr: _build_intent(
+                  raw, account, lineage, keys[-1] if keys else None)}
     trig = _deep_trigger(raw, tier, route, util, account, lineage,
-                         keys[-1] if keys else None, inplace, state)
+                         keys[-1] if keys else None, inplace, state,
+                         auto=auto_in)
+    verify_rec = _verify_decision((trig or {}).get("verify"), raw,
+                                  body.get("tools"), account, lineage,
+                                  keys[-1] if keys else None)
     if utility:
         sel = _utility_selection(util, requested_tier)
     elif inplace:
         why = ("an in-place compaction: served on the conversation's own "
                "prompt and slot, nothing added (mcp/compaction.py)")
-        sel = {"hints": False, "investigate": False, "fanout_n": 1,
+        sel = {"skills": False, "investigate": False, "fanout_n": 1,
                "utility": False, "compaction": True,
-               "because": {"utility": util.get("because"), "hints": why,
+               "because": {"utility": util.get("because"), "skills": why,
                            "investigate": why, "fanout": why},
                "signals": {"tier_requested": requested_tier}}
     else:
@@ -1891,6 +2832,55 @@ def prepare(body: dict) -> dict:
     # would not match the conversation's.
     fix_on = tiers.repair_on(tier) and not utility
     augmented = add_addendum(messages, think=think_on) if fix_on else messages
+    # THE CRAFT OFFER (skill_select PROGRESSIVE DISCLOSURE; operator,
+    # 2026-09-27): on the conversation's first request, an index of the
+    # craft relevant to it at the end of the system text (after the
+    # addendum) and yama_recall_craft on main; decided ONCE and kept with the
+    # tools withheld for a conflict with the client's (tool_conflicts), so
+    # the system block and the tool list never change mid-conversation. A
+    # kept offer applies to an in-place compaction too (its system block
+    # must match the conversation's).
+    craft_offer: dict = {"tool": False, "index": ""}
+    tools_withheld: list[dict] = []
+    mcp_rec: dict | None = None
+    mcp_line = ""
+    if not utility:
+        with skill_select_lock(account, lineage):
+            sk_state = _skill_state(account, lineage)
+            try:
+                craft_offer, sk_state = _craft_offer(
+                    raw, sel, route, client_tools, account, sk_state,
+                    inplace=inplace, continuing=continuing)
+            except Exception as e:                               # noqa: BLE001
+                craft_offer = {"tool": False, "index": "",
+                               "why": f"the offer raised "
+                                      f"{type(e).__name__}: {e}"[:200]}
+            # THE MCP TOOLS (mcp/mcp_host.py; switch `mcp_tools`): decided
+            # on the conversation's first request and kept by name, like the
+            # craft offer, so the tool list and the system line never change
+            # mid-conversation.
+            mcp_rec = _mcp_offer(tier, sk_state, continuing)
+            kept = list(sk_state.get("tools_withheld") or [])
+            tools, ours = main_tools(
+                body.get("tools"), None if utility else att,
+                delegate=delegate, images_on=tiers.images_offered(tier)
+                and not utility, think=think_on,
+                craft=bool(craft_offer.get("tool")),
+                withheld=tools_withheld, keep_withheld=kept,
+                mcp=mcp_host.definitions(mcp_rec["offered"]))
+            if not continuing:
+                sk_state["tools_withheld"] = sorted(
+                    {w["ours"] for w in tools_withheld})
+            _save_skill_state(account, lineage, sk_state)
+        # The one system line where they are offered (a conflict with the
+        # client's tools withholds a tool, and the line names only the rest).
+        mcp_rec["on_main"] = [n for n in mcp_rec["offered"] if n in ours]
+        mcp_line = mcp_host.line_for(mcp_rec["on_main"])
+        mcp_rec["line_chars"] = len(mcp_line)
+    if mcp_line:
+        augmented = add_system_tail(augmented, mcp_line)
+    if craft_offer.get("index"):
+        augmented = add_system_tail(augmented, craft_offer["index"])
 
     # THE PER-TURN INJECTION, decided ONCE per user turn and replayed from
     # the ledger ever after (ledger_restore put it back above). Decided on
@@ -1899,7 +2889,6 @@ def prepare(body: dict) -> dict:
     # already holds, and adding to it now would change a prefix it has
     # cached. One exception: the first request after a compaction, whose
     # whole prefix is new, may carry the work log on its last user turn.
-    used_hints: list[dict] = []
     skills_rec: dict | None = None
     inject_rec = {"decided": False, "chars": 0, "parts": []}
     use_rec: dict | None = None         # LIBRARY USE (#19), None when off
@@ -1907,12 +2896,26 @@ def prepare(body: dict) -> dict:
     # skills, the work log) when it is decided -- a replay sends what was
     # recorded, byte for byte (pre-deploy review, 2026-09-24).
     scrub_note: dict = {}
+    # The last user turn the USER wrote: a harness's synthetic tool-media
+    # turn carries a tool's image and is looked past (image_input), as
+    # route, deep and selection.question_of do.
     li = next((i for i in range(len(raw) - 1, -1, -1)
-               if isinstance(raw[i], dict) and raw[i].get("role") == "user"),
-              None)
+               if isinstance(raw[i], dict) and raw[i].get("role") == "user"
+               and not image_input.is_tool_media(raw, i)), None)
     speaking = li is not None and li == len(raw) - 1
     continued = bool(state.get("continues")) and not state.get(
         "rings_reinjected")
+    # THE WORK LOG AFTER A COMPACTION OF A CONVERSATION WHOSE KEY DID NOT
+    # CHANGE (#54; 2026-09-26). The link above (_continue_after_compaction)
+    # fires only when the compacted conversation comes back under a NEW
+    # session key; since #41 a conversation with an explicit id keeps its
+    # key across a compaction, so the work log was never re-injected for
+    # Hermes. _compaction_done counts the conversation's compactions
+    # (progress.note_compaction); the first request after one carries it.
+    wl_on, _wl_src = tiers.behaviour_source(tier, "work_log_reinject")
+    reinject = (not utility and not inplace and not continued and wl_on
+                and progress.reinject_due(account, lineage))
+    continued = continued or reinject
     recorded = (None if li is None or utility else
                 nebari.ledger_get(account, keys[li], "inject"))
     # RETRYABLE DECISIONS (live gate 2026-09-24: a decision made while the
@@ -1924,17 +2927,19 @@ def prepare(body: dict) -> dict:
     # turn, the slot holds what was sent, and that is what replays.
     retrying = (li is not None and retry_key is not None
                 and retry_key == keys[li])
-    replay_hints: list | None = None
     if recorded is not None and not retrying:
         rmeta = nebari.ledger_meta(account, keys[li], "inject")
         inject_rec.update(replayed=True, chars=len(recorded),
                           parts=list(rmeta.get("parts") or []))
-        skills_rec = {"path": None, "on": False, "ids": [], "versions": [],
-                      "why": "decided on the request this user turn arrived "
-                             "with; replayed from the ledger"}
-        replay_hints = rmeta.get("hints")
+        # A replay reports the skills its text carries (recorded in the
+        # decision's meta), without deciding again.
+        skills_rec = dict(rmeta.get("skills") or {"ids": [], "versions": [],
+                                                   "names": [], "chars": 0},
+                          on=False, replayed=True,
+                          why="decided on the request this user turn arrived "
+                              "with; replayed from the ledger")
     elif (li is not None and not utility and not inplace
-          and isinstance(raw[li].get("content"), str)
+          and message_text.has_text(raw[li])
           and (speaking or continued)):
         keep = dict(retry_meta.get("texts") or {}) if retrying else {}
         failed = set(retry_meta.get("retry") or {}) if retrying else set()
@@ -1943,14 +2948,25 @@ def prepare(body: dict) -> dict:
         if speaking:
             if "skills" in keep and "skills" not in failed:
                 texts["skills"] = keep["skills"]
-                replay_hints = retry_meta.get("hints")
-                skills_rec = {"path": None, "on": False, "ids": [],
-                              "versions": [],
-                              "why": "kept from this turn's retryable "
-                                     "decision (skills did not fail)"}
+                skills_rec = dict(retry_meta.get("skills") or {
+                    "ids": [], "versions": [], "names": [], "chars": 0},
+                    on=False, why="kept from this turn's retryable "
+                                  "decision (skills did not fail)")
             else:
-                tail, used_hints, skills_rec = _skills_tail(messages, sel,
-                                                            route)
+                # Selection reads the CLIENT's messages (`raw`), never the
+                # ledger-restored ones: what we injected before is not
+                # evidence (pagoda-h4: a TypeGPU craft body restored into
+                # the conversation picked the next TypeGPU craft).
+                _SKILL_CTX.value = {"lineage": lineage, "key": keys[li],
+                                    "raw": raw,
+                                    "server_tools": _server_tools(ours),
+                                    "plan_files": _plan_files(ours,
+                                                              messages)}
+                try:
+                    tail, skills_rec = _skills_tail(messages, sel, route,
+                                                    client_tools, account)
+                finally:
+                    _SKILL_CTX.value = None
                 texts["skills"] = tail
                 # Retryable only when it came out EMPTY for that reason: a
                 # fallback that still chose is a decision.
@@ -1986,7 +3002,10 @@ def prepare(body: dict) -> dict:
                 if "library_use" in keep and "library_use" not in failed:
                     texts["library_use"] = keep["library_use"]
                 else:
-                    use, use_rec = _library_use(raw, account, lineage, state)
+                    use, use_rec = _library_use(
+                        raw, account, lineage, state,
+                        room=_injection_room(augmented, body.get("tools"), sum(
+                            len(v or "") for v in texts.values())))
                     texts["library_use"] = use
                     if use_rec.get("unavailable"):
                         unavailable["library_use"] = "; ".join(
@@ -1994,6 +3013,10 @@ def prepare(body: dict) -> dict:
         if continued:
             texts["work_log"] = _work_log_block(state)
             _mark_rings_reinjected(state)
+            progress.mark_reinjected(account, lineage)
+            inject_rec["work_log"] = {"reinjected": True,
+                                      "same_key": bool(reinject),
+                                      "chars": len(texts["work_log"])}
         elif keep.get("work_log"):
             texts["work_log"] = keep["work_log"]
         order = [p for p in INJECT_PARTS if texts.get(p)]
@@ -2002,9 +3025,7 @@ def prepare(body: dict) -> dict:
             clean[p], n_scrub = scrub_markers(texts[p])
             _note_scrub(scrub_note, "injection", n_scrub)
         text = "".join(clean[p] for p in order)
-        hint_view = _hints_view(used_hints) if replay_hints is None \
-            else replay_hints
-        meta = {"parts": order, "hints": hint_view}
+        meta = {"parts": order, "skills": _skills_meta(skills_rec)}
         if unavailable:
             # The parts that did NOT fail are kept verbatim for the retry.
             meta.update(retry=unavailable, texts=clean)
@@ -2026,51 +3047,132 @@ def prepare(body: dict) -> dict:
             ai = _index_of_user(augmented, raw[li])
             if ai is not None:
                 augmented = list(augmented)
-                augmented[ai] = dict(augmented[ai],
-                                     content=augmented[ai]["content"] + text)
+                augmented[ai] = message_text.append_text(augmented[ai], text)
     # LIBRARY USE on a request that ENDS ON A TOOL RESULT (#19): the tool
     # result is the one message the slot does not hold yet, so a package the
     # conversation just started using (a file the harness read, a file the
     # model wrote) is covered there, decided once and recorded under that
     # message's key (ledger_restore replays it on every later request).
+    #
+    # THE PROJECT (mcp/progress.py): the step's successful writes are read
+    # into the conversation's project (the named files, the inferred working
+    # directory) for the fix-up's scope (#56) and deep thinking's label rule
+    # (#52). State only, no text. The tool-result SITUATIONS that used to be
+    # appended here (#50's progress line, #54's unchanged-read line) were
+    # REMOVED 2026-09-27 (operator: task-targeted steering in prompts; skills
+    # are the channel); tool results that already carry one replay it from
+    # the ledger byte for byte (ledger_restore), so their slots' prefixes
+    # hold.
     last_raw = raw[-1] if raw and isinstance(raw[-1], dict) else {}
-    if (not utility and not inplace and tier.get("retrieval")
-            and not sel.get("investigate")
-            and last_raw.get("role") == "tool"
-            and isinstance(last_raw.get("content"), str)
-            and augmented and isinstance(augmented[-1], dict)
-            and augmented[-1].get("role") == "tool"):
+    ends_on_tool = (not utility and not inplace
+                    and last_raw.get("role") == "tool"
+                    and message_text.has_text(last_raw)
+                    and augmented and isinstance(augmented[-1], dict)
+                    and augmented[-1].get("role") == "tool")
+    lib_on = bool(tier.get("retrieval")) and not sel.get("investigate")
+    proj_rec = (progress.learn(account, lineage, raw)
+                if ends_on_tool and lineage else None)
+    # SKILLS ON AN AGENT STEP (skill_select PER-TURN INJECTION, operator
+    # 2026-09-27): the newest evidence of the step decides, and what it
+    # brings is appended LAST to the tool result -- the end of what the
+    # model reads next -- decided once under the result's key and replayed.
+    step_skills_on = (bool(sel.get("skills")) and bool(lineage)
+                      and not utility and not inplace)
+    if ends_on_tool and (lib_on or step_skills_on):
         got = nebari.ledger_get(account, keys[-1], "inject")
         # A retryable decision on this tool result is decided again (see
         # RETRYABLE DECISIONS above); ledger_restore did not put it back.
         if got is None or (retry_key is not None and retry_key == keys[-1]):
-            use, use_rec = _library_use(raw, account, lineage, state)
-            use, n_scrub = scrub_markers(use)
-            _note_scrub(scrub_note, "injection", n_scrub)
-            meta = {"parts": ["library_use"] if use else []}
-            if use_rec.get("unavailable"):
-                meta.update(retry={"library_use": "; ".join(
-                    use_rec["unavailable"])[:300]}, texts={})
-            use, meta = nebari.ledger_decide(account, lineage, keys[-1],
-                                             "inject", use, meta)
-            use_rec["decided"] = True
-            if got is not None:
-                use_rec["retried"] = True
-            if meta.get("retry"):
-                use_rec["retryable"] = dict(meta["retry"])
-            if use:
+            use = ""
+            parts: list[str] = []
+            meta: dict = {}
+            if lib_on:
+                use, use_rec = _library_use(
+                    raw, account, lineage, state,
+                    room=_injection_room(augmented, body.get("tools")))
+                use, n_scrub = scrub_markers(use)
+                _note_scrub(scrub_note, "injection", n_scrub)
+                if use:
+                    parts.append("library_use")
+                if use_rec.get("unavailable"):
+                    meta.update(retry={"library_use": "; ".join(
+                        use_rec["unavailable"])[:300]}, texts={})
+            sk_text = ""
+            if step_skills_on:
+                sk_text, skills_rec = _skills_step(
+                    raw, sel, route, client_tools, account, lineage,
+                    keys[-1], server_tools=_server_tools(ours),
+                    plan_files=_plan_files(ours, messages))
+                sk_text, n_scrub = scrub_markers(sk_text)
+                _note_scrub(scrub_note, "injection", n_scrub)
+                if sk_text:
+                    sk_text = "\n" + sk_text
+                    parts.append("skills")
+                    meta["skills"] = _skills_meta(skills_rec)
+                # THE VERIFY DIRECTIVE's craft (mcp/verify_moment.py): the
+                # armed craft for checking this kind of work rides with the
+                # line, in the same injection (recorded, replayed).
+                vsk = (verify_rec or {}).pop("_skill", None)
+                if vsk is not None and vsk.get("id") not in (
+                        (skills_rec or {}).get("ids") or []):
+                    import skill_select
+                    vt, n_scrub = scrub_markers(skill_select.render([vsk]))
+                    _note_scrub(scrub_note, "injection", n_scrub)
+                    if vt:
+                        sk_text += "\n" + vt
+                        parts.append("verify_skill")
+                        verify_rec["skill"]["injected"] = True
+            meta["parts"] = parts
+            text, meta = nebari.ledger_decide(account, lineage, keys[-1],
+                                              "inject", use + sk_text,
+                                              meta)
+            if use_rec is not None and lib_on:
+                use_rec["decided"] = True
+                if got is not None:
+                    use_rec["retried"] = True
+                if meta.get("retry"):
+                    use_rec["retryable"] = dict(meta["retry"])
+            if text:
                 augmented = list(augmented)
-                augmented[-1] = dict(augmented[-1],
-                                     content=augmented[-1]["content"] + use)
+                augmented[-1] = message_text.append_text(augmented[-1], text)
         else:
-            use_rec = {"replayed": True, "chars": len(got)}
+            if lib_on:
+                use_rec = {"replayed": True, "chars": len(got)}
+            rmeta_t = nebari.ledger_meta(account, keys[-1], "inject")
+            rparts = rmeta_t.get("parts") or []
+            if "skills" in rparts:
+                skills_rec = dict(rmeta_t.get("skills") or {}, on=False,
+                                  replayed=True, why="decided on the request "
+                                  "this tool result arrived with; replayed "
+                                  "from the ledger")
 
     # The token budget is set inside tiers.apply by the one rule: the
     # client's max_tokens as the answer allowance, plus the thinking breaker.
     # The prompt estimate reads the messages AFTER vision.extract: a 1 MB
     # base64 image counted as text is ~450,000 "tokens", which would floor the
     # thinking room at MIN_THINKING for any turn that attached a picture.
-    out = tiers.apply(dict(body, messages=messages), tier)
+    # EVERY thinking request has a cap (operator, 2026-09-25): a step in the
+    # client's own tool loop thinks at most tiers.AGENT_STEP_THINKING, any
+    # other turn tiers.USER_TURN_THINKING. Without one an uncapped question
+    # got the whole main share (108,570 live) and the 60% nudge never fired.
+    # A utility call (and so a compaction) keeps its own budget. An agent
+    # step's nudge names the action (tiers.AGENT_STEP_NUDGE_MESSAGE, switch
+    # step_nudge). The cap by what the step answers (#53: 2,048 after a
+    # read, 6,144 after an error) was REMOVED 2026-09-27
+    # (docs/CONSTANTS-AUDIT.md: chosen from one Octopus run).
+    step_rec: dict | None = None
+    nudge = None
+    if not utility and route.get("class") == "agent_step":
+        step_cap = tiers.AGENT_STEP_THINKING
+        if tiers.behaviour(tier, "step_nudge"):
+            nudge = tiers.AGENT_STEP_NUDGE_MESSAGE
+        step_rec = {"thinking_cap": step_cap,
+                    "why": "an agent step (tiers.AGENT_STEP_THINKING)",
+                    "nudge": "agent_step" if nudge else "general"}
+    else:
+        step_cap = None if utility else tiers.USER_TURN_THINKING
+    out = tiers.apply(dict(body, messages=messages), tier, step_cap=step_cap,
+                      nudge=nudge)
     out.update(scrub_note)
     out["messages"] = augmented
     out["tools"] = tools
@@ -2082,21 +3184,31 @@ def prepare(body: dict) -> dict:
     # text model reads them, for deep thinking's question.
     out["_attached"] = att
     out["_seen_messages"] = messages
-    # 120 characters of each recipe and no more: this goes back to the client
-    # in `x_yamadori`, and a recipe snippet is the only corpus text that may.
-    # A REPLAYED decision reports the hints it carries (recorded in its meta
-    # when it was decided): the prompt holds them, so the record says so.
-    view = (_hints_view(used_hints) if replay_hints is None
-            else replay_hints)
-    out["_hints"] = list(view.get("hints") or [])
-    out["_suppressed_hints"] = list(view.get("suppressed") or [])
-    # x_yamadori.skills: path, ids, versions, why -- never text or a path.
+    # x_yamadori.skills: ids, versions, names, chars, why -- never skill text
+    # or a path. A REPLAYED decision reports the skills it carries.
     out["_skills"] = skills_rec
+    # The craft offer (kept for the conversation) and the tools of ours
+    # withheld for a conflict with the client's (x_yamadori.craft,
+    # x_yamadori.tools_withheld).
+    out["_craft"] = {k: craft_offer.get(k) for k in ("tool", "why", "kept")
+                     if k in craft_offer} | {
+        "listed": len(craft_offer.get("ids") or []),
+        "index_chars": len(craft_offer.get("index") or "")}
+    out["_tools_withheld"] = tools_withheld
+    # x_yamadori.mcp: the switch, the offer (kept for the conversation), the
+    # servers' states; the calls are added by the turn (_mcp_calls).
+    out["_mcp"] = mcp_rec
     out["_selection"] = sel
     # x_yamadori.deep: the trigger decision (or the recorded non-decision),
-    # and think_deeply's offer and calls on this request.
+    # and yama_think_deeply's and yama_plan's offer and calls on this
+    # request (one offer: deep.think_tool_offered).
     out["_deep"] = trig
+    # x_yamadori.deep.auto.verify: the verify moment's line and why.
+    if verify_rec is not None:
+        verify_rec.pop("_skill", None)
+    out["_verify"] = verify_rec
     out["_think_tool"] = {"offered": think_on, "calls": []}
+    out["_plan_tool"] = {"offered": think_on, "calls": []}
     # THE CODE CHECKS (mcp/tool_code.py, code_check.review_answer).
     #   _tool_code  client writes are checked (tiers.check_code_offered:
     #               `medium` and up); never a utility call
@@ -2110,6 +3222,9 @@ def prepare(body: dict) -> dict:
     out["_fixup"] = fix_on
     out["_route"] = route
     out["model"] = internal            # what llama-swap actually routes on
+    if body.get("_upstream_model") and internal == max_mode.MAIN:
+        # MAX MODE (mcp/max_mode.py): the main model server._serve_turn chose for this request
+        out["model"] = body["_upstream_model"]
     out["_tools_gate"] = gate
     out["_tier"] = tier
     out["_public_model"] = requested
@@ -2120,7 +3235,21 @@ def prepare(body: dict) -> dict:
     # request draws the same word), and what was restored.
     out["_ledger"] = {"account": account, "session": lineage,
                       "turn_key": keys[-1] if keys else None,
-                      "restored": restored, "inject": inject_rec}
+                      "restored": restored, "inject": inject_rec,
+                      "salt": salt, "conversation": ses,
+                      "restore_reasoning": {"on": bool(rr_on and not utility),
+                                            "source": rr_src if not utility
+                                            else "utility call"}}
+    # OUR SESSION LINE (#41), only on a COMPACTION SUMMARY we write (operator,
+    # 2026-09-25: no visible line in answers -- answers carry the id in
+    # their tool-call ids, _carry_session): an in-place compaction of a
+    # conversation with our id opens with the line, so the continuation
+    # (which carries the summary) keeps the conversation.
+    # _serve_compaction sets it for a flattened compaction it maps.
+    lead_id = (ses.get("id") if ses and ses.get("source") in session_id.OURS
+               else (ses or {}).get("carrier"))
+    if lead_id and inplace:
+        out["_session_lead"] = session_id.line(lead_id)
     if (restored or {}).get("markers_in_echo"):
         print(f"  template markers: {restored['markers_in_echo']} inside "
               f"reasoning the client echoed; passed through as sent",
@@ -2128,6 +3257,24 @@ def prepare(body: dict) -> dict:
     # x_yamadori.library_use: the packages used and held, what was injected
     # (package:name pairs, overviews, chars) -- never the text (#19).
     out["_library_use"] = use_rec
+    # x_yamadori.progress (mcp/progress.py, tiers.BEHAVIOURS): the agent
+    # step's thinking cap and nudge, every switch and its source, and the
+    # project as far as the conversation says (fix-up scope, deep labels),
+    # with the writes this request's tool result added to it.
+    out["_project"] = (progress.project_hint(account, lineage, raw)
+                       if not utility else None)
+    out["_progress"] = {"step": step_rec,
+                        "switches": tiers.behaviours(tier),
+                        "project": ({"root": out["_project"].get("root"),
+                                     "root_by": out["_project"].get(
+                                         "root_by"),
+                                     "named": len(out["_project"].get(
+                                         "named") or []),
+                                     "writes": ({k: proj_rec.get(k) for k in (
+                                         "project_writes", "scratch_writes",
+                                         "error") if k in proj_rec}
+                                         if proj_rec else None)}
+                                    if out["_project"] else None)}
     # WHICH KIND of side call (selection.utility_kind). A compaction -- a
     # flattened one (utility) or one that resends the conversation (in
     # place) -- is served on the conversation's stored prompt and slot by
@@ -2156,7 +3303,26 @@ def prepare(body: dict) -> dict:
     out["_slot"] = {"key": None if utility else (lineage or None),
                     "transient": utility, "prefix": kind == "compaction",
                     "account": account,
-                    "record": not utility and kind != "compaction"}
+                    "record": not utility and kind != "compaction",
+                    # A FORK takes over its parent's primacy (slots RANKS):
+                    # pagoda-h6's post-compaction session was one.
+                    "inherits": _fork_parent_lineage(account, state, ses)}
+    # Whether this request empties the slots it leaves nobody will reuse
+    # (slots RELEASE), and what it released (x_yamadori.slots).
+    out["_slot_release"] = slot_release
+    out["_slots_released"] = []
+    # And whether it clears OTHER conversations' slots idle past
+    # slots.IDLE_CLEAR_S before it generates (slots IDLE CLEAR).
+    out["_idle_clear"] = dict(idle_clear)
+    if isinstance(tier.get("idle_clear_s"), int) \
+            and "idle_clear_s" in (tier.get("overridden") or []):
+        # The live test's threshold override: a TEST account only, and it
+        # clears only that account's own conversations (slots.clear_idle).
+        test = corpus.account_traffic(account) == "test"
+        out["_idle_clear"].update(
+            override_s=tier["idle_clear_s"] if test else None,
+            override_refused=None if test else "not a test account")
+    out["_slots_cleared"] = []
     if out["_slot"]["record"]:
         out["_client_messages"] = list(raw)
     if kind == "compaction":
@@ -2168,9 +3334,82 @@ def prepare(body: dict) -> dict:
     return out
 
 
+def _build_intent(raw: list[dict], account: str, lineage: str,
+                  key: str | None) -> bool | None:
+    """The decider's build intent for the user turn a request ends on
+    (decide_turn.build_intent), or None (off, unavailable) -- the caller's
+    rule then answers."""
+    try:
+        import decide_turn
+        return decide_turn.build_intent(
+            _text_messages(raw), account=account, key=lineage or None,
+            request=key).get("value")
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  build intent: the decider raised ({type(e).__name__}: "
+              f"{e}); the rule answers", flush=True)
+        return None
+
+
+def _verify_decision(vm: dict | None, raw: list[dict], client_tools,
+                     account: str, lineage: str, key: str | None
+                     ) -> dict | None:
+    """THE VERIFY DIRECTIVE for a verify moment deep.decide found
+    (mcp/verify_moment.py): the decider's pick among the CLIENT's tools,
+    the line (named or generic, and why), and the armed craft for checking
+    this kind of work (or the coverage gap). None when this request is no
+    verify moment. Never raises: a fault is the generic line, said why."""
+    if not vm:
+        return None
+    import verify_moment as V
+    rec: dict = {"trigger": "verify", "moment": vm.get("moment"),
+                 "key": vm.get("key"), "kind": (vm.get("kind") or {}).get(
+                     "kind"), "signal": (vm.get("kind") or {}).get("signal"),
+                 "path": vm.get("path") or (vm.get("kind") or {}).get("path")}
+    if vm.get("error"):
+        rec.update(line=None, form=None, why="the moment raised: "
+                   + vm["error"])
+        return rec
+    try:
+        opts = V.tool_options([t for t in client_tools or []
+                               if not is_ours(((t or {}).get("function")
+                                               or {}).get("name"), OUR_NAMES)])
+        rec["options"] = [o["name"] for o in opts]
+        kind = vm.get("kind") or {}
+        choice = (V.choose_tool(_text_messages(raw), kind.get("label"), opts,
+                                account=account, key=lineage or None,
+                                request=key)
+                  if kind.get("kind") else {"judged": False,
+                                            "why": "the kind is unknown"})
+        vst = deep.load_state(account, lineage).get("verify") or {}
+        line, form, why = V.directive(kind, choice, vst)
+        rec.update(pick=choice.get("pick"), tie=choice.get("tie"),
+                   raw_pick=choice.get("raw_pick"),
+                   distribution=choice.get("distribution"),
+                   rounds=len(choice.get("rounds") or []),
+                   ms=choice.get("ms"), line=line, form=form, why=why,
+                   **({"failure": choice["failure"]}
+                      if choice.get("failure") else {}))
+        sk = V.verify_skill(kind.get("kind"))
+        rec["skill"] = ({"id": sk.get("id"), "name": sk.get("name"),
+                         "version": sk.get("version")} if sk else
+                        {"gap": f"no armed craft checks a "
+                                f"{kind.get('label') or 'work of this kind'}"
+                                f" (phase verify)"})
+        if sk:
+            rec["_skill"] = sk
+    except Exception as e:                                       # noqa: BLE001
+        rec.update(line=V.GENERIC, form="generic",
+                   why=f"the verify decision raised {type(e).__name__}: "
+                       f"{e}"[:200])
+    print(f"  verify: {rec.get('moment')} ({rec.get('kind')}) -> "
+          f"{rec.get('form')}: {rec.get('why')}", flush=True)
+    return rec
+
+
 def _deep_trigger(raw: list[dict], tier: dict, route: dict, util: dict,
                   account: str, lineage: str, turn_key: str | None,
-                  inplace: bool, state: dict | None) -> dict | None:
+                  inplace: bool, state: dict | None,
+                  auto: dict | None = None) -> dict | None:
     """deep.decide for one request, with the packages the conversation USES
     (library_uses, the same reading library help makes) and the held
     version each maps to. The package reading is done only where deep
@@ -2200,7 +3439,8 @@ def _deep_trigger(raw: list[dict], tier: dict, route: dict, util: dict,
                            account=account, lineage=lineage,
                            turn_key=turn_key, uses=uses, held=heldv,
                            inplace=inplace,
-                           continues=bool((state or {}).get("continues")))
+                           continues=bool((state or {}).get("continues")),
+                           auto=auto)
     except Exception as e:                                       # noqa: BLE001
         print(f"  deep: trigger decision raised ({type(e).__name__}: {e}); "
               f"no trigger", flush=True)
@@ -2208,7 +3448,7 @@ def _deep_trigger(raw: list[dict], tier: dict, route: dict, util: dict,
                 bool(tier.get("investigate")), "forced": None,
                 "because": f"the trigger decision raised "
                            f"{type(e).__name__}: {e}"[:300],
-                "signals": {}, "thresholds": {}, "cooldown": None}
+                "signals": {}, "thresholds": {}, "last_run": None}
     if trig.get("fire") or trig.get("signals", {}).get("struggle", {}).get(
             "count"):
         print(f"  deep: {trig.get('kind') or 'none'} -- "
@@ -2220,30 +3460,28 @@ def _deep_trigger(raw: list[dict], tier: dict, route: dict, util: dict,
 INJECT_PARTS = ("skills", "definitions", "library_use", "work_log")
 
 
-def _hints_view(used: list[dict]) -> dict:
-    """x_yamadori.hints / suppressed_hints for the hints a decision attached:
-    120 characters of each recipe and no more (this goes back to the
-    client, and a recipe snippet is the only corpus text that may)."""
-    return {
-        "hints": [{"score": h.get("_score"),
-                   "recipe": (h.get("recipe") or "")[:120],
-                   "source": h.get("source_name") or h.get("_file"),
-                   "bucket": h.get("_bucket")} for h in used or []],
-        "suppressed": [
-            {"score": x.get("score"), "recipe": (x.get("recipe") or "")[:120],
-             "bucket": h.get("_bucket"),
-             "held_by": (h.get("recipe") or "")[:60]}
-            for h in used or [] for x in (h.get("_suppressed") or [])]}
+def _skills_meta(rec: dict | None) -> dict:
+    """What the ledger keeps about a decision's skills (ids, versions,
+    names, chars), so a replay can report what its text carries."""
+    rec = rec or {}
+    out = {k: list(rec.get(k) or []) for k in ("ids", "versions", "names")} \
+        | {"chars": int(rec.get("chars") or 0)}
+    if rec.get("tool_recall"):
+        # SERVER-TOOL RECALL lines the text carries (skill_select).
+        out["tool_recall"] = [{k: d.get(k) for k in ("name", "trigger",
+                                                      "key")}
+                              for d in rec["tool_recall"]]
+    return out
 
 
 def _skills_unavailable(rec: dict | None) -> str | None:
-    """Why the skills / hints part came out empty because something was
+    """Why the skills part came out empty because something was
     UNAVAILABLE (the embedder not loaded, the A4000 busy, a raise), or None
-    when it was a real decision -- nothing cleared the floor, recall not
+    when it was a real decision -- nothing cleared the floor, skills not
     allowed, no skill armed."""
     rec = rec or {}
     why = str(rec.get("why") or "")
-    if why.startswith("recall raised"):
+    if why.startswith("skills raised"):
         return why[:200]
     emb = rec.get("embedding") or {}
     w = str(emb.get("why") or "")
@@ -2291,47 +3529,289 @@ def _index_of_user(messages: list, original: dict) -> int | None:
     """Where the client's last user turn sits in `messages` (the addendum
     may have added a system message in front, and restored image hops add
     messages before assistant turns)."""
-    text = original.get("content")
+    text = message_text.first_text(original)
     for i in range(len(messages) - 1, -1, -1):
         m = messages[i]
         if isinstance(m, dict) and m.get("role") == "user" \
-                and isinstance(m.get("content"), str) \
-                and m["content"].startswith(text or ""):
+                and message_text.has_text(m) \
+                and message_text.first_text(m).startswith(text or ""):
             return i
     return None
 
 
-def _skills_tail(messages: list[dict], sel: dict, route: dict
-                 ) -> tuple[str, list[dict], dict | None]:
-    """The skills / hints block for the last user turn, as the text to
-    append (mcp/skill_select.py decides; YAMADORI_RECALL picks the path).
+# THE CONVERSATION'S SKILL STATE (skill_select PER-TURN INJECTION and the
+# craft offer): which skills were given and when, the last recall per area,
+# the phase, the craft index and the tools withheld -- one ledger row per
+# conversation (kind `skills`), changed under a per-conversation lock.
+def skill_select_lock(account: str, lineage: str):
+    import skill_select
+    return skill_select.state_lock(account, lineage)
 
-    Selection is by embedding similarity with a FLOOR, not a rank cutoff, so
-    "the best of a bad set" stays silent (19 buckets / 89 probes: embeddings
-    71.9% against Laya's 33.7% and a 21.3% floor). A user turn, not the
-    system block: the system prefix must stay byte-identical, and
-    concept_seed.py records that guidance in the system message "was
-    sometimes ignored" while the same text in the user message "couldn't"
-    be. A failure degrades to silence and says so."""
+
+def _skill_state(account: str, lineage: str) -> dict:
+    import skill_select
+    try:
+        return skill_select.load_state(account, lineage)
+    except Exception:                                            # noqa: BLE001
+        return skill_select.new_state()
+
+
+def _save_skill_state(account: str, lineage: str, st: dict) -> None:
+    import skill_select
+    try:
+        skill_select.save_state(account, lineage, st)
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  skill state not saved: {type(e).__name__}: {e}", flush=True)
+
+
+def _text_messages(messages: list) -> list[dict]:
+    """The client's messages with every turn's text as a string (a list of
+    text parts -- Pi, Responses input_text -- joined), as skill_select
+    reads them."""
+    return [dict(m, content=message_text.text_of(m, ""))
+            if isinstance(m, dict) and isinstance(m.get("content"), list)
+            and message_text.has_text(m)
+            else (dict(m) if isinstance(m, dict) else m)
+            for m in messages if isinstance(m, dict)]
+
+
+def _mcp_offer(tier: dict, st: dict, continuing: bool) -> dict:
+    """The conversation's MCP tools (mcp/mcp_host.py), decided on its FIRST
+    request and kept by name in the skill state (`st["mcp"]`, saved by the
+    caller): the switch `mcp_tools` (tiers.BEHAVIOURS: medium and up, a
+    header or YAMADORI_MCP_TOOLS) and the host's offer at that moment. A
+    request that continues a conversation with no decision gets none --
+    adding tools then would change the system block the slot caches (the
+    craft offer's rule). Returns x_yamadori.mcp's record."""
+    on, src = tiers.behaviour_source(tier, "mcp_tools")
+    got = st.get("mcp")
+    if isinstance(got, dict) and "offered" in got:
+        return {"switch": {"on": on, "source": src},
+                "offered": [mcp_host.mcp_config.canonical(n)
+                            for n in got.get("offered") or []],
+                "kept": True,
+                "why": got.get("why"), "calls": []}
+    if continuing:
+        rec = {"offered": [], "why": "the conversation started without an "
+                                     "MCP tool offer"}
+    elif not on:
+        rec = {"offered": [], "why": f"switch mcp_tools off ({src})"}
+    else:
+        defs, why = mcp_host.offer()
+        rec = {"offered": [t["function"]["name"] for t in defs],
+               "why": why}
+    st["mcp"] = rec
+    return {"switch": {"on": on, "source": src}, "offered": rec["offered"],
+            "kept": False, "why": rec["why"], "calls": []}
+
+
+def _craft_offer(raw: list, sel: dict, route: dict, client_tools, account: str,
+                 st: dict, *, inplace: bool, continuing: bool
+                 ) -> tuple[dict, dict]:
+    """The conversation's craft offer (skill_select.craft_offer), decided on
+    its first request and kept."""
+    import skill_select
+    allowed = (bool((sel or {}).get("skills")) and not inplace
+               and (route or {}).get("class") not in skill_select.SKIP_CLASSES)
+    try:
+        import skill_learn
+        traffic = skill_learn.traffic_of(account or None)
+    except Exception:                                            # noqa: BLE001
+        traffic = "unknown"
+    return skill_select.craft_offer(
+        _text_messages(raw), (route or {}).get("class"),
+        list(client_tools or []), st, allowed=allowed,
+        continuing=continuing, traffic=traffic, account=account or None)
+
+
+# The per-request context the real _skills_tail reads (the conversation and
+# the user turn's ledger key): set by prepare, so the tail's signature --
+# which the offline suites replace -- stays as it is.
+_SKILL_CTX = threading.local()
+
+
+def _skills_tail(messages: list[dict], sel: dict, route: dict,
+                 client_tools: list[str] | None = None, account: str = ""
+                 ) -> tuple[str, dict | None]:
+    """The skills block for the last user turn, as the text to append
+    (mcp/skill_select.py decides; the tier's `skills` flag allows it).
+
+    A user turn, not the system block: the system prefix must stay
+    byte-identical, and concept_seed.py records that guidance in the system
+    message "was sometimes ignored" while the same text in the user message
+    "couldn't" be. Recorded in the ledger with the turn, so every later
+    request replays it byte for byte. A failure degrades to silence and says
+    so (and is RETRYABLE, _skills_unavailable)."""
     try:
         import skill_select
-        base = [dict(m) if isinstance(m, dict) else m for m in messages]
-        out, used, rec = skill_select.attach(base, messages, sel,
-                                             {"route": route})
+        # skill_select reads a turn's text as a string: a list of text
+        # parts (Pi, Responses input_text) is handed over as its text, and
+        # the caller appends the tail as a part (message_text).
+        base = [dict(m, content=message_text.text_of(m, ""))
+                if isinstance(m, dict) and isinstance(m.get("content"), list)
+                and message_text.has_text(m)
+                else (dict(m) if isinstance(m, dict) else m)
+                for m in messages]
+        # The client's tool names: a skill may be keyed on the harness
+        # (tools_any / tools_all / tools_none), never on our own tools.
+        # THE CONVERSATION'S STATE (skill_select PER-TURN INJECTION): what
+        # was given, when, and the last recall per area -- loaded, decided
+        # and saved under the conversation's lock.
+        ctx = getattr(_SKILL_CTX, "value", None) or {}
+        lineage = ctx.get("lineage") or ""
+        # MATCHING reads the client's own messages (prepare hands them over
+        # as `raw`); the block is appended to `base`, what will be sent.
+        own = (_text_messages(ctx["raw"]) if ctx.get("raw") is not None
+               else [dict(m) for m in base if isinstance(m, dict)])
+        with skill_select_lock(account, lineage), \
+                _decider_turn(own, account, lineage, ctx.get("key"),
+                              client_tools, sel, route) as turn:
+            st = _skill_state(account, lineage) if lineage else None
+            out, rec = skill_select.attach(
+                base, own, sel,
+                {"route": route, "client_tools": list(client_tools or []),
+                 # whose traffic: skill learning learns from client
+                 # traffic only
+                 "account": account, "skill_state": st,
+                 "key": ctx.get("key"),
+                 "server_tools": ctx.get("server_tools"),
+                 "plan_files": ctx.get("plan_files"),
+                 # the conversation's compactions (skill_select: a moved
+                 # count resets what was given)
+                 "compactions": _compactions(account, lineage),
+                 "decider": turn})
+            new_st = (rec or {}).pop("_state", None)
+            if lineage and new_st is not None:
+                _save_skill_state(account, lineage, new_st)
+        _decider_record(rec, turn)
     except Exception as e:                                       # noqa: BLE001
         print(f"  skills unavailable, continuing without: "
               f"{type(e).__name__}: {e}", flush=True)
-        return "", [], {"path": None, "on": False, "ids": [], "versions": [],
-                        "why": f"recall raised {type(e).__name__}: {e}"[:300]}
+        return "", {"on": False, "ids": [], "versions": [], "names": [],
+                    "chars": 0,
+                    "why": f"skills raised {type(e).__name__}: {e}"[:300]}
     li = next((i for i in range(len(base) - 1, -1, -1)
                if isinstance(base[i], dict) and base[i].get("role") == "user"),
               None)
     if li is None:
-        return "", used, rec
+        return "", rec
     before = base[li].get("content") or ""
     after = (out[li].get("content") if li < len(out) else before) or ""
     tail = after[len(before):] if after.startswith(before) else ""
-    return tail, used, rec
+    return tail, rec
+
+
+# The real tail, for a suite that replaces _skills_tail and wants it back.
+_skills_tail_real = _skills_tail
+
+
+def _server_tools(ours) -> list[str]:
+    """Our server tools on main this request (SERVER-TOOL RECALL names only
+    these): yama_think_deeply and yama_plan where deep.think_tool_offered
+    put them there and no conflict withheld them."""
+    have = set(ours or ())
+    return [n for n in (deep.TOOL_NAME, deep.PLAN_TOOL_NAME) if n in have]
+
+
+def _compactions(account: str, lineage: str) -> int | None:
+    """How many compactions this conversation has had (progress's count,
+    kept by _compaction_done), for the skill state's reset; None when it
+    cannot be read."""
+    if not lineage:
+        return None
+    try:
+        return int(progress.load(account, lineage).get("compactions") or 0)
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _plan_files(ours, messages: list) -> list[str] | None:
+    """The newest plan's FILES, read from the ledger-restored messages (the
+    yama_plan hop the client never saw), where main has yama_plan."""
+    if deep.PLAN_TOOL_NAME not in set(ours or ()):
+        return None
+    try:
+        import skill_select
+        return skill_select.plan_files_of(_text_messages(messages)) or None
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _skills_step(raw: list, sel: dict, route: dict, client_tools,
+                 account: str, lineage: str, key: str | None,
+                 server_tools: list[str] | None = None,
+                 plan_files: list[str] | None = None
+                 ) -> tuple[str, dict | None]:
+    """The skills this AGENT STEP's newest evidence brings (skill_select
+    PER-TURN INJECTION): a body the first time an area or API appears in
+    what the step read or wrote, a recall line when an error or a phase
+    change brings a given one back -- appended to the tool result the
+    request ends on, decided once under its key and replayed from the
+    ledger. A failure degrades to silence and says so."""
+    try:
+        import skill_select
+        msgs = _text_messages(raw)
+        with skill_select_lock(account, lineage), \
+                _decider_turn(msgs, account, lineage, key,
+                              client_tools, sel, route) as turn:
+            st = _skill_state(account, lineage) if lineage else None
+            text, rec = skill_select.attach_step(
+                msgs, sel,
+                {"route": route, "client_tools": list(client_tools or []),
+                 "account": account, "skill_state": st, "key": key,
+                 "server_tools": server_tools, "plan_files": plan_files,
+                 "compactions": _compactions(account, lineage),
+                 "decider": turn})
+            new_st = (rec or {}).pop("_state", None)
+            if lineage and new_st is not None:
+                _save_skill_state(account, lineage, new_st)
+        _decider_record(rec, turn)
+        return text, rec
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  step skills unavailable, continuing without: "
+              f"{type(e).__name__}: {e}", flush=True)
+        return "", {"on": False, "ids": [], "versions": [], "names": [],
+                    "chars": 0,
+                    "why": f"skills raised {type(e).__name__}: {e}"[:300]}
+
+
+def _decider_turn(messages: list, account: str, lineage: str,
+                  key: str | None, client_tools, sel: dict | None = None,
+                  route: dict | None = None):
+    """THE TURN DECIDER (mcp/decide_turn.py; operator 2026-09-27: the
+    default for every judgment question): this request's fixed questions
+    answered in one batch on the transient slot, before main's first
+    generation, the Turn handed to the selector (ctx "decider": its pick()
+    and confirm_packages() reuse the cached state) and its slot released
+    when the block ends. Off (answers are the rules') outside the serving
+    process, with YAMADORI_DECIDER=0, and where skills do not run (the
+    selection did not allow them; a client's side call); never raises."""
+    import decide_turn
+    on = None
+    try:
+        import skill_select
+        if not bool((sel or {}).get("skills")) or                 skill_select.route_class_of(None, sel or {}) in                 skill_select.SKIP_CLASSES or                 (route or {}).get("class") in skill_select.SKIP_CLASSES:
+            on = False
+    except Exception:                                            # noqa: BLE001
+        on = False
+    turn = decide_turn.Turn(messages, key=lineage or None, account=account,
+                            request=key, client_tools=client_tools, on=on)
+    try:
+        turn.facts()
+    except Exception as e:                                       # noqa: BLE001
+        turn.failure = {"code": type(e).__name__, "situation": str(e)[:160],
+                        "retryable": False}
+    return turn
+
+
+def _decider_record(rec: dict | None, turn) -> None:
+    """The Turn's record on the skills record, x_yamadori.skills.turn
+    (`decider` there is the selector's own: the decider's name)."""
+    if isinstance(rec, dict) and turn is not None:
+        try:
+            rec["turn"] = turn.record()
+        except Exception:                                        # noqa: BLE001
+            pass
 
 
 # LIBRARY DEFINITIONS (operator decision 2026-09-24, an UNMEASURED choice).
@@ -2409,17 +3889,19 @@ def _library_definitions(route: dict, tier: dict, gate: dict | None,
 # HELD package it has not covered yet, the service appends, to the message
 # this request ENDS on (a user turn or a tool result: the only text the slot
 # does not already hold), the definitions of the names imported from it
-# (find_definition_opt on that package's own index) or, for a package used
-# with no names yet, a short list of its exported classes and functions.
-# Decided once per message and recorded in the ledger under that message's
-# key (ledger_restore replays it, byte for byte); what was covered is recorded
-# per conversation, so each package and each name is injected once. Every cap
-# is a choice.
-USE_MAX_CHARS = 3000                # one injection
-USE_MAX_NAMES = 4                   # definitions in one injection
-USE_MAX_CHARS_EACH = 1000
-USE_OVERVIEW_ITEMS = 20             # exports listed for a package with no names
-USE_CONVERSATION_MAX_CHARS = 12000  # everything this injects in a conversation
+# (find_definition_opt on that package's own index), each WHOLE. Decided once
+# per message and recorded in the ledger under that message's key
+# (ledger_restore replays it, byte for byte); what was covered is recorded
+# per conversation, so each name is injected once.
+# THE ONE BOUND IS THE WINDOW (2026-09-27, docs/CONSTANTS-AUDIT.md): an
+# injection never takes the request past what the main share leaves after
+# the request itself and the generation floor (_injection_room); a
+# definition that does not fit is left uncovered, to be tried again on a
+# later message. REMOVED with the invented caps USE_MAX_CHARS 3,000,
+# USE_MAX_NAMES 4, USE_MAX_CHARS_EACH 1,000 and USE_CONVERSATION_MAX_CHARS
+# 12,000: the package OVERVIEW for a package used before any name from it
+# (USE_OVERVIEW_ITEMS 20 exports, lines cut at 140, test/spec/internal paths
+# skipped) -- it cannot exist without a picked number, so it is gone.
 # Imports sit at the top of a file; a harness can return a megabyte bundle.
 # Only the head of each message or written file is parsed.
 USE_SCAN_CHARS = 20000
@@ -2470,26 +3952,17 @@ def library_uses(messages: list[dict]) -> dict[str, dict]:
     return uses
 
 
-def _package_overview(db: str) -> str:
-    """A package's exported classes and functions, shallowest files first:
-    for a package used before any name from it is."""
-    import sqlite3 as _sq
-    try:
-        con = _sq.connect(f"file:{db}?mode=ro", uri=True)
-        try:
-            rows = con.execute(
-                "SELECT name, kind, path, start, line FROM defs WHERE kind IN "
-                "('class', 'function') AND line LIKE 'export %' AND path NOT "
-                "LIKE '%test%' AND path NOT LIKE '%spec%' AND path NOT LIKE "
-                "'%internal%' ORDER BY (LENGTH(path) - LENGTH(REPLACE(path, "
-                "'/', ''))), path, start LIMIT ?",
-                (USE_OVERVIEW_ITEMS,)).fetchall()
-        finally:
-            con.close()
-    except _sq.Error:
-        return ""
-    return "\n".join(f"{p}:{s}  {(ln or n).strip()[:140]}"
-                     for n, _k, p, s, ln in rows)
+def _injection_room(messages: list[dict], tools=None,
+                    already: int = 0) -> int:
+    """Characters an injection may add to this request: the main share
+    (window_limit's) less the request's high estimate and the generation
+    floor at a thinking tier, in the high estimate's own unit (3 characters
+    a token), less `already` characters decided for it. A real constraint:
+    the addition must not push the prompt past the window."""
+    est = high_estimate({"messages": messages, "tools": tools or None})
+    left = (int(tiers._shares()["main"]) - est - tiers.A_MIN
+            - tiers.MIN_THINKING)
+    return max(0, left * 3 - int(already))
 
 
 def conversation_versions(messages: list[dict],
@@ -2536,13 +4009,14 @@ def held_version(have: list[tuple[str, str]], stated: str | None
 
 
 def _library_use(messages: list[dict], account: str, lineage: str,
-                 state: dict | None = None) -> tuple[str, dict]:
+                 state: dict | None = None, room: int | None = None
+                 ) -> tuple[str, dict]:
     """(the text to append to the message this request ends on, the record).
     Updates the conversation's covered set in the ledger; the caller records
-    the text under the message's key."""
+    the text under the message's key. `room`: the characters the window
+    leaves (_injection_room); None computes it from `messages`."""
     import domains
-    rec: dict = {"packages": [], "names": [], "overview": [], "chars": 0,
-                 "versions": {}}
+    rec: dict = {"packages": [], "names": [], "chars": 0, "versions": {}}
     try:
         held = domains.held_sources()
         uses = library_uses(messages)
@@ -2560,12 +4034,11 @@ def _library_use(messages: list[dict], account: str, lineage: str,
         done = json.loads(nebari.ledger_get(account, key, "libuse") or "{}")
     except ValueError:
         done = {}
-    spent = int(done.get("_chars") or 0)
-    if spent >= USE_CONVERSATION_MAX_CHARS:
-        rec["why"] = "the conversation's cap is spent"
-        return "", rec
+    if room is None:
+        room = _injection_room(messages)
+    rec["room"] = room
     parts: list[str] = []
-    n_defs = 0
+    size = len(USE_HEAD)
     stated = conversation_versions(messages, state)
     for pkg in sorted(used):
         ver, db, label = held_version(held[pkg], stated.get(pkg))
@@ -2576,53 +4049,46 @@ def _library_use(messages: list[dict], account: str, lineage: str,
         vtag = f"{ver} ({label})" if label else ver
         covered = done.setdefault(pkg, [])
         names = [n for n in used[pkg]["names"] if n not in covered]
-        if names:
-            for n in names:
-                if n_defs >= USE_MAX_NAMES:
-                    break
-                try:
-                    out = _run_on_package(db, "find_definition_opt",
-                                          {"symbol": n})
-                except Exception as e:                           # noqa: BLE001
-                    out = ""
-                    rec.setdefault("unavailable", []).append(
-                        f"find_definition_opt({pkg}:{n}) raised "
-                        f"{type(e).__name__}: {e}"[:200])
-                    continue          # not covered: decided again later
-                why = _tool_unavailable(out)
-                if why:
-                    rec.setdefault("unavailable", []).append(
-                        f"find_definition_opt({pkg}:{n}): {why}")
-                    continue
+        for n in names:
+            try:
+                out = _run_on_package(db, "find_definition_opt",
+                                      {"symbol": n})
+            except Exception as e:                               # noqa: BLE001
+                rec.setdefault("unavailable", []).append(
+                    f"find_definition_opt({pkg}:{n}) raised "
+                    f"{type(e).__name__}: {e}"[:200])
+                continue              # not covered: decided again later
+            why = _tool_unavailable(out)
+            if why:
+                rec.setdefault("unavailable", []).append(
+                    f"find_definition_opt({pkg}:{n}): {why}")
+                continue
+            if not out or out.lstrip().startswith("{") \
+                    or packages._is_empty(out):
                 covered.append(n)
-                if not out or out.lstrip().startswith("{") \
-                        or packages._is_empty(out):
-                    continue
-                parts.append(f"== {pkg}@{vtag}: {n} ==\n"
-                             f"{out[:USE_MAX_CHARS_EACH]}")
-                rec["names"].append(f"{pkg}:{n}")
-                n_defs += 1
-        elif "*" not in covered:
-            covered.append("*")
-            ov = _package_overview(db)
-            if ov:
-                parts.append(f"== {pkg}@{vtag}: exported classes and "
-                             f"functions ==\n{ov}")
-                rec["overview"].append(pkg)
-        if parts and pkg not in rec["packages"]:
-            rec["packages"].append(pkg)
+                continue
+            part = f"== {pkg}@{vtag}: {n} ==\n{out}"
+            if size + len(part) + 2 > room:
+                # Does not fit what the window leaves: not covered, so a
+                # later message tries it again.
+                rec.setdefault("did_not_fit", []).append(f"{pkg}:{n}")
+                continue
+            covered.append(n)
+            parts.append(part)
+            size += len(part) + 2
+            rec["names"].append(f"{pkg}:{n}")
+            if pkg not in rec["packages"]:
+                rec["packages"].append(pkg)
     # A lookup that could not run (rec["unavailable"]) makes this decision
-    # RETRYABLE (prepare): nothing is marked covered and no characters are
-    # spent, so the retry decides the whole of it again.
+    # RETRYABLE (prepare): nothing is marked covered, so the retry decides
+    # the whole of it again.
     commit = not rec.get("unavailable")
     if not parts:
         if commit:
             nebari.ledger_put(account, lineage, key, "libuse",
                               json.dumps(done))
         return "", rec
-    room = min(USE_MAX_CHARS, USE_CONVERSATION_MAX_CHARS - spent)
-    text = (USE_HEAD + "\n\n".join(parts))[:room]
-    done["_chars"] = spent + len(text)
+    text = USE_HEAD + "\n\n".join(parts)
     if commit:
         nebari.ledger_put(account, lineage, key, "libuse", json.dumps(done))
     rec["chars"] = len(text)
@@ -2632,12 +4098,14 @@ def _library_use(messages: list[dict], account: str, lineage: str,
 def _work_log_block(state: dict | None) -> str:
     """The conversation's work log (mcp/rings.py), for the first user turn
     after a compaction. The proxy writes the log itself (_log_turn); the
-    model no longer has record_step / read_rings."""
+    model no longer has record_step / read_rings. (The files-read listing
+    #54 appended here was removed 2026-09-27 with the unchanged-read line:
+    task-targeted steering; skills are the channel.)"""
     try:
         import rings
         text = rings.read(session_lineage(state), limit=40)
     except Exception:                                            # noqa: BLE001
-        return ""
+        text = ""
     if not text or "nothing has been recorded" in text.lower():
         return ""
     return ("\n\n---\nWork log of this conversation before it was "
@@ -2666,17 +4134,24 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
     stored = None
     text = selection._text(messages[-1]) if messages else ""
     parsed = None if inplace else compaction.parse_flattened(text)
+    # The compaction call's own system prompt (Pi's summariser; Hermes and
+    # OpenCode send none), and whose form this is (x_yamadori.compaction
+    # .harness: hermes | pi | opencode | None).
+    own_system = selection._text(messages[0]) if len(messages) > 1 and \
+        messages[0].get("role") == "system" else ""
+    rec["harness"] = (parsed or {}).get("harness") or (
+        None if inplace else compaction.harness_of(text, own_system))
     if inplace:
         # THE LEDGER'S RENDERING (2026-09-24). prepare() already put back
         # everything this proxy added to the conversation -- injections, a
-        # fixed call's content, image hops with their reasoning emptied; past
-        # reasoning passes through as the client sent it -- so the request's
+        # fixed call's content, hidden hops, and (switch restore_reasoning,
+        # 2026-09-27) the slot's own past reasoning -- so the request's
         # own messages render as the slot holds them. The stored prompt is
         # the CHECK: when it (and the answer after it) is a prefix of this
         # rendering, the compaction is served as prepared; when not, the old
         # splice replaces the resent history with it.
-        _note_compaction(account)
         key = out["_slot"].get("key")
+        _note_compaction(account, lineage=key)
         e = next((x for x in compaction.entries(account) if x["key"] == key),
                  None)
         if e is None:
@@ -2712,7 +4187,9 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
                     rec["mode"] = "as_sent"
     elif not parsed:
         rec.update(mode="as_sent", why="not a flattened transcript this proxy "
-                   "can map (no TURNS TO SUMMARIZE block of [ROLE]: records)")
+                   "can map (none of Hermes' TURNS TO SUMMARIZE, Pi's "
+                   "<conversation> / # Conversation or OpenCode's "
+                   "<conversation> blocks of [Role]: records)")
     else:
         best, why = None, "no stored conversation for this account"
         for e in compaction.entries(account):
@@ -2733,28 +4210,56 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
                                        "kept: not found in the conversation")
             out["messages"] = compaction.continue_messages(
                 e, compaction.instruction_for(text, parsed, m, stored_msgs,
-                                              prev))
+                                              prev, system=own_system))
             out["tools"] = e["upstream"]["tools"]
             out["_slot"] = dict(out["_slot"], key=e["key"], transient=False,
                                 prefix=False)
+            # WHOSE compaction this is, exactly: the conversation it maps to
+            # (the recency guess in session_context missed it after a
+            # 2,903 s turn, #38).
+            _note_compaction(account, lineage=e["key"])
+            # The conversation's OWN session line on the summary (#41): the
+            # continuation carries the summary, so it keeps the conversation
+            # by its id. Only for a compaction mapped to it exactly, and only
+            # when the id is ours (a client with its own id sends it again).
+            st = nebari.load(e["key"])
+            if st.get("session_source") == "token" and st.get("session_id"):
+                out["_session_lead"] = session_id.line(st["session_id"])
+                rec["session_line"] = True
+                out.setdefault("_ledger", {})["conversation"] = {
+                    "id": st["session_id"], "source": "compaction_map",
+                    "why": "the conversation this compaction maps to; its "
+                           "summary carries the id on its line"}
             stored = e
             rec.update(mode="rewritten", why=m["why"], mapped=m["matched"],
                        span=[m["first"], m["last"]], conversation=e["key"][:8])
         else:
             rec.update(mode="as_sent", why=why)
     src = stored["upstream"] if stored else out
+    if not stored and (out.get("_utility") or {}).get("utility"):
+        # Nothing stored to take the conversation's effort from, and the
+        # utility rule set `minimal`: the effort the CLIENT sent is the
+        # conversation's (compaction.client_fields; AGENTS.md "A compaction
+        # THINKS at the conversation's own effort"). No effort sent: off.
+        eff = body.get("reasoning_effort") or (
+            body["reasoning"].get("effort")
+            if isinstance(body.get("reasoning"), dict) else None)
+        src = compaction.client_fields(out.get("_tier_requested")
+                                       if eff else None)
     client_max = (body.get("max_tokens") or body.get("max_completion_tokens")
                   or (parsed or {}).get("target_tokens"))
     comp = tiers.compaction_budget(
         client_max, tiers.estimate_prompt_tokens({"messages": out["messages"],
                                                   "tools": out.get("tools")}),
         helper_active=admission.helper_active())
-    fields = compaction.prefix_fields(src, comp["answer"])
+    fields = compaction.prefix_fields(src, comp["answer"],
+                                      comp["thinking_tokens"])
     rec["thinking"] = fields.pop("_thinking")
     thinks = bool(fields["enable_thinking"])
     if not thinks:
         for k in ("reasoning_effort", "reasoning_budget_tokens",
-                  "reasoning_budget_message"):
+                  "reasoning_budget_message", "reasoning_budget_nudge",
+                  "reasoning_budget_nudge_at"):
             out.pop(k, None)
     out.update(fields)
     sampling, out["_sampling"] = tiers.enforce_sampling(body, thinks)
@@ -2775,39 +4280,11 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
           f"{comp['room']}", flush=True)
 
 
-def _budget_note(finish: str | None, content: str,
-                 usage: dict | None) -> str | None:
-    """What to put in `content` when the model stopped on the token limit.
-
-    None when the finish was normal. The text states the fact -- a limit was
-    reached, and whether any answer was written -- so it can never be read as
-    the model's answer or as the model returning nothing.
-    """
-    notice = _budget_notice(finish, content, usage)
-    if notice is None:
-        return None
-    return content.rstrip() + notice if content.strip() else notice
-
-
-def _budget_notice(finish: str | None, content: str,
-                   usage: dict | None) -> str | None:
-    """Only the text `_budget_note` adds -- what the streamed path appends.
-
-    A stream has already delivered the partial answer, so it sends the notice
-    alone as a final content delta; the blocking path sends answer + notice.
-    One function, so the two paths cannot word the event differently.
-    """
-    if finish != "length":
-        return None
-    n = (usage or {}).get("completion_tokens")
-    spent = f" after {n} tokens" if n else ""
-    if not content.strip():
-        return (f"[no answer: the model reached its token limit{spent} while "
-                f"still thinking (finish_reason=length). This is a budget "
-                f"event, not the model's answer. Raise max_tokens, which is "
-                f"the answer allowance; thinking is budgeted separately.]")
-    return (f"\n\n[answer cut off at the token limit"
-            f"{spent} (finish_reason=length); raise max_tokens for the rest]")
+# _budget_note / _budget_notice REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md):
+# they appended "[no answer: the model reached its token limit ...]" or
+# "[answer cut off at the token limit ...]" to the client's content, where it
+# entered the client's stored history. finish_reason "length" carries the
+# fact (the OpenAI contract); the content is what was generated.
 
 
 # What the landing asks for. Shared by both tool loops so they land the same.
@@ -2817,9 +4294,164 @@ LANDING_PROMPT = ("Stop searching and answer now from what you have. If the "
                   "complete answer in full.")
 
 
+# THE CLIENT'S OWN PROMPT (C1, docs/OPENAI-CONFORMANCE.md; 2026-09-25,
+# "before V0 fixes should land"). A conversation past its window used to be
+# LANDED: the client's tools withdrawn and LANDING_PROMPT -- a user message
+# the client never sent -- appended, on a chars/3 estimate that fired before
+# the advertised context_length. An agent loop saw its tools vanish and the
+# task end, and no client ever saw `context_length_exceeded`, so none
+# compacted. Now the request as the proxy would send it (the client's
+# messages plus what the ledger and prepare put back, and the tools) is
+# measured BEFORE anything runs, and a prompt that does not fit is refused:
+# 400 context_length_exceeded, in OpenAI's wording (mcp/api_errors.py), with
+# the real count. The landing stays only for OUR hops (context_full, hop 1+).
+#
+# THE LIMIT is the window /v1/models advertises (catalog.context_window: the
+# main share, budget.budgets()["main"]) -- for a compaction, the window its
+# budget record was given (tiers.compaction_budget: the pool less a running
+# second brain's share). It covers prompt AND generation, as OpenAI's
+# context_length does, so a prompt is refused when it leaves less than
+# GENERATION_FLOOR: A_MIN (the smallest answer allowance the proxy sends)
+# plus MIN_THINKING when the request thinks -- 3,072 tokens at a thinking
+# tier, 2,048 without. A CHOICE (the smallest generation the budget rule
+# ever sends), not a measurement of what an answer needs.
+#
+# THE COUNT is llama-server's own: the chat template renders the request
+# (/apply-template) and the model's tokenizer counts it (/tokenize), the same
+# two calls the warm already makes (warm_prompt, _prefill_floor). It costs
+# two round trips, so it is made only NEAR THE EDGE: when a high estimate
+# (chars / 3 over messages and tools, plus half the extra UTF-8 bytes, so
+# text of non-ASCII scripts is not under-counted) says the prompt might not
+# fit. A prompt the estimate clears cannot overflow by more than the
+# estimate's error. When the count cannot be made the request is sent, and
+# llama-server's own exceed_context_size_error (at the slot's n_ctx) is
+# mapped to the same 400.
+COUNT_TIMEOUT = float(os.environ.get("YAMADORI_COUNT_TIMEOUT", "30"))
+
+
+def generation_floor(payload: dict) -> int:
+    thinks = bool(payload.get("enable_thinking", True)) and \
+        "reasoning_budget_tokens" in payload
+    return tiers.A_MIN + (tiers.MIN_THINKING if thinks else 0)
+
+
+def window_limit(payload: dict) -> int:
+    comp = payload.get("_compaction") or {}
+    if comp.get("window"):
+        return int(comp["window"])
+    return int(tiers._shares()["main"])
+
+
+def high_estimate(payload: dict, messages: list | None = None) -> int:
+    """chars / 3 over messages and tools, plus half the bytes non-ASCII text
+    adds in UTF-8 (a CJK character is ~1 token, not 1/3)."""
+    n = extra = 0
+    for key, v in (("messages", messages if messages is not None
+                    else payload.get("messages")),
+                   ("tools", payload.get("tools"))):
+        if key == "messages" and v:
+            # images passed to the main model: the projector's tokens for each
+            # (image_input.image_tokens), never their base64
+            v, image_tok = image_input.without_image_bytes(v)
+            n += 3 * image_tok
+        if not v:
+            continue
+        try:
+            s = json.dumps(v, ensure_ascii=False)
+        except (TypeError, ValueError):
+            s = str(v)
+        n += len(s)
+        extra += len(s.encode("utf-8", "replace")) - len(s)
+    return n // 3 + extra // 2
+
+
+def count_prompt_tokens(payload: dict, messages: list | None = None,
+                        timeout: float | None = None) -> int | None:
+    """The request's prompt in the model's own tokens: the served template's
+    render, tokenized by the model server. None when either call gives no
+    answer."""
+    model = payload.get("model") or "bonsai"
+    fields = {k: payload[k] for k in ("tools", "chat_template_kwargs",
+                                      "enable_thinking", "reasoning_effort")
+              if k in payload}
+    t = COUNT_TIMEOUT if timeout is None else timeout
+    # Image parts are counted as the projector counts them (image_input.
+    # image_tokens, from each image's own size), not rendered: the template
+    # would put a media marker there, whose few tokens are not the image's.
+    msgs, image_tok = image_input.without_image_bytes(
+        messages if messages is not None else payload.get("messages"))
+    prompt = _upstream_json(f"/upstream/{model}/apply-template",
+                            dict(fields, messages=msgs),
+                            timeout=t).get("prompt")
+    if not isinstance(prompt, str):
+        return None
+    toks = _upstream_json(f"/upstream/{model}/tokenize",
+                          {"content": prompt, "add_special": True},
+                          timeout=t).get("tokens")
+    return (len(toks) + image_tok if isinstance(toks, list) else None)
+
+
+def check_client_prompt(payload: dict) -> dict:
+    """Refuse (api_errors.context_length_exceeded) a request whose prompt
+    leaves less than the generation floor in its window; else the record for
+    x_yamadori.context: {limit, floor, estimate, tokens, counted, why}."""
+    limit, floor = window_limit(payload), generation_floor(payload)
+    est = high_estimate(payload)
+    rec = {"limit": limit, "floor": floor, "estimate": est, "tokens": None,
+           "counted": False}
+    if est + floor < limit:
+        rec["why"] = "fits by the high estimate; not counted"
+        return rec
+    try:
+        n = count_prompt_tokens(payload)
+    except cancel.Cancelled:
+        raise
+    except Exception as e:                                       # noqa: BLE001
+        n = None
+        rec["count_error"] = f"{type(e).__name__}: {e}"[:200]
+    if n is None:
+        rec["why"] = ("near the edge and the model server could not count "
+                      "it: sent; its own context limit decides")
+        print(f"  context: ~{est} tokens (estimate) near the {limit}-token "
+              f"window and not counted ({rec.get('count_error')}); sent",
+              flush=True)
+        return rec
+    rec.update(tokens=n, counted=True)
+    if n + floor > limit:
+        print(f"  context: {n} tokens + {floor} to answer > the {limit}-token "
+              f"window: refused (context_length_exceeded)", flush=True)
+        raise api_errors.context_length_exceeded(n, limit, floor)
+    rec["why"] = "counted near the edge: fits"
+    return rec
+
+
+def fit_window(payload: dict, n_prompt: int, limit: int) -> dict:
+    """Hop 0's token fields cut to the window: max_tokens never asks for
+    more than the prompt leaves (the budget rule adds MIN_THINKING and the
+    answer allowance on top of an estimate, which could), thinking keeps
+    what the answer allowance leaves. Unchanged when it already fits."""
+    room = int(limit) - int(n_prompt)
+    mt = int(payload.get("max_tokens") or 0)
+    if not mt or mt <= room:
+        return payload
+    out = dict(payload, max_tokens=max(room, 1))
+    rbt = payload.get("reasoning_budget_tokens")
+    if rbt is not None:
+        ans = int(payload.get("_answer") or tiers.A_MIN)
+        out["reasoning_budget_tokens"] = max(1, min(
+            int(rbt), max(room - ans, min(tiers.MIN_THINKING, room // 2))))
+    out["_fit_window"] = {"room": room, "max_tokens_was": mt}
+    return out
+
+
 def context_full(payload: dict, convo: list[dict], role: str = "main",
                  share_n: int = 1) -> bool:
     """Would one more hop no longer fit in this request's share of the pool?
+
+    OUR HOPS ONLY (hop 1+, after one of our tools ran; 2026-09-25): the
+    client's own prompt is measured before the turn starts
+    (check_client_prompt) and refused with context_length_exceeded, never
+    landed.
 
     One of two things that end a tool loop besides the model stopping; the
     other is the tool-turn cap (tiers.tool_turn_limit, 2026-09-23), which lands the same way. The old
@@ -2889,6 +4521,10 @@ def _land(payload: dict, convo: list[dict],
         cap = payload.get("_turn_cap") or {}
         print(f"  tool_turn_cap: {cap.get('limit')} tool turns reached; tools "
               "withdrawn for the landing", flush=True)
+    elif why == "image_guard":
+        print(f"  image guard: image data in a tool call again after "
+              f"{tool_code.IMAGE_REGENERATIONS} regenerations; tools "
+              "withdrawn for the landing", flush=True)
     elif not payload.get("tools"):
         # NO TOOLS, NOTHING TO WITHDRAW. A request that carries no tool
         # cannot loop, and "stop searching" appended to it -- a client's
@@ -2912,15 +4548,16 @@ def _land(payload: dict, convo: list[dict],
 # What crosses the callosum: deep thinking's hand-off (shomen.SECTIONS),
 # PREFILLED AS MAIN'S OWN REASONING (operator decision 2, 2026-09-24): the
 # second brain's thinking becomes main's thinking for THIS request (its
-# hidden hops included, _run_turn); on later turns it is whatever the client
-# echoes back -- the ledger restores no reasoning (pass-through,
-# 2026-09-24) -- and the user sees only the conclusion -- main's visible
+# hidden hops included, _run_turn); on later turns the ledger restores it
+# with the turn (PAST REASONING IS RESTORED, 2026-09-27; with switch
+# restore_reasoning off, whatever the client echoes) -- and the user sees
+# only the conclusion -- main's visible
 # answer, which opens with the fold-back phrase (shomen.opening). A run that
 # SEARCHED crosses under FINDINGS_HEAD; one that made no search under
 # REASONING_HEAD, which says no source was checked (operator, 2026-09-23).
 FINDINGS_HEAD = ("I investigated this in the library source before "
-                 "answering. A fact ending in path:line was read there; a "
-                 "fact labelled otherwise was not checked.\n\n")
+                 "answering. A fact ending in path:line was read "
+                 "there.\n\n")
 REASONING_HEAD = ("I thought this through before answering, without "
                   "searching: reasoning, no sources checked. Nothing below "
                   "was read from a file.\n\n")
@@ -2940,65 +4577,151 @@ FOLD_BACK_TAIL = ("\n\nThe user sees only my answer, not this thinking and "
                   "not this hand-off. So my answer stands on its own: it "
                   "states the findings in full -- each fact it relies on "
                   "with its path:line and the source lines that show it, "
-                  "what is still open, and the next step. It opens with "
+                  "and the next step. It opens with "
                   "\"After thinking deeply,\" and that same sentence goes "
                   "straight on into the answer itself. It never mentions "
                   "the hand-off, the investigation or anything \"above\", "
                   "and it never writes the opening phrase a second time.")
+# A MACHINE-BUILT hand-off (the second brain wrote no conclusion) gets its
+# own tail (deploy check 2026-09-26, handle d28941fb): under FOLD_BACK_TAIL
+# main was told to state "the findings in full" when there were none, wrote
+# "The hand-off didn't finish, so I'll continue from its NEXT STEP" into its
+# visible content and told the user "the deep-thinking pass ... cut off
+# before finishing". This one says what IS there -- a search log, no
+# conclusion -- and what the answer does with it. Same two prohibitions, the
+# observed leak's words added to the first. UNMEASURED WORDING. (2026-09-27:
+# "from the source lines shown here" dropped -- the machine-built hand-off
+# carries no source lines since the MACHINE EVIDENCE excerpts were removed.)
+FOLD_BACK_TAIL_MACHINE = (
+    "\n\nThe user sees only my answer, not this thinking and not this search "
+    "log. No conclusion was written here, so my answer works the question "
+    "out itself from what I know and acts on it. It opens with \"After "
+    "thinking "
+    "deeply,\" and that same sentence goes straight on into the answer "
+    "itself. It never mentions the search log, the investigation, deep "
+    "thinking or anything \"above\", and it never writes the opening phrase "
+    "a second time.")
 PLAN_TAIL = ("\n\nThe user sees only my answer, not this plan. So my answer "
              "says in a sentence or two what I will do and in what order, "
              "then starts on the first step.")
-# The check on what follows (x_yamadori.fold_back_answer; the live suite
-# asserts it): characters of answer after the opening phrase, and any
-# pointer at text the user never saw. 200 is a choice: the failing answer
-# had 72.
-FOLD_BACK_MIN_CHARS = 200
-_HIDDEN_REF = re.compile(r"\bhand-?offs?\b|\babove\b|\binvestigation\b|"
-                         r"\bmy (?:thinking|"
-                         r"reasoning)\b|\bthink_deeply\b", re.IGNORECASE)
+# THE PLAN AS A TOOL RESULT (operator, 2026-09-27; pagoda-h2): the initial
+# prompt's plan and a yama_plan call both come back as the yama_plan TOOL
+# RESULT of a hidden hop, and main goes on acting from it. PLAN_HEAD /
+# PLAN_TAIL above were written as main's own prefilled reasoning ("I
+# planned ..."); these are the result's own words: what it is, who sees it,
+# and the next action. No prohibition. UNMEASURED WORDING, a CHOICE.
+# plan/3 (operator, 2026-09-28, after pagoda-h6: "plans don't sow doubt"):
+# the head no longer says which decisions were "not checked" -- the
+# decisions are made, and the tail says to carry them out.
+PLAN_RESULT_HEAD = ("The plan for this task, written by a second model on "
+                    "the Yamadori server. Its decisions are made.\n\n")
+PLAN_RESULT_TAIL = ("\n\nThe user sees neither this result nor the plan. "
+                    "Carry it out step by step with your own tools, "
+                    "starting with the first ORDER step now.")
+# A hand-off delivered as an inserted yama_think_deeply result (switch
+# deep_tool_hop, OFF by default): no prefilled "After thinking deeply,"
+# follows it, so the result itself says who sees what. UNMEASURED WORDING.
+THINK_RESULT_TAIL = ("\n\nThe user sees neither this result nor your "
+                     "thinking. Your next step acts on the NEXT STEP above, "
+                     "and a reply to the user states the findings it relies "
+                     "on in full, each with its path:line.")
+THINK_RESULT_TAIL_MACHINE = (
+    "\n\nThe user sees neither this result nor your thinking. No conclusion "
+    "was written here: work the question out from the source lines shown, "
+    "if any, citing each by its path:line, and act on it.")
 
 
-def _repeat_opening_re() -> "re.Pattern":
-    phrase = re.escape(shomen.PHRASES["investigate"].rstrip(","))
-    # A later line that is only the phrase, bold, italic or a heading:
-    # "**After thinking deeply,**", "## After thinking deeply", ...
-    return re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]*)?[*_]{0,3}[ \t]*" + phrase
-                      + r",?[ \t]*[*_]{0,3}[ \t]*:?[ \t]*\n?")
+# THE SERVER-TOOL TRIGGERS' DIRECTIVE (operator, 2026-09-27, after pagoda-h5:
+# "this model isn't taking gentle hints, we need to tell it what to do ... at
+# the right time"). When the proxy runs deep thinking or a plan FOR the model
+# (deep.decide kind "auto": a package probe or scratch test, a new piece, a
+# finished plan, a build request after an answer), the result is inserted as
+# a hidden yama_think_deeply / yama_plan hop and main's turn after it OPENS
+# with one fixed line in the model's own voice saying what it does next --
+# generic, never task-specific, never "server tool". Only on the request the trigger fired: the line nearest the
+# generation, never repeated. Each ends on a LETTER (AGENTS.md's prefill
+# rule: "ends on a letter, or on an ending measured safe ... never a
+# space"). THE LAST LINE OF MAIN'S REASONING, the think block LEFT OPEN
+# (coordinator, 2026-09-27: "so the model keeps thinking toward the action
+# and then acts, instead of writing code with zero reasoning on that step"):
+# a prefill whose reasoning_content is the line and whose content is empty
+# (directive_prefill). That llama-server leaves the block open for such a
+# prefill is INFERRED from STEP 0's probe (docs/SELF-IMPROVEMENT-PLAN.md: a
+# trailing assistant message with reasoning and tool calls, no text,
+# rendered through /apply-template as `<think>` + the reasoning, and
+# stopped), not measured for a reasoning-only prefill -- confirm on the
+# live /apply-template before trusting it. The reasoning is the slot's own text: the client is
+# streamed it as reasoning (llama-server re-sends a prefill first), the
+# ledger restores it (restore_reasoning). The wording follows the
+# operator's examples; UNMEASURED.
+#
+# REWORDED 2026-09-28 (operator, after pagoda-h6: "don't say 'I have it from
+# source' or anything that confuses the model into overthinking its way out
+# of using the findings"). The 2026-09-27 lines said "I have <P>'s API from
+# its own source now, so I'll stop reading its files ..." and after every
+# one the model kept probing node_modules and writing scratch scripts: a
+# line that names WHERE the findings came from (and which files to stop
+# reading) gives the reasoning something to weigh -- where, how, whether to
+# trust it, whether to check. Each line now says only that the result just
+# given answers the question, to USE it, and the next concrete action: no
+# provenance, no package name, no prohibition. One line per job (the
+# investigate triggers -- probe, scratch -- share one; the plan triggers --
+# next_piece, plan_done, implement -- share one). The operator's candidates,
+# as given.
+AUTO_DIRECTIVE_THINK = ("The findings above answer this, so I'll use them "
+                        "and write the code now")
+AUTO_DIRECTIVE_PLAN = "Next I'll do the first step of this plan"
 
 
-def dedup_opening(text: str, payload: dict | None = None,
-                  count: bool = True) -> str:
-    """`text` with every LATER copy of the fold-back opening that stands on
-    its own line (bold, italic or a heading) removed -- the first one, the
-    prefilled opening, stays. A deterministic guard (live gate 2026-09-24,
-    second run: "... from the hand-off facts.\\n\\n**After thinking
-    deeply,**\\n\\nThe TSL node ..."). The removals are counted in
-    payload["_opening_repeats_removed"] (x_yamadori.fold_back_answer)."""
-    phrase = shomen.PHRASES["investigate"]
-    i = (text or "").find(phrase)
-    if i < 0:
-        return text
-    head, tail = text[:i + len(phrase)], text[i + len(phrase):]
-    new, n = _repeat_opening_re().subn("", tail)
-    if n and payload is not None and count:
-        payload["_opening_repeats_removed"] = int(
-            payload.get("_opening_repeats_removed") or 0) + n
-    if n:
-        new = re.sub(r"\n{3,}", "\n\n", new)
-    return head + new
+def directive_prefill(line: str) -> dict:
+    """A directive as the opening of main's REASONING, the think block left
+    open: no content, so the model thinks on from the line, then acts."""
+    return {"role": "assistant", "content": "", "reasoning_content": line}
+
+
+def auto_directive(auto: dict, machine: bool = False) -> str:
+    """The directive line for a fired server-tool trigger (deep.decide's
+    `auto` record). `machine`: the run wrote no conclusion -- the same line
+    (a CHOICE: the model reads the result either way)."""
+    if auto.get("job") == "plan":
+        return AUTO_DIRECTIVE_PLAN
+    return AUTO_DIRECTIVE_THINK
+
+
+def synthetic_hop(name: str, args: dict, result: str,
+                  key: str | None = None) -> list[dict]:
+    """A call of ours the PROXY makes on main's behalf, and its result: the
+    assistant turn that calls `name` with `args` (no content, no reasoning)
+    and the tool turn that answers it -- a hidden hop, recorded and replayed
+    by the ledger like one the model made (_run_turn). The id is not our
+    session form (session_id.carry) and never reaches the client."""
+    import hashlib
+    h = hashlib.sha1(f"{name}\x00{key or ''}\x00{result}".encode(
+        "utf-8")).hexdigest()[:12]
+    cid = f"call_{name}_{h}"
+    return [{"role": "assistant", "content": "", "reasoning_content": "",
+             "tool_calls": [{"id": cid, "type": "function", "function": {
+                 "name": name,
+                 "arguments": json.dumps(args, ensure_ascii=False,
+                                         sort_keys=True)}}]},
+            {"role": "tool", "tool_call_id": cid, "content": result}]
+# x_yamadori.fold_back_answer: how many characters of answer followed the
+# deep-thinking opening -- a number, recorded. REMOVED 2026-09-27
+# (docs/CONSTANTS-AUDIT.md): FOLD_BACK_MIN_CHARS (200, a log threshold), the
+# _ABOVE_REF / _HIDDEN_REF regexes that flagged an answer pointing at text
+# the user never saw (hand-written from two live-gate answers), and
+# dedup_opening, which removed later copies of "After thinking deeply," from
+# the model's answer (one live-gate run). The answer is delivered as written.
 
 
 def fold_back_answer(content: str) -> dict:
-    """{chars_after_opening, refers_to_hidden} for an answer that opened with
-    the deep-thinking fold-back ("... After thinking deeply,")."""
+    """{chars_after_opening, opened} for an answer that opened with the
+    deep-thinking fold-back ("... After thinking deeply,")."""
     phrase = shomen.PHRASES["investigate"]
     text = content or ""
     i = text.find(phrase)
     after = text[i + len(phrase):] if i >= 0 else text
-    m = _HIDDEN_REF.search(after)
-    return {"chars_after_opening": len(after.strip()),
-            "refers_to_hidden": m.group(0) if m else None,
-            "opened": i >= 0}
+    return {"chars_after_opening": len(after.strip()), "opened": i >= 0}
 
 
 def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
@@ -3014,7 +4737,7 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
     second-brain runner (shomen.run: `investigate`, or `plan` for a
     kickoff), with the concept seed the ledger recorded for this request and
     job, and the second brain's tools (deep_thinking_tools), never the
-    request's. The model's own trigger, think_deeply, is _think_deeply.
+    request's. The model's own trigger, yama_think_deeply, is _think_deeply.
 
     WHAT CROSSES: the hand-off, ALWAYS, once it ran -- shomen's four
     sections, labelled per fact -- as `payload["_prefill"]`: an assistant
@@ -3034,13 +4757,16 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
     # forces deep thinking, or nothing, asks the last user turn, as before.
     trig = payload.get("_deep") or {}
     own = bool(trig.get("fire") and trig.get("question")
-               and trig.get("kind") in ("struggle", "kickoff", "area"))
+               and trig.get("kind") in ("struggle", "kickoff", "area",
+                                        "auto"))
+    auto = trig.get("auto") if trig.get("kind") == "auto" else None
+    t_run = time.time()
     job = (trig.get("job") or "investigate") if own else "investigate"
     if own:
         q, ctx = trig["question"], trig.get("context") or ""
     else:
         # The messages as the text model reads them: an attached image is
-        # its placeholder, so the question carries the id describe_image
+        # its placeholder, so the question carries the id yama_describe_image
         # takes.
         q, ctx, _speaking = selection.question_of(
             payload.get("_seen_messages") or messages)
@@ -3066,40 +4792,76 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
         return out
 
     tier = payload.get("_tier") or {}
+    # THE REQUEST'S CANCELLATION (mcp/cancel.py, #39): the job's upstream
+    # sockets register with it, so a client that goes away stops the job and
+    # frees the helper lane. A caller with no token (complete(), a test) gets
+    # one of its own, cancelled if this generator is closed early.
+    tok = cancel.current() or cancel.Token()
 
     def _work():
         try:
-            box["res"] = shomen.run(
-                job, question=q,
-                tools=deep_thinking_tools((state or {}).get("_attached")),
-                run_tool=_watched, context=ctx,
-                on_think=lambda t: trace_q.put(t.rstrip()),
-                # The request's tier (medium on `xhigh`, xhigh on `max`); an
-                # effort override (the domain benchmark's header) wins.
-                tier=tier.get("name") or "max",
-                effort=(tier.get("effort") if "effort" in
-                        (tier.get("overridden") or []) else None),
-                seed=seed, lane_timeout=trig.get("lane_timeout"),
-                # A citation of the bound repository's own file is read from
-                # it (shomen THE EVIDENCE); with none bound, held packages
-                # only.
-                **({"source_root": root} if root else {}))
+            with cancel.bound(tok):
+                box["res"] = _job()
         except Exception as e:                                   # noqa: BLE001
             box["err"] = f"{type(e).__name__}: {e}"
         finally:
             trace_q.put(None)
 
+    def _job():
+        return shomen.run(
+            job, question=q,
+            tools=deep_thinking_tools((state or {}).get("_attached")),
+            run_tool=_watched, context=ctx,
+            on_think=lambda t: trace_q.put(t.rstrip()),
+            # The request's tier (medium on `xhigh`, xhigh on `max`); an
+            # effort override (the domain benchmark's header) wins.
+            tier=tier.get("name") or "max",
+            effort=(tier.get("effort") if "effort" in
+                    (tier.get("overridden") or []) else None),
+            seed=seed,
+            # #52: the research seed line, behind its switch
+            # (tiers.BEHAVIOURS).
+            seed_frame=tiers.behaviour(tier, "seed_frame"),
+            # #60: the plan job's tools, budget and prompt switches.
+            plan_switches=tiers.plan_switches(tier),
+            # A citation of the bound repository's own file is read from
+            # it (shomen THE EVIDENCE); with none bound, held packages
+            # only.
+            **({"source_root": root} if root else {}))
+
     # The investigation runs in a thread and its tool calls are streamed AS
     # THEY HAPPEN: the searches ARE the thinking. A thread because it blocks
     # for minutes and this is a generator.
+    #
+    # HEARTBEATS (#39): between trace lines this yields None every HEARTBEAT
+    # seconds, which _run_turn sends as an empty delta. The helper's first
+    # line came 350 s in and the last ~900 s before the end on the Octopus
+    # run, and Hermes kills a stream that sends no CHUNK for its stale
+    # timeout (900 s for a local endpoint, agent/chat_completion_helpers.py
+    # _local_stream_stale_timeout_default; an SSE comment is not a chunk to
+    # the OpenAI SDK, an empty delta is). It also gives a closed stream a
+    # yield point to be closed at, within HEARTBEAT seconds.
     th = _threading.Thread(target=_work, daemon=True)
     th.start()
-    while True:
-        line = trace_q.get()
-        if line is None:
-            break
-        yield line
+    try:
+        while True:
+            try:
+                line = trace_q.get(timeout=HEARTBEAT)
+            except _queue.Empty:
+                yield None
+                continue
+            if line is None:
+                break
+            yield line
+    except GeneratorExit:
+        # The stream was closed mid-investigation: stop the job (its
+        # sockets are shut, shomen.run fails fast and frees the lane).
+        tok.cancel("the stream was closed during deep thinking")
+        print("  deep thinking cancelled: the stream was closed", flush=True)
+        raise
     th.join(timeout=5)
+    if tok.cancelled:
+        raise cancel.Cancelled(tok.why)
     res = box.get("res") or {}
     if res.get("skipped"):
         # Reported, not swallowed: an investigation that quietly did not
@@ -3125,16 +4887,62 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
     # the template markers are scrubbed and counted, so a marker is counted
     # as ours, not mistaken for a role token.
     text = _screen_handoff(payload, text, ctx_run, rec)
-    payload["_prefill"] = {"role": "assistant",
-                           "reasoning_content": head + text.rstrip() + (
-                               PLAN_TAIL if job == "plan" else FOLD_BACK_TAIL),
-                           "content": shomen.opening(seeds)}
-    payload.setdefault("_fold_back", []).append(
-        {"job": job, "phrase": "investigate", "into": "prefill",
-         "trigger": rec["trigger"],
-         "seeds": [s.get("word") for s in seeds]})
+    machine = bool((stats or {}).get("machine_built"))
+    # HOW IT REACHES MAIN. The initial prompt's PLAN always, and any other
+    # run when the deep_tool_hop switch is on (tiers.BEHAVIOURS, OFF by
+    # default; operator deciding, 2026-09-27): as an INSERTED CALL of ours
+    # and its result -- yama_plan, or yama_think_deeply -- a hidden hop
+    # before main's first generation, as if main had called it. Main's
+    # generation continues from a tool result: no visible opening, no
+    # prefilled reasoning, and it can go straight on to a tool call
+    # (pagoda-h2, 2026-09-27: the plan prefilled under "After thinking
+    # deeply," was continued as prose about the second model, finish=stop,
+    # no call, and the harness ended the run). Otherwise, as before: the
+    # hand-off prefilled as main's reasoning under the fold-back opening.
+    # A run whose result would not leave main room in its window is the
+    # window check's to handle, as for any prompt: hop 0's max_tokens is cut
+    # to what is left (fit_window), a `length` finish is a budget event, and
+    # the client's next request is refused context_length_exceeded
+    # (check_client_prompt), which a harness compacts on.
+    if job == "plan" or auto is not None or \
+            tiers.behaviour(tier, "deep_tool_hop"):
+        name = deep.PLAN_TOOL_NAME if job == "plan" else deep.TOOL_NAME
+        result = (PLAN_RESULT_HEAD + text.rstrip() + PLAN_RESULT_TAIL
+                  if job == "plan" else
+                  head + text.rstrip() + (THINK_RESULT_TAIL_MACHINE if machine
+                                          else THINK_RESULT_TAIL))
+        payload["_pre_hops"] = synthetic_hop(
+            name, deep.synthetic_args(trig, job), result,
+            (payload.get("_ledger") or {}).get("turn_key"))
+        payload.setdefault("_fold_back", []).append(
+            {"job": job, "phrase": None, "into": "tool_result", "tool": name,
+             "trigger": rec["trigger"],
+             "seeds": [s.get("word") for s in seeds]})
+        rec["into"] = "tool_result"
+        rec["tool"] = name
+        if auto is not None:
+            # THE DIRECTIVE (operator, 2026-09-27): main's turn after the
+            # inserted result opens with one fixed line in its own voice
+            # saying what it does next -- on this request only, the line
+            # nearest the generation.
+            line = auto_directive(auto, machine)
+            payload["_prefill"] = directive_prefill(line)
+            payload["_prefill_auto"] = True
+            auto.update(seconds=round(time.time() - t_run, 1),
+                        delivered_as="tool_result", directive=line)
+    else:
+        payload["_prefill"] = {"role": "assistant",
+                               "reasoning_content": head + text.rstrip() + (
+                                   PLAN_TAIL if job == "plan" else
+                                   FOLD_BACK_TAIL_MACHINE if machine else
+                                   FOLD_BACK_TAIL),
+                               "content": shomen.opening(seeds)}
+        payload.setdefault("_fold_back", []).append(
+            {"job": job, "phrase": "investigate", "into": "prefill",
+             "trigger": rec["trigger"],
+             "seeds": [s.get("word") for s in seeds]})
+        rec["into"] = "prefill"
     rec["injected"] = True
-    rec["into"] = "prefill"
     rec["searches"] = searches
     rec["handoff"] = _handoff_record(stats)
     # What main should act on next, for the outcome check (deep.observe:
@@ -3154,7 +4962,7 @@ def _deep_thinking(payload: dict, messages: list[dict], db: str | None = None,
 def _handoff_record(stats: dict | None) -> dict:
     return {k: (stats or {}).get(k) for k in (
         "facts", "verified", "unverified", "searched_empty", "open", "chars",
-        "machine_built", "cut",
+        "machine_built",
         # Did the helper write the four sections? The rate of this is how
         # well the format is followed -- measure it before relying on it.
         "structured", "plan",
@@ -3177,6 +4985,11 @@ def _handoff_of(res: dict, q: str, err: str | None, rec: dict,
                effort=res.get("effort"),
                cited=len(res.get("cited") or []),
                unsupported=len(res.get("unsupported") or []))
+    if res.get("error") and not err:
+        # Why the run wrote no conclusion (shomen._fail), in the record and
+        # on the log line: "MACHINE-BUILT" alone left the 2026-09-26 cause
+        # to be dug out of the ledger.
+        rec.setdefault("why", "no conclusion: " + str(res["error"])[:300])
     # Real searches, not the "(turn cap)" / "(budget)" trace markers.
     searches = int(res.get("searches", rec["hops"]) or 0)
     text = (res.get("handoff") or "").strip()
@@ -3194,7 +5007,7 @@ def _handoff_of(res: dict, q: str, err: str | None, rec: dict,
             text, stats = shomen.machine_handoff(
                 q, tr.get("trace") or [], seen,
                 rec.get("why") or res.get("error") or "no hand-off came back",
-                rec["handle"] or "")
+                rec["handle"] or "", root=root)
     return text, stats, searches
 
 
@@ -3204,15 +5017,59 @@ def _handoff_of(res: dict, q: str, err: str | None, rec: dict,
 # hand-off as the TOOL RESULT. The call and its result are a hidden hop: the
 # client never sees them, and the ledger records and replays them
 # (ledger_record_turn / ledger_restore) so the next request extends the
-# slot. The next hop is prefilled: reasoning deep.THINK_REASONING, content
+# slot. The next hop is prefilled: reasoning deep.think_reasoning(concluded)
+# (THINK_REASONING, or THINK_REASONING_MACHINE after a machine-built result),
+# content
 # the fold-back opening (seed line + "After thinking deeply,").
 THINK_CALLS_PER_REQUEST = 1
+
+
+# ALREADY_THOUGHT: a yama_think_deeply call refused because deep thinking
+# already ran for this reply (THINK_CALLS_PER_REQUEST; one helper lane). A
+# failure return carries the situation, whether it is retryable, and a
+# remedy with an owner (AGENTS.md "Failure returns carry the next step"):
+# here, the facts -- that it ran, when, whether it concluded, how many
+# searches, and where its result already is in this reply. The steering the
+# return used to carry ("make the next call now" / "answer now", "cite each
+# by its path:line", the first 6 excerpt labels and 6-12 files read) was
+# REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md: unmeasured wording from one
+# deploy check, n=1). Whether a second run should be ALLOWED after a failed
+# one is the operator's call.
+def already_thought(payload: dict, ran_before: list[dict]) -> str:
+    pre = payload.get("_think_pre") or {}
+    first = pre if pre.get("ran") else (ran_before[-1] if ran_before else {})
+    h = first.get("handoff") or {}
+    machine = bool(h.get("machine_built"))
+    n = int(first.get("searches") or 0)
+    plan = bool(pre.get("ran") and pre.get("job") == "plan")
+    when = ("before this reply began" if pre.get("ran")
+            else "earlier in this reply, as your yama_think_deeply call")
+    what = "plan" if plan else "hand-off"
+    where = (f"Its {what} is the {pre.get('tool')} result before this reply"
+             if pre.get("ran") and pre.get("into") == "tool_result"
+             else f"Its {what} opens this reply's thinking" if pre.get("ran")
+             else f"Its {what} is that call's result")
+    searched = f"{n} search{'es' if n != 1 else ''}"
+    how = ("wrote no conclusion; the result was built from its search log"
+           if machine else "planned the task" if plan else "concluded")
+    return cs.error_result(
+        deep.TOOL_NAME, "ALREADY_THOUGHT",
+        f"Deep thinking already ran for this request, {when} ({searched}), "
+        f"and {how}. {where}. It runs once per reply; another "
+        f"{deep.TOOL_NAME} call returns this same result.",
+        retryable=False,
+        ran="before this reply" if pre.get("ran") else "earlier in this reply",
+        concluded=not machine, searches=n,
+        remedies=[{"fixable_by": "agent",
+                   "action": f"use the {what} already in this reply "
+                             f"({where[0].lower() + where[1:]})",
+                   "effect": "what deep thinking found is there"}])
 
 
 def _think_deeply(payload: dict, args: dict, db: str | None,
                   root: str | None, state: dict | None,
                   n_messages: int) -> str:
-    """Run one think_deeply call. Returns the tool result; the record goes
+    """Run one yama_think_deeply call. Returns the tool result; the record goes
     to payload["_think_tool"]["calls"]. Refusals are structured."""
     tt = payload.setdefault("_think_tool", {"offered": True, "calls": []})
     call: dict = {"ran": False}
@@ -3247,14 +5104,7 @@ def _think_deeply(payload: dict, args: dict, db: str | None,
     if (payload.get("_think_pre") or {}).get("ran") \
             or len(ran_before) >= THINK_CALLS_PER_REQUEST:
         call["refused"] = "ALREADY_THOUGHT"
-        return cs.error_result(
-            deep.TOOL_NAME, "ALREADY_THOUGHT",
-            "Deep thinking already ran for this request; its hand-off is "
-            "above (in your thinking, or the earlier think_deeply result). "
-            "Nothing new was run.", retryable=False,
-            remedies=[{"fixable_by": "agent",
-                       "action": "act on that hand-off's NEXT STEP",
-                       "effect": "the task moves on"}])
+        return already_thought(payload, ran_before)
     tried = args.get("tried")
     question = q.strip() + ("\n\nAlready tried, and how it failed:\n"
                             + tried.strip()[:2000]
@@ -3268,10 +5118,9 @@ def _think_deeply(payload: dict, args: dict, db: str | None,
     if state is not None:
         state["_research_budget"] = ctx_run
     lg = payload.get("_ledger") or {}
-    dst = deep.load_state(lg.get("account") or "", lg.get("session") or "")
-    # Main waits for a busy lane at most once per episode (deep.DEFER_...).
-    lane_timeout = (0 if dst.get("waited_episode") == int(
-        dst.get("episode") or 0) and "waited_episode" in dst else None)
+    # A busy lane: the standard helper-lane wait (admission.WAIT_SECONDS),
+    # then skipped. The deferral counter and the one-wait-per-episode rule
+    # (deep.DEFER_REQUESTS) were removed 2026-09-27 (docs/CONSTANTS-AUDIT.md).
     try:
         res = shomen.run(
             "investigate", question=question,
@@ -3279,15 +5128,14 @@ def _think_deeply(payload: dict, args: dict, db: str | None,
             run_tool=lambda fn, a: run_our_tool(fn, a, db, root, None, state),
             context=ctx, tier=tier.get("name") or "max",
             effort=(tier.get("effort") if "effort" in over else None),
-            seed=seed, lane_timeout=lane_timeout,
+            seed=seed,
+            seed_frame=tiers.behaviour(tier, "seed_frame"),
             **({"source_root": root} if root else {}))
         err = None
     except Exception as e:                                       # noqa: BLE001
         res, err = {}, f"{type(e).__name__}: {e}"
     if res.get("skipped"):
         call["refused"] = "HELPER_BUSY"
-        deep.mark_deferred(lg.get("account") or "", lg.get("session") or "",
-                           "model")
         return cs.error_result(
             deep.TOOL_NAME, "HELPER_BUSY",
             "Deep thinking is already running for another request; only one "
@@ -3302,17 +5150,129 @@ def _think_deeply(payload: dict, args: dict, db: str | None,
     call["web_refused"] = len(ctx_run.get("refused") or [])
     head = FINDINGS_HEAD if searches else REASONING_HEAD
     text, n_scrub = scrub_markers(head + text)
-    _note_scrub(payload, "think_deeply", n_scrub)
+    _note_scrub(payload, "yama_think_deeply", n_scrub)
     text = _screen_handoff(payload, text, ctx_run, call)
     call.update(searches=searches, handoff=_handoff_record(stats))
     call["_seed"] = seed
     payload["_deep_terms"] = deep.handoff_terms(text)
     deep.mark_ran(lg.get("account") or "", lg.get("session") or "",
                   n_messages, "model")
-    print(f"  think_deeply: ran, {searches} searches, "
+    print(f"  yama_think_deeply: ran, {searches} searches, "
           f"{(stats or {}).get('chars')} chars handed back as the tool "
           f"result (handle {call.get('handle')})", flush=True)
     return text
+
+
+# YAMA_PLAN, THE MODEL'S OWN PLAN CALL (operator, 2026-09-27). Main calls it
+# before a long implementation task; the proxy runs the task through the one
+# second-brain runner (shomen.run("plan"), its own budget, #60) in the
+# helper lane and returns the plan as the TOOL RESULT (PLAN_RESULT_HEAD +
+# the four sections + PLAN_RESULT_TAIL). A hidden hop, like
+# yama_think_deeply's, but nothing is prefilled after it: main goes on
+# acting from the result. One per request (PLAN_CALLS_PER_REQUEST), and
+# none after a run before main in the same request (the initial prompt's
+# inserted plan, or a trigger's run).
+PLAN_CALLS_PER_REQUEST = 1
+
+
+def _plan_task(payload: dict, args: dict, db: str | None,
+               root: str | None, state: dict | None) -> str:
+    """Run one yama_plan call. Returns the tool result; the record goes to
+    payload["_plan_tool"]["calls"]. Refusals are structured."""
+    pt = payload.setdefault("_plan_tool", {"offered": True, "calls": []})
+    call: dict = {"ran": False}
+    pt["calls"].append(call)
+    tier = payload.get("_tier") or {}
+    name = deep.PLAN_TOOL_NAME
+    task = args.get("task") if isinstance(args, dict) else None
+    if not isinstance(task, str) or \
+            len(task.strip()) < selection.MIN_QUESTION_CHARS:
+        call["refused"] = "BAD_ARGUMENTS"
+        return cs.error_result(
+            name, "BAD_ARGUMENTS",
+            "`task` must be a string of at least 8 characters naming what "
+            "to build or change. Nothing was planned.", retryable=True,
+            remedies=[{"fixable_by": "agent",
+                       "action": "call again with the task: what to build, "
+                                 "the libraries it names, where it goes",
+                       "effect": "the plan is written"}])
+    over = tier.get("overridden") or []
+    if not tier.get("investigate"):
+        call["refused"] = "DEEP_THINKING_OFF"
+        return cs.error_result(
+            name, "DEEP_THINKING_OFF",
+            f"Planning on the server is off for this request (tier "
+            f"{tier.get('name', '?')}"
+            + (", forced off by X-Yamadori-Features" if "investigate" in over
+               else "") + "). Nothing was planned.", retryable=False,
+            remedies=[{"fixable_by": "agent",
+                       "action": "plan the steps yourself and start on the "
+                                 "first one with your own tools",
+                       "effect": "the task goes on without it"}])
+    pre = payload.get("_think_pre") or {}
+    ran_before = [c for c in pt["calls"][:-1] if c.get("ran")]
+    if pre.get("ran") or len(ran_before) >= PLAN_CALLS_PER_REQUEST:
+        call["refused"] = "ALREADY_PLANNED"
+        where = ("before this reply began, and its result is in this "
+                 "conversation" if pre.get("ran") and pre.get("job") == "plan"
+                 else "earlier in this reply" if ran_before else
+                 "before this reply began (deep thinking on this step)")
+        return cs.error_result(
+            name, "ALREADY_PLANNED",
+            f"The second model already ran for this request, {where}; it "
+            f"runs once per request, so nothing more was planned.",
+            retryable=False,
+            remedies=[{"fixable_by": "agent",
+                       "action": "carry out the plan or hand-off you have, "
+                                 "starting with its first step, with your "
+                                 "own tools",
+                       "effect": "the task moves on"}])
+    question = "Plan this task.\n\nTASK:\n" + task.strip()
+    _q, ctx, _sp = selection.question_of(
+        payload.get("_seen_messages") or payload.get("messages") or [])
+    seed = ledger_seed(payload, "plan_call", question)
+    ctx_run = _research_context(payload, payload.get("_client_messages")
+                                or [])
+    if state is not None:
+        state["_research_budget"] = ctx_run
+    # A busy lane: the standard helper-lane wait (admission.WAIT_SECONDS),
+    # then skipped. The deferral counter and the one-wait-per-episode rule
+    # (deep.DEFER_REQUESTS) were removed 2026-09-27 (docs/CONSTANTS-AUDIT.md).
+    try:
+        res = shomen.run(
+            "plan", question=question,
+            tools=deep_thinking_tools((state or {}).get("_attached")),
+            run_tool=lambda fn, a: run_our_tool(fn, a, db, root, None, state),
+            context=ctx, tier=tier.get("name") or "max",
+            effort=(tier.get("effort") if "effort" in over else None),
+            seed=seed,
+            seed_frame=tiers.behaviour(tier, "seed_frame"),
+            plan_switches=tiers.plan_switches(tier),
+            **({"source_root": root} if root else {}))
+        err = None
+    except Exception as e:                                       # noqa: BLE001
+        res, err = {}, f"{type(e).__name__}: {e}"
+    if res.get("skipped"):
+        call["refused"] = "HELPER_BUSY"
+        return cs.error_result(
+            name, "HELPER_BUSY",
+            "The second model is already working for another request; only "
+            "one runs at a time. Nothing was planned.", retryable=True,
+            remedies=[{"fixable_by": "agent",
+                       "action": "plan the first steps yourself and start, "
+                                 "or call again on a later step",
+                       "effect": "the lane frees when the other run ends"}])
+    text, stats, searches = _handoff_of(res, question, err, call, seed, root)
+    call["web_refused"] = len(ctx_run.get("refused") or [])
+    text, n_scrub = scrub_markers(text)
+    _note_scrub(payload, name, n_scrub)
+    text = _screen_handoff(payload, text, ctx_run, call)
+    call.update(searches=searches, handoff=_handoff_record(stats))
+    payload["_deep_terms"] = deep.handoff_terms(text)
+    print(f"  {name}: ran, {searches} searches, "
+          f"{(stats or {}).get('chars')} chars handed back as the tool "
+          f"result (handle {call.get('handle')})", flush=True)
+    return PLAN_RESULT_HEAD + text.rstrip() + PLAN_RESULT_TAIL
 
 
 def _drain(gen):
@@ -3325,7 +5285,7 @@ def _drain(gen):
 
 
 def _fan_out(payload: dict, msg: dict, finish: str | None):
-    """FAN-OUT: (dissent note, x_yamadori record, winner).
+    """FAN-OUT: (x_yamadori record, winner).
 
     Runs only when the selection engine chose N > 1 and the answer is a
     finished text answer -- not a budget event, not a hand-off of tool calls
@@ -3349,7 +5309,7 @@ def _fan_out(payload: dict, msg: dict, finish: str | None):
     n = int((payload.get("_selection") or {}).get("fanout_n") or 1)
     if (n <= 1 or finish != "stop" or msg.get("tool_calls")
             or not (msg.get("content") or "").strip()):
-        return "", None, None
+        return None, None
     original = {"variant": ORIGINAL, "seed": None,
                 "content": msg.get("content") or "",
                 "raw": {"choices": [{"message": {"content": msg.get("content")},
@@ -3361,19 +5321,17 @@ def _fan_out(payload: dict, msg: dict, finish: str | None):
     except Exception as e:                                       # noqa: BLE001
         print(f"  fan-out unavailable, answering once: "
               f"{type(e).__name__}: {e}", flush=True)
-        return "", {"mode": "sequential", "n": 0, "asked": n, "seeds": [],
-                    "agreement": None, "error": type(e).__name__,
-                    "replaced": False, "appended": False}, None
+        return {"mode": "sequential", "n": 0, "asked": n, "seeds": [],
+                "agreement": None, "error": type(e).__name__,
+                "replaced": False, "appended": False}, None
     results = list(v.get("results") or [])
     others = results[1:]
-    note = fanout.dissent_note(v)
     win = v.get("winner") or None
     rec = {"n": sum(1 for r in results if r.get("content")), "asked": n,
            "seeds": [r.get("seed") for r in others if r.get("seed")],
            "agreement": v.get("agreement"),
            "votes": v.get("votes", 0),
            "winner": (win or {}).get("variant"),
-           "dissent_noted": bool(note),
            "replaced": False, "appended": False, "handback": None}
     rec.update(fanout.selection_record(v))
     try:
@@ -3390,7 +5348,7 @@ def _fan_out(payload: dict, msg: dict, finish: str | None):
           f"{rec.get('stop_reason')}, similarity A-B "
           f"{rec.get('similarity_ab')}, selection {rec.get('selection')}, "
           f"winner {rec['winner']}", flush=True)
-    return note, rec, win
+    return rec, win
 
 
 # The name the original answer carries among the fan-out candidates.
@@ -3453,10 +5411,12 @@ def _tool_evidence(name: str, out: str) -> dict:
 
 def _research_context(payload: dict, messages: list[dict]) -> dict:
     """One deep-thinking run's context for the second brain's web tools
-    (research_tools.run's `budget`): its search count, the URLs its
-    searches return and the USER's own URLs (the only ones read_web_page
-    may read), and the conversation's other text -- tool results and
-    answers -- for read_web_page's leak check. In memory, for the run."""
+    (research_tools.run's `budget`): its search and page-read counts, the
+    SEEN URLs -- its searches' results, the USER's own URLs, the links of
+    the pages it reads -- which read_web_page reads with their query (any
+    other URL only by its path), the conversation's text -- tool results,
+    answers, and all of it in own_text -- for read_web_page's leak check,
+    and every fetch. In memory, for the run."""
     user_urls: list[str] = []
     other: list[str] = []
     for m in messages or []:
@@ -3471,10 +5431,11 @@ def _research_context(payload: dict, messages: list[dict]) -> dict:
                 other.append(str((c.get("function") or {}).get("arguments")))
     own = "\n".join(_msg_text(m) for m in messages or []
                     if isinstance(m, dict))
-    return {"search_web": 0, "urls": [], "user_urls": user_urls[-100:],
+    return {"search_web": 0, "read_web_page": 0, "urls": [], "links": [],
+            "user_urls": user_urls[-100:],
             "conversation": "\n".join(other)[-200000:],
             "own_text": own[-400000:], "web_text": "", "refused": [],
-            "screened": []}
+            "screened": [], "fetches": []}
 
 
 def _screen_handoff(payload: dict, text: str, ctx_run: dict,
@@ -3490,10 +5451,17 @@ def _screen_handoff(payload: dict, text: str, ctx_run: dict,
     summary = {"removed": len(scr["removed"]), "labelled": scr["labelled"],
                "removed_rules": sorted({x["rule"] for x in scr["removed"]}),
                "fetched": list(ctx_run.get("screened") or [])[:20],
-               "urls_refused": list(ctx_run.get("refused") or [])[:20]}
+               "urls_refused": list(ctx_run.get("refused") or [])[:20],
+               # Every web fetch of the run (research_tools._record_fetch):
+               # host, provenance (search | user | link | memory), whether
+               # the query was stripped, status, bytes; never the path.
+               "searches": int(ctx_run.get("search_web") or 0),
+               "reads": int(ctx_run.get("read_web_page") or 0),
+               "fetches": list(ctx_run.get("fetches") or [])[:60]}
     rec["screen"] = summary
     if summary["removed"] or summary["labelled"] or summary["fetched"] \
-            or summary["urls_refused"]:
+            or summary["urls_refused"] or summary["fetches"] \
+            or summary["searches"]:
         payload.setdefault("_deep_screen", []).append(summary)
         print(f"  deep: hand-off screen removed {summary['removed']} "
               f"line(s) {summary['removed_rules']}, labelled "
@@ -3525,7 +5493,14 @@ def _deep_record(payload: dict, messages: list[dict],
             tier=(payload.get("_tier") or {}).get("name"),
             route=(payload.get("_route") or {}).get("class"),
             rec=json.loads(json.dumps(deep.public(trig) | {
-                "epoch": trig.get("epoch"), "episode": trig.get("episode")},
+                "epoch": trig.get("epoch"), "episode": trig.get("episode"),
+                # #52 / remedy 7: how a run of this request is labelled
+                # (deep._outcome: `helped` needs a project file changed
+                # after it), and the project that rule reads.
+                "helped_rule": deep.LABEL_RULE if tiers.behaviour(
+                    payload.get("_tier") or {}, "helped_needs_change")
+                else 1,
+                "project": _project_brief(payload.get("_project"))},
                 default=str)),
             n_messages=len(messages), ran=ran_pre or bool(calls),
             kind=(trig.get("kind") if trig.get("fire") else None),
@@ -3538,9 +5513,18 @@ def _deep_record(payload: dict, messages: list[dict],
         return None
 
 
+def _project_brief(project: dict | None) -> dict | None:
+    """The project as a deep_decisions row keeps it: the root and at most
+    20 named files -- paths only, never content."""
+    if not project:
+        return None
+    return {"root": project.get("root"),
+            "named": list(project.get("named") or [])[:20]}
+
+
 def _deep_public(payload: dict) -> dict | None:
     """x_yamadori.deep: the trigger decision (never the question text), the
-    thresholds in force, think_deeply's offer and calls, the record id."""
+    thresholds in force, yama_think_deeply's offer and calls, the record id."""
     trig = payload.get("_deep")
     if trig is None:
         return None
@@ -3550,7 +5534,23 @@ def _deep_public(payload: dict) -> dict | None:
                          "calls": [{k: v for k, v in c.items()
                                     if not k.startswith("_")}
                                    for c in tt.get("calls") or []]}
+    # yama_plan (2026-09-27): the model's own calls; the initial prompt's
+    # inserted plan is x_yamadori.investigate (into: tool_result).
+    pt = payload.get("_plan_tool") or {}
+    out["plan_tool"] = {"offered": bool(pt.get("offered")),
+                        "calls": [{k: v for k, v in c.items()
+                                   if not k.startswith("_")}
+                                  for c in pt.get("calls") or []]}
     out["record"] = payload.get("_deep_record")
+    # THE VERIFY DIRECTIVE (mcp/verify_moment.py): under auto.verify -- the
+    # moment, the kind, the options, the pick, the line, its form (named or
+    # generic) and why -- beside a server-tool trigger's record, if one
+    # fired on the same request.
+    vf = payload.get("_verify")
+    if vf is not None:
+        out["auto"] = dict(out.get("auto") or {"trigger": "verify"},
+                           verify={k: v for k, v in vf.items()
+                                   if not k.startswith("_")})
     # FETCHED CONTENT IS DATA: what the screen stripped from fetched text and
     # removed from (or labelled in) the hand-off, per run.
     out["screen"] = list(payload.get("_deep_screen") or [])
@@ -3564,12 +5564,13 @@ def _x_yamadori(payload: dict, *, hops: int, fan: dict | None,
 
     `x_yamadori` is a top-level extension key: OpenAI clients ignore keys
     they do not know. It exists so that a live check can read what happened
-    instead of asking the model to quote it (the hints check had to). It
+    instead of asking the model to quote it (the old recipe check had to). It
     carries decisions and numbers only -- no message text beyond 120
     characters of each recipe, and never the account or its key.
 
-    `hops` is the number of upstream generations in the main loop, the same
-    number as `usage.hops`, on both paths.
+    `hops` is the number of upstream generations of main in the turn, the
+    same number as `x_yamadori.usage.generations` (it was `usage.hops`
+    until 2026-09-25, U2), on both paths.
     """
     tier = payload.get("_tier") or {}
     gate = payload.get("_tools_gate")
@@ -3580,13 +5581,18 @@ def _x_yamadori(payload: dict, *, hops: int, fan: dict | None,
         "tools_gate": ({"offer": bool(gate.get("offer")),
                         "why": f"{gate.get('situation')}: {gate.get('because')}"}
                        if gate else None),
-        # Skills (mcp/skill_select.py): path, on, route_class, ids, versions,
-        # why, matched. `hints` and `suppressed_hints` are DEPRECATED aliases,
-        # kept one release: the legacy recipe rows on the hints path, one
-        # entry per injected skill (recipe = its title) on the skills path.
+        # Skills (mcp/skill_select.py): on, route_class, ids, versions,
+        # names, chars, why, matched.
         "skills": payload.get("_skills"),
-        "hints": list(payload.get("_hints") or []),
-        "suppressed_hints": list(payload.get("_suppressed_hints") or []),
+        # The craft index and yama_recall_craft (skill_select PROGRESSIVE
+        # DISCLOSURE): the offer kept for the conversation, and this
+        # request's reads (name, version, how it was found -- never the
+        # query's text).
+        "craft": dict(payload.get("_craft") or {},
+                      reads=list(payload.get("_craft_reads") or [])),
+        # Tools of ours withheld for a conflict with the client's
+        # (tool_conflicts): [{ours, because, client_tool}].
+        "tools_withheld": list(payload.get("_tools_withheld") or []),
         "selection": payload.get("_selection"),
         # The hand-back's text rides in the record as `_handback` and never
         # leaves: only its counts (`handback`) are data.
@@ -3596,16 +5602,30 @@ def _x_yamadori(payload: dict, *, hops: int, fan: dict | None,
         # Deep thinking's triggers (Phase 0.6, mcp/deep.py): which fired or
         # why none did, the signals counted, the thresholds in force (and
         # whether each is the default, pinned or learned), the cooldown, and
-        # think_deeply's offer and calls; `record` names the durable row.
+        # yama_think_deeply's offer and calls; `record` names the durable row.
         "deep": _deep_public(payload),
         "hops": hops,
-        # One entry per generate_image call: ok, id prefix, size, seed,
+        # CONTINUE A STATED STEP: an agent step that stopped with no call,
+        # judged by the decider and continued once when it only said what
+        # it was about to do ({judged, distribution, raw_pick, pick,
+        # continued, line, call_followed, ms, why, ...}); None when the
+        # trigger did not hold.
+        "continued": payload.get("_continued"),
+        # One entry per yama_generate_image call: ok, id prefix, size, seed,
         # seconds -- or the error code. Never the prompt or the URL.
         "images": list(payload.get("_images") or []),
-        # One entry per describe_image call: ok, which image (attached id or
+        # One entry per yama_describe_image call: ok, which image (attached id or
         # sha prefix), source, format, bytes, seconds, token usage -- or the
         # error code. Never the image or the question.
         "vision": list(payload.get("_vision") or []),
+        # The MCP-backed tools (mcp/mcp_host.py): the switch, the tools the
+        # conversation was offered (kept by name), which of them are on main
+        # this request, the servers' states at the offer, and one entry per
+        # call: tool, server, upstream, ms, ok, bytes, error, screen,
+        # args (120 chars each), names (the package names it returned).
+        "mcp": (dict(payload["_mcp"],
+                     calls=list(payload.get("_mcp_calls") or []))
+                if payload.get("_mcp") is not None else None),
         # The images this request carried and what became of each: id,
         # source, format, bytes, error. Never the bytes.
         "attachments": list(payload.get("_attachments") or []),
@@ -3613,12 +5633,19 @@ def _x_yamadori(payload: dict, *, hops: int, fan: dict | None,
         # action (loaded / fit / evicted / busy / no_room / uncoordinated),
         # need, free before/after, what was unloaded. Numbers and model ids.
         "gpu_room": list(payload.get("_gpu_room") or []),
+        # Max mode (mcp/max_mode.py): the main model that served this request and why; how long it waited for the
+        # other model's work to drain. Absent when max mode is off.
+        **({"capacity": payload["_capacity"]} if payload.get("_capacity") else {}),
         # One entry per tool call the proxy executed in THIS conversation's
         # loop (image tools, the delegate arm): name, empty, error, chars.
         "tools": list(payload.get("_tool_calls") or []),
         # The tool-turn cap (tiers.tool_turn_limit): limit, tool turns
         # executed, and whether the loop landed because of it.
         "tool_turns": dict(payload.get("_turn_cap") or _turn_cap(payload)),
+        # The client's own prompt against its window (check_client_prompt,
+        # C1): limit, generation floor, the high estimate, and the model
+        # server's own count when it was near enough the edge to be made.
+        "context": payload.get("_context"),
         # The check_code TOOL left main on 2026-09-24 (operator): client
         # writes are checked by the proxy (`tool_code`), an answer's code by
         # the repair pass (`repair`). Kept, always unoffered, for readers of
@@ -3637,6 +5664,13 @@ def _x_yamadori(payload: dict, *, hops: int, fan: dict | None,
         # after, formatted), the fixup job, why it stopped, and client calls
         # that carried code-sized strings nothing recognised. Never the code.
         "tool_code": tool_code.public(tool_check),
+        # THE IMAGE GUARD (tool_code, #46): None when no call was stopped;
+        # else each stopped call -- tool, argument name, kind of image data
+        # (a data:image/ URL, base64 PNG data, ...), the argument characters
+        # and deltas (~tokens) read and the seconds before the stop, the
+        # hop, `withheld` on a last hop -- how many times the model was asked
+        # again, and whether the turn landed. Never the argument's text.
+        "image_guard": payload.get("_image_guard_rec"),
         # The fold-backs this turn carried (shomen.PHRASES): job, phrase,
         # where it went (prefill / note / continuation / in_place /
         # appended), and the seed words named.
@@ -3650,44 +5684,101 @@ def _x_yamadori(payload: dict, *, hops: int, fan: dict | None,
         # `keyed_by_shown`: the client was streamed more content than the
         # turn renders (an earlier hop's), so the turn is keyed by what it
         # stores and its content restored as delivered (#10).
+        # `restore_reasoning` {on, source}: past reasoning restored (restored
+        # counts `reasoning`, `reasoning_chars`, `reasoning_missing`) and
+        # `reasoning_recorded`, the chars this turn's own reasoning added.
         "ledger": {"restored": lg.get("restored") or {},
                    "inject": lg.get("inject"),
-                   "keyed_by_shown": bool(payload.get("_stored_differs"))},
+                   "keyed_by_shown": bool(payload.get("_stored_differs")),
+                   "restore_reasoning": lg.get("restore_reasoning"),
+                   "reasoning_recorded": lg.get("reasoning_recorded")},
+        # WHICH CONVERSATION (#41, mcp/session_id.py): {id, source, why,
+        # carried, line}. source: prompt_cache_key | header | tool_call_id
+        # (our id, read back from a tool-call id) | summary_line (from a
+        # compaction summary we wrote) | minted (a new conversation) |
+        # compaction_map (a flattened compaction mapped to a conversation).
+        # `carried`: how many of this turn's client tool calls went out with
+        # an id carrying ours (_carry_session). `line`: this answer is a
+        # compaction summary that opens with the session line. `id` is ours
+        # in full, a client's own as a hash prefix. Never the key.
+        "session": (dict(lg["conversation"],
+                         carried=int(payload.get("_session_carried") or 0),
+                         line=bool(payload.get("_session_lead")))
+                    if lg.get("conversation") else None),
         # Whether the slot is being warmed with the delivered turn, and why.
         "warm": payload.get("_warm"),
         # The warm that ran after this conversation's PREVIOUS response:
         # reused / processed / slot, and `short` when it reused less than
         # the prompt that slot had just generated on (#11).
         "warm_before": payload.get("_warm_before"),
+        # How many earlier attempts of this very request (a client's retry
+        # of it) were still running and were cancelled for it (#44).
+        "superseded": payload.get("_superseded"),
         # The chat template's own markers (<think>, </think>, <|im_start|>,
         # <|im_end|>, <tool_call>) in the delivered content -- counts and
         # whose (`model`: left as written; `ours`: a defect) -- and what our
         # own path scrubbed before it reached a prompt. None when clean (#12).
         "template_markers": payload.get("_template_markers"),
         # LIBRARY USE (#19): held packages this conversation uses, and the
-        # definitions or overview injected for them on this request (names,
-        # never text), or that a recorded injection was replayed.
+        # definitions injected for them on this request (names, never
+        # text), or that a recorded injection was replayed.
         "library_use": payload.get("_library_use"),
+        # THE OVERTHINKING SWITCHES (mcp/progress.py, tiers.BEHAVIOURS;
+        # docs/research/OVERTHINKING.md): `project` -- the step's project and
+        # scratch writes read into the project on this request's tool
+        # result, the root and how it was found, how many files the task
+        # names -- `step` (the agent step's thinking
+        # cap and why, which nudge) and `switches` (each switch, on/off and
+        # its source: header / env / tier / default).
+        "progress": payload.get("_progress"),
         # Vendor sampling as enforced by tiers.apply, and what the client
         # had asked for where it differed.
         "sampling": payload.get("_sampling"),
         "budget": {"max_tokens_sent": payload.get("max_tokens"),
                    "reasoning_budget_tokens":
-                       payload.get("reasoning_budget_tokens")},
+                       payload.get("reasoning_budget_tokens"),
+                   # the thinking nudge's fraction (tiers.NUDGE_AT), None
+                   # when it was not sent; whether it FIRED is only in the
+                   # reasoning text, which the fork does not report
+                   "nudge_at": payload.get("reasoning_budget_nudge_at")},
         # A client utility call runs at `minimal` whatever the client's tier
         # (proxy.prepare); the rule's reason is selection.because.utility.
         "utility": bool((payload.get("_utility") or {}).get("utility")),
         "tier_requested": payload.get("_tier_requested") or tier.get("name"),
         "tier_overridden": ("minimal" if (payload.get("_utility") or {})
                             .get("utility") else None),
-        # compaction | classifier | structured | other, None for a task turn
-        # (selection.utility_kind). A compaction also carries its budget
-        # record (tiers.compaction_budget).
+        # compaction | title | classifier | structured | other, None for a
+        # task turn (selection.utility_kind). A compaction also carries its
+        # budget record (tiers.compaction_budget) and the harness whose form
+        # it is (mcp/compaction.py).
         "utility_kind": payload.get("_utility_kind"),
         "compaction": payload.get("_compaction"),
+        # How the client's instruction messages were mapped
+        # (system_roles.one_system: {merged, developer_as_user}); None when
+        # nothing was.
+        "roles": payload.get("_roles"),
         # Prompt tokens processed vs reused from the slot's cache, and which
         # slot (mcp/slots.py), summed over this request's generations.
         "cache": _cache_summary(payload),
+        # RELEASE (mcp/slots.py): the switch for this request (header / env
+        # / default) and each slot it emptied -- the second brain's after a
+        # run, the transient one after a side call -- or kept, and why:
+        # {slot, why, released, cells_before, ms, method, skipped?}.
+        "slots": {"release": dict(payload.get("_slot_release") or {}),
+                  "released": list(payload.get("_slots_released") or []),
+                  # IDLE CLEAR: the switch and threshold, the other
+                  # conversations' idle slots this request cleared before
+                  # it generated, and -- on a conversation that came back
+                  # to a cleared slot -- that its prompt was re-processed.
+                  "idle_clear": dict(
+                      payload.get("_idle_clear") or {},
+                      after_s=((payload.get("_idle_clear") or {})
+                               .get("override_s") or slots.IDLE_CLEAR_S)),
+                  "cleared_idle": list(payload.get("_slots_cleared") or []),
+                  "resumed_cold": next(
+                      (r["resumed_cold"] for r in
+                       payload.get("_cache_log") or []
+                       if r.get("resumed_cold")), None)},
         # Electricity for this request (mcp/power.py).
         "energy": power.request_energy(payload.get("_t_start")),
     }
@@ -3712,6 +5803,10 @@ def _cache_summary(payload: dict, log_line: bool = True) -> dict | None:
            # generations (slots.cache_record); None when a generation did not
            # report them. Wall clock minus this is the stack's overhead.
            "model_ms": total("model_ms"), "slot": last.get("slot"),
+           # The prefill's own milliseconds over the request, and the LAST
+           # generation's decode rate (slots.cache_record).
+           "prompt_ms": total("prompt_ms"),
+           "decode_tps": last.get("decode_tps"),
            "mode": last.get("mode"), "generations": len(recs),
            "evicted": next((r.get("evicted") for r in recs if r.get("evicted")),
                            None),
@@ -3720,40 +5815,35 @@ def _cache_summary(payload: dict, log_line: bool = True) -> dict | None:
     aff = next((r["affinity"] for r in recs if r.get("affinity")), None)
     if aff:
         out["affinity"] = aff
+    adopted = next((r["adopted"] for r in recs if r.get("adopted")), None)
+    if adopted:
+        out["adopted"] = adopted
+    # RANKS the engine was told for the last generation (layout v2: the
+    # lane's rank among them), and where a compaction sent as is went.
+    if last.get("kv_ranks") is not None:
+        out["kv_rank"], out["kv_ranks"] = last.get("kv_rank"), last["kv_ranks"]
+    for k in ("displaced", "how", "stray_pins_dropped"):
+        v = next((r[k] for r in recs if r.get(k)), None)
+        if v:
+            out[k] = v
     if log_line:
         f = out["first"]
         print(f"  cache: slot {out['slot']} ({out['mode']}) "
               f"first prompt {f['prompt']} reused {f['reused']} processed "
               f"{f['processed']}; {len(recs)} generation(s) reused "
               f"{out['reused']} of {out['prompt']}"
-              + (f"; evicted {out['evicted']}" if out["evicted"] else ""),
+              + (f"; evicted {out['evicted']}" if out["evicted"] else "")
+              + (f"; adopted slot {adopted['slot']} from {adopted['key']} "
+                 f"({adopted['why']})" if adopted else ""),
               flush=True)
     return out
 
 
-def _empty_notice(finish: str | None, content: str, msg: dict) -> str | None:
-    """What an answer says when the model wrote NOTHING: no content, no tool
-    call, and a normal stop. None otherwise.
-
-    Found 2026-09-23: 28 Hermes turns were logged `chars: 0` and read as empty
-    answers. They were not -- every one was followed by the same user request
-    with one assistant message and its tool results appended (corpus replay in
-    mcp/test_utility.py), i.e. a client tool call with no preface text, and
-    corpus.log_answer counted only content. That record now says so
-    (finish, tool_calls). What was never explained is the real case, a stop
-    with nothing written, which reached the client as a blank answer: that
-    is what this says instead (AGENTS.md, "Failure returns carry the next
-    step")."""
-    if (content or "").strip() or msg.get("tool_calls") or finish != "stop":
-        return None
-    thought = len(msg.get("reasoning_content") or "")
-    return ("[no answer: the model stopped (finish_reason=stop) without "
-            "writing an answer or calling a tool"
-            + (f", after {thought} characters of reasoning, which are in "
-               f"reasoning_content" if thought else "")
-            + ". Nothing was cut off and nothing failed. Retryable: yes -- "
-            "the same request samples again and normally answers. If it "
-            "repeats, the operator can read this turn in the corpus.]")
+# _empty_notice REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): a stop with
+# nothing written (no content, no tool call) used to be replaced by "[no
+# answer: the model stopped ...]". It is delivered as it is: blank content,
+# finish_reason stop. corpus.log_answer records finish and tool calls, so a
+# client tool call with no preface is not read as an empty answer.
 
 
 # ============================================================ THE TURN =====
@@ -3787,19 +5877,29 @@ def _in_thread(fn):
     indistinguishable from a hang (streaming.py)."""
     import threading as _threading
     box: dict = {}
+    # The request's cancellation reaches the job's sockets (mcp/cancel.py);
+    # closing this generator early cancels the job (#39).
+    tok = cancel.current() or cancel.Token()
 
     def _go():
         try:
-            box["v"] = fn()
+            with cancel.bound(tok):
+                box["v"] = fn()
         except Exception as e:                                   # noqa: BLE001
             box["e"] = e
 
     th = _threading.Thread(target=_go, daemon=True)
     th.start()
-    while th.is_alive():
-        th.join(timeout=HEARTBEAT)
-        if th.is_alive():
-            yield ("heartbeat", None)
+    try:
+        while th.is_alive():
+            th.join(timeout=HEARTBEAT)
+            if th.is_alive():
+                yield ("heartbeat", None)
+    except GeneratorExit:
+        tok.cancel("the stream was closed while a job ran")
+        raise
+    if tok.cancelled:
+        raise cancel.Cancelled(tok.why)
     if "e" in box:
         return ("error", box["e"])
     return ("ok", box.get("v"))
@@ -3819,9 +5919,15 @@ def _in_thread(fn):
 #                   SCRUBBED, and counted. A client's echo of the reasoning
 #                   channel is NOT ours: it passes through as sent and is
 #                   only counted (ledger_restore, markers_in_echo).
-#   the MODEL    -- markers in content the model generated are left as
-#                   written and RECORDED (x_yamadori.template_markers, one
-#                   log line): hiding them would hide a model defect.
+#   the MODEL    -- a stray marker in the ANSWER is removed from what the
+#                   client gets, with the text after it when that repeats
+#                   what was already sent, and RECORDED
+#                   (x_yamadori.template_markers.stripped, one log line):
+#                   _StrayMarkers. Operator, 2026-09-25, REVERSING the
+#                   2026-09-24 "delivered as written": the model does it at a
+#                   rate (7 of 40 replays of one fixed context with reasoning
+#                   echoed, 3 of 40 stripped), not once, and every client
+#                   showed it. The record keeps the defect visible.
 # Evidence for the live case: the gate's echo run, step 5, delivered
 # 'Done.\n</think>\n\nDone.\n</think>\n\nDone.'; that request reused 3964 of
 # 3988 prompt tokens (it extended what the slot held, so the model saw the
@@ -3863,40 +5969,480 @@ def _note_scrub(payload: dict, where: str, n: int) -> None:
               flush=True)
 
 
-def _markers_record(payload: dict, delivered: str, upstream: str) -> dict | None:
-    """x_yamadori.template_markers: the markers in the delivered content, and
-    whose they are -- `model` when the upstream generations (main's hops,
-    its continuation, a second-brain winner delivered in its place) carried
-    at least as many, else `ours` (a defect in this file: our path should
-    have scrubbed them). Plus what our path scrubbed. None when clean."""
+def _markers_record(payload: dict, delivered: str, upstream: str,
+                    stray: "_StrayMarkers | None" = None) -> dict | None:
+    """x_yamadori.template_markers: the markers the answer carried -- those
+    still in the delivered content (`in_content`: inside code, or a
+    `<tool_call>`) and those _StrayMarkers removed from it (`stripped`, with
+    `repeat_chars_dropped` and `new_text_after`) -- and whose they are:
+    `model` when the upstream generations (main's hops, its continuation, a
+    second-brain winner delivered in its place) carried at least as many,
+    else `ours` (a defect in this file: our path should have scrubbed them).
+    Plus what our path scrubbed. None when clean."""
     found = template_markers(delivered)
+    stripped = dict(stray.stripped) if stray is not None else {}
     scrubbed = dict(payload.get("_markers_scrubbed") or {})
-    if not found and not scrubbed:
+    if not found and not scrubbed and not stripped:
         return None
+    total = dict(found)
+    for m, k in stripped.items():
+        total[m] = total.get(m, 0) + k
     up = template_markers(upstream)
-    model = {m: min(k, up.get(m, 0)) for m, k in found.items()
+    model = {m: min(k, up.get(m, 0)) for m, k in total.items()
              if up.get(m, 0)}
-    ours = {m: k - model.get(m, 0) for m, k in found.items()
+    ours = {m: k - model.get(m, 0) for m, k in total.items()
             if k - model.get(m, 0) > 0}
-    rec = {"in_content": found, "model": model, "ours": ours,
-           "scrubbed": scrubbed,
+    rec = {"in_content": found, "stripped": stripped,
+           "repeat_chars_dropped": stray.repeat_chars if stray else 0,
+           "new_text_after": stray.new_after if stray else 0,
+           "model": model, "ours": ours, "scrubbed": scrubbed,
            "source": ("ours" if ours else "model" if model else None)}
-    if found:
-        print(f"  template markers in the delivered content: {found} -- "
-              f"written by {'the MODEL' if not ours else 'OUR PATH (defect)'}"
-              f"; left as written, recorded", flush=True)
+    if total:
+        print(f"  template markers in the answer: {total} -- written by "
+              f"{'the MODEL' if not ours else 'OUR PATH (defect)'}; "
+              f"stripped {stripped or 'none'} (a repeat of "
+              f"{rec['repeat_chars_dropped']} chars dropped), left in code "
+              f"{found or 'none'}; recorded", flush=True)
     return rec
+
+
+# IMAGES REACH THE CHAT THE MOMENT THEY EXIST (operator, 2026-09-25: "when
+# you ask for an image [Claude/ChatGPT] emit the image to the harness when
+# they make it"). yama_generate_image ran as a hidden hop and its picture reached
+# the user only inside the final answer, after the model had thought again.
+# Now the proxy streams the image's markdown line as CONTENT the moment the
+# tool returns (_run_turn); the blocking path puts it at the start of the
+# answer -- the same content either way. The model
+# is told the picture is shown (images.shown_on_main) and writes around it;
+# a copy it writes anyway is removed from what the client gets (_ImageDedup)
+# but kept in what the slot renders. The line is content the SLOT did not
+# generate: the ledger keys the turn by the client's copy and renders the
+# slot's text (#10), as for a compaction's session line, so the next
+# request extends the slot (mcp/test_image_emit.py, through the served
+# template).
+#
+# After the first content byte, reasoning is not forwarded (CHANNEL ORDER):
+# it goes out as an empty delta at most every REASONING_BEAT_S seconds, so a
+# client still sees the turn alive while the model thinks after the image.
+REASONING_BEAT_S = 1.0
+# The describe line (_describe_line): the description's first characters.
+DESCRIBE_LINE_CHARS = 100
+
+
+class _ImageDedup:
+    """Removes, from the model's content, an exact duplicate of an image the
+    proxy already showed: a markdown image whose target is that url (any alt
+    text), or the bare url alone on a line -- with the blank line that set it
+    apart. Streamed, text that might still become a duplicate is held back
+    until it cannot (feed / flush); `strip` does a whole text at once.
+    `removed`: {url: count}."""
+
+    _PARTIAL = re.compile(r"!(?:\[[^\]\n]{0,400}(?:\](?:\(([^\s)]*)(\))?"
+                          r"[ \t]*\n?)?)?)?")
+
+    def __init__(self):
+        self.urls: list[str] = []
+        self.removed: dict[str, int] = {}
+        self.buf = ""
+        self._last = "\n"            # the last character released
+
+    def add(self, url: str) -> None:
+        if url and url not in self.urls:
+            self.urls.append(url)
+
+    def _rx(self) -> "re.Pattern":
+        if getattr(self, "_rx_for", None) != tuple(self.urls):
+            alts = "|".join(re.escape(u) for u in
+                            sorted(self.urls, key=len, reverse=True))
+            self._rx_c = re.compile(r"!\[[^\]\n]*\]\((%s)\)|(?m:^[ \t]*(%s)"
+                                    r"[ \t]*(?=\n|\Z))" % (alts, alts))
+            self._rx_for = tuple(self.urls)
+        return self._rx_c
+
+    def _strip(self, text: str, final: bool, before: str = "\n") -> str:
+        if not self.urls or not text:
+            return text
+        out, pos = [], 0
+        for m in self._rx().finditer(text):
+            s, e = m.start(), m.end()
+            if not final and e + 2 > len(text):
+                break                 # what follows it is not known yet
+            url = m.group(1) or m.group(2)
+            s2 = s
+            while s2 > pos and text[s2 - 1] in " \t":
+                s2 -= 1
+            prev = text[s2 - 1] if s2 > 0 else (before or "\n")
+            e2 = e
+            while e2 < len(text) and text[e2] in " \t":
+                e2 += 1
+            if prev == "\n":
+                # A line of its own: the line goes, with the blank line after.
+                k = 0
+                while e2 < len(text) and text[e2] == "\n" and k < 2:
+                    e2 += 1
+                    k += 1
+            else:
+                s2 = s                # mid-line: keep the space before it
+            out.append(text[pos:s2])
+            pos = e2
+            self.removed[url] = self.removed.get(url, 0) + 1
+        out.append(text[pos:])
+        return "".join(out)
+
+    def _hold_from(self, text: str) -> int:
+        """The first index from which `text` could still become (or end in)
+        a duplicate; len(text) when none."""
+        n = len(text)
+        if not self.urls:
+            return n
+        best = n
+        # A bare url at the end, whole (what follows it is not known yet) or
+        # begun: the longest suffix that is a url's prefix.
+        body = text.rstrip()
+        for u in self.urls:
+            if body.endswith(u):
+                best = min(best, len(body) - len(u))
+            for k in range(min(len(u), n), 0, -1):
+                if text.endswith(u[:k]):
+                    best = min(best, n - k)
+                    break
+        # A markdown image begun (or ended, its line not yet known) whose
+        # target is, or may still become, one of the urls.
+        lo = max(0, n - (max(len(u) for u in self.urls) + 440))
+        i = text.find("!", lo)
+        while 0 <= i < best:
+            m = self._PARTIAL.fullmatch(text, i)
+            if m:
+                u = m.group(1)
+                if u is None or (any(x.startswith(u) for x in self.urls)
+                                 and (not m.group(2) or u in self.urls)):
+                    return i
+            i = text.find("!", i + 1)
+        return best
+
+    def feed(self, piece: str) -> str:
+        """Streamed: what may be released now."""
+        if not self.urls:
+            return piece
+        self.buf += piece
+        text = self._strip(self.buf, final=False, before=self._last)
+        cut = self._hold_from(text)
+        out, self.buf = text[:cut], text[cut:]
+        if out:
+            self._last = out[-1]
+        return out
+
+    def flush(self) -> str:
+        text = self._strip(self.buf, final=True, before=self._last)
+        self.buf = ""
+        if text:
+            self._last = text[-1]
+        return text
+
+    def strip(self, text: str) -> str:
+        """A whole text (the blocking path)."""
+        return self._strip(text, final=True)
+
+
+# STRAY TEMPLATE MARKERS IN THE ANSWER (#12; operator, 2026-09-25). The model
+# thinks, the FIRST `</think>` ends its reasoning (llama-server's parser
+# takes it; reasoning_content is whole), and then, in the ANSWER, it writes
+# a SECOND `</think>` and usually repeats itself: 'Done.\n</think>\n\nDone.',
+# 'Done.\n\nVerified stats.py ...\n</think>\n\nDone.', or '<sentence>\n
+# </think>\n\n' before its tool calls (live replays, 2026-09-25: 7 of 40
+# draws of one fixed context with reasoning echoed, 3 of 40 stripped). What
+# the CLIENT gets: the marker removed, with the whitespace around it; the
+# text after it dropped while it repeats what was already sent (a
+# whitespace-normalised prefix of it: the whole of it, or whole lines of
+# it); text after it that is NEW goes through, one blank line at most
+# between. A marker inside code (a ``` fence, or an odd number of backticks
+# on its line) is literal and stays (a program about templates). What the
+# SLOT holds is untouched: the ledger keys the turn by the client's copy
+# and renders the slot's text (#10), so the next request extends the slot.
+STRAY_MARKERS = ("</think>", "<think>", "<|im_end|>", "<|im_start|>")
+_FENCE_LINE = re.compile(r"(?m)^[ \t]{0,3}(?:```|~~~)")
+
+
+class _StrayMarkers:
+    """The answer's stray template markers out (see above). Streamed, text
+    that might still be (or precede) a marker -- a trailing '<', '</th', the
+    whitespace before them -- and text after a marker that might still be a
+    repeat are held until they cannot (feed / flush); fed a character at a
+    time or all at once, the output is the same (`clean` does a whole text).
+    Only the model's content goes through it: the session line and image
+    lines never do (_Out). `stripped`: {marker: n}; `repeat_chars`: the
+    repeated characters dropped; `new_after`: how often new text followed a
+    marker."""
+
+    _MAXLEN = max(len(m) for m in STRAY_MARKERS)
+    _ROLES = ("assistant\n", "user\n", "system\n", "tool\n")
+
+    def __init__(self):
+        self.buf = ""
+        self.role_next = False  # a `<|im_start|>`'s role line may follow
+        self.sent = ""          # every character released: what a repeat is
+        self.after = False      # just past a stray marker
+        self.sep = ""           # the whitespace around it, held
+        self.stripped: dict[str, int] = {}
+        self.repeat_chars = 0
+        self.new_after = 0
+
+    @staticmethod
+    def _literal(ctx: str) -> bool:
+        """A marker after `ctx` is inside code: an open fence, or an odd
+        number of backticks on its line."""
+        if len(_FENCE_LINE.findall(ctx)) % 2:
+            return True
+        return ctx[ctx.rfind("\n") + 1:].count("`") % 2 == 1
+
+    def _find(self, buf: str) -> tuple[int, str | None]:
+        """The first stray marker in `buf`: (index, marker), or (-1, None)."""
+        pos = 0
+        while True:
+            hits = [(i, m) for m in STRAY_MARKERS
+                    for i in (buf.find(m, pos),) if i >= 0]
+            if not hits:
+                return -1, None
+            i, m = min(hits)
+            if not self._literal(self.sent + buf[:i]):
+                return i, m
+            pos = i + 1
+
+    def _hold_from(self, buf: str) -> int:
+        """Where the held tail starts: a suffix that may still become a
+        marker, and the whitespace before it (it goes with the marker)."""
+        n = len(buf)
+        k = n
+        for L in range(min(n, self._MAXLEN - 1), 0, -1):
+            if any(m.startswith(buf[n - L:]) for m in STRAY_MARKERS):
+                k = n - L
+                break
+        while k > 0 and buf[k - 1].isspace():
+            k -= 1
+        return k
+
+    @staticmethod
+    def _repeat(t: str, ref: str, final: bool) -> tuple[str, int]:
+        """Is `t` (it opens on a non-space) a repeat of the start of `ref`,
+        whitespace-normalised? ("repeat", k): t[:k] is -- all of ref, or
+        whole lines of it; ("new", 0): it is not; ("need", 0): not known
+        until more of t arrives."""
+        n, m = len(t), len(ref)
+        j = 0
+        while j < m and ref[j].isspace():
+            j += 1
+        if j == m:
+            return "new", 0
+        i = last_t = 0
+        last_r = j
+        crossed = False       # just crossed a line break in both
+        while True:
+            i2, j2 = i, j
+            while i2 < n and t[i2].isspace():
+                i2 += 1
+            while j2 < m and ref[j2].isspace():
+                j2 += 1
+            t_ws, r_ws = i2 > i, j2 > j
+            if j2 == m:
+                # All of ref matched: a repeat, when it ends a word in t.
+                if i2 < n:
+                    return ("repeat", last_t) if t_ws else ("new", 0)
+                if t_ws or final:
+                    return "repeat", last_t
+                return "need", 0
+            if i2 == n:
+                if t_ws and not r_ws:
+                    return "new", 0
+                if not final:
+                    return "need", 0
+                # The end of the answer is a line end: whole lines repeated.
+                k = last_r
+                while k < m and ref[k].isspace():
+                    k += 1
+                return (("repeat", last_t) if "\n" in ref[last_r:k]
+                        else ("new", 0))
+            if t_ws != r_ws:
+                return "new", 0
+            if t_ws:
+                crossed = "\n" in t[i:i2] and "\n" in ref[j:j2]
+                i, j = i2, j2
+                continue
+            if t[i] != ref[j]:
+                return ("repeat", last_t) if crossed and last_t else ("new", 0)
+            i += 1
+            j += 1
+            last_t, last_r, crossed = i, j, False
+
+    @staticmethod
+    def _sep_of(ws: str) -> str:
+        k = ws.count("\n")
+        return "\n\n" if k >= 2 else "\n" if k == 1 else (" " if ws else "")
+
+    def _run(self, final: bool) -> str:
+        out: list[str] = []
+
+        def emit(t: str) -> None:
+            if t:
+                out.append(t)
+                self.sent += t
+
+        while True:
+            if not self.after:
+                i, mk = self._find(self.buf)
+                if mk is not None:
+                    j = i
+                    while j > 0 and self.buf[j - 1].isspace():
+                        j -= 1
+                    emit(self.buf[:j])
+                    self.sep = self.buf[j:i]
+                    self.buf = self.buf[i + len(mk):]
+                    self.stripped[mk] = self.stripped.get(mk, 0) + 1
+                    self.role_next = mk == "<|im_start|>"
+                    self.after = True
+                    continue
+                h = len(self.buf) if final else self._hold_from(self.buf)
+                emit(self.buf[:h])
+                self.buf = self.buf[h:]
+                return "".join(out)
+            # Just past a stray marker. `<|im_start|>`'s role line is part
+            # of it (the template writes "<|im_start|>assistant\n").
+            if self.role_next:
+                if any(self.buf.startswith(r) for r in self._ROLES):
+                    r = next(r for r in self._ROLES if self.buf.startswith(r))
+                    self.buf = self.buf[len(r):]
+                elif not final and any(r.startswith(self.buf)
+                                       for r in self._ROLES):
+                    return "".join(out)
+                self.role_next = False
+            # Its whitespace is held.
+            k = 0
+            while k < len(self.buf) and self.buf[k].isspace():
+                k += 1
+            self.sep += self.buf[:k]
+            self.buf = self.buf[k:]
+            if not self.buf:
+                if final:                 # nothing followed: it all goes
+                    self.sep, self.after = "", False
+                return "".join(out)
+            mk = next((x for x in STRAY_MARKERS if self.buf.startswith(x)),
+                      None)
+            if mk is not None:
+                self.buf = self.buf[len(mk):]
+                self.stripped[mk] = self.stripped.get(mk, 0) + 1
+                self.role_next = mk == "<|im_start|>"
+                continue
+            if not final and any(x.startswith(self.buf) for x in
+                                 STRAY_MARKERS):
+                return "".join(out)
+            how, k = self._repeat(self.buf, self.sent, final)
+            if how == "need":
+                return "".join(out)
+            if how == "repeat":
+                self.repeat_chars += k
+                self.buf = self.buf[k:]
+                self.sep = ""
+                continue
+            # New text: it goes through, one blank line at most before it.
+            self.new_after += 1
+            if self.sent and not self.sent[-1].isspace():
+                emit(self._sep_of(self.sep))
+            self.sep, self.after = "", False
+
+    def feed(self, piece: str) -> str:
+        """Streamed: what may be released now."""
+        self.buf += piece or ""
+        return self._run(final=False)
+
+    def flush(self) -> str:
+        """The answer's end (or an image line about to go out)."""
+        return self._run(final=True)
+
+    @classmethod
+    def clean(cls, text: str) -> tuple[str, "_StrayMarkers"]:
+        """A whole text (the blocking path): (cleaned, the filter's record)."""
+        f = cls()
+        return f.feed(text or "") + f.flush(), f
+
+
+def strip_stray_markers(text: str) -> str:
+    """`text` as the client gets it (_StrayMarkers)."""
+    return _StrayMarkers.clean(text)[0]
+
+
+# REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md), the answer is delivered as
+# the model wrote it:
+#   _ToolMarkup / tool_markup_notice -- removed written-out tool-call markup
+#     from a LANDED answer and, when nothing else was written, replaced it
+#     with a "[no answer: ...]" notice (built from one run, pagoda-r3f-1).
+#   _ImitatedNotes / NOTE_HEAD_MAX / note_heads -- removed note-shaped lines
+#     ("Verified ...", "Repaired ...") from the model's own content (#36; no
+#     operator decision found, and it altered model output).
+
+
+def _describe_line(result: str) -> str | None:
+    """ONE reasoning line when a yama_describe_image call returns (operator,
+    2026-09-25): which image, and the first DESCRIBE_LINE_CHARS characters
+    of what the vision model saw. SCREENED like any tool text shown to the
+    user -- the template's markers, markup, links and invisible characters
+    out; a credential, AI-directed text or exfiltration withholds the
+    excerpt (mcp/skill_screen.py). None for a failure (the error is in the
+    tool result the model reads)."""
+    try:
+        d = json.loads(result)
+    except (TypeError, ValueError):
+        return None
+    if not (isinstance(d, dict) and d.get("ok")
+            and isinstance(d.get("answer"), str) and d["answer"].strip()):
+        return None
+    import skill_screen
+    label = str(d.get("image") or "the image")
+    if not re.fullmatch(r"image-[0-9a-f]{10}", label):
+        label = ("generated image " + label[:10]
+                 if re.fullmatch(r"[0-9a-f]{10,64}", label) else "the image")
+    t, _n = scrub_markers(d["answer"])
+    t = re.sub(r"<!--.*?(?:-->|\Z)", " ", t, flags=re.S)
+    t = re.sub(r"</?[A-Za-z][^>\n]{0,200}>", " ", t)
+    t = re.sub(r"!?\[([^\]\n]*)\]\([^)\s]*\)", r"\1", t)
+    t = re.sub(r"(?i)\b(?:https?|ftp|file|data):\S+|\bwww\.\S+", "[link]", t)
+    t = t.replace("`", "'")
+    t = skill_screen.visible(t, limit=4000)
+    hits = (skill_screen.check_credentials(t)
+            + skill_screen.check_ai_directed(t)
+            + skill_screen.check_exfiltration(t))
+    if hits:
+        t = f"(the description is withheld from this line: " \
+            f"{hits[0].get('rule') or 'screened'})"
+    elif len(t) > DESCRIBE_LINE_CHARS:
+        t = t[:DESCRIBE_LINE_CHARS - 1].rstrip() + "…"
+    return f"`looked at {label}: {t}`\n"
 
 
 class _Out:
     """What a turn has presented, and CHANNEL ORDER (2026-09-24, live SSE
     diagnostic): a client closes its thinking block at the first `content`
     delta, so every byte of content must come after all reasoning. Once any
-    content has gone out, later reasoning is not forwarded."""
+    content has gone out, later reasoning is not forwarded: it becomes an
+    empty delta at most every REASONING_BEAT_S (IMAGES REACH THE CHAT)."""
 
-    def __init__(self, streamed: bool, shown_prefix: str = ""):
+    def __init__(self, streamed: bool, shown_prefix: str = "",
+                 lead: str = ""):
         self.streamed = streamed
         self.content_sent = False
+        # Image lines shown this turn, in order (IMAGES REACH THE CHAT), and
+        # the filter that removes the model's own copy of one.
+        self.images: list[str] = []
+        self.dedup = _ImageDedup()
+        # The model's stray template markers (#12), filtered AFTER the
+        # duplicate filter: a repeat is judged against what the client was
+        # actually sent (a copy of a shown image, already gone, cannot hide
+        # one). The same order on the blocking path (_run_turn).
+        self.markers = _StrayMarkers()
+        self.reasoning_suppressed = 0
+        self._beat_at = 0.0
+        # OUR SESSION LINE (#41, mcp/session_id.py), on a COMPACTION SUMMARY
+        # only (answers carry the id in their tool-call ids): the first
+        # content byte, after all reasoning (CHANNEL ORDER).
+        self.lead = lead or ""
         # Every content byte the client was sent, in order: what a streaming
         # client STORES as this turn's content, and so the text the ledger
         # must key the turn by (_run_turn, #10 in docs/SELF-IMPROVEMENT-LOG).
@@ -3906,28 +6452,93 @@ class _Out:
         self.reasoning_shown: list[str] = []
 
     def reasoning(self, text: str):
-        if self.streamed and text and not self.content_sent:
+        if not (self.streamed and text):
+            return
+        if not self.content_sent:
             self.reasoning_shown.append(text)
             yield ("reasoning", text)
+            return
+        # CHANNEL ORDER: after content, reasoning is a heartbeat, throttled.
+        self.reasoning_suppressed += len(text)
+        now = time.time()
+        if now - self._beat_at >= REASONING_BEAT_S:
+            self._beat_at = now
+            yield ("heartbeat", None)
 
     def content(self, text: str):
         if self.streamed and text:
+            yield from self.flush_lead()
             self.content_sent = True
+            if self.dedup.urls:
+                text = self.dedup.feed(text)
+            text = self.markers.feed(text)
+            if not text:
+                return
             self.shown.append(text)
             yield ("content", text)
 
+    def note(self, text: str, sep: str = "\n\n"):
+        """OUR note (tool_code's): after the model's content, which is
+        released through its filters first, and never filtered itself (it IS
+        the note). `sep` before it when the client was shown any text."""
+        if not (self.streamed and text):
+            return
+        yield from self.flush_lead()
+        yield from self.flush_held()
+        t = (sep if "".join(self.shown).strip() else "") + text
+        self.content_sent = True
+        self.shown.append(t)
+        yield ("content", t)
 
-class TurnRefused(RuntimeError):
+    def image(self, block: str, url: str):
+        """An image line the proxy shows the moment it exists: content, after
+        whatever content is held, bypassing the
+        duplicate filter (it IS the image). Blocking: recorded, and placed at
+        the start of the answer when the turn ends (_run_turn)."""
+        self.images.append(block)
+        if self.streamed:
+            yield from self.flush_lead()
+            yield from self.flush_held()
+            self.content_sent = True
+            self.shown.append(block)
+            yield ("content", block)
+        self.dedup.add(url)
+        self.dedup._last = "\n"
+
+    def flush_held(self):
+        """Content the filters still hold, released (turn end, or an image
+        line about to go out): the duplicate filter's, through the marker
+        filter, then the marker filter's."""
+        if not self.streamed:
+            return
+        t = self.dedup.flush() if self.dedup.urls else ""
+        t = self.markers.feed(t) + self.markers.flush()
+        if t:
+            self.shown.append(t)
+            yield ("content", t)
+
+    def flush_lead(self):
+        if self.streamed and self.lead:
+            t, self.lead = self.lead, ""
+            self.content_sent = True
+            self.shown.append(t)
+            yield ("content", t)
+
+
+class TurnRefused(api_errors.ApiError):
     """A turn that cannot start, as a STRUCTURED error (pre-deploy review,
     2026-09-24): `yamadori-vision`'s gpu_room.NoRoom escaped as a bare 502
     on the blocking path and a broken stream on the streamed one. It carries
     the situation, whether retrying helps (as a fact) and remedies with an
-    owner; server.py answers it with its status and `body()`, and
-    stream_body with an SSE error event."""
+    owner. One of the ApiErrors (mcp/api_errors.py): raised before the first
+    byte it is an HTTP status and `body()` on both paths (the streamed path
+    commits nothing until the turn has started, server.chat); after it, the
+    SSE error event."""
 
     def __init__(self, status: int, code: str, reason: str, retryable: bool,
                  remedies: list, facts: dict | None = None):
-        super().__init__(reason)
+        super().__init__(status, reason, code=code,
+                         headers={"Retry-After": "60"} if retryable else None)
         self.status, self.code, self.reason = status, code, reason
         self.retryable, self.remedies = retryable, remedies
         self.facts = dict(facts or {})
@@ -3946,8 +6557,182 @@ class TurnRefused(RuntimeError):
                           "remedies": self.remedies, **self.facts}}
 
 
+# =================================================== CONTINUE A STATED STEP ==
+#
+# "PLANNING WITHOUT ACTION" (operator-approved fix, 2026-09-27). An agent
+# step ends finish=stop with no tool call and text that only states its next
+# action -- "Now let me understand the task..." -- with nothing done, and
+# the harness, seeing an answer, ends the run (live: deploy_check's agent
+# loop [echo] step 3; pagoda-h3). So:
+#   TRIGGER (structural): an agent step (route agent_step, or the
+#     conversation carries client tool calls), the generation ended "stop",
+#     it made NO tool call, it wrote visible text, and the client offered
+#     tools. Only then:
+#   JUDGE: the Bonsai decider, ONE choice over that text and the tail of
+#     its reasoning (decide_turn.judge_stop: finished / about to do next /
+#     asking the user / none of these), on the transient slot, released.
+#   CONTINUE, when it said what it is about to do: main's own turn is
+#     PREFILLED -- its text, a blank line, CONTINUE_LINE -- and generated
+#     again with the client's tools still offered and the same budget rule
+#     (tiers.rebudget, as every hop). The client receives ONE turn: the
+#     text, the line and what the continuation wrote (normally a call).
+#     Nothing is hidden from the client and nothing is rewritten: the slot
+#     holds exactly the turn delivered (prompt, the prefill, the
+#     continuation), so the ledger records it like any turn and no warm is
+#     needed unless something else changed it (a tool_code note).
+#   ONCE per request: a continuation that stops again is delivered as is.
+# CONTINUE_LINE ends on a LETTER, never a space or a period: AGENTS.md's
+# prefill rule ("A prefilled phrase ends on a letter, or on an ending
+# measured safe (`After thinking deeply,` -- STEP 0), never a space"); a
+# period was never measured. "Let me ..." is the voice of the operator's
+# approved agent-step nudge (tiers.AGENT_STEP_NUDGE_MESSAGE, "Let me make
+# the call I've already worked out"). UNMEASURED WORDING; not yet run live.
+# x_yamadori.continued: {judged, distribution, raw_pick, pick, continued,
+# line, call_followed, ms, ...}; None when the trigger did not hold.
+CONTINUE_LINE = "Let me do that now"
+CONTINUE_PICK = "next_step"
+
+
+def _continue_separator(text: str) -> str:
+    """What goes between the model's text and CONTINUE_LINE: one blank line,
+    counting the newlines the text already ends on (its bytes are kept as
+    generated: the prefill must extend what the slot holds)."""
+    if text.endswith("\n\n"):
+        return ""
+    return "\n" if text.endswith("\n") else "\n\n"
+
+
+def _stated_step_gate(payload: dict, messages: list[dict], msg: dict,
+                      fin: str | None, ours: set, landed: bool) -> dict | None:
+    """None when the structural trigger does not hold (nothing to decide);
+    else {"eligible": bool, "why": ...} -- eligible only when the switch,
+    the tier and the turn allow the judgment."""
+    if fin != "stop" or msg.get("tool_calls"):
+        return None
+    client_tools = [t for t in (payload.get("tools") or [])
+                    if not is_ours(((t or {}).get("function") or {})
+                                   .get("name"), ours)]
+    if not client_tools:
+        return None
+    route = payload.get("_route") or {}
+    step = route.get("class") == "agent_step" or any(
+        isinstance(m, dict) and m.get("role") == "assistant"
+        and m.get("tool_calls") for m in messages)
+    if not step:
+        return None
+    tier = payload.get("_tier") or {}
+    on, src = tiers.behaviour_source(tier, "continue_stated_step")
+    rec = {"eligible": False, "judged": False, "continued": False,
+           "switch": {"on": on, "source": src}}
+    if not on:
+        rec["why"] = f"switch continue_stated_step off ({src})"
+    elif tier.get("name") in ("minimal", "low"):
+        rec["why"] = f"tier {tier.get('name')}: the model as it ships"
+    elif (payload.get("_utility") or {}).get("utility"):
+        rec["why"] = "a client's side call"
+    elif landed:
+        rec["why"] = "the turn landed (tools withdrawn)"
+    elif not (msg.get("content") or "").strip():
+        rec["why"] = "no visible text to judge"
+    else:
+        rec["eligible"] = True
+    return rec
+
+
+def _judge_stop(payload: dict, msg: dict) -> dict:
+    """decide_turn.judge_stop over the stopped turn (never raises)."""
+    import decide_turn
+    lg = payload.get("_ledger") or {}
+    return decide_turn.judge_stop(
+        msg.get("content") or "", msg.get("reasoning_content") or "",
+        account=lg.get("account") or "", key=lg.get("session"),
+        request=lg.get("turn_key"))
+
+
+def _stated_step(payload: dict, convo: list[dict], msg: dict, rec: dict):
+    """Judge a stopped agent step; (prefill, the line as the client gets
+    it) when it only said what it is about to do, else None. `rec` is
+    filled in (x_yamadori.continued). A generator: the judgment runs in a
+    thread, with heartbeats (_in_thread)."""
+    status, j = yield from _in_thread(lambda: _judge_stop(payload, msg))
+    if status != "ok" or not isinstance(j, dict):
+        j = {"judged": False, "why": "the judgment raised",
+             "failure": {"code": type(j).__name__, "situation": str(j)[:200],
+                         "retryable": False}}
+    for k in ("judged", "pick", "raw_pick", "tie", "distribution", "ms",
+              "why", "failure", "calibration", "state", "slot", "release",
+              "processed_tokens"):
+        if k in j:
+            rec[k] = j[k]
+    if not j.get("judged"):
+        return None
+    if j.get("pick") != CONTINUE_PICK:
+        rec["why"] = ("a tie: no decision, delivered as is" if j.get("tie")
+                      else f"judged {j.get('pick')!r}: delivered as is")
+        return None
+    text = msg.get("content") or ""
+    sep = _continue_separator(text)
+    prefill = {"role": "assistant", "content": text + sep + CONTINUE_LINE,
+               "reasoning_content": msg.get("reasoning_content") or ""}
+    if context_full(payload, list(convo) + [prefill]):
+        rec["why"] = ("judged next_step, but the continuation does not fit "
+                      "this request's share: delivered as is")
+        return None
+    rec.update(continued=True, line=CONTINUE_LINE,
+               why="judged next_step: continued once from its own text")
+    print(f"  stated step: continued (p={j.get('distribution', {}).get(CONTINUE_PICK)}"
+          f", {j.get('ms')} ms)", flush=True)
+    return prefill, sep + CONTINUE_LINE
+
+
+class _Resent:
+    """A prefill llama-server re-sends as its first deltas (STEP 0) that the
+    client has ALREADY been shown (a stated step's text): skipped once per
+    channel. Where the deltas do not open with it (no re-send), what was
+    held is released as it came."""
+
+    def __init__(self, reasoning: str, content: str):
+        self.want = {"reasoning": reasoning or "", "content": content or ""}
+        self.got = {"reasoning": "", "content": ""}
+        self.done = {k: not v for k, v in self.want.items()}
+
+    def feed(self, ch: str, text: str | None) -> str:
+        if not text or self.done[ch]:
+            return text or ""
+        g, w = self.got[ch] + text, self.want[ch]
+        if len(g) < len(w) and w.startswith(g):
+            self.got[ch] = g
+            return ""
+        self.done[ch] = True
+        return g[len(w):] if g.startswith(w) else g
+
+
+def _image_stop_record(stop: dict, hop: int) -> dict:
+    """One call the image guard stopped, for x_yamadori.image_guard: names
+    and numbers, never the argument's text."""
+    return {"tool": stop.get("tool"), "argument": stop.get("argument"),
+            "kind": stop.get("kind"), "chars_seen": stop.get("chars_seen"),
+            "deltas": stop.get("deltas"), "seconds": stop.get("seconds"),
+            "hop": hop}
+
+
 def _run_turn(body: dict, streamed: bool):
-    messages = body.get("messages") or []
+    # MAX MODE (mcp/max_mode.py): every call this request makes -- the second brain, the decider, summaries, warms --
+    # goes to the model server._serve_turn chose; a max request waits here (never cancelling it) until the other
+    # model's work in flight has ended, and its first upstream call swaps the card.
+    if body.get("_upstream_model"):
+        max_mode.set_current(body["_upstream_model"])
+        waited = max_mode.wait_ready(body["_upstream_model"])
+        body = dict(body, _capacity=dict(body.get("_capacity") or {}, **waited))
+        if body["_upstream_model"] == max_mode.MAX:
+            # the decider's label priors (and its label check) are per model: read on the max model once it serves
+            import decide_turn
+            decide_turn.prime_for(max_mode.MAX)
+    # ONE SYSTEM MESSAGE, `developer` included (system_roles.one_system):
+    # before anything reads the messages, so every reader sees what renders.
+    messages, roles_rec = system_roles.one_system(body.get("messages") or [])
+    if messages is not body.get("messages"):
+        body = dict(body, messages=messages, _roles=roles_rec)
     root, trusted, how = resolve_repo(messages, body.get("_client_ip", ""))
     db = repos.db_path(root) if root else None
     # Decided once, here, and handed to prepare(): a utility call has no
@@ -3955,13 +6740,18 @@ def _run_turn(body: dict, streamed: bool):
     body = dict(body, _utility=utility_of(body, strip_thinking(messages)))
     _key, state = session_context(messages, body.get("_account") or "",
                                    body.get("_session_token") or "",
-                                   utility=body["_utility"])
+                                   utility=body["_utility"],
+                                   cache_key=session_id.cache_key_of(body))
+    # A NEW conversation's id (#41), minted here once: prepare() resolves
+    # the session again and must find the same one.
+    if (state.get("_session") or {}).get("source") == "minted":
+        body["_session_minted"] = state["_session"]["id"]
     # x_yamadori.gpu_room: every A4000 decision THIS request causes
     # (mcp/gpu_room.py) -- prepare's own embeddings (skills, library help),
     # then every tool run_our_tool executes. Fresh per request.
     room_log: list = []
     # FAIL FAST (pre-deploy review, 2026-09-24; revised after the live gate
-    # the same night): prepare's own embeddings (skills / hints, library
+    # the same night): prepare's own embeddings (skills, library
     # help, E1) wait at most gpu_room.FAIL_FAST_WAIT_S (2 s) for the A4000's
     # room lock, which an image draw holds for its whole run (up to
     # ROOM_WAIT_S, 300 s). A loaded search model takes its lease; one that is
@@ -3975,6 +6765,29 @@ def _run_turn(body: dict, streamed: bool):
         payload = prepare(body)
     state["_gpu_room"] = room_log
     payload["_gpu_room"] = room_log
+    # The second brain's runs happen in threads bound to this request's
+    # cancel token: the release at the end of each (admission.helper_lane)
+    # finds this request's switch and record through it.
+    rel = payload.get("_slot_release") or {}
+    payload.setdefault("_slots_released", [])
+    payload.setdefault("_slots_cleared", [])
+    slots.bind_request(cancel.current(), rel.get("on", True),
+                       rel.get("source", "default"),
+                       payload["_slots_released"],
+                       key=(payload.get("_slot") or {}).get("key"),
+                       idle_on=(payload.get("_idle_clear") or {}).get("on"),
+                       idle_log=payload["_slots_cleared"],
+                       account=body.get("_account") or "",
+                       idle_after_s=(payload.get("_idle_clear") or {})
+                       .get("override_s"))
+    # Earlier attempts of this same request that the server cancelled on
+    # its arrival (server._supersede, #44).
+    payload["_superseded"] = body.get("_superseded")
+    # THE CLIENT'S OWN PROMPT MUST FIT (C1): measured here, before deep
+    # thinking or any generation, and refused with context_length_exceeded
+    # (an ApiError: a real HTTP 400 on both paths, since nothing has been
+    # sent yet) -- never landed.
+    payload["_context"] = check_client_prompt(payload)
     # A client that names the vision copy itself (`yamadori-vision`) loads
     # it with this turn's generation, which cannot be wrapped from here: room
     # is made once, now, and no lock is held through the turn (the KNOWN GAP
@@ -3991,17 +6804,26 @@ def _run_turn(body: dict, streamed: bool):
     if waited is not None:
         payload["_warm_waited"] = waited
     ours = set(payload.get("_ours") or [])
-    # generate_image links its result on the address the client used, and
+    # yama_generate_image links its result on the address the client used, and
     # picks the image model from this caller's account; each call is
     # recorded for x_yamadori.
     state["_public_base"] = body.get("_public_base") or ""
+    # A Responses request's hosted image_generation tool (its size), for
+    # THIS request only: set every request, so it never outlives one.
+    state["_image_options"] = body.get("_image_options")
     state["_account"] = body.get("_account") or ""
+    # yama_recall_craft's reads in THIS request (x_yamadori.craft.reads).
+    state["_craft_reads"] = []
+    payload["_craft_reads"] = state["_craft_reads"]
     payload["_images"] = state.setdefault("_images", [])
-    # describe_image reads this request's attached images from the session
+    # yama_describe_image reads this request's attached images from the session
     # state, not the payload: fan-out deep-copies payloads through JSON.
     state["_attached"] = payload.pop("_attached", None) or vision.empty()
     payload["_attachments"] = vision.summary(state["_attached"])
     payload["_vision"] = state.setdefault("_vision", [])
+    # The MCP-backed tools' calls in THIS request (x_yamadori.mcp.calls).
+    state["_mcp_calls"] = []
+    payload["_mcp_calls"] = state["_mcp_calls"]
     payload["_tool_calls"] = []
     payload.setdefault("_fold_back", [])
     rep = _repair_state(payload)
@@ -4011,6 +6833,14 @@ def _run_turn(body: dict, streamed: bool):
     # very same list object, and the loop appends to it.
     question = list(messages)
     turn = corpus.new_turn()
+    # The decider's rows of this request join the corpus turn (decide_turn:
+    # decisions pending before this point; later ones carry it themselves).
+    # Never raises.
+    import decide_turn
+    decide_turn.join_corpus(
+        (payload.get("_ledger") or {}).get("turn_key"), turn,
+        account=body.get("_account") or "",
+        conversation=(payload.get("_ledger") or {}).get("session"))
     t_start = time.time()
     payload["_t_start"] = t_start        # x_yamadori.energy's wall clock
     corpus.log_turn(turn, root, messages,
@@ -4022,12 +6852,13 @@ def _run_turn(body: dict, streamed: bool):
                     account=body.get("_account") or "",
                     client_tools=client_tool_names(body))
     tracker = repeats.Turn()
-    out = _Out(streamed, body.get("_shown_prefix") or "")
+    out = _Out(streamed, body.get("_shown_prefix") or "",
+               lead=payload.get("_session_lead") or "")
 
     # DEEP THINKING BEFORE MAIN, by a trigger (mcp/deep.py: struggle, a task
     # kickoff, a known-hard area) or a header. Its searches go out as
     # reasoning while it runs; its hand-off becomes this turn's prefill. The
-    # model's own trigger, think_deeply, runs inside the loop below.
+    # model's own trigger, yama_think_deeply, runs inside the loop below.
     gen = _deep_thinking(payload, messages, db, root, state)
     think = None
     while True:
@@ -4036,26 +6867,26 @@ def _run_turn(body: dict, streamed: bool):
         except StopIteration as stop:
             think = stop.value
             break
+        if line is None:
+            # The second brain is still working: an empty delta (#39).
+            yield ("heartbeat", None)
+            continue
         yield from out.reasoning(line + "\n")
     payload["_think_pre"] = think
-    if think and think.get("skipped"):
-        lg = payload.get("_ledger") or {}
-        # The trigger fired and nothing ran: deferred, with its own cooldown
-        # (deep.DEFER_REQUESTS), and this episode's one wait is spent.
-        deep.mark_deferred(lg.get("account") or "", lg.get("session") or "",
-                           (payload.get("_deep") or {}).get("kind"))
     if think and think.get("ran"):
         trig = payload.get("_deep") or {}
         lg = payload.get("_ledger") or {}
-        # The struggle episode ends here, the cooldown starts, and an area or
+        # The struggle episode ends here, and an area or
         # a kickoff is marked done (deep.mark_ran).
         deep.mark_ran(lg.get("account") or "", lg.get("session") or "",
                       len(messages), trig.get("kind") or "forced",
                       packages=trig.get("packages"), skills=trig.get("skills"),
-                      turn_key=lg.get("turn_key"))
+                      turn_key=lg.get("turn_key"),
+                      auto_key=(trig.get("key") if trig.get("kind") == "auto"
+                                else None))
 
     # THE MAIN LOOP. It runs more than once only for OUR tools on main --
-    # generate_image / describe_image, and the delegate benchmark arm. It
+    # yama_generate_image / yama_describe_image, and the delegate benchmark arm. It
     # ends when the model stops calling them, at context_full, or at the
     # tool-turn cap (tiers.tool_turn_limit), which LAND: tools withdrawn,
     # the answer asked for. ONE upstream generation per answer: every hop
@@ -4065,9 +6896,40 @@ def _run_turn(body: dict, streamed: bool):
     # request renders with, and so what the compaction store keeps.
     tools0 = list(payload.get("tools") or [])
     prefill = payload.pop("_prefill", None)
+    # THE VERIFY DIRECTIVE (mcp/verify_moment.py): its line opens main's
+    # turn -- in place of a server-tool trigger's directive when both fell
+    # on this request (checking the work comes before going further; the
+    # job's result is still inserted), never over deep thinking's visible
+    # opening.
+    vf = payload.get("_verify")
+    if vf and vf.get("line"):
+        if prefill is None or payload.get("_prefill_auto"):
+            if prefill is not None:
+                vf["replaced"] = prefill.get("reasoning_content")
+                auto = (payload.get("_deep") or {}).get("auto")
+                if isinstance(auto, dict):
+                    auto["directive_replaced"] = auto.get("directive")
+                    auto["directive"] = vf["line"]
+            prefill = directive_prefill(vf["line"])
+            vf["delivered"] = True
+            if vf.get("form") == "named":
+                lg = payload.get("_ledger") or {}
+                deep.note_verify(lg.get("account") or "",
+                                 lg.get("session") or "", vf["line"],
+                                 vf.get("pick"), vf.get("key"),
+                                 at=len(messages))
+        else:
+            vf["delivered"] = False
+            vf["why_not"] = ("deep thinking's visible opening opens this "
+                             "turn")
     spent = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    # Each main generation of the turn, in order: {usage, cache, reasoning,
+    # prefill_reasoning}. usage reports the FINAL one (_usage_of, U1).
+    gens: list[dict] = []
     n_calls = 0
     hops_added: list[dict] = []
+    # (url, x_yamadori.images record) per image shown (IMAGES REACH THE CHAT).
+    shown_images: list[tuple[str, dict]] = []
     # Every generation's content as the model server returned it: what the
     # model WROTE, for attributing template markers (#12).
     upstream_text: list[str] = []
@@ -4075,47 +6937,136 @@ def _run_turn(body: dict, streamed: bool):
     d: dict = {}
     send: dict = payload
     landed = False
+    # Whether any generation of this turn opened with a prefill (_warm).
+    prefilled = False
     pending = ""
+    # THE IMAGE GUARD (tool_code, #46): calls stopped because an image
+    # argument opened as image data, each handed back as a hidden hop; past
+    # IMAGE_REGENERATIONS the turn lands. x_yamadori.image_guard.
+    img_rec: dict | None = None
+    img_land = False
+    # A CALL OF OURS THE PROXY MADE ON MAIN'S BEHALF (_deep_thinking): the
+    # initial prompt's yama_plan -- or, behind the deep_tool_hop switch, a
+    # yama_think_deeply -- and its result, before main's first generation.
+    # A hidden hop like one the model made: the client never sees it, the
+    # ledger records it with the turn (hops_added) and replays it, and hop 0
+    # continues from its tool result.
+    pre_hops = payload.pop("_pre_hops", None) or []
+    if pre_hops:
+        pc = pre_hops[0]["tool_calls"][0]
+        p_name = pc["function"]["name"]
+        try:
+            p_args = json.loads(pc["function"]["arguments"] or "{}")
+        except ValueError:
+            p_args = {}
+        yield from out.reasoning(
+            f"`{streaming.describe_call(p_name, p_args)}`\n")
+        corpus.log_tool_call(turn, root, p_name, p_args, -1)
+        corpus.log_tool_result(turn, root, p_name, pre_hops[1]["content"], 0)
+        payload["_tool_calls"].append(
+            dict(_tool_evidence(p_name, pre_hops[1]["content"]),
+                 inserted=True))
+        for h in pre_hops:
+            convo.append(h)
+            hops_added.append(h)
+    # CONTINUE A STATED STEP (above _Resent): the record (None until a stop
+    # with no call is seen), and -- on the one continuation hop -- the text
+    # the client already has, which the server re-sends first.
+    cont_rec: dict | None = None
+    cont_checked = False
+    continuing = False
+    resend: _Resent | None = None
+    cont_lead = ""
     hop = -1
     while True:
         hop += 1
         pending = ""
         payload = tiers.rebudget(dict(payload, messages=convo), role="main")
-        last = context_full(payload, convo)
-        if not last and cap["turns"] >= cap["limit"]:
+        if continuing:
+            # Measured before the continuation was chosen (context_full
+            # with its prefill): the same tools, nothing appended.
+            last = False
+        elif hop == 0:
+            # THE CLIENT'S OWN REQUEST IS NEVER LANDED (C1): it was measured
+            # before the turn (check_client_prompt) and fits, so its tools
+            # stay and nothing is appended. Its token fields are cut to the
+            # window it was measured against (a prefill -- deep thinking's
+            # hand-off -- counted by estimate on top).
+            ctx = payload.get("_context") or {}
+            n0 = ctx.get("tokens") if ctx.get("counted") else \
+                tiers.estimate_prompt_tokens(payload)
+            if prefill is not None:
+                n0 = int(n0 or 0) + tiers.estimate_prompt_tokens(
+                    {"messages": [prefill]})
+            if pre_hops and ctx.get("counted"):
+                # The inserted call and its result (the plan) on top of the
+                # client's counted prompt; an estimate already has them.
+                n0 = int(n0 or 0) + tiers.estimate_prompt_tokens(
+                    {"messages": pre_hops})
+            payload = fit_window(payload, int(n0 or 0), window_limit(payload))
+            last = False
+        else:
+            last = context_full(payload, convo)
+        if not last and hop and cap["turns"] >= cap["limit"]:
             cap["hit"] = True
             payload = _land(payload, convo, "tool_turn_cap")
             last = landed = True
+        elif not last and img_land:
+            payload = _land(payload, convo, "image_guard")
+            last = landed = True
+            if img_rec is not None:
+                img_rec["landed"] = True
         elif last:
             payload = _land(payload, convo)
             landed = bool(convo) and convo[-1].get("content") == \
                 LANDING_PROMPT
         send = payload
         # A prefill opens this hop: deep thinking's hand-off on hop 0, or the
-        # fold-back after a think_deeply result on the hop that follows it.
+        # fold-back after a yama_think_deeply result on the hop that follows it.
         if prefill is not None:
             send = dict(payload, messages=list(convo) + [prefill])
+            # A stated step's continuation prefills the model's OWN turn,
+            # which the client keeps: not a prefill it drops (_warm).
+            prefilled = prefilled or not continuing
+        if (tool_code.IMAGE_GUARD and payload.get("tools")
+                and (payload.get("_tier") or {}).get("name")
+                not in ("minimal", "low")):
+            # Main's generation, with tools: the reader stops a call whose
+            # image argument opens as image data (_post_events_raw). Not at
+            # `minimal`/`low` (operator, 2026-09-26): those are the model as
+            # it ships, with nothing of ours.
+            send = dict(send, _image_guard=True)
         d = {}
         # CHANNEL ORDER within a hop: content is held until it passes
         # HOLD_CONTENT_CHARS (it is the answer: stream it live) or the hop
         # ends (a hop that calls one of OUR tools sends its held preface as
         # reasoning; the final hop flushes it as content).
-        held = ""
+        # A stated step's continuation opens with its line (CONTINUE_LINE),
+        # held like any preface: after the fix-up's reasoning line, before
+        # the calls.
+        held = cont_lead if continuing else ""
         live = False
-        # A fold-back hop (deep thinking's prefill): a second, bold or
-        # heading copy of the opening phrase is removed before the held
-        # content goes out (dedup_opening).
-        fold_hop = prefill is not None and any(
-            f.get("phrase") == "investigate"
-            for f in payload.get("_fold_back") or [])
         try:
             for kind, item in _post_events("/v1/chat/completions", send):
                 if kind == "done":
                     d = item
                     continue
-                if item.get("reasoning_content"):
-                    yield from out.reasoning(item["reasoning_content"])
+                if kind == "beat":
+                    # A tool call is being written (#44): an empty delta,
+                    # so the client -- and any relay between -- sees a live
+                    # stream. Nothing is added to reasoning or content.
+                    if streamed:
+                        yield ("heartbeat", None)
+                    continue
+                rpiece = item.get("reasoning_content") or ""
                 piece = item.get("content") or ""
+                if resend is not None:
+                    # The stated step's reasoning and text, re-sent: the
+                    # client has them already.
+                    rpiece = resend.feed("reasoning", rpiece)
+                    piece = resend.feed("content", piece)
+                if rpiece:
+                    yield from out.reasoning(rpiece)
                 if not piece:
                     continue
                 if live:
@@ -4124,43 +7075,90 @@ def _run_turn(body: dict, streamed: bool):
                 held += piece
                 if len(held) > HOLD_CONTENT_CHARS:
                     live = True
-                    if fold_hop:
-                        held = dedup_opening(held, payload)
                     yield from out.content(held)
                     held = ""
         except Exception as e:                                   # noqa: BLE001
-            if not streamed:
-                raise
-            yield ("content", f"\n[upstream error: {type(e).__name__}: {e}]")
+            if isinstance(e, cancel.Cancelled) or cancel.cancelled():
+                # The client went away (mcp/cancel.py): nothing to tell it.
+                raise cancel.Cancelled(str(e)) from e
+            # ONE ERROR PATH (E1): raised on both paths. stream_body turns it
+            # into an HTTP error when nothing has been sent yet, else into
+            # the SSE error event -- never into assistant content.
+            # finish "error": a failed turn, never read as an empty answer
+            # (mcp/test_utility.py, the chars=0 replay).
             corpus.log_answer(turn, root, "", hop,
-                              (time.time() - t_start) * 1000)
-            return {"_error": True}
+                              (time.time() - t_start) * 1000, finish="error")
+            raise
         n_calls += 1
         u = d.get("usage") or {}
         for k in spent:
             spent[k] += int(u.get(k) or 0)
-        d["usage"] = dict(spent, hops=n_calls)
+        # This generation's own usage (the length notice names its tokens);
+        # the turn's usage is decided at the end (_usage_of).
+        d["usage"] = dict(u)
         msg = d["choices"][0]["message"]
+        if continuing:
+            # The prefill in the message exactly once (llama-server re-sends
+            # it, STEP 0; where it did not, it is put back): the turn is the
+            # stated step's text, the line and the continuation.
+            pc = prefill.get("content") or ""
+            pr = prefill.get("reasoning_content") or ""
+            if not (msg.get("content") or "").startswith(pc):
+                msg["content"] = pc + (msg.get("content") or "")
+            got_r = msg.get("reasoning_content") or ""
+            if pr.strip() and not got_r.lstrip().startswith(pr.strip()):
+                msg["reasoning_content"] = pr + ("\n" + got_r if got_r
+                                                 else "")
+            cont_rec["call_followed"] = (bool(msg.get("tool_calls"))
+                                         or d.get("_image_arg") is not None)
+            cont_rec["finish"] = d["choices"][0].get("finish_reason")
+            continuing, resend, cont_lead = False, None, ""
+        gens.append({"usage": dict(u), "cache": d.get("_cache"),
+                     "reasoning": msg.get("reasoning_content") or "",
+                     "prefill_reasoning": (prefill or {}).get(
+                         "reasoning_content") or "",
+                     "which": f"hop {hop}"})
         upstream_text.append(msg.get("content") or "")
+        # A call stopped by the image guard: nothing of this generation runs
+        # or reaches the client; it is handed back below as NOT EXECUTED.
+        img = d.get("_image_arg")
         calls = [c for c in (msg.get("tool_calls") or [])
-                 if c.get("function", {}).get("name") in ours]
+                 if is_ours(c.get("function", {}).get("name"), ours)] \
+            if img is None else []
         if held:
-            if calls and not last:
+            if (calls or img is not None) and not last:
                 yield from out.reasoning(held)
-            elif tcheck is not None and any(
-                    c.get("function", {}).get("name") not in ours
+            elif img is None and tcheck is not None and any(
+                    not is_ours(c.get("function", {}).get("name"), ours)
                     for c in (msg.get("tool_calls") or [])):
                 # A preface to CLIENT calls waits for the code check: the
                 # fix-up's reasoning line must go out before any content.
                 pending = held
             else:
-                if fold_hop:
-                    held = dedup_opening(held, payload)
                 yield from out.content(held)
             held = ""
         # The landing is the last generation whatever it asked for: a call
         # made there is not run (nothing would read its result).
-        if not calls or last:
+        if (not calls and img is None) or last:
+            if not cont_checked and img is None:
+                # CONTINUE A STATED STEP: once per request, on the first
+                # generation that ends the turn.
+                cont_checked = True
+                cont_rec = _stated_step_gate(
+                    payload, messages, msg,
+                    d["choices"][0].get("finish_reason"), ours, last)
+                nxt = None
+                if cont_rec is not None and cont_rec.pop("eligible"):
+                    nxt = yield from _stated_step(payload, convo, msg,
+                                                  cont_rec)
+                if nxt is not None:
+                    prefill, cont_lead = nxt
+                    resend = _Resent(prefill["reasoning_content"],
+                                     prefill["content"])
+                    continuing = True
+                    payload["_continued"] = cont_rec
+                    continue
+                payload["_continued"] = cont_rec
             break
         # The hop's reasoning stays with it (the template renders it back),
         # and the ledger records the hops for the next request.
@@ -4187,7 +7185,9 @@ def _run_turn(body: dict, streamed: bool):
         hops_added.append(hop_msg)
         next_prefill = None
         for c in calls:
-            fn = c["function"]["name"]
+            # An old name of ours (copied from a replayed hop) runs as its
+            # `yama_*` tool; the call itself stays as the model wrote it.
+            fn = canonical_tool_name(c["function"]["name"])
             try:
                 args = json.loads(c["function"]["arguments"] or "{}")
             except json.JSONDecodeError:
@@ -4196,8 +7196,14 @@ def _run_turn(body: dict, streamed: bool):
             corpus.log_tool_call(turn, root, fn, args, hop)
             t0 = time.time()
             # An image takes a minute or more, and so can looking at one: a
-            # thread with heartbeats. So can deep thinking (think_deeply).
-            if fn == deep.TOOL_NAME:
+            # thread with heartbeats. So can deep thinking (yama_think_deeply),
+            # and a plan (yama_plan): its result is the next hop's context,
+            # nothing prefilled after it -- main goes on acting.
+            if fn == deep.PLAN_TOOL_NAME:
+                status, res = yield from _in_thread(
+                    lambda args=args: _plan_task(payload, args, db, root,
+                                                 state))
+            elif fn == deep.TOOL_NAME:
                 n_before = sum(1 for x in payload["_think_tool"]["calls"]
                                if x.get("ran"))
                 status, res = yield from _in_thread(
@@ -4212,17 +7218,48 @@ def _run_turn(body: dict, streamed: bool):
                     # at the hand-off in the tool result.
                     seed = ran_now[-1].pop("_seed", None)
                     seeds = [seed] if seed else []
+                    # A machine-built result (no conclusion) gets its own
+                    # line (deep.THINK_REASONING_MACHINE).
+                    concluded = not (ran_now[-1].get("handoff") or {}).get(
+                        "machine_built")
                     next_prefill = {"role": "assistant",
-                                    "reasoning_content": deep.THINK_REASONING,
+                                    "reasoning_content":
+                                        deep.think_reasoning(concluded),
                                     "content": shomen.opening(seeds)}
                     payload.setdefault("_fold_back", []).append(
                         {"job": "investigate", "phrase": "investigate",
                          "into": "prefill", "trigger": "model",
                          "seeds": [x.get("word") for x in seeds]})
             else:
+                n_img0 = len(payload["_images"])
                 status, res = yield from _in_thread(
                     lambda fn=fn, args=args: run_our_tool(fn, args, db, root,
                                                           tracker, state))
+                if fn == images.TOOL_NAME and status == "ok" and res:
+                    # IMAGES REACH THE CHAT: the picture goes to the client
+                    # now, as content; the model reads that it is shown.
+                    shown = images.shown_on_main(
+                        res, looks=vision.TOOL_NAME in ours)
+                    if shown:
+                        res, md, url = shown
+                        yield from out.image(md + "\n\n", url)
+                        new = payload["_images"][n_img0:]
+                        rec = new[-1] if new else None
+                        if rec is None:
+                            rec = {"ok": True}
+                            payload["_images"].append(rec)
+                        rec["emitted"] = {
+                            "ms": round((time.time() - t_start) * 1000),
+                            "after_hop": hop, "before_hop": hop + 1,
+                            "at": "stream" if streamed else "answer_start",
+                            "order": len(out.images)}
+                        shown_images.append((url, rec))
+                elif fn == vision.TOOL_NAME and status == "ok" and res:
+                    # One screened line of what the vision model saw: a
+                    # heartbeat once content has started (CHANNEL ORDER).
+                    seen = _describe_line(res)
+                    if seen:
+                        yield from out.reasoning(seen)
             res = res if status == "ok" and res else json.dumps(
                 images.ImageError(
                     "TOOL_RAISED", f"the {fn} call died without a result",
@@ -4232,10 +7269,46 @@ def _run_turn(body: dict, streamed: bool):
             corpus.log_tool_result(turn, root, fn, res,
                                    (time.time() - t0) * 1000)
             payload["_tool_calls"].append(_tool_evidence(fn, res))
+            # A hand-off or a plan crosses WHOLE (operator, 2026-09-27: the
+            # 6,000-character cut and its marker broke pagoda-h2): its
+            # length is bounded by its job's own generation budget, and the
+            # window check handles one that does not fit (context_full lands
+            # the next hop). Other results keep repeats.RESULT_CAP.
             tmsg = {"role": "tool", "tool_call_id": c["id"],
-                    "content": repeats.cap_tool_result(res, fn, args)}
+                    "content": res if fn in (deep.TOOL_NAME,
+                                             deep.PLAN_TOOL_NAME)
+                    else repeats.cap_tool_result(res, fn, args)}
             convo.append(tmsg)
             hops_added.append(tmsg)
+        if img is not None:
+            # THE IMAGE GUARD'S HAND-BACK (#46): the stopped call -- its
+            # image value replaced, so the model sees what it did without
+            # the data -- and a NOT EXECUTED result that says why and what
+            # to pass instead (tool_code.image_result); a complete call
+            # before it in the same generation is not run either. A hidden
+            # hop like the image tools' (the ledger replays it before the
+            # delivered turn), counted in tool_turns; the model then writes
+            # the turn again.
+            for c in hop_msg["tool_calls"]:
+                tmsg = {"role": "tool", "tool_call_id": c.get("id") or "",
+                        "content": (tool_code.image_result(
+                            img, generated=images.TOOL_NAME in ours)
+                            if c.get("id") == img["call_id"]
+                            else tool_code.image_other_result(img))}
+                convo.append(tmsg)
+                hops_added.append(tmsg)
+            if img_rec is None:
+                img_rec = {"stopped": [], "regenerated": 0, "landed": False}
+            img_rec["stopped"].append(_image_stop_record(img, hop))
+            if len(img_rec["stopped"]) > tool_code.IMAGE_REGENERATIONS:
+                img_land = True
+            else:
+                img_rec["regenerated"] += 1
+            yield from out.reasoning(
+                f"`stopped a {img['tool']} call: its {img['argument']} "
+                f"argument was image data ({img['kind']}); "
+                + ("asking for the answer`\n" if img_land
+                   else "asking for a file path`\n"))
         cap["turns"] += 1
         payload["messages"] = convo
         prefill = next_prefill
@@ -4256,26 +7329,28 @@ def _run_turn(body: dict, streamed: bool):
             base_messages[-1] is prefill:
         base_messages = base_messages[:-1]
     content = msg.get("content") or ""
-    if any(f.get("phrase") == "investigate"
-           for f in payload.get("_fold_back") or []):
-        # The delivered text agrees with what was streamed (dedup_opening
-        # counts a removal once).
-        content = dedup_opening(content, payload, count=not streamed)
     client_calls = [c for c in (msg.get("tool_calls") or [])
-                    if c.get("function", {}).get("name") not in ours]
+                    if not is_ours(c.get("function", {}).get("name"), ours)]
     stray = [c for c in (msg.get("tool_calls") or [])
-             if c.get("function", {}).get("name") in ours]
+             if is_ours(c.get("function", {}).get("name"), ours)]
+    img_last = d.get("_image_arg")
+    if img_last is not None:
+        # THE IMAGE GUARD on the last generation (a landing, or a full
+        # context): the stopped call is never forwarded, and there is no
+        # hop left to hand it back in.
+        stray, client_calls = list(msg.get("tool_calls") or []), []
+        if img_rec is None:
+            img_rec = {"stopped": [], "regenerated": 0, "landed": landed}
+        img_rec["stopped"].append(dict(_image_stop_record(img_last, hop),
+                                       withheld=True))
     fan = None
     if stray:
         # Withheld (the client does not have them), so the finish must not
-        # claim tool calls the client will never receive.
+        # claim tool calls the client will never receive. Nothing is written
+        # in their place: the "[no answer: ...]" defect notices were REMOVED
+        # 2026-09-27 (docs/CONSTANTS-AUDIT.md); an empty answer with
+        # finish_reason stop is what the client gets.
         fin = "stop" if fin == "tool_calls" else fin
-        if not content.strip():
-            t = ("[no answer: the tool loop reached its breaker and the "
-                 "landing still asked for a tool. This is a defect report, "
-                 "not the model's answer.]")
-            yield from out.content(t)
-            content += t
     if fin == "incomplete":
         took = (d.get("_transport") or {}).get("dropped_after")
         t = (f"\n\n[the connection to the model dropped"
@@ -4283,24 +7358,21 @@ def _run_turn(body: dict, streamed: bool):
              f"the answer above is the part that arrived]")
         yield from out.content(t)
         content += t
-    # A `length` finish is a BUDGET EVENT, reported with the same words on
-    # both paths, as content -- never the reasoning.
-    notice = _budget_notice(fin, content, d.get("usage"))
-    if notice:
-        yield from out.content(notice)
-        content = content.rstrip() + notice if content.strip() else notice
-    blank = _empty_notice(fin, content, msg)
-    if blank:
-        print("  empty answer: finish=stop, no content, no tool call; the "
-              "client is told so", flush=True)
-        yield from out.content(blank)
-        content = blank
+    # A `length` finish is a BUDGET EVENT: finish_reason "length" says so,
+    # and the content is what was generated (the "[no answer: ...]" /
+    # "[answer cut off ...]" notice and the empty-answer notice were REMOVED
+    # 2026-09-27, docs/CONSTANTS-AUDIT.md). Neither is treated as an answer
+    # (no code check, no fan-out): _finish_text runs on a "stop" with text.
+    if fin == "length" or (fin == "stop" and not content.strip()
+                           and not client_calls):
+        print(f"  finish={fin}, {len(content.strip())} chars of content; "
+              f"delivered as generated", flush=True)
 
     if client_calls:
         content = yield from _finish_calls(payload, tcheck, msg, client_calls,
                                            content, question, ours, out,
                                            pending)
-    elif not notice and not blank and fin == "stop":
+    elif fin == "stop" and content.strip():
         content, fan, slot_msg = yield from _finish_text(
             payload, rep, msg, fin, content, question, send, slot_msg, out)
         # A continuation, and a second-brain winner delivered in place, are
@@ -4309,6 +7381,10 @@ def _run_turn(body: dict, streamed: bool):
         if fan and isinstance(fan.get("_winner"), dict):
             upstream_text.append(fan["_winner"].get("content") or "")
     msg["content"] = content
+    # THE CONVERSATION'S ID RIDES IN THE CALL IDS (#41, _carry_session): from
+    # here on -- the streamed delta, the blocking answer, the ledger's keys,
+    # the compaction store and the warm -- every copy has the rewritten ids.
+    client_calls = _carry_session(payload, client_calls, slot_msg)
     # THE WARM RACE, streamed (live gate 2026-09-24, #5): the client has the
     # calls the moment they are yielded, and a harness that runs the tool
     # then and there can send its next request before this turn reaches
@@ -4316,6 +7392,11 @@ def _run_turn(body: dict, streamed: bool):
     # warm this turn is about to schedule (_warm takes the hold over, or
     # releases it when nothing is warmed).
     hold = _warm_hold(payload) if client_calls else None
+    # What the duplicate filter still holds goes out now (IMAGES REACH THE
+    # CHAT), and a compaction summary's session line if nothing streamed it
+    # yet (#41; answers carry no line).
+    yield from out.flush_held()
+    yield from out.flush_lead()
     if client_calls:
         msg["tool_calls"] = client_calls
         fin = "tool_calls"
@@ -4336,16 +7417,7 @@ def _run_turn(body: dict, streamed: bool):
         fan.pop("_winner", None)
     if any(f.get("phrase") == "investigate"
            for f in payload.get("_fold_back") or []):
-        payload["_fold_back_answer"] = dict(
-            fold_back_answer(content), repeated_opening_removed=int(
-                payload.get("_opening_repeats_removed") or 0))
-        fa = payload["_fold_back_answer"]
-        if fa["refers_to_hidden"] or fa["chars_after_opening"] < \
-                FOLD_BACK_MIN_CHARS:
-            print(f"  fold-back answer: {fa['chars_after_opening']} chars "
-                  f"after the opening"
-                  + (f"; refers to hidden text ({fa['refers_to_hidden']})"
-                     if fa["refers_to_hidden"] else ""), flush=True)
+        payload["_fold_back_answer"] = fold_back_answer(content)
     delivered = {"role": "assistant", "content": content,
                  "reasoning_content": msg["reasoning_content"]}
     if client_calls:
@@ -4361,23 +7433,63 @@ def _run_turn(body: dict, streamed: bool):
     # deep-thinking turn). The turn is keyed by what the client stores; the
     # content it renders is the delivered one (ledger_restore).
     stored = dict(delivered)
+    # STRAY TEMPLATE MARKERS (#12, _StrayMarkers): the client's copy has them
+    # out -- the stream filtered them as it went; the blocking path cleans
+    # the whole answer here, the same filters in the same order (image
+    # duplicates, then markers). `delivered` keeps the slot's text: the
+    # ledger renders it, keyed by the client's copy (#10), so the next
+    # request extends the slot. `clean`: the model's answer as the client
+    # gets it, without the lines the proxy put before it.
+    tnote = payload.get("_tool_note") or {}
+    if streamed:
+        stray = out.markers
+        clean = strip_stray_markers(content or "")
+    else:
+        # The model's text is filtered WITHOUT our note (the marker filter
+        # never sees the proxy's own lines), which is put back after it as
+        # the stream sends it (_Out.note).
+        body_text = content or ""
+        ours = tnote.get("appended") or ""
+        if ours and body_text.endswith(ours):
+            body_text = body_text[:-len(ours)]
+        else:
+            ours = ""
+        clean, stray = _StrayMarkers.clean(
+            out.dedup.strip(body_text) if out.images else body_text)
+        if ours:
+            clean += ("\n\n" if clean.strip() else "") + tnote["note"]
     if streamed:
         shown = "".join(out.shown)
         if shown.strip() != (content or "").strip():
             stored["content"] = shown
             payload["_stored_differs"] = True
+    elif payload.get("_session_lead") or out.images or clean != content:
+        # A COMPACTION SUMMARY'S SESSION LINE on the blocking path (#41; no
+        # answer carries one): the client receives and stores the line and
+        # the summary; the slot generated the summary. Keyed by the client's
+        # copy, rendered as the slot's (#10 path), so the model never reads
+        # it. IMAGES REACH THE CHAT: the image lines open the answer, in
+        # the order they were made -- where the stream puts them -- and the
+        # model's own copy of one is removed from the client's copy only.
+        stored["content"] = ((payload.get("_session_lead") or "")
+                             + "".join(out.images) + clean)
+        msg["content"] = stored["content"]
+        payload["_stored_differs"] = True
+    for url, rec in shown_images:
+        rec["duplicates_stripped"] = int(out.dedup.removed.get(url, 0))
     payload["_template_markers"] = _markers_record(
-        payload, stored.get("content") or "", "".join(upstream_text))
-    # THE TURN AS THE NEXT REQUEST WILL RENDER IT (reasoning pass-through,
-    # 2026-09-24): its reasoning is whatever this client sends back -- the
-    # echo of what it was shown if it echoes (seen on its past turns), else
-    # nothing -- and the hidden hops before it come back with their
-    # reasoning emptied (ledger_record_turn). The warm and the compaction
-    # store use that form; the ledger records no reasoning at all.
+        payload, stored.get("content") or "", "".join(upstream_text), stray)
+    # THE TURN AS THE NEXT REQUEST WILL RENDER IT: its reasoning is the echo
+    # of what this client was shown if it echoes (seen on its past turns),
+    # else the slot's own, which the ledger records and restores (switch
+    # restore_reasoning, 2026-09-27; off: nothing, the pass-through, and the
+    # hidden hops' reasoning emptied). The warm and the compaction store use
+    # that form.
     # Whether this client echoes: seen on this request's past assistant
-    # turns; on a first turn (none to see), what the ACCOUNT's client did
-    # last time -- echoing is a property of the harness, not the
-    # conversation. Unknown: it strips (Hermes does, for this provider).
+    # turns; on a first turn (none to see), what the ACCOUNT's client has
+    # been seen doing -- echoing is a property of the harness, not the
+    # conversation (_echo_guess). Unknown: it strips (Hermes does, for this
+    # provider).
     acct = ((payload.get("_ledger") or {}).get("account")) or ""
     if any(isinstance(m, dict) and m.get("role") == "assistant"
            for m in messages):
@@ -4388,19 +7500,68 @@ def _run_turn(body: dict, streamed: bool):
         echoes = _echo_guess(acct)
     client_turn = {k: v for k, v in delivered.items()
                    if k != "reasoning_content"}
+    # PAST REASONING IS RESTORED (switch `restore_reasoning`, operator
+    # 2026-09-27): a client that strips gets the slot's reasoning back on its
+    # next request, so the warm and the compaction store render it too.
+    rr_on = bool(((payload.get("_ledger") or {}).get("restore_reasoning")
+                  or {}).get("on"))
     if echoes:
         client_turn["reasoning_content"] = (
             "".join(out.reasoning_shown) if streamed
             else delivered["reasoning_content"])
+    elif rr_on:
+        client_turn["reasoning_content"] = delivered["reasoning_content"]
     hop_ids = {id(h) for h in hops_added}
+    # HIDDEN HOPS AND AN ECHOING CLIENT (ledger_restore, 2026-09-26): the
+    # next request renders the hops with their own reasoning and this turn
+    # with the slot's, so the warm and the compaction store do too; for a
+    # client that strips, the hops' reasoning is emptied -- unless past
+    # reasoning is restored, which keeps them as the slot holds them.
+    echo_shown = client_turn.get("reasoning_content") if echoes else None
+    # What an echoing client WILL send back for this turn is what it was
+    # shown -- recorded as the hop echo whenever the turn has hops, whatever
+    # `echoes` guessed. On a conversation's FIRST request `echoes` is only
+    # _echo_guess (the account's history), and the kickoff's inserted
+    # yama_plan hop sits exactly there: an echoing client on an account
+    # guessed "strips" sent the planner's streamed reasoning (9,544 chars;
+    # the slot's own was 67) back as main's, which passed through, so the
+    # request diverged inside the turn and re-read it (deploy check
+    # 2026-09-27, h5: agent loop [echo] step 2 reused 4,131 of 7,133,
+    # processed 3,002). The record is a hash; it matches only an echo.
+    hop_echo_shown = echo_shown
+    if hops_added and not echoes:
+        hop_echo_shown = ("".join(out.reasoning_shown) if streamed
+                          else delivered.get("reasoning_content")) or None
+    keep_hops = bool(hops_added) and (bool((echo_shown or "").strip())
+                                      or rr_on)
+    if keep_hops:
+        client_turn["reasoning_content"] = slot_msg.get(
+            "reasoning_content") or ""
     warm_base = [dict(m, reasoning_content="") if id(m) in hop_ids
-                 and m.get("role") == "assistant" else m
+                 and m.get("role") == "assistant" and not keep_hops else m
                  for m in base_messages]
+    # ONE ORDER FOR TOOL-CALL ARGUMENTS: the next request renders every call
+    # with sorted keys (prepare), so the warm and the compaction store do too
+    # -- the delivered turn and any hidden hop of ours, which the slot
+    # generated in the model's own order.
+    client_turn = sort_call_arguments([client_turn])[0]
+    warm_base = sort_call_arguments(warm_base)
     account, session = ledger_scope(payload)
     if session:
+        salt = (payload.get("_ledger") or {}).get("salt") or ""
+        own = (delivered.get("reasoning_content") or "") if rr_on else ""
         ledger_record_turn(account, session, delivered, hops_added or None,
                            stored=stored,
-                           prev=chain_keys(messages)[-1] if messages else "")
+                           prev=chain_keys(messages, salt)[-1] if messages
+                           else "", echo=hop_echo_shown,
+                           slot_reasoning=slot_msg.get("reasoning_content"),
+                           reasoning=own or None)
+        if isinstance(payload.get("_ledger"), dict):
+            payload["_ledger"]["reasoning_recorded"] = len(own.strip() and own)
+        # An answer that carries no id (no client call) is recorded with it
+        # (#41, THE ANSWER RECORD), so the next request finds its session.
+        _record_answer_session(payload, messages,
+                               stored.get("content") or "", client_calls)
         # The compaction store keeps the prompt AS THE LEDGER RENDERS IT
         # (pre-deploy review, 2026-09-24): hidden hops with their reasoning
         # emptied and no landing request, with the turn's own tools. It held
@@ -4421,8 +7582,17 @@ def _run_turn(body: dict, streamed: bool):
         payload["_warm_before"] = dict(payload["_warm_before"],
                                        waited_s=payload["_warm_waited"])
     payload["_warm"] = _warm(payload, warm_base, client_turn, slot_msg,
-                             landed, hold=hold)
+                             landed, hold=hold, prefilled=prefilled)
     _log_turn(state, delivered, tcheck, think, fan, rep)
+    # THE COMPACTION LINK (#38): a compaction's window starts when it ENDS,
+    # and its continuation is recognised by the summary it carries; any
+    # other conversation turn refreshes the account's last activity.
+    if payload.get("_utility_kind") == "compaction":
+        # The summary as the client will carry it (stray markers out).
+        _compaction_done(body.get("_account") or "",
+                         (payload.get("_slot") or {}).get("key"), clean)
+    elif not body["_utility"].get("utility"):
+        _session_touch(body.get("_account") or "", state.get("_key") or "")
     # THE SELF-IMPROVEMENT LOOP (Phase 0.6): this conversation's earlier
     # decisions are observed against what the client sent back, then this
     # request's decision -- or non-decision -- is recorded.
@@ -4431,14 +7601,109 @@ def _run_turn(body: dict, streamed: bool):
         n_calls += 1
         for k in spent:
             spent[k] += int(u.get(k) or 0)
+    # A fold-back continuation is main's own last generation of the answer.
+    if payload.get("_final_gen"):
+        gens.append(payload.pop("_final_gen"))
+    usage, usage_rec = _usage_of(gens, spent, n_calls, payload)
+    payload["_image_guard_rec"] = img_rec
     d["x_yamadori"] = _x_yamadori(payload, hops=n_calls, fan=fan,
                                   think=think, repair=rep, tool_check=tcheck)
+    d["x_yamadori"]["usage"] = usage_rec
     recent_turns.note(d["x_yamadori"])
     corpus.log_answer(turn, root, content, hop,
                       (time.time() - t_start) * 1000,
                       finish=fin, tool_calls=len(client_calls))
-    d["usage"] = dict(spent, hops=n_calls)
+    d["usage"] = usage
     return d
+
+
+# USAGE (U1, U2; docs/OPENAI-CONFORMANCE.md, 2026-09-25). `usage` describes
+# the FINAL main generation of the turn -- the one the client's answer came
+# from (the last hop, or a fold-back continuation when one ran):
+#   prompt_tokens      that generation's prompt: the context the conversation
+#                      occupies now. It was the SUM over the turn's hops, and
+#                      Hermes reads it as the context size
+#                      (context_compressor.py: last_prompt_tokens =
+#                      usage.prompt_tokens), so every multi-hop turn read as a
+#                      context 2-3x its size and compacted early.
+#   completion_tokens  what that generation produced (reasoning included, as
+#                      the spec counts it), which is what the client received
+#                      from it.
+#   total_tokens       their sum.
+#   prompt_tokens_details.cached_tokens     prompt tokens reused from the
+#                      slot's cache (llama-server's own usage field, else
+#                      its timings' cache_n: slots.cache_record).
+#   completion_tokens_details.reasoning_tokens   llama-server does not report
+#                      it (server-task.cpp usage_json_oaicompat), so the
+#                      reasoning the generation wrote is counted with the
+#                      model's own tokenizer (/tokenize; a prefill's echoed
+#                      reasoning is not counted); ABSENT when it cannot be
+#                      counted -- never guessed.
+# HIDDEN HOPS -- a generation that called one of OUR tools (images,
+# yama_think_deeply, the delegate arm) -- have no field in the spec. Their output
+# is in the final generation's prompt (the hop and its tool result are part
+# of what the model read), so prompt_tokens already covers them as context;
+# their own generation is the proxy's work, not the client's answer. Every
+# generation's numbers, and the sums the old `usage` carried, are in
+# x_yamadori.usage; `usage.hops` moved there (and x_yamadori.hops is the
+# same count).
+REASONING_COUNT_TIMEOUT = 10.0
+
+
+def _count_text_tokens(model: str, text: str) -> int | None:
+    try:
+        toks = _upstream_json(f"/upstream/{model}/tokenize",
+                              {"content": text, "add_special": False},
+                              timeout=REASONING_COUNT_TIMEOUT).get("tokens")
+    except cancel.Cancelled:
+        raise
+    except Exception:                                            # noqa: BLE001
+        return None
+    return len(toks) if isinstance(toks, list) else None
+
+
+def _usage_of(gens: list[dict], spent: dict, n_calls: int,
+              payload: dict) -> tuple[dict, dict]:
+    """(usage for the client, x_yamadori.usage)."""
+    final = gens[-1] if gens else {}
+    u = final.get("usage") or {}
+    cache = final.get("cache") or {}
+    prompt = u.get("prompt_tokens")
+    if prompt is None:
+        prompt = cache.get("prompt")
+    prompt = int(prompt or 0)
+    completion = int(u.get("completion_tokens") or 0)
+    usage = {"prompt_tokens": prompt, "completion_tokens": completion,
+             "total_tokens": prompt + completion}
+    cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens")
+    if cached is None:
+        cached = cache.get("reused")
+    if cached is not None:
+        usage["prompt_tokens_details"] = {"cached_tokens": int(cached)}
+    rec = {"final": final.get("which"), "generations": n_calls,
+           "summed": dict(spent), "reasoning_tokens": None}
+    text = final.get("reasoning") or ""
+    pre = (final.get("prefill_reasoning") or "").strip()
+    if pre and text.lstrip().startswith(pre):
+        text = text.lstrip()[len(pre):]
+    if not text.strip():
+        usage["completion_tokens_details"] = {"reasoning_tokens": 0}
+        rec["reasoning_tokens"] = "none written"
+    else:
+        n = _count_text_tokens(payload.get("model") or "bonsai", text)
+        if n is not None:
+            usage["completion_tokens_details"] = {
+                "reasoning_tokens": min(n, completion) if completion else n}
+            rec["reasoning_tokens"] = "tokenized"
+        else:
+            rec["reasoning_tokens"] = "absent: the tokenizer did not answer"
+    rec["per_generation"] = [
+        {"which": g.get("which"),
+         "prompt_tokens": (g.get("usage") or {}).get("prompt_tokens"),
+         "completion_tokens": (g.get("usage") or {}).get("completion_tokens"),
+         "cached_tokens": (g.get("cache") or {}).get("reused")}
+        for g in gens]
+    return usage, rec
 
 
 def _finish_calls(payload: dict, tcheck: dict | None, msg: dict,
@@ -4452,6 +7717,9 @@ def _finish_calls(payload: dict, tcheck: dict | None, msg: dict,
     delivered."""
     rv = tool_code.check(tcheck, msg, "tool_calls", ours)
     todo = tool_code.fixable(rv) if (tcheck and tcheck.get("fix")) else []
+    # Every blocking unit is repaired. The fix-up SCOPE (#56: project files
+    # only, scratch-name table) was REMOVED 2026-09-27
+    # (docs/CONSTANTS-AUDIT.md: its table named one run's files).
     if todo:
         yield from out.reasoning(
             "`fixing " + ", ".join(sorted({str(t["path"]) for t in todo}))
@@ -4485,7 +7753,11 @@ def _finish_calls(payload: dict, tcheck: dict | None, msg: dict,
         # CHANNEL ORDER: content, after every reasoning delta and before the
         # calls. A blank line after the model's own text, if any.
         t = ("\n\n" if content.strip() else "") + tnote
-        yield from out.content(t)
+        # OUR note goes past the imitation filter (IMITATED NOTES, #36): the
+        # model's text before it is released through the filters first. The
+        # blocking path splits it off the same way (_run_turn).
+        yield from out.note(tnote)
+        payload["_tool_note"] = {"note": tnote, "appended": t}
         content += t
     return content
 
@@ -4516,12 +7788,11 @@ def _finish_text(payload: dict, rep: dict | None, msg: dict, fin: str,
         else:
             content = yield from _repair_answer(payload, rep, review, content,
                                                 question, out)
-    fan = None
-    note, fan, win = "", None, None
+    fan, win = None, None
     status, res = yield from _in_thread(
         lambda: _fan_out(payload, dict(msg, content=content), fin))
     if status == "ok" and res:
-        note, fan, win = res
+        fan, win = res
     elif status != "ok":
         fan = {"n": 0, "error": type(res).__name__}
     if fan is not None and not fan.get("error") and not fan.get("skipped") \
@@ -4586,9 +7857,6 @@ def _finish_text(payload: dict, rep: dict | None, msg: dict, fin: str,
         fan["_winner"] = ({"variant": win.get("variant"),
                            "seed": win.get("seed"),
                            "content": win.get("content")} if win else None)
-    if note:
-        yield from out.content(note)
-        content += note
     return content, fan, slot_msg
 
 
@@ -4694,6 +7962,13 @@ def _continue(payload: dict, send: dict, slot_msg: dict, content: str,
     # Banked like every generation (usage accumulates across a turn's
     # generations; _run_turn adds it).
     payload.setdefault("_extra_usage", []).append(d.get("usage") or {})
+    # The answer's last generation: what `usage` reports (_usage_of, U1).
+    payload["_final_gen"] = {
+        "usage": dict(d.get("usage") or {}), "cache": d.get("_cache"),
+        "reasoning": ((d.get("choices") or [{}])[0].get("message") or {})
+        .get("reasoning_content") or "",
+        "prefill_reasoning": pre["reasoning_content"],
+        "which": "continuation"}
     full = ((d.get("choices") or [{}])[0].get("message") or {}).get(
         "content") or got
     if not full.startswith(pre["content"]):
@@ -4725,30 +8000,50 @@ END_OF_TURN = os.environ.get("YAMADORI_END_OF_TURN", "<|im_end|>")
 
 
 def _same_turn(a: dict, b: dict) -> bool:
+    # Arguments compared as the template RENDERS them, key order included
+    # (ONE ORDER FOR TOOL-CALL ARGUMENTS): a call the model wrote in another
+    # order than the sorted one the next request renders is not in the slot
+    # as delivered.
     def calls(m):
         return [(c.get("id"), (c.get("function") or {}).get("name"),
-                 _args_norm((c.get("function") or {}).get("arguments")))
+                 _args_as_rendered((c.get("function") or {}).get("arguments")))
                 for c in (m.get("tool_calls") or [])]
     return ((a.get("content") or "") == (b.get("content") or "")
             and calls(a) == calls(b))
 
 
+def _same_reasoning(a: dict, b: dict) -> bool:
+    """The two turns' reasoning as the template renders it (trimmed)."""
+    return ((a.get("reasoning_content") or "").strip()
+            == (b.get("reasoning_content") or "").strip())
+
+
 def _warm(payload: dict, base: list[dict], delivered: dict, slot_msg: dict,
-          landed: bool, hold: "threading.Event | None" = None) -> dict:
+          landed: bool, hold: "threading.Event | None" = None,
+          prefilled: bool = False) -> dict:
     """Schedule the warm; the record says whether and why. `hold`: the
     pending event _warm_hold registered before the calls went out -- taken
-    over by the warm, or released when nothing is warmed."""
+    over by the warm, or released when nothing is warmed. `prefilled`: a
+    generation of this turn opened with a prefill (PREFILLED TURNS)."""
     sl = payload.get("_slot") or {}
     why = None
     if not sl.get("key") or sl.get("transient"):
         why = "not a conversation turn"
-    elif _same_turn(delivered, slot_msg):
+    elif _same_turn(delivered, slot_msg) and (
+            not prefilled or _same_reasoning(delivered, slot_msg)):
+        # A PREFILLED turn whose reasoning comes back (restored, or echoed
+        # exactly) renders as the slot holds it: nothing to warm.
         why = "the slot already holds the turn as delivered"
     elif landed:
         why = ("the turn landed; its prompt carries the landing request, "
                "which the client does not keep")
     elif not WARM:
         why = "YAMADORI_WARM=0"
+    elif image_input.without_image_bytes(base)[1]:
+        # the warm renders a TEXT prompt (/apply-template, /completion): an
+        # image part would become its media marker as text, a prefix the
+        # multimodal request never has
+        why = "the conversation carries images passed to the model"
     if why:
         _warm_release(payload, hold)
         return {"sent": False, "why": why}
@@ -4765,6 +8060,15 @@ def _warm(payload: dict, base: list[dict], delivered: dict, slot_msg: dict,
                                 "slot generated", "state": "scheduled",
            "expect_reused_at_least": last.get("prompt"),
            "generated_on_slot": last.get("slot")}
+    if prefilled:
+        # PREFILLED TURNS: the expectation is counted by the warm itself
+        # (_prefill_floor), not the generation's prompt.
+        rec.update(prefilled=True, expect_reused_at_least=None,
+                   generated_prompt=last.get("prompt"),
+                   generated_reused=last.get("reused"))
+        if _same_turn(delivered, slot_msg):
+            rec["why"] = ("the turn opened with a prefill the client does "
+                          "not send back")
     msgs = list(base) + [delivered]
     fields = {k: payload[k] for k in ("tools", "chat_template_kwargs",
                                       "enable_thinking", "reasoning_effort")
@@ -4788,6 +8092,9 @@ def _warm(payload: dict, base: list[dict], delivered: dict, slot_msg: dict,
 
 
 def _upstream_json(path: str, body: dict, timeout: int = 120) -> dict:
+    if path.startswith("/upstream/"):
+        # MAX MODE's backstop (mcp/max_mode.py): never a request that loads a model max mode holds off the card
+        max_mode.guard(path.split("/")[2])
     req = urllib.request.Request(f"{UPSTREAM}{path}",
                                  data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
@@ -4828,6 +8135,13 @@ def warm_prompt(model: str, msgs: list[dict], fields: dict,
 
 
 _WARMS_DONE: dict[str, dict] = {}     # conversation key -> its last warm
+
+
+def _idle_guard(key: str) -> str | None:
+    """slots IDLE CLEAR's veto: a conversation whose warm is pending (held
+    or running) is not idle, whatever its slot's clock says."""
+    ev = _WARM_PENDING.get(key)
+    return "a warm is pending" if ev is not None and not ev.is_set() else None
 # THE WARM RACE (#11, the V0 pilot on slot 1, 2026-09-24). The warm thread
 # acquires the slot, asks /apply-template twice, and only then sends its
 # /completion. llama-server defers a request pinned to a slot only while that
@@ -4843,6 +8157,7 @@ WARM_WAIT = float(os.environ.get("YAMADORI_WARM_WAIT", "180"))
 # that registered it died between sending its calls and scheduling the warm.
 # A breaker, not a measurement: that stretch is in-process work taking ms.
 WARM_HOLD_S = float(os.environ.get("YAMADORI_WARM_HOLD", "30"))
+slots.idle_guard = _idle_guard
 
 
 # THE ECHO HABIT on a conversation's FIRST turn, where the conversation has
@@ -4850,28 +8165,28 @@ WARM_HOLD_S = float(os.environ.get("YAMADORI_WARM_HOLD", "30"))
 # account's LAST observation said "echoes" -- the agent-loop test's echoing
 # client had just run on the same key -- so the warm rendered the turn WITH
 # its reasoning, the stripping client sent it back without, and the next
-# request diverged at the turn's think block; the warm's own checkpoints had
-# evicted the generation's (server checkpoint_min_step 8192), so it fell back
-# 516 tokens (reused 2374 of 2890, processed 601). Now the account keeps its
-# last ECHO_WINDOW observations and a first turn guesses "echoes" only when
-# every one of them echoed; anything mixed or unknown is "strips", the
-# documented default (Hermes strips for this provider). A choice: 8.
-ECHO_WINDOW = 8
+# request diverged at the turn's think block. So a first turn guesses
+# "echoes" only when this account has been seen echoing and NEVER seen
+# stripping; anything mixed or unknown is "strips", the documented default.
+# The account keeps the SET of what it was seen doing ("0" strips, "1"
+# echoes), not a window: ECHO_WINDOW (the last 8 observations, "a choice:
+# 8") was REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md). A legacy
+# `echo_history` string reads as the set of its characters.
 
 
 def _echo_note(account: str, echoes: bool) -> None:
-    """Record one observation of whether this account's client echoed past
-    reasoning (a request that carries assistant turns)."""
-    hist = nebari.ledger_get(account, "client", "echo_history") or ""
-    new = (hist + ("1" if echoes else "0"))[-ECHO_WINDOW:]
-    if new != hist:
+    """Record that this account's client was seen echoing (or stripping)
+    past reasoning (a request that carries assistant turns)."""
+    seen = set(nebari.ledger_get(account, "client", "echo_history") or "")
+    new = "".join(sorted(seen | {"1" if echoes else "0"}))
+    if new != "".join(sorted(seen)):
         nebari.ledger_put(account, "", "client", "echo_history", new)
 
 
 def _echo_guess(account: str) -> bool:
-    """A first turn's guess: echoes only when every recent observation of
-    this account echoed (a record from before the history, the single
-    last flag, counts as one observation)."""
+    """A first turn's guess: echoes only when this account was only ever
+    seen echoing (a record from before the history, the single last flag,
+    counts as one observation)."""
     hist = nebari.ledger_get(account, "client", "echo_history")
     if hist is None:
         hist = nebari.ledger_get(account, "client", "echoes_reasoning") or ""
@@ -4884,6 +8199,142 @@ def _echo_guess(account: str) -> bool:
 # 2026-09-24: reused 4452 of 4456, 2886 of 2890), so it re-reads those 4
 # tokens by design. `short` allows that and a little more: 8 is a choice.
 WARM_CHECKPOINT_SLACK = 8
+
+# PREFILLED TURNS (Octopus v0b-V0-xhigh-1, step 1, 2026-09-25: a kickoff, the
+# plan prefilled as main's reasoning; prompt 10660, then the warm "reused
+# 7526 processed 3055 -- SHORT", and the next request reused 10581 of 10611).
+# The warm was RIGHT: it rendered the turn stripped, as Hermes sent it. What
+# was wrong was the expectation. The generation's prompt carries the prefill
+# -- `<|im_start|>assistant\n<think>\n` + the plan -- which no client sends
+# back, so the warm diverges from it where the plan begins, and the server
+# restores the latest context checkpoint at or before that point. The ones
+# it makes at a prompt's end (4 and 4 + n_ubatch tokens before it, 512 in
+# config.yaml) lie INSIDE any prefill longer than that; the one it makes at
+# the start of the LAST USER MESSAGE (llama.cpp server-context.cpp
+# `last_user_pos`; a tool result is not a user message there, common/chat.cpp
+# message_delimiters) is the floor. 7526 can only have been that one (the
+# slot started empty, reused 0, and the prompt held one user message), and
+# 3055 ~ the spec (~2245 tokens, x_yamadori.deep) + the delivered turn
+# (inferred from the server source and the counts, not tokenized). So a
+# prefilled turn's expectation is the prompt BEFORE the last user message,
+# counted by the model server's own /tokenize; the re-read of that message
+# is the server's checkpoint placement, not a miss. When an EARLIER request
+# processed that message (a struggle prefill), its checkpoint may since
+# have been evicted (checkpoint_min_step 8192), and a SHORT then says so,
+# as for any other warm. And a prefilled turn is warmed even when the
+# delivered turn equals what the slot generated: the slot still holds the
+# prefill's reasoning, which the client never sends back, so without a warm
+# the NEXT request pays that same re-read (offline, test_ledger [prefill
+# warm]: no warm was sent for a plain terminal call); with one it happens
+# while the harness runs its tool. The same tokens either way.
+USER_TURN = "<|im_start|>user"
+TOOL_TURN = "<|im_start|>user\n<tool_response>"
+
+
+def _last_user_start(prompt: str) -> int:
+    """Where the last user message (not a tool result) opens in a rendered
+    prompt; -1 when there is none."""
+    i = len(prompt)
+    while True:
+        i = prompt.rfind(USER_TURN, 0, i)
+        if i < 0 or not prompt.startswith(TOOL_TURN, i):
+            return i
+
+
+def _prefill_floor(model: str, prompt: str, timeout: float) -> int | None:
+    """Tokens before the last user message of the warmed prompt (the
+    server's checkpoint there), or None when they cannot be counted."""
+    i = _last_user_start(prompt)
+    if i < 0:
+        return None
+    toks = _upstream_json(f"/upstream/{model}/tokenize",
+                          {"content": prompt[:i], "add_special": True},
+                          timeout=timeout).get("tokens")
+    return len(toks) if isinstance(toks, list) else None
+
+
+# A PREFILL MID-CONVERSATION (Octopus v0f-V0-xhigh-1 step 25, 2026-09-26: a
+# struggle-triggered hand-off, ~3.5k chars, prefilled as main's reasoning;
+# prompt 63,397 reused 59,343; the warm then "reused 54,604 processed 8,280"
+# for a step that wrote 503 tokens, and the next request extended the warm,
+# reused 62,884 processed 1,628). The divergence is the prefill's, as above:
+# the client drops it, so the warm diverges where the hand-off begins. What
+# the server restores there is decided by its checkpoint THINNING
+# (server-context.cpp create_checkpoint): every task that makes a checkpoint
+# first erases each OTHER task's checkpoint lying within checkpoint_min_step
+# (8192, common.h; config.yaml does not set it) of the previous one kept.
+# The prefilled generation made its own two near its prompt's end -- inside
+# the hand-off -- and in doing so erased the previous request's (58,831 and
+# 59,343, both within 8,192 of 54,604 = step 23's prompt 55,120 - 4 - 512),
+# so the nearest checkpoint before the hand-off was 54,604: 7.8k tokens of
+# the conversation re-read before the delivered turn (15.9 s the next
+# request waited). Nothing the proxy sends can keep one closer: a pre-warm's
+# checkpoint at the hand-off's start is another task's too, and is erased
+# the same way unless it lies more than 8,192 past the one before it. So the
+# re-read is INHERENT to a client that drops the prefill (the hand-off lives
+# in one request by design: "Reasoning lives within one request only",
+# AGENTS.md) at this server's checkpoint spacing, and the warm -- which does
+# it while the harness runs its tool -- is the cheapest correct place for it.
+# It is BOUNDED: whatever the generation restored from (`generated_reused`,
+# the checkpoint it resumed at, or the whole cached prompt) either survived
+# or was erased for lying within CHECKPOINT_MIN_STEP of one that did, so the
+# warm reuses at least generated_reused - CHECKPOINT_MIN_STEP - 4. That is
+# the expectation now (never below the last user message's floor), so a
+# warm that restored less -- a real miss -- is SHORT; the old floor alone
+# (7,552 here) would have passed anything. `reread_before_turn` records the
+# measured cost: the tokens before the delivered turn that were re-read.
+# The two ways to remove it are recorded in docs/SELF-IMPROVEMENT-LOG.md
+# (#37): replay the hand-off as that turn's reasoning (an operator decision,
+# it reverses the pass-through for our own prefill), or a smaller server
+# --checkpoint-min-step (needs the checkpoint size measured). The first was
+# taken on 2026-09-27 for all past reasoning (switch restore_reasoning): a
+# prefilled turn then renders as the slot holds it and is not warmed (_warm,
+# _same_reasoning); all of this applies with the switch off.
+CHECKPOINT_MIN_STEP = int(os.environ.get("YAMADORI_CHECKPOINT_MIN_STEP",
+                                         "8192"))
+ASSISTANT_TURN = "<|im_start|>assistant"
+
+
+def _count_prefix(model: str, prompt: str, i: int,
+                  timeout: float) -> int | None:
+    """Tokens in prompt[:i] by the model server's own /tokenize."""
+    if i < 0:
+        return None
+    toks = _upstream_json(f"/upstream/{model}/tokenize",
+                          {"content": prompt[:i], "add_special": True},
+                          timeout=timeout).get("tokens")
+    return len(toks) if isinstance(toks, list) else None
+
+
+def _prefill_expectation(model: str, prompt: str, rec: dict,
+                         timeout: float) -> None:
+    """A prefilled turn's warm: expect_reused_at_least (the last user
+    message's checkpoint, or the thinning bound below the checkpoint the
+    generation resumed at, whichever is later), why, and what it re-read
+    before the delivered turn (turn_starts_at, reread_before_turn)."""
+    floor = _prefill_floor(model, prompt, timeout)
+    gr = rec.get("generated_reused")
+    bound = (int(gr) - CHECKPOINT_MIN_STEP - 4) if gr else None
+    rec["checkpoint_min_step"] = CHECKPOINT_MIN_STEP
+    if bound is not None and (floor is None or bound > floor):
+        rec["expect_reused_at_least"] = bound
+        rec["expect_why"] = (
+            f"the turn opened with a prefill the client drops: the server "
+            f"restores its nearest checkpoint before it, at most "
+            f"{CHECKPOINT_MIN_STEP} + 4 tokens before the {gr} the "
+            f"generation resumed at (checkpoint thinning)")
+    else:
+        rec["expect_reused_at_least"] = floor
+        rec["expect_why"] = (
+            "the turn opened with a prefill: the server restores its "
+            "checkpoint at the last user message" if floor is not None else
+            "the turn opened with a prefill and the tokens before the last "
+            "user message could not be counted: not judged")
+    at = _count_prefix(model, prompt, prompt.rfind(ASSISTANT_TURN), timeout)
+    if at is not None:
+        rec["turn_starts_at"] = at
+        if rec.get("reused") is not None:
+            rec["reread_before_turn"] = max(0, at - int(rec["reused"]))
 
 
 def _warm_hold(payload: dict) -> "threading.Event | None":
@@ -4961,6 +8412,16 @@ def _warm_now(key: str, model: str, msgs: list[dict], fields: dict,
     # when its waiter gives up (pre-deploy review, 2026-09-24; its render and
     # /completion timeouts were 120 + 120 + 600 s against a 180 s wait).
     end = time.time() + WARM_WAIT
+    if max_mode.blocks(model):
+        # MAX MODE: this conversation's model is off the card; a warm would load it (mcp/max_mode.py)
+        rec.update(state="skipped", why=max_mode.blocked_reason(model))
+        if ev is None:
+            ev = _WARM_PENDING.get(key)
+        if ev is not None:
+            if _WARM_PENDING.get(key) is ev:
+                _WARM_PENDING.pop(key, None)
+            ev.set()
+        return
 
     def left(cap: float) -> float:
         return max(1.0, min(cap, end - time.time()))
@@ -4981,21 +8442,40 @@ def _warm_now(key: str, model: str, msgs: list[dict], fields: dict,
             return
         r = _upstream_json(f"/upstream/{model}/completion",
                            {"prompt": prompt, "n_predict": 0,
-                            "id_slot": grant["slot"], "cache_prompt": True},
+                            **slots.upstream_fields(grant)},
                            timeout=left(600))
         t = r.get("timings") or {}
         token_ledger.record("warm", timings=t)
         rec.update(state="done", reused=t.get("cache_n"),
                    processed=t.get("prompt_n"), slot=grant["slot"])
+        # What the slot holds now (the warm popped the old claim): the
+        # delivered turn, which the next request extends. Read by slots
+        # ADOPTION and COMPACTION AFFINITY (#38).
+        slots.remember(grant, slots.fingerprint(dict(fields, messages=msgs)))
+        if rec.get("prefilled"):
+            # PREFILLED TURNS / A PREFILL MID-CONVERSATION.
+            try:
+                _prefill_expectation(model, prompt, rec, left(30))
+            except Exception as e:                               # noqa: BLE001
+                rec["expect_error"] = f"{type(e).__name__}: {e}"[:200]
+                rec.setdefault("expect_why", "the turn opened with a prefill "
+                               "and its expectation could not be counted: "
+                               "not judged")
         exp = rec.get("expect_reused_at_least")
         short = (exp is not None and t.get("cache_n") is not None
                  and int(t["cache_n"]) < int(exp) - WARM_CHECKPOINT_SLACK)
         rec["short"] = bool(short)
         rec["slack"] = WARM_CHECKPOINT_SLACK
+        pre = (f"a checkpoint at or after {exp} (the turn opened with a "
+               f"prefill the client drops; {rec.get('reread_before_turn')} "
+               f"tokens before the turn re-read)") if rec.get("prefilled") \
+            else ""
         print(f"  warm: slot {grant['slot']} reused {t.get('cache_n')} "
               f"processed {t.get('prompt_n')}"
-              + (f" -- SHORT: the slot generated on a {exp}-token prompt "
-                 f"moments ago" if short else ""), flush=True)
+              + ((f" -- SHORT: below {pre}" if pre else
+                  f" -- SHORT: the slot generated on a {exp}-token prompt "
+                  f"moments ago") if short else
+                 f" -- from {pre}" if pre else ""), flush=True)
     except Exception as e:                                       # noqa: BLE001
         rec.update(state="failed", error=f"{type(e).__name__}: {e}"[:200])
         print(f"  warm failed: {rec['error']}", flush=True)
@@ -5058,8 +8538,14 @@ def _log_turn(state: dict | None, msg: dict, tcheck: dict | None,
 
 
 def complete(body: dict) -> dict:
-    """The blocking path: the one turn implementation, drained."""
-    return _drain(_run_turn(body, streamed=False))
+    """The blocking path: the one turn implementation, drained.
+
+    Under a cancel token like the streamed path (never cancelled here): job
+    threads started under it (_in_thread) share it, which is how a release
+    at the end of a second-brain run finds this request (slots.bind_request).
+    """
+    with cancel.bound(cancel.current() or cancel.Token()):
+        return _drain(_run_turn(body, streamed=False))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -5167,17 +8653,6 @@ class Handler(BaseHTTPRequestHandler):
         # they cannot select.
         d = catalog.rewrite_response(d, body.get("model") or "yamadori")
 
-        if PREAMBLE and is_first_turn(body.get("messages") or []):
-            msgs = body.get("messages") or []
-            root, trusted, how = resolve_repo(msgs, self.client_address[0])
-            info = repos.ensure(root, from_trusted=trusted) if root else None
-            note = preamble_for(info, available_checks(root) if root else [], how)
-            try:
-                m = d["choices"][0]["message"]
-                m["content"] = note + (m.get("content") or "")
-            except (KeyError, IndexError, TypeError):
-                pass
-
         print(f"{self.path} {time.time() - t0:.1f}s", flush=True)
         self._send(200, d)
 
@@ -5235,7 +8710,8 @@ if __name__ == "__main__":
     main()
 
 
-def stream_body(body: dict, public_name: str = "yamadori"):
+def stream_body(body: dict, public_name: str = "yamadori",
+                token: "cancel.Token | None" = None):
     """The streamed path: the one turn implementation (`_run_turn`), its
     events as SSE bytes.
 
@@ -5251,54 +8727,123 @@ def stream_body(body: dict, public_name: str = "yamadori"):
       - ONE upstream generation per answer: the hop with no tool call is
         streamed as it is generated and is never regenerated.
       - reasoning goes out live as `reasoning_content` deltas, never content,
-        and never after the first content delta (CHANNEL ORDER).
-      - the breaker lands exactly like `complete()`: tools withdrawn (`_land`).
-      - a `length` finish ends with the same notice `complete()` writes.
-      - the corpus gets the real hop count, and usage is summed over hops.
-      - `x_yamadori` rides on the final chunk, the same object `complete()`
+        and never after the first content delta (CHANNEL ORDER): after it,
+        reasoning goes out as an empty delta (a heartbeat, at most one per
+        REASONING_BEAT_S).
+      - an image yama_generate_image makes goes out as content the moment the
+        tool returns, before the model's next generation is requested
+        (IMAGES REACH THE CHAT), and a copy the
+        model writes of it is removed from the content (_ImageDedup).
+      - a stray template marker the model writes in its answer never goes
+        out: it is removed, with the text after it while that repeats what
+        was already sent; new text after it goes through; only the minimal
+        tail that could still be a marker (or a repeat) is held
+        (_StrayMarkers, after _ImageDedup; complete() gives the same
+        content; mcp/test_stray_markers.py). Recorded in
+        x_yamadori.template_markers.stripped.
+      - a yama_describe_image result leaves ONE screened reasoning line
+        (_describe_line), or a heartbeat once content has started.
+      - the breaker lands exactly like `complete()`: tools withdrawn (`_land`),
+        on OUR hops only; the client's own prompt is never landed (C1).
+      - a `length` finish is finish_reason "length", as `complete()`
+        reports it (no notice text is added).
+      - a tool call whose IMAGE argument opens as image data (a
+        data:image/ URL, base64 image bytes) is never forwarded: its
+        upstream connection is closed at the value's first characters, the
+        model gets it back as NOT EXECUTED in a hidden hop and writes the
+        turn again; the client sees one reasoning line (tool_code IMAGE
+        GUARD, mcp/test_image_guard.py).
+      - the corpus gets the real hop count; usage is the final generation's
+        (U1), sent -- when the client asks with stream_options.include_usage
+        -- as its own last chunk with `choices: []`, as the spec says.
+      - `x_yamadori` rides on the finish chunk, the same object `complete()`
         puts on its response.
+      - NOTHING IS YIELDED UNTIL THE TURN HAS STARTED (E1, 2026-09-25): the
+        first byte waits for the turn's first event -- prepare(), the
+        context check and the first upstream generation (or deep thinking's
+        first heartbeat) behind it -- so server.chat can still answer a
+        failure before it with a real HTTP status: this generator RAISES the
+        ApiError then. After the first byte a failure is ONE SSE error event
+        (`data: {"error": {...}}`) and [DONE]: never assistant content, and
+        never a last chunk without finish_reason.
     """
     cid = streaming.new_id()
     model = public_name
-    messages = body.get("messages") or []
-    if PREAMBLE and is_first_turn(messages):
-        root, trusted, how = resolve_repo(messages, body.get("_client_ip", ""))
-        info = repos.ensure(root, from_trusted=trusted) if root else None
-        note = preamble_for(info, available_checks(root) if root else [], how)
-        if note:
-            yield streaming.text_chunk(cid, model, note)
-            # Part of the content the client stores for this turn (#10).
-            body = dict(body, _shown_prefix=note)
+    include_usage = bool((body.get("stream_options") or {})
+                         .get("include_usage")) if isinstance(
+                             body.get("stream_options"), dict) else False
+    lead = b""
+    # THE REQUEST'S CANCELLATION (mcp/cancel.py, #39). Bound to the thread
+    # around every resume of the turn, so each upstream socket the turn opens
+    # -- main's generation, and (through the threads they start under it)
+    # deep thinking's and the jobs' -- registers with it. The server cancels
+    # it the moment the client disconnects (server.py _CancellingStream); a
+    # consumer that simply stops iterating cancels it here.
+    token = token or cancel.Token()
     gen = _run_turn(body, streamed=True)
-    while True:
-        try:
-            kind, item = next(gen)
-        except StopIteration as stop:
-            d = stop.value or {}
-            break
-        except TurnRefused as e:
-            # The stream is already a 200: the refusal goes as an SSE error
-            # event (OpenAI's shape, which its clients raise on), then DONE.
-            yield b"data: " + json.dumps(e.body()).encode() + b"\n\n"
-            yield streaming.DONE
-            return
-        if kind == "reasoning":
-            yield streaming.reasoning_chunk(cid, model, item)
-        elif kind == "content":
-            yield streaming.text_chunk(cid, model, item)
-        elif kind == "heartbeat":
-            yield streaming.chunk(cid, model, {})
-        elif kind == "calls":
-            # The CLIENT's tools are the client's to execute. Forwarded
-            # whole, in the streamed shape, which needs an index per call.
-            yield streaming.chunk(cid, model, {"tool_calls": [
-                dict(c, index=i) for i, c in enumerate(item)]})
-    if d.get("_error"):
-        yield streaming.DONE
-        return
+    finished = False
+    started = False
+    try:
+        while True:
+            try:
+                with cancel.bound(token):
+                    kind, item = next(gen)
+            except StopIteration as stop:
+                d = stop.value or {}
+                break
+            except cancel.Cancelled as e:
+                # Its client is gone: nothing is sent, nothing is logged as
+                # an answer. The work below it has already stopped.
+                finished = True
+                print(f"  turn cancelled: {e or token.why}", flush=True)
+                return
+            except Exception as e:                               # noqa: BLE001
+                finished = True
+                err = api_errors.of_exception(e)
+                print(f"  turn failed ({err.status} {err.code}): "
+                      f"{type(e).__name__}: {str(e)[:300]}", flush=True)
+                if not started:
+                    # Nothing sent: the caller (server.chat) answers it with
+                    # its HTTP status and the error object.
+                    if err is e:
+                        raise
+                    raise err from e
+                # The stream is committed: OpenAI's mid-stream error form,
+                # which its SDKs raise on, then DONE.
+                yield err.sse()
+                yield streaming.DONE
+                return
+            if not started:
+                started = True
+                if lead:
+                    yield lead
+            if kind == "reasoning":
+                yield streaming.reasoning_chunk(cid, model, item)
+            elif kind == "content":
+                yield streaming.text_chunk(cid, model, item)
+            elif kind == "heartbeat":
+                yield streaming.chunk(cid, model, {})
+            elif kind == "calls":
+                # The CLIENT's tools are the client's to execute. Forwarded
+                # whole, in the streamed shape, which needs an index per call.
+                yield streaming.chunk(cid, model, {"tool_calls": [
+                    dict(c, index=i) for i, c in enumerate(item)]})
+        finished = True
+    finally:
+        if not finished:
+            # Closed before the turn ended (GeneratorExit): stop its work.
+            token.cancel("the stream was closed before the turn ended")
+            with cancel.bound(token):
+                gen.close()
+    if not started and lead:
+        yield lead
     fin = d["choices"][0].get("finish_reason") or "stop"
-    yield streaming.chunk(cid, model, {}, finish=fin, usage=d.get("usage"),
+    yield streaming.chunk(cid, model, {}, finish=fin,
                           extra={"x_yamadori": d.get("x_yamadori")})
+    if include_usage and d.get("usage"):
+        # stream_options.include_usage: the spec's own last chunk, usage
+        # with an EMPTY choices array (U2). Not sent unasked.
+        yield streaming.usage_chunk(cid, model, d["usage"])
     yield streaming.DONE
 
 

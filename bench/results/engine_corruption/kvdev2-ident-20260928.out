@@ -1,0 +1,18 @@
+[07:06:03] [dev2] attempt 1: unload bonsai: HTTP 200 OK
+[07:06:06] [dev2] card empty of llama-server: {'used': 0, 'free': 16050, 'util': 0}
+[07:06:06] [dev2] start: C:/Users/jwals/AppData/Local/Temp/claude/C--Users-jwals-llama-stack/d16e1f09-4699-483b-a257-1ba77b329ce7/scratchpad/kvdev/src/build/bin/llama-server.exe env {'CUDA_VISIBLE_DEVICES': 'GPU-de660e90-0e9c-d465-b389-6df63021b920', 'GGML_CUDA_BATCH_INVARIANT': '1'}
+[07:06:17] [dev2] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}; GPU-de660e90-0e9c-d465-b389-6df63021b920, 54232, C:\Users\jwals\AppData\Local\Temp\claude\C--Users-jwals-llama-stack\d16e1f09-4699-483b-a257-1ba77b329ce7\scratchpad\kvdev\src\build\bin\llama-server.exe; build b10747-a37a3a22
+[07:06:23] [dev2] greedy ts rep0: n=425 84.36 tok/s acc 261/326 finish=stop symptom=[]
+[07:06:30] [dev2] greedy bash rep0: n=512 74.61 tok/s acc 306/409 finish=length symptom=[]
+[07:06:37] [dev2] greedy prose rep0: n=460 65.36 tok/s acc 243/432 finish=stop symptom=[]
+[07:06:43] [dev2] greedy ts rep1: n=425 79.63 tok/s acc 261/326 finish=stop symptom=[]
+[07:06:50] [dev2] greedy bash rep1: n=512 75.70 tok/s acc 306/409 finish=length symptom=[]
+[07:06:57] [dev2] greedy prose rep1: n=460 65.51 tok/s acc 244/430 finish=stop symptom=[]
+[07:07:02] [dev2] greedy ts rep2: n=425 79.68 tok/s acc 261/326 finish=stop symptom=[]
+[07:07:09] [dev2] greedy bash rep2: n=512 75.92 tok/s acc 306/409 finish=length symptom=[]
+[07:07:16] [dev2] greedy prose rep2: n=460 65.30 tok/s acc 244/430 finish=stop symptom=[]
+[07:07:18] [dev2] stopped; min free 1047 MiB
+[07:07:30] restore: {'lane_resumed': True, 'reload_s': 12.4, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+| arm | greedy decode tok/s median (min-max), n | greedy reps 1..n identical | plain: with `!!!!`/`////` | plain: 10+ `!`/`/` | plain: 6+ punct run | plain: 5x word | plain finish | tools valid | error |
+|---|---|---|---|---|---|---|---|---|---|
+| dev2 | 75.70 (65.30-84.36), n=9 | ts yes, bash yes, prose yes | 0/0 | 0/0 | 0/0 | 0/0 | {} | 0/0 |  |

@@ -35,7 +35,18 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "sandbox"))
 import arms  # noqa: E402
+import sandbox_net  # noqa: E402  (the internal network + egress gate; #48/#49)
+
+# Every model-command container runs on its instance's own sandbox network
+# (bench/sandbox/sandbox_net.py): an `--internal` Docker network whose only
+# way out is the egress gate -- HTTP(S) to global addresses on 80/443 via
+# HTTP(S)_PROXY, the Windows host not at all. Before 2026-09-26 it ran on
+# the default bridge, where Docker Desktop routes host.docker.internal to the
+# host's LOOPBACK services (llama-swap :11434 with no auth, llama-server,
+# Caddy's admin API, the tools API, SMB): SELF-IMPROVEMENT-LOG #48/#49.
+SANDBOX_PREFIX = "swe"
 
 NATIVE = os.name == "nt"
 if NATIVE:
@@ -75,6 +86,16 @@ OVERLAY_DEVIATIONS = {
     "model.cost_tracking": "ignore_errors: mini raises on a cost of 0, which a "
                            "free local model always has. Consequence: the $3 "
                            "cost_limit can never bind; only step_limit does",
+    "environment.run_args": "[--rm, --network, swe-net-<instance>-<pid>]: the "
+                            "model's container joins the instance's internal "
+                            "sandbox network instead of the default bridge "
+                            "(SELF-IMPROVEMENT-LOG #49; the leaderboard ran "
+                            "with the bridge's open network)",
+    "environment.env": "HTTP_PROXY/HTTPS_PROXY (both cases) = http://egress:3128, "
+                       "NO_PROXY loopback, merged with the yaml's env: the "
+                       "only way out of that network is the gate (public "
+                       "addresses on 80/443; pip, git, curl honour it). The "
+                       "variables are visible to the model's commands (`env`)",
 }
 
 
@@ -136,7 +157,15 @@ def versions() -> dict:
             ("mini-swe-agent", "swebench", "litellm", "datasets")}
 
 
-def write_overlay(out: str, arm: str, api_base: str) -> str:
+def sandbox_environment(network: str) -> dict:
+    """The overlay's `environment` keys: the container on the instance's
+    sandbox network, the gate as its proxy. mini merges `env` into the
+    yaml's env (recursive_merge) and passes it to every command."""
+    return {"run_args": ["--rm", "--network", network],
+            "env": sandbox_net.proxy_env()}
+
+
+def write_overlay(out: str, arm: str, api_base: str, network: str | None = None) -> str:
     registry = os.path.join(out, "model_registry.json")
     zero = {"max_tokens": 32768, "max_input_tokens": 163840,
             "max_output_tokens": 32768, "input_cost_per_token": 0.0,
@@ -160,6 +189,8 @@ def write_overlay(out: str, arm: str, api_base: str) -> str:
         "litellm_model_registry": registry,
         "cost_tracking": "ignore_errors",
     }}
+    if network:
+        overlay["environment"] = sandbox_environment(network)
     # mini-swe-agent's -c only accepts a .yaml suffix; JSON is valid YAML.
     path = os.path.join(out, "config_overlay.yaml")
     with open(path, "w", encoding="utf-8") as f:
@@ -222,7 +253,20 @@ def cmd_agent(a) -> int:
     if os.path.isdir(work):
         shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work, exist_ok=True)
-    overlay = write_overlay(work, a.arm, api_base)
+    # The instance's sandbox network, up BEFORE mini starts its container and
+    # down after it (fail closed: no gate, no agent run).
+    net_tag = f"{a.instance}-{os.getpid()}"
+    net = sandbox_net.up(net_tag, prefix=SANDBOX_PREFIX)
+    if not net["ok"]:
+        stop = sandbox_net.down(net_tag, prefix=SANDBOX_PREFIX)
+        rec = {"instance": a.instance, "arm": a.arm, "rc": 97, "not_run": "sandbox_net",
+               "sandbox_net": {"error": net.get("error"), "network": net["network"],
+                               "stop": stop}, "started": time.time()}
+        with open(os.path.join(a.out, "timings.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+        print(json.dumps(rec), flush=True)
+        return 97
+    overlay = write_overlay(work, a.arm, api_base, net["network"])
     cfg = default_config()
     meta_path = os.path.join(a.out, "run.json")
     if not os.path.exists(meta_path):
@@ -271,17 +315,27 @@ def cmd_agent(a) -> int:
     # moves it next to the trajectory.
     log = os.path.join(work, "mini_stdout.log")
     t0 = time.time()
-    with open(log, "a", encoding="utf-8") as lf:
-        lf.write(f"\n=== {a.instance} {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        lf.flush()
-        rc = subprocess.run(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL).returncode
-    secs = time.time() - t0
+    try:
+        with open(log, "a", encoding="utf-8") as lf:
+            lf.write(f"\n=== {a.instance} {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            lf.flush()
+            rc = subprocess.run(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL).returncode
+        secs = time.time() - t0
+    finally:
+        # After mini: its container (still attached if mini's cleanup thread
+        # died with the process) is removed with the network.
+        stop = sandbox_net.down(net_tag, prefix=SANDBOX_PREFIX)
     merge(a.out, work, a.instance)
     traj = os.path.join(a.out, a.instance, f"{a.instance}.traj.json")
     rec = {"instance": a.instance, "arm": a.arm, "rc": rc,
            "seconds": round(secs, 1), "pull_seconds": pull_secs,
-           "started": t0, "traj": os.path.exists(traj)}
+           "started": t0, "traj": os.path.exists(traj),
+           "sandbox_net": {"network": net["network"], "ready_s": net.get("ready_s"),
+                           "allowed": stop["allowed"], "denied": stop["denied"],
+                           "denied_sample": stop["denied_sample"][:5],
+                           "leftovers_removed": stop["leftovers_removed"],
+                           "network_removed": stop["network_removed"]}}
     if rec["traj"]:
         with open(traj, encoding="utf-8") as f:
             info = json.load(f).get("info") or {}

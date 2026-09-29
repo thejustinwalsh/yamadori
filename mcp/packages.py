@@ -81,8 +81,11 @@ def search(root: str, query: str, tool: str, args: dict) -> str | None:
             continue
         if _is_empty(text):
             continue
+        # Not cut here: the silent [:2500] that stood here was invented
+        # (docs/CONSTANTS-AUDIT.md, 2026-09-27); the tool loop's own breaker
+        # (repeats.cap_tool_result) bounds it and says so.
         out.append(f"== projected from {name}@{version} source ==\n"
-                   f"{_pairing(name)}\n{text[:2500]}")
+                   f"{_pairing(name)}\n{text}")
         if out:
             break      # one good source is enough; more is noise
     return "\n\n".join(out) if out else None
@@ -331,5 +334,6 @@ def search_discovered(state: dict, query: str, tool: str,
             continue
         if _is_empty(text):
             continue
-        return f"{banner_for(pick)}\n{text[:3000]}"
+        # Not cut (the silent [:3000] was invented; CONSTANTS-AUDIT).
+        return f"{banner_for(pick)}\n{text}"
     return None

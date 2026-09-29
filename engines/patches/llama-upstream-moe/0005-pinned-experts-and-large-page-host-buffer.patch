@@ -1,0 +1,177 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yamadori <operator> (port of Strata, Niko1221/Strata @ d551edf42c157f1c8c20f07f68c5dfe506b1edda)
+Date: Sun, 28 Sep 2026 09:00:00 -0400
+Subject: [PATCH] pinned experts under mmap, and a large-page pinned host
+ buffer on Windows
+
+Ported from Strata (no licence file; used with the operator's
+authorisation, 2026-09-28), credit Niko1221 and pipeob0:
+
+- LLAMA_PIN_EXPERTS=1 (src/llama-model-loader.cpp): MoE expert tensors
+  ("_exps") placed on the CPU keep the device's pinned host buffer even under
+  mmap, which --lazy-mode needs for the n-gram table. Strata keeps every
+  expert in a pinned arena (src/core/pinned.cu:126-200) and copies the ones
+  it could not pin with helper threads (928b0e07): host->device copies of
+  experts (op offload in prefill, #28414's prefetch, the expert cache) then
+  read pinned memory by DMA instead of driver-staged pageable pages, and the
+  OS cannot page experts out under memory pressure. Upstream itself warns
+  that CPU overrides with mmap are slower. Every other tensor stays mapped.
+- GGML_CUDA_HOST_LARGE_PAGES=1 (ggml/src/ggml-cuda/ggml-cuda.cu, Windows):
+  the CUDA host buffer is VirtualAlloc(MEM_LARGE_PAGES) after enabling
+  SeLockMemoryPrivilege in the process token and rounding to
+  GetLargePageMinimum (Strata src/core/pinned.cu:30-80; commit 0bf3216e by
+  pipeob0), else ordinary pages, then cudaHostRegister(PORTABLE) before any
+  page is touched (pinned.cu:136-139); any failure falls back to
+  cudaMallocHost with the reason logged. Large pages need the account to hold
+  "Lock pages in memory" -- a system policy this code never changes.
+
+Both are generic: any model with CPU-placed experts, any CUDA host buffer.
+---
+ ggml/src/ggml-cuda/ggml-cuda.cu | 101 ++++++++++++++++++++++++++++++++++++++++
+ src/llama-model-loader.cpp      |  12 ++++-
+ 2 files changed, 112 insertions(+), 1 deletion(-)
+
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index b50d05d5f..bfdac3e7d 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -1264,7 +1264,104 @@ static bool ggml_backend_buft_is_cuda_host(ggml_backend_buffer_type_t buft) {
+     return buft->iface.get_name == ggml_backend_cuda_host_buffer_type_name;
+ }
+ 
++// Yamadori 0005: a pinned host buffer on Windows LARGE PAGES, ported from Strata's pinned arena
++// (Niko1221/Strata @ d551edf4, src/core/pinned.cu:30-80 reserve() and :126-200 the registration; commit
++// 0bf3216e by pipeob0: enable SeLockMemoryPrivilege in the process token, round the size to
++// GetLargePageMinimum). GGML_CUDA_HOST_LARGE_PAGES=1 turns it on: VirtualAlloc(MEM_LARGE_PAGES) -- which needs
++// the account to hold the "Lock pages in memory" right, a system policy this code never changes -- else
++// ordinary pages, then cudaHostRegister(PORTABLE) before any page is touched. Any failure falls back to
++// cudaMallocHost, and the reason is logged (VirtualAlloc 1314 = privilege, 87 = size, 1450 = the large-page
++// pool). Off: exactly the stock path.
++#ifdef _WIN32
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#include <windows.h>
++#include <mutex>
++#include <unordered_map>
++
++static std::mutex                          g_cuda_lp_mutex;
++static std::unordered_map<void *, size_t>  g_cuda_lp_allocs; // registered VirtualAlloc regions -> reserved bytes
++
++static void * ggml_cuda_host_malloc_large_pages(size_t size) {
++    static const bool on = [] {
++        const char * v = getenv("GGML_CUDA_HOST_LARGE_PAGES");
++        return v && atoi(v) != 0;
++    }();
++    if (!on || size == 0) {
++        return nullptr;
++    }
++    {
++        HANDLE tok = nullptr;
++        if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &tok)) {
++            TOKEN_PRIVILEGES tp{};
++            tp.PrivilegeCount = 1;
++            if (LookupPrivilegeValueW(nullptr, L"SeLockMemoryPrivilege", &tp.Privileges[0].Luid)) {
++                tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
++                AdjustTokenPrivileges(tok, FALSE, &tp, 0, nullptr, nullptr); // the VirtualAlloc below reports the outcome
++            }
++            CloseHandle(tok);
++        }
++    }
++    void * p = nullptr;
++    size_t reserved = size;
++    const SIZE_T large = GetLargePageMinimum();
++    if (large > 0) {
++        const SIZE_T lbytes = (SIZE_T) ((size + large - 1) / large * large);
++        p = VirtualAlloc(nullptr, lbytes, MEM_RESERVE | MEM_COMMIT | MEM_LARGE_PAGES, PAGE_READWRITE);
++        if (p) {
++            reserved = lbytes;
++            GGML_LOG_INFO("%s: %.2f MiB on large pages (%zu B)\n", __func__, lbytes / 1024.0 / 1024.0, (size_t) large);
++        } else {
++            GGML_LOG_INFO("%s: large pages refused for %zu B (GetLargePageMinimum=%zu, VirtualAlloc error %lu); 4 KB pages\n",
++                    __func__, (size_t) lbytes, (size_t) large, (unsigned long) GetLastError());
++        }
++    }
++    if (!p) {
++        p = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++        if (!p) {
++            return nullptr;
++        }
++    }
++    // register BEFORE any page is touched (Strata pinned.cu:136-139)
++    const cudaError_t e = cudaHostRegister(p, reserved, cudaHostRegisterPortable);
++    if (e != cudaSuccess) {
++        (void) cudaGetLastError();
++        GGML_LOG_INFO("%s: cudaHostRegister of %.2f MiB failed (%s); using cudaMallocHost\n", __func__,
++                reserved / 1024.0 / 1024.0, cudaGetErrorString(e));
++        VirtualFree(p, 0, MEM_RELEASE);
++        return nullptr;
++    }
++    std::lock_guard<std::mutex> lock(g_cuda_lp_mutex);
++    g_cuda_lp_allocs[p] = reserved;
++    return p;
++}
++
++static bool ggml_cuda_host_free_large_pages(void * p) {
++    {
++        std::lock_guard<std::mutex> lock(g_cuda_lp_mutex);
++        auto it = g_cuda_lp_allocs.find(p);
++        if (it == g_cuda_lp_allocs.end()) {
++            return false;
++        }
++        g_cuda_lp_allocs.erase(it);
++    }
++    CUDA_CHECK(cudaHostUnregister(p));
++    VirtualFree(p, 0, MEM_RELEASE);
++    return true;
++}
++#else
++static void * ggml_cuda_host_malloc_large_pages(size_t) { return nullptr; }
++static bool ggml_cuda_host_free_large_pages(void *) { return false; }
++#endif
++
+ static void ggml_backend_cuda_host_buffer_free_buffer(ggml_backend_buffer_t buffer) {
++    if (ggml_cuda_host_free_large_pages(buffer->context)) {
++        return;
++    }
+     CUDA_CHECK(cudaFreeHost(buffer->context));
+ }
+ 
+@@ -1273,6 +1370,10 @@ static void * ggml_cuda_host_malloc(size_t size) {
+         return nullptr;
+     }
+ 
++    if (void * lp = ggml_cuda_host_malloc_large_pages(size)) {
++        return lp;
++    }
++
+     void * ptr = nullptr;
+     cudaError_t err = cudaMallocHost((void **) &ptr, size);
+     if (err != cudaSuccess) {
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 43c396f15..19ff31e62 100644
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -1267,8 +1267,18 @@ struct ggml_tensor * llama_model_loader::create_tensor(
+         }
+ 
+         // avoid using a host buffer when using mmap
++        // Yamadori 0005 (after Strata's pinned expert arena, Niko1221/Strata @ d551edf4 src/core/pinned.cu:126-200
++        // and its helper-thread copies of unpinned experts, commit 928b0e07): LLAMA_PIN_EXPERTS=1 keeps the
++        // device's pinned host buffer for MoE expert tensors ("_exps") placed on the CPU even under mmap, so
++        // the op-offload and expert-cache copies read pinned memory (DMA, no driver staging) and the OS cannot
++        // page the experts out; every other tensor, lazy ones included, stays mapped
++        static const bool pin_experts = [] {
++            const char * v = getenv("LLAMA_PIN_EXPERTS");
++            return v && atoi(v) != 0;
++        }();
+         auto * buft_dev = ggml_backend_buft_get_device(buft);
+-        if (use_mmap && buft_dev && buft == ggml_backend_dev_host_buffer_type(buft_dev)) {
++        const bool pinned_expert = pin_experts && strstr(tn.str().c_str(), "_exps") != nullptr;
++        if (use_mmap && buft_dev && buft == ggml_backend_dev_host_buffer_type(buft_dev) && !pinned_expert) {
+             auto * cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+             if (!cpu_dev) {
+                 throw std::runtime_error("no CPU backend found");

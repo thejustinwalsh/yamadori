@@ -1,0 +1,21 @@
+[07:36:26] [current] unload bonsai: HTTP 200
+[07:36:38] [current] loaded in 8.6 s; card {'used': 14946, 'free': 1105, 'util': 0}
+[07:36:39] [current] G_concurrent_slots_1_2 ...
+[07:37:04] [current] G_concurrent_slots_1_2: prompt_n=None (0 tok/s) decode 18.15 tok/s acc None/None pool_max_p1=16508 used=16508 ours=[]
+[07:37:04] [current] G_clear_slot1 ...
+[07:37:05] [current] G_clear_slot1: prompt_n=1 (25 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=16488 used=8255 ours=[]
+[07:37:05] [current] G_alone_slot1 ...
+[07:37:18] [current] G_alone_slot1: prompt_n=7999 (870 tok/s) decode 65.24 tok/s acc 134/241 pool_max_p1=16508 used=16508 ours=[]
+[07:37:18] [current] G_clear_slot2 ...
+[07:37:19] [current] G_clear_slot2: prompt_n=1 (26 tok/s) decode 0.00 tok/s acc 0/0 pool_max_p1=16508 used=8253 ours=[]
+[07:37:19] [current] G_alone_slot2 ...
+[07:37:32] [current] G_alone_slot2: prompt_n=7999 (871 tok/s) decode 79.38 tok/s acc 156/197 pool_max_p1=16510 used=16508 ours=[]
+[07:37:34] [current] stopped; min free 1035 MiB
+[07:37:44] restore: {'lane_resumed': True, 'reload_s': 10.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14946, 'free': 1105, 'util': 0}}
+| arm | stage | prompt_n | prompt tok/s | decode tok/s | draft acc | pool max+1 | used |
+|---|---|---|---|---|---|---|---|
+| current | G_concurrent_slots_1_2 | None | 0 | 18.15 | - | 16508 | 16508 |
+| current | G_clear_slot1 | 1 | 25 | 0.00 | - | 16488 | 8255 |
+| current | G_alone_slot1 | 7999 | 870 | 65.24 | 134/241 | 16508 | 16508 |
+| current | G_clear_slot2 | 1 | 26 | 0.00 | - | 16508 | 8253 |
+| current | G_alone_slot2 | 7999 | 871 | 79.38 | 156/197 | 16510 | 16508 |

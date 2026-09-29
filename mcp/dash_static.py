@@ -27,9 +27,11 @@ THREE MODES, ONE DECISION (`ui_mode()`)
           as /nebari or /data/<id> survive a refresh), /assets/* are the
           hashed chunks, and old /dash and /dash/<route> bookmarks 302 to
           the root equivalent. /dash/api/* stays the JSON API and the Python
-          pages stay at /dash/classic*, where they still own the two write
-          flows the React build does not have yet: recipe review
-          (/dash/classic) and dataset submission (/dash/classic/data).
+          pages stay at /dash/classic*: the fallback, and the one surface
+          that still edits recipe rows (/dash/classic), which are provenance
+          only since the corpus became skills (2026-09-26). Dataset
+          submission is on the React NAEDOKO screen too (2026-09-29 audit,
+          docs/DASHBOARD.md).
   python  YAMADORI_DASH_UI=python, or no bundle: exactly the old behaviour.
   dev     --dev or YAMADORI_DASH_DEV=1: dist is NOT served, and an HTML
           request says where Vite is. The browser talks to Vite on :5173 and

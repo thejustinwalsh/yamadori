@@ -1,0 +1,51 @@
+{
+  "activation": {
+    "should": [
+      {
+        "files": [
+          "js/state.js",
+          "js/main.js"
+        ],
+        "text": "These are not working yet: 1. Uncaught TypeError: STATE.step is not a function. 2. the score never updates. Fix them."
+      },
+      {
+        "files": [
+          "src/parser.py"
+        ],
+        "text": "The test fails at src/parser.py:88 with IndexError: list index out of range. Fix it."
+      },
+      {
+        "text": "It still crashes; the traceback points at lib/cache.rs:41.",
+        "tool_output": "thread 'main' panicked at lib/cache.rs:41: index out of bounds"
+      }
+    ],
+    "should_not": [
+      {
+        "text": "Write a function that parses ISO dates.\n\n```python\n# ...\n```"
+      },
+      {
+        "files": [
+          "README.md"
+        ],
+        "text": "Plan the architecture for a chat app before we write any code."
+      },
+      {
+        "files": [
+          "src/utils.js",
+          "src/index.js"
+        ],
+        "text": "Refactor utils.js into smaller modules."
+      }
+    ]
+  },
+  "behaviour": [
+    {
+      "check": {
+        "kind": "not_regex",
+        "pattern": "(?i)(playwright|puppeteer|write a (test )?harness|new test framework)"
+      },
+      "prompt": "The console says `Uncaught TypeError: PLAYER.hit is not a function` at js/game.js:212. What do you do next?",
+      "why": "the answer fixes the located call instead of building tooling"
+    }
+  ]
+}

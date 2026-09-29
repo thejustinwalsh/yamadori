@@ -593,6 +593,47 @@ models:
     ttl: 0
 
   # =====================================================================
+  # CLM ENCODER -- the decision model's encoder, on the A4000 (docs/CLM.md).
+  #
+  # CLM-v0.1-8B is a frozen Qwen3-8B used as an embedder plus two small
+  # projection heads; the heads run in Python (mcp/clm_heads.py) and this
+  # entry serves only the encoder: the LAST token's final hidden state,
+  # which is what the heads were trained on (Contrastive-LM/CLM @ bb42c6c5,
+  # src/clm/embedder.py). Our own GGUF from Qwen/Qwen3-8B @ b968826d
+  # (models/manifest.yaml `qwen3-8b-clm-q8`, recipe in docs/MODELS.md).
+  #   --pooling last    CLM's pooling. /v1/embeddings L2-normalises by
+  #                     default (embd_normalize 2); CLM normalises too, so
+  #                     either way the heads see the same unit vector.
+  #   -c 2048 -np 1     CLM's window (vLLM --max-model-len 2048); one slot,
+  #                     so the whole 2,048 is one sequence's.
+  #   -b 2048 -ub 2048  an embedding must fit in ONE micro-batch
+  #                     (llama-server refuses a longer input); mcp/clm.py
+  #                     cuts every input to 2,047 tokens, as CLM's recipe.
+  # Fidelity against the HF reference: 40/40 decisions, cosine median
+  # 0.9999 (docs/CLM.md). ON-DEMAND SWAP (operator, 2026-09-27): llama-swap
+  # loads it on the first decision (measured 3.7 s from a warm page cache,
+  # 6.3 s cold), mcp/gpu_room.py makes room for it and evicts it (LRU) when
+  # vision or a draw needs the card -- 9,379 MiB idle, 9,415 at peak, so it
+  # does NOT co-reside with image generation -- and ttl 300 (a choice, as
+  # bonsai-vision's) frees the card after five idle minutes.
+  "clm-encoder":
+    name: "Qwen3-8B Q8_0 -- CLM encoder (last-token embeddings, A4000)"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
+    cmd: |
+      ${server}
+      --port ${PORT}
+      -m ${models}/Qwen3-8B-Q8_0.gguf
+      -dev CUDA0
+      -ngl 999
+      -c 2048
+      -np 1
+      --embeddings
+      --pooling last
+      -b 2048 -ub 2048
+    ttl: 300
+
+  # =====================================================================
   # CRITIC -- on demand, not resident.
   #
   # DIFFERENT WEIGHTS on purpose. A model reviewing its own output shares
@@ -658,6 +699,16 @@ routing:
           members:
             - "embeddings"
             - "reranker"
+
+        # The CLM encoder (docs/CLM.md). Its own group because an ungrouped
+        # model lands in llama-swap's "(default)" group, swap:true AND
+        # exclusive:true, whose load would evict retrieval. exclusive:false:
+        # gpu_room decides what leaves the A4000 for it, and for a draw.
+        "decision":
+          swap: false
+          exclusive: false
+          members:
+            - "clm-encoder"
 
         # WHO DECIDES WHAT IS ON THE A4000: mcp/gpu_room.py, not these groups
         # (operator, 2026-09-24: "if it fits with headroom fine, if it doesn't

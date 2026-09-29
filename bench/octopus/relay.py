@@ -27,6 +27,15 @@ A row: t0 / t_first_byte / t_end (epoch), method, path, status, request
 last_chars, last_head (300 chars), n_tools, tool_names, tool_names_hash}, response
 {finish_reason, usage, tool_calls: [names], content_chars, reasoning_chars,
 x_yamadori (verbatim), bytes, error}.
+
+BOTH WIRES (2026-09-26). A Responses request (POST /v1/responses: `input`
+items, flat tools) is shaped the same way, `wire: "responses"`; its stream's
+`x_yamadori`, usage and finish ride inside the terminal event's `response`
+(response.completed / .incomplete / .failed) or the blocking Response
+object, and are recorded in the chat row's terms: usage as prompt_tokens /
+completion_tokens / total_tokens (+ cached and reasoning details), finish as
+`tool_calls` (a function call in the output), `stop`, `length` (incomplete,
+max_output_tokens) or `error` (failed), tool calls from output_item.done.
 """
 from __future__ import annotations
 
@@ -34,6 +43,8 @@ import argparse
 import hashlib
 import http.client
 import json
+import select
+import socket
 import sys
 import threading
 import time
@@ -46,22 +57,60 @@ HOP = {"connection", "keep-alive", "proxy-connection", "transfer-encoding", "te"
 _lock = threading.Lock()
 
 
+def _responses_messages(d: dict) -> list:
+    """A Responses request's input, as the roles and texts _shape reads."""
+    raw = d.get("input")
+    if isinstance(raw, str):
+        return [{"role": "user", "content": raw}]
+    out = []
+    for it in raw if isinstance(raw, list) else []:
+        if not isinstance(it, dict):
+            continue
+        kind = it.get("type") or ("message" if "role" in it else None)
+        if kind == "message":
+            c = it.get("content")
+            if isinstance(c, list):
+                c = " ".join(x.get("text", "") for x in c
+                             if isinstance(x, dict))
+            out.append({"role": it.get("role"), "content": c or ""})
+        elif kind in ("function_call", "custom_tool_call"):
+            if out and out[-1].get("role") == "assistant":
+                out[-1].setdefault("tool_calls", []).append(it)
+            else:
+                out.append({"role": "assistant", "content": "",
+                            "tool_calls": [it]})
+        elif kind in ("function_call_output", "custom_tool_call_output"):
+            o = it.get("output")
+            if isinstance(o, list):
+                o = " ".join(x.get("text", "") for x in o
+                             if isinstance(x, dict))
+            out.append({"role": "tool", "content": o or ""})
+    return out
+
+
 def _shape(body: bytes) -> dict:
     try:
         d = json.loads(body or b"{}")
     except ValueError:
         return {"unparsed_bytes": len(body or b"")}
-    msgs = d.get("messages") or []
+    wire = "responses" if "input" in d and "messages" not in d else "chat"
+    msgs = d.get("messages") or [] if wire == "chat" else         _responses_messages(d)
     last = msgs[-1] if msgs else {}
     c = last.get("content")
     if isinstance(c, list):
         c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
     c = c or ""
     tools = d.get("tools") or []
-    names = sorted((t.get("function") or {}).get("name", "") for t in tools)
-    return {"model": d.get("model"), "stream": d.get("stream"),
-            "reasoning_effort": d.get("reasoning_effort"),
-            "max_tokens": d.get("max_tokens") or d.get("max_completion_tokens"),
+    names = sorted((t.get("function") or {}).get("name", "")
+                   or t.get("name") or t.get("type") or "" for t in tools
+                   if isinstance(t, dict))
+    effort = d.get("reasoning_effort") or (
+        (d.get("reasoning") or {}).get("effort")
+        if isinstance(d.get("reasoning"), dict) else None)
+    return {"wire": wire, "model": d.get("model"), "stream": d.get("stream"),
+            "reasoning_effort": effort,
+            "max_tokens": d.get("max_tokens") or d.get("max_completion_tokens")
+            or d.get("max_output_tokens"),
             "n_messages": len(msgs), "last_role": last.get("role"),
             "last_chars": len(c), "last_head": c[:300],
             "last_tool_calls": len(last.get("tool_calls") or []),
@@ -106,6 +155,9 @@ class _Collect:
     def _take(self, d: dict, stream: bool) -> None:
         if not isinstance(d, dict):
             return
+        if isinstance(d.get("type"), str) or d.get("object") == "response":
+            self._take_responses(d)
+            return
         if d.get("x_yamadori") is not None:
             self.out["x_yamadori"] = d["x_yamadori"]
         if d.get("usage"):
@@ -122,6 +174,56 @@ class _Collect:
                 name = (tc.get("function") or {}).get("name")
                 if name:
                     self.out["tool_calls"].append(name)
+
+    def _take_responses(self, d: dict) -> None:
+        """One Responses event, or a blocking Response object."""
+        t = d.get("type") or "response.blocking"
+        if t == "response.output_text.delta":
+            self.out["content_chars"] += len(d.get("delta") or "")
+        elif t in ("response.reasoning_summary_text.delta",
+                   "response.reasoning_text.delta"):
+            self.out["reasoning_chars"] += len(d.get("delta") or "")
+        elif t == "error":
+            self.out["error"] = {"code": d.get("code"),
+                                 "message": d.get("message")}
+        if t not in ("response.completed", "response.incomplete",
+                     "response.failed", "response.blocking"):
+            return
+        r = d.get("response") if t != "response.blocking" else d
+        r = r if isinstance(r, dict) else {}
+        self.out["wire"] = "responses"
+        if r.get("x_yamadori") is not None:
+            self.out["x_yamadori"] = r["x_yamadori"]
+        u = r.get("usage")
+        if isinstance(u, dict):
+            self.out["usage"] = {
+                "prompt_tokens": u.get("input_tokens"),
+                "completion_tokens": u.get("output_tokens"),
+                "total_tokens": u.get("total_tokens"),
+                "prompt_tokens_details": {"cached_tokens": (
+                    u.get("input_tokens_details") or {}).get("cached_tokens")},
+                "completion_tokens_details": {"reasoning_tokens": (
+                    u.get("output_tokens_details") or {}).get(
+                        "reasoning_tokens")}}
+        out = [o for o in r.get("output") or [] if isinstance(o, dict)]
+        calls = [o.get("name") for o in out if o.get("type") in (
+            "function_call", "custom_tool_call") and o.get("name")]
+        self.out["tool_calls"] = calls
+        if t == "response.blocking":
+            for o in out:
+                if o.get("type") == "message":
+                    self.out["content_chars"] += sum(
+                        len(c.get("text") or "") for c in o.get("content")
+                        or [] if isinstance(c, dict))
+        status = r.get("status")
+        if status == "failed":
+            self.out["finish_reason"] = "error"
+            self.out["error"] = r.get("error")
+        elif status == "incomplete":
+            reason = (r.get("incomplete_details") or {}).get("reason")
+            self.out["finish_reason"] = "length" if reason ==                 "max_output_tokens" else (reason or "incomplete")
+        else:
+            self.out["finish_reason"] = "tool_calls" if calls else "stop"
 
     def done(self) -> dict:
         if not self.sse and self.raw:
@@ -155,10 +257,64 @@ def make_handler(upstream: str, out_path: str):
             if body:
                 headers["Content-Length"] = str(len(body))
             col = None
+            up = None
+            # WATCH THE CLIENT WHILE WAITING (2026-09-25, SELF-IMPROVEMENT-LOG
+            # #44): the relay used to notice a hang-up only when it wrote, so
+            # during a silent upstream stretch Hermes' stale-stream abort left
+            # both of its attempts generating upstream for 23 and 40 min and
+            # the proxy 429'd the third. A readable client socket that peeks
+            # EOF means the client closed: close the upstream so the proxy's
+            # disconnect cancel reaches the turn.
+            stop = threading.Event()
+
+            held = {}
+
+            def _close_upstream():
+                # shutdown() first: close() is deferred while the response's
+                # reader still holds the socket, so no FIN would go out. The
+                # socket is the connection's, or -- once http.client hands it
+                # to a response that will close (HTTP/1.0) -- the response's.
+                socks = []
+                if up is not None and up.sock is not None:
+                    socks.append(up.sock)
+                raw = getattr(getattr(held.get("resp"), "fp", None), "raw", None)
+                if getattr(raw, "_sock", None) is not None:
+                    socks.append(raw._sock)
+                for sk in socks:
+                    try:
+                        sk.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                try:
+                    if up is not None:
+                        up.close()
+                except Exception:                            # noqa: BLE001
+                    pass
+
+            def _watch_client():
+                sock = self.connection
+                while not stop.is_set():
+                    try:
+                        readable, _, _ = select.select([sock], [], [], 1.0)
+                    except (OSError, ValueError):
+                        return
+                    if not readable:
+                        continue
+                    try:
+                        gone = not sock.recv(1, socket.MSG_PEEK)
+                    except OSError:
+                        gone = True
+                    if not gone:
+                        return        # the client sent data: not ours to judge
+                    row["client_gone"] = "closed while waiting on the proxy"
+                    _close_upstream()
+                    return
             try:
                 up = conn_cls(host, port, timeout=7200)
                 up.request(self.command, self.path, body=body or None, headers=headers)
+                threading.Thread(target=_watch_client, daemon=True).start()
                 resp = up.getresponse()
+                held["resp"] = resp
                 row["status"] = resp.status
                 ctype = resp.getheader("Content-Type", "")
                 col = _Collect(sse="text/event-stream" in ctype)
@@ -196,6 +352,9 @@ def make_handler(upstream: str, out_path: str):
                         self.wfile.write(msg)
                 except Exception:                            # noqa: BLE001
                     pass
+            finally:
+                stop.set()
+                _close_upstream()        # never leave an upstream running
             row["t_end"] = time.time()
             if col is not None:
                 row["response"] = col.done()

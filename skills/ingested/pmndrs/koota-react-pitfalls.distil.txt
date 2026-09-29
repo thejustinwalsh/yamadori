@@ -1,0 +1,13 @@
+name: koota-react-entity-lifetime
+description: Use when React components in TypeScript create, hold or look up koota entities (spawning on mount, cleanup, finding an entity from a component), or when a view holds an entity that was destroyed.
+phases: implement, debug
+topics: useQueryFirst, useEffect, useState, useRef, entity.destroy, world.spawn
+# Koota Entity Lifetime in React
+- DO NOT: store entities in useState or useRef; an entity can be destroyed outside React at any time.
+  source: "**Never store entities in `useState` or `useRef`:**"
+- DO: spawn entities in a useEffect whose cleanup destroys them (world.spawn in the effect, entity.destroy() in its return), or in a Startup component.
+  source: "Spawn initial entities on mount. Clean up in `useEffect` return."
+- DO: reach an entity from a component by querying for it (useQueryFirst(IsPlayer)) or by receiving it as a prop.
+  source: "**To access an entity in a component, query for it or pass it as a prop:**"
+- DO: let components answer input by adding or removing traits, and let systems act on those traits.
+  source: "React components respond to user input by adding/removing traits. Systems process these traits."

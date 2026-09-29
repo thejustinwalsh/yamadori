@@ -73,28 +73,33 @@ Same server, same tools, same code path — reachable over ZeroTier:
 POST http://ai.thejustinwalsh.me:1235/mcp
 ```
 
-It speaks plain MCP JSON-RPC: one request in, one response out.
+It speaks plain MCP JSON-RPC: one request in, one response out. It needs the
+same account key as `:1234`, sent as `Authorization: Bearer` (2026-09-26;
+`docs/TOOLS-API.md`):
 
 ```bash
-curl http://ai.thejustinwalsh.me:1235/mcp -H "Content-Type: application/json"   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+curl http://ai.thejustinwalsh.me:1235/mcp -H "Authorization: Bearer $YAMADORI_API_KEY" -H "Content-Type: application/json"   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-For a client that wants a config block:
+For a client that wants a config block (Claude Code's form):
 
 ```json
 {
   "mcpServers": {
     "code-search": {
       "type": "http",
-      "url": "http://ai.thejustinwalsh.me:1235/mcp"
+      "url": "http://ai.thejustinwalsh.me:1235/mcp",
+      "headers": { "Authorization": "Bearer ${YAMADORI_API_KEY}" }
     }
   }
 }
 ```
 
-Exact key names vary between clients (`type`/`transport`, `url`/`endpoint`) —
-check yours. If it only supports stdio, run a thin local relay that forwards
-stdin to that URL; the protocol is identical on both sides.
+Hermes itself takes `mcp_servers.<name>.url` and `.headers`, with
+`${env:YAMADORI_API_KEY}` interpolated. `docs/TOOLS-API.md` has the verified
+forms for Claude Code, OpenCode and Hermes. If a client supports only stdio,
+run `mcp/mcp_bridge.py` locally with `YAMADORI_API_KEY` set. It forwards stdin
+to that URL with the key, and the protocol is identical on both sides.
 
 **Which do you want?** stdio is lower latency and needs no open port. HTTP is
 the only option when the agent is not on the GPU box. Both serve the same
@@ -175,7 +180,8 @@ http://ai.thejustinwalsh.me:1235
 ```
 
 GET forms work too: `/definition?symbol=foo`. Use this from build scripts,
-editors and CI; use MCP from agents.
+editors and CI; use MCP from agents. Every route except `/health` needs
+`Authorization: Bearer <key>`. The key never goes in the query string.
 
 ## 3. System prompt
 

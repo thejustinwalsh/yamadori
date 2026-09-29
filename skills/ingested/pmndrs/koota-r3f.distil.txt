@@ -1,0 +1,17 @@
+name: koota-with-react-three-fiber
+description: Use when a koota world drives a React Three Fiber scene in TypeScript: entity views as R3F components, three.js Object3D refs held in traits, and a sync system that writes transforms to the three.js objects.
+phases: implement, debug
+topics: handleInit, Object3D, entity.isAlive, syncToThree, useQuery, entity.id
+# Koota With React Three Fiber
+- DO: hold each view's three.js object in a Ref trait (trait(() => null! as THREE.Object3D)); React decides when a view connects to its entity, and systems only query and mutate.
+  source: "React controls when a view element connects to an entity. Systems only query and mutate; they never add or remove view refs."
+- DO: add the Ref in the element's ref callback (handleInit) when the component mounts, only while entity.isAlive(), and return a cleanup that removes it.
+  source: "1. Component mounts → add `Ref` trait via `handleInit`"
+- DO: write positions and rotations to the three.js objects in one sync system (syncToThree) that queries Position, Rotation and Ref, instead of one React render per entity.
+  source: "**Performance** — Batch view updates in single system vs individual React renders"
+- DO: run that sync system at a fixed point of the frame loop, after the systems that move the entities.
+  source: "**Control** — Run sync at precise points in frameloop"
+- WHEN third-party three.js code (controls, physics) also moves the objects: keep the Object3D's own position, rotation and quaternion in the trait and let systems mutate them directly, with no sync system.
+  source: "Three.js objects stored in trait; systems mutate them directly. External libs (controls, physics) can also mutate transforms. No sync system needed."
+- DO: map entities to views with a Renderer component that queries them (useQuery) and renders one View per entity, keyed by entity.id().
+  source: "`{Domain}Renderer` — Queries and maps to views"

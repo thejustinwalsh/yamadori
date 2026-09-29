@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Vision (describe_image and attached images), against fake servers. No GPU.
+"""Vision (yama_describe_image and attached images), against fake servers. No GPU.
 
 WHAT THIS GATES
 
@@ -18,7 +18,7 @@ WHAT THIS GATES
      attachments or our media store, by id. No URL is ever fetched -- not a
      model-supplied one, not a client's image link -- and no model-supplied
      path is ever opened. Only the vision server is ever contacted.
-  4. describe_image is offered wherever generate_image is (every tier, and
+  4. yama_describe_image is offered wherever yama_generate_image is (every tier, and
      deep thinking), and on every tier when the request carries an image,
      even with no image server. YAMADORI_VISION=0 withholds it.
   5. x_yamadori.vision records each call (ok, image, source, format, bytes,
@@ -86,6 +86,15 @@ for k in ("YAMADORI_IMAGEGEN_URL", "YAMADORI_PUBLIC_BASE", "YAMADORI_VISION",
           "YAMADORI_VISION_MAX_BYTES", "YAMADORI_VISION_TIMEOUT",
           "YAMADORI_IMAGEGEN_DEFAULT"):
     os.environ.pop(k, None)
+# The main model sees (2026-09-27: its projector is folded in; /props is not
+# asked offline). Tests of a main model WITHOUT one set it to 0.
+os.environ["YAMADORI_MAIN_VISION"] = "1"
+
+# Every other store the code under test can write (the jobs database
+# behind skill selection, the concept seed, ...), BEFORE any mcp import:
+# 2026-09-27 this suite wrote the live index/ (the offline guard).
+import offline_stores  # noqa: E402
+offline_stores.isolate("yamadori_test_vision_stores_")
 
 import admission  # noqa: E402
 import budget  # noqa: E402
@@ -312,6 +321,14 @@ def test_the_fixture_is_not_the_real_store():
     check(model.UPSTREAM == VISION_URL, "the vision upstream is the fake")
 
 
+def _generations(urls: list) -> list:
+    """The URLs a look opened, less the main model's own housekeeping reads
+    (its /props for the pool and projector, /slots for the helper slot): the
+    generation requests. Since 2026-09-27 the look goes to the MAIN model."""
+    return [u for u in urls if not u.rstrip("/").endswith(("/props", "/slots"))
+            and "/slots?" not in u]
+
+
 def test_request_shape():
     png = tiny_png(1)
     _out, att, iid = attached(img_part(png))
@@ -324,8 +341,9 @@ def test_request_shape():
     body = V_SEEN[-1]["body"] if V_SEEN else {}
     check(V_SEEN and V_SEEN[-1]["path"] == "/v1/chat/completions",
           "POST /v1/chat/completions on the model server")
-    check(body.get("model") == "bonsai-vision",
-          "routed to llama-swap's `bonsai-vision`", str(body.get("model")))
+    check(body.get("model") == model.MODEL,
+          "a main model WITH its projector (YAMADORI_MAIN_VISION=1: max mode's, "
+          "or bonsai before layout v2) is asked itself", str(body.get("model")))
     msgs = body.get("messages") or []
     user = msgs[-1] if msgs else {}
     parts = user.get("content") if isinstance(user.get("content"), list) else []
@@ -383,7 +401,7 @@ def _shape(d: dict, code: str, name: str, retryable: bool) -> None:
     if not check(d.get("ok") is False and d.get("error") == code,
                  f"{name}: {code}", json.dumps(d)[:200]):
         return
-    check(d.get("tool") == "describe_image", f"{name}: names the tool")
+    check(d.get("tool") == "yama_describe_image", f"{name}: names the tool")
     check(d.get("retryable") is retryable,
           f"{name}: retryable={retryable} as a fact", str(d.get("retryable")))
     rem = d.get("remedies") or []
@@ -572,13 +590,15 @@ def test_security_contract():
         d = env_of(vision.run_tool({"image": link, "question": "q"}, vision.empty(), []))
     check(d.get("ok") is True and d.get("source") == "generated",
           "a valid signed /media link is read from the store", json.dumps(d)[:160])
-    check(all(u.startswith(VISION_URL) for u in w.urls) and len(w.urls) == 1,
-          "and the only URL opened is the vision server's", str(w.urls))
+    gen = _generations(w.urls)
+    check(all(u.startswith(VISION_URL) for u in gen) and len(gen) == 1,
+          "and the only URL opened is the model server's (one generation; "
+          "the main model's /props and /slots reads aside)", str(w.urls))
     check("ai.example.test" not in json.dumps(V_SEEN[-1]["body"]) if V_SEEN else False,
           "the vision server gets bytes, never our link")
     md = f"![a fox]({link})"
     d = env_of(vision.run_tool({"image": md, "question": "q"}, vision.empty(), []))
-    check(d.get("ok") is True, "the markdown line generate_image returned works too")
+    check(d.get("ok") is True, "the markdown line yama_generate_image returned works too")
     att = vision.empty()
     vision.note_generated(json.dumps({"ok": True, "url": link}), att)
     d = env_of(vision.run_tool({"image": sha, "question": "q"}, att, []))
@@ -604,7 +624,7 @@ def test_security_contract():
 
 
 # --------------------------------------------------------------------------
-# 4: offered wherever generate_image is, and with an attachment
+# 4: offered wherever yama_generate_image is, and with an attachment
 # --------------------------------------------------------------------------
 def _names(out: dict) -> list[str]:
     return [t.get("function", {}).get("name") for t in out.get("tools") or []]
@@ -620,49 +640,52 @@ def test_offered_everywhere_generate_image_is():
         with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
             n = _names(proxy.prepare({"model": "yamadori", "messages": txt,
                                       "reasoning_effort": effort}))
-        check("generate_image" in n and "describe_image" in n,
+        check("yama_generate_image" in n and "yama_describe_image" in n,
               f"image server configured, tier {effort}: both offered", str(n))
         with use(YAMADORI_IMAGEGEN_URL=None):
             n = _names(proxy.prepare({"model": "yamadori", "messages": pic,
                                       "reasoning_effort": effort}))
-        check("describe_image" in n and "generate_image" not in n,
+        check("yama_describe_image" in n and "yama_generate_image" not in n,
               f"no image server, an attached image, tier {effort}: "
-              f"describe_image offered", str(n))
+              f"yama_describe_image offered", str(n))
         with use(YAMADORI_IMAGEGEN_URL=None):
             n = _names(proxy.prepare({"model": "yamadori", "messages": txt,
                                       "reasoning_effort": effort}))
-        check("describe_image" not in n,
+        check("yama_describe_image" not in n,
               f"nothing to look at, tier {effort}: not offered", str(n))
     with use(YAMADORI_IMAGEGEN_URL=IMG_URL, YAMADORI_VISION="0"):
         n = _names(proxy.prepare({"model": "yamadori", "messages": pic,
                                   "reasoning_effort": "low"}))
-        check("describe_image" not in n and "generate_image" in n,
+        check("yama_describe_image" not in n and "yama_generate_image" in n,
               "YAMADORI_VISION=0 withholds it, attachment or not", str(n))
     with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
         dt = [t["function"]["name"] for t in proxy.deep_thinking_tools()]
-        check("describe_image" in dt and "generate_image" in dt,
+        check("yama_describe_image" in dt and "yama_generate_image" in dt,
               "deep thinking gets both", str(dt))
     with use(YAMADORI_IMAGEGEN_URL=None):
         _m, att = vision.extract(pic)
         dt = [t["function"]["name"] for t in proxy.deep_thinking_tools(att)]
-        check("describe_image" in dt,
+        check("yama_describe_image" in dt,
               "deep thinking gets it for an attached image with no image server",
               str(dt))
     mine = {"type": "function", "function": {
-        "name": "describe_image", "description": "the client's own",
+        "name": "yama_describe_image", "description": "the client's own",
         "parameters": {"type": "object", "properties": {}}}}
     with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
         out = proxy.prepare({"model": "yamadori", "messages": pic,
                              "reasoning_effort": "low", "tools": [mine]})
-    got = [t for t in out["tools"] if t["function"]["name"] == "describe_image"]
+    got = [t for t in out["tools"] if t["function"]["name"] == "yama_describe_image"]
     check(len(got) == 1 and got[0]["function"]["description"] == "the client's own",
-          "a client's own describe_image wins")
-    check("describe_image" in proxy.OUR_NAMES and "describe_image" in proxy._STATEFUL,
+          "a client's own yama_describe_image wins")
+    check("yama_describe_image" in proxy.OUR_NAMES and "yama_describe_image" in proxy._STATEFUL,
           "the proxy runs it as its own, and never serves it from the repeat cache")
 
     s = shomen.SYSTEM
-    para = s[s.index("generate_image"):s.index("WRITE IN PLAIN")]
-    check("describe_image" in para and "draw it again" in para,
+    # The image paragraph used to end at the "WRITE IN PLAIN" style block,
+    # removed 2026-09-27 (docs/CONSTANTS-AUDIT.md): it now ends the prompt.
+    end = s.find("WRITE IN PLAIN")
+    para = s[s.index("yama_generate_image"):end if end >= 0 else len(s)]
+    check("yama_describe_image" in para and "draw it again" in para,
           "deep thinking is told to look at its drawing and refine it", para[:200])
     check(not re.search(r"\b(never|do not|don't|cannot)\b", para, re.I),
           "that instruction is positive: no prohibition (AGENTS.md)", para)
@@ -670,16 +693,20 @@ def test_offered_everywhere_generate_image_is():
     desc = vision.TOOL["function"]["description"]
     check(desc.startswith("Answers a question about what is IN an image"),
           "the description leads with the question it answers", desc[:60])
-    check("generate_image" in desc and "turns words into" in desc,
-          "and contrasts itself with generate_image")
+    check("yama_generate_image" in desc and "turns words into" in desc,
+          "and contrasts itself with yama_generate_image")
     for phrase in ("what is in this image", "describe this screenshot",
                    "read the text in this picture", "check the image you just drew",
                    "image-", "It sees images only",
                    "client's own file tools"):
         check(phrase in desc, f"it lists the trigger {phrase!r}")
     name = vision.TOOL["function"]["name"]
-    check(re.fullmatch(r"[a-z]+(_[a-z]+)+", name) and name.split("_")[0] == "describe",
-          "snake_case, verb first, spelled out", name)
+    # `yama_` first (operator, 2026-09-27: every tool of ours on main), then
+    # snake_case, verb first, spelled out.
+    bare = name[len("yama_"):] if name.startswith("yama_") else ""
+    check(re.fullmatch(r"[a-z]+(_[a-z]+)+", bare)
+          and bare.split("_")[0] == "describe",
+          "yama_, then snake_case, verb first, spelled out", name)
 
 
 # --------------------------------------------------------------------------
@@ -732,7 +759,7 @@ def test_placeholders():
           json.dumps(vision.summary(att)))
     text = "\n".join(p["text"] for p in parts)
     for i in ok_ids:
-        check(f'describe_image with image "{i}"' in text,
+        check(f'yama_describe_image with image "{i}"' in text,
               f"the placeholder names {i} and the call to make")
     check("another site" in text and "attach the image file" in text,
           "the link's placeholder asks for the file")
@@ -764,7 +791,7 @@ def test_placeholders():
     with use(YAMADORI_VISION="0"):
         out_off, _a = vision.extract([{"role": "user", "content": [img_part(png)]}])
     t = out_off[0]["content"][0]["text"]
-    check("switched off" in t and "describe_image" not in t,
+    check("switched off" in t and "yama_describe_image" not in t,
           "with vision off, the placeholder says so instead of naming the tool", t)
 
 
@@ -779,22 +806,44 @@ def test_budget_is_not_floored_by_an_image():
     b = proxy.prepare({"model": "yamadori", "messages": with_img,
                        "reasoning_effort": "low"})
     ta, tb = a.get("reasoning_budget_tokens") or 0, b.get("reasoning_budget_tokens") or 0
-    check(tb > 10 * tiers.MIN_THINKING and abs(ta - tb) < 500,
-          "a 600 KB attachment costs the thinking budget only its placeholder",
-          f"text-only {ta}, with image {tb}")
-    check(b["_seen_messages"][0]["content"][1]["type"] == "text",
-          "the main model's messages carry the placeholder")
+    # the main model SEES (YAMADORI_MAIN_VISION=1): the image goes to it and
+    # costs the projector's cap (image_input.IMAGE_TOKENS), never its base64
+    import image_input
+    ea = proxy.high_estimate({"messages": a["_seen_messages"]})
+    eb = proxy.high_estimate({"messages": b["_seen_messages"]})
+    w, h = image_input.image_size(big)
+    want = image_input.image_tokens(w, h)
+    check(tb > 10 * tiers.MIN_THINKING and ta - tb <= want + 500
+          and abs((eb - ea) - want) < 500,
+          "a 600 KB attachment passed to the main model counts as the "
+          "projector's cap in every estimate, not its 800 KB of base64",
+          f"thinking text-only {ta}, with image {tb}; estimate {ea} -> {eb}")
+    seen = b["_seen_messages"][0]["content"]
+    check(seen[1]["type"] == "image_url"
+          and seen[1]["image_url"]["url"].startswith("data:image/png;base64,")
+          and seen[2]["type"] == "text" and "shown to you above" in seen[2]["text"],
+          "the main model's messages carry the image part and its label",
+          json.dumps([p.get("type") for p in seen]))
     check(a["_seen_messages"] is not None, "prepare exposes the messages it saw")
+    with use(YAMADORI_MAIN_VISION="0"):
+        c = proxy.prepare({"model": "yamadori", "messages": with_img,
+                           "reasoning_effort": "low"})
+    tc = c.get("reasoning_budget_tokens") or 0
+    check(abs(ta - tc) < 500,
+          "a main model WITHOUT a projector: the attachment costs only its "
+          "placeholder", f"text-only {ta}, placeholder {tc}")
+    check(c["_seen_messages"][0]["content"][1]["type"] == "text",
+          "and its messages carry the placeholder")
 
 
 def test_a_chat_turn_that_draws_then_looks():
-    """complete(): generate_image, then describe_image on its url, then an
+    """complete(): yama_generate_image, then yama_describe_image on its url, then an
     answer. x_yamadori records both."""
     LLM_SENT.clear()
     V_SEEN.clear()
     LLM_SCRIPT[:] = [
-        lambda b: _call("generate_image", {"prompt": "a fox", "seed": 51}),
-        lambda b: _call("describe_image", {"image": _last_tool(b).get("url", ""),
+        lambda b: _call("yama_generate_image", {"prompt": "a fox", "seed": 51}),
+        lambda b: _call("yama_describe_image", {"image": _last_tool(b).get("url", ""),
                                            "question": "Does this show a fox?"}, "c2"),
         lambda b: {"content": "It shows a fox."}]
     with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
@@ -803,14 +852,14 @@ def test_a_chat_turn_that_draws_then_looks():
             "messages": [{"role": "user", "content": "draw a fox and check it"}],
             "_public_base": "https://ai.example.test"}))
     first = [t["function"]["name"] for t in (LLM_SENT[0].get("tools") or [])] if LLM_SENT else []
-    check("generate_image" in first and "describe_image" in first,
+    check("yama_generate_image" in first and "yama_describe_image" in first,
           "the model was offered both", str(first))
     res = _last_tool(LLM_SENT[2]) if len(LLM_SENT) > 2 else {}
     check(res.get("ok") is True and res.get("answer") == ANSWER
           and res.get("source") == "generated",
-          "the proxy ran describe_image on what it drew", json.dumps(res)[:200])
-    check(V_SEEN and V_SEEN[-1]["body"]["model"] == "bonsai-vision",
-          "the vision call went to bonsai-vision")
+          "the proxy ran yama_describe_image on what it drew", json.dumps(res)[:200])
+    check(V_SEEN and V_SEEN[-1]["body"]["model"] == model.MODEL,
+          "the vision call went to the main model")
     x = d.get("x_yamadori") or {}
     v = x.get("vision") or []
     check(len(v) == 1 and v[0].get("ok") and v[0].get("source") == "generated"
@@ -822,8 +871,13 @@ def test_a_chat_turn_that_draws_then_looks():
     check(x.get("attachments") == [], "no attachments on this turn")
     check("Does this show" not in json.dumps(x),
           "the question is not in x_yamadori")
-    check(d["choices"][0]["message"]["content"] == "It shows a fox.",
-          "the answer comes back")
+    # The picture, shown the moment it existed (2026-09-25); no session
+    # line (#41: the id rides in tool-call ids).
+    drawn = _last_tool(LLM_SENT[1]) if len(LLM_SENT) > 1 else {}
+    check(d["choices"][0]["message"]["content"]
+          == (drawn.get("markdown") or "?") + "\n\n" + "It shows a fox.",
+          "the answer comes back: the image line, the model's words",
+          d["choices"][0]["message"]["content"][:200])
 
 
 def test_a_chat_turn_with_an_attached_image():
@@ -834,7 +888,7 @@ def test_a_chat_turn_with_an_attached_image():
     def look(b):
         text = json.dumps(b.get("messages"))
         m = re.search(r"image-[0-9a-f]{10}", text)
-        return _call("describe_image", {"image": m.group(0) if m else "none",
+        return _call("yama_describe_image", {"image": m.group(0) if m else "none",
                                         "question": "What is in the picture?"})
     LLM_SCRIPT[:] = [look, lambda b: {"content": "A fox."}]
     with use(YAMADORI_IMAGEGEN_URL=None):
@@ -843,12 +897,20 @@ def test_a_chat_turn_with_an_attached_image():
             "messages": [{"role": "user", "content": [
                 {"type": "text", "text": "what is this?"}, img_part(png),
                 img_part(b"junk")]}]}))
-    sent = json.dumps(LLM_SENT[0]) if LLM_SENT else ""
-    check(LLM_SENT and '"image_url"' not in sent
-          and base64.b64encode(png).decode() not in sent,
-          "the text model received no image part and no image bytes")
-    check("describe_image" in [t["function"]["name"] for t in LLM_SENT[0].get("tools") or []],
-          "describe_image was offered at tier minimal with no image server")
+    sent0 = LLM_SENT[0] if LLM_SENT else {}
+    user = (sent0.get("messages") or [{}])[-1]
+    parts = user.get("content") if isinstance(user.get("content"), list) else []
+    imgs = [p for p in parts if p.get("type") == "image_url"]
+    check(len(imgs) == 1 and imgs[0]["image_url"]["url"]
+          == "data:image/png;base64," + base64.b64encode(png).decode(),
+          "the MAIN model received the readable image as ONE image part: a "
+          "data: URI of the attached bytes (the junk one stays a placeholder)",
+          json.dumps([p.get("type") for p in parts]))
+    check(any(p.get("type") == "text" and "not an image this server can read"
+              in p.get("text", "") for p in parts),
+          "the unreadable attachment is a placeholder, not an image part")
+    check("yama_describe_image" in [t["function"]["name"] for t in LLM_SENT[0].get("tools") or []],
+          "yama_describe_image was offered at tier minimal with no image server")
     res = _last_tool(LLM_SENT[1]) if len(LLM_SENT) > 1 else {}
     check(res.get("ok") is True and res.get("source") == "attached",
           "the model looked at the attachment by its id", json.dumps(res)[:200])
@@ -871,21 +933,16 @@ def test_streamed_turn_with_an_attached_image():
 
     def look(b):
         m = re.search(r"image-[0-9a-f]{10}", json.dumps(b.get("messages")))
-        return _call("describe_image", {"image": m.group(0) if m else "none",
+        return _call("yama_describe_image", {"image": m.group(0) if m else "none",
                                         "question": "What is it?"})
     LLM_SCRIPT[:] = [look, lambda b: {"content": "A fox."}]
 
     def run(proxy):
-        old = proxy.PREAMBLE
-        proxy.PREAMBLE = False
-        try:
-            return [e for e in proxy.stream_body({
-                "model": "yamadori", "reasoning_effort": "low", "stream": True,
-                "messages": [{"role": "user", "content": [
-                    {"type": "text", "text": "what is this?"}, img_part(png)]}]},
-                "yamadori")]
-        finally:
-            proxy.PREAMBLE = old
+        return [e for e in proxy.stream_body({
+            "model": "yamadori", "reasoning_effort": "low", "stream": True,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "what is this?"}, img_part(png)]}]},
+            "yamadori")]
     with use(YAMADORI_IMAGEGEN_URL=None):
         events = _with_llm(run)
     last = {}
@@ -899,6 +956,189 @@ def test_streamed_turn_with_an_attached_image():
           "the streamed path runs it and records it", json.dumps(v))
     check(len(last.get("attachments") or []) == 1,
           "and records the attachment", json.dumps(last.get("attachments")))
+
+
+def test_a_main_model_without_a_projector():
+    """LAYOUT V2 (operator, 2026-09-29: "Vision can go to second card and swap
+    in and out"). YAMADORI_MAIN_VISION=0 (or /props without
+    modalities.vision): no image part reaches the main model, and
+    yama_describe_image asks the A4000 copy, `bonsai-vision`
+    (model.VISION_MODEL) -- the pre-fold route, restored. Only with no
+    separate copy (YAMADORI_VISION_MODEL = the main model) does it answer
+    VISION_NO_PROJECTOR."""
+    import model
+    png = tiny_png(14)
+
+    def look(b):
+        m = re.search(r"image-[0-9a-f]{10}", json.dumps(b.get("messages")))
+        return _call("yama_describe_image", {"image": m.group(0) if m else "none",
+                                             "question": "What is it?"})
+
+    def turn():
+        LLM_SENT.clear()
+        V_SEEN.clear()
+        LLM_SCRIPT[:] = [look, lambda b: {"content": "It is a fox."}]
+        with use(YAMADORI_IMAGEGEN_URL=None, YAMADORI_MAIN_VISION="0"):
+            _with_llm(lambda proxy: proxy.complete({
+                "model": "yamadori", "reasoning_effort": "minimal",
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": "what is this?"}, img_part(png)]}]}))
+        return _last_tool(LLM_SENT[1]) if len(LLM_SENT) > 1 else {}
+
+    check(model.VISION_MODEL == "bonsai-vision",
+          "the vision copy is `bonsai-vision` by default (layout v2)",
+          model.VISION_MODEL)
+    res = turn()
+    sent = json.dumps(LLM_SENT[0]) if LLM_SENT else ""
+    check(LLM_SENT and '"image_url"' not in sent
+          and base64.b64encode(png).decode() not in sent,
+          "no projector on the main model: it received no image part and no "
+          "image bytes (a placeholder naming the id)")
+    body = V_SEEN[-1]["body"] if V_SEEN else {}
+    check(res.get("ok") is True and res.get("answer") == ANSWER
+          and body.get("model") == "bonsai-vision",
+          "yama_describe_image asked the A4000 copy, bonsai-vision, and its "
+          "answer came back", json.dumps({"res": res, "model": body.get("model")})[:300])
+    parts = ((body.get("messages") or [{}])[-1].get("content") or [])
+    check(any(p.get("type") == "image_url" and str((p.get("image_url") or {})
+              .get("url", "")).startswith("data:image/png;base64,") for p in parts),
+          "and it was sent the image as a data: URI")
+    saved = model.VISION_MODEL
+    model.VISION_MODEL = model.MODEL
+    try:
+        check(vision.separate_copy() is False, "VISION_MODEL = the main model: no copy")
+        res = turn()
+    finally:
+        model.VISION_MODEL = saved
+    check(res.get("ok") is False and res.get("error") == "VISION_NO_PROJECTOR"
+          and res.get("retryable") is False and res.get("remedies"),
+          "no copy and no projector: VISION_NO_PROJECTOR, not retryable, with "
+          "remedies", json.dumps(res)[:300])
+    check(not V_SEEN, "and no model server was asked to look")
+
+
+def test_main_sees_reads_props():
+    """main_sees(): the MAIN model's /props `modalities.vision`, cached;
+    YAMADORI_MAIN_VISION overrides; an unreadable /props is 'no'."""
+    real = model.props
+    calls: list = []
+    try:
+        with use(YAMADORI_MAIN_VISION=None):
+            model.props = lambda name=None, timeout=10: (
+                calls.append(name) or {"modalities": {"vision": True}})
+            check(vision.main_sees(refresh=True) is True and calls == [model.MODEL],
+                  "modalities.vision true: the main model sees", str(calls))
+            vision.main_sees()
+            check(len(calls) == 1, "kept: not asked again (no timer; the "
+                  "projector is a launch flag)", str(calls))
+            vision.note_no_projector("image input is not supported")
+            check(vision.main_sees() is False and len(calls) == 1,
+                  "the server refusing an image drops it to NO at once, without "
+                  "asking /props", str(calls))
+            import api_errors
+            vision._sees.update(value=True, model=model.MODEL, why="x")
+            api_errors.of_upstream(500, {"message": "image input is not supported"
+                                         " - hint: ... provide the mmproj"})
+            check(vision.main_sees() is False,
+                  "the chat path's upstream refusal (api_errors.of_upstream) "
+                  "drops it too")
+            model.props = lambda name=None, timeout=10: {"modalities": {"vision": False}}
+            check(vision.main_sees(refresh=True) is False,
+                  "modalities.vision false: it does not")
+
+            def boom(name=None, timeout=10):
+                raise OSError("down")
+            model.props = boom
+            check(vision.main_sees(refresh=True) is False,
+                  "/props unreadable: no (placeholders, never an image part a "
+                  "server may refuse)")
+            model.props = lambda name=None, timeout=10: {"modalities": {"vision": True}}
+            check(vision.main_sees() is True,
+                  "an unreadable /props is not kept: the next request asks again")
+        with use(YAMADORI_MAIN_VISION="1"):
+            check(vision.main_sees() is True, "YAMADORI_MAIN_VISION=1 overrides")
+    finally:
+        model.props = real
+        vision._sees.update(value=None, why=None, model=None)
+
+
+def test_image_tokens_as_the_projector_counts():
+    """image_input.image_tokens: mtmd-image.cpp's calc_size_preserved_ratio
+    with the served mmproj's patch 16 x merge 2 and clip.cpp's QWEN3VL limits
+    (8, 4096 tokens)."""
+    import image_input as ii
+    cases = {(256, 256): 64, (2, 2): 9, (1920, 1080): 60 * 34, (32, 32): 9,
+             (4000, 3000): None}
+    got = {k: ii.image_tokens(*k) for k in cases}
+    check(got[(256, 256)] == 64, "256x256: 8 x 8 = 64 tokens", str(got))
+    check(got[(2, 2)] == 9 and got[(32, 32)] == 9,
+          "tiny images are scaled UP to the 8-token floor (3 x 3 = 9)", str(got))
+    check(got[(1920, 1080)] == 2040, "1920x1080: 60 x 34 = 2,040 tokens", str(got))
+    check(got[(4000, 3000)] <= ii.MAX_IMAGE_TOKENS,
+          "a large image is scaled DOWN under the 4,096-token ceiling", str(got))
+    check(ii.image_size(tiny_png(3)) is not None
+          and ii.image_size(b"not an image") is None,
+          "a PNG's size is read from its header; junk has none")
+    uri = "data:image/png;base64," + base64.b64encode(tiny_png(3)).decode()
+    _m, tok = ii.without_image_bytes([{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": uri}},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}])
+    w, h = ii.image_size(tiny_png(3))
+    check(tok == ii.image_tokens(w, h) + ii.MAX_IMAGE_TOKENS,
+          "an estimate counts each image by its size, and an unreadable one at "
+          "the 4,096 ceiling", str(tok))
+
+
+def test_what_passes_through():
+    """normalise(see=True): only a readable image in a USER turn becomes an
+    image part; a tool result's image, printed bytes, a link, WebP and an
+    image past the held count stay placeholders. The same history renders
+    the same messages every time."""
+    png, png2 = tiny_png(21), tiny_png(22)
+    webp = b"RIFF$\x00\x00\x00WEBPVP8 " + b"\x00" * 24
+    msgs = [{"role": "user", "content": [
+                {"type": "text", "text": "look"}, img_part(png),
+                img_part(webp, "image/webp"),
+                {"type": "image_url", "image_url": {"url": "https://example.com/x.png"}}]},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "read", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": [img_part(png2)]}]
+    out, att = vision.extract(msgs, see=True)
+    user = out[0]["content"]
+    kinds = [p.get("type") for p in user]
+    check(kinds == ["text", "image_url", "text", "text", "text"],
+          "user turn: text, the PNG as an image part + its label, WebP and the "
+          "link as placeholders", str(kinds))
+    check(user[1]["image_url"]["url"] == "data:image/png;base64,"
+          + base64.b64encode(png).decode(),
+          "the image part is a data: URI of the held bytes (sniffed MIME)")
+    check("image-" in user[2]["text"] and "shown to you above" in user[2]["text"],
+          "its label names the id", user[2]["text"])
+    check("another site" in user[4]["text"] and "example.com" not in json.dumps(out),
+          "a link is never passed on")
+    tool = out[2]["content"]
+    check([p.get("type") for p in tool] == ["text"]
+          and "yama_describe_image" in tool[0]["text"],
+          "a tool result's image stays a placeholder (looked at by the tool)")
+    check(att.get("passed") == 1 and sum(1 for e in att["images"].values()
+                                         if e.get("passed")) == 1,
+          "the register records which image passed", json.dumps(vision.summary(att)))
+    again, _a = vision.extract(msgs, see=True)
+    check(json.dumps(again) == json.dumps(out),
+          "the same history renders byte for byte the same messages")
+    off, _b = vision.extract(msgs, see=False)
+    check('"image_url"' not in json.dumps(off),
+          "see=False: no image part at all (the old path)")
+    import image_input
+    cap = image_input.max_images()
+    many = [{"role": "user", "content": [img_part(tiny_png(100 + i))]}
+            for i in range(cap + 2)]
+    out2, _c = vision.extract(many, see=True)
+    got = [m["content"][0].get("type") for m in out2]
+    check(got[:2] == ["text", "text"] and got[2:] == ["image_url"] * cap,
+          f"only the newest {cap} held images pass; older ones are placeholders",
+          str(got))
 
 
 def _link_part(url: str) -> dict:
@@ -928,7 +1168,7 @@ def test_our_signed_link_is_an_attachment():
     check(len(ids) == 1 and e.get("error") is None and e.get("source") ==
           "media" and e.get("format") == "png"
           and base64.b64decode(e.get("b64") or "") == images.png_bytes(sha)
-          and f'describe_image with image "{ids[0]}"' in ph
+          and f'yama_describe_image with image "{ids[0]}"' in ph
           and not w.urls,
           "our valid signed link: read from the media store as an attachment "
           "(the stored bytes), nothing fetched", json.dumps(
@@ -938,8 +1178,8 @@ def test_our_signed_link_is_an_attachment():
         d = env_of(vision.run_tool({"image": ids[0] if ids else "none",
                                     "question": "q"}, att, []))
     check(d.get("ok") is True and all(u.startswith(VISION_URL)
-                                      for u in w.urls),
-          "describe_image looks at it by its attachment id; the only URL "
+                                      for u in _generations(w.urls)),
+          "yama_describe_image looks at it by its attachment id; the only URL "
           "opened is the vision server's", json.dumps(d)[:200])
     loop = images.signed_url(sha, "http://127.0.0.1:1234")
     rel = loop[len("http://127.0.0.1:1234"):]
@@ -1020,9 +1260,9 @@ def test_our_signed_link_is_an_attachment():
                               "_public_base": "https://ai.example.test"})
     names = [t["function"]["name"] for t in out7.get("tools") or []]
     sel = out7.get("_selection") or {}
-    check("describe_image" in names and not sel.get("utility")
+    check("yama_describe_image" in names and not sel.get("utility")
           and (out7.get("_route") or {}).get("class") != "utility",
-          "through prepare: not routed utility, and describe_image is "
+          "through prepare: not routed utility, and yama_describe_image is "
           "offered for our link", json.dumps({"tools": names,
                                               "route": out7.get("_route")})[:400])
 
@@ -1038,7 +1278,11 @@ def main() -> int:
              test_budget_is_not_floored_by_an_image,
              test_a_chat_turn_that_draws_then_looks,
              test_a_chat_turn_with_an_attached_image,
-             test_streamed_turn_with_an_attached_image)
+             test_streamed_turn_with_an_attached_image,
+             test_a_main_model_without_a_projector,
+             test_main_sees_reads_props,
+             test_image_tokens_as_the_projector_counts,
+             test_what_passes_through)
     try:
         for fn in tests:
             print(f"\n--- {fn.__name__} ---")

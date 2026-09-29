@@ -3,12 +3,23 @@
 Qwen-Image-2.1 on the A4000 (CUDA1) through stable-diffusion.cpp's
 `sd-server`, beside the resident rootstock and Laya. It is reached two ways:
 
-- **`generate_image`**, a model tool that the proxy runs. This is the primary
+- **`yama_generate_image`**, a model tool that the proxy runs. This is the primary
   path: it needs no client configuration.
 - **`POST /v1/images/generations`**, the OpenAI Images API.
 
 Results are served from **`GET /media/<sha>.png`** through signed capability
 URLs.
+
+**Seeing, layout v2 (operator, 2026-09-29: "Vision can go to second card and
+swap in and out").** `bonsai-vision` on the A4000, which this document
+describes as the model `yama_describe_image` asks, was retired on
+2026-09-27 when the projector was folded into the main model; layout v2
+(`bench/deploy_layout_v2.py`, docs/ENGINES.md "Layout v2") restores it and
+takes the projector off the 5060 Ti. The image rules here are unchanged;
+`mcp/gpu_room.py` decides again between vision, the image models, the CLM
+encoder and search on the A4000.
+
+**Names (2026-09-27, operator).** Every tool the proxy adds to main is `yama_*`, a name no harness offers, and its description says it is a server tool (it runs on the Yamadori server and does not touch the workspace): `generate_image` is `yama_generate_image` and `describe_image` is `yama_describe_image`. The old names are still read in stored ledger rows and records, and a call by an old name runs as the new tool (`proxy.LEGACY_TOOL_NAMES`, AGENTS.md "The surface").
 
 **Two image models** (2026-09-23), one loaded at a time:
 
@@ -276,7 +287,7 @@ All of these are in `bench/imagegen/samples/`.
 
 ## API and tool
 
-### The model tool: `generate_image`
+### The model tool: `yama_generate_image`
 
 - **Offered** only when `YAMADORI_IMAGEGEN_URL` is set (`proxy.image_tools()`),
   and then on every tier, `minimal` included: a capability, not a gate
@@ -284,8 +295,8 @@ All of these are in `bench/imagegen/samples/`.
   - It is offered **even when the code-tool gate withholds the code tools**:
     "draw me a fox" carries no code domain, and that gate is about indexes.
   - Deep thinking gets it too (`proxy.deep_thinking_tools`, operator
-    2026-09-23), with `describe_image` beside it so it can look at what it
-    drew (see "Seeing: `describe_image`" below).
+    2026-09-23), with `yama_describe_image` beside it so it can look at what it
+    drew (see "Seeing: `yama_describe_image`" below).
   - A client's own tool with the same name wins.
 - **Description:** written as a trigger condition. It fires on draw, render,
   paint, sketch, generate, make an image, picture, photo, illustration,
@@ -294,12 +305,15 @@ All of these are in `bench/imagegen/samples/`.
 - **A successful result:**
 
 ```json
-{"tool": "generate_image", "ok": true,
+{"tool": "yama_generate_image", "ok": true,
  "markdown": "![a red fox in snow](https://ai.thejustinwalsh.me/media/<sha>.png?exp=...&sig=...)",
  "url": "https://ai.thejustinwalsh.me/media/<sha>.png?exp=...&sig=...",
  "seed": 42, "size": "1024x1024", "steps": 20, "seconds": 107.6,
  "instruction": "Put the markdown line above in your answer exactly as given, on its own line. ..."}
 ```
+
+  That is the result deep thinking reads. On main the proxy has already
+  shown the picture, and the result says so instead (next bullets).
 
 - **Failures** use the tool envelope (`ok:false`, `error`, `reason`,
   `retryable` as a fact, `remedies` with an owner). The codes are:
@@ -319,6 +333,52 @@ All of these are in `bench/imagegen/samples/`.
   busy.
 - **Streaming:** on the streamed path the tool runs in a thread, and an empty
   delta goes out every 5 s so a two-minute generation is never silence.
+- **The picture reaches the chat the moment it exists** (operator,
+  2026-09-25: "when you ask for an image [Claude/ChatGPT] emit the image to
+  the harness when they make it"). Before, the tool ran as a hidden hop: its
+  markdown went back to the model, the model thought again, and the picture
+  reached the user only inside the final answer. Now, on main
+  (`proxy._run_turn`, "IMAGES REACH THE CHAT"):
+  - **Streamed:** the markdown line (and a blank line) goes out as CONTENT
+    as soon as the tool returns, before the model's next generation is even
+    requested (no session line precedes it: #41, the id rides in tool-call
+    ids). CHANNEL ORDER
+    holds: from then on the model's reasoning goes out as empty deltas (one
+    per `REASONING_BEAT_S`, 1 s), never as reasoning text, and its closing
+    words follow as content.
+  - **Blocking:** the line opens the answer: the same content the stream
+    gives.
+  - **What the model reads:** main is offered `images.MAIN_TOOL`, whose
+    description says the picture is shown to the user the moment it is
+    made, on its own line above the reply. The successful result is
+    rewritten by `images.shown_on_main`: `"shown_to_user": true` and the
+    instruction "This picture is already shown to the user, on its own line
+    above your reply, as the markdown line above. Write your reply around
+    it: say what you drew, or refer to it as the image above." (plus how to
+    pass the url to `yama_describe_image` when main has it). The situation,
+    stated plainly; no prohibition (AGENTS.md "Prompting this model"). Deep
+    thinking keeps `images.TOOL` and its original instruction: its markdown
+    crosses back in the hand-off.
+  - **A copy the model writes anyway** -- the image with that url (any alt
+    text), or the bare url alone on a line, with the blank line that set it
+    apart -- is removed from the CLIENT's copy (`proxy._ImageDedup`; streamed,
+    text that might still become one is held back until it cannot, across
+    chunk boundaries). A url inside a sentence and any other image stay.
+  - **The cache:** the line is content the slot did not generate. The ledger
+    keys the turn by the client's copy (image lines, the de-duplicated
+    words) and renders the slot's own text, the model's copy included
+    (#10), and the hidden hop is replayed
+    as before, so the next request extends the slot.
+  - **A failed draw** shows nothing; the model reads the error envelope as
+    before. A turn that showed an image and wrote no words after it has
+    answered (no "no answer" notice).
+  - **`x_yamadori.images[]`** adds `emitted` {`ms` since the request
+    started, `after_hop`, `before_hop`, `at`: `stream` | `answer_start`,
+    `order`} and `duplicates_stripped`. Still no prompt and no URL.
+  - Tests: `mcp/test_image_emit.py` (69 checks: streamed and blocking,
+    channel order, the timing, dedup, the ledger through the served
+    template, session-line order, draw-then-look-then-redraw, the describe
+    line, a failed draw) and `mcp/test_stream.py`. **Not yet run live.**
 - **`x_yamadori.images`** gets one entry per call: `ok`, a 16-character id
   prefix, size, seed, steps, `model` (the public name, e.g.
   `yamadori-image-turbo`), `model_source` (`account` or `default`), seconds,
@@ -416,7 +476,7 @@ renders `![](url)` sends no Authorization header.
   steps, seconds and licence, the checked model, the default marker, and the
   way back to the default.
 - **`mcp/test_tools.py`** is extended: the tool count is now 13,
-  `generate_image` is in the never-empty table and has a gated-and-says-why
+  `yama_generate_image` is in the never-empty table and has a gated-and-says-why
   test, and `x_yamadori` carries `images`.
 - **`python scripts/run_tests.py`:** all suites green, ruff clean.
 
@@ -707,10 +767,11 @@ In `Restart-Service`, add this immediately before the `Start-Process` line
    - Use the **desktop app**, pointed at the Yamadori provider.
    - Send: "generate an image of a lighthouse at dusk".
    - Expected:
-     - The model calls `generate_image`, and the stream sends keep-alive
+     - The model calls `yama_generate_image`, and the stream sends keep-alive
        deltas for about 2 minutes.
-     - The answer contains the `![...](https://ai.thejustinwalsh.me/media/...)`
-       line, and the desktop app renders it inline.
+     - The `![...](https://ai.thejustinwalsh.me/media/...)` line arrives as
+       content the moment the image exists (before the model's closing
+       words), once, and the desktop app renders it inline.
      - `x_yamadori.images` records the call.
    - In the TUI the same answer shows as `[image: …] url`, which is Hermes's
      renderer and not a failure. Gateway platforms also need
@@ -733,7 +794,7 @@ C:\Users\jwals\sdcpp-pr2043\build\bin\sd-server.exe --listen-ip 127.0.0.1 --list
 With it running, set `YAMADORI_IMAGEGEN_URL=http://127.0.0.1:1240` for the
 proxy.
 
-## Seeing: `describe_image`
+## Seeing: `yama_describe_image`
 
 **UNTESTED LIVE.** Every claim in this section is from code and fake-server
 tests (`mcp/test_vision.py`). `bonsai-vision` has never been loaded: the
@@ -748,27 +809,27 @@ the prism build), so the turn failed. `mcp/vision.py` fixes both.
 
 ### The model tool
 
-- **Name:** `describe_image`. It is snake_case, verb first and spelled out,
+- **Name:** `yama_describe_image`. It is snake_case, verb first and spelled out,
   per AGENTS.md. It is not `_opt`, because a failure is an envelope, not an
   absent answer.
 - **Arguments:** `{image, question}`. `image` is either:
   - an attached image's id, `image-<10 hex>`, which the placeholder names;
-  - or the `url` that `generate_image` returned. The markdown line and the
+  - or the `url` that `yama_generate_image` returned. The markdown line and the
     bare sha also work.
 - **Description:** written as a trigger condition. It leads with the question
   it answers ("what is IN an image"). It contrasts itself with
-  `generate_image`: that tool turns words into a picture, and this one turns
+  `yama_generate_image`: that tool turns words into a picture, and this one turns
   a picture into words. It lists the phrasings that should fire it: "what is
   in this image", "describe this screenshot", "read the text in this
   picture", "check the image you just drew".
-- **Offered** wherever `generate_image` is: on every tier where
+- **Offered** wherever `yama_generate_image` is: on every tier where
   `YAMADORI_IMAGEGEN_URL` is set, and to deep thinking.
   - It is also offered on every tier to a request that carries a readable
     attached image, even with no image server.
   - `YAMADORI_VISION=0` withholds it everywhere.
   - A client's own tool with the same name wins.
 - **Deep thinking** (`shomen.SYSTEM`) is told to draw a mockup, look at it
-  with `describe_image`, and draw it again if it is off.
+  with `yama_describe_image`, and draw it again if it is off.
 - **The call:** one generation through `mcp/model.py` (`model.chat`,
   `model=bonsai-vision`), shaped by `tiers.apply` with vendor sampling at
   effort `low`. The image goes as an OpenAI `image_url` part holding a
@@ -784,7 +845,20 @@ the prism build), so the turn failed. `mcp/vision.py` fixes both.
     of that family.
 - **Lane:** it takes `admission.image_lane`, the one A4000 lane, so drawing
   and looking never overlap. On the streamed path it runs in a thread with
-  keep-alive deltas, as `generate_image` does.
+  keep-alive deltas, as `yama_generate_image` does.
+- **One reasoning line** (operator, 2026-09-25): on the streamed path, when
+  a look the proxy ran on main returns, one line goes out on the reasoning
+  channel -- `` `looked at image-3f9a1c2b7d: <the description's first 100
+  characters>…` `` (a generated image is named `generated image <sha 10>`;
+  `proxy._describe_line`). It is screened like any tool text shown to the
+  user: the template's markers, HTML and comments, markdown links and
+  images, bare links and backticks are taken out and invisible characters
+  spelled out (`skill_screen.visible`); a credential, AI-directed text or
+  exfiltration withholds the excerpt ("the description is withheld from
+  this line: <rule>"). A failed look gives no line (the model reads the
+  error). Once content has started -- after an image was shown -- CHANNEL
+  ORDER makes it a heartbeat. Hermes strips reasoning from its history, so
+  it costs no context there; the blocking path does not deliver reasoning.
 - **Timeout:** 900 s (`YAMADORI_VISION_TIMEOUT`), which covers a cold load.
   It is not measured.
 
@@ -801,7 +875,7 @@ never opens it. Only three sources are read:
    - a signed `/media` link that verifies (`images.verify`, the same check
      as the `/media` route);
    - a verified link that appeared anywhere in the conversation's messages;
-   - or an image that `generate_image` made in this request.
+   - or an image that `yama_generate_image` made in this request.
 3. **Nothing else.** The rest is refused before anything touches a file or
    the network:
    - a bare sha from another conversation;
@@ -830,7 +904,7 @@ This is the simplest correct design: the conversation is the store.
    image:
 
    > [image-3f9a1c2b7d: an attached image (PNG, 245 KB). You cannot see it
-   > directly. To look at it, call describe_image with image "image-3f9a1c2b7d"
+   > directly. To look at it, call yama_describe_image with image "image-3f9a1c2b7d"
    > and a question about it.]
 
 3. **The id is the first 10 hex characters of the image's sha256.** Every
@@ -873,8 +947,8 @@ available (`available.attached_ids`, `available.generated_ids`).
 | `NOT_AN_IMAGE` | attached bytes are not PNG/JPEG/GIF/BMP/WebP, or not base64 | no |
 | `IMAGE_TOO_LARGE` | over 10 MB | no |
 | `VISION_BUSY` | the A4000 image lane is held (drawing or looking) | yes |
-| `A4000_BUSY` | the coordinator must unload a model another request is using, or another load holds the card (mcp/gpu_room.py; `generate_image` too) | yes |
-| `A4000_NO_ROOM` | vision cannot fit with 1,331 MiB free even with every unloadable A4000 model gone; nothing was unloaded (`generate_image` too) | no |
+| `A4000_BUSY` | the coordinator must unload a model another request is using, or another load holds the card (mcp/gpu_room.py; `yama_generate_image` too) | yes |
+| `A4000_NO_ROOM` | vision cannot fit with 1,331 MiB free even with every unloadable A4000 model gone; nothing was unloaded (`yama_generate_image` too) | no |
 | `VISION_LOADING` | HTTP 503 "Loading model" | yes |
 | `VISION_UNAVAILABLE` | llama-swap 502/503/504: failed load, crash or eviction | no |
 | `VISION_NO_PROJECTOR` | "image input is not supported": launched without `--mmproj` | no |
@@ -976,8 +1050,8 @@ request that would load the model:
 4. If it cannot fit even with everything unloadable gone, nothing is
    unloaded and the call fails with `A4000_NO_ROOM` (not retryable: an
    outsider or Laya holds the card; the operator remedy says so) or
-   `A4000_BUSY` (retryable). Both appear in `generate_image` and
-   `describe_image` envelopes with `need_mib`, `free_mib` and `headroom_mib`.
+   `A4000_BUSY` (retryable). Both appear in `yama_generate_image` and
+   `yama_describe_image` envelopes with `need_mib`, `free_mib` and `headroom_mib`.
 
 What that does to the two sequences above, by the table's numbers:
 
@@ -1010,7 +1084,7 @@ This is one request. It makes the model draw, then look at what it drew.
 curl -s --max-time 1800 http://127.0.0.1:1234/v1/chat/completions \
   -H "Authorization: Bearer $YAMADORI_TEST_KEY" -H "Content-Type: application/json" \
   -H "X-Yamadori-Session: vision-live-check-1" \
-  -d '{"model":"yamadori","reasoning_effort":"low","messages":[{"role":"user","content":"Draw a red fox sitting in snow with generate_image. Then look at the picture you made with describe_image and tell me in two sentences what it shows and whether it matches what you asked for. Include the image line."}]}' \
+  -d '{"model":"yamadori","reasoning_effort":"low","messages":[{"role":"user","content":"Draw a red fox sitting in snow with yama_generate_image. Then look at the picture you made with yama_describe_image and tell me in two sentences what it shows and whether it matches what you asked for. Include the image line."}]}' \
   > vision-live.json
 python -c "import json;d=json.load(open('vision-live.json'));x=d['x_yamadori'];print(json.dumps({k:x[k] for k in ('images','vision','attachments','tools','tool_turns')},indent=1));print(d['choices'][0]['message']['content'][:600])"
 ```
@@ -1028,7 +1102,7 @@ python -c "import json;d=json.load(open('vision-live.json'));x=d['x_yamadori'];p
   arithmetic is wrong.
 - `vision[0].completion_tokens` and `seconds` are the first measured cost of
   a look. `seconds` includes the cold load.
-- `tools` lists `generate_image` then `describe_image`, both with
+- `tools` lists `yama_generate_image` then `yama_describe_image`, both with
   `error: false`. `attachments` is `[]`.
 - The answer contains the `![...](.../media/<sha>.png?...)` line and a
   description consistent with a fox.
@@ -1043,9 +1117,9 @@ above, and its A4000 peak is the number the VRAM concern needs.
 
 **Measured 2026-09-24 (n=1, `mcp/test_live_stack.py --only images`, part of
 the live gate).** This is not the draw-then-look request above. That test
-draws once (`generate_image`, turbo, 4 steps, 25.2 s, `ok`), then sends a
+draws once (`yama_generate_image`, turbo, 4 steps, 25.2 s, `ok`), then sends a
 separate request that attaches a 256x256 two-colour PNG and asks
-`describe_image` about it: `ok`, `source: attached`, `finish: stop`, 5.93 s,
+`yama_describe_image` about it: `ok`, `source: attached`, `finish: stop`, 5.93 s,
 168 prompt tokens, 125 completion tokens, and the answer `left=red,
 right=blue` was correct. nvidia-smi sampled the A4000 every second through
 both: baseline 12,457 MiB at the start (what was resident was not recorded),
@@ -1174,7 +1248,7 @@ a transparent background kept byte for byte).
   generation). Only idle retrieval was present.
 - **Whether a second CUDA1 consumer arriving mid-generation fails cleanly.**
   Incident 2 says the card can fill.
-- **Anything about `describe_image` on real hardware.** That covers load
+- **Anything about `yama_describe_image` on real hardware.** That covers load
   time, seconds per look, image token cost, answer quality, and the A4000
-  footprint of `bonsai-vision`. See "Seeing: `describe_image`", the live
+  footprint of `bonsai-vision`. See "Seeing: `yama_describe_image`", the live
   check and the VRAM concern.

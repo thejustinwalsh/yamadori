@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
 import type { ReactNode } from 'react';
 import { useShared } from '../api/data';
-import { kvSplit } from '../api/kv';
+import { kvNames, kvSplit } from '../api/kv';
+import { DEEP_PATH, MCP_PATH } from '../api/host';
 import type { Endpoint, Listener, Tiers, Vitals } from '../api/types';
 import { useNow } from '../api/usePoll';
 import { Tokonoma } from '../bonsai/scene/Tokonoma';
@@ -18,6 +19,7 @@ import { TOKENS_PATH } from '../api/tokens';
 import { SavingsPanel, TokensPanel, useTokens } from '../ui/TokenPanels';
 import { SERIES_PATH } from '../api/powerSeries';
 import { KogoseiLive } from '../ui/KogoseiPanel';
+import { DeepPanel, McpPanel, ServingPanel } from '../ui/HostPanels';
 import { PollState, StateView } from '../ui/StateView';
 import { SectionedTable, Table } from '../ui/Table';
 import { text } from '../ui/text';
@@ -28,14 +30,14 @@ const areas = stylex.create({
       // Top: the tree and its readouts. Then the money row (what the
       // GPUs drew, what they produced, what that would have cost), then the
       // machine (processes, the ladder, services + warnings).
-      default: '"tree" "side" "stat" "money" "tier" "proc"',
+      default: '"tree" "side" "stat" "serve" "money" "tier" "mcp" "deep" "proc"',
       [MQ.tablet]:
-        '"tree tree tree tree tree tree" "side side side stat stat stat" "money money money money money money" "proc proc proc proc proc proc" "tier tier tier tier tier tier"',
+        '"tree tree tree tree tree tree" "side side side stat stat stat" "serve serve serve mcp mcp mcp" "money money money money money money" "deep deep deep deep deep deep" "proc proc proc proc proc proc" "tier tier tier tier tier tier"',
       // Measured at 1600 px with live data: stat 914 / money 1,028 (tokens
       // over savings), proc 372 / tier 276. Tokens and savings stack
       // vertically; side by side they left two tall, mostly empty columns.
       [MQ.desktop]:
-        '"tree tree tree tree tree tree tree tree side side side side" "stat stat stat money money money money money money money money money" "proc proc proc proc proc proc proc proc tier tier tier tier"',
+        '"tree tree tree tree tree tree tree tree side side side side" "stat stat stat money money money money money money money money money" "serve serve serve serve mcp mcp mcp mcp deep deep deep deep" "proc proc proc proc proc proc proc proc tier tier tier tier"',
     },
   },
 });
@@ -116,6 +118,23 @@ export function Cockpit() {
           <SavingsPanel {...tok} fill />
         </Guard>
       </Cell>
+      {/* What serves the card (max mode), the MCP servers the proxy hosts,
+          and deep thinking's triggers: each its own source and boundary. */}
+      <Cell area="serve">
+        <Guard what="SERVING · MAX MODE" source={`${V} · serving`} fill>
+          <ServingPanel v={v} tiers={tiers.data} stale={vitals.stale} failure={vitals.failure} fill />
+        </Guard>
+      </Cell>
+      <Cell area="mcp">
+        <Guard what="MCP · HOSTED SERVERS" source={MCP_PATH} fill>
+          <McpPanel fill />
+        </Guard>
+      </Cell>
+      <Cell area="deep">
+        <Guard what="DEEP THINKING · TRIGGERS" source={DEEP_PATH} fill>
+          <DeepPanel fill />
+        </Guard>
+      </Cell>
       <Cell area="proc">
         <Guard what="PROCESSES" source={V} fill>
           <ProcessesPanel v={v} stale={vitals.stale} failure={vitals.failure} fill />
@@ -135,28 +154,33 @@ type P = { v: Vitals | null; stale?: boolean; failure: ReturnType<typeof useShar
 export function KvPanel({ v, stale, failure, fill }: P) {
   const c = v?.context;
   const kv = kvSplit(c);
+  const nm = kv ? kvNames(kv) : null;
   const pct = (x: number) => `${((100 * x) / (kv?.pool || 1)).toFixed(1)}%`;
   return (
-    <Panel kanji="幹" title="MIKI · KV POOL" tag={kv ? `${kv.helpers + 1} CONTEXTS` : 'TRUNK SPLIT'} tagTone="cyan" stale={stale} edge="cyan" fill={fill}>
+    <Panel kanji="幹" title="MIKI · KV POOL" tag={nm ? nm.tag : 'TRUNK SPLIT'} tagTone="cyan" stale={stale} edge="cyan" fill={fill}>
       {!v ? (
         <PollState path={V} failure={failure} />
-      ) : !kv ? (
+      ) : !kv || !nm ? (
         <StateView kind="error" title="no context budget" detail={c && 'error' in c ? c.error : undefined} />
       ) : (
         <>
           <div {...stylex.props(layout.grid4)}>
             <Stat label="POOL" value={n(kv.pool)} sub={`${kv.gib} GiB KV`} />
-            <Stat label="MAIN" value={n(kv.main)} sub={pct(kv.main)} tone="moss" />
+            <Stat label={nm.main} value={n(kv.main)} sub={pct(kv.main)} tone="moss" />
             <Stat
-              label={`DEEP THINKING ×${kv.helpers}`}
+              label={nm.helper}
               value={n(kv.helper * kv.helpers)}
-              sub={`${n(kv.helper)} · ${pct(kv.helper)} each`}
+              sub={kv.layout === 'cap' ? `${n(kv.helper)} · own window` : `${n(kv.helper)} · ${pct(kv.helper)} each`}
               tone="cyan"
             />
-            <Stat label="RESERVE" value={n(kv.reserve)} sub={pct(kv.reserve)} />
+            <Stat label={nm.reserve} value={n(kv.reserve)} sub={pct(kv.reserve)} />
           </div>
           <SplitBar
-            label={`main ${n(kv.main)}, ${kv.helpers} deep thinking contexts of ${n(kv.helper)}, reserve ${n(kv.reserve)}, of ${n(kv.pool)} tokens`}
+            label={
+              kv.layout === 'cap'
+                ? `main ${n(kv.main)} (the VRAM line), child ${n(kv.helper)}, second conversation ${n(kv.reserve)}, of ${n(kv.pool)} tokens`
+                : `main ${n(kv.main)}, ${kv.helpers} deep thinking contexts of ${n(kv.helper)}, reserve ${n(kv.reserve)}, of ${n(kv.pool)} tokens`
+            }
             parts={[
               { value: kv.main, tone: 'moss' as Tone | 'hatch' },
               ...Array.from({ length: kv.helpers }, () => ({ value: kv.helper, tone: 'cyan' as Tone | 'hatch' })),
@@ -164,10 +188,14 @@ export function KvPanel({ v, stale, failure, fill }: P) {
             ]}
           />
           <div {...stylex.props(layout.rowWrap, text.labelXs)} style={{ gap: 14 }}>
-            <span><i {...stylex.props(s.keyDot, s.kMain)} />MAIN</span>
-            <span><i {...stylex.props(s.keyDot, s.kThink)} />DEEP THINKING ×{kv.helpers}{kv.helpersReported ? '' : ' (DERIVED)'}</span>
-            {kv.reserve > 0 && <span><i {...stylex.props(s.keyDot, s.kRes)} />RESERVE</span>}
+            <span title={nm.mainWhy}><i {...stylex.props(s.keyDot, s.kMain)} />{nm.main}</span>
+            <span title={nm.helperWhy}><i {...stylex.props(s.keyDot, s.kThink)} />{nm.helper}{kv.helpersReported ? '' : ' (DERIVED)'}</span>
+            {kv.reserve > 0 && <span title={nm.reserveWhy}><i {...stylex.props(s.keyDot, s.kRes)} />{nm.reserve}</span>}
           </div>
+          <p {...stylex.props(text.labelXs, s.why)}>
+            {nm.main.toLowerCase()}: {nm.mainWhy} · {nm.helper.toLowerCase()}: {nm.helperWhy} · {nm.reserve.toLowerCase()}: {nm.reserveWhy}
+            {kv.vramLine != null ? ` · served VRAM line ${n(kv.vramLine)} cells` : ''}
+          </p>
           {kv.pool === 131072 && <Chip tone="rose">POOL EQUALS THE FALLBACK VALUE · UNCONFIRMED</Chip>}
         </>
       )}
@@ -193,7 +221,9 @@ function SiliconPanel({ v, stale, failure, fill }: P) {
               </div>
               <p {...stylex.props(text.headlineSm, text.num, s.big)}>
                 {n(x.free_mib)}
-                <span {...stylex.props(text.labelXs, s.unit)}>MiB FREE</span>
+                <span {...stylex.props(text.labelXs, s.unit)}>
+                  MiB FREE{x.floor_mib != null ? ` · FLOOR ${n(x.floor_mib)}` : ''}
+                </span>
               </p>
               <Meter value={x.pct / 100} tone={x.tight ? 'crimson' : 'moss'} label={`${n(x.used_mib)} of ${n(x.total_mib)} MiB used`} />
               <Label>USED {gib(x.used_mib)} / {gib(x.total_mib)} GiB · {x.pct}%</Label>
@@ -289,11 +319,28 @@ function ProcessesPanel({ v, stale, failure, fill }: P) {
             { key: 'ppid', head: 'parent', num: true, cell: (p) => p.ppid ?? '—' },
             { key: 'what', head: 'what', cell: (p) => p.what },
             { key: 'port', head: 'port', num: true, cell: (p) => p.port || '—' },
+            { key: 'started', head: 'started', cell: (p) => startedText(p.started) },
           ]}
         />
       )}
     </Panel>
   );
+}
+
+/**
+ * A process's start time. mcp/vitals.py sends local ISO seconds; a server
+ * from before the 2026-09-29 fix sent PowerShell 5.1's "/Date(<ms>)/" cut to
+ * 19 characters, which is read here rather than printed raw.
+ */
+export function startedText(x: string | null | undefined): string {
+  if (!x) return '—';
+  const m = /^\/Date\((\d+)/.exec(x);
+  if (m) {
+    const d = new Date(Number(m[1]));
+    const p2 = (k: number) => String(k).padStart(2, '0');
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  }
+  return x.replace('T', ' ');
 }
 
 const up = (x: unknown) => (typeof x === 'string' && x ? x.toUpperCase() : '—');
@@ -328,6 +375,9 @@ export function TiersPanel({ t, failure, fill }: { t: Tiers | null; failure: Ret
                 <div>
                   <div {...stylex.props(layout.rowWrap)}>
                     {x.thinks === false && <Chip tone="muted">THINKING OFF</Chip>}
+                    {t.max_mode?.enabled && x.model && x.model !== t.max_mode.main ? (
+                      <Chip tone="rose" title="mcp/max_mode.py: this tier is served by the max model">SERVED BY {x.model.toUpperCase()}</Chip>
+                    ) : null}
                     {flags.map((f) => (
                       <Chip key={String(f)} tone={f === 'deep thinking' ? 'cyan' : 'moss'}>{String(f).toUpperCase()}</Chip>
                     ))}

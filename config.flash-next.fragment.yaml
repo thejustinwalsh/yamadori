@@ -1,0 +1,64 @@
+# The llama-swap entry for max mode's model, PREPARED, NOT ENABLED (docs/FLASH-NEXT.md section 4).
+# bench/deploy_flash_next.py inserts it into config.yaml after the GPU gate (bench/flashnext_gate.py) passes,
+# filling the {{...}} placeholders from the gate's measured fit. Nothing reads this file at run time.
+#
+# macros:  (added under config.yaml `macros:`)
+  server_upstream_moe: "{{ENGINE_BIN}}"
+
+# models:  (added after the `bonsai` block)
+  "flash-next":
+    # Qwen3.8-Flash-Next (arch qwen4exp, 125B MoE, 6B active), GSQ-RCO IQ2_XS (models/manifest.yaml flash-next-*),
+    # the max tier's model (mcp/max_mode.py). It shares the 5060 Ti with `bonsai`: the two SWAP each other in the
+    # `primary` group (one big model at a time, operator 2026-09-27). Clients never see this name.
+    name: "Qwen3.8-Flash-Next {{QUANT}} -- max mode (5060 Ti + RAM experts)"
+    filters:
+      params:
+        # the tier sends xhigh at max (tiers.TIERS); the card's default is xhigh too
+        reasoning_effort?: "xhigh"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-de660e90-0e9c-d465-b389-6df63021b920"
+      # Strata 66099605: kernels loaded at start, so a kernel first used mid-prompt cannot find the VRAM gone;
+      # kept only if the gate's `eager` arm showed it affordable ({{EAGER}})
+      - "CUDA_MODULE_LOADING={{EAGER}}"
+      # 0005 (Strata's pinned arena): the CPU-placed experts in pinned memory under mmap, if the gate passed it
+      - "LLAMA_PIN_EXPERTS={{PIN_EXPERTS}}"
+      # 0004 (Strata's expert cache policy), if the gate chose the cache
+      - "LLAMA_MOE_CACHE_PROFILE={{PROFILE}}"
+      - "LLAMA_MOE_CACHE_POLICY={{CACHE_POLICY}}"
+    cmd: |
+      ${server_upstream_moe}
+      --port ${PORT}
+      -m ${models}/flash-next/{{QUANT}}/Qwen3.8-Flash-Next-GSQ-RCO-{{QUANT}}-00001-of-00002.gguf
+      # vision is the main model's (operator, 2026-09-27): its own projector ({{MMPROJ_WHERE}})
+      --mmproj ${models}/flash-next/mmproj-Qwen3.8-Flash-Next-BF16.gguf {{MMPROJ_OFFLOAD}}
+      -dev CUDA0 -ngl 999
+      # CPU threads for the RAM experts (the gate's thread arms; empty = llama.cpp's default)
+      {{THREADS}}
+      # MTP: the model's own draft layer (the gate's mtp arms; empty = off)
+      {{MTP}}
+      # the routed experts of the first N layers stay in RAM; the rest, attention, DeltaNet, the router, the
+      # shared experts and the head are on the card (the gate's fit, docs/FLASH-NEXT.md section 4)
+      --n-cpu-moe {{N_CPU_MOE}}
+      # the GPU expert cache (0003/0004): VRAM slots per RAM expert layer (the gate's fit; 0 = off)
+      --moe-expert-cache {{CACHE_SLOTS}}
+      # prefill: host-resident experts one split ahead (0002, Strata's streaming ring); 0 = off
+      --prefetch-experts-slots {{PREFETCH_SLOTS}}
+      # the n-gram table (shard 2, 28.8 GB) stays on disk, read by rows (ISTA's card)
+      -lm mmap --lazy-mode on
+      # the model's native window, q8_0 K/V (Strata's kv-q4 bench: 8-bit ~fp16, q4 +8-12% perplexity); the
+      # slot count and KV layout are bonsai's at deploy time ({{NP}} slots; the gate's `nounified` arm decides
+      # the KV streams: {{KV_UNIFIED}})
+      -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -fa on
+      -np {{NP}} {{KV_UNIFIED}}
+      -b {{UB}} -ub {{UB}}
+      --jinja
+      # the GGUF's own template (= Strata's: Unsloth's fix of Qwen's); never Qwen's raw template file
+      --reasoning-format deepseek
+      --no-context-shift
+      --no-cache-idle-slots
+      # the server's runaway breaker for direct callers; the proxy sends each request's budget (at max: the
+      # card's -- no Bonsai cap, tiers.budget) and bonsai's message
+      --reasoning-budget 262144
+      --reasoning-budget-message "Thinking budget reached. I will stop deliberating and write the final answer now."
+      ${sampling}
+    ttl: 0

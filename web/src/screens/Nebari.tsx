@@ -1,8 +1,16 @@
-// 根張り NEBARI — the root flare. What the model can draw on: the recipe
-// corpus behind hints (now skills, mcp/skills.py), and the source trees indexed for retrieval. Every
-// root drawn here is a counted row in a real payload.
+// 根張り NEBARI — the root flare. What the model can draw on: the skills
+// (the one knowledge system since 2026-09-26: mcp/skills.py, served through
+// skill selection), the held package indexes the code tools and deep
+// thinking read, and how well retrieval found things when it was measured.
+// Every root drawn here is a counted row in a real payload
+// (/dash/api/nebari, mcp/dash_nebari.py).
+//
+// Until 2026-09-29 the roots were the recipe corpus's domain tags
+// (/dash/api/stats). The corpus stopped being served when its rows were
+// migrated into skills; bench/recipes stays only as provenance.
 import * as stylex from '@stylexjs/stylex';
 import { PATHS, useShared } from '../api/data';
+import { errorOf, flareRoots, itemsOf, labelOf, NEBARI_PATH, packagesOf, skillsOf, type HeldPackage, type Nebari, type Root } from '../api/nebari';
 import { KNOWN_VOID } from '../api/provenance';
 import type { Results, RetrievalSection } from '../api/types';
 import { usePoll } from '../api/usePoll';
@@ -20,57 +28,36 @@ import { PollState, StateView } from '../ui/StateView';
 import { Table } from '../ui/Table';
 import { text } from '../ui/text';
 
-type Stats = {
-  total: number;
-  by_state: Record<string, number>;
-  by_domain: Record<string, number>;
-  by_domain_tag: Record<string, number>;
-  untagged_domains: number;
-  over_40_words: number;
-  with_trigger: number;
-  without_trigger: number;
-  files: string[];
-};
-
 const s = stylex.create({
   svg: { width: '100%', height: 'auto', display: 'block', backgroundColor: colors.surfaceContainerLowest },
   note: { margin: 0, color: colors.onSurfaceVariant },
-  warn: { margin: 0, color: colors.secondary },
-  tier: {
-    display: 'grid',
-    gridTemplateColumns: '72px minmax(0,1fr)',
-    gap: space.spaceSm,
-    padding: space.spaceSm,
-    backgroundColor: colors.surfaceContainerLowest,
-    borderLeftWidth: 2,
-    borderLeftStyle: 'dashed',
-    borderLeftColor: colors.outlineVariant,
-  },
   bar: { display: 'grid', gridTemplateColumns: 'minmax(90px, 140px) minmax(0,1fr) 44px', gap: space.spaceSm, alignItems: 'center' },
 });
 
 /**
- * Root flare: one root per corpus domain tag, length by log(count), and one
- * heavy root per retrieval source, width by rows scored. Deterministic
- * layout: angle from the sorted index, never random.
+ * Root flare: one heavy root per framework the served skills cover, one thin
+ * root per language, length by log(count). Deterministic layout: angle from
+ * the sorted index, never random.
  */
-function RootFlare({ tags, sources }: { tags: [string, number][]; sources: { source: string; n: number; emb: number }[] }) {
+function RootFlare({ roots }: { roots: Root[] }) {
   const W = 980;
   const H = 420;
   const cx = W / 2;
   const cy = 50;
-  const maxTag = Math.max(1, ...tags.map(([, c]) => c));
-  const maxSrc = Math.max(1, ...sources.map((x) => x.n));
-  // Heavy source roots straight down the middle; tag roots fan out either
-  // side, largest nearest the trunk, like a real nebari.
-  const tagRoots = tags.map(([t, c]) => ({ kind: 'tag' as const, source: t, n: c, emb: 0 }));
-  const left = tagRoots.filter((_, i) => i % 2 === 0).reverse();
-  const right = tagRoots.filter((_, i) => i % 2 === 1);
-  const all = [...right.reverse(), ...sources.map((x) => ({ kind: 'src' as const, ...x })), ...left.reverse()];
+  const max = Math.max(1, ...roots.map((r) => r.n));
+  // Heavy roots down the middle, thin roots fanned out either side, largest
+  // nearest the trunk, like a real nebari.
+  const heavy = roots.filter((r) => r.heavy);
+  const thin = roots.filter((r) => !r.heavy);
+  const left = thin.filter((_, i) => i % 2 === 0).reverse();
+  const right = thin.filter((_, i) => i % 2 === 1);
+  const all = [...right.reverse(), ...heavy, ...left.reverse()];
   const span = Math.PI * 0.92;
   const start = (Math.PI - span) / 2;
+  const weight = (x: Root) => (x.heavy ? 2 : 1);
+  const total = all.reduce((acc, x) => acc + weight(x), 0);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} {...stylex.props(s.svg)} role="img" aria-label={`root flare: ${sources.length} retrieval sources, ${tags.length} corpus domain tags`}>
+    <svg viewBox={`0 0 ${W} ${H}`} {...stylex.props(s.svg)} role="img" aria-label={`root flare: served skills across ${heavy.length} frameworks and ${thin.length} languages`}>
       <defs>
         <radialGradient id="flare" cx="50%" cy="15%" r="70%">
           <stop offset="0%" stopColor={token.primaryContainer} stopOpacity="0.16" />
@@ -87,42 +74,38 @@ function RootFlare({ tags, sources }: { tags: [string, number][]; sources: { sou
       <rect x="0" y="0" width={W} height={H} fill="url(#flare)" />
       <line x1="0" y1={cy} x2={W} y2={cy} stroke={token.outlineVariant} strokeDasharray="2 6" />
       {all.map((r, i) => {
-        // Source roots get 2.5 slots of angle each, so their labels have room.
-        const weight = (x: typeof r) => (x.kind === 'src' ? 2.5 : 1);
-        const total = all.reduce((acc, x) => acc + weight(x), 0);
         const before = all.slice(0, i).reduce((acc, x) => acc + weight(x), 0);
         const a = start + (span * (before + weight(r) / 2)) / total;
-        const isSrc = r.kind === 'src';
-        const srcIdx = isSrc ? all.slice(0, i).filter((x) => x.kind === 'src').length : 0;
-        const len = isSrc ? 230 + 60 * (r.n / maxSrc) : 70 + 150 * (Math.log1p(r.n) / Math.log1p(maxTag));
+        const hi = all.slice(0, i).filter((x) => x.heavy).length;
+        const len = r.heavy ? 150 + 140 * (Math.log1p(r.n) / Math.log1p(max)) : 70 + 150 * (Math.log1p(r.n) / Math.log1p(max));
         const ex = cx + Math.cos(a) * len * 1.35;
         const ey = cy + Math.sin(a) * len;
         const mx = cx + Math.cos(a) * len * 0.45 + (i % 2 ? 14 : -14);
         const my = cy + Math.sin(a) * len * 0.35;
-        const width = isSrc ? 3 + 10 * (r.n / maxSrc) : 1 + 3 * (r.n / maxTag);
-        const stroke = isSrc ? token.tertiaryContainer : token.primaryContainer;
+        const width = r.heavy ? 3 + 9 * (r.n / max) : 1 + 3 * (r.n / max);
+        const stroke = r.heavy ? token.tertiaryContainer : token.primaryContainer;
         return (
-          <g key={`${r.kind}-${r.source}`}>
+          <g key={`${r.heavy ? 'h' : 't'}-${r.label}`}>
             <path
               d={`M ${cx} ${cy} Q ${mx} ${my} ${ex} ${ey}`}
               fill="none"
               stroke={stroke}
-              strokeOpacity={isSrc ? 0.9 : 0.55}
+              strokeOpacity={r.heavy ? 0.9 : 0.55}
               strokeWidth={width}
               strokeLinecap="round"
-              filter={isSrc ? 'url(#glow)' : undefined}
+              filter={r.heavy ? 'url(#glow)' : undefined}
             />
             <rect x={ex - 3} y={ey - 3} width="6" height="6" fill={stroke} />
             <text
-              x={isSrc ? ex : ex + (Math.cos(a) >= 0 ? 8 : -8)}
-              y={isSrc ? ey + 20 + (srcIdx % 2) * 15 : ey + 4}
-              textAnchor={isSrc ? 'middle' : Math.cos(a) >= 0 ? 'start' : 'end'}
+              x={r.heavy ? ex : ex + (Math.cos(a) >= 0 ? 8 : -8)}
+              y={r.heavy ? ey + 20 + (hi % 2) * 15 : ey + 4}
+              textAnchor={r.heavy ? 'middle' : Math.cos(a) >= 0 ? 'start' : 'end'}
               fontFamily="ui-monospace, monospace"
-              fontSize={isSrc ? 13 : 10}
-              fontWeight={isSrc ? 700 : 400}
-              fill={isSrc ? token.tertiaryContainer : token.onSurfaceVariant}
+              fontSize={r.heavy ? 12 : 10}
+              fontWeight={r.heavy ? 700 : 400}
+              fill={r.heavy ? token.tertiaryContainer : token.onSurfaceVariant}
             >
-              {isSrc ? `${r.source.toUpperCase()} · ${n(r.n)} · emb ${pct(r.emb, 0)}` : `${r.source} ${n(r.n)}`}
+              {r.heavy ? `${r.label.toUpperCase()} · ${n(r.n)}` : `${r.label} ${n(r.n)}`}
             </text>
           </g>
         );
@@ -142,14 +125,115 @@ function retrievalOf(res: Polled<Results>): RetrievalSection | null {
   return ret && ret.state === 'ready' ? (ret as RetrievalSection) : null;
 }
 
-function FlarePanel({ st, res }: { st: Polled<Stats>; res: Polled<Results> }) {
-  const r = retrievalOf(res);
-  const emb = r?.arms.find((a) => a === 'embedding');
-  const sources = r ? r.sources.map((x) => ({ source: x.source, n: x.n, emb: emb ? x.by_arm[emb] ?? 0 : 0 })) : [];
-  const tags = st.data?.by_domain_tag ? Object.entries(st.data.by_domain_tag).sort((a, b) => b[1] - a[1]) : [];
+function FlarePanel({ nb }: { nb: Polled<Nebari> }) {
+  const sk = skillsOf(nb.data);
+  const roots = flareRoots(sk);
+  const fw = roots.filter((r) => r.heavy).length;
   return (
-    <Panel kanji="根張り" title="NEBARI · ROOT FLARE" tag={`${sources.length} SOURCES · ${tags.length} TAGS`} edge="moss" fill>
-      {st.data || r ? <RootFlare tags={tags} sources={sources} /> : <PollState path="/dash/api/stats" failure={st.failure ?? res.failure} />}
+    <Panel kanji="根張り" title="NEBARI · ROOT FLARE" tag={sk ? `${n(sk.served)} SERVED SKILLS · ${fw} FRAMEWORKS` : '—'} edge="moss" fill>
+      {!nb.data ? (
+        <PollState path={NEBARI_PATH} failure={nb.failure} />
+      ) : !sk ? (
+        <StateView kind="error" title={`${NEBARI_PATH} · skills`} detail={errorOf(nb.data.skills) ?? undefined} />
+      ) : !roots.length ? (
+        <StateView kind="empty" title="no served skill is filed under a framework or language" />
+      ) : (
+        <RootFlare roots={roots} />
+      )}
+    </Panel>
+  );
+}
+
+function SkillsPanel({ nb }: { nb: Polled<Nebari> }) {
+  const sk = skillsOf(nb.data);
+  const domains = sk ? Object.entries(sk.served_by?.domain ?? {}) : [];
+  const top = domains[0]?.[1] ?? 1;
+  return (
+    <Panel kanji="技" title="SKILLS" tag={sk ? `${n(sk.served)} SERVED OF ${n(sk.total)}` : '—'} fill>
+      {!nb.data ? (
+        <PollState path={NEBARI_PATH} failure={nb.failure} />
+      ) : !sk ? (
+        <StateView kind="error" title={`${NEBARI_PATH} · skills`} detail={errorOf(nb.data.skills) ?? undefined} />
+      ) : (
+        <>
+          <div {...stylex.props(layout.grid2)}>
+            <Stat label="ARMED" value={n(sk.counts.armed ?? 0)} sub={`${n(sk.served)} served: enabled, with a line to serve`} tone="moss" />
+            <Stat label="QUARANTINED" value={n(sk.counts.quarantined ?? 0)} tone={(sk.counts.quarantined ?? 0) ? 'rose' : undefined} sub="held back by a check" />
+          </div>
+          <div {...stylex.props(layout.rowWrap)}>
+            {Object.entries(sk.counts ?? {})
+              .filter(([k, c]) => c > 0 && k !== 'armed' && k !== 'quarantined')
+              .map(([k, c]) => (
+                <Chip key={k} tone={k === 'failed' ? 'crimson' : 'muted'}>
+                  {k} {n(c)}
+                </Chip>
+              ))}
+            {Object.entries(sk.served_by?.phase ?? {}).map(([k, c]) => (
+              <Chip key={`p-${k}`} tone="cyan">
+                phase {labelOf(sk, 'phase', k)} {n(c)}
+              </Chip>
+            ))}
+          </div>
+          <div {...stylex.props(layout.stack)}>
+            {domains.map(([t, c]) => (
+              <div key={t} {...stylex.props(s.bar)}>
+                <Label>{t}</Label>
+                <Meter value={c / Math.max(1, top)} label={`${t} ${c} served skills`} />
+                <span {...stylex.props(text.labelXs, text.num, text.primary)}>{n(c)}</span>
+              </div>
+            ))}
+          </div>
+          <p {...stylex.props(text.labelXs, s.note)}>served skills by domain · the whole library, with its tests and provenance, is on SKILLS</p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+function PackagesPanel({ nb }: { nb: Polled<Nebari> }) {
+  const pk = packagesOf(nb.data);
+  const ix = nb.data && nb.data.indexes && !('error' in nb.data.indexes) ? nb.data.indexes : null;
+  return (
+    <Panel kanji="蔵" title="HELD PACKAGES" tag={pk ? `${pk.length} INDEXES` : '—'} tagTone="cyan" fill>
+      {!nb.data ? (
+        <PollState path={NEBARI_PATH} failure={nb.failure} />
+      ) : !pk ? (
+        <StateView kind="error" title={`${NEBARI_PATH} · packages`} detail={errorOf(nb.data.packages) ?? undefined} />
+      ) : !pk.length ? (
+        <StateView kind="empty" title="no package index held (index/packages)" />
+      ) : (
+        <>
+          <Table
+            rows={pk}
+            rowKey={(p: HeldPackage) => `${p.package}@${p.version}`}
+            columns={[
+              {
+                key: 'p',
+                head: 'package',
+                cell: (p: HeldPackage) => (
+                  <span {...stylex.props(layout.rowWrap)}>
+                    {p.package}@{p.version}
+                    {p.unseen ? (
+                      <Chip tone="rose" title={p.unseen}>
+                        UNSEEN
+                      </Chip>
+                    ) : null}
+                    {p.embedded === false ? <Chip tone="muted">NOT EMBEDDED</Chip> : null}
+                  </span>
+                ),
+              },
+              { key: 'i', head: 'items', num: true, cell: (p: HeldPackage) => n(itemsOf(p)) },
+              { key: 'd', head: 'defs', num: true, cell: (p: HeldPackage) => n(p.defs) },
+              { key: 'f', head: 'files', num: true, cell: (p: HeldPackage) => n(p.files) },
+              { key: 'pub', head: 'published', cell: (p: HeldPackage) => p.published ?? '—' },
+            ]}
+          />
+          <p {...stylex.props(text.labelXs, s.note)}>
+            UNSEEN: deep thinking's known-hard area (deep.unseen: first published, or a new major, after the model's cutoff)
+            {ix ? ` · bound code index ${n(ix.code ? ix.code.chunks + ix.code.defs : null)} items · ${n(ix.repos?.indexes ?? 0)} repository indexes` : ''}
+          </p>
+        </>
+      )}
     </Panel>
   );
 }
@@ -157,7 +241,7 @@ function FlarePanel({ st, res }: { st: Polled<Stats>; res: Polled<Results> }) {
 function SourcesPanel({ res }: { res: Polled<Results> }) {
   const r = retrievalOf(res);
   return (
-    <Panel kanji="源" title="RETRIEVAL SOURCES" tag="HIT@1 BY SOURCE" tagTone="cyan" fill>
+    <Panel kanji="源" title="RETRIEVAL SOURCES" tag="HIT@1 BY SOURCE · MEASURED" tagTone="cyan" fill>
       {!res.data ? (
         <PollState path={PATHS.results} failure={res.failure} />
       ) : !r ? (
@@ -186,74 +270,42 @@ function SourcesPanel({ res }: { res: Polled<Results> }) {
   );
 }
 
-function CorpusPanel({ st }: { st: Polled<Stats> }) {
-  const d = st.data;
-  const tags = d?.by_domain_tag ? Object.entries(d.by_domain_tag).sort((a, b) => b[1] - a[1]) : [];
-  return (
-    <Panel kanji="譜" title="RECIPE CORPUS" tag={d ? `${n(d.total)} RECIPES` : '—'} fill>
-      {!d ? (
-        <PollState path="/dash/api/stats" failure={st.failure} />
-      ) : (
-        <>
-          <div {...stylex.props(layout.grid2)}>
-            <Stat label="STATE A TRIGGER" value={n(d.with_trigger)} sub={`${pct(d.with_trigger / Math.max(d.total, 1), 0)} of rows`} />
-            <Stat label="UNTAGGED DOMAINS" value={n(d.untagged_domains)} tone={d.untagged_domains ? 'rose' : 'moss'} sub="eligible everywhere" />
-            <Stat label="OVER 40 WORDS" value={n(d.over_40_words)} />
-            <Stat label="FILES" value={n(d.files?.length ?? 0)} />
-          </div>
-          <div {...stylex.props(layout.rowWrap)}>
-            {Object.entries(d.by_state ?? {}).map(([k, c]) => (
-              <Chip key={k} tone={k === 'unreviewed' ? 'rose' : 'moss'}>
-                {k} {n(c)}
-              </Chip>
-            ))}
-          </div>
-          <div {...stylex.props(layout.stack)}>
-            {tags.map(([t, c]) => (
-              <div key={t} {...stylex.props(s.bar)}>
-                <Label>{t}</Label>
-                <Meter value={c / Math.max(1, tags[0]?.[1] ?? 1)} label={`${t} ${c}`} />
-                <span {...stylex.props(text.labelXs, text.num, text.primary)}>{n(c)}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </Panel>
-  );
-}
-
 const nebariAreas = stylex.create({
   nebari: {
     gridTemplateAreas: {
-      default: '"flare" "strata" "corpus" "src"',
-      [MQ.tablet]: '"flare flare flare flare flare flare" "strata strata strata corpus corpus corpus" "src src src corpus corpus corpus"',
+      default: '"flare" "skills" "pkgs" "strata" "src"',
+      [MQ.tablet]: '"flare flare flare flare flare flare" "skills skills skills pkgs pkgs pkgs" "strata strata strata src src src"',
       [MQ.desktop]:
-        '"flare flare flare flare flare flare flare corpus corpus corpus corpus corpus" "src src src src src src src strata strata strata strata strata"',
+        '"flare flare flare flare flare flare flare skills skills skills skills skills" "pkgs pkgs pkgs pkgs pkgs pkgs pkgs skills skills skills skills skills" "src src src src src src src strata strata strata strata strata"',
     },
   },
 });
 
 export function Nebari() {
   const { vitals } = useShared();
-  const st = usePoll<Stats>('/dash/api/stats', 60000);
+  const nb = usePoll<Nebari>(NEBARI_PATH, 60000);
   const res = usePoll<Results>(PATHS.results, 60000);
   const v = vitals.data;
   return (
     <Bento areas={nebariAreas.nebari}>
       <Cell area="flare">
-        <ErrorBoundary what="NEBARI · ROOT FLARE" source="/dash/api/stats" fill>
-          <FlarePanel st={st} res={res} />
+        <ErrorBoundary what="NEBARI · ROOT FLARE" source={NEBARI_PATH} fill>
+          <FlarePanel nb={nb} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="skills">
+        <ErrorBoundary what="SKILLS" source={`${NEBARI_PATH} · skills`} fill>
+          <SkillsPanel nb={nb} />
+        </ErrorBoundary>
+      </Cell>
+      <Cell area="pkgs">
+        <ErrorBoundary what="HELD PACKAGES" source={`${NEBARI_PATH} · packages`} fill>
+          <PackagesPanel nb={nb} />
         </ErrorBoundary>
       </Cell>
       <Cell area="src">
         <ErrorBoundary what="RETRIEVAL SOURCES" source={`${PATHS.results} · sections.retrieval`} fill>
           <SourcesPanel res={res} />
-        </ErrorBoundary>
-      </Cell>
-      <Cell area="corpus">
-        <ErrorBoundary what="RECIPE CORPUS" source="/dash/api/stats" fill>
-          <CorpusPanel st={st} />
         </ErrorBoundary>
       </Cell>
       <Cell area="strata">

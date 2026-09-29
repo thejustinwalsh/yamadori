@@ -196,6 +196,16 @@ recorded in each arm's `run.json`.
 | `model.model_kwargs.temperature` | `null` (was `0.0`) | Matches what all 13 v2 submissions actually ran. The server's own sampling then applies (`--temp 1.0 --top-p 0.95 --top-k 20`, Qwen's recommendation). |
 | `model.litellm_model_registry` | cost 0 per token | a free local model |
 | `model.cost_tracking` | `ignore_errors` | mini raises on a cost of 0. **Consequence: the $3 cost limit never binds for us; only the 250-step limit does.** |
+| `environment.run_args` | `["--rm", "--network", "swe-net-<instance>-<pid>"]` | Since 2026-09-26 (SELF-IMPROVEMENT-LOG #49). The model's container joins its instance's `--internal` sandbox network (`bench/sandbox/sandbox_net.py`), not Docker's default bridge, which on this Docker Desktop reaches the Windows host's loopback services (#48). `dockerfix.LowLevelDockerEnvironment` joins the `--network` named here and otherwise `none`, never the bridge. `wsl_side.cmd_agent` brings the network and its gate up before mini and down after it; no gate means no agent run (`rc` 97, `not_run: sandbox_net` in `timings.jsonl` and in `parse_results`' row). |
+| `environment.env` | `HTTP_PROXY`/`HTTPS_PROXY` (both cases) `http://egress:3128`, `NO_PROXY` loopback | Merged into the yaml's env. The gate is the only way out: global addresses on 80/443. pip, git and curl honour it; anything that ignores it has no route. **A deviation from the leaderboard, which ran with an open network**: an instance whose fix needs another port, or a tool that ignores the proxy variables, behaves differently. The variables are visible to the model (`env`). Checked live by `dockerfix.py netcheck` (Docker, no model): 0 of 54 host address:port pairs open, 40/40 host targets refused by the gate, pip install and `git clone` over https work, from the sympy image through `env.execute`. |
+
+**Not on the sandbox network: the grading containers.** The swebench
+harness (`dockerfix.py eval`) still creates its containers on the default
+bridge. They run the model's patch and the instance's tests, so the model's
+code executes there with the host's loopback in reach (#48). Moving them
+changes the grading environment of every past run (tests that read proxy
+variables, installs in `eval.sh`), so it needs a paired re-grade first; it is
+open in SELF-IMPROVEMENT-LOG #49.
 
 **A known quirk of the leaderboard config, kept on purpose.** The config uses
 `interpreter: ["bash", "-c"]`, which is not a login shell, so the image's
