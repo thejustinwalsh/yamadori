@@ -93,7 +93,7 @@ LABELS = os.environ.get("YAMADORI_SKILL_LABELS") or (
 IDLE_MINUTES = float(os.environ.get("YAMADORI_SKILL_LEARN_IDLE_MINUTES", "15"))
 QUERY_CHARS = 600
 LEARN_BATCH = 200
-LEARN = ("skill.learn", "gpu")
+LEARN = ("skill.learn", "gpu_a4000")  # the embedder, on the A4000: jobs.GPU_SCOPES (2026-09-30)
 
 DDL = """
 CREATE TABLE IF NOT EXISTS skill_fallbacks(

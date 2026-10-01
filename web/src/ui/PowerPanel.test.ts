@@ -1,13 +1,11 @@
-// Static renders of the electricity panel and the LiveBench estimate (vitest
-// runs in node: react-dom/server markup), plus the pure helpers behind them.
-// The payloads are shaped exactly as mcp/power.py live() and
-// dash_results._livebench_electricity() return them.
+// Static renders of the electricity panel (vitest runs in node:
+// react-dom/server markup), plus the pure helpers behind it. The payloads
+// are shaped exactly as mcp/power.py live() returns them.
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { basisLines, dayLabel, dollarsText, electricityCells, isPower, periodName, weekTotal } from '../api/power';
-import type { LbRun, PowerDay, PowerLive, Vitals } from '../api/types';
-import { Electricity } from '../screens/sentei/LiveBench';
+import { basisLines, dayLabel, dollarsText, isPower, periodName, weekTotal } from '../api/power';
+import type { PowerDay, PowerLive, Vitals } from '../api/types';
 import { PowerPanel } from './PowerPanel';
 
 const day = (date: string, kwh: number | null, cents: number | null, over: Partial<PowerDay> = {}): PowerDay => ({
@@ -166,42 +164,5 @@ describe('power helpers', () => {
   });
   it('basis lines are empty without a basis', () => {
     expect(basisLines(undefined, false)).toEqual([]);
-  });
-});
-
-describe('LiveBench electricity', () => {
-  const run = {
-    arms: [
-      {
-        arm: 'bonsai',
-        electricity: { n: 21, seconds_per_question: 226.6, watts: 138.5, wh_per_question: 8.718, kwh_per_100: 0.8718, cents_per_question: [0.1607, 0.2104], dollars_per_100: [0.1607, 0.2104], cents_per_kwh: [18.435, 24.133], seconds_from: 'summary' },
-      },
-      { arm: 'no-seconds', electricity: null },
-    ],
-    electricity_basis: {
-      estimate: true, watts: 138.5, gpu_watts: 138.5, extra_watts: 0,
-      evidence: 'operator measurement, 594 one-second nvidia-smi power.draw samples while generating; script not in the repo; n=1 run',
-      per_gpu: {}, seconds: 's', overlap: 'wall seconds charge the whole GPU to each question', cents_per_kwh: [18.435, 24.133], rate: basis.rate, priced: 'cheapest and dearest cell of the rate table',
-    },
-  } as unknown as LbRun;
-  it('shows per question and per 100 for each arm with seconds, labelled an estimate with its basis', () => {
-    const html = renderToStaticMarkup(createElement(Electricity, { run }));
-    expect(html).toContain('Electricity · estimate');
-    expect(html).toContain('8.7 Wh');
-    expect(html).toContain('0.16–0.21¢');
-    expect(html).toContain('0.87 kWh');
-    expect(html).toContain('$0.16–$0.21');
-    expect(html).toContain('227 s');
-    expect(html).toContain('ESTIMATE, not metered');
-    expect(html).toContain('138.5 W');
-    expect(html).toContain('594 one-second');
-    expect(html).toContain('18.435–24.133¢/kWh');
-    expect(html).not.toContain('no-seconds');
-  });
-  it('renders nothing without a basis', () => {
-    expect(renderToStaticMarkup(createElement(Electricity, { run: { ...run, electricity_basis: null } }))).toBe('');
-  });
-  it('cells are null for an arm with no estimate', () => {
-    expect(electricityCells(null)).toBeNull();
   });
 });

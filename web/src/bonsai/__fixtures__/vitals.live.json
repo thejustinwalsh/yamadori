@@ -245,10 +245,7 @@
     "measured_at": 1790268664.6954672,
     "recent": {
       "turns": 0,
-      "fanout": null,
       "foliage": null,
-      "hold_s": 120.0,
-      "decay_s": 60.0,
       "foliage_window_s": 1800.0,
       "foliage_full": 3.0
     }

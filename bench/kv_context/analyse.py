@@ -301,7 +301,7 @@ def render(v: dict) -> str:
         + f" -> usable context {g3b['usable_context']} ({g3b['status']})",
         f"Stack errors {a['stack_errors']}, budget events {a['budget_events']} (neither is scored)."]
     q = v["quality"]
-    L += ["", "## G4 quality (LiveBench coding, bare @ medium, check_code/repair off)", ""]
+    L += ["", "## G4 quality (LiveBench coding, bare @ medium, every augmentation off)", ""]
     for k in ("primary_fresh_q8_vs_q4", "secondary_cached_q8_vs_q4", "q8_fresh_vs_cached"):
         r = q[k]
         ra, rb = r["labels"]

@@ -2,44 +2,32 @@
 """Which files are the project's, and when a compaction happened. State
 only: nothing here writes text the model reads.
 
-WHY. Two features need to know the model's OWN work from what the proxy
-already sees (the client's tool calls, which tool_code parses, and the tool
-results in the next request): deep thinking's label rule 2 (#52,
-deep._project_writes: a run is `helped` only if a PROJECT file changed after
-it), and the work log's re-injection after a compaction that kept the
-session key (#41/#54, switch work_log_reinject). The fix-up's scope (#56)
-and the agent step's thinking cap by what the step answers (#53,
-step_kind) were REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md); the project
-paths below remain for label rule 2 (switch helped_needs_change, the
-operator's call).
-
-REMOVED 2026-09-27 (operator: "keep our system prompts clean; fixes go
-through skills" -- task-targeted steering in prompts; skills are the
-channel): the tool-result SITUATIONS this module used to write -- the
-PROGRESS line ("No project file has changed in the last N steps ...", #50,
-switch progress_note), the UNCHANGED re-read line ("Unchanged since step N
-...", #54, switch unchanged_read) and the files-read listing in the
-post-compaction work log. Lines already recorded in the ledger replay byte
-for byte (ledger_restore replays the stored text; nothing regenerates it).
-
   PROJECT PATHS  `project_of` / `is_project`: which written paths are the
-                 project's. Not a temp directory (/tmp, /var/tmp, a Windows
-                 Temp), not a dot-file, not a scratch-harness name
-                 (SCRATCH_NAMES, each row seen in a run), not outside the
-                 working directory when one is known -- unless the task
-                 itself names the file. The task's files: relative paths
-                 in its prose, and a project TREE's files qualified by
-                 their folders (tree_paths: space-shooter/ js/ config.js
-                 -> js/config.js). The working directory: one the
-                 conversation states, else inferred from the first write
-                 whose path ends in a file the task names (the most
-                 qualified name decides), WIDENED to the deepest common
-                 directory when a later named file lands outside it
-                 (v0f-V0: root /workspace/space-shooter/js from a bare
-                 config.js, and index.html outside the project). `learn`
-                 reads each tool result's successful writes into it.
+                 project's (read by skill_select, which judges a write or a
+                 read as the work's own evidence). Not a temp directory
+                 (/tmp, /var/tmp, a Windows Temp), not a dot-file, not a
+                 scratch-harness name (SCRATCH_NAMES, each row seen in a
+                 run), not outside the working directory the conversation
+                 states -- unless the task itself names the file. The
+                 task's files: relative paths in its prose, and a project
+                 TREE's files qualified by their folders (tree_paths:
+                 space-shooter/ js/ config.js -> js/config.js).
+  COMMANDS       `command_of` / `inspect_only`: a shell call's command, and
+                 whether it only looks (skill_select).
   COMPACTIONS    `note_compaction` / `reinject_due` / `mark_reinjected`: the
-                 work log is re-injected on the first request after one.
+                 work log is re-injected on the first request after one
+                 (#41/#54, switch work_log_reinject).
+
+REMOVED 2026-09-29 with deep thinking (docs/REMOVED.md): `learn` /
+`project_hint`, which read each step's successful writes into the
+conversation's project -- the named files and a working directory INFERRED
+from the first write of a named file -- for deep thinking's label rule 2
+(#52: a run is `helped` only if a project file changed after it). Earlier
+removals: the fix-up's scope (#56) and the agent step's thinking cap by
+result (#53, step_kind), 2026-09-27; the tool-result SITUATIONS (#50's
+progress line, #54's unchanged-read line), 2026-09-27 (operator: "keep our
+system prompts clean; fixes go through skills"). Lines already recorded in
+the ledger replay byte for byte.
 
 The per-conversation state lives in the ledger (`work:<lineage>`, kind
 "work"), so it survives a compaction and a restart, and it is pruned with
@@ -52,9 +40,6 @@ import re
 import threading
 
 _MAX_NAMED = 60
-# State fields the removed situations kept (2026-09-27); dropped from a
-# conversation's state the next time it is saved.
-_RETIRED = ("reads", "seen", "since", "since_t", "step", "last_write")
 
 # ============================================================ project ======
 # A temp directory: POSIX, and Windows' %TEMP% (AppData\Local\Temp).
@@ -260,58 +245,6 @@ def is_project(path: str, project: dict | None) -> tuple[bool, str]:
     return True, "a project path"
 
 
-def _infer_root(path: str, named: list[str]) -> str | None:
-    """The working directory from an absolute write of a file the task
-    names: /workspace/space-shooter/js/game.js + js/game.js ->
-    /workspace/space-shooter. The most qualified name that matches decides
-    (js/game.js over a bare game.js)."""
-    p = _norm(path)
-    if not _is_abs(p) or _TEMP.search(p):
-        return None
-    for n in sorted(named, key=lambda x: -x.count("/")):
-        if p.endswith("/" + n):
-            r = p[:-(len(n) + 1)]
-            return r or None
-    return None
-
-
-def _common_root(a: str, b: str) -> str | None:
-    """The deepest directory holding both; None when that is only the
-    filesystem root (or a drive), which is no working directory."""
-    pa, pb = a.rstrip("/").split("/"), b.rstrip("/").split("/")
-    k = 0
-    while k < min(len(pa), len(pb)) and pa[k] == pb[k]:
-        k += 1
-    r = "/".join(pa[:k])
-    if not r or r == "/" or re.fullmatch(r"[A-Za-z]:", r):
-        return None
-    return r
-
-
-def _learn_root(proj: dict, st: dict, path: str) -> None:
-    """An inferred working directory from the write of a file the task
-    names (never over a stated one). The first such write sets it; a later
-    one outside it WIDENS it to the deepest directory holding both, so a
-    bare name that matched in a subfolder (config.js written to js/) does
-    not fence the project in (the next named file, index.html, lands one
-    level up)."""
-    if proj.get("root_by") == "stated":
-        return
-    r = _infer_root(path, proj["named"])
-    if not r:
-        return
-    cur = proj.get("root")
-    if not cur:
-        new = r
-    elif r == cur or r.startswith(cur + "/"):
-        return
-    else:
-        new = _common_root(cur, r)
-        if not new:
-            return
-    proj["root"] = st["root"] = new
-    proj["root_by"] = st["root_by"] = "inferred"
-
 # ============================================================ tool calls ===
 
 
@@ -322,10 +255,6 @@ def _args(call: dict) -> dict:
     except ValueError:
         return {}
     return a if isinstance(a, dict) else {}
-
-
-def _name(call: dict) -> str:
-    return str(((call or {}).get("function") or {}).get("name") or "")
 
 
 _COMMAND_KEYS = ("command", "cmd", "script", "commands")
@@ -379,28 +308,6 @@ def inspect_only(cmd: str) -> bool:
 # ============================================================== steps ======
 
 
-def _step(raw: list[dict]) -> tuple[int | None, list[tuple[dict, str]]]:
-    """The step this request answers: (index of the last assistant turn with
-    tool calls, [(call, its result's text)]) when the request ENDS on tool
-    results; (None, []) otherwise."""
-    if not raw or not isinstance(raw[-1], dict) or raw[-1].get("role") != "tool":
-        return None, []
-    ai = next((i for i in range(len(raw) - 1, -1, -1)
-               if isinstance(raw[i], dict) and raw[i].get("role") == "assistant"
-               and raw[i].get("tool_calls")), None)
-    if ai is None:
-        return None, []
-    results = {}
-    for m in raw[ai + 1:]:
-        if isinstance(m, dict) and m.get("role") == "tool":
-            results[m.get("tool_call_id")] = _text(m)
-    out = []
-    for c in raw[ai].get("tool_calls") or []:
-        if isinstance(c, dict):
-            out.append((c, results.get(c.get("id"), "")))
-    return ai, out
-
-
 # step_kind (what the step a request answers was, for #53's thinking cap by
 # result) and SEARCH_NAMES were REMOVED 2026-09-27 with that cap
 # (docs/CONSTANTS-AUDIT.md). inspect_only stays: skill_select reads it.
@@ -442,61 +349,6 @@ def save(account: str, lineage: str, st: dict) -> None:
     nebari.ledger_put(account or "", lineage, _key(lineage), "work",
                       json.dumps(st, sort_keys=True))
 
-
-def learn(account: str, lineage: str, raw: list[dict]) -> dict:
-    """Read the step a request answers into the project: the task's named
-    files, and the working directory inferred from a successful write of a
-    named file (_learn_root). Idempotent -- a retry of the request changes
-    nothing -- and it writes no text. Returns {root, root_by, named,
-    project_writes, scratch_writes}. Never raises."""
-    try:
-        with _lock(account, lineage):
-            return _learn(account, lineage, raw)
-    except Exception as e:                                       # noqa: BLE001
-        return {"error": f"{type(e).__name__}: {e}"[:200]}
-
-
-def _learn(account, lineage, raw) -> dict:
-    import deep
-    import tool_code
-    st = load(account, lineage)
-    before = json.dumps(st, sort_keys=True)
-    for k in _RETIRED:
-        st.pop(k, None)
-    rec: dict = {"project_writes": [], "scratch_writes": []}
-    proj = project_of(raw, st)
-    st["named"] = proj["named"]
-    _ai, calls = _step(raw)
-    for c, text in calls:
-        try:
-            # whole_pages: WHICH FILE the call writes -- an .html page with
-            # only `src` scripts has no script unit (v0f-V0 index.html).
-            units = tool_code.detect(c, whole_pages=True).get("units") or []
-        except Exception:                                        # noqa: BLE001
-            units = []
-        if not units or deep.is_error(text) or deep.not_applied(text):
-            continue
-        for p in dict.fromkeys(u.get("path") for u in units if u.get("path")):
-            _learn_root(proj, st, p)
-            yes, why = is_project(p, proj)
-            if yes:
-                rec["project_writes"].append(_norm(p))
-            else:
-                rec["scratch_writes"].append({"path": _norm(p), "why": why})
-    if json.dumps(st, sort_keys=True) != before:
-        save(account, lineage, st)
-    rec.update(root=proj.get("root"), root_by=proj.get("root_by"),
-               named=len(proj["named"]))
-    return rec
-
-
-def project_hint(account: str, lineage: str, raw: list[dict]) -> dict:
-    """The project for a request (for the fix-up's scope and the deep
-    labels): the conversation's state plus what this request names."""
-    try:
-        return project_of(raw, load(account, lineage))
-    except Exception:                                            # noqa: BLE001
-        return project_of(raw)
 
 # ======================================================= compaction ========
 

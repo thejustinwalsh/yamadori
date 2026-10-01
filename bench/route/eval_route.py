@@ -328,63 +328,10 @@ def benchmarks() -> dict:
     return out
 
 
-def deep_thinking_effect() -> dict:
-    """What `deep thinking on library_question only` changes, on the sets
-    test_selection.py measures deep thinking on, at tier max, Laya absent:
-    selection.decide without the route (the word rules) against with it."""
-    import discover
-    import domains
-    import selection
-    import tiers
-    t = tiers.resolve({"reasoning_effort": "max"})
-    dbs = selection.symbol_dbs()
-    out = {}
-
-    def both(msgs):
-        gate = domains.tool_admission(
-            msgs, None, discovered=discover.scan(msgs)["packages"])
-        rt = route_of(msgs, [], None)
-        a = selection.decide(msgs, t, gate, dbs=dbs)
-        b = selection.decide(msgs, t, gate, dbs=dbs, route=rt)
-        return a, b, rt
-    ce = os.path.join(ROOT, "bench", "context_economy_tasks.jsonl")
-    if os.path.exists(ce):
-        on0 = on1 = 0
-        for line in open(ce, encoding="utf-8"):
-            a, b, _ = both(_single(json.loads(line)["question"]))
-            on0 += a["investigate"]
-            on1 += b["investigate"]
-        out["context_economy (26 three.js questions)"] = {
-            "investigate_without_route": on0, "investigate_with_route": on1}
-    held = os.path.join(ROOT, "bench", "laya_routing_heldout_packages.jsonl")
-    if os.path.exists(held):
-        rows = [json.loads(x) for x in open(held, encoding="utf-8") if x.strip()]
-        ok0 = ok1 = 0
-        disc = Counter()
-        for r in rows:
-            msgs = ((_single(r["context"]) if r.get("context") else [])
-                    + _single(r["question"]))
-            a, b, rt = both(msgs)
-            want = r["label"] == "investigate"
-            c0, c1 = a["investigate"] == want, b["investigate"] == want
-            ok0 += c0
-            ok1 += c1
-            if c0 != c1:
-                disc[("route_right" if c1 else "route_wrong", rt["class"])] += 1
-        out["held-out package labels (120)"] = {
-            "correct_without_route": ok0, "correct_with_route": ok1,
-            "discordant": {f"{k[0]}:{k[1]}": v for k, v in disc.items()}}
-    for name, prompts in benchmark_prompts().items():
-        if not name.startswith("bench/domain"):
-            continue
-        on0 = on1 = 0
-        for pr in prompts:
-            a, b, _ = both(_single(pr))
-            on0 += a["investigate"]
-            on1 += b["investigate"]
-        out[name] = {"investigate_without_route": on0,
-                     "investigate_with_route": on1}
-    return out
+# deep_thinking_effect() -- selection.decide's investigate decision with and
+# without the route -- was removed 2026-09-29 with deep thinking and
+# selection's investigate decision (the way back is commit e360d37, whose
+# results.json holds its last numbers under "deep_thinking").
 
 
 def run(write: bool = False, verbose: bool = False) -> dict:
@@ -405,7 +352,6 @@ def run(write: bool = False, verbose: bool = False) -> dict:
                 print(f"  miss id={r['id']} {r['label']} -> {r['pred']}: "
                       f"{r['because'][:140]}")
     if write:
-        res["deep_thinking"] = deep_thinking_effect()
         with open(RESULTS, "w", encoding="utf-8", newline="\n") as f:
             json.dump(res, f, indent=1)
     return res
@@ -414,8 +360,7 @@ def run(write: bool = False, verbose: bool = False) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true",
-                    help="also measure the deep-thinking effect and write "
-                         "bench/route/results.json")
+                    help="also write bench/route/results.json")
     ap.add_argument("-v", action="store_true", help="print every miss")
     a = ap.parse_args()
     if not os.path.exists(CORPUS):
@@ -436,10 +381,6 @@ def main() -> int:
         print(f"  {name}: {b['to_code']}/{b['n']} to code  {b['classes']}"
               + (f"  not code: {b['not_code_index']}" if b["not_code_index"]
                  else ""))
-    if "deep_thinking" in res:
-        print("\ndeep thinking, word rules vs route (tier max, Laya absent):")
-        for k, v in res["deep_thinking"].items():
-            print(f"  {k}: {v}")
     return 0
 
 

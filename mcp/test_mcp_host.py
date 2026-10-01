@@ -17,10 +17,10 @@ GATED HERE:
      data; a 404 is NOT_FOUND (not retryable) with the remedy; an empty
      README is read from the package's GitHub repository (the version
      document's directory first, then the root; README.md, then readme.md;
-     a fake research_tools.fetch_named_file), screened the same way and
+     a fake pinned_fetch.fetch_named_file), screened the same way and
      labelled, and when none is found the result says what was tried and
      where the README is; a README longer than main's cap sends its
-     install / usage / API sections first; the named fetch is read_web_page's
+     install / usage / API sections first; the named fetch is mcp/pinned_fetch.py's
      pinned GET without robots.txt, with Accept replaced only by a
      NAMED_ACCEPT value; an npm package's versions carry each listed
      version's peer dependencies (the abbreviated packument; cut at the byte
@@ -87,7 +87,7 @@ import dash_mcp  # noqa: E402
 import mcp_config  # noqa: E402
 import mcp_host  # noqa: E402
 import proxy  # noqa: E402
-import research_tools  # noqa: E402
+import pinned_fetch  # noqa: E402
 import tiers  # noqa: E402
 
 
@@ -95,12 +95,12 @@ def _no_network(url, deadline=None, accept=None):
     """The default for the whole suite: the proxy's own GETs (README
     fallback, peer dependencies) never leave this process. A test that needs
     answers installs FakeFetch."""
-    raise research_tools.Refused("FETCH_REFUSED", f"GET {url} answered HTTP "
+    raise pinned_fetch.Refused("FETCH_REFUSED", f"GET {url} answered HTTP "
                                  f"404 (offline suite)", status=404)
 
 
-_REAL_NAMED_FETCH = research_tools.fetch_named_file
-research_tools.fetch_named_file = _no_network
+_REAL_NAMED_FETCH = pinned_fetch.fetch_named_file
+pinned_fetch.fetch_named_file = _no_network
 
 _tmp_root = os.path.abspath(tempfile.gettempdir())
 assert os.path.abspath(mcp_config.path()).startswith(_tmp_root), mcp_config.path()
@@ -370,15 +370,15 @@ def test_what_the_model_reads():
 
 # ------------------------------------------- 2b. the README from GitHub
 class FakeFetch:
-    """Replaces research_tools.fetch_named_file (the one fetch the README
+    """Replaces pinned_fetch.fetch_named_file (the one fetch the README
     fallback and the peer lookup may use): `pages` maps a URL to bytes
     (200), (bytes, "cut") (200, cut at the byte cap), an int (that HTTP
-    status, raised as research_tools raises it) or an Exception. Anything
+    status, raised as pinned_fetch raises it) or an Exception. Anything
     else answers 404. Records every URL asked for, in order, and the Accept
     each asked with."""
 
     def __init__(self, pages: dict):
-        self.rt, self.pages, self.urls = research_tools, pages, []
+        self.rt, self.pages, self.urls = pinned_fetch, pages, []
         self.accepts: list = []
 
     def __call__(self, url, deadline=None, accept=None):
@@ -508,9 +508,9 @@ def test_the_readme_from_github():
           "a repository not on GitHub: no repository read, the result says "
           "why and where the README is", out[:500] + json.dumps(ff.urls))
     # 5. A failure other than 404 ends the fallback and is said.
-    import research_tools
+    import pinned_fetch
     with FakeFetch({f"{RAW}/example/empty-rl/HEAD/README.md":
-                    research_tools.Refused(
+                    pinned_fetch.Refused(
                         "RATE_LIMITED", "raw.githubusercontent.com answered "
                         "HTTP 429 (rate limit)", retryable=True, after=60,
                         status=429)}) as ff:
@@ -687,7 +687,7 @@ def test_the_versions_carry_peer_dependencies():
           and "dist-tags: canary 10.0.0-canary.1" in out and len(ff.urls) == 4,
           "no peer data readable: the version list still comes back and says "
           "peers are unavailable and why", out[:700])
-    with FakeFetch({R3F: research_tools.Refused(
+    with FakeFetch({R3F: pinned_fetch.Refused(
             "RATE_LIMITED", "registry.npmjs.org answered HTTP 429 (rate "
             "limit)", retryable=True, after=60, status=429)}) as ff:
         out = mcp_host.run_tool("yama_list_package_versions", args, c)
@@ -712,11 +712,11 @@ def test_the_versions_carry_peer_dependencies():
 
 
 def test_the_named_fetch_is_the_pinned_get_without_robots():
-    """research_tools.fetch_named_file: read_web_page's _get and its answer
+    """pinned_fetch.fetch_named_file: its _get and its answer
     checks, no robots.txt."""
     import http.client
     import io
-    import research_tools as rt
+    import pinned_fetch as rt
     asked: list = []
 
     def headers(ctype):
@@ -761,11 +761,10 @@ def test_the_named_fetch_is_the_pinned_get_without_robots():
           and nf is not None and nf.status == 404
           and nf.code == "FETCH_REFUSED"
           and rl is not None and rl.code == "RATE_LIMITED" and rl.status == 429,
-          "fetch_named_file: the same pinned _get and answer checks as "
-          "read_web_page (a 404 carries its status, a 429 pauses the host), "
-          "and no robots.txt", json.dumps(asked))
+          "fetch_named_file: the pinned _get and its answer checks (a 404 "
+          "carries its status, a 429 pauses the host), and no robots.txt", json.dumps(asked))
     check(rt.REQUEST_HEADERS and rt.METHOD == "GET",
-          "the fetch is research_tools' own (GET, its fixed headers)")
+          "the fetch is pinned_fetch's own (GET, its fixed headers)")
 
     class Conn:
         def __init__(self):
@@ -901,7 +900,7 @@ class Conv:
                  features: dict | None = None, tools: list | None = None):
         self.effort = effort
         self.account = f"{T.ACCOUNT}-mcp-{tag}"
-        self.features = {"skills": False, "investigate": False, "fanout": 1}
+        self.features = {"skills": False}
         self.features.update(features or {})
         self.tools = tools if tools is not None else [T.WRITE]
         self.msgs = [{"role": "system", "content": T.SYSTEM + f" [{tag}]"}]

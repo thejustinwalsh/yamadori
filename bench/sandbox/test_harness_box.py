@@ -129,7 +129,8 @@ def test_write_home() -> None:
                       "pi": [".agents/skills/package-api/SKILL.md", ".agents/skills/package-api/api.cjs",
                              ".agents/skills/page-check/SKILL.md", ".agents/skills/type-check/SKILL.md",
                              ".pi/agent/models.json", ".pi/agent/settings.json"],
-                      "codex": [".codex/config.toml", ".codex/skills/type-check/SKILL.md",
+                      "codex": [".codex/config.toml", ".codex/skills/package-api/SKILL.md",
+                                ".codex/skills/package-api/api.cjs", ".codex/skills/type-check/SKILL.md",
                                 ".codex/yamadori-catalog.json"]},
               "the default loadout adds Pi's settings and the loadout skills (Pi, Codex), "
               "never auth.json", json.dumps(rel))

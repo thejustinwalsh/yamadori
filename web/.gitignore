@@ -1,3 +1,8 @@
 node_modules/
 # dist/ is committed on purpose (design/STACK.md: Node is a contributor
 # dependency, never a runtime one). Do not add it here.
+# The STAGED bundle (npm run build:stage) and the one a swap set aside
+# (scripts/swap_dash_dist.py): the live proxy serves dist/ from disk, so a
+# new bundle is built beside it and swapped in at deploy.
+dist-next/
+dist-prev/

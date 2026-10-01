@@ -1,0 +1,347 @@
+{
+ "started": "2026-10-01T01:10:27-0400",
+ "arms": {
+  "base": {}
+ },
+ "steps": [
+  "lane",
+  "kernels",
+  "fit",
+  "api",
+  "decider",
+  "needles",
+  "corrupt",
+  "speed"
+ ],
+ "mmproj": false,
+ "lane_hold": {
+  "took": true,
+  "holder": "engine_corruption",
+  "ttl_seconds": 43200,
+  "lane": "gpu"
+ },
+ "lane3": {
+  "load_s": 9.0,
+  "8k": {
+   "kept": [
+    32.52054501372686,
+    34.22327722371112,
+    34.20857653283601
+   ],
+   "active": [
+    29.475659231788033,
+    29.064124919660493,
+    29.46243193311681
+   ],
+   "cleared": [
+    34.70251304712424,
+    34.68481230959908,
+    34.68641643205727
+   ],
+   "reprefill_ms": [
+    183.5,
+    202.0,
+    189.1
+   ],
+   "burst_ms": [
+    1914.6,
+    1993.4,
+    1920.7
+   ],
+   "median_tps": {
+    "kept": 34.20857653283601,
+    "active": 29.46243193311681,
+    "cleared": 34.68641643205727
+   },
+   "material": {
+    "kept": true,
+    "active": true
+   }
+  },
+  "32k": {
+   "kept": [
+    31.17936498271196,
+    31.192431615180805,
+    31.197720878028658
+   ],
+   "active": [
+    26.755967944881444,
+    26.746905986093914,
+    26.751561084724397
+   ],
+   "cleared": [
+    31.361606580083215,
+    31.435186377987282,
+    31.407704396105594
+   ],
+   "reprefill_ms": [
+    191.3,
+    193.4,
+    193.3
+   ],
+   "burst_ms": [
+    2143.7,
+    2150.0,
+    2146.3
+   ],
+   "median_tps": {
+    "kept": 31.192431615180805,
+    "active": 26.751561084724397,
+    "cleared": 31.407704396105594
+   },
+   "material": {
+    "kept": true,
+    "active": true
+   }
+  },
+  "64k": {
+   "kept": [
+    28.152444493315617,
+    28.180416997234012,
+    28.185335269536914
+   ],
+   "active": [
+    23.85936113613225,
+    23.909589123556035,
+    23.738056964634204
+   ],
+   "cleared": [
+    28.32135969181918,
+    28.325078146669036,
+    28.31613600006929
+   ],
+   "reprefill_ms": [
+    289.1,
+    252.0,
+    253.1
+   ],
+   "burst_ms": [
+    2497.9,
+    2594.1,
+    2630.8
+   ],
+   "median_tps": {
+    "kept": 28.180416997234012,
+    "active": 23.85936113613225,
+    "cleared": 28.32135969181918
+   },
+   "material": {
+    "kept": true,
+    "active": true
+   }
+  },
+  "gpu_min_free": 4071,
+  "gpu_max_used": 11980,
+  "guard": null
+ },
+ "layout": {
+  "np": 1,
+  "why": "the lane is MATERIAL (ACTIVE below CLEARED's minimum at ['8k', '32k', '64k']): -np 1, jjava and side calls on bonsai-a4000 (the operator's rule for Bonsai and Flash-Next, 2026-09-30)"
+ },
+ "kernels": {
+  "devices": {
+   "CUDA0": "RTX 5060 Ti (GPU-de660e90-0e9c-d465-b389-6df63021b920) only: --card-only (the A4000 is another agent's window)"
+  },
+  "CUDA0/MIRAI.*": {
+   "passed": 33,
+   "total": 33
+  },
+  "CUDA0/FLASH_ATTN_EXT": {
+   "passed": 4414,
+   "total": 4414
+  },
+  "CUDA0/GATED_DELTA_NET": {
+   "passed": 46,
+   "total": 46
+  },
+  "CUDA0/MUL_MAT/type_a=q8_0": {
+   "passed": 50,
+   "total": 50
+  },
+  "CUDA0/MUL_MAT/type_a=f16": {
+   "passed": 281,
+   "total": 281
+  },
+  "CUDA0/MUL_MAT/type_a=f32": {
+   "passed": 217,
+   "total": 217
+  },
+  "PASS": false
+ },
+ "fit": {
+  "base": {
+   "points": [
+    {
+     "ctx": 49152,
+     "load_s": 4.5,
+     "after_warm": {
+      "used": 10230,
+      "free": 5821,
+      "util": 97
+     },
+     "gpu_min_free": 5821,
+     "gpu_max_used": 10230,
+     "guard": null
+    },
+    {
+     "ctx": 90112,
+     "load_s": 4.5,
+     "after_warm": {
+      "used": 11830,
+      "free": 4221,
+      "util": 100
+     },
+     "gpu_min_free": 4221,
+     "gpu_max_used": 11830,
+     "guard": null
+    }
+   ],
+   "derived": {
+    "bytes_per_cell": 40960,
+    "fixed_mib": 8310,
+    "total_mib": 16050,
+    "margin_mib": 1000,
+    "max_ctx": 172032
+   }
+  },
+  "mtp": {
+   "points": [
+    {
+     "ctx": 49152,
+     "load_s": 6.6,
+     "after_warm": {
+      "used": 11618,
+      "free": 4433,
+      "util": 96
+     },
+     "gpu_min_free": 4433,
+     "gpu_max_used": 11618,
+     "guard": null
+    },
+    {
+     "ctx": 90112,
+     "load_s": 4.5,
+     "after_warm": {
+      "used": 13398,
+      "free": 2653,
+      "util": 41
+     },
+     "gpu_min_free": 2653,
+     "gpu_max_used": 13398,
+     "guard": null
+    }
+   ],
+   "derived": {
+    "bytes_per_cell": 45568,
+    "fixed_mib": 9482,
+    "total_mib": 16050,
+    "margin_mib": 1000,
+    "max_ctx": 128000
+   }
+  },
+  "np": 1
+ },
+ "ctx_used": 128000,
+ "api": {
+  "props": {
+   "status": 200,
+   "chat_template_sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+   "n_ctx": 128000
+  },
+  "apply_template": {
+   "low": {
+    "status": 200,
+    "prompt_tail": "ur current knowledge and do not tell the user about function calls\n</IMPORTANT>\n\nYou are terse.<|im_end|>\n<|im_start|>user\nList the files.<|im_end|>\n<|im_start|>assistant\n<think>\nI will list them.\n</think>\n\n<tool_call>\n<function=ls>\n<parameter=path>\n.\n</parameter>\n</function>\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\na.py\nb.py\n</tool_response><|im_end|>\n<|im_start|>assistant\n<think>\n"
+   },
+   "medium": {
+    "status": 200,
+    "prompt_tail": "ur current knowledge and do not tell the user about function calls\n</IMPORTANT>\n\nYou are terse.<|im_end|>\n<|im_start|>user\nList the files.<|im_end|>\n<|im_start|>assistant\n<think>\nI will list them.\n</think>\n\n<tool_call>\n<function=ls>\n<parameter=path>\n.\n</parameter>\n</function>\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\na.py\nb.py\n</tool_response><|im_end|>\n<|im_start|>assistant\n<think>\n"
+   },
+   "high": {
+    "status": 500,
+    "prompt_tail": "{\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}\u21b5        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                           ^\\nError: Jinja Exception: Unexpected reasoning effort h"
+   },
+   "xhigh": {
+    "status": 200,
+    "prompt_tail": "ur current knowledge and do not tell the user about function calls\n</IMPORTANT>\n\nYou are terse.<|im_end|>\n<|im_start|>user\nList the files.<|im_end|>\n<|im_start|>assistant\n<think>\nI will list them.\n</think>\n\n<tool_call>\n<function=ls>\n<parameter=path>\n.\n</parameter>\n</function>\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\na.py\nb.py\n</tool_response><|im_end|>\n<|im_start|>assistant\n<think>\n"
+   },
+   "max": {
+    "status": 500,
+    "prompt_tail": "{\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}\u21b5        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                           ^\\nError: Jinja Exception: Unexpected reasoning effort m"
+   }
+  },
+  "tokenize": {
+   "status": 200,
+   "body": "{\"tokens\":[{\"id\":9419,\"piece\":\"Hello\"},{\"id\":1814,\"piece\":\" world\"}]}"
+  },
+  "completion_n0": {
+   "content": " jumps",
+   "prompt_n": 4,
+   "cache_n": 0,
+   "prompt_tps": 64.73748948015796,
+   "predicted_n": 1,
+   "tps": 0.0
+  },
+  "slots": {
+   "status": 200,
+   "n": 1
+  },
+  "erase": {
+   "status": 501,
+   "body": "{\"error\":{\"code\":501,\"message\":\"This server does not support slots action. Start it with `--slot-save-path`\",\"type\":\"not_supported_error\"}}",
+   "fallback_needed": true
+  },
+  "chat": {
+   "status": 200,
+   "has_logprobs": true,
+   "top_logprobs_n": 5,
+   "reasoning_chars": 248,
+   "content": "Hello",
+   "body": "{\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Hello\",\"reasoning_content\":\"The user asks me to say one word. I should simply respond with a single word. Let me "
+  },
+  "cache_n_after_extend": 4,
+  "PASS": true,
+  "gpu_min_free": 2829,
+  "gpu_max_used": 13222,
+  "guard": null
+ },
+ "decider": {
+  "load_s": 4.5,
+  "runs": [
+   {
+    "cmd": "bench/decider/measure_model.py --run --model mirai-s --base-url http://127.0.0.1:18096",
+    "exit": 0,
+    "seconds": 407.7,
+    "log": "bench/results/mirai_s/gate-20261001\\measure_model.mirai-s.log"
+   },
+   {
+    "cmd": "bench/decider/jevbench_run.py --run --model mirai-s --base-url http://127.0.0.1:18096",
+    "exit": 0,
+    "seconds": 363.8,
+    "log": "bench/results/mirai_s/gate-20261001\\jevbench_run.mirai-s.log"
+   }
+  ],
+  "gpu_min_free": 2733,
+  "gpu_max_used": 13318,
+  "guard": null,
+  "PASS": true
+ },
+ "restore": {
+  "lane_resumed": false,
+  "reload_s": 49.4,
+  "bonsai_state": "ready",
+  "bonsai_cmd_is_config": true,
+  "proxy_health": 200,
+  "gpu": {
+   "used": 14964,
+   "free": 1087,
+   "util": 100
+  }
+ },
+ "lane": {
+  "held_by": "engine_corruption",
+  "resumed": true,
+  "lane": "gpu"
+ },
+ "finished": "2026-10-01T01:39:27-0400"
+}

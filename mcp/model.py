@@ -101,6 +101,12 @@ def shape(body: dict, effort: str = "low", role: str = "main",
     would not fit it (mcp/vision.py)."""
     tier = tiers.resolve({"reasoning_effort": effort},
                          {"reasoning_cap": int(cap)} if cap is not None else None)
+    # A LOCKED CARD: the job goes to the table's helper (max_mode.internal_model), and is budgeted against THAT
+    # server's own window (tiers.window_model_of), not the main line
+    target = body.get("model") or max_mode.current(MODEL)
+    routed = max_mode.internal_model(target)
+    if routed != target:
+        body = dict(body, model=routed)
     out = tiers.apply(body, tier, role=role, step_cap=step_cap, nudge=nudge)
     # MAX MODE (mcp/max_mode.py): the model of the request this thread works for -- a max conversation's second
     # brain, summaries and decider questions go to the max model; MODEL outside a request or with max mode off
@@ -112,19 +118,77 @@ def shape(body: dict, effort: str = "low", role: str = "main",
     return out
 
 
+class WindowExceeded(ValueError):
+    """An internal job whose prompt cannot fit the window of the server it was routed to. Not retryable: the same
+    job is as large next time."""
+
+    def __init__(self, model: str, prompt: int, floor: int, window: int, source: str):
+        self.model, self.prompt, self.floor, self.window, self.source = model, prompt, floor, window, source
+        super().__init__(
+            f"this job does not fit {model}'s window: its prompt is ~{prompt} tokens (a HIGH estimate, "
+            f"tiers.estimate_prompt_tokens) and a generation needs at least {floor} more, but the window is {window} "
+            f"({source}) | retryable: no | remedy: a smaller input (split the job), or run it when the card is "
+            f"unlocked | owner: the job's caller")
+
+
+def fit_window(send: dict) -> dict | None:
+    """For a request routed to a HELPER server with its own window (tiers.window_model_of: bonsai-a4000): refuse it
+    (WindowExceeded) when its prompt cannot fit, and cut max_tokens (and the thinking budget inside it) to what the
+    window leaves, so it can never run into the server's context end. None (untouched) for anything else. The
+    prompt size is tiers' deliberately HIGH estimate (chars / 3): a job near the edge may be refused that would have
+    fit; nothing that does not fit is ever sent."""
+    m = send.get("model", MODEL)
+    wm = tiers.window_model_of(m)
+    if not wm:
+        return None
+    import budget
+    w = budget.model_window(wm) or {}
+    window = int(w.get("main_cap") or w.get("ctx") or 0)
+    if not window:
+        return None
+    thinks = bool(send.get("reasoning_budget_tokens"))
+    floor = tiers.A_MIN + (tiers.MIN_THINKING if thinks else 0)
+    prompt = tiers.estimate_prompt_tokens(send)
+    if prompt + floor > window:
+        raise WindowExceeded(m, prompt, floor, window, str(w.get("source") or "tier table")[:160])
+    room = window - prompt
+    rec = {"model": m, "window": window, "prompt_estimate": prompt, "room": room}
+    if int(send.get("max_tokens") or 0) > room:
+        rec["max_tokens_was"] = send.get("max_tokens")
+        send["max_tokens"] = room
+    if thinks and int(send["reasoning_budget_tokens"]) > room - tiers.A_MIN:
+        rec["thinking_was"] = send["reasoning_budget_tokens"]
+        send["reasoning_budget_tokens"] = max(room - tiers.A_MIN, tiers.MIN_THINKING)
+    return rec
+
+
 def post(body: dict, timeout: int = TIMEOUT) -> dict:
     """Send an already-shaped body. For the proxy's own loops, whose payload
     came from prepare() and must not be re-shaped."""
     send = {k: v for k, v in body.items() if not k.startswith("_")}
+    # A LOCKED CARD (the tier table; coordinator 2026-09-30): an internal generation -- everything through here is
+    # the stack's own, never a conversation's turn -- goes to the table's helper (bonsai-a4000), never the locked card
+    routed = max_mode.internal_model(send.get("model", MODEL))
+    if routed != send.get("model", MODEL):
+        send["model"] = routed
+    # A CARD SCOPE (the worker's gpu lane per card, mcp/jobs.py): a job claimed for the A4000 never touches the main
+    # card -- if its route now resolves to a main model (the card was unlocked), it waits (ModelAtCapacity: the
+    # worker defers it without an attempt)
+    max_mode.check_scope(send.get("model", MODEL))
+    # ITS OWN WINDOW: a request to a helper server that cannot fit is refused here, with its sizes, before anything
+    # is sent -- never a generation cut off at the server's context end
+    fit_window(send)
     # MAX MODE's backstop: never a request that would make llama-swap load a model max mode holds off the card
     # (raises max_mode.ModelAtCapacity: retryable; the worker defers on it, a turn answers 503 model_at_capacity)
     max_mode.guard(send.get("model", MODEL))
-    # THE SECOND BRAIN'S SLOT (mcp/slots.py). Everything through here is the
-    # stack's own generation -- deep thinking's hops, summarize_text -- and
-    # left to itself llama-server gives it the least recently used idle slot,
-    # which can be the one holding a conversation's cached prefix. Pinned to
-    # slots.HELPER, an investigation's hops also reuse each other's prefix.
-    # Not for another server (the vision copy has its own slots).
+    # THE CHILD SLOT (mcp/slots.py). Everything through here is the stack's
+    # own generation -- summarize_text, the worker's and the skill pipeline's
+    # model stages -- and left to itself llama-server gives it the least
+    # recently used idle slot, which can be the one holding a conversation's
+    # cached prefix. Pinned to slots.HELPER (the child slot, the lane) on an
+    # UNLOCKED main card. Not for another server (bonsai-a4000 or the vision
+    # copy picks its own slots): a locked card's internal work went there
+    # above, so it never reaches this.
     grant = None
     if max_mode.is_main(send.get("model", MODEL)) and "id_slot" not in send:
         import slots
@@ -169,11 +233,17 @@ def post(body: dict, timeout: int = TIMEOUT) -> dict:
     # thinking (shape(role="helper")) as the second brain, everything else
     # as internal. A no-op unless this process called token_ledger.enable().
     import token_ledger
+    role = "second_brain" if body.get("_share") == "helper" else "internal"
     token_ledger.record(
-        "second_brain" if body.get("_share") == "helper" else "internal",
+        role,
         account=str(body.get("_account") or ""),
         usage=d.get("usage") if isinstance(d, dict) else None,
-        timings=d.get("timings") if isinstance(d, dict) else None)
+        timings=d.get("timings") if isinstance(d, dict) else None,
+        # the dashboard's history (mcp/stats_store.py): the model, and a
+        # decider read (one token with logprobs: decider_bonsai.body) named
+        model=str(send.get("model", MODEL)),
+        stats_role=("decider" if send.get("logprobs") and
+                    send.get("max_tokens") == 1 else role))
     return d
 
 
@@ -213,6 +283,22 @@ def release_slot(slot: int, model: str | None = None,
     if max_mode.blocks(model) and max_mode.bound_model() != model:
         # MAX MODE: releasing a slot of a model that is off the card would load it
         out.update(skipped=max_mode.blocked_reason(model), ms=round((_time.time() - t0) * 1000))
+        return out
+    ok_touch, why_not = max_mode.touch_allowed("release", model)
+    if not ok_touch and max_mode.locked(model):
+        # A LOCKED model (the table; operator 2026-09-30): nothing but its own conversation's work touches its
+        # card -- a release (erase, or a one-token prompt) is other work
+        out.update(skipped=why_not, ms=round((_time.time() - t0) * 1000))
+        return out
+    # A READ NEVER LOADS A MODEL (2026-09-30): max_mode.blocks() is False when
+    # NO main model is loaded (a GPU window running its own llama-server), and
+    # /upstream/<model>/slots would then start it. Only while llama-swap's
+    # /running lists it ready; a model that is not loaded holds nothing to
+    # release.
+    import gpu_room
+    loaded, why = gpu_room.model_loaded(UPSTREAM, model)
+    if not loaded:
+        out.update(skipped=why, ms=round((_time.time() - t0) * 1000))
         return out
     base = f"{UPSTREAM}/upstream/{model}"
 

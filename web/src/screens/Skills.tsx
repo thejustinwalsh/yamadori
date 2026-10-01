@@ -2,10 +2,13 @@
 // Four views over the one pipeline:
 //
 //   LIBRARY     every skill, faceted by the taxonomy the server sends, with
-//               each skill's injected size against the caps it sends
+//               each skill's injected size against the caps it sends; the
+//               served skills by area and the held packages (folded in from
+//               the retired NEBARI screen, 2026-09-30)
 //   CREATE      paste text, give URL(s), or hand over a frontier SKILL.md;
 //               watch each stage answer, and why it stopped
-//   SELECTIONS  what the last requests were given (x_yamadori.skills), and
+//   SELECTIONS  the injector's jjava decisions per model (/dash/api/jjava),
+//               what the last requests were given (x_yamadori.skills), and
 //               the durable selection log
 //   PROMPTS     the versioned templates the model stages run
 //
@@ -45,6 +48,8 @@ import {
   type SortKey,
 } from '../api/skills';
 import { linksOf, ONBOARDING_PATH, onboardingBody, onboardingTone, packageLabel, splitList, type OnboardingSummary, type PromptFields, type ReplacesChoice } from '../api/onboarding';
+import { LIBRARY_PATH, type Library as LibraryData } from '../api/library';
+import { JJAVA_PATH, type Jjava } from '../api/stats';
 import { usePoll } from '../api/usePoll';
 import { ago, clock, n } from '../format';
 import { href, type SkillsView } from '../router';
@@ -52,9 +57,13 @@ import { colors, space } from '../tokens/tokens.stylex';
 import { NavLink } from '../ui/NavLink';
 import { Panel } from '../ui/Panel';
 import { Chip, Label, layout, Row, Stat } from '../ui/primitives';
+import { InjectorPanel } from '../ui/StatsParts';
+import { StrataPanel } from '../ui/Strata';
+import { useShared } from '../api/data';
 import { PollState, StateView } from '../ui/StateView';
 import { Table } from '../ui/Table';
 import { text } from '../ui/text';
+import { AreasPanel, PackagesPanel } from './skills/library';
 import { OnboardingCard } from './skills/onboarding';
 import { Btn, Chips, Field, Note, ProhibitionChip, s as p, send, SizeBar, StageRail, SubNav, type Msg } from './skills/parts';
 
@@ -254,6 +263,8 @@ function Library({ o, stale }: { o: SkillsOverview; stale: boolean }) {
   const overHard = sized.filter((x) => x.size!.tokens > l.skill_tokens_hard).length;
   const atProh = sized.filter((x) => x.size!.prohibitions >= l.max_prohibitions).length;
   const failing = o.skills.filter((x) => x.activation && !x.activation.passed).length;
+  const lib = usePoll<LibraryData>(LIBRARY_PATH, 60000);
+  const { vitals } = useShared();
   return (
     <div {...stylex.props(s.lib)}>
       <Panel kanji="類" title="FACETS" tag={active ? `${active} ON` : 'ALL'} tagTone={active ? 'cyan' : 'muted'}>
@@ -300,6 +311,11 @@ function Library({ o, stale }: { o: SkillsOverview; stale: boolean }) {
           {hits.length > limit ? <Btn onClick={() => setLimit((x) => x + PAGE)}>{`SHOW ${Math.min(PAGE, hits.length - limit)} MORE OF ${n(hits.length - limit)}`}</Btn> : null}
           <Label>CAPS · {l.label}</Label>
         </Panel>
+        <AreasPanel poll={lib} />
+        <PackagesPanel poll={lib} />
+        {/* TIER STRATA: the code-search result tiers over the held package
+            indexes, 24 h (/dash/api/vitals strata; moved from NEBARI). */}
+        {vitals.data ? <StrataPanel strata={vitals.data.strata} present={'strata' in vitals.data} /> : null}
       </div>
     </div>
   );
@@ -882,10 +898,19 @@ function Learning({ o }: { o: SkillsOverview }) {
   );
 }
 
+/** The skills injector's jjava decisions (/dash/api/jjava, the JJAVA page's
+ *  same panel): what stage 1 offered, what jjava passed, injected or not. */
+function InjectorStats() {
+  const r = usePoll<Jjava>(JJAVA_PATH, 30000);
+  if (!r.data && r.failure) return <PollState path={JJAVA_PATH} failure={r.failure} />;
+  return <InjectorPanel data={r.data} stale={r.stale} />;
+}
+
 function Selections({ o }: { o: SkillsOverview }) {
   return (
     <div {...stylex.props(s.two)}>
       <div {...stylex.props(s.col)}>
+        <InjectorStats />
         <RecentPanel o={o} />
       </div>
       <div {...stylex.props(s.col)}>

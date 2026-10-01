@@ -1,5 +1,18 @@
 #!/usr/bin/env python
-"""Every tool, every state it can be in, against a stated contract.
+"""Every code tool, every state it can be in, against a stated contract.
+
+WHAT CHANGED 2026-09-29 (docs/REMOVED.md; the way back is commit e360d37)
+
+The code-intelligence tools (find_*, read_file_range, describe_index,
+summarize_text, run_check) and the work log's record_step / read_rings are no
+longer run by the proxy: the second brain that used them is gone, and so is
+the proxy's no-repository package fallback. They stay on the MCP tools API
+(:1235, mcp/tools_api.py -> code_search.handle), so this suite now calls
+`code_search.handle` directly -- the one code path both the stdio and HTTP
+MCP servers share. The proxy's own server tools (yama_generate_image,
+yama_describe_image, yama_recall_craft, the MCP host's package lookups) are
+called through `proxy.run_our_tool(name, args, state)`, and a name the proxy
+no longer runs is answered NOT_A_SERVER_TOOL.
 
 WHY THIS GATES THE BENCHMARKS
 
@@ -44,9 +57,9 @@ Every tool is exercised in every state it can reach without a GPU:
     retrievers partly down  a negative that must say it is incomplete
     bad arguments           missing, wrong-typed and absurd values
 
-`summarize_text` and `delegate_investigation` call the model, so only their
-argument handling is checked here -- validation short-circuits before the HTTP
-request, which is exactly why it can be. Their live behaviour lives in
+`summarize_text` calls the model, so only its argument handling and an
+unreachable model are checked here -- validation short-circuits before the
+HTTP request, which is exactly why it can be. Its live behaviour lives in
 `test_tools_live.py`, which is opt-in because it needs the card.
 
 Findings and their fixes are written up in `docs/TOOLS.md`. A measurement that
@@ -56,7 +69,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sqlite3
 import struct
 import sys
@@ -78,10 +90,8 @@ _DB_TMP = tempfile.mkdtemp(prefix="yamadori_test_tools_db_")
 os.environ["YAMADORI_NEBARI_DB"] = os.path.join(_DB_TMP, "nebari.sqlite3")
 os.environ["YAMADORI_JOBS_DB"] = os.path.join(_DB_TMP, "jobs.sqlite3")
 os.environ["YAMADORI_SKILLS_DIR"] = os.path.join(_DB_TMP, "skills")
-# Never the real package store either. With no repository bound, index tools
-# now fall back to every held package index; against the real store that made
-# "no index anywhere" checks pass or fail depending on what this machine had
-# downloaded. Tests that want a package put one here deliberately.
+# Never the real package store either (what describes and screens a held
+# package reads it).
 PKG_STORE = tempfile.mkdtemp(prefix="yamadori_test_pkgs_")
 os.environ["YAMADORI_PKG_DIR"] = PKG_STORE
 # No image server, whatever the operator's shell has: yama_generate_image is offered
@@ -133,9 +143,11 @@ FIXTURE_FILES = {
 FIXTURE_ROOT = tempfile.mkdtemp(prefix="yamadori_test_repo_")
 FIXTURE_DB = os.path.join(FIXTURE_ROOT, "code.sqlite3")
 # A second database with chunks but NO roots table -- what `_db()` produced
-# before the schema fix, and what the proxy's own `_no_repository_bound`
-# database still is. See test_roots_table_is_part_of_the_schema.
+# before the schema fix. See test_roots_table_is_part_of_the_schema.
 PARTIAL_DB = os.path.join(FIXTURE_ROOT, "partial.sqlite3")
+# An index that does not exist yet: the "nothing is indexed" state (code_search
+# creates it empty on first use, inside this temp directory).
+EMPTY_DB = os.path.join(FIXTURE_ROOT, "empty.sqlite3")
 
 os.environ["CODE_INDEX_DB"] = FIXTURE_DB
 
@@ -147,7 +159,6 @@ offline_stores.isolate("yamadori_test_tools_stores_")
 
 import code_search as cs  # noqa: E402
 import fusion  # noqa: E402
-import shomen  # noqa: E402
 import proxy  # noqa: E402
 import served_fixture  # noqa: E402
 # The served model's /props, pinned (mcp/served_fixture.py): budget and
@@ -155,7 +166,7 @@ import served_fixture  # noqa: E402
 served_fixture.pin()
 # No offline test may reach the live model server (2026-09-24: a fixture
 # that faked only proxy._post let the turn engine's _post_events reach
-# :11434). The proxy's door and the second brain's (mcp/model.py) go to a
+# :11434). The proxy's door and internal generation's (mcp/model.py) go to a
 # port that refuses, unless a test points them at its own fake.
 import model as _model  # noqa: E402
 _model.UPSTREAM = "http://127.0.0.1:9"
@@ -163,12 +174,15 @@ proxy.UPSTREAM = "http://127.0.0.1:9"
 # A pinned concept seed: no 420 MB matrix load in an offline suite.
 proxy._draw_seed = lambda prompt=None: {"word": "cedar", "token_id": 1,
                                         "u32": 2}
-import repeats  # noqa: E402
 
 # Tools that call the model. Excluded from the execute-for-real paths: this
 # suite must not need a GPU, and an audit that hangs for ten minutes is an
 # audit nobody runs.
-NEEDS_MODEL = {"summarize_text", "delegate_investigation", "judge"}
+NEEDS_MODEL = {"summarize_text", "judge"}
+
+# The code tools that read an index (the MCP surface's search and read tools).
+INDEX_TOOLS = {"find_by_meaning", "find_definition_opt", "find_references",
+               "find_by_pattern", "read_file_range", "describe_index"}
 
 # The real index, which nothing here may touch.
 REAL_INDEX = os.path.abspath(os.path.join(HERE, "..", "index", "code.sqlite3"))
@@ -239,18 +253,40 @@ def check(ok: bool, name: str, detail: str = "") -> bool:
     return bool(ok)
 
 
-def call(tool: str, args: dict, db=None, root=None, state=None) -> str:
+# Which of the proxy's own server tools this run exercised (ours()).
+_exercised_ours: set[str] = set()
+WORK_LOG_TOOLS = {"record_step", "read_rings"}
+
+
+def call(tool: str, args: dict, db=None, state=None) -> str:
+    """A code tool through code_search.handle -- the MCP tools API's own path
+    -- against `db` (default: an index that holds nothing). The work log is
+    per conversation: its tools get the conversation's key as `_session`, as
+    the proxy passed it when it ran them."""
     _exercised.add(tool)
-    turn = repeats.Turn()
-    return proxy.run_our_tool(tool, args, db, root, turn,
-                              state if state is not None else {"_key": "test-session"})
+    a = dict(args)
+    if tool in WORK_LOG_TOOLS:
+        a["_session"] = (state if state is not None
+                         else {"_key": "test-session"}).get("_key", "")
+    resp = cs.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                      "params": {"name": tool, "arguments": a}},
+                     db=db or EMPTY_DB)
+    if "result" not in resp:
+        return json.dumps(resp)
+    return resp["result"]["content"][0]["text"]
 
 
 def indexed(tool: str, args: dict, **kw) -> str:
-    """A call against the fixture index, with the fixture repository bound."""
+    """A call against the fixture index."""
     kw.setdefault("db", FIXTURE_DB)
-    kw.setdefault("root", FIXTURE_ROOT)
     return call(tool, args, **kw)
+
+
+def ours(tool: str, args: dict, state=None) -> str:
+    """One of the proxy's own server tools, as main's hidden hop runs it."""
+    _exercised_ours.add(tool)
+    return proxy.run_our_tool(tool, args,
+                              state if state is not None else {"_key": "test-session"})
 
 
 def as_json(text: str):
@@ -280,7 +316,8 @@ def leaked_exception(text: str) -> list[str]:
 # Contract 1 + 2, applied to every tool in the failure state that matters
 # ---------------------------------------------------------------------------
 def test_never_empty_never_raw():
-    """No repository bound. This is the NORMAL case, and it returned ""."""
+    """Nothing indexed. Through the proxy this was the NORMAL case (no
+    repository bound), and it returned ""."""
     cases = [
         ("find_by_meaning", {"query": "how is the KV pool sized"}),
         ("find_by_pattern", {"pattern": "minimumIncrements"}),
@@ -297,7 +334,7 @@ def test_never_empty_never_raw():
         if tool in NEEDS_MODEL:
             continue
         try:
-            out = call(tool, args)
+            out = (ours if tool in proxy.OUR_NAMES else call)(tool, args)
         except Exception as e:                                   # noqa: BLE001
             check(False, f"{tool} does not raise", f"{type(e).__name__}: {e}")
             continue
@@ -314,10 +351,13 @@ def test_never_empty_never_raw():
 # Contract 3 + 4 + 5
 # ---------------------------------------------------------------------------
 def test_index_tools_name_the_situation():
+    # describe_index is not in this list: with nothing indexed it states the
+    # counts ("0 chunks across 0 files"), a fact rather than a failure. (The
+    # proxy used to answer it NO_INDEX, or with the held packages, before it
+    # stopped running the code tools, 2026-09-29.)
     for tool, args in (("find_by_meaning", {"query": "x"}),
                        ("find_by_pattern", {"pattern": "x"}),
-                       ("find_definition_opt", {"symbol": "x"}),
-                       ("describe_index", {})):
+                       ("find_definition_opt", {"symbol": "x"})):
         d = as_json(call(tool, args))
         if not check(d is not None, f"{tool} answers with structure"):
             continue
@@ -332,113 +372,6 @@ def test_index_tools_name_the_situation():
         check(all(r.get("fixable_by") in ("agent", "user", "operator")
                   for r in rem), f"{tool} says WHO can fix it",
               json.dumps([r.get("fixable_by") for r in rem]))
-
-
-def test_no_repository_falls_back_to_held_packages():
-    """With no repository bound, index tools must reach the package indexes.
-
-    They used to return NO_INDEX before the fallback could run: measured
-    live, a three.js question looped 12 times over 331 s against NO_INDEX
-    while three@0.185.1 was indexed. A miss must say the packages were
-    searched, never that the search did not run.
-    """
-    import shutil
-    pkg_db = os.path.join(PKG_STORE, "fixturepkg@1.0.0.sqlite3")
-    shutil.copyfile(FIXTURE_DB, pkg_db)
-    try:
-        hit = proxy.run_our_tool("find_definition_opt", {"symbol": "sizeKvPool"},
-                                 None, None, None, {})
-        check("fixturepkg@1.0.0" in hit and "sizeKvPool" in hit
-              and "NO_INDEX" not in hit,
-              "a symbol in a held package is found with no repository bound",
-              hit[:300])
-        miss = proxy.run_our_tool("find_definition_opt",
-                                  {"symbol": "sizeKvPol"}, None, None, None, {})
-        check("None matched in any library" in miss
-              and "fixturepkg@1.0.0" in miss and "NO_INDEX" not in miss,
-              "a miss says which packages were searched, not NO_INDEX",
-              miss[:300])
-        check("library source only" in miss
-              and "client's own file tools" in miss
-              and "same arguments return the same miss" in miss,
-              "and the situation, the retry fact and the user's-files remedy",
-              miss[:300])
-        # describe_index lists what is held (its description says so), and
-        # a read of a path naming no held library -- the user's own file --
-        # says what IS held and sends the user's files to the client's tools.
-        listing = proxy.run_our_tool("describe_index", {}, None, None, None, {})
-        check("fixturepkg@1.0.0" in listing and "NO_INDEX" not in listing
-              and "client's own file tools" in listing,
-              "describe_index with no repository lists the held libraries",
-              listing[:300])
-        d = as_json(proxy.run_our_tool("read_file_range", {"path": "src/main.rs"},
-                                       None, None, None, {}))
-        check(d is not None and d.get("error") == "NO_INDEX"
-              and d.get("libraries_held") == ["fixturepkg@1.0.0"]
-              and "affects" not in d,
-              "a read of the user's file names the held libraries, and does "
-              "not claim every argument fails", json.dumps(d)[:300])
-        rem = (d or {}).get("remedies") or []
-        check(bool(rem) and rem[0].get("fixable_by") == "agent"
-              and "client's own file" in rem[0].get("action", ""),
-              "its first remedy: the agent, with the client's own file tools",
-              json.dumps(rem)[:300])
-        check("database" not in ((d or {}).get("index") or {}),
-              "and no path on the service's disk", json.dumps(d)[:300])
-        check("sizeKvPool" in miss,
-              "and carries the package's own near-miss names", miss[:400])
-        # The repeat breaker must recognise this, the proxy's OWN no-result
-        # wording ("None matched."). It did not, so an identical miss was
-        # re-run every time for exactly the callers with no repository.
-        check(repeats._empty(miss), "repeats._empty recognises the proxy's "
-              "no-repository miss", miss[:160])
-        turn = repeats.Turn()
-        turn.record("find_definition_opt", {"symbol": "sizeKvPol"}, miss)
-        check(turn.cached_empty("find_definition_opt", {"symbol": "sizeKvPol"}),
-              "so the identical call is not re-run")
-        check(not repeats._empty(hit), "and a hit is not empty", hit[:120])
-        # A glob that NAMES the package routes the search there. On a real
-        # typegpu task the model passed glob="typegpu@0.12.5/data"; no path
-        # inside a package index matches that, every search came back as a
-        # wall of misses from every package, and it looped to the breaker.
-        for glob in ("fixturepkg", "fixturepkg@1.0.0", "fixturepkg/src",
-                     "fixturepkg@1.0.0/src", "node_modules/fixturepkg/src"):
-            hit = proxy.run_our_tool("find_by_pattern",
-                                     {"pattern": "sizeKvPool", "glob": glob},
-                                     None, None, None, {})
-            check("fixturepkg@1.0.0" in hit and "src/pool.ts" in hit,
-                  f"glob={glob!r} searches that package", hit[:240])
-        miss = proxy.run_our_tool("find_by_pattern",
-                                  {"pattern": "noSuchNameAnywhere",
-                                   "glob": "fixturepkg/src"},
-                                  None, None, None, {})
-        check("searched fixturepkg@1.0.0" in miss and len(miss) < 2000,
-              "a routed miss names the one package searched, briefly",
-              f"{len(miss)} chars: {miss[:200]}")
-        for path in ("fixturepkg@1.0.0/src/pool.ts", "fixturepkg/src/pool.ts",
-                     "node_modules/fixturepkg/src/pool.ts"):
-            read = proxy.run_our_tool("read_file_range", {"path": path},
-                                      None, None, None, {})
-            check("fixturepkg@1.0.0" in read and "sizeKvPool" in read,
-                  f"read_file_range(path={path!r}) reads from that package "
-                  "(it returned an error envelope on a real typegpu task)",
-                  read[:200])
-        check(proxy._route_package_glob("*.ts", ["fixturepkg"]) is None
-              and proxy._route_package_glob("fixturepkgx", ["fixturepkg"])
-              is None,
-              "an ordinary glob, or a name that only STARTS like a package, "
-              "is not routed")
-    finally:
-        os.remove(pkg_db)
-    out = proxy.run_our_tool("find_definition_opt", {"symbol": "sizeKvPool"},
-                             None, None, None, {})
-    check('"NO_INDEX"' in out,
-          "with no package held either, NO_INDEX is still the answer",
-          out[:200])
-    check("bind_project_context" not in proxy.OUR_NAMES
-          and not hasattr(proxy, "bind_project_context"),
-          "bind_project_context is gone (operator, 2026-09-24): it pinned "
-          "versions for tools main no longer has")
 
 
 def test_non_index_tools_work_without_an_index():
@@ -493,8 +426,12 @@ def test_bad_input_is_answered_not_crashed():
         check("traceback" not in (out or "").lower(),
               f"{tool} does not leak a traceback on {why}")
         if tool == "read_file_range":
-            check("passwd" not in (out or "") or "ERROR" in out or
-                  '"ok": false' in out,
+            # With nothing indexed code_search answers in prose that echoes
+            # the path it could not find; what must never appear is the
+            # file's content.
+            check("root:x:" not in (out or "")
+                  and ("not found under any indexed root" in out
+                       or "ERROR" in out or '"ok": false' in out),
                   "path traversal does not return the file", (out or "")[:100])
         if tool == "run_check" and "rm -rf" in json.dumps(args):
             check("deleted" not in (out or "").lower(),
@@ -786,8 +723,8 @@ def test_roots_table_is_part_of_the_schema():
     `_db()` created chunks, defs and refs but never `roots`, and THREE tools
     read `SELECT path FROM roots`. Against any database this module made
     rather than scripts/index_code.py -- a half-built index, a dependency
-    index, or the proxy's own `_no_repository_bound.sqlite3` -- all three
-    raised:
+    index, or the proxy's own `_no_repository_bound.sqlite3` (until the proxy
+    stopped running these tools, 2026-09-29) -- all three raised:
 
         {"error": "TOOL_RAISED", "reason": "OperationalError: no such table:
          roots", "retryable": false, "remedies": [{"fixable_by": "operator"}]}
@@ -865,12 +802,6 @@ BAD_ARGUMENT_CASES = [
     ("read_rings", {"limit": "sixty"}, "limit is a word"),
     ("read_rings", {"limit": 0}, "limit asks for nothing"),
     ("run_check", {"check": 5}, "check is a number"),
-    # delegate_investigation is NOT in this table. It has no argument gate at
-    # all: `args.get("question", "")` goes straight to a second context on the
-    # GPU, so a call with no question here would start a real investigation --
-    # and this suite must never need the card. It is checked with the
-    # hemisphere stubbed instead, below, and the missing gate is a finding in
-    # docs/TOOLS.md rather than something this file can exercise safely.
 ]
 
 
@@ -890,7 +821,7 @@ def test_bad_arguments_blame_the_caller_and_stay_retryable():
         d = as_json(out)
         if d is None or d.get("ok") is not False:
             # Tools that answer argument mistakes in prose -- record_step's
-            # "summary is required", bind_project_context's example -- are
+            # "summary is required" -- are
             # acceptable, provided the prose says what to do. What is NOT
             # acceptable is silence or a stack trace, both checked above.
             check(len(out.strip()) > 20,
@@ -1078,9 +1009,9 @@ def test_summarize_text_names_an_unreachable_model():
 def test_path_traversal_is_refused_with_an_index_present():
     """The traversal check, repeated where it can actually do damage.
 
-    With no index bound this returns NO_INDEX before the path is looked at, so
-    the existing check proves nothing about the resolver. With roots present,
-    the join and the prefix test are really exercised.
+    With nothing indexed there are no roots to join against, so the check
+    above proves little about the resolver. With roots present, the join and
+    the prefix test are really exercised.
     """
     for rel in ("../../../../Windows/win.ini", "..\\..\\..\\etc\\passwd",
                 os.path.abspath(__file__)):
@@ -1090,104 +1021,6 @@ def test_path_traversal_is_refused_with_an_index_present():
         check("[extensions]" not in out and "root:x:" not in out
               and "THE CONTRACT" not in out,
               "no file outside the roots is returned", out[:160])
-
-
-# ---------------------------------------------------------------------------
-# THE MODEL-BACKED TOOL, WITHOUT THE MODEL
-#
-# delegate_investigation cannot be run here -- it is a second context on the
-# GPU -- but the two things the PROXY is responsible for can be, with the
-# hemisphere stubbed: that a refused lane is reported rather than swallowed,
-# and that a finding comes back with its cost attached.
-# ---------------------------------------------------------------------------
-def test_delegate_investigation_reports_a_refused_lane():
-    """An investigation that did not happen must not look like one that did.
-
-    HELPER_LANES is 1. When the lane is held, `investigate` is never called --
-    and a silent return would be indistinguishable to the model from an
-    investigation that searched and found nothing. It would then reason from
-    an absence we manufactured.
-    """
-    import admission
-
-    class Busy:
-        def __enter__(self):
-            return False
-
-        def __exit__(self, *exc):
-            return False
-
-    original = admission.helper_lane
-    admission.helper_lane = lambda *a, **k: Busy()
-    try:
-        out = indexed("delegate_investigation",
-                      {"question": "how is the kv pool sized"})
-    finally:
-        admission.helper_lane = original
-
-    d = as_json(out)
-    if not check(d is not None, "a refused lane answers with structure", out[:120]):
-        return
-    check(d.get("error") == "HELPER_BUSY",
-          "a refused lane is named", str(d.get("error")))
-    check(d.get("retryable") is True,
-          "a busy lane frees, so retrying can work", str(d.get("retryable")))
-    # Asserts the PROPERTY, not the sentence. This check previously pinned the
-    # literal string "Nothing was investigated" and broke when the user-facing
-    # wording changed from "investigating in a second context" to "thinking
-    # deeply" -- a rename with no behavioural effect. A test that fails on
-    # phrasing trains people to edit the test, which is how an assertion stops
-    # meaning anything. What must remain true is that the agent is told no work
-    # happened, so it does not reason from an absence we manufactured.
-    reason = (d.get("reason") or "").lower()
-    check("nothing" in reason,
-          "the result says plainly that no work was done", reason[:120])
-
-
-def test_delegate_investigation_returns_the_cost_with_the_finding():
-    """Context economy is the entire justification for this tool.
-
-    An unmeasured saving is a claim. The proxy appends what the investigation
-    spent in the other context; if that line goes missing nobody notices,
-    because the finding still reads fine.
-    """
-    original = shomen.investigate
-    seen: dict = {}
-
-    def fake(question, tools, run_tool, context="", **_kw):
-        seen["question"] = question
-        seen["tools"] = [t["function"]["name"] for t in tools]
-        seen["probe"] = run_tool("find_definition_opt", {"symbol": "sizeKvPool"})
-        return {"ok": True, "finding": "sizeKvPool divides TOTAL_KV by slots.",
-                "handle": "abc12345", "hops": 3, "helper_tokens": 1200,
-                "seconds": 4.2}
-
-    shomen.investigate = fake
-    try:
-        out = indexed("delegate_investigation",
-                      {"question": "how is the kv pool sized",
-                       "context": "three@0.185.1"})
-    finally:
-        shomen.investigate = original
-
-    check(seen.get("question") == "how is the kv pool sized",
-          "the question reaches the investigator verbatim",
-          repr(seen.get("question")))
-    check("sizeKvPool divides TOTAL_KV by slots." in out,
-          "the finding is returned", out[:120])
-    for want in ("3 tool", "1200 tokens", "4.2s", "abc12345"):
-        check(want in out, f"the cost line reports {want}", out[-200:])
-    check("None of that entered this conversation" in out,
-          "the saving is stated, not implied", out[-200:])
-    check("delegate_investigation" not in seen.get("tools", []),
-          "the investigator cannot delegate again -- nothing bounds that depth",
-          json.dumps(seen.get("tools")))
-    check("bind_project_context" not in seen.get("tools", []),
-          "the investigator cannot rebind the session's versions",
-          json.dumps(seen.get("tools")))
-    check("src/pool.ts" in (seen.get("probe") or ""),
-          "the injected runner reaches the same index",
-          (seen.get("probe") or "")[:120])
 
 
 # ---------------------------------------------------------------------------
@@ -1201,7 +1034,7 @@ def test_generate_image_is_gated_and_says_why():
     names = {t["function"]["name"] for t in proxy.main_tools(None)[0]}
     check("yama_generate_image" not in names,
           "unconfigured: yama_generate_image is not offered", str(sorted(names)))
-    d = as_json(call("yama_generate_image", {"prompt": "a lighthouse at dusk"}))
+    d = as_json(ours("yama_generate_image", {"prompt": "a lighthouse at dusk"}))
     check(d is not None and d.get("ok") is False
           and d.get("error") == "IMAGEGEN_NOT_CONFIGURED",
           "a call names the situation", json.dumps(d)[:160])
@@ -1216,47 +1049,40 @@ def test_generate_image_is_gated_and_says_why():
         names = {t["function"]["name"] for t in proxy.main_tools(None)[0]}
         check("yama_generate_image" in names,
               "configured: yama_generate_image is offered", str(sorted(names)))
-        dt = {t["function"]["name"] for t in proxy.deep_thinking_tools()}
-        check("yama_generate_image" in dt,
-              "deep thinking gets it too -- mockups and designs while it "
-              "works (operator, 2026-09-23)", str(sorted(dt)))
-        check("yama_describe_image" in names and "yama_describe_image" in dt,
-              "yama_describe_image goes wherever yama_generate_image goes, deep "
-              "thinking included", str(sorted(dt)))
+        check("yama_describe_image" in names,
+              "yama_describe_image goes wherever yama_generate_image goes",
+              str(sorted(names)))
     finally:
         os.environ.pop("YAMADORI_IMAGEGEN_URL", None)
 
 
 def test_descriptions_say_remote_read_only():
-    """The second brain's tools describe a REMOTE, READ-ONLY library-source
-    service, and send the user's files to the client's own tools; the static
-    addendum on main describes what the service does beside the model.
+    """The code tools describe a REMOTE, READ-ONLY library-source service, and
+    send the user's files to the client's own tools; so do main's image tools.
 
     Operator report, 2026-09-23: in Hermes, "start this project in
     ~/Develop..." was spent on these tools instead of the harness's file
-    tools. Since 2026-09-24 they are the second brain's only (main gets the
-    client's tools and the image tools), and the capability block that
-    routed main to them is replaced by the addendum (proxy.ADDENDUM).
+    tools. (The second brain's copy of this set, and the addendum on main that
+    named its fold-back phrases, were removed 2026-09-29.)
     """
+    by_name = {t["name"]: t["description"] for t in cs.ALL_TOOLS}
     os.environ["YAMADORI_IMAGEGEN_URL"] = "http://127.0.0.1:9"
     try:
-        tools = proxy.deep_thinking_tools() + [shomen.TOOL]
+        main = {t["function"]["name"]: t["function"]["description"]
+                for t in proxy.image_tools()}
     finally:
         os.environ.pop("YAMADORI_IMAGEGEN_URL", None)
-    by_name = {t["function"]["name"]: t["function"]["description"]
-               for t in tools}
     for want in ("find_by_meaning", "find_definition_opt", "find_references",
                  "find_by_pattern", "read_file_range", "describe_index",
-                 "summarize_text", "run_check", "record_step", "read_rings",
-                 "delegate_investigation", "yama_generate_image", "yama_describe_image"):
-        check(want in by_name, f"{want} is in the second brain's set")
-    texts = dict(by_name, ADDENDUM=proxy.ADDENDUM)
-    for name, text in texts.items():
+                 "summarize_text", "run_check", "record_step", "read_rings"):
+        check(want in by_name, f"{want} is on the tools API's surface")
+    for want in ("yama_generate_image", "yama_describe_image"):
+        check(want in main, f"{want} is main's image tool")
+    for name, text in by_name.items():
         low = text.lower()
         check("this server" not in low and "proxy" not in low,
-              f"{name}: no 'this server', no 'proxy'",
-              text[:120])
-    for name in sorted(proxy.INDEX_TOOLS):
+              f"{name}: no 'this server', no 'proxy'", text[:120])
+    for name in sorted(INDEX_TOOLS):
         d = by_name[name]
         check(cs.REMOTE_READ_ONLY in d and "read-only" in d.lower(),
               f"{name}: says remote and read-only", d[-160:])
@@ -1265,22 +1091,14 @@ def test_descriptions_say_remote_read_only():
               d[-160:])
         check(d.startswith("Answers '"),
               f"{name}: leads with the question it answers", d[:60])
-    for name in ("run_check", "summarize_text", "yama_generate_image",
-                 "yama_describe_image", "record_step", "delegate_investigation"):
-        check("client's own" in by_name[name],
+    for name, d in (("run_check", by_name["run_check"]),
+                    ("summarize_text", by_name["summarize_text"]),
+                    ("record_step", by_name["record_step"]),
+                    ("yama_generate_image", main.get("yama_generate_image", "")),
+                    ("yama_describe_image", main.get("yama_describe_image", ""))):
+        check("client's own" in d,
               f"{name}: sends the user's files to the client's own tools",
-              by_name[name][-200:])
-    b = proxy.ADDENDUM
-    check("| when |" in b and b.count("\n|") >= 5,
-          "the addendum is a decision table, not prose", b[:300])
-    for phrase in ("Verified", "Repaired", "After thinking deeply,",
-                   "Compared two approaches", "Today I was inspired by"):
-        check(phrase in b, f"the addendum names the fold-back phrase "
-              f"{phrase!r}")
-    prohibitions = re.findall(r"\b(never|do not|don't|cannot)\b", b, re.I)
-    check(len(prohibitions) <= 2,
-          "at most two prohibitions in the addendum (AGENTS.md)",
-          str(prohibitions))
+              d[-200:])
 
 
 def test_describe_image_names_what_it_can_see():
@@ -1292,27 +1110,27 @@ def test_describe_image_names_what_it_can_see():
     check("yama_describe_image" not in names,
           "no image server and nothing attached: yama_describe_image is not offered",
           str(sorted(names)))
-    d = as_json(call("yama_describe_image", {"image": "image-0123456789",
+    d = as_json(ours("yama_describe_image", {"image": "image-0123456789",
                                         "question": "what is in it?"}))
     check(d is not None and d.get("ok") is False
           and d.get("error") == "UNKNOWN_IMAGE" and d.get("retryable") is True,
           "an id the conversation does not hold: UNKNOWN_IMAGE", json.dumps(d)[:200])
     check(d is not None and "available" in d and d.get("remedies"),
           "it names what IS available, with a remedy", json.dumps(d)[:200])
-    d = as_json(call("yama_describe_image", {"image": "C:/Windows/win.ini",
+    d = as_json(ours("yama_describe_image", {"image": "C:/Windows/win.ini",
                                         "question": "read it"}))
     check(d is not None and d.get("error") == "UNKNOWN_IMAGE",
           "a filesystem path is not an image id", json.dumps(d)[:200])
 
 
 def test_concurrent_calls_never_swap_indexes():
-    """Pre-deploy review, 2026-09-24 (BLOCKS DEPLOY #2). _run_on_package and
-    _run_our_tool saved, mutated and restored the process-wide
-    cs.INDEX_DB / CODE_INDEX_DB with no lock; two requests (or a request and
-    its deep-thinking thread) interleaved and one got the other's repository
-    source. The database is now PASSED (code_search.handle(db=)) and bound
-    per thread. Here the two calls are forced to interleave: each blocks
-    inside its tool until the other is inside its own."""
+    """Pre-deploy review, 2026-09-24 (BLOCKS DEPLOY #2). The proxy's package
+    and repository paths saved, mutated and restored the process-wide
+    cs.INDEX_DB / CODE_INDEX_DB with no lock; two requests interleaved and
+    one got the other's repository source. The database is now PASSED
+    (code_search.handle(db=)) and bound per thread. Here two calls are forced
+    to interleave: each blocks inside its tool until the other is inside its
+    own."""
     import threading
     tmp = tempfile.mkdtemp(prefix="yamadori_test_swap_")
     vec = struct.pack("<4f", 1.0, 0.0, 0.0, 0.0)
@@ -1345,13 +1163,11 @@ def test_concurrent_calls_never_swap_indexes():
 
     out: dict = {}
 
-    def run_a():             # a repository call (the deep-thinking thread)
-        out["a"] = call("describe_index", {}, db=dbs["a"],
-                        root=os.path.join(tmp, "a"))
+    def run_a():
+        out["a"] = call("describe_index", {}, db=dbs["a"])
 
-    def run_b():             # a package call (_library_use / definitions)
-        _exercised.add("describe_index")
-        out["b"] = proxy._run_on_package(dbs["b"], "describe_index", {})
+    def run_b():
+        out["b"] = call("describe_index", {}, db=dbs["b"])
 
     cs.load_index = interleaved
     try:
@@ -1364,10 +1180,10 @@ def test_concurrent_calls_never_swap_indexes():
         cs.load_index = orig
     a, b = out.get("a") or "", out.get("b") or ""
     check("account_a/secret.ts" in a and "account_b" not in a,
-          "interleaved: the repository call reads ITS index, not the other "
+          "interleaved: the first call reads ITS index, not the other "
           "request's", a[:200])
     check("account_b/secret.ts" in b and "account_a" not in b,
-          "interleaved: the package call reads ITS index, not the other "
+          "interleaved: the second call reads ITS index, not the other "
           "request's", b[:200])
     check(cs.INDEX_DB == prev_db
           and os.environ.get("CODE_INDEX_DB") == prev_env,
@@ -1375,134 +1191,91 @@ def test_concurrent_calls_never_swap_indexes():
           f"{cs.INDEX_DB} / {os.environ.get('CODE_INDEX_DB')}")
 
 
-def test_the_second_brains_other_sources_answer_or_say_why():
-    """Phase 0.6's tools (mcp/research_tools.py, and yama_think_deeply) through
-    the proxy's own dispatch: each answers, or fails with the situation,
-    whether a retry helps, and a remedy. Nothing leaves the machine: the
-    search goes to a refusing loopback port, the page to a private address.
-    Their behaviour in depth is mcp/test_deep.py."""
-    import research_tools as rt
-    import skills as skill_store
-    saved = (skill_store.armed, rt.SEARXNG_URL)
-    skill_store.armed = lambda: [{"id": "r3f-v10-frame", "version": 1,
-                                  "title": "R3F v10 frame loop",
-                                  "text": "- DO use delta in useFrame",
-                                  "rule": {"text": "react-three-fiber"}},
-                                 {"id": "prefix-sums", "version": 1,
-                                  "title": "Range sums",
-                                  "body": "Range sums\n- DO: use prefix sums "
-                                          "for many range-sum queries on a "
-                                          "static array.",
-                                  "text": "---\nname: prefix-sums\n---\n",
-                                  "rule": {}}]
-    rt.SEARXNG_URL = "http://127.0.0.1:9"
-    try:
-        out = call("find_in_knowledge_base", {"query": "useFrame delta"})
-        check("skill:r3f-v10-frame" in out,
-              "find_in_knowledge_base cites a skill as skill:<id>", out[:160])
-        out = call("find_in_knowledge_base", {"query": "range-sum prefix"})
-        check("skill:prefix-sums" in out and "hint:" not in out,
-              "a migrated skill (a SKILL.md body) is found and cited as "
-              "skill:<id>", out[:160])
-        d = as_json(call("read_web_page", {"url": "http://127.0.0.1:1234/"}))
-        check(d and d.get("error") == "REFUSED_ADDRESS"
-              and d.get("retryable") is False and d.get("remedies"),
-              "read_web_page refuses a local address, with a remedy",
-              json.dumps(d)[:200])
-        d = as_json(call("search_web", {"query": "three.js WebGPURenderer "
-                                                 "init error"}))
-        check(d and d.get("error") == "SEARCH_UNAVAILABLE"
-              and d.get("retryable") is True
+def test_the_proxys_other_server_tools_answer_or_say_why():
+    """The proxy's other server tools through its own dispatch
+    (proxy.run_our_tool): each answers, or fails with the situation, whether
+    a retry helps, and a remedy. And a name it no longer runs -- a code tool,
+    a removed tool of ours -- is NOT_A_SERVER_TOOL, not silence."""
+    out = ours("yama_recall_craft", {"name_or_topic": "no such craft here"})
+    d = as_json(out)
+    check(d and d.get("error") == "NO_SUCH_CRAFT"
+          and d.get("retryable") is True and d.get("remedies")
+          and "skill" not in out.lower(),
+          "yama_recall_craft with nothing matching: the situation, "
+          "retryable, a remedy -- and the model reads 'craft'",
+          (out or "")[:200])
+    # The MCP host's package lookups (mcp/mcp_host.py): this process never
+    # enabled the host (server.py does), so each says so -- the situation,
+    # not retryable, a remedy with its owner. Their own suite, against a real
+    # stdio server, is mcp/test_mcp_host.py.
+    for name, args in (
+            ("yama_find_package", {"query": "a date library",
+                                   "ecosystem": "npm"}),
+            ("yama_list_package_versions", {"package": "left-pad",
+                                            "ecosystem": "npm"}),
+            ("yama_read_package_readme", {"package": "left-pad",
+                                          "ecosystem": "npm"}),
+            ("yama_resolve_packages", {"packages": ["left-pad"],
+                                       "ecosystem": "npm"})):
+        d = as_json(ours(name, args))
+        check(d and d.get("error") == "MCP_SERVER_OFF"
+              and d.get("retryable") is False
               and any(r.get("fixable_by") == "operator"
                       for r in d.get("remedies") or []),
-              "search_web with nothing listening: the situation, retryable, "
-              "the remedy", json.dumps(d)[:200])
-        out = call("yama_recall_craft", {"name_or_topic": "no such craft here"})
+              f"{name} with the MCP host off: the situation, not "
+              f"retryable, the operator's remedy", json.dumps(d)[:200])
+    for name, args in (("find_by_meaning", {"query": "size pool"}),
+                       ("record_step", {"kind": "did", "summary": "x"}),
+                       ("yama_think_deeply", {"question": "why?"}),
+                       ("yama_plan", {"task": "build a voxel pagoda"}),
+                       ("delegate_investigation", {"question": "how is it"}),
+                       ("search_web", {"query": "three.js"})):
+        out = proxy.run_our_tool(name, args, {"_key": "test-session"})
         d = as_json(out)
-        check(d and d.get("error") == "NO_SUCH_CRAFT"
-              and d.get("retryable") is True and d.get("remedies")
-              and "skill" not in out.lower(),
-              "yama_recall_craft with nothing matching: the situation, "
-              "retryable, a remedy -- and the model reads 'craft'",
-              (out or "")[:200])
-        d = as_json(call("yama_think_deeply", {"question": "why does it fail?"}))
-        check(d and d.get("error") == "NOT_IN_A_TURN"
-              and d.get("retryable") is False,
-              "yama_think_deeply outside a chat turn says where it runs",
-              json.dumps(d)[:200])
-        d = as_json(call("yama_plan", {"task": "build a voxel pagoda"}))
-        check(d and d.get("error") == "NOT_IN_A_TURN"
-              and d.get("retryable") is False,
-              "yama_plan outside a chat turn says where it runs",
-              json.dumps(d)[:200])
-        # The MCP host's package lookups (mcp/mcp_host.py): this process never
-        # enabled the host (server.py does), so each says so -- the
-        # situation, not retryable, a remedy with its owner. Their own
-        # suite, against a real stdio server, is mcp/test_mcp_host.py.
-        for name, args in (
-                ("yama_find_package", {"query": "a date library",
-                                       "ecosystem": "npm"}),
-                ("yama_list_package_versions", {"package": "left-pad",
-                                                "ecosystem": "npm"}),
-                ("yama_read_package_readme", {"package": "left-pad",
-                                              "ecosystem": "npm"}),
-                ("yama_resolve_packages", {"packages": ["left-pad"],
-                                           "ecosystem": "npm"})):
-            d = as_json(call(name, args))
-            check(d and d.get("error") == "MCP_SERVER_OFF"
-                  and d.get("retryable") is False
-                  and any(r.get("fixable_by") == "operator"
-                          for r in d.get("remedies") or []),
-                  f"{name} with the MCP host off: the situation, not "
-                  f"retryable, the operator's remedy", json.dumps(d)[:200])
-    finally:
-        skill_store.armed, rt.SEARXNG_URL = saved
+        check(d and d.get("ok") is False
+              and d.get("error") == "NOT_A_SERVER_TOOL"
+              and d.get("retryable") is False and d.get("remedies")
+              and "Nothing was run" in (d.get("reason") or ""),
+              f"{name}: the proxy no longer runs it, and says so -- nothing "
+              f"was run", (out or "")[:200])
 
 
 def test_every_tool_has_a_test():
     """A tool added later cannot go quietly untested.
 
-    `_exercised` is filled by call() itself rather than by a hand-maintained
-    list, so it records what this run actually did. The failure mode being
-    prevented is the ordinary one: somebody adds a thirteenth tool, the suite
-    still says all green, and it says so about twelve tools.
+    `_exercised` and `_exercised_ours` are filled by call() and ours()
+    themselves rather than by a hand-maintained list, so they record what
+    this run actually did. The failure mode being prevented is the ordinary
+    one: somebody adds a tool, the suite still says all green, and it says so
+    about the tools it had before.
     """
-    missing = sorted(proxy.OUR_NAMES - _exercised)
-    check(not missing, "every tool in OUR_NAMES has at least one test case",
-          "untested: " + ", ".join(missing))
-    stray = sorted(_exercised - proxy.OUR_NAMES)
-    check(not stray, "no test exercises a tool the proxy does not offer",
+    surface = {t["name"] for t in cs.ALL_TOOLS}
+    missing = sorted(surface - _exercised)
+    check(not missing, "every tool on the tools API (code_search.ALL_TOOLS) "
+          "has at least one test case", "untested: " + ", ".join(missing))
+    stray = sorted(_exercised - surface)
+    check(not stray, "no test exercises a code tool the tools API does not "
+          "offer", "unknown: " + ", ".join(stray))
+    missing = sorted(proxy.OUR_NAMES - _exercised_ours)
+    check(not missing, "every tool in proxy.OUR_NAMES has at least one test "
+          "case", "untested: " + ", ".join(missing))
+    stray = sorted(_exercised_ours - proxy.OUR_NAMES)
+    check(not stray, "no test calls a server tool the proxy does not run",
           "unknown: " + ", ".join(stray))
-    # 13 since yama_generate_image (2026-09-22, docs/IMAGEGEN.md). It is offered
-    # only when an image server is configured; OUR_NAMES lists it always,
-    # because OUR_NAMES is what the proxy recognises as its own to execute.
-    # 14 since check_code (2026-09-23, mcp/code_check.py; its own suite is
-    # mcp/test_code_check.py). 15 since yama_describe_image (2026-09-23,
-    # mcp/vision.py; its own suite is mcp/test_vision.py). 13 since
-    # 2026-09-24: bind_project_context is deleted, and check_code is no
-    # longer a tool the proxy runs (the proxy checks code itself). 18 since
-    # Phase 0.6 (2026-09-24): yama_think_deeply on main, and the second brain's
-    # find_skills, find_in_knowledge_base, read_web_page and search_web
-    # (mcp/research_tools.py; their own suite is mcp/test_deep.py). 17
-    # since 2026-09-25: find_skills folded into find_in_knowledge_base (the
-    # knowledge base is the skills pipeline, nothing else). 18 since
-    # 2026-09-27: yama_recall_craft on main (skill_select PROGRESSIVE
-    # DISCLOSURE; its own suite is mcp/test_skill_turns.py). 19 since
-    # 2026-09-27: yama_plan on main (its own suite is mcp/test_ledger.py);
-    # every tool of ours on main renamed yama_* the same day. 22 since
-    # 2026-09-28: the MCP host's package lookups (yama_find_package,
-    # yama_package_versions, yama_package_readme; mcp/mcp_host.py, their
-    # own suite is mcp/test_mcp_host.py). 23 since 2026-09-29:
-    # yama_resolve_packages (mcp/npm_resolve.py, its own suite
-    # mcp/test_npm_resolve.py), and the two lookups renamed verb first
-    # (yama_list_package_versions, yama_read_package_readme; the old names
-    # are legacy, not OUR_NAMES).
-    check(len(proxy.OUR_NAMES) == 23 and "yama_recall_craft" in proxy.OUR_NAMES
-          and "yama_plan" in proxy.OUR_NAMES
-          and "yama_find_package" in proxy.OUR_NAMES
-          and "yama_resolve_packages" in proxy.OUR_NAMES
-          and "yama_package_versions" not in proxy.OUR_NAMES
-          and "find_skills" not in proxy.OUR_NAMES
+    # 23 until 2026-09-29, when the code tools, the work-log tools, the
+    # research tools, yama_think_deeply and yama_plan left the proxy
+    # (docs/REMOVED.md): what it runs now is the two image tools,
+    # yama_recall_craft and the MCP host's four package lookups
+    # (yama_find_package, yama_list_package_versions,
+    # yama_read_package_readme, yama_resolve_packages; the old names are
+    # legacy, not OUR_NAMES).
+    check(len(proxy.OUR_NAMES) == 7
+          and {"yama_generate_image", "yama_describe_image",
+               "yama_recall_craft", "yama_find_package",
+               "yama_resolve_packages"} <= proxy.OUR_NAMES
+          and not surface & proxy.OUR_NAMES
+          and not {"yama_think_deeply", "yama_plan", "yama_package_versions",
+                   "find_in_knowledge_base"} & proxy.OUR_NAMES
           and not set(proxy.LEGACY_TOOL_NAMES) & proxy.OUR_NAMES,
           "the tool count is what the audit was written against",
           str(sorted(proxy.OUR_NAMES)))
@@ -1532,524 +1305,9 @@ def test_every_tool_has_a_test():
           "and no result is produced for it", json.dumps(unlisted)[:140])
 
 
-def test_tools_are_withheld_when_they_cannot_work():
-    """The capability block and twelve tool definitions are not free.
-
-    MEASURED: on a problem with no repository and nothing indexed, the
-    augmented arm carried 3,145 prompt tokens against the baseline's 416 --
-    2,729 of them, 87% of its prompt, were the block and the tool list. It
-    called zero tools. On the two problems where it did call them it looped
-    twelve times against an empty index and never answered, at 842s and 889s.
-
-    So `should_offer_tools` withholds them when they CANNOT succeed, and only
-    then.
-
-    CHANGED 2026-09-22, deliberately. This test used to simulate "no index" by
-    pointing `cs.INDEX_DB` at a missing file. That was testing the old gate's
-    mechanism, and the mechanism was the bug: `cs.INDEX_DB` is the server's own
-    index, which a caller without a repository is never searched against, so
-    on a real deployment the gate never fired. What such a caller CAN reach is
-    the package store, so "no index" is now simulated by an empty package
-    store, and "an index exists" by a store holding one live package. The
-    domain half of the rule has its own suite: mcp/test_domains.py.
-    """
-    import domains
-    import sqlite3
-
-    msgs = [{"role": "user", "content": "how does the KV pool get sized?"}]
-    held_store = tempfile.mkdtemp(prefix="yamadori_test_pkgs_")
-    con = sqlite3.connect(os.path.join(held_store, "three@0.185.1.sqlite3"))
-    con.execute("CREATE TABLE chunks(id INTEGER PRIMARY KEY, path TEXT, "
-                "start INT, end INT, text TEXT, vec BLOB)")
-    con.execute("INSERT INTO chunks(path, start, end, text) "
-                "VALUES('src/x.js', 1, 1, 'x')")
-    # Held means usable: domains.held_sources() requires definitions
-    # (deps.index_health), so a live package index carries at least one.
-    con.execute("CREATE TABLE defs(name TEXT, kind TEXT, path TEXT, "
-                "start INT, end INT, line TEXT)")
-    con.execute("INSERT INTO defs VALUES('WebGPURenderer', 'class', "
-                "'src/x.js', 1, 1, 'class WebGPURenderer {}')")
-    con.commit()
-    con.close()
-    empty_store = tempfile.mkdtemp(prefix="yamadori_test_nopkgs_")
-    prev_store = domains.PACKAGE_STORE
-    domains.PACKAGE_STORE = held_store
-
-    offer, why = proxy.should_offer_tools(msgs, None)
-    check(offer is True, "tools offered when an index exists", why)
-
-    offer, why = proxy.should_offer_tools(msgs, os.path.join("C:", "some", "repo"))
-    check(offer is True, "tools offered when a repository is bound", why)
-
-    prev, prev_cache = cs.INDEX_DB, cs._INDEX
-    domains.PACKAGE_STORE = empty_store
-    try:
-        offer, why = proxy.should_offer_tools(msgs, None)
-        check(offer is False, "tools WITHHELD when no index can be searched", why)
-        check("NO_INDEX" in why or "no index" in why,
-              "and the reason says why, for the log", why)
-
-        # Skills forced off: at `medium` they would embed the question through
-        # the live embeddings server, and an offline suite sends no traffic.
-        body = {"model": "yamadori", "reasoning_effort": "medium",
-                "messages": msgs, "_client_ip": "127.0.0.1",
-                "_features": '{"skills": false}'}
-        # prepare() reads and writes session memory, and the gate now honours
-        # "this conversation already had the tools". Against the real
-        # index/nebari.sqlite3 that makes this check depend on whatever the
-        # live proxy has seen, so it gets a temp database of its own.
-        prev_nebari = proxy.nebari.DB
-        proxy.nebari.DB = os.path.join(held_store, "nebari.sqlite3")
-        try:
-            out = proxy.prepare(dict(body))
-        finally:
-            proxy.nebari.DB = prev_nebari
-        # CHANGED 2026-09-23: check_code needs no index (it parses the text it
-        # is handed), so the gate says nothing about it and it is offered at
-        # `medium` and up whatever the gate decides (yama_generate_image: every
-        # tier). What
-        # this check protects is that no INDEX tool is sent.
-        # CHANGED 2026-09-24: no tool of ours goes to main at all; the
-        # proxy checks code itself (mcp/tool_code.py).
-        sent = [t["function"]["name"] for t in (out.get("tools") or [])]
-        check(sent == [],
-              "no tool definitions of ours are sent", str(sent))
-        check(not [m for m in out["messages"] if m.get("role") == "system"],
-              "and no capability block is sent")
-    finally:
-        cs.INDEX_DB, cs._INDEX = prev, prev_cache
-        domains.PACKAGE_STORE = held_store
-
-    # Back to normal: the gate must not be sticky.
-    offer, _ = proxy.should_offer_tools(msgs, None)
-    check(offer is True, "the gate reopens once an index is present again")
-    domains.PACKAGE_STORE = prev_store
-
-
-def _selection_fixture():
-    """A package store holding `three` with a symbol table, a dead Laya, a
-    skill selection that injects one skill without the embedder, and an
-    upstream that answers at once. Returns (restore, upstream_calls,
-    investigations)."""
-    import domains
-    import selection
-    import skill_select
-    import sqlite3
-
-    store = tempfile.mkdtemp(prefix="yamadori_test_sel_pkgs_")
-    con = sqlite3.connect(os.path.join(store, "three@0.185.1.sqlite3"))
-    con.execute("CREATE TABLE chunks(id INTEGER PRIMARY KEY, path TEXT, "
-                "start INT, end INT, text TEXT, vec BLOB)")
-    con.execute("INSERT INTO chunks(path, start, end, text) "
-                "VALUES('core/Object3D.js', 1, 1, 'class Object3D')")
-    con.execute("CREATE TABLE defs(name TEXT, kind TEXT, path TEXT, start INT, "
-                "end INT, line TEXT)")
-    con.execute("INSERT INTO defs VALUES('Object3D', 'class', "
-                "'core/Object3D.js', 1, 1, 'class Object3D')")
-    con.commit()
-    con.close()
-
-    upstream: list[dict] = []
-    ran: list[dict] = []
-    finding = {"hops": 2}
-
-    def fake_post(path, payload, timeout=1800, retries=1):
-        upstream.append(json.loads(json.dumps(
-            {k: v for k, v in payload.items() if not k.startswith("_")})))
-        return {"choices": [{"index": 0, "message": {
-                    "role": "assistant", "content": "the answer"},
-                    "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5,
-                          "total_tokens": 15}}
-
-    def fake_events(path, payload, timeout=1800, retries=1):
-        # The turn engine (proxy._run_turn) reads the upstream through
-        # _post_events; the same fake, in its shape.
-        yield "done", fake_post(path, payload, timeout, retries)
-
-    def fake_investigate(question, tools, run_tool, context="", hops=8,
-                         on_think=None, tier="max", effort=None, seed=None,
-                         mode="investigate", **_kw):
-        ran.append({"question": question, "tier": tier, "effort": effort,
-                    "mode": mode,
-                    "tools": [t["function"]["name"] for t in tools]})
-        if on_think:
-            on_think("reading core/Object3D.js")
-        return {"ok": True, "finding": "DEFAULT_UP is (0,1,0), core/Object3D.js",
-                "hops": finding["hops"], "handle": "h1", "cited": [],
-                "unsupported": [], "helper_tokens": 1, "seconds": 0.1}
-
-    def fake_attach(augmented, messages, sel, body=None):
-        rec = {"on": True, "route_class": "code_generation",
-               "ids": ["abc123def456"], "versions": [2],
-               "names": ["prefix-sums"], "chars": 42, "tokens": 14,
-               "matched": [{"id": "abc123def456", "version": 2,
-                            "name": "prefix-sums", "title": "T" * 300}],
-               "why": "1 skill(s) injected"}
-        if not sel.get("skills"):
-            return augmented, dict(rec, on=False, ids=[], versions=[],
-                                   names=[], chars=0, why="not allowed")
-        out = [dict(m) for m in augmented]
-        out[-1]["content"] = out[-1]["content"] + "\n" + "S" * 41
-        return out, rec
-
-    saved = (domains.PACKAGE_STORE, selection.LAYA_URL, proxy._post,
-             proxy._post_events, shomen.investigate, skill_select.attach,
-             proxy.nebari.DB)
-    domains.PACKAGE_STORE = store
-    selection.LAYA_URL = "http://127.0.0.1:1"      # reserved; refuses
-    proxy._post = fake_post
-    proxy._post_events = fake_events
-    shomen.investigate = fake_investigate
-    skill_select.attach = fake_attach
-    proxy.nebari.DB = os.path.join(store, "nebari.sqlite3")
-
-    def restore():
-        (domains.PACKAGE_STORE, selection.LAYA_URL, proxy._post,
-         proxy._post_events, shomen.investigate, skill_select.attach,
-         proxy.nebari.DB) = saved
-    return restore, upstream, ran, finding
-
-
-def _lcb_prompt() -> str:
-    """A real LiveCodeBench prompt that the REGEX reads as "investigate" (the
-    puzzle says "we"), so the check below is not passed vacuously: only the
-    gate and the nothing-to-read rule stand between it and deep thinking."""
-    import selection
-    sys.path.insert(0, os.path.join(HERE, "..", "bench"))
-    from livecodebench import PROMPT_STDIN
-    with open(os.path.join(HERE, "..", "bench", "data", "test5.jsonl"),
-              encoding="utf-8") as fh:
-        for line in fh:
-            row = json.loads(line)
-            if (row.get("starter_code") or "").strip():
-                continue
-            p = PROMPT_STDIN.format(question=row["question_content"])
-            if selection.rule_baseline({"question": p}) == "investigate":
-                return p
-    raise RuntimeError("no LiveCodeBench prompt the regex reads as investigate")
-
-
-def test_deep_thinking_is_selected_not_forced_by_the_tier():
-    """docs/SELECTION-BUILD.md harms 1 and 5, steps 3-5 and 8, end to end
-    through complete() against a fake upstream.
-
-    At `max` deep thinking used to run on EVERYTHING -- its gate was
-    `root is not None or cs.has_index()`, true on every deployment -- with
-    tools copied from the request, so a LiveCodeBench puzzle whose tools were
-    withheld got an investigation with no tools and its uncited answer pasted
-    in as "findings from the indexed source".
-    """
-    restore, upstream, ran, finding = _selection_fixture()
-    try:
-        secret = "acct-7f3a-not-for-the-wire"
-        lcb = _lcb_prompt()
-        # skills are off at every tier (operator, 2026-09-29: "Stop skills
-        # until we have a good skill injector."): forced on so the skills
-        # record is checked
-        d = proxy.complete({"model": "yamadori", "reasoning_effort": "max",
-                            "messages": [{"role": "user", "content": lcb}],
-                            "_client_ip": "127.0.0.1", "_account": secret,
-                            "_features": '{"skills": true}'})
-        x = d.get("x_yamadori") or {}
-        # CHANGED 2026-09-27 (operator: "Doesn't matter the length of the
-        # prompt, we should always give it a planning turn"): a first user
-        # turn is a new task, so at max the plan job runs before main --
-        # whatever its size; the gate + rule still never decide it.
-        check(len(ran) == 1 and ran[0]["mode"] == "plan"
-              and ran[0]["question"].startswith("Plan this task."),
-              "a LiveCodeBench prompt at max: a new task, so the PLAN job "
-              "runs (every new task is planned)", str(ran)[:200])
-        check(x.get("selection", {}).get("investigate") is True
-              and x["selection"]["because"]["investigate"].startswith(
-                  "task kickoff")
-              and (x.get("deep") or {}).get("kind") == "kickoff",
-              "and the decision says why: task kickoff",
-              json.dumps(x.get("selection", {}).get("because"))[:200])
-        check((x.get("investigate") or {}).get("job") == "plan"
-              and x.get("tools_gate", {}).get("offer") is False,
-              "x_yamadori: the plan job, gate closed",
-              json.dumps({k: x.get(k) for k in ("investigate", "tools_gate")})[:200])
-        ran.clear()
-        # Operator decision 2026-09-23: a code-writing task fans out at max
-        # (selection._CODE_TASK). A puzzle is one: up to 3 candidates, the
-        # original included (sequential via the second brain, 2026-09-23).
-        check(x.get("selection", {}).get("fanout_n") == 3,
-              "a code-writing puzzle IS fanned out at max, to the tier's 3",
-              str(x.get("selection")))
-        # The fake upstream answers prose ("the answer"), so the sequential
-        # fan-out writes B, records the vote and stops: no tie-breaker.
-        check(len(upstream) == 2 and (x.get("fanout") or {}).get("mode")
-              == "sequential" and (x.get("fanout") or {}).get("steps") == 2,
-              "two upstream generations: the original plus the second "
-              "brain's one candidate (prose: no tie-breaker)",
-              f"{len(upstream)} {json.dumps(x.get('fanout'))[:200]}")
-
-        want = {"tier", "effort_sent", "tools_gate",
-                "selection", "fanout", "investigate",
-                "hops", "images", "budget", "check_code", "repair",
-                "sampling", "tools", "tool_turns",
-                # yama_describe_image calls and the images a request carried
-                # (mcp/vision.py), 2026-09-23.
-                "vision", "attachments",
-                # client utility calls and the slot/cache record
-                # (mcp/test_utility.py), 2026-09-23.
-                "utility", "tier_requested", "tier_overridden", "cache",
-                # the request's electricity (mcp/power.py), 2026-09-24.
-                "energy",
-                # skills, the one knowledge system (mcp/skill_select.py);
-                # the `hints` aliases were retired with hints, 2026-09-26.
-                "skills",
-                # which kind of side call, and a compaction's budget record
-                # (selection.utility_kind, tiers.compaction_budget), 2026-09-24.
-                "utility_kind", "compaction",
-                # the code-work route and the tool-call code check
-                # (mcp/route.py, mcp/tool_code.py), 2026-09-24.
-                "route", "tool_code",
-                # a call whose image argument opened as image data, stopped
-                # at once (tool_code IMAGE GUARD, #46), 2026-09-26.
-                "image_guard",
-                # one model, one cache (2026-09-24): the fold-backs, what the
-                # ledger restored and decided, and the slot warm.
-                "fold_back", "ledger", "warm",
-                # the live gate of 2026-09-24: how much answer followed a
-                # deep-thinking fold-back (proxy.fold_back_answer; the
-                # hidden-text regex was removed 2026-09-27).
-                "fold_back_answer",
-                # docs/SELF-IMPROVEMENT-LOG.md, 2026-09-24: the previous
-                # warm's own numbers (#11), the template's markers in the
-                # delivered content and whose they are (#12), and the
-                # library-use injection keyed on the packages a conversation
-                # uses (#19).
-                "warm_before", "template_markers", "library_use",
-                # earlier attempts of this same request cancelled for it
-                # (server._supersede, #44), 2026-09-26.
-                "superseded",
-                # the overthinking switches, the project and agent-step
-                # thinking cap (mcp/progress.py, tiers.BEHAVIOURS),
-                # 2026-09-26.
-                "progress",
-                # every A4000 decision the request caused: what was loaded,
-                # fit or unloaded to make room (mcp/gpu_room.py, #16).
-                "gpu_room",
-                # deep thinking's triggers, the thresholds in force and
-                # yama_think_deeply's calls (mcp/deep.py, Phase 0.6), 2026-09-24.
-                "deep",
-                # which conversation: its explicit id and where it came from
-                # (mcp/session_id.py, #41), 2026-09-25.
-                "session",
-                # the client's prompt against its window (C1) and the
-                # per-generation usage + sums that left `usage` (U1/U2),
-                # docs/OPENAI-CONFORMANCE.md, 2026-09-25.
-                "context", "usage",
-                # how the client's instruction messages were mapped
-                # (`developer` as system; proxy.instruction_roles),
-                # docs/HARNESS-PI.md gap 1, 2026-09-26.
-                "roles",
-                # the slots this request emptied -- the second brain's
-                # after a run, the transient one after a side call -- and
-                # the switch (mcp/slots.py RELEASE, #58), 2026-09-26.
-                "slots",
-                # the craft index / yama_recall_craft offer and this request's
-                # reads, and the tools of ours withheld for a conflict with
-                # the client's (skill_select, proxy.tool_conflicts),
-                # 2026-09-27.
-                "craft", "tools_withheld",
-                # an agent step that stopped with no call, judged and
-                # continued once (proxy CONTINUE A STATED STEP), 2026-09-27.
-                "continued",
-                # the MCP host's tools: the switch, the offer kept for the
-                # conversation, this request's calls (mcp/mcp_host.py),
-                # 2026-09-28.
-                "mcp"}
-        # REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md): "imitated_notes"
-        # (proxy._ImitatedNotes) and "tool_markup" (proxy._ToolMarkup).
-        check(set(x) == want, "x_yamadori carries exactly the agreed keys",
-              str(sorted(set(x) ^ want)))
-        blob = json.dumps(x)
-        check(secret not in blob and "_account" not in blob,
-              "x_yamadori never carries the account", blob[:120])
-        check(lcb[:200] not in blob and lcb[-200:] not in blob,
-              "x_yamadori carries no message text")
-        check(x["tier"] == "max" and x["effort_sent"] == "xhigh"
-              and x["hops"] == 1 and x["budget"]["reasoning_budget_tokens"],
-              "tier, the effort actually sent, hops and the budget sent",
-              json.dumps({k: x[k] for k in ("tier", "effort_sent", "hops",
-                                            "budget")}))
-        sk = x.get("skills") or {}
-        check(sk.get("ids") == ["abc123def456"] and sk.get("versions") == [2]
-              and sk.get("names") == ["prefix-sums"] and sk.get("chars") == 42,
-              "skills: ids, versions, names and chars, no skill text",
-              json.dumps(sk)[:200])
-
-        # CHANGED 2026-09-24 (Phase 0.6): a library question no longer runs
-        # deep thinking by itself -- the library_question gate is gone. At
-        # max it gets the definitions injection, like medium and high ...
-        # (asked mid-loop, after a tool result: a first user turn is a new
-        # task, and every new task is planned since 2026-09-27)
-        q = "What is the default value of Object3D.DEFAULT_UP in the source?"
-
-        def mid(text):
-            return [{"role": "user", "content": "Fix the scene."},
-                    {"role": "assistant", "content": "", "tool_calls": [{
-                        "id": "m1", "type": "function", "function": {
-                            "name": "read_file",
-                            "arguments": '{"path": "scene.js"}'}}]},
-                    {"role": "tool", "tool_call_id": "m1", "content": "ok"},
-                    {"role": "user", "content": text}]
-        upstream.clear()
-        d = proxy.complete({"model": "yamadori", "reasoning_effort": "max",
-                            "messages": mid(q),
-                            "_client_ip": "127.0.0.1"})
-        x = d.get("x_yamadori") or {}
-        first = upstream[0]["messages"] if upstream else []
-        check(not ran and x.get("route", {}).get("class") == "library_question"
-              and "Library definitions" in str(first[-1].get("content")),
-              "a library question with no trigger: no deep thinking, the "
-              "definitions injection instead (Phase 0.6)",
-              json.dumps(x.get("selection", {}).get("because"))[:300])
-        # ... and the known-hard-area trigger runs deep thinking when the
-        # conversation USES a held package the model cannot have seen (here
-        # named unseen by the operator's list, deep.unseen).
-        q2 = ("What is the default value of Object3D.DEFAULT_UP in the "
-              "source?\n```js\nimport { Object3D } from 'three';\n```")
-        os.environ["YAMADORI_UNSEEN_PACKAGES"] = "three"
-        upstream.clear()
-        try:
-            d = proxy.complete({"model": "yamadori", "reasoning_effort": "max",
-                                "messages": mid(q2),
-                                "_client_ip": "127.0.0.1"})
-        finally:
-            os.environ.pop("YAMADORI_UNSEEN_PACKAGES", None)
-        x = d.get("x_yamadori") or {}
-        check(len(ran) == 1 and (x.get("deep") or {}).get("kind") == "area"
-              and "three@0.185.1" in ran[0]["question"],
-              "a held package the model cannot have seen: the area trigger "
-              "runs deep thinking on it",
-              json.dumps(x.get("selection", {}).get("because"))[:300])
-        tools = set(ran[0]["tools"]) if ran else set()
-        check(tools and "delegate_investigation" not in tools
-              and "bind_project_context" not in tools
-              and "find_definition_opt" in tools,
-              "its tools are ours (deep_thinking_tools), not the request's",
-              str(sorted(tools)))
-        check(ran and ran[0].get("tier") == "max",
-              "deep thinking runs at the REQUEST's tier (max -> xhigh effort), "
-              "passed by name, not a hardcoded effort string",
-              str(ran[0].get("tier") if ran else None))
-        first = upstream[0]["messages"] if upstream else []
-        pre = first[-1] if first else {}
-        check(pre.get("role") == "assistant"
-              and str(pre.get("reasoning_content", "")).startswith(
-                  proxy.FINDINGS_HEAD)
-              and pre.get("content", "").endswith("After thinking deeply,"),
-              "a finding that searched is PREFILLED as main's reasoning, and "
-              "the answer opens with the fold-back phrase",
-              json.dumps(pre)[:300])
-        inv = x.get("investigate") or {}
-        check(inv.get("ran") and inv.get("injected") and inv.get("hops") == 2
-              and inv.get("handle") == "h1",
-              "x_yamadori.investigate: ran, hops, handle", json.dumps(inv))
-        sig = (x.get("selection") or {}).get("signals") or {}
-        # Phase 0.6: the triggers do not consult Laya (a separate evaluation
-        # decides Laya vs Tev1).
-        check(sig.get("laya") is None
-              and str(sig.get("laya_status", "")).startswith("not consulted")
-              and sig.get("trigger") == "area",
-              "the trigger path does not consult Laya, and says so",
-              str(sig.get("laya_status")))
-
-        ran.clear()
-        upstream.clear()
-        finding["hops"] = 0
-        d = proxy.complete({"model": "yamadori", "reasoning_effort": "max",
-                            "messages": [{"role": "user", "content": q}],
-                            "_client_ip": "127.0.0.1",
-                            "_features": '{"investigate": true}'})
-        inv = (d.get("x_yamadori") or {}).get("investigate") or {}
-        first = upstream[0]["messages"] if upstream else []
-        # CHANGED 2026-09-23 (operator: the second brain's work is never
-        # thrown away). A run that searched NOTHING used to be dropped as
-        # general knowledge. It now crosses -- but under REASONING_HEAD,
-        # never FINDINGS_HEAD, so it is not presented as retrieved source
-        # (docs/SELECTION-BUILD.md harm 1), and every fact is labelled.
-        crossed = [str(m.get("reasoning_content")) for m in first
-                   if m.get("role") == "assistant"
-                   and str(m.get("reasoning_content", "")).startswith(
-                       proxy.REASONING_HEAD)]
-        check(inv.get("ran") and inv.get("injected")
-              and inv.get("searches") == 0 and len(crossed) == 1
-              and not any(proxy.FINDINGS_HEAD
-                          in str(m.get("reasoning_content") or m.get("content"))
-                          for m in first),
-              "a finding that searched NOTHING crosses, labelled 'reasoning, "
-              "no sources checked' -- never as source", json.dumps(inv))
-        # The fixture's fact cites core/Object3D.js, a file the fixture
-        # store's index does not list (no package_files): the verifier cannot
-        # read it, so the citation is REMOVED and the fact crosses as
-        # reasoning (shomen THE EVIDENCE, live gate 2026-09-24).
-        check(crossed and "DEFAULT_UP is (0,1,0) (reasoning, not checked "
-                          "against source)" in crossed[0]
-              and "core/Object3D.js" not in crossed[0]
-              and (inv.get("handoff") or {}).get("unverified") == 1
-              and (inv.get("handoff") or {}).get("citations_removed") == 1,
-              "and its fact is labelled unverified, its unreadable citation "
-              "removed, counted in x_yamadori.investigate.handoff",
-              (crossed[0] if crossed else "")[:300])
-        finding["hops"] = 2
-
-        ran.clear()
-        d = proxy.complete({"model": "yamadori", "reasoning_effort": "medium",
-                            "messages": [{"role": "user", "content": q}],
-                            "_client_ip": "127.0.0.1"})
-        check(not ran, "the engine never exceeds the tier: nothing at medium",
-              str(ran))
-
-        # The header FORCES, for experiments -- including the arm the old code
-        # could not run: deep thinking with retrieval off got no tools.
-        ran.clear()
-        upstream.clear()
-        d = proxy.complete({"model": "yamadori", "reasoning_effort": "minimal",
-                            "messages": [{"role": "user", "content": lcb}],
-                            "_client_ip": "127.0.0.1",
-                            "_features": '{"investigate": true}'})
-        check(len(ran) == 1 and "find_by_meaning" in ran[0]["tools"],
-              "forced on with retrieval off, deep thinking still has its tools",
-              str(ran)[:200])
-        check(not upstream[0].get("tools"),
-              "while the main conversation stays tool-less",
-              str(len(upstream[0].get("tools") or [])))
-
-        # Step 8: delegate_investigation is a benchmark arm, off by default.
-        upstream.clear()
-        proxy.complete({"model": "yamadori", "reasoning_effort": "medium",
-                        "messages": [{"role": "user", "content": q}],
-                        "_client_ip": "127.0.0.1"})
-        names = {t["function"]["name"] for t in upstream[0].get("tools") or []}
-        check("find_definition_opt" not in names
-              and "delegate_investigation" not in names,
-              "delegate_investigation is not offered by default (and no code "
-              "tool of ours reaches main)",
-              str(sorted(names)))
-        upstream.clear()
-        proxy.complete({"model": "yamadori", "reasoning_effort": "medium",
-                        "messages": [{"role": "user", "content": q}],
-                        "_client_ip": "127.0.0.1",
-                        "_features": '{"delegate": true}'})
-        names = {t["function"]["name"] for t in upstream[0].get("tools") or []}
-        check("delegate_investigation" in names,
-              "and is offered when the header asks for it (the arm)",
-              str(sorted(names)))
-    finally:
-        restore()
-
-
 def main() -> int:
-    for fn in (test_tools_are_withheld_when_they_cannot_work,
-               test_deep_thinking_is_selected_not_forced_by_the_tier,
-               test_never_empty_never_raw,
+    for fn in (test_never_empty_never_raw,
                test_index_tools_name_the_situation,
-               test_no_repository_falls_back_to_held_packages,
                test_non_index_tools_work_without_an_index,
                test_work_log_is_per_session,
                test_bad_input_is_answered_not_crashed,
@@ -2066,13 +1324,11 @@ def main() -> int:
                test_run_check_lists_and_refuses_without_executing_anything,
                test_summarize_text_names_an_unreachable_model,
                test_path_traversal_is_refused_with_an_index_present,
-               test_delegate_investigation_reports_a_refused_lane,
-               test_delegate_investigation_returns_the_cost_with_the_finding,
                test_generate_image_is_gated_and_says_why,
                test_describe_image_names_what_it_can_see,
                test_descriptions_say_remote_read_only,
                test_concurrent_calls_never_swap_indexes,
-               test_the_second_brains_other_sources_answer_or_say_why,
+               test_the_proxys_other_server_tools_answer_or_say_why,
                test_every_tool_has_a_test):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

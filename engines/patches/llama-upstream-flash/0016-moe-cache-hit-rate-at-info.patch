@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Wed, 30 Sep 2026 02:49:23 -0400
+Subject: [PATCH] llama: moe expert cache reports its hit rate at INFO
+
+The cache's statistics line (hits, misses, the running hit rate) was
+LLAMA_LOG_DEBUG, which llama-server prints only at -lv 5 with every other
+debug line, every 512 cache steps, and at the end of llama_moe_cache_step,
+which the strata policy (0004) returns before: under that policy it never
+printed. It is now INFO (-lv 4), printed every 64 steps (a 256-token decode
+is ~70-256 steps) before either policy's branch, with the rate of the last
+64 steps beside the running one, so a speed run can report the share of
+routed expert reads the VRAM cache served next to its tokens per second.
+---
+ src/llama-moecache.cpp | 20 ++++++++++++++------
+ 1 file changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index d0bc88ab..75b88bfe 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -552,6 +552,20 @@ void llama_moe_cache_step() {
+     std::lock_guard<std::mutex> lock(mc->mtx);
+     mc->n_steps++;
+ 
++    // the share of routed expert reads the VRAM cache served: every 64 steps (a 256-token decode is ~70-256 steps),
++    // before either policy returns, at INFO (llama-server shows it at -lv 4), the last 64 steps' rate beside the
++    // running one
++    if (mc->n_steps % 64 == 0) {
++        uint64_t h = 0, m = 0;
++        for (auto & ls : mc->layers) { h += ls.n_hit; m += ls.n_miss; }
++        static uint64_t h_prev = 0, m_prev = 0;
++        const uint64_t dh = h - h_prev, dm = m - m_prev;
++        h_prev = h;
++        m_prev = m;
++        LLAMA_LOG_INFO("moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%% last-64=%.1f%%\n",
++                mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0, dh + dm ? 100.0*dh/(dh + dm) : 0.0);
++    }
++
+     // 0004: Strata's adaptive tier (generate.cpp:2418-2457), at deliberate moments only
+     if (mc->policy_strata) {
+         for (auto & ls : mc->layers) {
+@@ -663,12 +677,6 @@ void llama_moe_cache_step() {
+     }
+     mc->wcv.notify_one();
+ 
+-    if (mc->n_steps % 512 == 0) {
+-        uint64_t h = 0, m = 0;
+-        for (auto & ls : mc->layers) { h += ls.n_hit; m += ls.n_miss; }
+-        LLAMA_LOG_DEBUG("moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%%\n",
+-                mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0);
+-    }
+ }
+ 
+ int64_t llama_moe_cache_max_tokens() {

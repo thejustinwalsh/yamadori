@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 """The dashboard's view of the stack as it is (the 2026-09-29 fixup), asserted.
 
-  /dash/api/nebari   (mcp/dash_nebari.py) what the model can draw on: skill
-                     counts by state and the SERVED skills along each
+  /dash/api/skill-factory/library   (mcp/dash_skills.py; what the NEBARI
+                     screen showed, folded into the Skills page 2026-09-30)
+                     skill counts by state and the SERVED skills along each
                      taxonomy axis; one row per held package index (name
-                     from the file stem, @scope restored, counts, meta, and
-                     why deep thinking treats it as unseen); cached; every
-                     part fails alone; the route claims only its own path
+                     from the file stem, @scope restored, counts, meta) and
+                     what reads them; cached; every part fails alone
   /dash/api/tiers    (mcp/dashboard.py) carries the model serving each tier
                      (mcp/max_mode.py model_for) and the max mode switch
-  server.py          routes /dash/api/nebari through the gated catch-all
+  server.py          NEBARI (/dash/api/nebari) and /dash/api/results are gone
 
 Every store is a temp path (mcp/offline_stores.py) set BEFORE any import;
 the package indexes are temp sqlite files; nothing reaches a port.
@@ -32,7 +32,7 @@ PKG_DIR = os.path.join(_TMP, "packages")
 os.makedirs(PKG_DIR, exist_ok=True)
 os.environ["YAMADORI_PACKAGES_DIR"] = PKG_DIR
 
-import dash_nebari  # noqa: E402
+import dash_skills  # noqa: E402
 import dashboard  # noqa: E402
 import tree_sources  # noqa: E402
 
@@ -60,10 +60,10 @@ def _index(stem: str, chunks: int, defs: int, meta: dict) -> str:
 def test_package_names():
     check(os.path.abspath(tree_sources.PACKAGES) == os.path.abspath(PKG_DIR),
           "the package folder read is the temp one, never index/packages", tree_sources.PACKAGES)
-    check(dash_nebari.package_of("react-three__fiber@10.0.0-alpha.5") == ("@react-three/fiber", "10.0.0-alpha.5"),
+    check(dash_skills.package_of("react-three__fiber@10.0.0-alpha.5") == ("@react-three/fiber", "10.0.0-alpha.5"),
           "a scoped package's stem gets its @scope/ back")
-    check(dash_nebari.package_of("three@0.186.0") == ("three", "0.186.0"), "an unscoped one is as written")
-    check(dash_nebari.package_of("noversion") == ("noversion", ""), "a stem with no version never raises")
+    check(dash_skills.package_of("three@0.186.0") == ("three", "0.186.0"), "an unscoped one is as written")
+    check(dash_skills.package_of("noversion") == ("noversion", ""), "a stem with no version never raises")
 
 
 def test_packages_read_only():
@@ -71,21 +71,15 @@ def test_packages_read_only():
                {"files": "3", "embedded": "1", "complete": "1", "published": "2026-04-01"})
     _index("three@0.186.0", 50, 1, {"files": "10", "embedded": "0"})
     before = os.path.getmtime(a), os.path.getsize(a)
-    import deep
-    real = deep.unseen
-    deep.unseen = lambda pkg, ver, db=None: ("a new major" if pkg == "@react-three/fiber" else None)
-    try:
-        rows = dash_nebari.packages(PKG_DIR)
-    finally:
-        deep.unseen = real
+    rows = dash_skills.held_packages(PKG_DIR)
     check([r["package"] for r in rows] == ["three", "@react-three/fiber"],
           "one row per index, largest first", str([r["package"] for r in rows]))
     f = [r for r in rows if r["package"] == "@react-three/fiber"][0]
     check(f["chunks"] == 5 and f["defs"] == 7 and f["files"] == 3 and f["embedded"] is True
           and f["published"] == "2026-04-01", "counts and meta are read", str(f))
-    check(f["unseen"] == "a new major", "deep.unseen's reason rides on the row", str(f["unseen"]))
+    check("unseen" not in f, "no deep-thinking unseen reason (removed 2026-09-29)", str(f))
     t = rows[0]
-    check(t["embedded"] is False and t["complete"] is None and t["unseen"] is None,
+    check(t["embedded"] is False and t["complete"] is None,
           "an unembedded index says so; absent meta is None, not a guess", str(t))
     check((os.path.getmtime(a), os.path.getsize(a)) == before, "the index files are not written")
 
@@ -100,7 +94,7 @@ def test_skills_view():
         {"id": "c", "category": {"language": ["rust"], "situation": ["error_output"]}},
     ]
     try:
-        v = dash_nebari.skills_view()
+        v = dash_skills.library_by_area()
     finally:
         skills.counts, skills.armed = real
     check(v["served"] == 3 and v["total"] == 4, "served is what selection reads; total is every state", str(v))
@@ -115,29 +109,34 @@ def test_skills_view():
 def test_route_cache_and_isolation():
     import skills
     real = skills.counts
-    dash_nebari._cache.clear()
+    dash_skills._library_cache.clear()
     skills.counts = lambda: (_ for _ in ()).throw(RuntimeError("store locked"))
     try:
-        code, ctype, body = dash_nebari.handle_get("/dash/api/nebari")
+        code, ctype, body = dash_skills.handle_get("/dash/api/skill-factory/library")
     finally:
         skills.counts = real
     j = json.loads(body)
     check(code == 200 and ctype == "application/json", "the route answers JSON", f"{code} {ctype}")
-    check("error" in j["skills"] and "store locked" in j["skills"]["error"],
-          "a failing part reports its own error", str(j["skills"]))
+    check("error" in j["areas"] and "store locked" in j["areas"]["error"],
+          "a failing part reports its own error", str(j["areas"]))
     check(isinstance(j["packages"], list) and len(j["packages"]) == 2, "the other parts still answer",
           str(j["packages"])[:200])
-    check(dash_nebari.handle_get("/dash/api/nebari/x") is None and dash_nebari.handle_get("/dash/api/stats") is None,
+    who = [r["who"] for r in j["readers"]]
+    check(any("code-search" in w for w in who) and any("type check" in w for w in who)
+          and any("find_by_meaning" in r["needs_embedding"] for r in j["readers"]),
+          "what reads a held package today: the code-search tools (find_by_meaning "
+          "needs the index embedded) and the PROVE type check", str(j["readers"]))
+    check(dash_skills.handle_get("/dash/api/skill-factory/library/x") is None,
           "only its own path is claimed")
-    # cached: a second call inside CACHE_S does not read the stores again
+    # cached: a second call inside LIBRARY_CACHE_S does not read the stores again
     calls = []
     skills.counts = lambda: calls.append(1) or {}
     try:
-        dash_nebari.overview()
+        dash_skills.library()
     finally:
         skills.counts = real
-    check(not calls, "a second read inside CACHE_S is the cache", str(calls))
-    dash_nebari._cache.clear()
+    check(not calls, "a second read inside the cache window is the cache", str(calls))
+    dash_skills._library_cache.clear()
 
 
 def test_tiers_carry_the_serving_model():
@@ -169,8 +168,12 @@ def test_tiers_carry_the_serving_model():
 
 def test_server_routes_it():
     src = open(os.path.join(HERE, "server.py"), encoding="utf-8").read()
-    check("import dash_nebari" in src and "dash_nebari.handle_get" in src,
-          "server.py dispatches /dash/api/nebari through the gated GET chain")
+    check("dash_nebari" not in src and "dash_results" not in src,
+          "NEBARI (/dash/api/nebari) and /dash/api/results are retired: server.py "
+          "no longer dispatches them (2026-09-30)")
+    check(not os.path.exists(os.path.join(HERE, "dash_nebari.py"))
+          and not os.path.exists(os.path.join(HERE, "dash_results.py")),
+          "and their modules are gone")
 
 
 def main() -> int:

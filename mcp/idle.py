@@ -97,10 +97,11 @@ def next_tick() -> float:
     return time.time() + every
 
 
-def slots_processing() -> tuple[list[int] | None, str]:
-    """(the main model's slots that are generating, how it was read). []
-    when none is, or when the main model is not loaded; None when it cannot
-    be told."""
+def slots_processing(model: str | None = None) -> tuple[list[int] | None, str]:
+    """(the main model's -- or `model`'s -- slots that are generating, how it
+    was read). [] when none is, or when the model is not loaded; None when it
+    cannot be told. A read only while /running lists it (never loads)."""
+    MAIN_MODEL_ = model or MAIN_MODEL
     try:
         import gpu_room
         rows = gpu_room.running(UPSTREAM)
@@ -108,11 +109,11 @@ def slots_processing() -> tuple[list[int] | None, str]:
         return None, f"llama-swap /running: {type(e).__name__}: {e}"[:200]
     if rows is None:
         return None, "llama-swap /running could not be read"
-    if not any(str(r.get("model")) == MAIN_MODEL for r in rows):
-        return [], f"{MAIN_MODEL} is not loaded"
+    if not any(str(r.get("model")) == MAIN_MODEL_ for r in rows):
+        return [], f"{MAIN_MODEL_} is not loaded"
     try:
         with urllib.request.urlopen(
-                f"{UPSTREAM}/upstream/{MAIN_MODEL}/slots", timeout=10) as r:
+                f"{UPSTREAM}/upstream/{MAIN_MODEL_}/slots", timeout=10) as r:
             table = json.loads(r.read().decode("utf-8") or "[]")
     except Exception as e:                                       # noqa: BLE001
         return None, f"/slots: {type(e).__name__}: {e}"[:200]
@@ -122,10 +123,15 @@ def slots_processing() -> tuple[list[int] | None, str]:
             and s.get("is_processing")], "read"
 
 
-def gpu_running(exclude: str | None = None) -> int:
+def gpu_running(exclude: str | None = None, scope: str | None = None) -> int:
+    """Other gpu jobs running: all of them (as before), or those of one gpu SCOPE (mcp/jobs.py GPU_SCOPES)."""
     import jobs
     con = jobs._db()
     try:
+        if scope in jobs.GPU_SCOPES:
+            return con.execute(
+                "SELECT COUNT(*) FROM jobs WHERE lane IN ('gpu','gpu_a4000') AND state='running' "
+                "AND COALESCE(card, lane)=? AND id != ?", (scope, exclude or "")).fetchone()[0]
         return con.execute(
             "SELECT COUNT(*) FROM jobs WHERE lane='gpu' AND state='running' "
             "AND id != ?", (exclude or "",)).fetchone()[0]
@@ -133,14 +139,25 @@ def gpu_running(exclude: str | None = None) -> int:
         con.close()
 
 
-def stack_idle(job_id: str | None = None) -> dict:
+# The A4000's generating server, for a job of its scope: the table's helper (bonsai-a4000), where the operator's
+# own conversation's jjava and side calls run while the main card is locked.
+A4000_MODEL = os.environ.get("YAMADORI_A4000_MODEL", "bonsai-a4000")
+
+
+def stack_idle(job_id: str | None = None, scope: str | None = None) -> dict:
     """{idle, why, until, checks}. Every condition is checked in order; the
     first that fails is the reason, and `until` is when looking again can
-    change the answer."""
+    change the answer. `scope` gpu_a4000 (a job claimed for the A4000,
+    mcp/jobs.py): the main card's state is not its business -- it waits for
+    no client request, no other job of ITS scope, and the A4000's generating
+    server idle; never a read of the main card."""
     checks: dict = {"idle_minutes": idle_minutes(),
-                    "idle_minutes_source": IDLE_MINUTES_SOURCE}
+                    "idle_minutes_source": IDLE_MINUTES_SOURCE, "scope": scope or "gpu"}
     import max_mode
-    if max_mode.blocks(MAIN_MODEL):
+    scope = scope or max_mode.scope()        # the worker's thread sets it (worker.run_one)
+    checks["scope"] = scope or "gpu"
+    a4000 = scope == "gpu_a4000"
+    if not a4000 and max_mode.blocks(MAIN_MODEL):
         # MAX MODE (mcp/max_mode.py), first: the max model holds the card; "not loaded" is not idle, and a job that
         # asked the main model would load it
         checks["max_mode"] = max_mode.snapshot()
@@ -159,19 +176,19 @@ def stack_idle(job_id: str | None = None) -> dict:
                        f"(idle means {checks['idle_minutes']:g}: "
                        "skill_learn.IDLE_MINUTES)",
                 "until": at + checks["idle_minutes"] * 60, "checks": checks}
-    n = gpu_running(job_id)
+    n = gpu_running(job_id, scope=scope if a4000 else None)
     checks["gpu_running"] = n
     if n:
         return {"idle": False, "why": f"{n} other gpu-lane job(s) running",
                 "until": next_tick(), "checks": checks}
-    busy, how = slots_processing()
+    busy, how = slots_processing(A4000_MODEL) if a4000 else slots_processing()
     checks["slots"] = {"processing": busy, "how": how}
     if busy is None:
         return {"idle": False, "why": f"cannot tell whether the model is "
                                       f"generating ({how})",
                 "until": next_tick(), "checks": checks}
     if busy:
-        return {"idle": False, "why": f"{MAIN_MODEL} slot(s) {busy} are "
+        return {"idle": False, "why": f"{A4000_MODEL if a4000 else MAIN_MODEL} slot(s) {busy} are "
                                       "generating",
                 "until": next_tick(), "checks": checks}
     return {"idle": True,

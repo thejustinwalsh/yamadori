@@ -22,6 +22,11 @@ is recorded as the author of a submission, an edit or a state change.
     GET  /dash/api/skills/<id>/skill.md      the SKILL.md as text/markdown
     GET  /dash/api/skill-factory/prompts     the templates, with their text
     GET  /dash/api/skill-factory/selections  recent selections, all skills
+    GET  /dash/api/skill-factory/library     the served skills by taxonomy
+                                             area, the held package indexes
+                                             and what reads them (folded in
+                                             from the retired NEBARI screen,
+                                             2026-09-30)
     GET  /dash/api/skill-factory/recent      the last requests' x_yamadori.
                                              skills (in memory), with the
                                              per-turn caps
@@ -74,10 +79,13 @@ filesystem path (skills.public). Errors are {ok: false, error} with 400
 """
 from __future__ import annotations
 
+import glob
 import json
 import re
 import os
+import sqlite3
 import sys
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -185,9 +193,153 @@ def overview() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# THE LIBRARY BY AREA AND THE HELD PACKAGES (2026-09-30, operator: "Please
+# make that cleanup of Nebari, remove and fold anything useful into the
+# skills page"): what the retired NEBARI screen showed that still has a
+# reader, now GET /dash/api/skill-factory/library. Read-only (sqlite
+# mode=ro), no model asked, cached LIBRARY_CACHE_S: the package indexes do
+# not change between polls.
+# ---------------------------------------------------------------------------
+LIBRARY_PATH = "/dash/api/skill-factory/library"
+LIBRARY_CACHE_S = 60.0
+# The taxonomy axes counted over the served skills (skill_classify.taxonomy).
+AXES = ("framework", "language", "domain", "artifact", "phase")
+# What reads a held package index today. The code-search MCP tools (the
+# tools API, :1235) that run against a held package: code_search's own
+# "affects" list for "no library index is held" (mcp/code_search.py);
+# find_by_meaning needs the index EMBEDDED. And the skills pipeline's PROVE
+# stage: mcp/typecheck.py installs the HELD version (typecheck.pinned) in its
+# throwaway container.
+PACKAGE_READERS = [
+    {"who": "code-search MCP tools (tools API :1235)",
+     "tools": ["find_by_pattern", "find_definition_opt", "find_references",
+               "read_file_range", "find_by_meaning"],
+     "needs_embedding": ["find_by_meaning"],
+     "source": "mcp/code_search.py (TOOLS; the 'affects' list)"},
+    {"who": "skills pipeline PROVE type check",
+     "tools": ["typecheck.check (the held version, and its held @types)"],
+     "needs_embedding": [],
+     "source": "mcp/typecheck.py pinned / specs_for"},
+]
+_library_lock = threading.Lock()
+_library_cache: dict = {}
+
+
+def package_of(stem: str) -> tuple[str, str]:
+    """(npm name, version) from an index file's stem: deps.slug writes
+    `@scope/name@1.2.3` as `scope__name@1.2.3`."""
+    name, _, version = stem.rpartition("@")
+    if not name:
+        return stem, ""
+    if "__" in name:
+        name = "@" + name.replace("__", "/", 1)
+    return name, version
+
+
+def _meta(path: str) -> dict:
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2)
+    except sqlite3.Error:
+        return {}
+    try:
+        return {k: v for k, v in con.execute("SELECT k, v FROM meta")}
+    except sqlite3.Error:
+        return {}
+    finally:
+        con.close()
+
+
+def held_packages(folder: str | None = None) -> list[dict]:
+    """One row per held package index (index/packages/*.sqlite3), largest
+    first: package@version, chunks, definitions, files, embedded, complete,
+    published."""
+    import tree_sources
+    folder = folder or tree_sources.PACKAGES
+    out = []
+    for p in sorted(glob.glob(os.path.join(folder, "*.sqlite3"))):
+        stem = os.path.basename(p)[:-len(".sqlite3")]
+        name, version = package_of(stem)
+        c = tree_sources._counts(p) or {}
+        m = _meta(p)
+        out.append({"package": name, "version": version,
+                    "chunks": c.get("chunks"), "defs": c.get("defs"),
+                    "files": int(m["files"]) if str(m.get("files", "")).isdigit() else None,
+                    "embedded": (m.get("embedded") == "1") if "embedded" in m else None,
+                    "complete": (m.get("complete") == "1") if "complete" in m else None,
+                    "published": m.get("published") or None})
+    return sorted(out, key=lambda r: -((r["chunks"] or 0) + (r["defs"] or 0)))
+
+
+def library_by_area() -> dict:
+    """Counts by state (skills.counts), and the SERVED skills -- what
+    selection reads, skills.armed() -- counted along each taxonomy axis,
+    with the taxonomy's display names."""
+    counts = skills.counts()
+    served = skills.armed()
+    axes: dict[str, dict[str, int]] = {a: {} for a in AXES}
+    for s in served:
+        cat = s.get("category") if isinstance(s.get("category"), dict) else {}
+        for axis, vals in cat.items():
+            if axis not in axes:
+                continue
+            for v in vals or []:
+                axes[axis][str(v)] = axes[axis].get(str(v), 0) + 1
+    labels: dict = {}
+    try:
+        tax = skill_classify.taxonomy()
+        for axis in AXES:
+            vals = tax.get(axis) if isinstance(tax, dict) else None
+            if isinstance(vals, list):
+                labels[axis] = {str(v.get("id")): str(v.get("name") or v.get("id"))
+                                for v in vals if isinstance(v, dict)}
+    except Exception:                                            # noqa: BLE001
+        labels = {}
+    return {"counts": counts, "total": sum(counts.values()),
+            "served": len(served),
+            "served_by": {a: dict(sorted(v.items(), key=lambda kv: -kv[1]))
+                          for a, v in axes.items()},
+            "labels": labels}
+
+
+def library(now: float | None = None) -> dict:
+    """GET /dash/api/skill-factory/library: {areas, packages, readers,
+    indexes}; each part fails alone."""
+    import time
+    now = time.time() if now is None else now
+    with _library_lock:
+        if _library_cache and now - _library_cache["measured_at"] < LIBRARY_CACHE_S:
+            return dict(_library_cache)
+    out: dict = {"measured_at": now, "cache_s": LIBRARY_CACHE_S,
+                 "readers": PACKAGE_READERS}
+    try:
+        out["areas"] = library_by_area()
+    except Exception as e:                                       # noqa: BLE001
+        out["areas"] = {"error": f"{type(e).__name__}: {e}"[:300]}
+    try:
+        out["packages"] = held_packages()
+    except Exception as e:                                       # noqa: BLE001
+        out["packages"] = {"error": f"{type(e).__name__}: {e}"[:300]}
+    try:
+        import tree_sources
+        n = tree_sources.snapshot(now).get("nebari") or {}
+        out["indexes"] = {"code": n.get("code"), "repos": n.get("repos")}
+    except Exception as e:                                       # noqa: BLE001
+        out["indexes"] = {"error": f"{type(e).__name__}: {e}"[:300]}
+    with _library_lock:
+        _library_cache.clear()
+        _library_cache.update(out)
+    return out
+
+
 def handle_get(path: str):
     """(status, content_type, body) or None if this path is not ours."""
     p = path.rstrip("/")
+    if p == LIBRARY_PATH:
+        try:
+            return _json(200, library())
+        except Exception as e:                                   # noqa: BLE001
+            return _json(500, {"error": f"library raised {type(e).__name__}: {e}"})
     if p == "/dash/api/skills":
         try:
             return _json(200, overview())

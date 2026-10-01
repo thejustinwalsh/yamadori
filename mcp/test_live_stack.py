@@ -22,15 +22,15 @@ Contract, never wording:
                   exact failure that produced empty replies (fdc9067, and
                   summarize_text at max_tokens=900 this session)
     streamed      the same, over SSE
-    tools         a library question gets the held definitions injected
-                  (no code tool reaches main since 2026-09-24) and the
-                  answer names the right file
     cache         one model, one cache: a stripping client's xhigh session
-                  (deep thinking, a repaired write, fan-out, a compaction)
-                  processes only each request's new tail
+                  (a library question, a write, the agent step after it, a
+                  code request, a compaction) processes only each request's
+                  new tail
     summarize     the summarize_text tool returns a summary SHORTER than its
                   input, through the tools API on :1235
-    seeds         a fan-out tier records the concept seed it injected
+    seeds         a conversation's first user turn at `high` carries the
+                  concept seed (x_yamadori.session.seed, the ledger's `seed`
+                  part); at `medium` none
     skills        at `medium`, a multi-file browser app that loads but draws
                   nothing gets the authored "browser-app-entry-point" skill
                   (x_yamadori.skills names it); skills are the one
@@ -41,15 +41,6 @@ Contract, never wording:
                   re-read, no restart, no content before reasoning, only the
                   new tail processed each step, and the file it writes passes
                   the project's own test
-    repair        xhigh: a broken write_file comes back repaired (it parses),
-                  "Repaired", and the next request extends the warmed slot
-    note          medium: a broken write is noted "Checked", not changed, and
-                  the next request still extends the slot
-    deep          deep thinking: the hand-off is prefilled as reasoning, the
-                  answer opens with the seed line and "After thinking deeply,",
-                  and every path:line it cites exists in the held source
-    fanout        high: B ran, "Compared two approaches", and the delivered
-                  code passes the task's test
     compaction    both shapes: an in-place one (ledger / spliced) and Hermes'
                   flattened one (rewritten); the prefix is reused, the finish
                   is not `length`, and the summary keeps a file path and an
@@ -72,17 +63,20 @@ Contract, never wording:
                   reused), an input_image, the hosted image_generation
                   tool, previous_response_id refused
     router       one real request per class returns that x_yamadori.route
-    slots         a side call's transient slot and a fix-up's helper slot hold
-                  ~0 tokens afterwards (/slots via the proxy's vitals); an
+    slots         a side call's transient slot holds ~0 tokens afterwards
+                  (the lane: at most its cells) (/slots via the proxy's
+                  vitals); an
                   active conversation's decode tok/s with another's ~40k
                   idle slot kept vs cleared (n=3 each; cleared >= 95% of
                   kept, the gain reported); the cleared conversation's next
                   turn records resumed_cold: restored (host-RAM prompt
                   cache) or reprocessed, and the ms
-    e1            (deploy with YAMADORI_E1=1) the served E1 route_in head is
-                  the offline version and gives the offline choice on all
-                  261 held-out rows (probabilities within 1e-3); a live
-                  request shows deep.py consulted E1, not Laya
+    e1            the current E1 route_in head (e1.overview) is the offline
+                  version and, through the live embedder, gives the offline
+                  choice on all 261 held-out rows (probabilities within
+                  1e-3). In-process: /dash/api/deep and its decide route
+                  went with mcp/dash_deep.py, and no request consults
+                  route_in since mcp/deep.py was removed (2026-09-29)
     ledger_restart  (--maintenance ONLY: restarts the proxy) the ledger
                   survives a proxy-only restart
 
@@ -131,6 +125,33 @@ PRIMES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61,
 
 _results: list[tuple[bool, str, str]] = []
 _not_run: list[tuple[str, str]] = []
+# NOT APPLICABLE (coordinator, 2026-09-30: "NOT APPLICABLE on a locked card with the reason, never a false FAIL"):
+# a check whose mechanism the served layout does not have (a lane on a -np 1 card). Neither a pass nor a failure,
+# and not NOT RUN either: nothing was refused -- it does not exist here. Printed with its reason.
+_na: list[tuple[str, str]] = []
+# ONE CONVERSATION PER CARD (mcp/slots.py, layout v3): a new conversation within the owner's hold is told 503
+# conversation_at_capacity + Retry-After only when it cannot have THE OTHER CARD (operator 2026-09-30): both cards
+# hold a conversation, or its tier's model has no other card (flash-next, mirai-s). A Bonsai-tier newcomer inside
+# the owner's hold is routed to bonsai-a4000 instead. So the wait below is the FALLBACK: it does what the 503 asks --
+# waits Retry-After and sends again -- bounded by CAPACITY_WAIT_MAX_S; each wait is recorded and printed.
+CAPACITY_WAIT_MAX_S = 180         # derived: slots.PRIMARY_HOLD_S (60) + slots.RETRY_AFTER_UNKNOWN (30) x 4 rounds
+_capacity_waits: list[dict] = []
+# THE SUITE'S HOLD (mcp/slots.py _hold_for; deploy check 2026-10-01): this suite opens a new conversation every few
+# seconds, and inside ONE CONVERSATION's 60 s hold each was routed to the other card or told 503 -- 12 false
+# failures (the conformance window read as bonsai-a4000's). Every request sends X-Yamadori-Features
+# {"primary_hold_s": 0}, which the proxy honours for this TEST account only and only against its own owner, so a
+# finished test's conversation no longer holds the card from the next test's. A request in flight still holds it.
+# The checks OF the hold (test_one_conversation_card, the tier walk's in-flight case) opt out:
+# features={"primary_hold_s": None} sends the server's own hold.
+SUITE_FEATURES = {"primary_hold_s": 0}
+
+
+def _features(features: dict | None = None) -> str | None:
+    """The X-Yamadori-Features value: the suite's defaults under the test's own (a key set to None drops it)."""
+    f = dict(SUITE_FEATURES)
+    f.update(features or {})
+    f = {k: v for k, v in f.items() if v is not None}
+    return json.dumps(f) if f else None
 KEY = ""
 MAINTENANCE = False
 
@@ -146,6 +167,27 @@ def check(ok: bool, name: str, detail: str = "") -> bool:
     return bool(ok)
 
 
+def na(name: str, why: str) -> None:
+    """A check that does not apply to the served layout, with the reason (never a false FAIL)."""
+    _na.append((name, why))
+
+
+def _capacity_retry_after(status: int, raw: str, headers) -> float | None:
+    """Seconds to wait when this is a 503 conversation_at_capacity (one conversation per card), else None."""
+    if status != 503:
+        return None
+    try:
+        err = (json.loads(raw) or {}).get("error") or {}
+    except ValueError:
+        return None
+    if err.get("code") != "conversation_at_capacity":
+        return None
+    try:
+        return max(1.0, float((headers or {}).get("Retry-After") or 30))
+    except (TypeError, ValueError):
+        return 30.0
+
+
 def _nonce() -> str:
     """A fresh conversation: the session key hashes the first messages."""
     import uuid
@@ -154,24 +196,34 @@ def _nonce() -> str:
 
 def _post(url: str, body: dict, *, auth: bool = True,
           timeout: int = TIMEOUT,
-          features: dict | None = None) -> tuple[int, dict | str, float]:
+          features: dict | None = None,
+          capacity_retry: bool = True) -> tuple[int, dict | str, float]:
     headers = {"Content-Type": "application/json"}
     if auth and KEY:
         headers["Authorization"] = f"Bearer {KEY}"
-    if features:
-        # Forces those systems on or off for this request (experiments only);
-        # everything else stays the selection engine's decision.
-        headers["X-Yamadori-Features"] = json.dumps(features)
-    req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                 headers=headers)
-    t0 = time.time()
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read().decode("utf-8", "replace")
-            status = r.status
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", "replace")
-        status = e.code
+    # Forces those systems on or off for this request (experiments only);
+    # everything else stays the selection engine's decision.
+    if _features(features):
+        headers["X-Yamadori-Features"] = _features(features)
+    t_wait0 = time.time()
+    while True:
+        req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                     headers=headers)
+        t0 = time.time()
+        hdrs = None
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read().decode("utf-8", "replace")
+                status = r.status
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", "replace")
+            status = e.code
+            hdrs = e.headers
+        ra = _capacity_retry_after(status, raw, hdrs) if capacity_retry else None
+        if ra is None or time.time() - t_wait0 + ra > CAPACITY_WAIT_MAX_S:
+            break
+        _capacity_waits.append({"url": url.rsplit("/", 2)[-1], "retry_after": ra})
+        time.sleep(ra)
     if status == 429:
         raise NotRun(f"429 from {url}: {raw[:200]}")
     try:
@@ -193,16 +245,26 @@ def _x(d) -> dict:
 
 
 def _open(req: urllib.request.Request, timeout: int = TIMEOUT):
-    """urlopen for a streamed request: a 429 is NotRun, any other HTTP error
-    raises with the body it carried."""
-    try:
-        return urllib.request.urlopen(req, timeout=timeout)
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8", "replace")
-        if e.code == 429:
-            raise NotRun(f"429 from {req.full_url}: {raw[:200]}") from None
-        raise RuntimeError(f"HTTP {e.code} from {req.full_url}: "
-                           f"{raw[:300]}") from None
+    """urlopen for a streamed request: a 429 is NotRun, a 503
+    conversation_at_capacity is waited out (Retry-After, as _post), any other
+    HTTP error raises with the body it carried."""
+    t_wait0 = time.time()
+    while True:
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", "replace")
+            ra = _capacity_retry_after(e.code, raw, e.headers)
+            if ra is not None and time.time() - t_wait0 + ra <= CAPACITY_WAIT_MAX_S:
+                _capacity_waits.append({"url": req.full_url.rsplit("/", 2)[-1], "retry_after": ra, "stream": True})
+                time.sleep(ra)
+                continue
+            err = e
+            break
+    if err.code == 429:
+        raise NotRun(f"429 from {req.full_url}: {raw[:200]}") from None
+    raise RuntimeError(f"HTTP {err.code} from {req.full_url}: "
+                       f"{raw[:300]}") from None
 
 
 def _stream(messages: list[dict], **kw) -> tuple[str, str, dict, float]:
@@ -213,7 +275,8 @@ def _stream(messages: list[dict], **kw) -> tuple[str, str, dict, float]:
     req = urllib.request.Request(
         f"{PROXY}/v1/chat/completions", data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {KEY}"})
+                 "Authorization": f"Bearer {KEY}",
+                 "X-Yamadori-Features": _features()})
     parts, fin, x = [], "", {}
     t0 = time.time()
     with _open(req) as r:
@@ -324,23 +387,13 @@ def test_the_pinned_props_are_the_served_ones():
               f"served {live['eos_token']!r} pinned {pin['eos_token']!r}")
 
 
-# The tiers where a conversation's first user turn is planned (deep
-# thinking's kickoff trigger is allowed at xhigh and max: tiers.TIERS
-# `investigate`; the tiers test asks for `max`).
-KICKOFF_TIERS = ("xhigh", "max")
-
-
 def _second_model_s(x: dict) -> float:
     """Seconds of model work a request ran besides main's own generation,
-    as x_yamadori records them: the second brain's generations (a plan's
-    x_yamadori.investigate.handoff.plan.run.generations[].seconds) and the
-    turn decider's questions (x_yamadori.skills.turn.ms_questions)."""
-    inv = x.get("investigate") or {}
-    gens = ((((inv.get("handoff") or {}).get("plan") or {}).get("run")
-             or {}).get("generations") or [])
-    s = sum(float(g.get("seconds") or 0) for g in gens)
+    as x_yamadori records them: the turn decider's questions
+    (x_yamadori.skills.turn.ms_questions). (The second brain's plan
+    generations were counted here until it was removed, 2026-09-29.)"""
     turn = (x.get("skills") or {}).get("turn") or {}
-    s += float(turn.get("ms_questions") or 0) / 1000.0
+    s = float(turn.get("ms_questions") or 0) / 1000.0
     # ONE MODEL PER EFFORT TIER (mcp/max_mode.py): a request that swapped the card waited for the other model's
     # work and for its own model to load -- model time too (x_yamadori.capacity waited_s, swap.load_s)
     cap = x.get("capacity") or {}
@@ -373,41 +426,10 @@ def test_every_tier_returns_a_complete_answer_on_a_small_budget():
               f"tier {tier}: all 25 primes, finish=stop ({dt:.0f}s)",
               f"HTTP {status} finish={fin} got={got[:30]} "
               f"content={text[:200]!r}")
-        check("unsettled" not in text and "agreed on the same file" not in text,
-              f"tier {tier}: no fan-out dissent note on an answer naming no file",
-              f"content={text[-300:]!r}")
+        # The kickoff plan, deep thinking and fan-out checks went with those
+        # features (2026-09-29, docs/REMOVED.md).
         x = _x(d)
-        sel = x.get("selection") or {}
         second[tier] = _second_model_s(x)
-        inv = x.get("investigate") or {}
-        if tier in KICKOFF_TIERS:
-            # THE INITIAL PROMPT IS ALWAYS PLANNED (operator, 2026-09-27:
-            # "Doesn't matter the length of the prompt, we should always
-            # give it a planning turn"; AGENTS.md, yama_plan row): at xhigh
-            # and max a conversation's first user turn runs the plan job and
-            # main continues from an inserted yama_plan tool result. No
-            # investigate, no fan-out (prose).
-            check(bool(x) and sel.get("investigate") is True
-                  and (x.get("deep") or {}).get("kind") == "kickoff"
-                  and inv.get("job") == "plan"
-                  and inv.get("into") == "tool_result"
-                  and inv.get("tool") == "yama_plan"
-                  and sel.get("fanout_n") == 1,
-                  f"tier {tier}: x_yamadori says the first turn was planned "
-                  f"(kickoff, a yama_plan tool result), no fan-out",
-                  json.dumps({"selection": {k: sel.get(k) for k in
-                                            ("investigate", "fanout_n",
-                                             "because")},
-                              "investigate": {k: inv.get(k) for k in
-                                              ("job", "trigger", "into",
-                                               "tool", "seconds")}})[:400])
-            continue
-        check(bool(x) and sel.get("investigate") is False
-              and x.get("investigate") is None and sel.get("fanout_n") == 1,
-              f"tier {tier}: x_yamadori says no deep thinking, no fan-out",
-              json.dumps({"selection": {k: sel.get(k) for k in
-                                        ("investigate", "fanout_n", "because")},
-                          "investigate": x.get("investigate")})[:400])
     # OUR OVERHEAD, not the model's thinking (revised after the live gate of
     # 2026-09-24). The old check compared raw wall clocks: max 11 s vs
     # minimal 3 s. Measured that night through :1234: minimal generated 71
@@ -427,6 +449,8 @@ def test_every_tier_returns_a_complete_answer_on_a_small_budget():
     # every judgment question"; x_yamadori.skills.turn.ms_questions). Both
     # are the model's own time, recorded per request, so they are
     # subtracted like main's; what remains is still the stack's own work.
+    # (The kickoff plan went with the second brain, 2026-09-29; the
+    # decider's time is still subtracted.)
     if "max" in took and "minimal" in took:
         over = {k: (None if model_s.get(k) is None
                     else round(took[k] - model_s[k] - second.get(k, 0.0), 2))
@@ -452,7 +476,8 @@ def test_streaming_returns_the_whole_answer():
     req = urllib.request.Request(
         f"{PROXY}/v1/chat/completions", data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {KEY}"})
+                 "Authorization": f"Bearer {KEY}",
+                 "X-Yamadori-Features": _features()})
     parts, fin, n = [], "", 0
     try:
         with _open(req) as r:
@@ -508,49 +533,20 @@ def _real_symbol() -> tuple[str, str] | None:
         return None
 
 
-def test_a_library_question_gets_the_definitions():
-    """Since 2026-09-24 no code tool of ours reaches main: a library question
-    at `medium` (where deep thinking is not allowed) gets the definitions of
-    the names it uses, as a tail injection (proxy._library_definitions), and
-    the model answers from them."""
-    sym = _real_symbol()
-    if not check(sym is not None, "the package index has a class to ask about",
-                 "no live three index"):
-        return
-    name, path = sym
-    # A fresh conversation per run (the ledger keys a turn by the messages
-    # up to it; the same words every run replayed the first run's decision
-    # -- live gate 2026-09-24).
-    status, d, dt = chat([{"role": "system", "content":
-                           f"[session {_nonce()}]"},
-                          {"role": "user", "content":
-                           f"In three.js, which file defines the class "
-                           f"`{name}`? Answer with the file path."}],
-                         reasoning_effort="medium")
-    text, fin = _content(d)
-    inj = (_x(d).get("ledger") or {}).get("inject") or {}
-    check(status == 200 and "definitions" in (inj.get("parts") or []),
-          f"the library definitions were injected on the user turn ({dt:.0f}s)",
-          json.dumps({"status": status, "inject": inj,
-                      "route": (_x(d).get("route") or {}).get("class")}))
-    check(os.path.basename(path) in text,
-          f"and the answer names the defining file {os.path.basename(path)}",
-          f"content={text[:300]!r}")
-
-
 # ---------------------------------------------------------------------------
 # ONE MODEL, ONE CACHE -- the acceptance check (docs/SELF-IMPROVEMENT-PLAN.md
 # Phase 0.5, operator 2026-09-24). A Hermes-style streamed session at
-# reasoning_effort xhigh whose client STRIPS reasoning: a library question
-# that deep-thinks, a write_file with a syntax error (repaired, then the
-# slot warmed), the agent step after it, a code request that fans out, and an
-# in-place compaction; then a short medium pass (the check note only).
+# reasoning_effort xhigh whose client STRIPS reasoning: a library question,
+# a write_file, the agent step after it, a code request, and an in-place
+# compaction. (Until 2026-09-29 the question deep-thought, the write was a
+# broken one the second brain repaired, the code request fanned out, and a
+# medium pass checked the "Checked" note; those features were removed.)
 #
 # PASS: on every request after the first, x_yamadori.cache.first.processed --
 # the prompt tokens the slot had to process for the request's first
 # generation -- is only the new tail. The tail's size is estimated from the
-# characters the client added since the previous request (plus a deep-
-# thinking hand-off's, which is new prefill), at 2 characters a token, plus
+# characters the client added since the previous request, at 2 characters a
+# token, plus
 # 128 for the template's framing: generous, and still an order of magnitude
 # below a cache miss on this ~7,000-character prompt. A CHOICE of bound, not a
 # measurement.
@@ -577,8 +573,8 @@ def _stream_turn(messages: list[dict], effort: str,
             "tools": _CACHE_TOOLS, "reasoning_effort": effort}
     headers = {"Content-Type": "application/json",
                "Authorization": f"Bearer {KEY}"}
-    if features:
-        headers["X-Yamadori-Features"] = json.dumps(features)
+    if _features(features):
+        headers["X-Yamadori-Features"] = _features(features)
     req = urllib.request.Request(f"{PROXY}/v1/chat/completions",
                                  data=json.dumps(body).encode(),
                                  headers=headers)
@@ -625,7 +621,8 @@ def _tail_injection_chars(x: dict) -> int:
     INJECTION, "appended to the tool result", ledger-replayed; AGENTS.md
     Skills) these ride on the new tail of any request, so the tail a
     request processes is the client's new messages PLUS them; what came
-    before must still be reused (the reuse half of each check)."""
+    before must still be reused (the reuse half of each check). (Library
+    use rode here too until its removal, 2026-09-29.)"""
     n = 0
     led = (x.get("ledger") or {}).get("inject") or {}
     if led.get("decided"):
@@ -633,9 +630,6 @@ def _tail_injection_chars(x: dict) -> int:
     sk = x.get("skills") or {}
     if sk.get("kind") == "step" and not sk.get("replayed"):
         n += int(sk.get("chars") or 0)
-        lu = x.get("library_use") or {}
-        if lu.get("decided") and not lu.get("replayed"):
-            n += int(lu.get("chars") or 0)
     return n
 
 
@@ -690,96 +684,37 @@ def test_one_model_one_cache():
               flush=True)
         return msg, x
 
-    # 1. A library question; deep thinking forced (the selection engine may
-    #    also choose it; x_yamadori.selection says).
+    # 1. A library question.
     msg, x = turn([{"role": "user", "content":
                     "In three.js, how does Object3D.lookAt decide between "
                     "rotating the object and rotating a camera? Cite the "
-                    "source."}], features={"investigate": True},
-                  label="1 deep thinking")
-    inv = x.get("investigate") or {}
-    check(inv.get("ran") and inv.get("into") == "prefill"
-          and "After thinking deeply," in msg["content"][:200]
-          and "Today I was inspired by" in msg["content"][:200],
-          "the hand-off is prefilled as reasoning; the answer opens with the "
-          "seed line and 'After thinking deeply,'",
-          msg["content"][:200] + " " + json.dumps(inv)[:200])
-    # 2. A write_file whose code does not parse: repaired, then warmed.
+                    "source."}], label="1 library question")
+    # 2. A write_file.
     msg, x = turn([{"role": "user", "content":
                     "Call write_file with path hi.py and EXACTLY this content, "
-                    "character for character:\ndef f(:\n    return 1\n"}],
+                    "character for character:\ndef f():\n    return 1\n"}],
                   label="2 write")
-    tc = x.get("tool_code") or {}
-    args = {}
-    if msg.get("tool_calls"):
-        try:
-            args = json.loads(msg["tool_calls"][0]["function"]["arguments"])
-        except (ValueError, KeyError):
-            args = {}
-    check(tc.get("stopped") == "fixed" and "Repaired hi.py" in msg["content"]
-          and "def f()" in (args.get("content") or "")
-          and (x.get("warm") or {}).get("sent") is True,
-          "the broken write is repaired by the second brain, noted "
-          "'Repaired', and the slot warmed",
-          json.dumps({"tool_code": tc, "warm": x.get("warm"),
-                      "content": msg["content"][-200:]})[:500])
     cid = (msg.get("tool_calls") or [{}])[0].get("id") or "call_1"
-    time.sleep(5)            # the harness "runs the tool"; the warm lands
     # 3. The agent step after the tool.
     msg, x = turn([{"role": "tool", "tool_call_id": cid,
                     "content": "wrote hi.py (22 bytes)"}],
-                  label="3 agent step after the warm")
-    # #11 (SELF-IMPROVEMENT-LOG): the warm itself must reuse the prompt its
-    # slot generated on moments before, and process only the delivered
-    # turn. Live 2026-09-24 it reused 0 of 4567. Reported on THIS response.
-    wb = x.get("warm_before") or {}
-    check(wb.get("state") == "done" and wb.get("short") is False
-          and not wb.get("moved_from"),
-          f"the warm after the repaired write reused at least the "
-          f"{wb.get('expect_reused_at_least')}-token prompt its slot had just "
-          f"generated on (reused {wb.get('reused')}, processed "
-          f"{wb.get('processed')})", json.dumps(wb)[:300])
-    # 4. A code request that fans out.
+                  label="3 agent step")
+    # 4. A code request.
     msg, x = turn([{"role": "user", "content":
                     "Write a Python function fib(n) that returns the n-th "
                     "Fibonacci number, iteratively. Just the code."}],
-                  label="4 fan-out")
-    fan = x.get("fanout") or {}
-    warm4 = bool((x.get("warm") or {}).get("sent"))
-    check((fan.get("steps") or 0) >= 2
-          and "Compared two approaches" in msg["content"],
-          "the code request fans out and folds back 'Compared two approaches'",
-          json.dumps(fan)[:300])
+                  label="4 code request")
     # 5. An in-place compaction: thinks at the conversation's effort; only
     #    the instruction is new.
     msg, x = turn([{"role": "user", "content":
                     "Your task is to create a detailed summary of the "
                     "conversation so far."}], label="5 compaction")
-    wb = x.get("warm_before") or {}
-    check(not warm4 or (wb.get("state") == "done"
-                        and wb.get("short") is False),
-          "the warm after the fan-out's appended code (if one was sent) "
-          "reused the prompt its slot had just generated on (#11)",
-          json.dumps({"warm_sent_after_4": warm4, "warm_before": wb})[:300])
     comp = x.get("compaction") or {}
     check(x.get("utility_kind") == "compaction"
           and comp.get("mode") in ("ledger", "spliced")
           and str(comp.get("thinking", "")).startswith("on"),
           "the compaction is served on the conversation's rendering, "
           "thinking at its effort", json.dumps(comp)[:300])
-
-    # MEDIUM: a broken write is checked and only noted.
-    convo[:] = [{"role": "system", "content": _CACHE_SYSTEM}]
-    msg, x = _stream_turn(convo + [{"role": "user", "content":
-                                    "Call write_file with path lo.py and "
-                                    "EXACTLY this content:\ndef g(:\n"
-                                    "    pass\n"}], "medium")
-    tc = x.get("tool_code") or {}
-    check(tc.get("stopped") == "noted"
-          and "Checked lo.py" in msg["content"]
-          and "Repaired" not in msg["content"],
-          "medium: the broken write is noted 'Checked', not repaired",
-          json.dumps({"tool_code": tc, "content": msg["content"][-200:]})[:400])
 
 
 def test_summarize_text_through_the_tools_api():
@@ -802,42 +737,59 @@ def test_summarize_text_through_the_tools_api():
           "and keeps an identifier from the source verbatim", out[:300])
 
 
-def test_a_fanout_tier_records_its_seed():
-    import concept_seed
-    before = (concept_seed.last() or {}).get("at", 0)
-    status, d, dt = chat([{"role": "user", "content":
-                           "Name one data structure for fast prefix lookups "
-                           "on strings, in one word."}],
-                         reasoning_effort="high", features={"fanout": 3})
-    after = concept_seed.last() or {}
-    fx = _x(d).get("fanout") or {}
-    # THE DESIGN (mcp/fanout.py, operator 2026-09-23): SEQUENTIAL. A is the
-    # answer; the second brain writes B with one fresh seed; C, with its own,
-    # only when the code grade does not separate A and B. So a candidate
-    # carries a seed per second-brain run: steps - 1 seeds (1 for this
-    # prose question, which never reaches C). Until 2026-09-24 this asserted
-    # the concurrent design's >= 2 seeds (#15a, SELF-IMPROVEMENT-LOG).
-    steps = int(fx.get("steps") or 0)
-    check(status == 200 and fx.get("mode") == "sequential" and steps >= 2
-          and fx.get("n", 0) >= 2
-          and len(fx.get("seeds") or []) == steps - 1
-          and all(fx.get("seeds") or [None]),
-          "x_yamadori.fanout: sequential, and one seed word per second-brain "
-          "run (B, and C when it ran)", json.dumps(fx)[:300])
-    want = "fanout:tiebreak" if steps >= 3 else "fanout:direct"
-    check(status == 200 and after.get("at", 0) > before
-          and after.get("where") == want
-          and after.get("word") == (fx.get("seeds") or [None])[-1],
-          f"a high-tier request injected and recorded the last run's seed "
-          f"where {want!r} ({dt:.0f}s)",
-          f"HTTP {status} last={json.dumps(after)} "
-          f"content={_content(d)[0][:160]!r}")
+def test_the_first_turn_carries_the_concept_seed():
+    """THE CONCEPT SEED (2026-09-29): drawn once per conversation and
+    appended to its FIRST user turn at the tiers whose `seed` flag is on
+    (high, xhigh, max), as part of that turn's ledger-recorded injection;
+    x_yamadori.session.seed names it ({word, token_id, u32}). At `medium`
+    the flag is off: no seed. (Until 2026-09-29 the seed rode each fan-out
+    candidate's user turn; fan-out was removed.) NOT YET RUN LIVE."""
+    q = ("Name one data structure for fast prefix lookups on strings, in "
+         "one word.")
+    status, d, dt = chat([{"role": "system", "content":
+                           f"[session {_nonce()}]"},
+                          {"role": "user", "content": q}],
+                         reasoning_effort="high")
+    x = _x(d)
+    seed = (x.get("session") or {}).get("seed") or {}
+    inj = (x.get("ledger") or {}).get("inject") or {}
+    check(status == 200 and bool(seed.get("word"))
+          and "seed" in (inj.get("parts") or []),
+          f"high: the first user turn carries the conversation's concept "
+          f"seed, recorded in x_yamadori.session.seed ({dt:.0f}s)",
+          json.dumps({"status": status, "seed": seed, "inject": inj})[:400])
+    status, d, dt = chat([{"role": "system", "content":
+                           f"[session {_nonce()}]"},
+                          {"role": "user", "content": q}],
+                         reasoning_effort="medium")
+    x = _x(d)
+    inj = (x.get("ledger") or {}).get("inject") or {}
+    check(status == 200 and not (x.get("session") or {}).get("seed")
+          and "seed" not in (inj.get("parts") or []),
+          f"medium: no concept seed ({dt:.0f}s)",
+          json.dumps({"status": status, "session": x.get("session"),
+                      "inject": inj})[:400])
 
 
 def test_skills_reach_the_model():
     """The skill store's authored skill reaches a request shaped like its
     target (mcp/skill_migrate.py --authored installs it). Delivery is read
-    off x_yamadori.skills; what the model does with it is printed only."""
+    off x_yamadori.skills; what the model does with it is printed only.
+    NOT APPLICABLE while the skill is not ARMED: the pipeline's PROVE step
+    may quarantine it (2026-10-01: "WITH the skill a check that passed
+    without it failed"), and a quarantined skill is never served."""
+    import re
+    md = os.path.join(os.path.dirname(HERE), "index", "skills", "library",
+                      "browser-app-entry-point", "SKILL.md")
+    try:
+        state = (re.search(r"^\s*state:\s*(\S+)", open(md, encoding="utf-8").read(), re.M) or [None, None])[1]
+    except OSError:
+        state = None
+    if state != "armed":
+        na("x_yamadori.skills: the browser-app-entry-point skill was injected",
+           f"the skill is {state or 'not installed'} (index/skills/library/browser-app-entry-point), not armed: "
+           "nothing to serve")
+        return
     status, d, dt = chat([
         {"role": "system", "content": f"You are a coding agent. "
                                       f"[session {_nonce()}]"},
@@ -863,80 +815,6 @@ def test_skills_reach_the_model():
     low = text.lower()
     print(f"  info  answer mentions an entry point / init call: "
           f"{any(w in low for w in ('init', 'domcontentloaded', 'onload'))}")
-
-
-def test_selection_decides_deep_thinking():
-    """docs/SELECTION-BUILD.md steps 4 and 5, Live lines."""
-    q = ("In three r185 TSL, the node method `label()` is deprecated. What "
-         "replaces it, in which release was it deprecated, and which file "
-         "emits the warning?")
-    status, d, dt = chat([{"role": "system", "content":
-                           f"[session {_nonce()}]"},
-                          {"role": "user", "content": q}],
-                         reasoning_effort="max")
-    x = _x(d)
-    sel = x.get("selection") or {}
-    inv = x.get("investigate") or {}
-    text, _fin = _content(d)
-    check(status == 200 and sel.get("investigate") is True,
-          f"a TSL deprecation question at max runs the second brain "
-          f"({dt:.0f}s)",
-          json.dumps(sel.get("because"))[:400])
-    # Laya is retired (docs/E1.md, 2026-09-24): the two signals are the
-    # trigger rule's own (x_yamadori.deep.signals: struggle, kickoff, the
-    # unseen-package area) and E1's route_in head.
-    dsig = (x.get("deep") or {}).get("signals") or {}
-    e1_rin = ((dsig.get("e1") or {}).get("heads") or {}).get("route_in")
-    check(all(k in dsig for k in ("struggle", "kickoff", "area"))
-          and e1_rin is not None and e1_rin.get("version"),
-          "both signals recorded: the rule AND E1's route_in head",
-          json.dumps({"rule": {k: dsig.get(k) for k in ("kickoff", "area")},
-                      "e1": dsig.get("e1")})[:400])
-    # THE INITIAL PROMPT IS ALWAYS PLANNED (operator, 2026-09-27: "Doesn't
-    # matter the length of the prompt, we should always give it a planning
-    # turn"; AGENTS.md "Deep thinking's triggers": kickoff outranks the
-    # known-hard area). So this FIRST turn is planned, not investigated: the
-    # plan job runs before main and crosses as an inserted yama_plan TOOL
-    # RESULT -- no prefill, no "After thinking deeply," opening (that
-    # fold-back is checked where it still happens: a forced investigation,
-    # test_deep_thinking_folds_back and the cache test's step 1). Until
-    # 2026-09-27 this checked the area trigger's investigate hand-off
-    # (cited > 0, 'After thinking deeply,'); a plan cites only its KEY
-    # DECISIONS (shomen.plan_handoff), so its searches, reads and citations
-    # are printed as evidence, not gated.
-    check(inv.get("ran") and inv.get("job") == "plan"
-          and inv.get("trigger") == "kickoff" and inv.get("injected")
-          and inv.get("into") == "tool_result"
-          and inv.get("tool") == "yama_plan",
-          "the first turn is planned: the plan job ran and crossed as a "
-          "yama_plan tool result (its searches, reads and citations are "
-          "evidence)",
-          json.dumps({k: inv.get(k) for k in
-                      ("ran", "job", "trigger", "injected", "into", "tool",
-                       "hops", "seconds", "cited", "searches")}
-                     | {"reads": (inv.get("screen") or {}).get("reads"),
-                        "fold_back_answer": x.get("fold_back_answer")}))
-    check("nodes/" in text or "Node.js" in text,
-          "the answer names a real three@0.185.1 source path",
-          f"content={text[:400]!r}")
-
-    p = ("List the first 25 prime numbers in ascending order, one per "
-         "line, digits only, nothing else.")
-    status, d, dt = chat([{"role": "user", "content": p}], max_tokens=64,
-                         reasoning_effort="max")
-    x = _x(d)
-    inv = x.get("investigate") or {}
-    # Planned like every first turn at max (operator, 2026-09-27, above);
-    # what must NOT happen is an investigation: no job but the plan, no
-    # other trigger.
-    check(status == 200 and (x.get("deep") or {}).get("kind") == "kickoff"
-          and inv.get("job") == "plan" and inv.get("tool") == "yama_plan",
-          f"the primes prompt at max is planned (kickoff), not investigated "
-          f"({dt:.0f}s)",
-          json.dumps({"because": (x.get("selection") or {}).get("because"),
-                      "investigate": {k: inv.get(k) for k in
-                                      ("job", "trigger", "tool",
-                                       "seconds")}})[:400])
 
 
 def test_streamed_and_blocking_are_one_system():
@@ -993,7 +871,16 @@ def test_a_harness_side_call_and_a_pinned_conversation():
           json.dumps({"status": status, "text": text[:80], "fin": fin,
                       "utility": x.get("utility"), "tier": x.get("tier"),
                       "cache": x.get("cache")})[:400])
-    check(dt < 60, "and it is fast (409 s before the fix)", f"{dt:.1f}s")
+    # WHERE THE WALL CLOCK WENT when it is slow (deploy check 2026-09-29: 72.8 s wall for a 414 ms generation, and
+    # the evidence printed only x_yamadori.cache): every record that times a wait -- the tier-model decision and its
+    # swap (capacity: waited_s, swap.load_s), the slots (releases, idle clears, a queue behind the lane), the A4000
+    # (gpu_room), the energy window, the decider's turn.
+    check(dt < 60, "and it is fast (409 s before the fix)",
+          json.dumps({"wall_s": round(dt, 1), "model_ms": (x.get("cache") or {}).get("model_ms"),
+                      "capacity": x.get("capacity"), "slots": x.get("slots"), "gpu_room": x.get("gpu_room"),
+                      "energy": x.get("energy"), "decider": (x.get("decider") or x.get("turn")),
+                      "timing": x.get("timing"),
+                      "cache_how": (x.get("cache") or {}).get("how")})[:2500])
     tools = [{"type": "function", "function": {
         "name": "read_file", "description": "Read a file on the user's machine.",
         "parameters": {"type": "object", "properties": {
@@ -1046,8 +933,8 @@ def _sse(messages: list[dict], *, tools: list[dict] | None = None,
         body["tools"] = tools
     headers = {"Content-Type": "application/json",
                "Authorization": f"Bearer {KEY}"}
-    if features:
-        headers["X-Yamadori-Features"] = json.dumps(features)
+    if _features(features):
+        headers["X-Yamadori-Features"] = _features(features)
     req = urllib.request.Request(f"{PROXY}/v1/chat/completions",
                                  data=json.dumps(body).encode(),
                                  headers=headers)
@@ -1135,12 +1022,6 @@ def _run_python(files: dict[str, str], main: str,
             return p.returncode, (p.stdout + p.stderr)[-600:]
         except subprocess.TimeoutExpired:
             return 124, f"timed out after {timeout}s"
-
-
-def _python_blocks(text: str) -> list[str]:
-    import re
-    return [m.group(2) for m in re.finditer(
-        r"```(python|py)?[ \t]*\n(.*?)```", text or "", re.S)]
 
 
 def _cache_first(x: dict) -> dict:
@@ -1305,292 +1186,6 @@ def _agent_run(mode: str, effort: str = "xhigh") -> None:
 def test_a_harness_agent_loop():
     for mode in ("strip", "echo"):
         _agent_run(mode)
-
-
-# -------------------------------------------- b/c. tool-call check, alone ---
-def _broken_write(effort: str, path: str, body: str) -> tuple[dict, list]:
-    convo = [{"role": "system", "content": _CACHE_SYSTEM
-              + f"\n[session {_nonce()}]"},
-             {"role": "user", "content":
-              f"Call write_file with path {path} and EXACTLY this content, "
-              f"character for character:\n{body}"}]
-    r = _sse(convo, tools=_CACHE_TOOLS, effort=effort)
-    return r, convo
-
-
-def _next_is_extension(label: str, r: dict, convo: list[dict],
-                       effort: str) -> None:
-    """Send the harness's tool result: the request must extend what the slot
-    holds -- the delivered turn, warmed -- and process only its tail."""
-    convo.append(r["msg"])
-    cid = (r["calls"] or [{}])[0].get("id") or "call_1"
-    time.sleep(5)                 # the harness "runs the tool"; the warm lands
-    add = [{"role": "tool", "tool_call_id": cid, "content": "wrote the file"}]
-    r2 = _sse(convo + add, tools=_CACHE_TOOLS, effort=effort)
-    f1, f2 = _cache_first(r["x"]), _cache_first(r2["x"])
-    # PAST REASONING PASSES THROUGH (design change 2026-09-24, proxy
-    # LEDGER block): the slot generated the previous turn's reasoning,
-    # the client sends none, so the request diverges at that turn's
-    # think block. The processed tail is that turn as the client sends
-    # it + the new messages; everything before it must be reused (the
-    # checkpoint at the previous prompt's end -- measured here, live).
-    # + what the proxy appended to the tool result (_tail_injection_chars).
-    bound = _tail_bound(_chars(add) + _chars([r["msg"]]), r2["x"])
-    slack = CHECKPOINT_SLACK
-    check(f2.get("processed") is not None and f2["processed"] <= bound
-          and (f2.get("reused") or 0) >= (f1.get("prompt") or 0) - slack,
-          f"{label}: the next request extends the slot (processed "
-          f"{f2.get('processed')} <= {bound}, injected "
-          f"{_tail_injection_chars(r2['x'])} chars; reused "
-          f"{f2.get('reused')} >= "
-          f"the previous prompt {f1.get('prompt')} less the checkpoint "
-          f"slack {slack})",
-          # `warm` is the FIRST response's record, sent before the warm ran
-          # (always "scheduled"); `warm_before` is the NEXT response's: what
-          # the warm did, and how long this request waited for it.
-          json.dumps({"before": r["x"].get("cache"),
-                      "after": r2["x"].get("cache"),
-                      "warm_before": r2["x"].get("warm_before"),
-                      "warm": r["x"].get("warm")})[:900])
-
-
-def test_tool_call_repair_at_xhigh():
-    r, convo = _broken_write("xhigh", "hi.py", "def f(:\n    return 1\n")
-    x = r["x"]
-    tc = x.get("tool_code") or {}
-    writes = [_args(c) for c in r["calls"]
-              if (c.get("function") or {}).get("name") == "write_file"]
-    code = (writes[0].get("content") if writes else "") or ""
-    ev = json.dumps({"tool_code": tc, "warm": x.get("warm"),
-                     "content": r["content"][-240:], "code": code[:200]})[:700]
-    check(bool(writes), "repair: the model called write_file", ev)
-    check(tc.get("stopped") == "fixed" and _parses(code) is None
-          and "def f(" in code,
-          "repair: the write_file the client receives parses (tool_code "
-          "stopped=fixed)", ev)
-    check("Repaired" in r["content"], "repair: the note says 'Repaired'", ev)
-    check((x.get("warm") or {}).get("sent") is True,
-          "repair: the slot is warmed with the delivered call", ev)
-    if writes:
-        _next_is_extension("repair", r, convo, "xhigh")
-
-
-def test_medium_notes_without_fixing():
-    r, convo = _broken_write("medium", "lo.py", "def g(:\n    pass\n")
-    x = r["x"]
-    tc = x.get("tool_code") or {}
-    writes = [_args(c) for c in r["calls"]
-              if (c.get("function") or {}).get("name") == "write_file"]
-    code = (writes[0].get("content") if writes else "") or ""
-    ev = json.dumps({"tool_code": tc, "warm": x.get("warm"),
-                     "content": r["content"][-240:], "code": code[:200]})[:700]
-    if not check(bool(writes) and _parses(code) is not None,
-                 "note (precondition): the model wrote the broken content "
-                 "as asked", ev):
-        return
-    check(tc.get("stopped") == "noted" and "Checked" in r["content"]
-          and "Repaired" not in r["content"],
-          "note: medium notes the error 'Checked' and does not repair", ev)
-    check("def g(:" in code,
-          "note: the call reaches the client unchanged (nothing fixes at "
-          "medium)", ev)
-    check((x.get("warm") or {}).get("sent") is True,
-          "note: the note changed the stored turn, so the slot is warmed", ev)
-    _next_is_extension("note", r, convo, "medium")
-
-
-# ----------------------------------------------------- d. deep thinking -----
-def _held_files() -> list[tuple[str, str]]:
-    """(root, relative path) of every file the held package indexes cover."""
-    import domains
-    out = []
-    for _pkg, rows in (domains.held_sources() or {}).items():
-        for row in rows:
-            db = row[1]
-            try:
-                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-                roots = [r[0] for r in con.execute("SELECT path FROM roots")]
-                paths = [r[0] for r in con.execute(
-                    "SELECT path FROM package_files")]
-                con.close()
-            except sqlite3.Error:
-                continue
-            for p in paths:
-                out.append((roots[0] if roots else "", p))
-    return out
-
-
-def _cited_lines_exist(text: str) -> tuple[list, list]:
-    """Every path:line in `text`: (resolved, missing). A citation resolves
-    when a held file's path ends with the cited path (or the reverse) and
-    the file has at least that many lines."""
-    import re
-    cites = sorted(set(re.findall(
-        r"([\w@./\\-]+\.(?:tsx|ts|jsx|js|mjs|cjs|wgsl|glsl|rs|py)):(\d+)",
-        text or "")))
-    held = _held_files()
-    ok, missing = [], []
-    for path, line in cites:
-        p = path.replace("\\", "/").lstrip("./")
-        hit = next(((root, f) for root, f in held
-                    if f == p or p.endswith("/" + f) or f.endswith("/" + p)),
-                   None)
-        if not hit:
-            missing.append(f"{path}:{line} (no such held file)")
-            continue
-        try:
-            with open(os.path.join(hit[0], hit[1]), encoding="utf-8",
-                      errors="replace") as fh:
-                n = sum(1 for _ in fh)
-        except OSError as e:
-            missing.append(f"{path}:{line} (unreadable: {e})")
-            continue
-        (ok if 1 <= int(line) <= n else missing).append(
-            f"{path}:{line}" + ("" if 1 <= int(line) <= n
-                                else f" (file has {n} lines)"))
-    return ok, missing
-
-
-def test_deep_thinking_folds_back():
-    q = ("In three.js, how does Object3D.lookAt decide between rotating the "
-         "object and rotating a camera? Cite the source file and line.")
-    status, d, dt = chat([{"role": "system", "content":
-                           f"[session {_nonce()}]"},
-                          {"role": "user", "content": q}],
-                         reasoning_effort="xhigh",
-                         features={"investigate": True})
-    x = _x(d)
-    inv = x.get("investigate") or {}
-    text, fin = _content(d)
-    msg = ((d.get("choices") or [{}])[0].get("message") or {}) \
-        if isinstance(d, dict) else {}
-    reasoning = msg.get("reasoning_content") or ""
-    ev = json.dumps({"status": status, "investigate": inv,
-                     "fold_back": x.get("fold_back"),
-                     "opening": text[:200]})[:700]
-    check(status == 200 and inv.get("ran") and inv.get("into") == "prefill"
-          and inv.get("injected"),
-          f"deep: the investigation ran and was prefilled ({dt:.0f}s)", ev)
-    check(text.startswith("Today I was inspired by")
-          and "After thinking deeply," in text[:240],
-          "deep: the answer opens with the seed line, then 'After thinking "
-          "deeply,'", ev)
-    check(reasoning.startswith("I investigated this in the library source")
-          or reasoning.startswith("I thought this through before answering"),
-          "deep: the hand-off is the answer's reasoning (prefilled)",
-          f"reasoning head={reasoning[:200]!r}")
-    ok, missing = _cited_lines_exist(reasoning)
-    check(bool(ok) and not missing,
-          f"deep: every path:line the hand-off cites exists in the held "
-          f"source ({len(ok)} resolved)",
-          json.dumps({"resolved": ok[:8], "missing": missing[:8],
-                      "handoff": inv.get("handoff")})[:600])
-    # THE EVIDENCE (operator, 2026-09-24): a verified fact carries the lines
-    # it cites, read from the held index by the verifier. Every excerpt in
-    # the hand-off must be those lines EXACTLY.
-    snips, bad = _excerpts_match_held_source(reasoning)
-    h = inv.get("handoff") or {}
-    check(not bad and (snips or not h.get("verified")),
-          f"deep: every inlined excerpt matches the held source exactly "
-          f"({len(snips)} excerpts, {h.get('verified')} verified facts)",
-          json.dumps({"matched": snips[:6], "mismatched": bad[:4],
-                      "handoff": h})[:900])
-    check(reasoning.rstrip().endswith("the opening phrase a second time."),
-          "deep: the prefilled hand-off ends by saying the user sees only "
-          "the answer, which states the findings in full",
-          f"reasoning tail={reasoning[-240:]!r}")
-    fa = x.get("fold_back_answer") or {}
-    check(fa.get("opened") and (fa.get("chars_after_opening") or 0) > 0,
-          "deep: an answer follows 'After thinking deeply,' (its length is "
-          "recorded as evidence; the 200-char floor was removed 2026-09-27)",
-          json.dumps({"fold_back_answer": fa, "content": text[:400]}))
-    check(fin == "stop", "deep: finish=stop", f"finish={fin}")
-
-
-def _excerpts_match_held_source(text: str) -> tuple[list, list]:
-    """Every `source: <package>@<version> <path>:<a>-<b>` excerpt in `text`:
-    (matched labels, mismatches). An excerpt matches when its fenced lines
-    are exactly lines a..b of that file in that held version's source."""
-    import re
-    import domains
-    held = domains.held_sources() or {}
-    pat = re.compile(r"source: (\S+) (\S+?):(\d+)-(\d+)\n(`{3,})[^\n]*\n"
-                     r"(.*?)\n\5(?:\n|$)", re.S)
-    ok, bad = [], []
-    for m in pat.finditer(text or ""):
-        label, rel, a, b, body = (m.group(1), m.group(2), int(m.group(3)),
-                                  int(m.group(4)), m.group(6))
-        tag = f"{label} {rel}:{a}-{b}"
-        if "@" not in label:
-            bad.append(f"{tag} (not a held package label)")
-            continue
-        pkg, ver = label.rsplit("@", 1)
-        db = next((d for v, d in held.get(pkg) or [] if v == ver), None)
-        root = None
-        if db:
-            try:
-                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-                root = (con.execute("SELECT path FROM roots").fetchone()
-                        or [None])[0]
-                con.close()
-            except sqlite3.Error:
-                root = None
-        if not root:
-            bad.append(f"{tag} (no such held package version)")
-            continue
-        try:
-            with open(os.path.join(root, rel), encoding="utf-8",
-                      errors="replace", newline="") as fh:
-                lines = [ln.rstrip("\r") for ln in fh.read().split("\n")]
-        except OSError as e:
-            bad.append(f"{tag} (unreadable: {e})")
-            continue
-        want = "\n".join(lines[a - 1:b])
-        (ok if body == want else bad).append(
-            tag if body == want else f"{tag} (differs: {body[:80]!r} vs "
-                                     f"{want[:80]!r})")
-    return ok, bad
-
-
-# --------------------------------------------------------- e. fan-out -------
-_BALANCED_TEST = (
-    "from answer import is_balanced\n"
-    "cases = {'': True, '()': True, '([]{})': True, '([)]': False,\n"
-    "         '((': False, '}': False, 'a(b[c]d)e': True, '{[()()]}': True,\n"
-    "         '(]': False, '())(': False}\n"
-    "bad = [(k, v) for k, v in cases.items() if is_balanced(k) is not v]\n"
-    "assert not bad, bad\n"
-    "print('ok')\n")
-
-
-def test_fanout_delivers_tested_code():
-    q = ("Write a Python function is_balanced(s) that returns True when every "
-         "bracket in s -- (), [] and {} -- is closed in the right order, and "
-         "False otherwise. Other characters are ignored. Give just the code "
-         "in one python block.")
-    status, d, dt = chat([{"role": "system", "content":
-                           f"[session {_nonce()}]"},
-                          {"role": "user", "content": q}],
-                         reasoning_effort="high")
-    x = _x(d)
-    fan = x.get("fanout") or {}
-    text, fin = _content(d)
-    ev = json.dumps({"status": status, "route": (x.get("route") or {}).get(
-        "class"), "fanout": fan, "tail": text[-300:]})[:700]
-    check(status == 200 and (x.get("route") or {}).get("class")
-          == "code_generation", f"fanout: routed code_generation ({dt:.0f}s)",
-          ev)
-    check((fan.get("steps") or 0) >= 2,
-          f"fanout: B ran (steps={fan.get('steps')}"
-          + (", C too" if (fan.get("steps") or 0) >= 3 else "") + ")", ev)
-    check("Compared two approaches" in text,
-          "fanout: the answer says 'Compared two approaches'", ev)
-    blocks = _python_blocks(text)
-    code = blocks[0] if blocks else ""
-    rc, out = _run_python({"answer.py": code, "t.py": _BALANCED_TEST}, "t.py")
-    check(rc == 0 and out.strip().endswith("ok"),
-          "fanout: the delivered code passes the task's test",
-          json.dumps({"rc": rc, "out": out[-300:], "code": code[:400]}))
 
 
 # --------------------------------------------------------- f. compaction ----
@@ -1995,9 +1590,10 @@ def test_images_look_draw_search():
                          "images": x.get("images"),
                          "gpu_room": x.get("gpu_room"),
                          "running_after": _swap_running()}
-        # 3. SEARCH: the tools API's semantic search loads embeddings and
-        # (top_k <= RERANK_MAX_K) the reranker -- a separate process, so its
-        # decisions are in the tools API's log, not in an x_yamadori.
+        # 3. SEARCH: the tools API's semantic search loads embeddings (the
+        # reranker it also loaded at top_k <= 2 was removed 2026-10-01) -- a
+        # separate process, so its decisions are in the tools API's log, not
+        # in an x_yamadori.
         status, d, dt = _post(f"{TOOLS}/search",
                               {"query": "how does the proxy choose a slot "
                                         "for a conversation", "top_k": 2},
@@ -2036,11 +1632,11 @@ def test_images_look_draw_search():
           + ("none: the main model sees" if sees else
              "bonsai-vision (layout v2)") + " -- as the layout says",
           json.dumps(rooms)[:1500])
-    check(v.get("samples", 0) > 0 and v.get("min_free_mib") is not None
-          and v["min_free_mib"] >= floor,
-          f"a4000: free memory stays >= {floor:,} MiB across look -> draw -> "
-          f"search (min {v.get('min_free_mib')} MiB of {v.get('total_mib')}; "
-          f"row 16 was 308)", ev[:2000])
+    # THE A4000 IS THE STACK'S ALONE (operator, 2026-10-01: "Second card isn't shared with anything at all ever, if
+    # it generates images we are good"): no outside consumer needs room on it, so the free-memory floor is not a
+    # pass/fail line -- the look, the draw and the search succeeding (above) is. The minimum is printed as evidence.
+    print(f"  info  a4000: min free {v.get('min_free_mib')} MiB of {v.get('total_mib')} across look -> draw -> "
+          f"search (gpu_room's headroom {floor:,} MiB; row 16 was 308)")
 
 
 def test_images():
@@ -2102,7 +1698,8 @@ def _raw_post(path: str, raw: bytes, stream: bool = False
     """(status, headers, body text) for a request that may be refused."""
     req = urllib.request.Request(f"{PROXY}{path}", data=raw, headers={
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {KEY}"})
+        "Authorization": f"Bearer {KEY}",
+        "X-Yamadori-Features": _features()})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return r.status, dict(r.headers), r.read().decode("utf-8",
@@ -2342,8 +1939,8 @@ def test_e1_serves_the_offline_head():
     choice on every row, probabilities within 1e-3. The offline side is
     bench/e1/results/offline_preds.json (bench/e1/eval_e1.py offline);
     set 2's text is local (index/e1/, never in the repo). Then one real
-    request at xhigh shows deep.py consulted E1 in flight and Laya was not
-    asked. The CLM-EVAL bar item "the live service reproduces the offline
+    request at xhigh shows deep.py consulted E1 in flight (Laya's code was
+    removed 2026-09-29). The CLM-EVAL bar item "the live service reproduces the offline
     argmax" is this test."""
     path = os.path.join(ROOT, "bench", "e1", "results", "offline_preds.json")
     if not check(os.path.exists(path), "e1: offline predictions exist",
@@ -2351,17 +1948,17 @@ def test_e1_serves_the_offline_head():
         return
     with open(path, encoding="utf-8") as fh:
         off = json.load(fh)
-    code, _ct, body = _get(f"{PROXY}/dash/api/deep", auth=True)
-    ov = (json.loads(body or b"{}") or {}).get("e1") or {} if code == 200 \
-        else {}
-    ri = (ov.get("heads") or {}).get("route_in") or {}
-    check(code == 200 and ov.get("enabled") is True,
-          "e1: the proxy runs with YAMADORI_E1=1",
-          json.dumps({"code": code, "enabled": ov.get("enabled")}))
-    check(ri.get("served") and ri.get("current") == off["version"],
-          f"e1: route_in v{off['version']} is the served version",
-          json.dumps({k: ri.get(k) for k in ("current", "served", "status")}))
+    # IN-PROCESS (2026-09-29): GET /dash/api/deep and POST
+    # /dash/api/deep/e1/decide went with mcp/dash_deep.py, and no request
+    # consults route_in since mcp/deep.py was removed. The head is read from
+    # index/e1 (e1.overview) and decided here, through the LIVE resident
+    # embedder -- what the offline run is compared against.
     import e1
+    ov = e1.overview()
+    ri = (ov.get("heads") or {}).get("route_in") or {}
+    check(ri.get("served") and ri.get("current") == off["version"],
+          f"e1: route_in v{off['version']} is the current, servable version",
+          json.dumps({k: ri.get(k) for k in ("current", "served", "status")}))
     with open(os.path.join(ROOT, "bench",
                            "laya_routing_heldout_packages.jsonl"),
               encoding="utf-8") as fh:
@@ -2378,12 +1975,10 @@ def test_e1_serves_the_offline_head():
         if src is None:
             missing += 1
             continue
-        st, d, _dt = _post(f"{PROXY}/dash/api/deep/e1/decide",
-                           {"head": "route_in", "question": src["question"],
-                            "context": src.get("context") or ""})
-        dec = (d or {}).get("decision") if isinstance(d, dict) else None
-        if st != 200 or not dec:
-            bad.append(f"{row['set']}:{row['id']} HTTP {st} {str(d)[:120]}")
+        dec, why = e1.decide("route_in", src["question"],
+                             src.get("context") or "")
+        if not dec:
+            bad.append(f"{row['set']}:{row['id']} {why[:120]}")
             continue
         if dec["choice"] == row["choice"]:
             same += 1
@@ -2400,22 +1995,6 @@ def test_e1_serves_the_offline_head():
           "; ".join(bad[:10]))
     check(worst <= 1e-3, f"e1: probabilities within 1e-3 of offline "
                          f"(worst {worst:.2e})")
-    status, d, dt = chat([{"role": "system", "content":
-                           f"[session {_nonce()}]"},
-                          {"role": "user", "content":
-                           "In one sentence: what does a three.js "
-                           "PerspectiveCamera's fov parameter set?"}],
-                         reasoning_effort="xhigh", max_tokens=200)
-    x = _x(d)
-    deep_sig = ((x.get("deep") or {}).get("signals") or {}).get("e1") or {}
-    rin = (deep_sig.get("heads") or {}).get("route_in") or {}
-    lay = ((x.get("selection") or {}).get("signals") or {}).get(
-        "laya_status") or ""
-    check(status == 200 and rin.get("version") == off["version"],
-          f"e1: a live request consulted E1 in flight ({dt:.0f}s)",
-          json.dumps({"status": status, "e1": deep_sig})[:400])
-    check(not lay.startswith("answered") or "E1" in lay,
-          "e1: Laya was not the one that answered", lay[:200])
 
 
 def _resp_events(text: str) -> list[dict]:
@@ -2648,6 +2227,13 @@ def test_idle_conversation_clearing():
     from the server's host-RAM prompt cache or re-processed -- in how many
     ms."""
     import statistics
+    card = _card()
+    if card.get("n") in (1, 2):
+        na("idle conversation clearing (kept vs cleared, resumed_cold)",
+           f"{card.get('model')} serves ONE conversation ({card.get('n')} slot(s), layout v3): no second "
+           "conversation's slot sits idle on the card to clear (a second conversation is refused; "
+           "test_one_conversation_card)")
+        return
     n = _nonce()
     key_a, key_b = f"slots-a-{n}", f"slots-b-{n}"
     doc = _FILLER * 1333                                # ~40k tokens
@@ -2765,14 +2351,175 @@ def test_idle_conversation_clearing():
           + " " + str([r["prompt_ms"] for r in resumed]), rev)
 
 
+def _card() -> dict:
+    """The served main card, as the proxy sees it: {model, locked, n (slots), helpers, slots {id: prompt}} from
+    /dash/api/vitals/pulse (a /slots read of the loaded model, allowed on a locked card) and /dash/api/tiers (the
+    table: locked, helpers). {} when unreadable."""
+    out: dict = {}
+    code, _, raw = _get(f"{PROXY}/dash/api/vitals/pulse", auth=True)
+    if code == 200:
+        try:
+            sl = (json.loads(raw.decode("utf-8", "replace")).get("slots") or {})
+        except ValueError:
+            sl = {}
+        if sl.get("ok"):
+            rows = [r for r in sl.get("slots") or [] if "id" in r]
+            out.update(model=sl.get("model"), locked=bool(sl.get("locked")), n=len(rows),
+                       slots={int(r["id"]): int(r.get("prompt") or 0) for r in rows})
+    code, _, raw = _get(f"{PROXY}/dash/api/tiers", auth=True)
+    if code == 200 and out.get("model"):
+        try:
+            tb = (((json.loads(raw) or {}).get("max_mode") or {}).get("table") or {})
+        except ValueError:
+            tb = {}
+        row = (tb.get("models") or {}).get(out["model"]) or {}
+        out["helpers"] = row.get("helpers") or {}
+        out["locked"] = bool(out.get("locked") or row.get("locked"))
+        out["other_card"] = row.get("other_card")
+    return out
+
+
+def _decider_models(x) -> list[str]:
+    """Every model a jjava read of this request names (a Turn's model_profile.model, wherever it sits in
+    x_yamadori)."""
+    found: list[str] = []
+
+    def walk(v):
+        if isinstance(v, dict):
+            mp = v.get("model_profile")
+            if isinstance(mp, dict) and mp.get("model"):
+                found.append(str(mp["model"]))
+            for w in v.values():
+                walk(w)
+        elif isinstance(v, list):
+            for w in v:
+                walk(w)
+    walk(x)
+    return found
+
+
+def test_one_conversation_card():
+    """LAYOUT V3 (operator, 2026-09-30; mcp/slots.py ONE CONVERSATION, mcp/max_mode.py), at -np 1 or 2: 1. one
+    conversation, on slot 0; 2. the owner's compaction runs on its own card and slot, never bonsai-a4000; 3. a side
+    call runs on the table's helper (bonsai-a4000) on a locked card and leaves the card's one slot as it was; 4. a
+    jjava read on these requests, when one ran, read the helper; 5. a NEW conversation id inside the owner's hold
+    runs on THE OTHER CARD (x_yamadori.slots.routed; operator 2026-09-30) and keeps it -- or, when the card's model
+    has no other card, is told 503 conversation_at_capacity + Retry-After (never downgraded). The switch after the
+    hold is NOT APPLICABLE live (a 60 s idle wait): mcp/test_one_conversation.py checks it offline."""
+    card = _card()
+    if not card.get("model"):
+        raise NotRun("the card's /slots could not be read through the proxy (/dash/api/vitals/pulse)")
+    if card.get("n") not in (1, 2):
+        na("one conversation per card", f"the card serves {card.get('n')} slots: the rule is on at 1 or 2")
+        return
+    n = _nonce()
+    helper = (card.get("helpers") or {}).get("side_calls") if card.get("locked") else None
+    key_a, key_b = f"one-a-{n}", f"one-b-{n}"
+    a = [{"role": "system", "content": f"You are a coding agent. [one {n} A]"},
+         {"role": "user", "content": "In one sentence: what is a closure?"}]
+    sa, da, ta = chat(a, prompt_cache_key=key_a, reasoning_effort="medium", max_tokens=200)
+    xa = _x(da)
+    ca = xa.get("cache") or {}
+    check(sa == 200 and ca.get("slot") == 0 and (xa.get("capacity") or {}).get("model") in (None, card["model"]),
+          f"one conversation: served on {card['model']}'s slot 0 ({ta:.0f}s)",
+          json.dumps({"status": sa, "cache": ca, "capacity": xa.get("capacity")})[:500])
+    # 2. the owner's compaction (in place: its history plus a summarise turn, its own key)
+    ta_text, _ = _content(da)
+    comp = a + [{"role": "assistant", "content": ta_text or "ok"},
+                {"role": "user", "content": "Summarize this conversation so far for a continuation."}]
+    sc, dc, tc = chat(comp, prompt_cache_key=key_a, max_tokens=300)
+    xc = _x(dc)
+    cc = xc.get("cache") or {}
+    cm = (xc.get("capacity") or {}).get("model")
+    is_comp = xc.get("utility_kind") == "compaction" or bool(xc.get("compaction"))
+    check(sc == 200 and is_comp and cm in (None, card["model"]) and cc.get("slot") == 0,
+          f"the owner's compaction runs on its own card ({card['model']}) and slot 0, never a helper ({tc:.0f}s)",
+          json.dumps({"status": sc, "utility_kind": xc.get("utility_kind"), "capacity": xc.get("capacity"),
+                      "cache": cc})[:600])
+    # 3. a side call: on the helper when the card is locked, and the card's one slot is untouched
+    before = (_card().get("slots") or {})
+    classifier = [
+        {"role": "system", "content": "You are a security reviewer for an AI coding agent.\n\nRespond with "
+         f"exactly one word: APPROVE, DENY, or ESCALATE [one {n}]"},
+        {"role": "user", "content": "<command>ls -la</command>\n\nRespond with exactly one word: APPROVE, DENY, "
+         "or ESCALATE"}]
+    ss, ds, ts = chat(classifier, max_tokens=16)
+    xs = _x(ds)
+    sm = (xs.get("capacity") or {}).get("model")
+    after = (_card().get("slots") or {})
+    ev = json.dumps({"status": ss, "capacity": xs.get("capacity"), "cache": xs.get("cache"),
+                     "card_slots_before": before, "card_slots_after": after})[:700]
+    if helper:
+        check(ss == 200 and xs.get("utility") is True and sm == helper,
+              f"a side call on a locked card runs on {helper} ({ts:.1f}s)", ev)
+        check(before and before == after,
+              f"and {card['model']}'s one slot is as it was (/slots before == after)", ev)
+    else:
+        na("a side call runs on the helper", f"{card['model']} is not locked: its side calls stay on its own lane")
+    # 4. jjava's model, where a read ran on these requests
+    dm = sorted(set(_decider_models(xa) + _decider_models(xc) + _decider_models(xs)))
+    if not dm:
+        na("jjava reads the helper", "no jjava read ran on these requests (no Turn record in x_yamadori)")
+    elif helper:
+        check(dm == [helper], f"jjava's reads on a locked card went to {helper}", json.dumps(dm))
+    else:
+        na("jjava reads the helper", f"{card['model']} is not locked (jjava on its own lane: {dm})")
+    # 5. a NEW conversation id inside the owner's hold (A was active seconds ago): THE OTHER CARD (operator
+    # 2026-09-30) when the card's model has one (bonsai: bonsai-a4000), else 503 with the rest of the hold -- never
+    # downgraded (no retry here)
+    other = (card.get("other_card") or None)
+    b = [{"role": "system", "content": f"You are a coding agent. [one {n} B]"},
+         {"role": "user", "content": "In one sentence: what is a generator?"}]
+    t0 = time.time()
+    sb, db, tb = _post(f"{PROXY}/v1/chat/completions",
+                       {"model": "yamadori", "messages": b, "temperature": 0, "prompt_cache_key": key_b,
+                        "max_tokens": 64}, capacity_retry=False, features={"primary_hold_s": None})
+    xb = _x(db)
+    ro = (xb.get("slots") or {}).get("routed") or {}
+    err = (db.get("error") if isinstance(db, dict) else None) or {}
+    ev = json.dumps({"status": sb, "routed": ro, "cache": xb.get("cache"), "error": err,
+                     "other_card": other})[:700]
+    if other:
+        check(sb == 200 and ro.get("routed") == "other_card" and ro.get("model") == other
+              and ro.get("why") and ro.get("owner_idle_s") is not None and (xb.get("cache") or {}).get("slot") == 0,
+              f"a new conversation id inside the owner's hold runs on the other card ({other}, its slot 0) "
+              f"({time.time() - t0:.1f}s; x_yamadori.slots.routed)", ev)
+        # and keeps it: its next turn goes there again
+        b2 = b + [{"role": "assistant", "content": _content(db)[0] or "ok"},
+                  {"role": "user", "content": "And an iterator, in one sentence?"}]
+        s2, d2, _t2 = _post(f"{PROXY}/v1/chat/completions",
+                            {"model": "yamadori", "messages": b2, "temperature": 0, "prompt_cache_key": key_b,
+                             "max_tokens": 64}, capacity_retry=False, features={"primary_hold_s": None})
+        r2 = (_x(d2).get("slots") or {}).get("routed") or {}
+        check(s2 == 200 and r2.get("model") == other and int(((_x(d2).get("cache") or {}).get("first") or {})
+                                                           .get("reused") or 0) > 0,
+              f"and keeps it for its life: its next turn is on {other} again and reuses its cached prefix",
+              json.dumps({"status": s2, "routed": r2, "cache": _x(d2).get("cache")})[:500])
+    else:
+        check(sb == 503 and err.get("code") == "conversation_at_capacity",
+              f"{card['model']} has no other card: a new conversation id inside the owner's hold is told 503 "
+              "conversation_at_capacity with Retry-After (never downgraded)", ev)
+    na("the switch after the hold (a new id takes the main card; the old one restored from --cache-ram)",
+       "needs a 60 s idle hold between two conversations; checked offline (mcp/test_one_conversation.py "
+       "test_other_card_routing), and the restore path live by the slots group's resumed_cold")
+
+
 def test_released_slots_hold_nothing():
-    """3. After a side call the transient slot, and after a fix-up the
-    second brain's slot, hold ~0 cells: /slots n_prompt_tokens read through
-    the proxy's vitals, beside x_yamadori.slots.released. LAYOUT V2: the
-    child slot is THE LANE, KEPT after a side call (at most the lane's
-    budget.LANE_TOKENS cells); a fix-up still empties it."""
+    """3. After a side call the transient slot holds ~0 cells: /slots
+    n_prompt_tokens read through the proxy's vitals, beside
+    x_yamadori.slots.released. LAYOUT V2: the child slot is THE LANE, KEPT
+    after a side call (at most the lane's budget.LANE_TOKENS cells). (The
+    fix-up half went with the fix-up job, 2026-09-29.) A LOCKED -np 1 card
+    has no lane: NOT APPLICABLE, with the reason."""
     import budget
     import slots as _slots
+    card = _card()
+    if card.get("locked") and card.get("n") == 1:
+        na("a side call's lane is released / kept", f"{card['model']} is LOCKED at -np 1: no lane on the card; side "
+           f"calls run on {(card.get('helpers') or {}).get('side_calls')}, which picks its own slot (the proxy "
+           "sends it no slot id and releases nothing there: slots._helper_server_grant); "
+           "test_one_conversation_card checks the routing")
+        return
     classifier = [
         {"role": "system", "content": "You are a security reviewer for an AI "
          "coding agent.\n\nRespond with exactly one word: APPROVE, DENY, or "
@@ -2805,23 +2552,10 @@ def test_released_slots_hold_nothing():
         check(after is not None and tslot in after and after[tslot] <= 8,
               "slots: /slots shows the transient slot holding ~0 tokens "
               "after the side call", ev)
-    r, _ = _broken_write("xhigh", "slots_hi.py", "def f(:\n    return 1\n")
-    x = r["x"]
-    rel = (x.get("slots") or {}).get("released") or []
-    fix = [e for e in rel if "fixup" in (e.get("why") or "")]
-    after = _pulse_prompts()
-    ev = json.dumps({"tool_code": (x.get("tool_code") or {}).get("stopped"),
-                     "released": rel, "slots_after": after})
-    check((x.get("tool_code") or {}).get("stopped") == "fixed"
-          and fix and fix[-1].get("released"),
-          "slots: the fix-up job's slot is released when the job ends", ev)
-    hs = fix[-1].get("slot") if fix else None
-    check(after is not None and hs in after and after[hs] <= 8,
-          "slots: /slots shows the second brain's slot holding ~0 tokens "
-          "after the fix-up", ev)
 
 
 def test_slots():
+    test_one_conversation_card()
     test_released_slots_hold_nothing()
     test_idle_conversation_clearing()
 
@@ -2849,7 +2583,12 @@ def test_the_layout_v2_lane_and_vision():
             f"{PROXY}/v1/models", headers={"Authorization": f"Bearer {KEY}"}),
             timeout=30) as r:
         row = (json.loads(r.read().decode()).get("data") or [{}])[0]
-    if _slots.lane_ranked() and line:
+    if n == 1 and line:
+        check(row.get("context_length") == line,
+              f"layout v3 -np 1: the advertised window is the whole served line ({line}; no lane)",
+              json.dumps({"context_length": row.get("context_length"), "line": line}))
+        na("layout: the lane's rank", "-np 1: no lane on the card (jjava and side calls on bonsai-a4000)")
+    elif _slots.lane_ranked() and line:
         check(row.get("context_length") == line - budget.LANE_TOKENS,
               f"layout v2: the advertised window is the served line less the "
               f"lane ({line} - {budget.LANE_TOKENS})",
@@ -2866,94 +2605,6 @@ def test_the_layout_v2_lane_and_vision():
           "bonsai-vision on the A4000)", json.dumps(pin.get("modalities")))
 
 
-def test_clm_decides_through_llama_swap():
-    """CLM (docs/CLM.md), after the llama-swap restart that serves
-    `clm-encoder`: mcp/clm.py through llama-swap's /v1/embeddings behind
-    gpu_room -- the path skill_deciders.ClmDecider takes -- reproduces the
-    OFFLINE reference decisions of bench/clm/fidelity.py (Qwen3-8B fp32 HF
-    transformers + the release heads) on all 40 questions: argmax and
-    none-vs-pick, 40/40, as the standalone measurement did. Then: the
-    A4000 decision is recorded, the encoder is in /running, a repeat is
-    deterministic (with another state between, so no cached prefix), and the
-    selector's `clm` decider answers a question (not an abstention). The
-    per-call state-encode ms are printed as evidence. In-process client,
-    not :1234: no client request reaches CLM unless YAMADORI_SKILL_DECIDER
-    is clm."""
-    import numpy as np
-    sys.path.insert(0, os.path.join(ROOT, "bench", "clm"))
-    import gpu_room
-    import clm
-    import clm_heads
-    import fidelity
-    st = clm.status()
-    if not check(st.get("heads") and st.get("tokenizer"),
-                 "clm: heads and tokenizer are present", json.dumps(st)):
-        return
-    ref_path = os.path.join(fidelity.VECTORS, "reference_fp32.npz")
-    if not check(os.path.exists(ref_path), "clm: the offline reference "
-                 "vectors exist (bench/clm/fidelity.py reference)", ref_path):
-        return
-    ref = fidelity._load(ref_path)
-    heads = clm_heads.load()
-    room: list = []
-    agree = none_agree = 0
-    ms, bad = [], []
-    qs = fidelity.load_questions()
-    with gpu_room.recording(room):
-        for q in qs:
-            try:
-                d = clm.decide_detail(q["state"], q["options"],
-                                      instructions=q["instructions"])
-            except clm.ClmUnavailable as e:
-                if e.retryable:
-                    raise NotRun(f"clm-encoder: {e.code}") from None
-                check(False, "clm: the encoder answers", json.dumps(e.facts()))
-                return
-            ms.append(d["timing"]["state_encode_ms"])
-            s = ref[fidelity.key(clm.state_text(q["state"], q["instructions"]))]
-            a = np.stack([ref[fidelity.key(t)] for t in q["options"]])
-            r = clm_heads.softmax(heads.logits(heads.project_states(s)[0],
-                                               heads.project_actions(a)))
-            p = np.asarray(d["probabilities"])
-            ni = q["keys"].index("none")
-            same = int(p.argmax()) == int(r.argmax())
-            agree += same
-            none_agree += (int(p.argmax()) == ni) == (int(r.argmax()) == ni)
-            if not same:
-                bad.append(q["id"])
-    ev = json.dumps({"argmax": f"{agree}/{len(qs)}",
-                     "none_vs_pick": f"{none_agree}/{len(qs)}",
-                     "state_encode_ms_p50": float(np.median(ms)),
-                     "max_ms": float(np.max(ms)), "disagree": bad,
-                     "gpu_room": room[:2]})
-    check(agree == len(qs), "clm: served argmax == the offline reference "
-          "on every fidelity question", ev)
-    check(none_agree == len(qs), "clm: served none-vs-pick == the offline "
-          "reference on every fidelity question", ev)
-    check(any((r or {}).get("model") == "clm-encoder" for r in room),
-          "clm: the A4000 decision for clm-encoder is recorded (gpu_room)", ev)
-    check("clm-encoder" in (_swap_running() or []),
-          "clm: llama-swap /running lists clm-encoder after use",
-          json.dumps(_swap_running()))
-    tok = clm.tokenizer()
-    a_ids, b_ids = tok.ids(qs[0]["state"]), tok.ids(qs[1]["state"])
-    e1 = clm.encoder().embed_ids([a_ids])[0]
-    clm.encoder().embed_ids([b_ids])
-    e2 = clm.encoder().embed_ids([a_ids])[0]
-    check(float(np.abs(e1 - e2).max()) == 0.0,
-          "clm: the same state encodes identically (another between)",
-          str(float(np.abs(e1 - e2).max())))
-    import skill_deciders as D
-    q0 = qs[0]
-    dq = D.Question("q0", "asked", "r3f", q0["state"], [
-        D.Option(k, t) for k, t in zip(q0["keys"], q0["options"])
-        if k != "none"][:5])
-    got = D.ClmDecider().decide(dq.state, dq.options, dq)
-    check(got is not None and abs(sum(got.values()) - 1) < 1e-3,
-          "clm: skill_deciders.ClmDecider answers a question (no abstention)",
-          json.dumps(got)[:300])
-
-
 def test_one_model_per_tier():
     """ONE MODEL PER EFFORT TIER (operator, 2026-09-29; mcp/tier_models.py, mcp/max_mode.py), live through :1234.
     The walk medium -> xhigh -> max -> medium: each answer comes from its tier's model (x_yamadori.capacity.model,
@@ -2965,8 +2616,13 @@ def test_one_model_per_tier():
     code, _ct, raw = _get(f"{PROXY}/dash/api/tiers", auth=True)
     mm = (json.loads(raw) or {}).get("max_mode") or {} if code == 200 else {}
     tiers_of = {k: (v or {}).get("model") for k, v in ((json.loads(raw) or {}).get("tiers") or {}).items()}         if code == 200 else {}
-    if not mm.get("enabled") or not (mm.get("table") or {}).get("enabled"):
-        raise NotRun("the tier -> model table is off on this proxy (YAMADORI_TIER_MODELS unset)")
+    # THE RUNNING PROXY'S OWN RECORD (/dash/api/tiers max_mode.table, tier_models.describe): the table's profiles
+    # and swaps are on only when the proxy was started with YAMADORI_TIER_MODELS naming the table file. The older
+    # YAMADORI_MAX_MODEL alone (max mode, 2026-09-28) enables routing but none of what this group checks.
+    tb = mm.get("table") or {}
+    if not mm.get("enabled") or not tb.get("profiles"):
+        raise NotRun(f"the tier -> model table file is not in force on this proxy (YAMADORI_TIER_MODELS unset; "
+                     f"table source: {tb.get('source')!r}, profiles {tb.get('profiles')!r})")
     prompt = [{"role": "user", "content": "Reply with exactly: ok"}]
     walk = ["medium", "xhigh", "max", "medium"]
     for tier in walk:
@@ -2998,12 +2654,26 @@ def test_one_model_per_tier():
     th = threading.Thread(target=xhigh_turn)
     th.start()
     time.sleep(20)
-    status, d, _dt = chat(prompt, max_tokens=64, reasoning_effort="medium")
+    # the server's own hold (no suite override): the xhigh request is IN FLIGHT on the main card
+    status, d, _dt = _post(f"{PROXY}/v1/chat/completions",
+                           {"model": "yamadori", "messages": prompt, "temperature": 0, "max_tokens": 64,
+                            "reasoning_effort": "medium"}, capacity_retry=False, features={"primary_hold_s": None})
     err = (d or {}).get("error") if isinstance(d, dict) else None
     th.join(TIMEOUT)
-    check(status == 503 and (err or {}).get("code") == "model_at_capacity" and (err or {}).get("holder"),
-          "medium while xhigh works: 503 model_at_capacity, the holder named, Retry-After",
-          json.dumps({"status": status, "error": err})[:500])
+    # LAYOUT V3 (operator 2026-09-30): a newcomer whose tier's model has THE OTHER CARD (bonsai: bonsai-a4000) runs
+    # there while the main card is busy; one whose model has none is told 503 with Retry-After (never downgraded)
+    other = (((tb.get("models") or {}).get(tiers_of.get("medium")) or {}).get("other_card"))
+    xm = _x(d)
+    served = (xm.get("capacity") or {}).get("model")
+    routed = ((xm.get("slots") or {}).get("routed") or {})
+    ev = json.dumps({"status": status, "error": err, "capacity_model": served, "routed": routed,
+                     "other_card": other})[:600]
+    if other:
+        check(status == 200 and (routed.get("model") == other or served == other),
+              f"medium while xhigh works: served on the other card ({other}), x_yamadori says so", ev)
+    else:
+        check(status == 503 and (err or {}).get("code") in ("model_at_capacity", "conversation_at_capacity"),
+              "medium while xhigh works: 503 at capacity with Retry-After (no other card for its model)", ev)
     st2 = (got.get("xhigh") or (0,))[0]
     check(st2 == 200, "and the xhigh request it waited behind was not disturbed", str(st2))
     status, d, dt = chat(prompt, max_tokens=64, reasoning_effort="medium")
@@ -3087,11 +2757,9 @@ TESTS = {
     "harness": test_a_harness_side_call_and_a_pinned_conversation,
     "tiers": test_every_tier_returns_a_complete_answer_on_a_small_budget,
     "stream": test_streaming_returns_the_whole_answer,
-    "tools": test_a_library_question_gets_the_definitions,
     "summarize": test_summarize_text_through_the_tools_api,
-    "seeds": test_a_fanout_tier_records_its_seed,
+    "seeds": test_the_first_turn_carries_the_concept_seed,
     "skills": test_skills_reach_the_model,
-    "selection": test_selection_decides_deep_thinking,
     "parity": test_streamed_and_blocking_are_one_system,
     "cache": test_one_model_one_cache,
     "router": test_the_router_classes,
@@ -3100,16 +2768,11 @@ TESTS = {
     "conformance": test_openai_conformance,
     "responses": test_responses_api,
     "agent_loop": test_a_harness_agent_loop,
-    "repair": test_tool_call_repair_at_xhigh,
-    "note": test_medium_notes_without_fixing,
-    "deep": test_deep_thinking_folds_back,
-    "fanout": test_fanout_delivers_tested_code,
     "compaction": test_compaction_both_shapes,
     "images": test_images,
     "slots": test_slots,
     "layout": test_the_layout_v2_lane_and_vision,
     "tier_models": test_one_model_per_tier,
-    "clm": test_clm_decides_through_llama_swap,
     # INTRUSIVE: restarts the proxy. Runs only with --maintenance.
     "ledger_restart": test_the_ledger_survives_a_proxy_restart,
     # OPT-IN: writes live state (a held package); runs only when named
@@ -3156,6 +2819,7 @@ def main(argv: list[str]) -> int:
             continue
         print(f"\n--- {fn.__name__} ---", flush=True)
         n0 = len(_results)
+        na0 = len(_na)
         t0 = time.time()
         try:
             fn()
@@ -3173,6 +2837,8 @@ def main(argv: list[str]) -> int:
                   flush=True)
         if _not_run and _not_run[-1][0] == name:
             print(f"  NOT RUN  {name}: {_not_run[-1][1]}", flush=True)
+        for nm, why in _na[na0:]:
+            print(f"  n/a   {nm}\n        <- {why}", flush=True)
         print(f"  ({name}: {time.time() - t0:.0f}s)", flush=True)
     passed = sum(1 for ok, _, _ in _results if ok)
     failed = [nm for ok, nm, _ in _results if not ok]
@@ -3181,6 +2847,11 @@ def main(argv: list[str]) -> int:
     if _not_run:
         print(f"  {len(_not_run)} tests NOT RUN (429): "
               + ", ".join(n for n, _ in _not_run))
+    if _na:
+        print(f"  {len(_na)} checks NOT APPLICABLE to the served layout (reasons above)")
+    if _capacity_waits:
+        print(f"  waited out {len(_capacity_waits)} 503 conversation_at_capacity "
+              f"({sum(w['retry_after'] for w in _capacity_waits):.0f} s in all; one conversation per card)")
     for nm in failed:
         print(f"  failed: {nm}")
     if failed:

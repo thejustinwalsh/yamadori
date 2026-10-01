@@ -13,7 +13,10 @@ harness's shapes: Pi's `developer` role (a 502 with the addendum), Pi's and
 OpenCode's synthetic image turns routed as prose / counted as kickoffs / as
 the user speaking, OpenCode's title call recorded as a compaction, Pi's and
 OpenCode's compactions unrecognised, Pi's edit tool caught only by the shape
-fallback, .html writes unchecked. Each was found live, one harness at a
+fallback, .html writes unchecked. (The addendum, deep thinking's kickoff and
+struggle triggers, the code check of client writes and the project
+inference were removed 2026-09-29, docs/REMOVED.md: their columns and
+expectations went with them; see RETIRED below.) Each was found live, one harness at a
 time. This gate replays the shapes offline, every harness through every
 decision point, so a new harness -- or a change to a classifier -- is
 checked against all of them at once (PROTOCOL rule 7: a detector is only
@@ -49,31 +52,33 @@ THE DECISION POINTS (the columns of the matrix printed at the end)
   session     proxy.session_identity's source (prompt_cache_key, header --
               server.session_of_headers -- tool_call_id, minted; None for
               a side call)
-  deep        mcp/deep.py's trigger INPUTS: kickoff (deep.kickoff), the
-              user speaking (selection.question_of) and the struggle
-              signal count (deep.struggle_scan)
+  speaking    the user speaking or not (selection.question_of, which
+              route reads): a harness's tool result, synthetic tool-media
+              turn or context turn is not the user. Read from the fixture's
+              `deep` row, whose kickoff / struggle keys are RETIRED
   roles       system/developer handling: after prepare exactly one system
-              message, first, at the harness's own tier AND at `high` (the
-              addendum's tier), rendered by the SERVED chat template
-              (mcp/fixtures/bonsai_chat_template.jinja) without raising
+              message, first, at the harness's own tier AND at `high` (where
+              the concept seed joins the first user turn), rendered by the
+              SERVED chat template (mcp/fixtures/bonsai_chat_template.jinja)
+              without raising
   image       vision.normalise's register (each image's `form`) and no
               image part left in what the text model is sent
-  tool_code   tool_code.detect / review on the harness's own write/edit
-              calls: known-name table vs shape fallback, the unit kind,
-              the language, whether it blocks
+  tool_code   tool_code.detect on the harness's own write/edit calls:
+              known-name table vs shape fallback, the unit kind, the
+              language (`blocking` is RETIRED: the check is gone)
   skills      skill_select.select with the AUTHORED skills armed in a temp
               store (skills/authored/, deterministic stages: the embedder
               and the fallback are the live stack's and are replaced), both
               called directly and through proxy.prepare's injection: which
               skills a target shape gets, and that a near miss gets none
-  project     mcp/progress.py's project: the fixture's conversation
-              replayed prefix by prefix (each request that ends on tool
-              results, in order, one session) through the wire's
-              translation and proxy.prepare -- the working directory, the
-              project writes (v0f-V0: a write has to pair with its result
-              on the Responses path), and that every tool result goes up
-              as the harness sent it (the situation lines were removed
-              2026-09-27)
+  project     the fixture's conversation replayed prefix by prefix (each
+              request that ends on tool results, in order, one session)
+              through the wire's translation and proxy.prepare: every tool
+              result goes up as the harness sent it and pairs with the call
+              it answers (v0f-V0: on the Responses path a call's id must be
+              the call_id its output names). The working directory and the
+              project writes (`root`, `project_writes_seen`) are RETIRED:
+              the project inference left prepare 2026-09-29
 
 ADDING A HARNESS: drop fixtures under bench/harness_shapes/<name>/ with a
 README.md; the matrix grows a row. Every database is a temp file, set
@@ -135,11 +140,9 @@ import jinja2  # noqa: E402
 
 import api_errors  # noqa: E402
 import compaction  # noqa: E402
-import deep  # noqa: E402
 import image_input  # noqa: E402
 import jobs  # noqa: E402
 import nebari  # noqa: E402
-import progress  # noqa: E402
 import proxy  # noqa: E402
 import responses_api  # noqa: E402
 import selection  # noqa: E402
@@ -172,8 +175,22 @@ skill_select.refresh_triggers = lambda: {"rows": 0, "offline": True}
 proxy._draw_seed = lambda prompt=None: {"word": "cedar", "token_id": 1,
                                         "u32": 1}
 
-POINTS = ("accepted", "route", "utility", "compaction", "session", "deep",
-          "roles", "image", "tool_code", "skills", "project", "tools")
+POINTS = ("accepted", "route", "utility", "compaction", "session",
+          "speaking", "roles", "image", "tool_code", "skills", "project",
+          "tools")
+# Fixture expectations of decisions that were REMOVED 2026-09-29
+# (docs/REMOVED.md; the way back is commit e360d37). The fixtures still carry
+# them (bench/harness_shapes); they are read as below and never checked.
+#   expect key -> sub-keys no longer checked (None: the whole key)
+RETIRED = {
+    "deep": ("kickoff", "struggle_min", "struggle_max"),   # deep.py is gone;
+    #   its `speaking` is the `speaking` column
+    "roles": ("addendum",),                  # proxy.ADDENDUM is gone
+    "tool_code": ("blocking",),              # the check / review is gone
+    "project": ("root", "project_writes_seen"),   # the project inference
+}
+# A fixture's `deep` row is where the `speaking` column's expectation lives.
+EXPECT_KEY = {"speaking": "deep"}
 # Decision points checked on EVERY fixture (no `expect` row needed): the
 # tool list's no-conflict rule holds for any request of any harness.
 UNIVERSAL = {"tools": {}}
@@ -187,24 +204,8 @@ UNIVERSAL_WANT = {"hermes": {"tools": {"withheld": ["yama_describe_image"]}}}
 # harness. Each is an open finding; the list is the report. "fix list" rows
 # are being fixed elsewhere (2026-09-26); "NEW" rows were found by this gate.
 KNOWN: dict[tuple[str, str], str] = {
-    # The expectation is the harness's intent (one command failing the same
-    # way 4 times is a struggle); the code no longer reads these results.
-    ("codex/responses/struggle-same-error", "deep"): (
-        "NEW 2026-09-27: plain-text tool results never signal since "
-        "deep._ERR_TEXT was removed (docs/CONSTANTS-AUDIT.md: only "
-        "structured status/error fields count). Codex writes its exit "
-        "status as a header line ('Process exited with code 1', "
-        "docs/HARNESS-CODEX.md s4, captured), which is not read: an open "
-        "decision."),
-    ("pi/chat/struggle-same-error", "deep"): (
-        "NEW 2026-09-27: plain-text tool results never signal since "
-        "deep._ERR_TEXT was removed (docs/CONSTANTS-AUDIT.md). Pi appends "
-        "its exit status as a line ('Command exited with code 1', "
-        "tools/bash.js), which is not read: an open decision."),
-    ("opencode/chat/struggle-same-error", "deep"): (
-        "NEW 2026-09-27: plain-text tool results never signal since "
-        "deep._ERR_TEXT was removed (docs/CONSTANTS-AUDIT.md). OpenCode's "
-        "bash result carries no exit status in its text at all."),
+    # (The three struggle rows -- plain-text exit statuses that deep.py did
+    # not read -- went with deep.py, 2026-09-29.)
 }
 
 # ============================================================= plumbing ====
@@ -398,28 +399,14 @@ def c_session(fx, want, cx):
     return ok, f"source={src} header={hdr or None}"
 
 
-def c_deep(fx, want, cx):
-    raw = cx["raw"]
-    ko = deep.kickoff(raw)
-    speaking = selection.question_of(raw)[2]
-    scan = deep.struggle_scan(raw)
-    ev = scan["events"]
-    # (`still_broken`, the user_still_broken signal, was removed 2026-09-27.)
-    got = {"kickoff": ko["new_task"], "speaking": speaking,
-           "struggle": len(ev)}
-    ok = True
-    for k in ("kickoff", "speaking"):
-        if k in want:
-            ok = ok and got[k] == want[k]
-    if "struggle_min" in want:
-        ok = ok and got["struggle"] >= want["struggle_min"]
-    if "struggle_max" in want:
-        ok = ok and got["struggle"] <= want["struggle_max"]
-    kinds = sorted({e["kind"] for e in ev})
-    return ok, f"{got} kinds={kinds} kickoff_why={ko['why'][:70]!r}"
+def c_speaking(fx, want, cx):
+    """Is the user speaking (selection.question_of, read by route)? `want`
+    is the fixture's `deep` row; only its `speaking` key is checked."""
+    speaking = selection.question_of(cx["raw"])[2]
+    return speaking == want["speaking"], f"speaking={speaking}"
 
 
-def _roles_of(out: dict, addendum: bool) -> tuple[bool, str]:
+def _roles_of(out: dict) -> tuple[bool, str]:
     msgs = out.get("messages") or []
     inst = [i for i, m in enumerate(msgs) if isinstance(m, dict)
             and m.get("role") in ("system", "developer")]
@@ -427,11 +414,6 @@ def _roles_of(out: dict, addendum: bool) -> tuple[bool, str]:
     if not inst:
         first_ok = True             # no instruction message at all is fine
     why = f"instruction messages at {inst}, roles {[msgs[i].get('role') for i in inst]}"
-    if addendum:
-        head = selection._text(msgs[0]) if msgs else ""
-        has = proxy.ADDENDUM.strip()[:60] in head
-        first_ok = first_ok and has
-        why += f", addendum in the first: {has}"
     try:
         render(out)
     except Exception as e:                                       # noqa: BLE001
@@ -440,7 +422,7 @@ def _roles_of(out: dict, addendum: bool) -> tuple[bool, str]:
 
 
 def c_roles(fx, want, cx):
-    ok1, why1 = _roles_of(cx["out"], False)
+    ok1, why1 = _roles_of(cx["out"])
     util = bool((cx["out"].get("_utility") or {}).get("utility"))
     if util:
         return ok1, f"as sent: {why1}"
@@ -448,11 +430,8 @@ def c_roles(fx, want, cx):
     if hi is None:
         hi = cx["out_high"] = prepared(fx, cx["chat"], effort="high",
                                        tag=cx.get("tag", "") + "#high")
-    ok2, why2 = _roles_of(hi, True)
-    ok = ok1 and ok2
-    if want.get("addendum"):
-        ok = ok and ok1 and _roles_of(cx["out"], True)[0]
-    return ok, f"as sent: {why1} | at high: {why2}"
+    ok2, why2 = _roles_of(hi)
+    return ok1 and ok2, f"as sent: {why1} | at high: {why2}"
 
 
 def c_image(fx, want, cx):
@@ -477,24 +456,18 @@ def c_tool_code(fx, want, cx):
             gots.append(f"no call at {spec['call']}")
             continue
         d = tool_code.detect(call)
-        rv = tool_code.review([json.loads(json.dumps(call))])
         units = d.get("units") or []
         g = {"name": d.get("name"), "detected": d.get("detected"),
              "kinds": sorted({u.get("kind") for u in units}),
-             "languages": sorted({str(u.get("language")) for u in units}),
-             "blocking": bool(rv.get("blocked")), "errors": rv.get("errors")}
+             "languages": sorted({str(u.get("language")) for u in units})}
         ok = g["detected"] == spec.get("detected", g["detected"]) and bool(units)
         if "kind" in spec:
             ok = ok and g["kinds"] == [spec["kind"]]
         if "language" in spec:
             ok = ok and g["languages"] == [spec["language"]]
-        if "blocking" in spec:
-            ok = ok and g["blocking"] == spec["blocking"]
         oks.append(ok)
         gots.append(str(g))
-    enabled = bool(cx["out"].get("_tool_code"))
-    return all(oks) and enabled, f"checked on this request: {enabled}; " \
-        + " | ".join(gots)
+    return all(oks), " | ".join(gots)
 
 
 _POOL: list[dict] | None = None
@@ -540,13 +513,14 @@ def _prefixes(fx: dict) -> list[dict]:
 
 
 def c_project(fx, want, cx):
-    """The PROJECT (mcp/progress.py): every prefix that ends on tool results
-    replayed in order through the wire's translation (responses_api.to_chat)
-    and proxy.prepare, on one account and session, as the harness sends the
-    conversation. Checks the last request's root, the project writes seen
-    over all of them, and that the tool result the model is sent is the
-    harness's own text (no line of ours: removed 2026-09-27)."""
-    recs, last_out, last_chat = [], None, None
+    """Every prefix that ends on tool results replayed in order through the
+    wire's translation (responses_api.to_chat) and proxy.prepare, on one
+    account and session, as the harness sends the conversation. Checks that
+    the tool result the model is sent is the harness's own text (no line of
+    ours: removed 2026-09-27) and that every tool result pairs with the call
+    it answers. (The project's root and writes, mcp/progress.py's inference,
+    are RETIRED: removed from prepare 2026-09-29.)"""
+    n, last_out, last_chat = 0, None, None
     tag = cx.get("tag", "") + "#project"
     for b in _prefixes(fx):
         chat, why = chat_of(dict(fx, body=b))
@@ -554,19 +528,12 @@ def c_project(fx, want, cx):
             return False, f"a prefix was refused: {why}"
         last_chat = chat
         last_out = prepared(fx, chat, tag=tag)
-        recs.append((last_out.get("_progress") or {}).get("project") or {})
-    if not recs:
+        n += 1
+    if not n:
         return False, "no prefix ends on a tool result"
-    last = recs[-1]
-    writes = sorted({p for r in recs
-                     for p in (r.get("writes") or {}).get("project_writes")
-                     or []})
     tail = selection._text((last_out.get("messages") or [{}])[-1])
     sent = selection._text((last_chat.get("messages") or [{}])[-1])
-    got = {"root": last.get("root"), "project_writes_seen": writes,
-           "scratch": [s.get("path") for r in recs
-                       for s in (r.get("writes") or {}).get(
-                           "scratch_writes") or []],
+    got = {"prefixes": n,
            "tool_result_as_sent": tail.startswith(sent)
            and "Unchanged since step" not in tail
            and "No project file has changed" not in tail}
@@ -577,18 +544,14 @@ def c_project(fx, want, cx):
     got["paired"] = all(m.get("tool_call_id") in ids
                         for m in last_chat.get("messages") or []
                         if m.get("role") == "tool")
-    ok = got["tool_result_as_sent"] and got["paired"]
-    if "root" in want:
-        ok = ok and got["root"] == want["root"]
-    if "project_writes_seen" in want:
-        ok = ok and writes == sorted(want["project_writes_seen"])
-    return ok, json.dumps(got)
+    return got["tool_result_as_sent"] and got["paired"], json.dumps(got)
 
 
 def c_tools(fx, want, cx):
     """NO CONFLICTS (operator, 2026-09-27): every tool of ours that goes on
-    main -- yama_generate_image, yama_describe_image, yama_think_deeply, yama_recall_craft, the
-    delegate arm -- is compared with the harness's own; the final list has
+    main -- yama_generate_image, yama_describe_image, yama_recall_craft, the
+    MCP host's package lookups -- is compared with the harness's own; the
+    final list has
     no duplicate or normalised-duplicate name and no declared overlap
     (proxy.TOOL_OVERLAPS), and each withheld tool names the client tool it
     yielded to. Served at `max` with an image server configured, so every
@@ -618,9 +581,31 @@ def c_tools(fx, want, cx):
 
 
 CHECKS = {"accepted": c_accepted, "route": c_route, "utility": c_utility,
-          "compaction": c_compaction, "session": c_session, "deep": c_deep,
+          "compaction": c_compaction, "session": c_session,
+          "speaking": c_speaking,
           "roles": c_roles, "image": c_image, "tool_code": c_tool_code,
           "skills": c_skills, "project": c_project, "tools": c_tools}
+
+
+def expectations(fx: dict) -> dict:
+    """The fixture's `expect`, as the columns read it: a RETIRED sub-key
+    dropped (a row left empty is not checked), and the `speaking` column's
+    expectation taken from the `deep` row."""
+    out = {}
+    for key, want in (fx.get("expect") or {}).items():
+        gone = RETIRED.get(key, ())
+        if isinstance(want, dict):
+            want = {k: v for k, v in want.items() if k not in gone}
+        elif isinstance(want, list):
+            want = [{k: v for k, v in w.items() if k not in gone}
+                    if isinstance(w, dict) else w for w in want]
+        out[key] = want
+    for col, key in EXPECT_KEY.items():
+        row = out.pop(key, None)
+        if isinstance(row, dict) and "speaking" in row:
+            out[col] = row
+    # roles/project rows with nothing left to check still check the shape
+    return out
 
 
 def evaluate(fx: dict, points=None, tag: str = "") -> list[tuple]:
@@ -637,11 +622,12 @@ def evaluate(fx: dict, points=None, tag: str = "") -> list[tuple]:
             out_err = f"prepare raised {type(e).__name__}: {e}"
             traceback.print_exc()
     res = []
+    expect = expectations(fx)
     for p in POINTS:
-        if (p not in fx["expect"] and p not in UNIVERSAL) or (
+        if (p not in expect and p not in UNIVERSAL) or (
                 points and p not in points):
             continue
-        want = fx["expect"].get(p)
+        want = expect.get(p)
         if want is None:
             want = ((UNIVERSAL_WANT.get(fx.get("harness")) or {}).get(p)
                     if (fx.get("body") or {}).get("tools") else None) \
@@ -668,17 +654,6 @@ def evaluate(fx: dict, points=None, tag: str = "") -> list[tuple]:
 # it on the fixtures that carry that harness's shape. A mutant the gate
 # misses is a FAIL: the column would not have seen the bug.
 
-def _old_add_addendum(messages, think=False):
-    """add_addendum before 2026-09-26: only a `system` message was joined."""
-    text = proxy.addendum_text(think)
-    out = list(messages)
-    if out and out[0].get("role") == "system" and isinstance(
-            out[0].get("content"), str):
-        out[0] = dict(out[0], content=out[0]["content"] + text)
-        return out
-    return [{"role": "system", "content": text.strip()}] + out
-
-
 def _old_harness_of(text, system=""):
     t = text or ""
     return "hermes" if compaction._START.search(t) and "summar" in \
@@ -692,17 +667,16 @@ _ROO_OPENCODE_EDIT = [r for r in tool_code.KNOWN["edit"]
                       and r.get("path") in ("file_path", "filePath")]
 
 MUTANTS = (
-    ("developer role unmapped, addendum joins `system` only",
-     [(system_roles, "one_system", lambda msgs: (msgs, {})),
-      (proxy, "add_addendum", _old_add_addendum)],
+    ("developer role unmapped",
+     [(system_roles, "one_system", lambda msgs: (msgs, {}))],
      [("pi/chat/developer-role-high", "roles")]),
     ("synthetic tool-media turns read as user turns",
      [(image_input, "tool_media_turn", lambda messages, i: None)],
      [("opencode/chat/read-image-synthetic-turn", "route"),
-      ("opencode/chat/read-image-synthetic-turn", "deep"),
+      ("opencode/chat/read-image-synthetic-turn", "speaking"),
       ("opencode/chat/read-image-synthetic-turn", "image"),
       ("pi/chat/read-image-synthetic-turn", "route"),
-      ("pi/chat/read-image-synthetic-turn", "deep"),
+      ("pi/chat/read-image-synthetic-turn", "speaking"),
       ("pi/chat/read-image-synthetic-turn", "image")]),
     ("a title call read by the summarise rule",
      [(selection, "names_a_title", lambda text: False)],
@@ -721,11 +695,6 @@ MUTANTS = (
      [(tool_code, "is_html", lambda path: False)],
      [("opencode/chat/write-html-broken-script", "tool_code"),
       ("pi/chat/write-html", "tool_code")]),
-    ("the working directory from the first write's own folder (v0f-V0: a "
-     "bare config.js made it .../space-shooter/js)",
-     [(progress, "tree_paths", lambda text: ([], set())),
-      (progress, "_common_root", lambda a, b: None)],
-     [("hermes/responses/reread-unchanged", "project")]),
     ("a Responses call's id is not the call_id its output names (the "
      "suspected v0f-V0 cause: a tool result the project cannot pair)",
      [(responses_api, "_call_of", lambda item, where, custom, flat_of=None:
@@ -798,11 +767,11 @@ def main(argv: list[str]) -> int:
     for fx in fixtures:
         row = f"{fx['harness']}/{fx['wire']}"
         for p in fx["expect"]:
-            if p not in CHECKS:
+            if p not in CHECKS and p not in RETIRED:
                 print(f"FAIL: {fx['id']}: unknown decision point {p!r}")
                 bad_setup += 1
         for p, ok, g in evaluate(fx):
-            want = fx["expect"].get(p, UNIVERSAL.get(p))
+            want = expectations(fx).get(p, UNIVERSAL.get(p))
             known = KNOWN.get((fx["id"], p))
             status = ("pass" if ok and not known else
                       "now-passes" if ok and known else
@@ -814,7 +783,7 @@ def main(argv: list[str]) -> int:
             if status == "FAIL":
                 print(f"FAIL: {fx['id']} [{p}] want {w[:160]} -- got {g[:400]}")
                 print(f"        why expected: "
-                      f"{str((fx.get('why') or {}).get(p, ''))[:200]}")
+                      f"{str((fx.get('why') or {}).get(EXPECT_KEY.get(p, p), ''))[:200]}")
             elif status == "known":
                 print(f"  KNOWN-FAIL  {fx['id']} [{p}] want {w[:120]} -- got "
                       f"{g[:260]}\n              reason: {known}")
@@ -889,4 +858,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    # jjava is always in scope where skills serve (operator, 2026-09-29):
+    # offline, the STUBBED decider answers (mcp/decider_stub.py).
+    import decider_stub
+    with decider_stub.installed():
+        sys.exit(main(sys.argv[1:]))

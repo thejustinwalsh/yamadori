@@ -9,8 +9,9 @@ THE RULE (operator, 2026-09-24, verbatim)
 
 WHY THIS EXISTS (docs/SELF-IMPROVEMENT-LOG.md #16)
 
-The A4000 (16 GB) holds the search models (embeddings + reranker, llama-swap
-group `retrieval`), Laya (not managed by llama-swap, always resident), and two
+The A4000 (16 GB) holds the search model (embeddings, llama-swap group
+`retrieval`; the reranker beside it was removed 2026-10-01, docs/REMOVED.md),
+Laya (not managed by llama-swap, always resident), and two
 on-demand consumers: the image generator (`imagegen` / `imagegen-turbo`) and
 the vision copy of the 27B (`bonsai-vision`). llama-swap's group flags act
 only when an EXCLUSIVE member loads, so "look at an image, then draw one, then
@@ -128,7 +129,7 @@ NEVER = frozenset({"bonsai", "bonsai-agent"})
 # REFUSED when the card cannot be read (operator rule: never load into an
 # out-of-memory; pre-deploy review, 2026-09-24). Until then an unreadable
 # /running or nvidia-smi let any load through as `uncoordinated`.
-RESIDENT = frozenset({"embeddings", "reranker"})
+RESIDENT = frozenset({"embeddings"})
 
 
 @dataclass(frozen=True)
@@ -164,14 +165,11 @@ SIZES: dict[str, Size] = {
         "(Qwen3-Embedding-0.6B-Q8_0.gguf, 639,150,592 B) + f16 KV at -c 8192 "
         "(28 layers x 8 KV heads x 128 x 2 x 2 B = 112 KiB/token, 896 MiB) + "
         "compute buffer and CUDA context (~600, assumed). Measured only "
-        "together: embeddings + reranker + Laya = 7,565 MiB (config.yaml "
-        "`retrieval` comment; 7,567 in docs/CLM-EVAL.md s.4, 2026-09-24)"),
-    "reranker": Size(
-        3000, 3000, False,
-        "ESTIMATE, not measured alone: weights 610 MiB "
-        "(Qwen3-Reranker-0.6B-Q8_0.gguf) + f16 KV at -c 16384 (1,792 MiB) + "
-        "compute buffer and CUDA context (~600, assumed). Measured only "
-        "together with embeddings and Laya: 7,565 MiB (config.yaml)"),
+        "together: embeddings + the reranker (removed 2026-10-01) + Laya "
+        "(retired) = 7,565 MiB (config.yaml `retrieval` comment; 7,567 in "
+        "docs/CLM-EVAL.md s.4, 2026-09-24)"),
+    # The `reranker` row (an ESTIMATE, 3,000 MiB) went with the reranker,
+    # 2026-10-01 (docs/REMOVED.md).
     # LAYOUT V2 (operator, 2026-09-29: "Vision can go to second card and swap
     # in and out"): the row retired with the 2026-09-27 fold, restored.
     "bonsai-vision": Size(
@@ -181,9 +179,19 @@ SIZES: dict[str, Size] = {
         "buffer; `ondemand` group comment, docs/IMAGEGEN.md 'VRAM on the "
         "A4000'). Never measured alone. The one live reading with it loaded "
         "(2026-09-24, mcp/test_live_stack.py --only images, n=1) was the "
-        "card's peak with embeddings, the reranker, Laya, imagegen-turbo and "
-        "bonsai-vision resident together: 16,068 of 16,376 MiB, 308 MiB free "
-        "-- a sum, not this row"),
+        "card's peak with embeddings, the reranker (removed 2026-10-01), "
+        "Laya, imagegen-turbo and bonsai-vision resident together: 16,068 of "
+        "16,376 MiB, 308 MiB free -- a sum, not this row"),
+    # THE SECOND BONSAI (tier models, operator 2026-09-30: jjava and side calls leave a LOCKED model's card --
+    # Flash-Next's -- for "bonsai-a4000"; config.bonsai-a4000.fragment.yaml, deployed by bench/deploy_tier_models.py).
+    "bonsai-a4000": Size(
+        10893, 10893, True,
+        "MEASURED 2026-09-30 (bench/a4000_fit.py, bench/results/a4000/20260930/fit.json; one run, two launches): "
+        "-c 141,312 -np 2 beside embeddings + the reranker (4,152 MiB resident), loaded with a side call on slot 0 "
+        "and a 10-read jjava burst on slot 1 at once; slope 35,840 B/cell, fixed 10,193 MiB with the residents -> "
+        "the card's peak at that -c is 16,376 - HEADROOM_MIB 1,331 = 15,045 MiB, of which this server's own "
+        "15,045 - 4,152 = 10,893. Measured with the reranker resident; it was removed 2026-10-01 "
+        "(docs/REMOVED.md) and the number is kept as measured, not recomputed"),
     "imagegen": Size(
         6389, 319, True,
         "MEASURED: peak +6,389 MiB at 1344x1344 under --max-vram 6 (n=1); "
@@ -195,13 +203,6 @@ SIZES: dict[str, Size] = {
         "`imagegen`, whose measured ceiling (+6,389) is used. Its own peak was "
         "read once, +5,527 MiB (sd-cli smoke test, n=1, docs/IMAGEGEN.md "
         "'Smoke test'); its idle hold is assumed equal to imagegen's 319"),
-    "clm-encoder": Size(
-        9415, 9379, True,
-        "MEASURED 2026-09-27 (bench/clm/standalone.py, config.yaml's "
-        "clm-encoder flags, Qwen3-8B-Q8_0.gguf, A4000): 9,379 MiB held idle "
-        "after load, 9,413-9,415 MiB after a full-window (2,047-token) "
-        "input (n=3 loads). Swap-in 3.7 s warm, 6.3 s cold (bench/clm/"
-        "swap.py). docs/CLM.md"),
     "critic-disabled": Size(
         20173, 20173, False,
         "ARITHMETIC in config.yaml: ~19.7 GiB (weights 15.41 + q8 KV 1.06 + "
@@ -248,6 +249,24 @@ def running(upstream: str) -> list[dict] | None:
     if not isinstance(rows, list):
         return None
     return [x for x in rows if isinstance(x, dict) and x.get("model")]
+
+
+def model_loaded(upstream: str, model: str) -> tuple[bool | None, str]:
+    """Is `model` loaded and ready, per llama-swap's GET /running (which never
+    loads anything)? (True | False | None, why). None: /running could not be
+    read. THE RULE (2026-09-30, docs/DASHBOARD.md): a reader asks
+    /upstream/<model>/... -- which makes llama-swap LOAD the model -- only
+    when this says True; otherwise it skips and records `why`."""
+    rows = running(upstream)
+    if rows is None:
+        return None, "llama-swap /running could not be read, so nothing was asked"
+    for r in rows:
+        if str(r.get("model")) == model:
+            st = str(r.get("state") or "ready")
+            if st == "ready":
+                return True, f"{model} is ready (llama-swap /running)"
+            return False, f"{model} is {st} (llama-swap /running), so nothing was asked"
+    return False, f"{model} is not loaded (llama-swap /running), so nothing was asked"
 
 
 def _nvidia_smi() -> dict | None:

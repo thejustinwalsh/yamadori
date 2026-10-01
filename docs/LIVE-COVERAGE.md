@@ -14,7 +14,7 @@ Sources for the feature list: `AGENTS.md`, `README.md`, `tiers.features`
 **How to run:** `python scripts/run_tests.py --live --key-file PATH`, or
 after a restart `python scripts/deploy_check.py --key-file PATH` (the deploy
 gate). One test at a time:
-`python mcp/test_live_stack.py --live --key-file PATH --only deep,fanout`.
+`python mcp/test_live_stack.py --live --key-file PATH --only cache,seeds`.
 `--maintenance` adds the intrusive tests.
 
 Status values:
@@ -33,8 +33,8 @@ is named.
 `images` follows the served projector (the pinned fixture the deploy
 re-records): after the deploy the look is `yama_describe_image` on
 `bonsai-vision`, and gpu_room records its load on the A4000. `slots` checks
-the lane KEPT after a side call (at most `budget.LANE_TOKENS` cells); the
-fix-up still empties it. New group `layout`: the advertised window is the
+the lane KEPT after a side call (at most `budget.LANE_TOKENS` cells). New
+group `layout`: the advertised window is the
 served line less the lane, every request ranks the lane `slots.RANK_LANE`
 (`x_yamadori.cache.kv_ranks`), and the served main model has no projector.
 
@@ -48,6 +48,20 @@ class, the client's max_tokens recorded, not trusted), and a medium request
 while an xhigh one works is 503 `model_at_capacity` with the holder named.
 NOT RUN while the table is off. `tiers`' overhead check counts a swap's wait
 and load as model time.
+
+**The removal (operator, 2026-09-29; docs/REMOVED.md).** Deep thinking and
+its triggers (`yama_think_deeply`, `yama_plan`, the kickoff plan), fan-out,
+the code check and fix-up (`Verified` / `Repaired` / `Checked`), the static
+addendum, library definitions and library use, the second brain's research
+tools, `delegate_investigation`, `/dash/api/deep`, Laya and CLM were
+removed. Their live groups went with them: `tools`, `selection`, `repair`,
+`note`, `deep`, `fanout` and `clm` in `mcp/test_live_stack.py`, and
+`test_delegate_investigation_live` in `mcp/test_tools_live.py`. `cache` keeps
+its five turns without the removed features' checks; `seeds` now checks the
+conversation's concept seed (`x_yamadori.session.seed`, WRITTEN, NOT RUN);
+`slots` lost its fix-up half; `e1` decides in process through the live
+embedder (no route serves E1 and no request consults `route_in` any more).
+Their rows below say REMOVED. The summary counts are from before the removal.
 
 ## Summary
 
@@ -105,12 +119,12 @@ run.)
 | 15 | Router: `utility` | COVERED | `router`, `harness` |
 | 16 | Router: `agent_step` (ends on a client tool result) | COVERED | `router`; also every `agent_loop` step after the first |
 | 17 | Router: `code_edit` | COVERED | `router` |
-| 18 | Router: `code_generation` | COVERED | `router`, `fanout` |
+| 18 | Router: `code_generation` | COVERED | `router` |
 | 19 | Router: `library_question` | COVERED | `router` |
 | 20 | Router: `prose` | COVERED | `router` |
-| 21 | Deep thinking decided by the rule plus Laya's `route_in` head; both signals recorded | COVERED | `selection` |
-| 22 | No deep thinking and no fan-out on a non-code, non-library prompt, even at max | COVERED | `tiers`, `selection` |
-| 23 | `X-Yamadori-Features` forces a feature | COVERED | used by `seeds`, `deep`, `cache` |
+| 21 | Deep thinking decided by the rule plus Laya's `route_in` head; both signals recorded | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`selection` removed) |
+| 22 | No deep thinking and no fan-out on a non-code, non-library prompt, even at max | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 23 | `X-Yamadori-Features` forces a feature | COVERED | used by `skills` (`{"skills": true}`) and `slots` (`idle_clear_s`) |
 
 ### Side calls, sessions, slots
 
@@ -121,8 +135,9 @@ run.)
 | 26 | Side calls use the transient slot | PARTIAL | `harness` checks the utility record, not the slot id |
 | 27 | A conversation continues across a harness compaction (work log, slot, tools: `_continue_after_compaction`) | UNCOVERED | none |
 | 28 | `X-Yamadori-Session` names a session | UNCOVERED | none |
-| 89 | The second brain's slot is emptied after each run and the transient slot after each side call; a conversation's pinned slot never is (`slots.release_idle`, `x_yamadori.slots.released`, 2026-09-26) | COVERED (written 2026-09-26, not yet run) | `slots`: after a side call and after an xhigh fix-up, `x_yamadori.slots.released` names the slot and `/dash/api/vitals/pulse` (llama-server `/slots`) shows it holding <= 8 tokens |
+| 89 | The transient slot is emptied after each side call (layout v2: the lane is KEPT, at most its cells); a conversation's pinned slot never is (`slots.release_idle`, `x_yamadori.slots.released`, 2026-09-26). The second brain's slot release went with the second brain (2026-09-29) | COVERED (written 2026-09-26, not yet run) | `slots`: after a side call, `x_yamadori.slots.released` names the slot and `/dash/api/vitals/pulse` (llama-server `/slots`) shows it holding <= 8 tokens (the lane: <= `budget.LANE_TOKENS`) |
 | 90 | An idle conversation's pinned slot (idle > `slots.IDLE_CLEAR_S`, 600 s) is cleared when another conversation generates; its pin is kept and its next request records `resumed_cold` (`x_yamadori.slots.cleared_idle` / `resumed_cold`, 2026-09-26) | COVERED (written 2026-09-26, not yet run) | `slots`: two of the test's own conversations, the threshold overridden to 2 s by the test-account-only header `idle_clear_s`; decode tok/s of the active one with the other's ~40k idle cells kept vs cleared, n=3 each (pass: cleared >= 95% of kept -- clearing never slows the active one; the gain depends on where the cells sit in the unified pool, #59, and is reported as evidence), and the cleared one's next turn records `resumed_cold` with `how`: `restored` (llama-server's host-RAM prompt cache brought it back: reused >= half the prompt) or `reprocessed` (processed >= half), agreeing with its counts, and its `prompt_ms`. First live run 2026-09-27: kept [29.3, 29.06, 28.05], cleared [45.36, 29.88, 27.51] tok/s; B came back in ~516 ms (restored) |
+| 90a | LAYOUT V3, one conversation per card (-np 1 on a LOCKED card, operator 2026-09-30; or -np 2): the conversation on slot 0; a NEW conversation id inside the owner's 60 s hold runs on THE OTHER CARD (bonsai-a4000's slot 0; `x_yamadori.slots.routed`, operator 2026-09-30) and keeps it (its next turn there again, reusing its prefix) -- or 503 `conversation_at_capacity` + Retry-After when the card's model has no other card (never downgraded); the switch after the hold is n/a live (a 60 s idle wait) and checked offline; the owner's compaction on its own card and slot 0, never bonsai-a4000; on a locked card a side call on the table's helper (bonsai-a4000) with the card's one slot unchanged, and jjava's reads on the helper (`mcp/slots.py`, `mcp/max_mode.py`) | WRITTEN, NOT RUN | `slots` (`test_one_conversation_card`). On a locked -np 1 card rows 89 and 90 are NOT APPLICABLE, printed with the reason (no lane; no second conversation's slot to clear) -- never a FAIL, and not NOT RUN (exit 0). The whole suite waits out a 503 `conversation_at_capacity` as a FALLBACK only (Retry-After, at most 180 s a request; printed): both cards held, or a tier with no other card |
 
 ### One model, one cache (Phase 0.5)
 
@@ -130,37 +145,37 @@ run.)
 |---|---|---|---|
 | 29 | The ledger restores reasoning for a client that strips it | COVERED | `agent_loop [strip]`, `cache` |
 | 30 | A client that echoes what it was shown gets the clean copy in its place | COVERED | `agent_loop [echo]` (tail-only on every step) |
-| 31 | Per-turn injections (skills, definitions) are replayed byte for byte | PARTIAL | implied by the tail bound in `cache` and `agent_loop`; no test compares the injection text |
-| 32 | Static addendum at `high` and up | PARTIAL | present in every `xhigh` request of `cache` / `agent_loop` / `repair`; its text is never asserted |
-| 33 | Library definitions injected at `medium` | COVERED | `tools` |
-| 34 | Deep thinking: hand-off prefilled as reasoning; answer opens with the seed line and "After thinking deeply," | COVERED | `deep`, `cache` step 1 |
-| 35 | Deep thinking: every cited `path:line` exists in the held source | COVERED | `deep` |
-| 36 | The slot is warmed with a delivered turn that differs from the generated one, and the next request extends it | COVERED | `repair`, `note`, `cache` steps 2-3 |
+| 31 | Per-turn injections (skills, the concept seed, the work log) are replayed byte for byte | PARTIAL | implied by the tail bound in `cache` and `agent_loop`; no test compares the injection text |
+| 32 | Static addendum at `high` and up | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 33 | Library definitions injected at `medium` | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`tools` removed) |
+| 34 | Deep thinking: hand-off prefilled as reasoning; answer opens with the seed line and "After thinking deeply," | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`deep` removed) |
+| 35 | Deep thinking: every cited `path:line` exists in the held source | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 36 | The slot is warmed with a delivered turn that differs from the generated one, and the next request extends it | UNCOVERED since 2026-09-29 | its live cases were the repaired and the noted write (`repair`, `note`, `cache` steps 2-3), removed with the code check; an image turn's delivered line still warms, unasserted |
 | 37 | The ledger survives a proxy-only restart | COVERED, `--maintenance` only | `ledger_restart` (restarts the proxy; never run by default) |
-| 38 | Every second-brain job carries a concept seed, recorded | COVERED | `seeds` (fan-out), `deep` (seed line) |
+| 38 | A conversation's first user turn carries its concept seed at `high` and up, recorded (`x_yamadori.session.seed`, the injection's `seed` part); none at `medium` (2026-09-29; before, each second-brain job carried one) | WRITTEN, NOT RUN | `seeds` |
 | 39 | A replay of a turn draws the same seed | UNCOVERED | none |
 
 ### Code checks and repair
 
 | # | feature | status | live test |
 |---|---|---|---|
-| 40 | `medium`: a broken client write is noted "Checked" and forwarded unchanged | COVERED | `note`, `cache` (medium pass) |
-| 41 | `high`+: a broken client write is repaired by the second brain, noted "Repaired", and it parses | COVERED | `repair`, `cache` step 2 |
-| 42 | A clean write gets a "Verified" note | UNCOVERED | `agent_loop` writes clean files but does not assert the note |
-| 43 | Formatter output for a whole file that parses (ruff, prettier, rustfmt) | UNCOVERED | none |
-| 44 | Edit-shaped calls (old/new strings, diff hunks, SEARCH/REPLACE) block or flag | UNCOVERED | only `write_file` is exercised live |
-| 45 | Known tool names of other harnesses (Claude Code, Codex, Cline...) | UNCOVERED | only the `write_file` shape |
-| 46 | Final-answer repair pass ("Verified" / "Repaired" on a code answer) | UNCOVERED | `fanout`'s answer passes through it, and nothing asserts it |
+| 40 | `medium`: a broken client write is noted "Checked" and forwarded unchanged | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`note` removed) |
+| 41 | `high`+: a broken client write is repaired by the second brain, noted "Repaired", and it parses | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`repair` removed) |
+| 42 | A clean write gets a "Verified" note | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 43 | Formatter output for a whole file that parses (ruff, prettier, rustfmt) | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 44 | Edit-shaped calls (old/new strings, diff hunks, SEARCH/REPLACE) block or flag | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 45 | Known tool names of other harnesses (Claude Code, Codex, Cline...) | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) (the check); the detection table stays for the image guard | -- |
+| 46 | Final-answer repair pass ("Verified" / "Repaired" on a code answer) | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
 
 ### Fan-out
 
 | # | feature | status | live test |
 |---|---|---|---|
-| 47 | Code request at `high`: B written, "Compared two approaches", winner delivered | COVERED | `fanout`, `cache` step 4 |
-| 48 | The delivered code works | COVERED | `fanout` (runs the task's test) |
-| 49 | Tie-breaker C when the check does not separate A and B | PARTIAL | `fanout` records steps=3 when it happens; never forced |
-| 50 | Prose hand-back continuation ("Weighing them") | UNCOVERED | reachable only with a header, since prose no longer fans out |
-| 51 | `x_yamadori.fanout` reports variants and their seeds | COVERED | `seeds` |
+| 47 | Code request at `high`: B written, "Compared two approaches", winner delivered | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`fanout` removed) |
+| 48 | The delivered code works | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 49 | Tie-breaker C when the check does not separate A and B | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 50 | Prose hand-back continuation ("Weighing them") | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
+| 51 | `x_yamadori.fanout` reports variants and their seeds | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
 
 ### Compaction
 
@@ -198,7 +213,7 @@ run.)
 | 66 | `summarize_text` through the tools API on `:1235` | COVERED | `summarize` |
 | 67 | `summarize_text` keeps identifiers, paths, numbers and errors verbatim | STALE | `mcp/test_tools_live.py` (in process, on a fixture index, internal generation to llama-swap; see below) |
 | 68 | `find_by_meaning`, `find_definition_opt`, `find_references`, `find_by_pattern`, `read_file_range`, `describe_index`, `run_check` | NO MODEL | `mcp/test_tools.py` offline; nothing live through `:1235` |
-| 69 | `delegate_investigation` (off by default: a benchmark arm) | STALE | `mcp/test_tools_live.py` |
+| 69 | `delegate_investigation` (off by default: a benchmark arm) | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`test_delegate_investigation_live` removed) |
 | 69a | The tools API's door (2026-09-26): no key 401 + `WWW-Authenticate` resource_metadata, foreign Origin 403, key 200 on `/mcp`, `/health` liveness only, RFC 9728 metadata unauthenticated | WRITTEN, NOT RUN (needs the tools API restarted on this code; until then its first check fails with 200) | `mcp/test_tools_live.py` `test_tools_api_door_live`; offline `mcp/test_tools_api_auth.py` |
 
 ### Ledgers, dashboard, Laya
@@ -206,10 +221,10 @@ run.)
 | # | feature | status | live test |
 |---|---|---|---|
 | 70 | `/dash/api/tokens` grows by exactly the usage a request reported | COVERED | `tokens` |
-| 71 | `x_yamadori.cache` reports reused vs processed | COVERED | `cache`, `agent_loop`, `repair`, `note`, `compaction`, `tokens` |
+| 71 | `x_yamadori.cache` reports reused vs processed | COVERED | `cache`, `agent_loop`, `compaction`, `tokens` |
 | 72 | `x_yamadori.energy` and the power ledger | UNCOVERED | none |
-| 73 | Laya `route_in` head served (both engines) | COVERED (Laya model) | `bench/test_laya_head.py --serve`, on an alternate port, not :1237 |
-| 74 | Laya's cached calibration and guardrail numbers still reproduce on :1237 | COVERED (Laya model) | `bench/test_laya_calibration.py --live`, `bench/test_guardrail.py --live` |
+| 73 | Laya `route_in` head served (both engines) | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`bench/test_laya_head.py` deleted with Laya's code) |
+| 74 | Laya's cached calibration and guardrail numbers still reproduce on :1237 | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- |
 | 75 | Rings work log written by the proxy and reinjected after a compaction | UNCOVERED | none |
 | 76 | Dataset pipeline (`clarify` is model-assisted) | UNCOVERED | none live |
 
@@ -234,17 +249,17 @@ run.)
 | 86 | The hosted `image_generation` tool is our yama_generate_image; an `image_generation_call` item with the PNG | COVERED (NOT RUN when no image server) | `responses` |
 | 87 | `previous_response_id` is 400 `unsupported_parameter` | COVERED | `responses` |
 | 88 | A real Codex / Hermes `codex_responses` / OpenCode / Pi session against `:1234` | UNCOVERED | none: Codex CLI is not installed; the offline replay (`mcp/test_responses_api.py`) is built from codex-rs source |
-| 89 | CLM (`mcp/clm.py`, docs/CLM.md) through llama-swap's `clm-encoder` behind gpu_room reproduces the offline reference decisions (40/40 argmax and none-vs-pick), deterministic, and the selector's `clm` decider answers | WRITTEN, NOT RUN (needs the llama-swap restart that serves `clm-encoder`; measured on a standalone llama-server with the same flags, bench/clm/standalone.py) | `clm` |
+| 89 | CLM (`mcp/clm.py`, docs/CLM.md) through llama-swap's `clm-encoder` behind gpu_room reproduces the offline reference decisions (40/40 argmax and none-vs-pick), deterministic, and the selector's `clm` decider answers | REMOVED 2026-09-29 (the feature was removed; docs/REMOVED.md) | -- (`clm` removed) |
 | 91 | PACKAGE ONBOARDING (docs/PACKAGE-ONBOARDING.md): a prompt with links submitted through `:1234`, run by the worker, resolved with its rules, the licence quoted, indexed, the vocabulary judged by the floor, completed | WRITTEN, NOT RUN; OPT-IN (writes live state -- a held package, its skills -- and fetches from npm and GitHub; the operator names the package and the wait) | `onboarding` (`--only onboarding --onboard "<prompt>" --onboard-wait S`; never in the default live run) |
 
 ## Stale live tests, and what should replace them
 
 | test | why it is stale | replacement |
 |---|---|---|
-| `mcp/test_tools_live.py` `test_delegate_investigation_live` | `delegate_investigation` is off by default: a benchmark arm (`YAMADORI_DELEGATE_TOOL=1`). The test runs in process on a fixture index, and its generation goes from `mcp/model.py` to llama-swap. Nothing crosses `:1234`. | `deep` (deep thinking as selection runs it, through `:1234`, citations checked against the held source). Keep the delegate test only as the benchmark arm's own check, outside the gate. |
+| `mcp/test_tools_live.py` `test_delegate_investigation_live` | REMOVED 2026-09-29 with `delegate_investigation` and deep thinking. | -- |
 | `mcp/test_tools_live.py` summarize tests | In process against the fixture, not the running tools API. | `summarize` (through `:1235`). Its verbatim-token checks (`KEEP`) should move into `summarize`. |
 | `mcp/test_live_stack.py` `hints` | REPLACED 2026-09-26 by `skills` (the hints path is gone). | -- |
-| `bench/test_hint_collapse.py --live` (reranker checks) | Calls the reranker on `:11434` directly. The reranker is "not trusted, not used" (`docs/FINDINGS.md` #20). Its checks assert the serving BUG exists. | Keep as a regression probe of the bug, outside the deploy gate. See the result below. |
+| `bench/test_hint_collapse.py --live` (reranker checks) | REMOVED 2026-10-01 with the reranker (docs/REMOVED.md); the suite has no --live arm. Until then: calls the reranker on `:11434` directly. The reranker is "not trusted, not used" (`docs/FINDINGS.md` #20). Its checks assert the serving BUG exists. | Keep as a regression probe of the bug, outside the deploy gate. See the result below. |
 
 ## Results of the first full run
 

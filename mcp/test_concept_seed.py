@@ -4,7 +4,11 @@
 The real matrix is 400 MB and extracted per machine; its decode is gated by
 scripts/extract_token_embd.py's neighbour probes. What is asserted here is
 everything built on top of it: the number, the spread, the distance from the
-prompt, and the record the dashboard reads.
+prompt, the line the conversation's first user turn carries
+(concept_seed.user_turn_line / USER_TURN_LINE: since 2026-09-29 the seed is
+drawn once per conversation and rides its first user turn -- proxy.prepare,
+gated end to end by mcp/test_ledger.py -- the second-brain jobs that carried
+one having been removed), and the record the dashboard reads.
 """
 from __future__ import annotations
 
@@ -108,6 +112,19 @@ def test_away_from_keeps_the_far_half():
 def test_the_last_used_word_reaches_vitals():
     check(vitals.seed() is None or isinstance(vitals.seed(), dict),
           "vitals.seed() answers before anything was recorded")
+    line = concept_seed.user_turn_line("word005")
+    check(line == concept_seed.USER_TURN_LINE.format(word="word005")
+          and line.startswith("\n\n") and "word005" in line
+          and "not a clue" in line,
+          "user_turn_line() is USER_TURN_LINE with the word: where the word "
+          "comes from, and that it is not a clue", repr(line))
+    last = concept_seed.last()
+    check(last and last["word"] == "word005" and last["where"] == "first_turn"
+          and last["u32"] == concept_seed.encode("word005"),
+          "user_turn_line() records the word as the first turn's",
+          json.dumps(last))
+    check(vitals.seed() == last,
+          "and vitals.snapshot()'s seed field reads it", json.dumps(vitals.seed()))
     text = concept_seed.phrase("word007", where="test")
     check(text == "\n\nInspiration word: word007",
           "phrase() is the original's plain form, with no hedge", repr(text))
@@ -123,8 +140,10 @@ def test_the_last_used_word_reaches_vitals():
 
 
 def test_parallel_fanout_records_never_corrupt_the_file():
-    """A fan-out records from parallel threads. One shared temp name left
-    `{...}}` on disk in the live run, so last() returned None."""
+    """Records from parallel threads (a fan-out's, until fan-out was
+    removed 2026-09-29; concurrent conversations' first turns now). One
+    shared temp name left `{...}}` on disk in the live run, so last()
+    returned None."""
     import threading
     # Varied LENGTHS matter: the live corruption was a shorter record written
     # over a longer one through a shared file, leaving the longer one's tail.

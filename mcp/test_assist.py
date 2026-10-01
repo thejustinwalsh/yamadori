@@ -527,10 +527,10 @@ def test_the_api_carries_provenance_and_takes_the_minimal_submission():
 
     code, _, body = dash_data.handle_post(
         "/dash/api/dataset", {"text": "pasted apitext. " + ADVICE,
-                              "kind": "laya"})
+                              "kind": "recipes"})
     j = json.loads(body)
     check(code == 200 and j["dataset"]["source"].startswith("pasted apitext")
-          and j["dataset"]["kind"] == "laya"
+          and j["dataset"]["kind"] == "recipes"
           and len(j["assist_jobs"]) == 1,
           "{text} becomes the source and enqueues the assist at once",
           body[:300].decode())

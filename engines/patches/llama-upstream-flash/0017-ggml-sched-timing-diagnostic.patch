@@ -1,0 +1,159 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Wed, 30 Sep 2026 17:50:23 -0400
+Subject: [PATCH] ggml: GGML_SCHED_TIMING=1 splits a scheduler graph's wall
+ time
+
+A diagnostic, off by default. With GGML_SCHED_TIMING=1 each
+ggml_backend_sched_graph_compute_async call is timed and split into: host
+time blocked waiting for a backend (ggml_backend_synchronize,
+ggml_backend_event_synchronize), a CPU backend computing its splits, a
+device backend's graph launch, and synchronous tensor copies; the rest is
+"other". One accumulator per scheduler (a target model and its MTP draft
+have their own); the averages per graph are printed every 100 graphs at
+INFO (llama-server shows them at -lv 4), with the splits per graph.
+
+Why: on Flash-Next with every routed expert in RAM the decode alternates a
+GPU split and a CPU split per layer (98 splits a token), and neither the
+GPU op profile (0010) nor the server's timings say whether a token's time
+is the GPU, the CPU experts, or the syncs between them. First reading, the
+A4000 (sm_86), 8 threads, 32 VRAM expert-cache slots a layer, ~35K
+context: 50.4 ms a token = 26.7 blocked on the GPU (212 waits) + 18.9 on
+the CPU experts + 4.0 in copies.
+---
+ ggml/src/ggml-backend.cpp | 80 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 79 insertions(+), 1 deletion(-)
+
+diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index 7654eea8..90787b89 100644
+--- a/ggml/src/ggml-backend.cpp
++++ b/ggml/src/ggml-backend.cpp
+@@ -20,6 +20,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <algorithm>
++#include <map>
++#include <mutex>
+ #include <unordered_map>
+ #include <vector>
+ 
+@@ -422,12 +424,34 @@ void ggml_backend_tensor_memset(struct ggml_tensor * tensor, uint8_t value, size
+     buf->iface.memset_tensor(buf, tensor, value, offset, size);
+ }
+ 
++// 0017, GGML_SCHED_TIMING=1 (diagnostic, off by default): where a scheduler graph's wall time goes -- host time
++// blocked waiting for a backend (synchronize / event_synchronize), a CPU backend computing its splits, a device
++// backend's graph launch, and synchronous copies -- summed over each ggml_backend_sched_graph_compute_async call and
++// printed per call, averaged over 100 calls (at INFO: llama-server shows it at -lv 4)
++struct ggml_sched_timing {
++    int64_t t_wall = 0, t_wait = 0, t_cpu = 0, t_launch = 0, t_copy = 0;
++    int64_t n_calls = 0, n_splits = 0, n_waits = 0;
++};
++static thread_local ggml_sched_timing * g_sched_timing = nullptr;
++
++static bool ggml_sched_timing_enabled() {
++    static const bool on = [] { const char * e = getenv("GGML_SCHED_TIMING"); return e && e[0] == '1'; }();
++    return on;
++}
++
+ void ggml_backend_synchronize(ggml_backend_t backend) {
+     GGML_ASSERT(backend);
+     if (backend->iface.synchronize == NULL) {
+         return;
+     }
+ 
++    if (g_sched_timing) {
++        const int64_t t0 = ggml_time_us();
++        backend->iface.synchronize(backend);
++        g_sched_timing->t_wait += ggml_time_us() - t0;
++        g_sched_timing->n_waits++;
++        return;
++    }
+     backend->iface.synchronize(backend);
+ }
+ 
+@@ -460,6 +484,14 @@ enum ggml_status ggml_backend_graph_compute(ggml_backend_t backend, struct ggml_
+ 
+ enum ggml_status ggml_backend_graph_compute_async(ggml_backend_t backend, struct ggml_cgraph * cgraph) {
+     GGML_ASSERT(backend);
++    if (g_sched_timing) {
++        const int64_t t0 = ggml_time_us();
++        const enum ggml_status st = backend->iface.graph_compute(backend, cgraph);
++        const bool is_cpu = backend->device && ggml_backend_dev_type(backend->device) == GGML_BACKEND_DEVICE_TYPE_CPU;
++        (is_cpu ? g_sched_timing->t_cpu : g_sched_timing->t_launch) += ggml_time_us() - t0;
++        g_sched_timing->n_splits++;
++        return st;
++    }
+     return backend->iface.graph_compute(backend, cgraph);
+ }
+ 
+@@ -485,7 +517,22 @@ ggml_backend_dev_t ggml_backend_get_device(ggml_backend_t backend) {
+ 
+ // backend copy
+ 
++static void ggml_backend_tensor_copy_impl(const struct ggml_tensor * src, struct ggml_tensor * dst);
++
+ void ggml_backend_tensor_copy(const struct ggml_tensor * src, struct ggml_tensor * dst) {
++    if (g_sched_timing) {
++        ggml_sched_timing * tm = g_sched_timing;
++        g_sched_timing = nullptr;       // a copy's own waits are the copy's time
++        const int64_t t0 = ggml_time_us();
++        ggml_backend_tensor_copy_impl(src, dst);
++        tm->t_copy += ggml_time_us() - t0;
++        g_sched_timing = tm;
++        return;
++    }
++    ggml_backend_tensor_copy_impl(src, dst);
++}
++
++static void ggml_backend_tensor_copy_impl(const struct ggml_tensor * src, struct ggml_tensor * dst) {
+     GGML_ASSERT(ggml_are_same_layout(src, dst) && "cannot copy tensors with different layouts");
+ 
+     if (src == dst) {
+@@ -557,6 +604,13 @@ void ggml_backend_event_synchronize(ggml_backend_event_t event) {
+     GGML_ASSERT(event);
+     GGML_ASSERT(event->device->iface.event_synchronize);
+ 
++    if (g_sched_timing) {
++        const int64_t t0 = ggml_time_us();
++        event->device->iface.event_synchronize(event->device, event);
++        g_sched_timing->t_wait += ggml_time_us() - t0;
++        g_sched_timing->n_waits++;
++        return;
++    }
+     event->device->iface.event_synchronize(event->device, event);
+ }
+ 
+@@ -2323,7 +2377,31 @@ enum ggml_status ggml_backend_sched_graph_compute_async(ggml_backend_sched_t sch
+         }
+     }
+ 
+-    return ggml_backend_sched_compute_splits(sched);
++    if (!ggml_sched_timing_enabled()) {
++        return ggml_backend_sched_compute_splits(sched);
++    }
++    // 0017: one accumulator per scheduler (the target model and a draft model have their own), printed every 100
++    static std::mutex tmtx;
++    static std::map<ggml_backend_sched_t, ggml_sched_timing> timings;
++    ggml_sched_timing * tm;
++    {
++        std::lock_guard<std::mutex> lk(tmtx);
++        tm = &timings[sched];
++    }
++    g_sched_timing = tm;
++    const int64_t t0 = ggml_time_us();
++    const enum ggml_status st = ggml_backend_sched_compute_splits(sched);
++    tm->t_wall += ggml_time_us() - t0;
++    g_sched_timing = nullptr;
++    if (++tm->n_calls % 100 == 0) {
++        const double n = (double) tm->n_calls;
++        GGML_LOG_INFO("sched timing %p over %lld graphs: wall %.3f ms = wait %.3f (%.1f waits) + cpu %.3f + launch %.3f "
++                      "+ copy %.3f + other %.3f ms per graph; %.1f splits per graph\n", (void *) sched, (long long) tm->n_calls,
++                      tm->t_wall/n/1e3, tm->t_wait/n/1e3, tm->n_waits/n, tm->t_cpu/n/1e3, tm->t_launch/n/1e3, tm->t_copy/n/1e3,
++                      (tm->t_wall - tm->t_wait - tm->t_cpu - tm->t_launch - tm->t_copy)/n/1e3, tm->n_splits/n);
++        *tm = ggml_sched_timing{};
++    }
++    return st;
+ }
+ 
+ void ggml_backend_sched_synchronize(ggml_backend_sched_t sched) {

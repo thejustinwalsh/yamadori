@@ -50,7 +50,7 @@ $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunL
 
 Register-ScheduledTask -TaskName 'llama-stack' -Action $action -Trigger $trigger `
     -Settings $settings -Principal $principal -Force `
-    -Description 'llama-swap: Bonsai 2 27B ternary x2 + embeddings + reranker. OpenAI API and control UI on :1234.' | Out-Null
+    -Description 'llama-swap: Bonsai 2 27B ternary x2 + embeddings. OpenAI API and control UI on :1234.' | Out-Null
 
 Write-Host ''
 Get-ScheduledTask -TaskName 'llama-stack', 'text-generation-webui' -ErrorAction SilentlyContinue |

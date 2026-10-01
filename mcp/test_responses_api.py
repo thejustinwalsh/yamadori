@@ -390,9 +390,7 @@ class RClient:
         chat, ctx = R.to_chat(body)
         chat.update(_account=self.account, _client_ip="127.0.0.1",
                     _public_base=BASE, _session_token="",
-                    _features=json.dumps({"skills": True,
-                                          "investigate": False,
-                                          "fanout": 1}))
+                    _features=json.dumps({"skills": True}))
         return chat, ctx
 
     def turn(self, script: list[dict], user: str | list | None = None
@@ -833,13 +831,13 @@ def test_blocking_turns_extend_the_slot():
           and json.loads(fc[0]["arguments"]) == {"path": "a.py",
                                                  "content": "x = 1"}
           and fc[0]["id"].startswith("fc_")
-          and _text(r1).startswith("Verified a.py (python)")
+          and _text(r1) == ""
           and [o["type"] for o in r1["output"]] == [
-              "reasoning", "message", "function_call"],
+              "reasoning", "function_call"],
           "a client call is a function_call item: call_id is the chat "
-          "tool-call id, carrying the carrier of the client's key; "
-          "the code check's note (tool_code, the same turn) is the message "
-          "before it", json.dumps(r1["output"])[:400])
+          "tool-call id, carrying the carrier of the client's key; no "
+          "message item before it (the code check's note went 2026-09-29)",
+          json.dumps(r1["output"])[:400])
     x1 = t1["x"]
     check((x1.get("session") or {}).get("source") == "prompt_cache_key"
           and (x1.get("skills") or {}).get("ids") == ["s1"]
@@ -950,50 +948,6 @@ def test_streamed_turns():
           and last.get("usage", {}).get("input_tokens") == 5,
           "a `length` finish is response.incomplete, reason "
           "max_output_tokens", json.dumps(last)[:300])
-
-
-def test_a_stated_step_continues_on_responses():
-    """CONTINUE A STATED STEP through the Responses translation: an agent
-    step that stops on "let me ..." with no call is continued once; the
-    Response carries ONE message (the text and CONTINUE_LINE) and the
-    function_call, streamed == blocking, and the next turn extends the
-    slot."""
-    import decide_turn
-    real = decide_turn.judge_stop
-    decide_turn.judge_stop = T._stub_judge
-    try:
-        got = {}
-        for stream in (False, True):
-            T.slots.reset(n=4)
-            T.compaction.reset()
-            tag = "stated-" + ("s" if stream else "b")
-            c = RClient(tag, stream=stream)
-            c.turn([T.reply("", reasoning="Write it.", calls=[T.call(
-                "write_file", {"path": "notes.txt", "content": "a"},
-                f"{tag}-1")])], user="Write notes.txt, then fix it.")
-            c.tool_output(f"{tag}-1", "wrote notes.txt")
-            t2 = c.turn([T.reply(T.STATED, reasoning="Check it."),
-                         T.reply(".", calls=[T.call(
-                             "write_file", {"path": "notes.txt",
-                                            "content": "b"}, f"{tag}-2")])])
-            if stream:
-                check_stream(t2["events"], "a streamed stated step")
-            fc = _items(t2["resp"], "function_call")
-            got[stream] = (_text(t2["resp"]), [f["name"] for f in fc],
-                           (t2["x"].get("continued") or {}).get("continued"))
-            c.tool_output(f"{tag}-2", "wrote notes.txt")
-            t3 = c.turn([T.reply("Done. notes.txt holds b.")])
-            T._extends(t2, t3, f"responses, {tag}: the turn after a "
-                               f"continued step")
-        want = T.STATED + "\n\n" + proxy.CONTINUE_LINE + "."
-        check(got[False][0].startswith(want) and got[False][1] ==
-              ["write_file"] and got[False][2] is True
-              and got[True] == got[False],
-              "a stated step on /v1/responses: one message (its text and "
-              "the line) and the call; streamed == blocking",
-              json.dumps(got)[:400])
-    finally:
-        decide_turn.judge_stop = real
 
 
 def test_stream_keepalive_and_failure():
@@ -1391,9 +1345,9 @@ APPLY_PATCH = {"type": "custom", "name": "apply_patch",
 def test_codex_apply_patch_end_to_end():
     """Codex 0.157.1 (captured, docs/HARNESS-CODEX.md): apply_patch is a
     FREEFORM custom tool. The model sees a tool; its call comes back as a
-    custom_tool_call with the raw patch; the code check reads the patch
-    (tool_code's names table: apply_patch(input)); the replayed call and its
-    custom_tool_call_output render as the turn the slot holds."""
+    custom_tool_call with the raw patch, untouched; the replayed call and
+    its custom_tool_call_output render as the turn the slot holds. (The code
+    check that read the patch went 2026-09-29.)"""
     T.slots.reset(n=4)
     T.compaction.reset()
     c = RClient("patch", tools=[APPLY_PATCH, FLAT_WRITE])
@@ -1403,16 +1357,11 @@ def test_codex_apply_patch_end_to_end():
                                            "pa-1")])],
                 user="Add p.py.")
     ct = _items(t1["resp"], "custom_tool_call")
-    tc = t1["x"].get("tool_code") or {}
-    files = tc.get("files") or []
     check(ct and ct[0]["input"] == patch and ct[0]["name"] == "apply_patch"
-          and "arguments" not in ct[0]
-          and files and files[0].get("tool") == "apply_patch"
-          and files[0].get("path") == "p.py"
-          and files[0].get("errors_before", 0) >= 1,
+          and "arguments" not in ct[0] and "tool_code" not in t1["x"],
           "the model's apply_patch call is a custom_tool_call with the raw "
-          "patch, and the code check read the patch (p.py's syntax error)",
-          json.dumps([ct, files])[:500])
+          "patch, as written (a syntax error in it is the harness's to meet)",
+          json.dumps(ct)[:500])
     c.input.append({"type": "custom_tool_call_output",
                     "call_id": ct[0]["call_id"] if ct else "pa-1",
                     "output": "Success. Updated the following files:\nA p.py"})
@@ -1669,7 +1618,6 @@ def main() -> int:
     for fn in (test_request_translation, test_request_errors,
                test_codex_request_replay,
                test_blocking_turns_extend_the_slot, test_streamed_turns,
-               test_a_stated_step_continues_on_responses,
                test_stream_keepalive_and_failure, test_output_forms,
                test_harness_gaps,
                test_a_changed_prompt_cache_key_continues_the_conversation,

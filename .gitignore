@@ -57,3 +57,11 @@ models/manifest.local.yaml
 *.pem
 .env
 **/.env
+
+# Skills data is not repo content (operator, 2026-10-01: "none of our skills data, or things the user can make
+# themselves through the exposed dashboard tools"): the skills (authored, ingested, replacements, retags), the
+# documentation pages the pitfall harness downloads, and its generated gap reports. Each is rebuilt by the skills
+# pipeline / the dashboard from its sources.
+skills/
+bench/skills/pitfalls/sources/
+bench/skills/pitfalls/gaps/

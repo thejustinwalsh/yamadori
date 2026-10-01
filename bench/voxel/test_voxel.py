@@ -52,12 +52,12 @@ def fake_response(content: str, tier: str = "xhigh", finish: str = "stop",
                       "completion_tokens_details": {"reasoning_tokens": 3000}},
             "x_yamadori": {"tier": tier, "tier_requested": tier, "utility": utility,
                            "route": {"class": "code_generation"},
-                           "selection": {"fanout": 3}, "fanout": {"n": 2},
-                           "deep": {"trigger": "none", "fired": False,
-                                    "think_tool": {"offered": True, "calls": []}},
+                           "selection": {"skills": False, "utility": False},
                            "usage": {"generations": 1}, "hops": 1,
-                           "fold_back": [{"phrase": "Compared two approaches"}],
-                           "session": {"source": "minted"}}}
+                           "mcp": {"offered": [], "calls": [{"tool": "yama_find_package"}]},
+                           "session": {"source": "minted",
+                                       "seed": {"word": "lantern", "token_id": 1,
+                                                "u32": 2}}}}
 
 
 PAGE = "<!DOCTYPE html>\n<html><body><canvas></canvas><script>1</script></body></html>"
@@ -172,8 +172,8 @@ def test_run_rep():
               and resp["response"]["choices"][0]["message"]["reasoning_content"],
               "response.json keeps the whole body, x_yamadori and reasoning included")
         check(row["usage"]["completion_tokens"] == 9000 and row["wall_s"] >= 0
-              and row["x"]["route"] == "code_generation" and row["x"]["fanout_n"] == 2
-              and row["x"]["deep"]["think_calls"] == 0,
+              and row["x"]["route"] == "code_generation" and row["x"]["seed"] == "lantern"
+              and row["x"]["mcp_calls"] == 1 and row["x"]["session_source"] == "minted",
               "the row carries usage, wall time and the stack's decisions", json.dumps(row["x"])[:300])
         check(KEY not in all_text(d) and KEY not in json.dumps(row), "the key is in no file and no row")
         check(post.calls[0]["body"]["messages"][0]["content"] == VERBATIM,

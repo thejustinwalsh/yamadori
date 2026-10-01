@@ -360,8 +360,7 @@ def _body(tag: str, user: str, tools: list) -> dict:
             "tools": tools, "messages": [
                 {"role": "system", "content": T.SYSTEM + f" [img {tag}]"},
                 {"role": "user", "content": user}],
-            "_features": json.dumps({"hints": True, "investigate": False,
-                                     "fanout": 1})}
+            "_features": json.dumps({"skills": True})}
 
 
 def _stopped_stream(tag: str, name: str, bad: str, good: str, tools: list,

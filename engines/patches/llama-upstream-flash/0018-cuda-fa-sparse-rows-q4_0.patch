@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Wed, 30 Sep 2026 17:58:40 -0400
+Subject: [PATCH] cuda: the sparse flash attention's selected-cell conversion
+ covers q4_0
+
+0014 converted only the selected cells of a q8_0 K/V to f16 for the sparse
+(top-k) MMA kernel; a q4_0 cache still went through the whole conversion on
+every call. A q4_0 cache (with upstream's Walsh-Hadamard rotation, which
+llama-kv-cache applies to any quantized K/V) is the next VRAM lever for
+Flash-Next: about 1.5 GB of a 262K window back for the expert cache. The
+conversion kernel is now templated on the cache type; q4_0 is dequantized
+exactly as convert.cu's dequantize_q4_0 (low nibbles first, (q - 8) * d).
+The QSA-shaped eval cases gain q4_0 (11 cases); all 4,015 FLASH_ATTN_EXT
+cases pass with GGML_CUDA_FA_SPARSE_ROWS_POISON=1 on the A4000 (sm_86).
+---
+ ggml/src/ggml-cuda/fattn-common.cuh | 36 ++++++++++++++++++++++-------
+ tests/test-backend-ops.cpp          |  2 +-
+ 2 files changed, 29 insertions(+), 9 deletions(-)
+
+diff --git a/ggml/src/ggml-cuda/fattn-common.cuh b/ggml/src/ggml-cuda/fattn-common.cuh
+index 4a1186b4..d2d9210b 100644
+--- a/ggml/src/ggml-cuda/fattn-common.cuh
++++ b/ggml/src/ggml-cuda/fattn-common.cuh
+@@ -980,7 +980,23 @@ static __global__ void flash_attn_combine_results(
+ // flash_attn_ext_f16_load_tile, the cp.async path) -- but a masked score times a non-finite row is still NaN, so row 0
+ // is converted too; every other row is left unwritten and nothing reads it. One block per (list entry, head), plus
+ // one for row 0; lists past their count hold -1. GGML_CUDA_FA_SPARSE_ROWS=0 restores the whole conversion.
+-static __global__ void k_fattn_sparse_rows_q8_0_to_f16(
++// 0018: q4_0 too (a q4_0 cache: the same selected-cell conversion, dequantized as convert.cu's dequantize_q4_0)
++template <ggml_type type>
++static __device__ __forceinline__ float fattn_sparse_rows_value(const char * row, const int j) {
++    if constexpr (type == GGML_TYPE_Q8_0) {
++        const block_q8_0 & b = ((const block_q8_0 *) row)[j/QK8_0];
++        return __half2float(b.d) * b.qs[j%QK8_0];
++    } else {
++        static_assert(type == GGML_TYPE_Q4_0, "q8_0 or q4_0");
++        const block_q4_0 & b = ((const block_q4_0 *) row)[j/QK4_0];
++        const int jj = j%QK4_0;
++        const int q  = jj < QK4_0/2 ? (b.qs[jj] & 0x0F) : (b.qs[jj - QK4_0/2] >> 4);
++        return (q - 8) * __half2float(b.d);
++    }
++}
++
++template <ggml_type type>
++static __global__ void k_fattn_sparse_rows_to_f16(
+         const char * __restrict__ src, half * __restrict__ dst, const int32_t * __restrict__ indices,
+         const int32_t * __restrict__ counts, const int n_kv_max, const int ntiles_x, const int ne0, const int ne1,
+         const int ne3, const size_t nb1, const size_t nb2, const size_t nb3) {
+@@ -996,11 +1012,10 @@ static __global__ void k_fattn_sparse_rows_q8_0_to_f16(
+     }
+     const int h = blockIdx.z;
+     const int s = ne3 == 1 ? 0 : l / ntiles_x;
+-    const block_q8_0 * row = (const block_q8_0 *) (src + cell*nb1 + h*nb2 + s*nb3);
++    const char * row = src + cell*nb1 + h*nb2 + s*nb3;
+     half * out = dst + ((int64_t(s)*gridDim.z + h)*ne1 + cell)*ne0;
+     for (int j = threadIdx.x; j < ne0; j += blockDim.x) {
+-        const block_q8_0 & b = row[j/QK8_0];
+-        out[j] = __float2half(__half2float(b.d) * b.qs[j%QK8_0]);
++        out[j] = __float2half(fattn_sparse_rows_value<type>(row, j));
+     }
+ }
+ 
+@@ -1081,8 +1096,11 @@ void launch_fattn(
+         ((Q->ne[1] + ncols1 - 1) / ncols1) * mask->ne[3] : 0;
+     const bool rows_ok = use_sparse && ggml_cuda_fattn_sparse_rows_enabled() && mask &&
+         (K->ne[3] == 1 || K->ne[3] == mask->ne[3]) && rows_listed < K->ne[1]*std::max<int64_t>(K->ne[3], 1);
+-    const bool sparse_rows_K = rows_ok && need_f16_K && K->type == GGML_TYPE_Q8_0 && K->ne[0] % QK8_0 == 0;
+-    const bool sparse_rows_V = rows_ok && need_f16_V && V->type == GGML_TYPE_Q8_0 && V->ne[0] % QK8_0 == 0 &&
++    auto sparse_rows_type = [](const ggml_tensor * t) {
++        return (t->type == GGML_TYPE_Q8_0 && t->ne[0] % QK8_0 == 0) || (t->type == GGML_TYPE_Q4_0 && t->ne[0] % QK4_0 == 0);
++    };
++    const bool sparse_rows_K = rows_ok && need_f16_K && sparse_rows_type(K);
++    const bool sparse_rows_V = rows_ok && need_f16_V && sparse_rows_type(V) &&
+         !V_is_K_view && (V->ne[3] == 1 || V->ne[3] == mask->ne[3]);
+ 
+     if (need_f16_K && K->type != GGML_TYPE_F16 && sparse_rows_K) {
+@@ -1191,14 +1209,16 @@ void launch_fattn(
+         }
+         if (sparse_rows_K) {
+             const dim3 grid(n_kv_max + 1, n_lists, K->ne[2]);
+-            k_fattn_sparse_rows_q8_0_to_f16<<<grid, 128, 0, main_stream>>>(
++            const auto kfn = K->type == GGML_TYPE_Q8_0 ? k_fattn_sparse_rows_to_f16<GGML_TYPE_Q8_0> : k_fattn_sparse_rows_to_f16<GGML_TYPE_Q4_0>;
++            kfn<<<grid, 128, 0, main_stream>>>(
+                 (const char *) K->data, (half *) f16_extra.K, idx, counts, n_kv_max, ntiles_x,
+                 K->ne[0], K->ne[1], K->ne[3], K->nb[1], K->nb[2], K->nb[3]);
+             CUDA_CHECK(cudaGetLastError());
+         }
+         if (sparse_rows_V) {
+             const dim3 grid(n_kv_max + 1, n_lists, V->ne[2]);
+-            k_fattn_sparse_rows_q8_0_to_f16<<<grid, 128, 0, main_stream>>>(
++            const auto kfn = V->type == GGML_TYPE_Q8_0 ? k_fattn_sparse_rows_to_f16<GGML_TYPE_Q8_0> : k_fattn_sparse_rows_to_f16<GGML_TYPE_Q4_0>;
++            kfn<<<grid, 128, 0, main_stream>>>(
+                 (const char *) V->data, (half *) f16_extra.V, idx, counts, n_kv_max, ntiles_x,
+                 V->ne[0], V->ne[1], V->ne[3], V->nb[1], V->nb[2], V->nb[3]);
+             CUDA_CHECK(cudaGetLastError());
+diff --git a/tests/test-backend-ops.cpp b/tests/test-backend-ops.cpp
+index 700fdcd0..e10a153a 100644
+--- a/tests/test-backend-ops.cpp
++++ b/tests/test-backend-ops.cpp
+@@ -10991,7 +10991,7 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
+ 
+     // sparse (n_kv_max) decode over a q8_0 cache, the QSA shape (256/256, 2 KV heads, gqa 12, top-k 2048): the
+     // sparse kernel's f16 K/V converted at the listed cells only; one query and an MTP verify window of four
+-    for (ggml_type type_KV : {GGML_TYPE_Q8_0, GGML_TYPE_F16}) {
++    for (ggml_type type_KV : {GGML_TYPE_Q8_0, GGML_TYPE_Q4_0, GGML_TYPE_F16}) {
+         for (int64_t kv : {8192, 20480}) {
+             for (int64_t nb : {1, 4}) {
+                 test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {12, 1}, kv, nb, true, false, 0, 0, GGML_PREC_F32,

@@ -6,8 +6,8 @@ WHAT THIS IS GATING
 `catalog.py` decides what `/v1/models` advertises and what a requested model
 name resolves to. Its promises:
 
-  1. One product name is advertised. Internal names (`bonsai`, `embeddings`,
-     `reranker`) are never listed -- listing them advertises a bypass around
+  1. One product name is advertised. Internal names (`bonsai`,
+     `embeddings`) are never listed -- listing them advertises a bypass around
      retrieval, tiering, secret filtering and the audit log.
   2. The reserved name `metsumi` is neither advertised nor resolvable as ours.
   3. Anything a client sends resolves to a working model: unknown names fall
@@ -58,7 +58,7 @@ _budget_pin.HELPER_TOKENS = 0
 _tiers_pin.HELPER_THINKING, _tiers_pin.JOB_THINKING = 0, {}
 
 INTERNAL_NAMES = {"bonsai", "bonsai-agent", "embeddings",
-                  "reranker", "critic-disabled", "bonsai-vision"}
+                  "critic-disabled", "bonsai-vision"}
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -181,8 +181,8 @@ def test_the_context_window_is_advertised():
         other = [n for n in rows if catalog.CATALOG[n][0] != "bonsai"]
         check(chat and all(rows[n].get("context_length") == want for n in chat),
               "exposed chat variants carry it too", str(chat))
-        # The vision copy runs its own -c, and embeddings/reranker are not
-        # chat models: the chat card would be false of them.
+        # The vision copy runs its own -c, and embeddings is not a chat
+        # model: the chat card would be false of them.
         check(other and all("context_length" not in rows[n]
                             and "supported_parameters" not in rows[n]
                             for n in other),

@@ -165,13 +165,24 @@ def _idle(upstream=None) -> bool:
     """No main-model slot processing and no request of this process in
     flight."""
     import max_mode
-    if max_mode.blocks(max_mode.current()) and max_mode.bound_model() != max_mode.current():
+    dm = max_mode.decider_model()          # the model jjava reads (the table's helper under a locked model)
+    if max_mode.blocks(dm) and max_mode.bound_model() != dm:
         # MAX MODE: the prime's model is off the card; asking its /slots would load it
         return False
     try:
         import slots
         with slots._lock:
             if any(v > 0 for v in slots._busy.values()):
+                return False
+        if upstream is None:
+            # A READ NEVER LOADS A MODEL (2026-09-30): max_mode.blocks() is
+            # False when NO main model is loaded, and /upstream/<model>/slots
+            # would then start it. Not loaded: not idle (the prime waits).
+            import gpu_room
+            import model as _model
+            loaded, _why = gpu_room.model_loaded(_model.UPSTREAM,
+                                                  max_mode.decider_model(_model.MODEL))
+            if not loaded:
                 return False
         table = (upstream or D._upstream)("/slots", timeout=5)
         return isinstance(table, list) and not any(
@@ -267,7 +278,7 @@ def _cf_key(k: str) -> str:
     """TEMPLATE_CF's key, per main model under max mode (a label prior is
     a property of the model that reads it)."""
     import max_mode
-    return f"{max_mode.current()}:{k}" if max_mode.ENABLED else k
+    return f"{max_mode.decider_model()}:{k}" if max_mode.ENABLED else k
 
 
 def enabled() -> bool:
@@ -445,6 +456,11 @@ def flat(a: dict) -> dict:
             "prior": d.get("prior"), "excluded": d.get("excluded") or [],
             "readout": d.get("readout"), "reads": d.get("reads"),
             "tie_band": d.get("tie_band"),
+            # the temperature read with (1.0 unless one is fitted: decider_
+            # bonsai THE TEMPERATURE) and the case-variant diagnostics
+            "temperature": (d.get("temperature") or {}).get("value"),
+            "variant_mass_max": d.get("variant_mass_max"),
+            "word_mass_max": d.get("word_mass_max"),
             "processed_tokens": d.get("processed_tokens"),
             "prompt_tokens": d.get("prompt_tokens"),
             "decision_id": a.get("decision_id"), "ms": d.get("ms") or 0.0}
@@ -771,9 +787,18 @@ class Turn:
                          "cut": bool(self.state_info.get("cut"))},
                "question": {"type": f.get("type"), "name": f.get("name"),
                             "keys": f.get("keys")},
-               "orders": [{"printed": o.get("printed"), "p": o.get("probs"),
-                           "label_mass": o.get("label_mass")}
-                          for o in f.get("orders") or []],
+               # + raw / variant_mass / word_mass (2026-09-30, additive):
+               # each order's distribution as read, before the temperature
+               # (bench/decider/fit_temperature.py refits from it), and
+               # where the rest of its top K went (decider_bonsai.
+               # case_variants)
+               "orders": [{k: v for k, v in (
+                   ("printed", o.get("printed")), ("p", o.get("probs")),
+                   ("raw", o.get("raw")), ("label_mass", o.get("label_mass")),
+                   ("variant_mass", o.get("variant_mass")),
+                   ("word_mass", o.get("word_mass")))
+                   if k in ("printed", "p", "label_mass") or v is not None}
+                   for o in f.get("orders") or []],
                "p": f.get("probs"), "pick": f.get("answer"),
                "argmax": f.get("argmax"), "tie": f.get("tie"),
                "tier": f.get("tier") or "untuned",
@@ -784,7 +809,12 @@ class Turn:
                "prior": f.get("prior"),
                "excluded": f.get("excluded") or [],
                "rule": _jsonable(rule)}
-        for k in ("confidence", "noul", "score", "tie_band"):
+        # + ms / reads / processed_tokens / prompt_tokens (2026-09-30, the
+        # JJAVA page's latency per read and per burst): what this decision
+        # cost, from its own reads. Additive: v2 readers ignore them.
+        for k in ("confidence", "noul", "score", "tie_band", "ms", "reads",
+                  "processed_tokens", "prompt_tokens", "temperature",
+                  "variant_mass_max", "word_mass_max"):
             if f.get(k) is not None:
                 row[k] = f[k]
         row.update(extra or {})

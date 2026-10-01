@@ -1,129 +1,61 @@
 #!/usr/bin/env python
-"""The selection engine: per request, WHEN each system runs.
+"""The selection engine: per request, whether skills may run -- and the
+reading of a request that the route and the utility rule share.
 
-docs/SELECTION-BUILD.md is the spec. This module is step 3 and 4 of its build
-plan; the decisions it owns are D2-D4 of that plan's table:
+    select / decide   may skills be attached at all? (the tier allows, a
+                      header forces; the skills system abstains per skill)
+    utility_call      is this a client's own side call (a title, a
+                      classifier, a summary of the conversation)?
+    question_of /     the user's question, its context, and the instruction
+    instruction_of    apart from an attachment the harness inlined after it
+    acts_locally      does the instruction ask to act on the user's machine?
+    symbol_dbs /      does a held package DEFINE a name the question uses?
+    defined_symbols   (mcp/route.py's library_question)
+    rule_baseline     the six-line regex E1 is compared against (mcp/e1.py)
 
-    skills        may skills be attached at all?
-    investigate   does deep thinking run before the answer?
-    fanout_n      how many ways is the answer written?
+D0 (which systems the caller ALLOWS) is the tier, `mcp/tiers.py`. This module
+never widens it: a tier flag means ALLOWED, not ON, and nothing decided here
+exceeds what the client asked for. The one exception is deliberate and loud
+-- a flag set in `X-Yamadori-Features` (`tier["overridden"]`) is FORCED on
+or off, because a benchmark arm must be able to say "on, always" or "off,
+always" and mean it.
 
-D0 (which systems the caller ALLOWS) is the tier, `mcp/tiers.py`. D1 (are the
-code tools admissible) is `domains.tool_admission`, whose decision arrives
-here as `gate`. This module never widens either: a tier flag means ALLOWED,
-not ON, and nothing decided here exceeds what the client asked for. The one
-exception is deliberate and loud -- a flag set in `X-Yamadori-Features`
-(`tier["overridden"]`) is FORCED on or off, because a benchmark arm must be
-able to say "deep thinking on, always" or "off, always" and mean it.
+REMOVED 2026-09-29 (docs/REMOVED.md; the way back is commit e360d37): the
+deep-thinking decision (the triggers' record, and the LEGACY path: the regex
++ symbol lookup + Laya's route_in head, two signals where disagreement
+escalated -- held-out 91/120 against 89/120 for the rule alone, p=0.79, not
+significant), the fan-out rule (design / code-task words, then the route's
+code classes; its only measurement a null, 7/8 vs 7/8 at 3.2x wall clock,
+n=8) and the Laya service call.
 
-WHY decide() IS PURE, AND WHAT PURE MEANS HERE
-
-`decide()` makes no network call and runs no model. It reads the package
-store's symbol tables (read-only sqlite, the same files `tool_admission`
-reads) and that is all, so a decision can be replayed over thousands of
-logged prompts in seconds -- which is how mcp/test_selection.py checks it
-against 342 LiveCodeBench prompts and 26 hand-written three.js questions.
-The one input that needs a service, Laya's `/route`, is fetched by
-`laya_signal()` and handed in. `select()` is the wrapper the proxy calls: it
-fetches that signal only when it could change something, then decides.
-
-DEEP THINKING ON THE PROXY'S PATH: TRIGGERS (Phase 0.6, 2026-09-24)
-
-The proxy passes a route and mcp/deep.py's trigger; deep thinking then runs
-exactly when a trigger fired (struggle, task kickoff, known-hard area; the
-model's own yama_think_deeply call runs during generation), on ANY route class.
-The library_question-only gate is gone, and the two-signal rule below is not
-consulted there: it is the LEGACY path, kept byte for byte for the offline
-evaluators that replay it (no route, no trigger). A header still forces deep
-thinking on or off on both paths.
-
-DEEP THINKING, LEGACY PATH: TWO SIGNALS, AND DISAGREEMENT ESCALATES
-
-docs/SELECTION.md pattern 5, the shipped recommendation. The rule signal is
-the six-line regex (`rule_baseline`, moved here from bench/laya_calibration.py
-so there is ONE copy) plus the symbol lookup. The second signal is the trained
-Laya route_in head, served at `/route` with `engine: "trained"`.
-
-    ORIGINAL head (n=89 labels, docs/LAYA.md F11): regex 0.841 +/-0.023 vs
-    trained 0.726 +/-0.045 on the same splits.
-
-    RETRAINED 2026-09-22 with 200 package-domain labels, scored on the 120
-    HELD-OUT package labels it never saw (bench/eval_route_heldout.py),
-    investigate-vs-not: new head 80/120, old head 64/120 (McNemar p=0.011),
-    regex 73/120, this module's rule + symbol lookup 89/120. Hard slice
-    (n=28): both heads 11, regex and selection 18. The head still does not
-    beat the rule, so it never decides alone.
-
-    agree            -> that answer
-    disagree         -> investigate (the misfire costs one search loop; the
-                        other misfire costs a wrong answer with no receipts)
-    head abstains    -> undecided, which is not agreement -> investigate
-    Laya down        -> signal recorded as None, the rule decides alone.
-                        Never a guess: a missing second opinion is reported
-                        as missing, not replaced by a made-up one.
-
-THE HARD-SLICE CHECK: THE SYMBOL LOOKUP
+THE HARD-SLICE CHECK: THE SYMBOL LOOKUP (defined_symbols; mcp/route.py)
 
 The regex reads surface cues ("our", "src/", a `.ts` path). The questions it
 cannot read are the ones about a LIBRARY'S source phrased as general
 questions -- "what is the default value of `Object3D.DEFAULT_UP`" has no
-cue at all and the regex says `answer_directly` on all 26 of
-bench/context_economy_tasks.jsonl. Whether a held package DEFINES a name the
-question uses is not a reading of the prose; it is a lookup in the index that
-would answer it. So an `answer_directly` from the regex is upgraded to
-`investigate` when a held package (or the bound repository) defines a symbol
-the question names. `clarify` is not upgraded: an underspecified question
-does not become specified because it contains a class name.
+cue at all. Whether a held package DEFINES a name the question uses is not a
+reading of the prose; it is a lookup in the index that would answer it.
 
 This probe is WIDER than `domains._symbols`. Code-shaped names (backticks,
 an internal capital, a digit, an underscore) are asked of every symbol
 table; a capitalised / ALLCAPS word in identifier syntax (`THREE.MOUSE`,
 `Loop()`) only of a package the text names. English-shaped ones -- a
 capitalised word used as a code noun ("the renderer's Pipelines module") --
-count only where a library defines them in
-its own source, not its examples or tests: three.js's examples define `For`,
-`Number` and `String`, and a LiveCodeBench puzzle's "a Zero Array" and "Group
-A" matched typegpu's `Array` and three's `Group` until the code-noun rule.
-A BARE ALLCAPS WORD IS NOT PROBED (2026-09-23): it was, and "MOUSE" and "API"
-in a pasted game spec matched three's `MOUSE` and wgpu-matrix's `API` and sent
-a request to create files locally into minutes of deep thinking. Names the
-platform defines (`Event`, `Array`, `Math`) never count
-(domains.PLATFORM_NAMES). mcp/test_selection.py asserts 0/342 LiveCodeBench
-prompts fire and 25/26 context-economy questions do with the rule alone:
-ce05 names no symbol, and fired before only because the ALLCAPS "TSL"
-matched a `TSL` namespace declaration. Held-out labels, investigate-vs-not,
-Laya absent: 88/120 before this change, 91/120 after (+4 -1, McNemar
-p=0.375, not significant).
+count only where a library defines them in its own source, not its examples
+or tests: three.js's examples define `For`, `Number` and `String`, and a
+LiveCodeBench puzzle's "a Zero Array" and "Group A" matched typegpu's `Array`
+and three's `Group` until the code-noun rule. A BARE ALLCAPS WORD IS NOT
+PROBED (2026-09-23): "MOUSE" and "API" in a pasted game spec matched three's
+`MOUSE` and wgpu-matrix's `API`. Names the platform defines (`Event`,
+`Array`, `Math`) never count (domains.PLATFORM_NAMES).
 
 AN AGENT HARNESS ACTING LOCALLY, AND ATTACHMENTS
 
 When the client sent its own tools and the instruction asks to act on the
-user's machine ("start this project in ~/Developer/x"), neither deep thinking
-nor fan-out runs (`acts_locally`). What escalates reads the user's
-instruction, not an attachment the harness inlined after it
+user's machine ("start this project in ~/Developer/x"), the request is the
+client's agent loop to run (`acts_locally`; mcp/route.py). What is read is
+the user's instruction, not an attachment the harness inlined after it
 (`instruction_of`). Both are explained where they are defined.
-
-NOTHING TO READ, NOTHING TO THINK ABOUT
-
-Deep thinking runs only if there is source that bears on THIS question: a
-bound repository, a held package the request imports or names, or a held
-definition of a name it uses (`READABLE_GATE`, the symbol lookup). The tool
-gate also offers for reasons that say nothing about the question -- no
-domain evidence, a domain a held package serves, an unmapped package in the
-store -- and on 2026-09-22 those opened it for all 342 LiveCodeBench prompts
-(koota, mapped to `algorithms`, and four unmapped packages were indexed).
-The regex reads "we" in a puzzle as "our code", so 65 of them would have
-investigated. Laya is not asked either: a second opinion on whether to read
-nothing is not a decision.
-
-FAN-OUT: THE DOCUMENTED RULE, NOT YET CALIBRATED
-
-`mcp/fanout.py`'s docstring states the policy: lookups N=1, design / approach
-/ refactor / "how should I" N>1. It was written in prose and implemented
-nowhere (PROTOCOL rule 14). It is implemented here as a word rule at n=0
-labels -- step 7 of the build plan labels ~40 prompts and replaces it. The
-only measurement behind it is the null it cites: 7/8 vs 7/8, zero discordant
-pairs, at 3.2x wall clock, on file-location questions (n=8).
 """
 from __future__ import annotations
 
@@ -132,20 +64,12 @@ import os
 import re
 import sqlite3
 import sys
-import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-LAYA_URL = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
-# A routing call is one forward pass of a 421M encoder. Ten seconds is ~50x the
-# measured cost; past it Laya is treated as down for THIS request and the rule
-# decides alone. Not a retry loop: one call, then a recorded None.
-LAYA_ROUTE_TIMEOUT = float(os.environ.get("YAMADORI_LAYA_ROUTE_TIMEOUT", "10"))
-
-# The shortest question deep thinking will take. shomen's own argument gate
-# for `delegate_investigation` (proxy.run_our_tool) uses the same number.
+# The shortest instruction selection reads as a question.
 MIN_QUESTION_CHARS = 8
 
 # How much earlier user text rides along as `context`. The labels' context
@@ -156,9 +80,9 @@ CONTEXT_CHARS = 1500
 
 # ====================================================== THE REGEX (moved) ===
 #
-# Moved verbatim from bench/laya_calibration.py on 2026-09-22 so that the
-# benchmark, the trainer (scripts/train_laya.py scores it on every split) and
-# the proxy run ONE copy. bench/data/rule_baseline_golden.json holds its 89
+# Moved verbatim from bench/laya_calibration.py on 2026-09-22 so that every
+# evaluator runs ONE copy (today E1's, mcp/e1.py: the rule it is compared
+# against). bench/data/rule_baseline_golden.json holds its 89
 # predictions as captured before the move; mcp/test_selection.py asserts they
 # are reproduced exactly.
 
@@ -252,9 +176,9 @@ def signals(item: dict) -> dict:
     }
 
 
-# Without this, "Laya gets 62%" is unreadable: the majority class alone gets
-# 39%, and six lines of regex may get more than the model does. A router is
-# only worth a GPU if it beats the thing you would have written anyway.
+# Without this, "a head gets 62%" is unreadable: the majority class alone
+# gets 39%, and six lines of regex may get more than a model does. A router
+# is only worth a GPU if it beats the thing you would have written anyway.
 _CLARIFY_HINT = re.compile(
     r"^\s*(it'?s broken|fix it|can you (make|check)|why doesn'?t this|"
     r"does this look|which one is better|update the|add the thing|"
@@ -309,7 +233,8 @@ _MID_CAPITAL = re.compile(r"(?<=[a-z,'’] )([A-Z][a-z0-9]{2,40})"
 # A bare ALLCAPS word is NOT probed (2026-09-23). It used to be, against a
 # library's src/, and a Hermes request's pasted spec matched three's `MOUSE`
 # (an ALLCAPS heading) and wgpu-matrix's `API` ("Web Audio API"); deep
-# thinking then ran for minutes on a request to create files locally. ALLCAPS
+# thinking (removed 2026-09-29) then ran for minutes on a request to create
+# files locally. ALLCAPS
 # is how prose writes acronyms and headings. It now counts only in code
 # context: backticked (`REVISION`), code-shaped (DEFAULT_UP, PI2), or in
 # identifier syntax (THREE.MOUSE, MOUSE.LEFT) -- domains.code_context_names.
@@ -485,30 +410,6 @@ def defined_symbols(text: str, dbs: dict[str, str]) -> dict[str, list[str]]:
     return out
 
 
-# ================================================= THE FAN-OUT RULE =========
-
-# fanout.py's docstring rule, as words. n=0 labels; build step 7 replaces it.
-_DESIGN = re.compile(
-    r"\b(how should (i|we)|design(ing)?|architect(ure|ing)?|approach(es)?|"
-    r"refactor\w*|trade-?offs?|pros and cons|(best|cleanest|right) way)\b",
-    re.I)
-
-# A request to WRITE code. Operator decision 2026-09-23: at tiers that allow
-# fan-out (high, max), code-writing tasks fan out too -- the original and the
-# second brain's candidates are checked (they must parse) and the winner is
-# DELIVERED (fanout.run, sequential since 2026-09-23; proxy._fan_out). The
-# old rule fanned out only on design
-# questions, from a null result on file LOOKUPS (7/8 vs 7/8, n=8); it was
-# never measured on code generation. A code fence in the request, or a
-# write/implement/fix verb followed by a code noun, counts.
-_CODE_TASK = re.compile(
-    r"```|\b(write|implement|complete|finish|fix|create|generate|build|"
-    r"rewrite|port|refactor)\b[^.?!\n]{0,80}?\b(function|method|class|"
-    r"component|hook|type|interface|struct|enum|trait|impl|program|script|"
-    r"module|solution|code|tests?|query|algorithm|shader|kernel)s?\b",
-    re.I)
-
-
 # ================================== THE INSTRUCTION, NOT THE ATTACHMENT =====
 #
 # Hermes sends an attached file INLINE in the user turn, after the user's own
@@ -526,12 +427,11 @@ _CODE_TASK = re.compile(
 #     build a space shooter game with vanilla JavaScript ...
 #
 # DECISION: the signals that ESCALATE -- the regex, the held-symbol lookup,
-# the design and code-task words, the act-locally rule, and the question Laya
-# is asked -- read the user's instruction, not the attachment. An attachment
+# the act-locally rule -- read the user's instruction, not the attachment. An attachment
 # is material to act on; the instruction says what to do with it. The
 # attachment above is a game spec for the user's OWN project: its ALLCAPS
 # headings matched held definitions, and the ``` Hermes wraps every
-# attachment in read as "a code-writing task" to _CODE_TASK. Evidence that an
+# attachment in read as "a code-writing task". Evidence that an
 # attachment really is about a held library still arrives as a FACT: its
 # imports are parsed (discover.scan -> the session's packages, and the gate's
 # IMPORTS_HELD_SOURCE), and the gate still reads every message, because an
@@ -556,10 +456,9 @@ def instruction_of(q: str) -> tuple[str, str]:
 # A turn in an agent harness that asks to act on the user's own machine --
 # create, start, scaffold, set up, install, run, build or move a project,
 # repo, folder or file -- is work for the CLIENT's tools (file write,
-# terminal), which only the client can run. Deep thinking reads library
-# source for minutes before the first token, and fan-out re-writes a final
-# answer; neither can create a file on the user's disk, and both hold the
-# turn while the harness waits. Live, 2026-09-23: "I want to start this
+# terminal), which only the client can run. (Deep thinking and fan-out,
+# removed 2026-09-29, held such a turn for minutes and could create no file
+# on the user's disk.) Live, 2026-09-23: "I want to start this
 # project in ~/Developer/octopus-invaders" ran deep thinking for 26,660 prompt
 # + 19,515 decoded tokens before it was killed, and the client's tools were
 # never called.
@@ -658,8 +557,7 @@ def acts_locally(instruction: str) -> str | None:
 # (PROTOCOL rule 7) -- see that file for the counts.
 #
 # A utility call gets the bare model at the tier it resolves to: no capability
-# block, no tools, no skills, no deep thinking, no fan-out, no repair, and no
-# session (it neither reads nor writes the conversation's offered-tools flag,
+# block, no tools, no skills, no seed, and no session (it neither reads nor writes the conversation's offered-tools flag,
 # work log or pins -- proxy.session_context). X-Yamadori-Features {"utility":
 # true|false} forces it; a header that forces an augmentation ON wins over the
 # rule, because a benchmark that forced it meant it.
@@ -774,7 +672,7 @@ def utility_call(messages: list[dict], client_tools: list[str] | None = None,
         # needs no vision: the image becomes its text placeholder and
         # nothing is described, and the call never becomes the
         # conversation's first request (no session, no slot pin, no
-        # yama_think_deeply offer, no chain salt).
+        # tool offer, no chain salt).
         sig["image"] = True
         form = None
         if not client_tools and sig["single_exchange"]:
@@ -897,7 +795,7 @@ def question_of(messages: list[dict]) -> tuple[str, str, bool]:
     tool result:", Pi's "Attached image(s) from tool result:", Cline's
     image-only turn; image_input.TOOL_MEDIA_TURNS) is the tool result it
     carries, never the user speaking: it is looked past, as route.ends_on
-    and deep do (2026-09-26).
+    does (2026-09-26).
     """
     import image_input
     import message_text
@@ -920,84 +818,36 @@ def _forced(tier: dict, key: str) -> bool:
     return key in (tier.get("overridden") or [])
 
 
-def laya_says_investigate(laya: dict | None) -> bool | None:
-    """The head's answer on the binary the rule is compared on.
-
-    True / False when it decided; None when it abstained (undecided, which
-    is NOT "no" -- docs/SELECTION.md anti-pattern D) or gave nothing usable.
-    """
-    if not laya or laya.get("abstain"):
-        return None
-    choice = laya.get("choice")
-    if choice not in ("investigate", "answer_directly", "clarify"):
-        return None
-    return choice == "investigate"
-
-
 # Gate situations that are EVIDENCE the request is about source this server
 # holds, as opposed to reasons it merely could not rule the tools out.
 # domains.tool_admission's other offers -- no domain evidence, a domain some
 # held package serves, an unmapped package in the store -- say nothing about
-# whether THIS question has anything to read.
+# whether THIS question has anything to read (mcp/route.py's
+# library_question).
 READABLE_GATE = {"REPOSITORY_BOUND", "IMPORTS_HELD_SOURCE", "NAMES_HELD_SOURCE",
                  "DEFINES_MENTIONED_SYMBOL"}
 
 
-def decide(messages: list[dict], tier: dict, gate: dict | None,
-           state: dict | None = None, *, laya: dict | None = None,
-           laya_status: str = "not consulted",
-           dbs: dict[str, str] | None = None,
+def decide(messages: list[dict], tier: dict, *,
            client_tools: list[str] | None = None,
-           route: dict | None = None,
-           trigger: dict | None = None,
-           second: str = "Laya") -> dict:
-    """{skills, investigate, fanout_n, because, signals} for one request.
-
-    `route` is mcp/route.py's class for the request (proxy.prepare decides
-    it once). When given, fan-out READS it instead of re-deciding: it runs on
-    code_generation / code_edit only; a header that forces it still forces
-    it. None (the default, and every caller before 2026-09-24) keeps the
-    word rules.
-
-    `trigger` is mcp/deep.py's decision for the request (Phase 0.6). With a
-    route or a trigger, deep thinking runs exactly when a trigger FIRED --
-    on any route class; the library_question-only gate is gone (operator,
-    2026-09-24) -- and its reason is the trigger's. With neither, the legacy
-    rule + symbol lookup + Laya path decides, for the offline evaluators.
+           route: dict | None = None) -> dict:
+    """{skills, because, signals} for one request.
 
     `tier` is what the caller is ALLOWED (tiers.resolve, header applied);
-    `gate` is domains.tool_admission's decision, or None when the tier has no
-    retrieval; `state` is the session's nebari row. `laya` is the /route
-    response or None. `dbs` names the symbol tables to look in; None means
-    the held package store (plus nothing -- the proxy passes the bound
-    repository's table in explicitly). `client_tools` names the tools the
-    CLIENT sent with the request (never ours); a non-empty list means an
-    agent harness is driving its own loop. `second` names the second
-    signal in the reasons: "Laya" (the default, byte for byte what the
-    offline evaluators replay) or "E1" (mcp/e1.py, YAMADORI_E1=1); `laya`
-    carries either one's answer.
+    `route` is mcp/route.py's class for the request (proxy.prepare decides
+    it once); `client_tools` names the tools the CLIENT sent with the
+    request (never ours). Pure: no network call, no model.
     """
-    st = state or {}
-    whole, ctx, speaking = question_of(messages)
-    # What escalates reads the instruction; see instruction_of.
+    whole, _ctx, speaking = question_of(messages)
     q, attached = instruction_of(whole)
-    local = acts_locally(q) if client_tools else None
     because: dict[str, str] = {}
     sig: dict = {"question_chars": len(whole), "user_turn": speaking,
                  "instruction_chars": len(q), "attached_chars": len(attached),
                  "client_tools": len(client_tools or []),
-                 "acts_locally": local,
-                 "forced": sorted(k for k in ("skills", "investigate", "fanout")
-                                  if _forced(tier, k)),
-                 "allowed": {"skills": bool(tier.get("skills")),
-                             "investigate": bool(tier.get("investigate")),
-                             "fanout": int(tier.get("fanout") or 1)},
-                 "gate": (gate or {}).get("situation"),
-                 "route": (route or {}).get("class"),
-                 "laya": laya, "laya_status": laya_status}
-    rclass = (route or {}).get("class")
-
-    # ---- skills: allowed or forced. skill_select abstains per skill. ------
+                 "forced": sorted(k for k in ("skills",) if _forced(tier, k)),
+                 "allowed": {"skills": bool(tier.get("skills"))},
+                 "route": (route or {}).get("class")}
+    # skills: allowed or forced. The skills system abstains per skill.
     if _forced(tier, "skills"):
         skills_on = bool(tier.get("skills"))
         because["skills"] = (f"forced {'on' if skills_on else 'off'} by "
@@ -1010,257 +860,26 @@ def decide(messages: list[dict], tier: dict, gate: dict | None,
         skills_on = False
         because["skills"] = (f"tier {tier.get('name', '?')} does not allow "
                              "skills")
-
-    # ---- deep thinking ------------------------------------------------------
-    investigate = False
-    rule = None
-    held: dict = {}
-    trig = trigger or {}
-    fired = bool(trig.get("fire")) and trig.get("kind") not in (None, "forced")
-    sig["trigger"] = trig.get("kind") if trig.get("fire") else None
-    if len(q.strip()) < MIN_QUESTION_CHARS and not fired:
-        why = "no question of at least 8 characters to think about"
-    elif _forced(tier, "investigate"):
-        investigate = bool(tier.get("investigate"))
-        why = f"forced {'on' if investigate else 'off'} by X-Yamadori-Features"
-    elif not tier.get("investigate"):
-        why = f"tier {tier.get('name', '?')} does not allow deep thinking"
-    elif route is not None or trigger is not None:
-        # PHASE 0.6 (operator, 2026-09-24; docs/SELF-IMPROVEMENT-PLAN.md):
-        # deep thinking is no longer limited to library questions. Four
-        # TRIGGERS decide it (mcp/deep.py) -- struggle, a task kickoff and a
-        # known-hard area here, before main generates; the model's own
-        # yama_think_deeply call during generation -- on every route class, the
-        # agent path included. The rule, the symbol lookup and Laya are not
-        # consulted on this path (a separate evaluation decides Laya vs
-        # Tev1); a header still forces it either way (above). The reason is
-        # the trigger's, recorded as before.
-        investigate = fired
-        why = (trig.get("because") or
-               "no trigger was evaluated for this request (mcp/deep.py "
-               "decides); the model may call yama_think_deeply")
-    elif local:
-        why = (f"the client sent its own tools ({_tool_list(client_tools)}) and "
-               f"the request asks to act on the user's machine ({local!r}): "
-               f"that is the client's agent loop to run, and deep thinking "
-               f"cannot create or change a local file")
-    elif not (gate or {}).get("offer"):
-        why = ("the code tools are withheld ("
-               + ((gate or {}).get("situation") or "retrieval off")
-               + "): nothing indexed that deep thinking could read")
-    elif not speaking:
-        why = "the conversation ends on a tool result: a task in progress, not a new question"
-    else:
-        # THE LEGACY PATH: no route and no trigger -- the offline evaluators
-        # (bench/eval_route_heldout.py, bench/laya_factcheck/) and every
-        # caller before 2026-09-24. The regex + symbol lookup + Laya
-        # decision, unchanged, so those measurements still replay.
-        rule = rule_baseline({"question": q, "context": ctx})
-        if dbs is None:
-            dbs = symbol_dbs(None)
-        held = defined_symbols(q, dbs)
-        situation = (gate or {}).get("situation")
-        imported = sorted(set(st.get("packages") or [])
-                          & {k for k in dbs if not k.startswith("(")})
-        readable = bool(held) or situation in READABLE_GATE or bool(imported)
-        sig["readable"] = readable
-        if not readable:
-            # NOTHING TO READ. The tools were offered for a reason that is not
-            # about this question -- no domain evidence, a domain some held
-            # package serves, an unmapped package in the store -- and the
-            # question names nothing a held package defines. The regex's
-            # "investigate" means "this is about OUR code", and with no
-            # repository bound there is none to read. Measured necessary on
-            # 2026-09-22: indexing koota (mapped to `algorithms`) and four
-            # unmapped packages opened the tool gate for all 342 LiveCodeBench
-            # prompts, and 65 of them say "we" or "us", which the regex reads
-            # as investigate.
-            why = (f"regex={rule}, but nothing to read: no repository is "
-                   f"bound, the tools were offered only because {situation} "
-                   f"and the question names nothing a held source defines")
-        else:
-            rule_says = rule == "investigate" or (rule == "answer_directly"
-                                                  and bool(held))
-            rule_why = (f"regex={rule}"
-                        + (" + a held source defines "
-                           + "; ".join(f"{k}: {', '.join(v[:3])}"
-                                       for k, v in held.items())
-                           if held else ""))
-            sig["consult_laya"] = True
-            sig["second_signal"] = second
-            other = laya_says_investigate(laya)
-            if laya is None:
-                investigate = rule_says
-                why = (f"{rule_why}; {second}: {laya_status}, so the rule "
-                       f"decides alone")
-            elif other is None:
-                investigate = True
-                why = (f"{rule_why}; {second} abstained (margin "
-                       f"{laya.get('margin')}) -- undecided is not agreement, "
-                       f"so investigate")
-            elif other == rule_says:
-                investigate = rule_says
-                why = f"{rule_why}; {second} agrees ({laya.get('choice')})"
-            else:
-                investigate = True
-                why = (f"{rule_why}; {second} says {laya.get('choice')} -- "
-                       f"the signals disagree, which escalates to investigate")
-    because["investigate"] = why
-    sig["rule"] = rule
-    sig["held_symbols"] = {k: v[:8] for k, v in held.items()}
-
-    # ---- fan-out ------------------------------------------------------------
-    allowed_n = max(1, int(tier.get("fanout") or 1))
-    design = bool(_DESIGN.search(q))
-    code_task = bool(_CODE_TASK.search(q))
-    sig["design"] = design
-    sig["code_task"] = code_task
-    if _forced(tier, "fanout"):
-        fanout_n = allowed_n
-        because["fanout"] = f"forced to {fanout_n} by X-Yamadori-Features"
-    elif allowed_n <= 1:
-        fanout_n = 1
-        because["fanout"] = f"tier {tier.get('name', '?')} allows one answer"
-    elif not speaking:
-        fanout_n = 1
-        because["fanout"] = "a task in progress, not a new question"
-    elif local:
-        fanout_n = 1
-        because["fanout"] = (f"the client sent its own tools and the request "
-                             f"asks to act on the user's machine ({local!r}): "
-                             f"one answer, the client's loop does the work")
-    elif route is not None:
-        # The route decides, not the words (operator, 2026-09-24): the code
-        # classes fan out -- candidates are graded by the code check -- and
-        # nothing else does, design questions included.
-        if rclass in ("code_generation", "code_edit"):
-            fanout_n = allowed_n
-            because["fanout"] = (f"route {rclass}: candidates are checked and "
-                                 f"the best-supported parsing code is "
-                                 f"delivered")
-        else:
-            fanout_n = 1
-            because["fanout"] = (f"route {rclass}: fan-out runs on "
-                                 f"code_generation / code_edit only")
-    elif design:
-        fanout_n = allowed_n
-        because["fanout"] = ("a design/approach question: room for different "
-                             "answers (word rule, n=0 labels -- build step 7)")
-    elif code_task:
-        fanout_n = allowed_n
-        because["fanout"] = ("a code-writing task: candidates are checked and "
-                             "the best-supported parsing code is selected and "
-                             "delivered (operator decision 2026-09-23)")
-    else:
-        fanout_n = 1
-        because["fanout"] = ("not a design/approach question: a single right "
-                             "answer leaves no variance for variants to use "
-                             "(fanout.py: 7/8 vs 7/8, 0 discordant, n=8)")
-
-    _ = st  # the session row is part of the contract; nothing reads it yet
-    return {"skills": skills_on, "investigate": investigate, "fanout_n": fanout_n,
-            "because": because, "signals": sig}
+    return {"skills": skills_on, "because": because, "signals": sig}
 
 
-# ====================================================== THE SERVICE CALL ===
-
-def laya_signal(question: str, context: str = "", url: str | None = None,
-                timeout: float | None = None) -> tuple[dict | None, str]:
-    """(the trained head's /route answer, status). (None, why) when it did not
-    answer -- down, slow, no trained head, or a malformed reply. Never a guess.
-    With YAMADORI_E1=1 Laya is off the request path: nothing is sent.
-    """
-    import e1
-    if not e1.laya_allowed():
-        return None, "not consulted: YAMADORI_E1=1 (E1 is the second signal)"
-    body = json.dumps({"task": "route_in", "engine": "trained",
-                       "question": question, "context": context}).encode()
-    req = urllib.request.Request((url or LAYA_URL) + "/route", data=body,
-                                 headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(
-                req, timeout=LAYA_ROUTE_TIMEOUT if timeout is None else timeout) as r:
-            d = json.loads(r.read().decode("utf-8"))
-    except Exception as e:                                       # noqa: BLE001
-        return None, f"down ({type(e).__name__}: {str(e)[:120]})"
-    if not isinstance(d, dict) or d.get("engine") != "trained" or "choice" not in d:
-        return None, "answered without a trained route_in decision: " + json.dumps(d)[:160]
-    keep = {k: d.get(k) for k in ("choice", "probabilities", "margin",
-                                  "abstain", "gate", "engine",
-                                  "artefact_version", "elapsed_ms")}
-    return keep, "answered"
-
-
-def select(messages: list[dict], tier: dict, gate: dict | None,
-           state: dict | None = None, *, root_db: str | None = None,
-           laya_url: str | None = None,
+def select(messages: list[dict], tier: dict, *,
            client_tools: list[str] | None = None,
-           route: dict | None = None,
-           trigger: dict | None = None) -> dict:
-    """What the proxy calls: decide, fetch the second signal only if the
-    decision reached the two-signal stage, decide again with it, and log one
-    line.
-
-    Laya is consulted whenever deep thinking is genuinely on the table --
-    allowed, not forced, tools offered, something to read -- even when the
-    rule already says investigate. The outcome cannot change then, but the
-    log carries both signals, and that pair is the data pattern 5 needs to be
-    judged on. Deciding twice costs a few symbol-table reads, not a model.
-    """
-    try:
-        dbs = symbol_dbs(root_db)
-    except Exception:                                            # noqa: BLE001
-        dbs = {}
-    d = decide(messages, tier, gate, state, dbs=dbs,
-               laya_status="not consulted", client_tools=client_tools,
-               route=route, trigger=trigger)
-    if d["signals"].get("consult_laya"):
-        q, ctx, _ = question_of(messages)
-        # The instruction, not the attachment: Laya's window is ~512 tokens
-        # and it silently drops the tail (AGENTS.md), so an 8.8 KB paste is
-        # judged on whatever of it fits.
-        q, _attached = instruction_of(q)
-        import e1
-        if e1.enabled():
-            # E1 (mcp/e1.py) in Laya's place: its route_in head on one
-            # embedding of the same instruction and context. None when the
-            # head is not servable or the embedder is down -- the rule then
-            # decides alone, as it does when Laya is down.
-            laya, status = e1.route_signal(q, ctx)
-            second = "E1"
-        else:
-            laya, status = laya_signal(q, ctx, url=laya_url)
-            second = "Laya"
-        d = decide(messages, tier, gate, state, laya=laya,
-                   laya_status=status, dbs=dbs, client_tools=client_tools,
-                   route=route, trigger=trigger, second=second)
-    else:
-        d["signals"]["laya_status"] = ("not consulted: "
-                                       + d["because"]["investigate"][:120])
+           route: dict | None = None) -> dict:
+    """What the proxy calls: decide, and log one line."""
+    d = decide(messages, tier, client_tools=client_tools, route=route)
     print("  " + log_line(d), flush=True)
     return d
 
 
 def log_line(d: dict) -> str:
-    s = d["signals"]
-    laya = s.get("laya")
-    lay = (f"{laya.get('choice')}{'?' if laya.get('abstain') else ''}"
-           f"({laya.get('margin')})" if laya else f"None [{s.get('laya_status')}]")
-    name = "e1" if s.get("second_signal") == "E1" else "laya"
-    held = ";".join(f"{k}:{','.join(v[:3])}"
-                    for k, v in (s.get("held_symbols") or {}).items()) or "-"
-    return (f"selection: investigate={'yes' if d['investigate'] else 'no'} "
-            f"fanout={d['fanout_n']} skills={'yes' if d['skills'] else 'no'} | "
-            f"rule={s.get('rule')} held={held} {name}={lay} | "
-            f"{d['because'].get('investigate', '')[:220]}")
+    return (f"selection: skills={'yes' if d['skills'] else 'no'} | "
+            f"{d['because'].get('skills', '')[:220]}")
 
 
 if __name__ == "__main__":
     import tiers
     q = " ".join(sys.argv[1:]) or "What is the default value of Object3D.DEFAULT_UP?"
     msgs = [{"role": "user", "content": q}]
-    import domains
-    g = domains.tool_admission(msgs, None)
-    d = decide(msgs, tiers.resolve({"reasoning_effort": "max"}), g,
-               laya_status="not consulted: self-test")
+    d = decide(msgs, tiers.resolve({"reasoning_effort": "max"}))
     print(json.dumps(d, indent=1, default=str))

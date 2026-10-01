@@ -1,0 +1,30 @@
+{
+ "devices": {
+  "CUDA0": "RTX 5060 Ti (GPU-de660e90-0e9c-d465-b389-6df63021b920) only: --card-only (the A4000 is another agent's window)"
+ },
+ "CUDA0/MIRAI.*": {
+  "passed": 33,
+  "total": 33
+ },
+ "CUDA0/FLASH_ATTN_EXT": {
+  "passed": 4414,
+  "total": 4414
+ },
+ "CUDA0/GATED_DELTA_NET": {
+  "passed": 46,
+  "total": 46
+ },
+ "CUDA0/MUL_MAT/type_a=q8_0": {
+  "passed": 50,
+  "total": 50
+ },
+ "CUDA0/MUL_MAT/type_a=f16": {
+  "passed": 281,
+  "total": 281
+ },
+ "CUDA0/MUL_MAT/type_a=f32": {
+  "passed": 217,
+  "total": 217
+ },
+ "PASS": false
+}

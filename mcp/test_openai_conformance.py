@@ -446,33 +446,6 @@ def test_the_sdk_raises_on_the_error_event():
           "compress)", json.dumps(raised)[:300])
 
 
-def test_a_committed_stream_during_deep_thinking_still_ends_in_an_event():
-    """Deep thinking's heartbeats commit the stream (the long pre-main work
-    keeps its keep-alive); main's refusal after them is the error event."""
-    srv, url = S._slow_server()
-    saved = (S._model.UPSTREAM, proxy.HEARTBEAT)
-    S._model.UPSTREAM, proxy.HEARTBEAT = url, 0.05
-    S._Slow.HOLD = 0.4
-    try:
-        with upstream([err_obj(400, "invalid_request_error", "bad field")]):
-            S.SELECTION["investigate"] = True
-            body = {"model": "yamadori", "stream": True, "messages": [
-                {"role": "user", "content": S.Q_LATHE}]}
-            chunks = list(proxy.stream_body(body, "yamadori"))
-    finally:
-        S._model.UPSTREAM, proxy.HEARTBEAT = saved
-        S._Slow.HOLD = 4.0
-        srv.shutdown()
-        S.SELECTION.clear()
-    beats = sum(1 for b in chunks if S._is_heartbeat(b))
-    ev = sse_events(b"".join(chunks).decode())
-    errs = [e for e in ev if isinstance(e, dict) and e.get("error")]
-    check(beats >= 1 and len(errs) == 1 and ev[-1] == "[DONE]"
-          and "bad field" in errs[0]["error"]["message"],
-          "heartbeats first, then one error event and [DONE]",
-          f"{beats} heartbeats; {json.dumps(ev)[-300:]}")
-
-
 def test_a_normal_stream_ends_on_finish_then_done():
     with upstream([S.reply("pong")]):
         st, _h, _d, ev = post(dict(user(), stream=True), stream=True)
@@ -672,8 +645,8 @@ def test_usage_is_the_final_generation():
 def test_usage_details_fall_back_and_stay_honest():
     gens = [{"usage": {"prompt_tokens": 500, "completion_tokens": 20},
              "cache": {"reused": 480, "prompt": 500},
-             "reasoning": "HANDOFF TEXT\nmine now", "prefill_reasoning":
-             "HANDOFF TEXT", "which": "hop 0"}]
+             "reasoning": "DIRECTIVE TEXT\nmine now", "prefill_reasoning":
+             "DIRECTIVE TEXT", "which": "hop 0"}]
     real = proxy._count_text_tokens
     seen = []
     proxy._count_text_tokens = lambda model, text: seen.append(text) or \
@@ -731,7 +704,6 @@ TESTS = [test_request_validation_is_a_400_object,
          test_upstream_errors_keep_their_class,
          test_a_failure_after_the_first_byte_is_one_error_event,
          test_the_sdk_raises_on_the_error_event,
-         test_a_committed_stream_during_deep_thinking_still_ends_in_an_event,
          test_a_normal_stream_ends_on_finish_then_done,
          test_the_client_prompt_past_the_window_is_refused,
          test_the_threshold_is_the_count_plus_the_floor,

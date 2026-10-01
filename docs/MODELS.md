@@ -24,7 +24,7 @@ pinned revision on that date: 11 of 11 match.
 | `qwen-image-2.1/qwen3vl_8b_heretic-Q4_K_M.gguf` | image text encoder (both) | in service | pinned `pottokao/Qwen-Image-2.1-Text-Encoder-Heretic-GGUF` @ `68ceaa76` |
 | `qwen-image-2.1/vae/qwen_image_2.1_vae_bf16.safetensors` | image VAE (both) | in service | pinned `unsloth/Qwen-Image-2.1-FP8` @ `9e520642` |
 | `Qwen3-Embedding-0.6B-Q8_0.gguf` | embedder: code search, E1, skills | in service | pinned `Qwen/Qwen3-Embedding-0.6B-GGUF` @ `370f27d7` |
-| `Qwen3-Reranker-0.6B-Q8_0.gguf` | reranker | in service | pinned `mradermacher/Qwen3-Reranker-0.6B-GGUF` @ `6727da81` (named `Qwen3-Reranker-0.6B.Q8_0.gguf` there) |
+| `Qwen3-Reranker-0.6B-Q8_0.gguf` | reranker | retired (removed 2026-10-01, docs/REMOVED.md) | pinned `mradermacher/Qwen3-Reranker-0.6B-GGUF` @ `6727da81` (named `Qwen3-Reranker-0.6B.Q8_0.gguf` there) |
 | `Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_M.gguf` | critic (`critic-disabled`) | disabled | pinned `huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF` @ `3d5cf9ef` |
 | `index/token_embd.npz` | concept seeds, bonsai viz | in service | **rebuilt byte-identical** 2026-09-25 |
 | `index/e1/heads/route_in/v0001.json` | E1 route_in head | in service (behind `YAMADORI_E1=1`) | **weights rebuilt bit-identical** 2026-09-25 from the stored vectors |

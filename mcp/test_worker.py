@@ -490,23 +490,14 @@ def test_a_dead_local_workers_gpu_slot_is_freed_at_once():
     jobs.finish(held, {})
 
 
-def test_laya_label_and_train_refuse_with_the_gap_named():
-    ds = datasets.create("laya rows", name="laya set", kind="laya",
-                         source=SOURCE_HTML, source_url="local:paste",
-                         **ANSWERS)
-    datasets.advance(ds["id"])
-    drain()
-    ds = datasets.get(ds["id"])
-    label = [j for j in jobs.listing(dataset=ds["id"])
-             if j["queue"] == "dataset.label"]
-    check(ds["stage"] == "label", "a laya set runs through index to label",
-          ds["stage"])
-    check(label and label[0]["state"] == "errored"
-          and "docs/LAYA.md" in (label[0]["error"] or "")
-          and "remedy (developer)" in (label[0]["error"] or ""),
-          "label is refused -- errored, never done -- naming the runbook and "
-          "a developer as the owner of the gap",
-          str(label and label[0]["error"])[:240])
+def test_no_laya_or_deep_learn_handlers():
+    """The `laya` kind's dataset.label / dataset.train refusals and deep
+    thinking's idle learner (deep.learn) were removed 2026-09-29 with Laya
+    and mcp/deep_learn.py; the way back is commit e360d37."""
+    gone = [q for q in worker.HANDLERS
+            if q in ("dataset.label", "dataset.train") or q.startswith("deep.")]
+    check(not gone, "the worker registers no label, train or deep handler",
+          str(gone))
 
 
 def test_a_paused_lane_hands_out_nothing_and_the_pause_expires():
@@ -558,7 +549,7 @@ def main() -> int:
                test_a_fetch_404_is_permanent_and_blocks_clarify,
                test_two_workers_never_run_two_gpu_jobs,
                test_a_dead_local_workers_gpu_slot_is_freed_at_once,
-               test_laya_label_and_train_refuse_with_the_gap_named,
+               test_no_laya_or_deep_learn_handlers,
                test_a_paused_lane_hands_out_nothing_and_the_pause_expires):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

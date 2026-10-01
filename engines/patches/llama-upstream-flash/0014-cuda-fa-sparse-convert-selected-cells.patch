@@ -1,0 +1,207 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Wed, 30 Sep 2026 01:39:43 -0400
+Subject: [PATCH] cuda: sparse flash attention converts only the selected q8_0
+ cells to f16
+
+The sparse MMA flash-attention kernel (the QSA path: indexer top-k, then a
+mask the index lists are compacted from) reads K and V only at the cells its
+lists name, but it needs them in f16, and a quantized cache was converted
+whole on every call -- every cell of every KV head, each token, per QSA
+layer. That cost grows with the context (at 262K about 0.5 GB read and 1 GB
+written per layer-call), and with the cache in host-mapped memory (LLAMA_KV_HOST_MAPPED,
+an earlier patch of this series) every cell crossed PCIe: 4K decode 9.3 tok/s against ~23
+with the cache on the card (the Flash-Next gate's fit-kvmap arm,
+2026-09-30).
+
+When the lists name fewer rows than the cache holds (a decode step; not a
+prompt batch, whose overlapping per-tile lists can name more), the q8_0 K and
+V are now converted after the lists exist, at the listed cells only, into
+the same dense f16 layout the whole conversion writes; the rows no list
+names are left unwritten and nothing reads them. The values the kernel reads
+are the same. GGML_CUDA_FA_SPARSE_ROWS=0 restores the whole conversion.
+
+The kernel's padded slots (a tile past a list's count) gather ROW 0 and rely
+on the -inf mask (fattn-mma-f16.cuh, the cp.async load path), and a masked
+score times a non-finite row is still NaN: row 0 is converted too. Without
+it the first build of this patch lost needles at 32K and 128K on Flash-Next
+(7/15; 5/5 at 32K with this patch off, the expert cache on: the gate's
+cache-all and diag-* arms, 2026-09-30) while test-backend-ops passed -- its
+buffers held finite leftovers. GGML_CUDA_FA_SPARSE_ROWS_POISON=1 (tests only)
+fills the f16 K/V with NaN before the conversion, so a read of any row it did
+not write fails the comparison: without the row-0 conversion 6 of the q8_0
+sparse cases fail that way; with it all 4,004 FLASH_ATTN_EXT cases pass.
+The eval cases gain the model's own sizes: top-k 2,051, the K/V a permuted
+view of the cache, one query past 4,096 cells and two / four past 16,384.
+---
+ ggml/src/ggml-cuda/fattn-common.cuh | 101 +++++++++++++++++++++++++++-
+ tests/test-backend-ops.cpp          |  23 +++++++
+ 2 files changed, 123 insertions(+), 1 deletion(-)
+
+diff --git a/ggml/src/ggml-cuda/fattn-common.cuh b/ggml/src/ggml-cuda/fattn-common.cuh
+index 6d1ce52d..4a1186b4 100644
+--- a/ggml/src/ggml-cuda/fattn-common.cuh
++++ b/ggml/src/ggml-cuda/fattn-common.cuh
+@@ -972,6 +972,56 @@ static __global__ void flash_attn_combine_results(
+     dst[tid] = VKQ_numerator / VKQ_denominator;
+ }
+ 
++// The sparse MMA kernel reads K and V only at the cells its index lists name (flash_attn_mask_to_sparse_indices), but
++// it needs them in f16, and a q8_0 cache used to be converted WHOLE on every call: every cell of every head, each
++// token -- a cost that grows with the context, and with a host-mapped cache every cell crosses PCIe. This converts
++// only the listed cells, into the same dense f16 layout the whole conversion writes. The kernel's padded slots (a
++// tile past a list's count) gather ROW 0 and rely on the -inf mask to remove it (fattn-mma-f16.cuh
++// flash_attn_ext_f16_load_tile, the cp.async path) -- but a masked score times a non-finite row is still NaN, so row 0
++// is converted too; every other row is left unwritten and nothing reads it. One block per (list entry, head), plus
++// one for row 0; lists past their count hold -1. GGML_CUDA_FA_SPARSE_ROWS=0 restores the whole conversion.
++static __global__ void k_fattn_sparse_rows_q8_0_to_f16(
++        const char * __restrict__ src, half * __restrict__ dst, const int32_t * __restrict__ indices,
++        const int32_t * __restrict__ counts, const int n_kv_max, const int ntiles_x, const int ne0, const int ne1,
++        const int ne3, const size_t nb1, const size_t nb2, const size_t nb3) {
++    const int l = blockIdx.y;
++    const int i = blockIdx.x;
++    if (i < n_kv_max && i >= counts[l]) {
++        return;
++    }
++    // the last block converts row 0, the row the kernel's padded slots gather
++    const int cell = i == n_kv_max ? 0 : indices[int64_t(l)*n_kv_max + i];
++    if (cell < 0 || cell >= ne1) {
++        return;
++    }
++    const int h = blockIdx.z;
++    const int s = ne3 == 1 ? 0 : l / ntiles_x;
++    const block_q8_0 * row = (const block_q8_0 *) (src + cell*nb1 + h*nb2 + s*nb3);
++    half * out = dst + ((int64_t(s)*gridDim.z + h)*ne1 + cell)*ne0;
++    for (int j = threadIdx.x; j < ne0; j += blockDim.x) {
++        const block_q8_0 & b = row[j/QK8_0];
++        out[j] = __float2half(__half2float(b.d) * b.qs[j%QK8_0]);
++    }
++}
++
++static bool ggml_cuda_fattn_sparse_rows_enabled() {
++    static const bool on = [] {
++        const char * e = getenv("GGML_CUDA_FA_SPARSE_ROWS");
++        return !(e && e[0] == '0');
++    }();
++    return on;
++}
++
++// GGML_CUDA_FA_SPARSE_ROWS_POISON=1 (tests only): fill the f16 K/V with NaN before the listed cells are converted,
++// so a read of any row the conversion did not write turns the result into NaN instead of passing on stale data
++static bool ggml_cuda_fattn_sparse_rows_poison() {
++    static const bool on = [] {
++        const char * e = getenv("GGML_CUDA_FA_SPARSE_ROWS_POISON");
++        return e && e[0] == '1';
++    }();
++    return on;
++}
++
+ template <int DV, int ncols1, int ncols2>
+ void launch_fattn(
+     ggml_backend_cuda_context & ctx, ggml_tensor * dst, fattn_kernel_t fattn_kernel, const int nwarps, const size_t nbytes_shared,
+@@ -1023,7 +1073,25 @@ void launch_fattn(
+     size_t nb22 = V->nb[2];
+     size_t nb23 = V->nb[3];
+ 
+-    if (need_f16_K && K->type != GGML_TYPE_F16) {
++    // sparse: q8_0 K/V are converted after the index lists exist, at the listed cells only (see above)
++    // only where the lists name fewer rows than the cache holds: a decode step lists ~top-k cells, a prompt batch's
++    // lists (one per query tile, overlapping) can name more rows than the whole conversion writes
++    const int64_t rows_listed = use_sparse && mask ?
++        std::min<int64_t>(K->ne[1], int64_t(ncols1)*ggml_get_op_params_i32(KQV, 4)) *
++        ((Q->ne[1] + ncols1 - 1) / ncols1) * mask->ne[3] : 0;
++    const bool rows_ok = use_sparse && ggml_cuda_fattn_sparse_rows_enabled() && mask &&
++        (K->ne[3] == 1 || K->ne[3] == mask->ne[3]) && rows_listed < K->ne[1]*std::max<int64_t>(K->ne[3], 1);
++    const bool sparse_rows_K = rows_ok && need_f16_K && K->type == GGML_TYPE_Q8_0 && K->ne[0] % QK8_0 == 0;
++    const bool sparse_rows_V = rows_ok && need_f16_V && V->type == GGML_TYPE_Q8_0 && V->ne[0] % QK8_0 == 0 &&
++        !V_is_K_view && (V->ne[3] == 1 || V->ne[3] == mask->ne[3]);
++
++    if (need_f16_K && K->type != GGML_TYPE_F16 && sparse_rows_K) {
++        GGML_ASSERT(f16_extra.K != 0);
++        K_data = (char *) f16_extra.K;
++        nb11 = K->ne[0] * sizeof(half);
++        nb12 = K->ne[1] * nb11;
++        nb13 = K->ne[2] * nb12;
++    } else if (need_f16_K && K->type != GGML_TYPE_F16) {
+         const size_t bs = ggml_blck_size(K->type);
+         const size_t ts = ggml_type_size(K->type);
+ 
+@@ -1057,6 +1125,12 @@ void launch_fattn(
+             nb21   = nb11;
+             nb22   = nb12;
+             nb23   = nb13;
++        } else if (sparse_rows_V) {
++            GGML_ASSERT(f16_extra.V != 0);
++            V_data = (char *) f16_extra.V;
++            nb21 = V->ne[0] * sizeof(half);
++            nb22 = V->ne[1] * nb21;
++            nb23 = V->ne[2] * nb22;
+         } else {
+             const size_t bs = ggml_blck_size(V->type);
+             const size_t ts = ggml_type_size(V->type);
+@@ -1104,6 +1178,31 @@ void launch_fattn(
+ 
+         KV_max.alloc(size_t(n_kv_max)*n_lists + n_lists);
+         ggml_cuda_flash_attn_ext_compact_mask(mask, KV_max.ptr, KV_max.ptr + size_t(n_kv_max)*n_lists, Q->ne[1], ncols1, n_kv_max, main_stream);
++
++        const int32_t * idx    = KV_max.ptr;
++        const int32_t * counts = KV_max.ptr + size_t(n_kv_max)*n_lists;
++        if (ggml_cuda_fattn_sparse_rows_poison()) {
++            if (sparse_rows_K) {
++                CUDA_CHECK(cudaMemsetAsync((void *) f16_extra.K, 0xFF, ggml_nelements(K)*sizeof(half), main_stream));
++            }
++            if (sparse_rows_V) {
++                CUDA_CHECK(cudaMemsetAsync((void *) f16_extra.V, 0xFF, ggml_nelements(V)*sizeof(half), main_stream));
++            }
++        }
++        if (sparse_rows_K) {
++            const dim3 grid(n_kv_max + 1, n_lists, K->ne[2]);
++            k_fattn_sparse_rows_q8_0_to_f16<<<grid, 128, 0, main_stream>>>(
++                (const char *) K->data, (half *) f16_extra.K, idx, counts, n_kv_max, ntiles_x,
++                K->ne[0], K->ne[1], K->ne[3], K->nb[1], K->nb[2], K->nb[3]);
++            CUDA_CHECK(cudaGetLastError());
++        }
++        if (sparse_rows_V) {
++            const dim3 grid(n_kv_max + 1, n_lists, V->ne[2]);
++            k_fattn_sparse_rows_q8_0_to_f16<<<grid, 128, 0, main_stream>>>(
++                (const char *) V->data, (half *) f16_extra.V, idx, counts, n_kv_max, ntiles_x,
++                V->ne[0], V->ne[1], V->ne[3], V->nb[1], V->nb[2], V->nb[3]);
++            CUDA_CHECK(cudaGetLastError());
++        }
+     }
+ 
+     // Optional optimization where the mask is scanned to determine whether part of the calculation can be skipped.
+diff --git a/tests/test-backend-ops.cpp b/tests/test-backend-ops.cpp
+index 32c3f3d2..700fdcd0 100644
+--- a/tests/test-backend-ops.cpp
++++ b/tests/test-backend-ops.cpp
+@@ -10989,6 +10989,29 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
+     test_cases.emplace_back(new test_flash_attn_ext(64, 128, 4, {1, 1}, 128, 2, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q4_0, GGML_TYPE_Q2_0));
+     test_cases.emplace_back(new test_flash_attn_ext(128, 64, 4, {1, 1}, 64, 2, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q2_0, GGML_TYPE_F16));
+ 
++    // sparse (n_kv_max) decode over a q8_0 cache, the QSA shape (256/256, 2 KV heads, gqa 12, top-k 2048): the
++    // sparse kernel's f16 K/V converted at the listed cells only; one query and an MTP verify window of four
++    for (ggml_type type_KV : {GGML_TYPE_Q8_0, GGML_TYPE_F16}) {
++        for (int64_t kv : {8192, 20480}) {
++            for (int64_t nb : {1, 4}) {
++                test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {12, 1}, kv, nb, true, false, 0, 0, GGML_PREC_F32,
++                                                                type_KV, type_KV, {0, 1, 2, 3}, true, false, 2048));
++            }
++        }
++        // the model's own sizes: top-k 2,051 (indexer_top_k 2048 + a block of 4 - 1), the K/V a permuted view of the
++        // cache ([head_dim, n_head_kv, n_kv] -> [head_dim, n_kv, n_head_kv], the heads interleaved per cell), one
++        // query past 4,096 cells and two / four past 16,384 (the sparse kernel's thresholds), up to ~35K
++        for (int64_t kv : {5120, 16896, 35840}) {
++            for (int64_t nb : {1, 2, 4}) {
++                if (nb > 1 && kv < 16896) {
++                    continue;
++                }
++                test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {12, 1}, kv, nb, true, false, 0, 0, GGML_PREC_F32,
++                                                                type_KV, type_KV, {0, 2, 1, 3}, true, false, 2051));
++            }
++        }
++    }
++
+     // q8_0 KV cases: decode and prompt batches, KV pad, permuted KV, feature flags, and long context
+     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {16, 1},   113,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
+     test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {16, 1},  1024,   1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));

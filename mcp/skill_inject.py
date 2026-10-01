@@ -59,7 +59,7 @@ cookbook: wrong loads 16.8% -> 7.3%, needless 9.8% -> 4.0%)
             ledger; a prefill line rides in rec["prefill"]. Every profile
             choice names its
             evidence: a measurement on that model (bench/skills/
-            render_probe.py, paired with/without per rendering, like
+            pitfall_harness.py: docs pitfall cases, WITHOUT and WITH each rendering, like
             skill_prove), else the research default it starts from.
 
 THRESHOLDS belong to the question set (docs/JJAVA.md 3; operator 2026-09-29,
@@ -107,9 +107,14 @@ see. Record which questions went to rules and why."):
          code written) did not agree with the rubric (kappa 0.08, n=470)
   jjava  inject now or not (stage 3)
 
-FAILURES: no decider (off, unavailable, a DeciderUnavailable mid-turn) ->
-nothing is injected and the record says why (the safe default). Never
-raises out of inject().
+FAILURES (operator, 2026-09-29: "Why would jjava not be available? This
+sounds like a failure to build our platform."): jjava is part of the
+platform, always in scope where skills serve; there is NO path that picks
+skills without it. When it truly cannot answer on a request -- no decider
+Turn in scope, a decider switched off in the process, a DeciderUnavailable
+(the model server down, the lane refused) -- NOTHING is injected and
+x_yamadori.skills.inject says why. Offline suites answer through a stubbed
+decider (mcp/decider_stub.py). Never raises out of inject().
 
 THE RECORD (x_yamadori.skills.inject): ids, hashes and numbers -- never the
 conversation's text; an item is named by its key "<skill id>#<index>".
@@ -189,8 +194,13 @@ def question_room() -> int:
 # (a Noul's act_yes / act_no / caution_yes / caution_no on the belief).
 # skill_item's belief is `need` (P(top level)), read as a noul; skill_inject
 # is a noul. EMPTY: NONE SHIP UNTUNED (operator). bench/skills/
-# inject_tune.py proposes rows; the owner pastes an accepted one here with
-# its n and date. Nothing writes this table.
+# inject_tune.py proposes rows at the OPERATOR-ACCEPTED target precisions
+# (2026-09-29, "yes"): high 0.409 = 11.5 / (16.6 + 11.5), SkillsBench
+# 2602.12670v4's curated gain against its worst self-generated loss;
+# medium 0.266 = 7.5 / (20.7 + 7.5), Skills in the Wild 2604.04323's curated
+# gain against its distractor cost on Qwen -- a tier ships only where the
+# LOWER Wilson bound of its held-out precision clears it. The owner pastes
+# an accepted row here with its n and date. Nothing writes this table.
 THRESHOLDS: dict = {}
 
 
@@ -211,7 +221,7 @@ def tier(belief: float, qset: str, model: str) -> str:
 
 # -------------------------------------------------------------- profiles ---
 # ONE PROFILE PER MODEL FAMILY. Each choice carries its evidence: `measured`
-# (bench/skills/render_probe.py on that model: script, n, the paired
+# (bench/skills/pitfall_harness.py on that model: script, n, the paired
 # better/worse counts) or `default` (the research finding it starts from).
 # Mirai S is a Qwen3.8-27B 2.4-bit quant and Flash-Next is Qwen3.8-Flash-
 # Next: the same family's defaults, until each is measured on its own model.
@@ -304,14 +314,23 @@ def fact_text(it: dict) -> str:
 
 
 def candidates(skills: list[dict], given: dict | None = None,
-               events: dict | None = None) -> tuple[list[dict], list[dict]]:
+               events: dict | None = None, last: list | None = None
+               ) -> tuple[list[dict], list[dict]]:
     """(items to ask about, items left out with why): the first MAX_SKILLS
     skills' items in stage 1's order, the doubt-bearing ones out, a repeat
-    of an earlier item's text or code spans out (the first kept), and an
-    item this conversation was already given out unless its skill comes
-    with an event (`events` {skill id: trigger}: error / phase / asked)."""
+    of an earlier item's text or code spans out (the first kept), an item
+    this conversation was already given out unless its skill comes with an
+    event (`events` {skill id: trigger}: error / phase / asked), and an item
+    of the conversation's LAST injection (`last`, {key: the trigger it went
+    in on}) out -- never the identical injection twice in a row (the
+    selector's standing rule, 2026-09-27: "never the identical line twice
+    in a row", carried to items) -- except that an ERROR brings back an
+    item last given for another reason (a body, then the error it
+    prevents: the old recall), once."""
     given = given or {}
     events = events or {}
+    last = dict(last or {}) if isinstance(last, dict) else {
+        k: None for k in (last or ())}
     keep, out = [], []
     seen_text, seen_spans = set(), set()
     for n, s in enumerate(skills or []):
@@ -333,6 +352,12 @@ def candidates(skills: list[dict], given: dict | None = None,
                     "error", "phase", "asked"):
                 out.append({"key": it["key"], "why": "given before; no "
                             "event brings it back"})
+                continue
+            if it["key"] in last and not (
+                    events.get(it["skill"]) == "error"
+                    and last[it["key"]] != "error"):
+                out.append({"key": it["key"], "why": "the same item as the "
+                            "last injection"})
                 continue
             seen_text.add(nt)
             if sp:
@@ -452,7 +477,7 @@ def compose(items: list[dict], chosen: list[str], profile: dict
 # AGENTS.md "Heavy-handed, at the right time"); never a reasoning prefill
 # (coordinator, 2026-09-29: the directive prefills are on the removal
 # list). Each item keeps its words after "I'll" / "I won't" / "When ...,
-# I'll". UNMEASURED WORDING until render_probe.py has measured it.
+# I'll". UNMEASURED WORDING until pitfall_harness.py has measured it.
 FIRST_PERSON_HEAD = "What I'll hold to while I write this:"
 # The prefill channel's line (voice first_person_prefill): the same items in
 # the model's voice as one reasoning line ending on a letter. UNMEASURED
@@ -541,11 +566,13 @@ def render(items: list[dict], profile: dict) -> dict:
 # ----------------------------------------------------------------- entry ---
 def inject(skills: list[dict], kind: str, *, turn=None, model: str | None
            = None, given: dict | None = None, events: dict | None = None,
-           profile: dict | None = None) -> tuple[str, dict]:
+           profile: dict | None = None, last: list | None = None
+           ) -> tuple[str, dict]:
     """(text for the end of what the model reads next, the record). `skills` are stage 1's candidates in its
     order; `turn` the request's decide_turn.Turn (None: no decider -> the
     safe default, nothing); `given` the conversation's items given before
-    ({key: req}); `events` {skill id: stage 1's trigger}."""
+    ({key: req}); `events` {skill id: stage 1's trigger}; `last` the keys of
+    the conversation's last injection."""
     t0 = time.time()
     if model is None:
         try:
@@ -559,7 +586,7 @@ def inject(skills: list[dict], kind: str, *, turn=None, model: str | None
                  "kind": kind, "stage1": {"skills": [s["id"] for s in
                                                      skills or []]}}
     try:
-        items, left = candidates(skills, given, events)
+        items, left = candidates(skills, given, events, last)
         rec["stage1"].update(items=len(items), left_out=left)
         if not items:
             rec.update(why="stage 1 left no item to ask about", chosen=[],
@@ -567,8 +594,16 @@ def inject(skills: list[dict], kind: str, *, turn=None, model: str | None
                        ms=round((time.time() - t0) * 1000, 1))
             return "", rec
         if turn is None or not getattr(turn, "on", True):
-            rec.update(why="no decider this request: nothing goes in (the "
-                       "safe default)", chosen=[],
+            rec.update(why=("no decider Turn in scope" if turn is None else
+                            "the decider is off in this process")
+                       + ": nothing goes in (jjava decides every injection)",
+                       failure={"code": "NO_DECIDER" if turn is None
+                                else "DECIDER_OFF", "retryable": False,
+                                "remedy": "the operator: the serving "
+                                "process enables the decider (decide_turn."
+                                "enable in server.py); YAMADORI_DECIDER=0 "
+                                "turns skills off with it"},
+                       chosen=[],
                        rendered=render([], prof),
                        ms=round((time.time() - t0) * 1000, 1))
             return "", rec

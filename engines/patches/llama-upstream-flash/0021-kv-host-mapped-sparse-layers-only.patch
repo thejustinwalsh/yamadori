@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Thu, 1 Oct 2026 03:06:59 -0400
+Subject: [PATCH] llama: LLAMA_KV_HOST_MAPPED=1 maps only the sparse (QSA)
+ layers' K/V
+
+0012 put every attention cache's K/V in host-mapped memory. The layers
+that read a sparse subset of the cells (qwen4exp's QSA layers, a compress
+ratio in hparams) are what it is for; a dense attention layer reads every
+cell on every step -- the MTP draft's layer above all, three draft steps a
+verify step -- and from host memory that is the whole window over PCIe
+each time. =1 now maps only the layers with a compress ratio; a dense
+layer keeps its K/V on the card (the draft's one layer is ~0.27 GB at a
+262,144 window). =2 maps every attention layer, as before.
+
+Flash-Next, the A4000 (sm_86), MTP 3, LLAMA_GRAPH_CACHE=8, a 40K window,
+every routed expert in RAM, n=1 each: decode at ~4K / ~35K was 18.0 / 18.7
+tok/s with the K/V on the card, 16.5 / 11.5 with every layer mapped, and
+18.0 / 16.2 with only the sparse layers mapped. The remaining cost at ~35K
+(the target's verify step blocked on the GPU 44.5 ms against 35.5) is the
+selected cells crossing PCIe: ~2,051 of them per query, so it does not grow
+with the context, while the VRAM the K/V frees grows with it.
+---
+ src/llama-kv-cache.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 02437834..14d5adb8 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -226,8 +226,12 @@ llama_kv_cache::llama_kv_cache(
+             // the CUDA FA's sparse path gathering them by index), this frees the whole KV from VRAM for weights
+             // at the cost of the selected rows crossing PCIe. The idea is Strata's KV streaming
+             // (Niko1221/Strata --kv-resident, MIT), here without its VRAM page window.
+-            static const bool kv_mapped = [] { const char * e = getenv("LLAMA_KV_HOST_MAPPED"); return e && atoi(e) != 0; }();
+-            if (kv_mapped && name_tag && name_tag[0] == '\0') {
++            // 0021: =1 maps only the layers whose attention is sparse (a QSA compress ratio: they read the selected
++            // cells); a dense layer -- an MTP draft's, which reads every cell each draft step -- keeps its K/V on the
++            // card. =2 maps every attention layer, as 0012 first did.
++            static const int kv_mapped = [] { const char * e = getenv("LLAMA_KV_HOST_MAPPED"); return e ? atoi(e) : 0; }();
++            const bool layer_sparse = il < LLAMA_MAX_LAYERS && hparams.dsv4_compress_ratios[il] > 0;
++            if ((kv_mapped == 2 || (kv_mapped == 1 && layer_sparse)) && name_tag && name_tag[0] == '\0') {
+                 auto * reg = ggml_backend_dev_backend_reg(dev);
+                 using fn_t = ggml_backend_buffer_type_t (*)(ggml_backend_dev_t);
+                 auto fn = reg ? (fn_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_host_mapped_buffer_type") : nullptr;

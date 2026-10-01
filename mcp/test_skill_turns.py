@@ -256,35 +256,37 @@ def _sequence():
 
 
 def _forms(rec: dict) -> dict:
-    return {d["name"]: d["form"] for d in rec.get("decisions") or []}
+    """STAGE 1's forms (x_yamadori.skills.stage1): body -- new to the
+    conversation; recall -- an event brings a given skill back. The
+    injector then asks jjava about the skill's ITEMS (the stub decider
+    offline, mcp/decider_stub.py)."""
+    return {d["name"]: d["form"] for d in rec.get("stage1") or []}
 
 
 def test_the_engine_body_then_recall_then_nothing():
     out, m, st = _sequence()
     (t0, r0), (t1, r1), (t2, r2), (t3, r3) = out
-    check(r0["decisions"] and r0["decisions"][0]["trigger"] == "asked"
-          and r0["decisions"][0]["form"] == "body"
-          and P.CRAFT_HEADER in t0,
-          "[engine] turn 0: the asked area's skill, as a BODY under the "
-          "craft header", r0.get("decisions"))
+    check(r0["stage1"] and r0["stage1"][0]["trigger"] == "asked"
+          and r0["stage1"][0]["form"] == "body"
+          and P.CRAFT_HEADER in t0 and r0["decisions"],
+          "[engine] turn 0: stage 1 offers the asked area's skill as new "
+          "(body); its items go in under the craft header",
+          r0.get("stage1"))
     f1 = _forms(r1)
     check(f1.get("koota-queries-and-systems") in ("body", None)
           and ("koota-queries-and-systems" in f1
-               or r0["decisions"][0]["name"] == "koota-queries-and-systems"),
+               or r0["stage1"][0]["name"] == "koota-queries-and-systems"),
           "[engine] step 1: the first koota query written brings the "
           "queries skill (a body, unless the ask already gave it)", f1)
     f2 = _forms(r2)
-    d2 = [d for d in r2["decisions"] if d["name"] ==
+    d2 = [d for d in r2["stage1"] if d["name"] ==
           "koota-queries-and-systems"]
     check(d2 and d2[0]["form"] == "recall" and d2[0]["trigger"] == "error"
-          and "updateEach" in t2 and t2.count("Remember (craft "
-                                              "koota-queries-and-systems)")
-          == 1 and P.CRAFT_HEADER not in t2,
-          "[engine] step 2: a koota error brings a RECALL line naming the "
-          "matching item (updateEach), not the body again", (f2, t2[:300]))
-    check("; not destructure a tag trait" in t2 or "not " in t2,
-          "[engine] the recall's DO NOT part comes from the skill's own DO "
-          "NOT item", t2[:300])
+          and "updateEach" in t2 and "Remember (craft" not in t2,
+          "[engine] step 2: a koota error brings the given skill back "
+          "(stage 1: recall, trigger error) and its items, updateEach "
+          "among them, go in again -- no recall LINE (retired with the "
+          "per-skill path)", (f2, t2[:300]))
     check(not r3["decisions"] and not t3,
           "[engine] step 3: an unrelated step (a README) injects nothing",
           r3.get("decisions"))
@@ -321,35 +323,31 @@ def test_the_fade_rate_limit_and_compaction():
              " { vel.x += d })\n}\n"}, '{"bytes_written": 150}', n)
     t, r, st = S.decide(m, "agent_step", POOL, [], st, key="fade")
     check(not any(x["name"] == "koota-queries-and-systems"
-                  for x in r["decisions"]),
+                  for x in r["decisions"]) and not t,
           "[no fade] the koota query written again after unrelated output: "
-          "no recall (given, and no event makes it matter)",
-          r.get("decisions"))
-    last = (st.get("recalls") or {}).get("koota") or {}
-    # An error is an event: a recall right away (no cooldown) -- unless it
-    # would be the identical line to the area's last recall.
+          "nothing (given, and no event makes it matter)",
+          (r.get("stage1"), r.get("skipped")))
+    # An error is an event: stage 1 brings the skill back at once (no
+    # cooldown), and its items go in unless they were the LAST injection
+    # on an error too -- never the identical injection twice in a row.
     n += 1
     m = step(m, "terminal", {"command": "npm test"},
              "TypeError: x is undefined at updateEach (koota.js:1:9)\n"
              "world.query(Falling, Velocity).updateEach(...)", n)
     t, r, st = S.decide(m, "agent_step", POOL, [], st, key="rate")
-    rec_line = st["recalls"].get("koota", {}).get("line")
-    check((any(x["form"] == "recall" for x in r["decisions"])
-           and rec_line != last.get("line"))
-          or any("same line" in s0["why"] for s0 in r["skipped"]),
-          "[no cooldown] an error brings the recall at once, never the "
-          "identical line twice in a row", (r.get("decisions"),
-                                             r.get("skipped")))
-    again, _refs = S.recall_line(KOOTA_Q, "updateEach world.query", POOL,
-                                 avoid=rec_line)
-    check(again is None or again != rec_line, "[rate] never the identical "
-          "recall line twice in a row", (again, rec_line))
+    check(any(x["form"] == "recall" for x in r["stage1"])
+          and any("same item" in s0["why"] for s0 in r["skipped"])
+          and not t,
+          "[no cooldown] an error brings the skill back at once (stage 1: "
+          "recall), and the items the LAST error already brought are not "
+          "sent again (never the identical injection twice in a row)",
+          (r.get("stage1"), r.get("skipped")))
     # A compaction: the proxy's count moved, what was given is gone.
     short = U("Continue the shooter; use koota for the ECS.")
     t, r, st = S.decide(short, "code_generation", POOL, [], st, key="cmp",
                         compactions=1)
     check(st.get("compacted") and any(x["form"] == "body"
-                                      for x in r["decisions"]),
+                                      for x in r["stage1"]) and t,
           "[compaction] the proxy's compaction count moved: what was given "
           "is forgotten and the next need gets the body again",
           r.get("decisions"))
@@ -376,7 +374,7 @@ def test_a_phase_change_on_a_user_turn():
     t, r, st = S.decide(m, "prose", POOL, [], st, key="p2")
     check(r.get("phase_changed") and any(
               x["name"] == "koota-queries-and-systems" and x["trigger"]
-              in ("phase", "error") for x in r["decisions"]),
+              in ("phase", "error") for x in r["stage1"]),
           "[phase] implement -> debug on a user turn brings the koota "
           "queries skill back (a recall: it was given)",
           (r.get("phase"), r.get("decisions")))
@@ -432,20 +430,18 @@ def test_tools_of_ours_never_conflict_with_the_clients():
     os.environ["YAMADORI_IMAGEGEN_URL"] = "http://127.0.0.1:9"
     try:
         held: list = []
-        tools, ours = proxy.main_tools(HERMES, None, think=True, craft=True,
-                                       delegate=True, withheld=held)
+        tools, ours = proxy.main_tools(HERMES, None, craft=True,
+                                       withheld=held)
         ok, why = _no_conflicts(tools)
         check(ok and "yama_describe_image" not in ours
               and {"ours": "yama_describe_image", "client_tool":
                    "vision_analyze"}.items() <= held[0].items()
-              and "yama_recall_craft" in ours
-              and "yama_think_deeply" in ours and "yama_plan" in ours,
+              and "yama_recall_craft" in ours,
               "[conflicts] Hermes: yama_describe_image is withheld beside "
               "vision_analyze (a declared overlap), recorded; "
-              "yama_recall_craft, yama_think_deeply and yama_plan stay",
+              "yama_recall_craft stays",
               (sorted(ours), held, why))
-        check(all(n.startswith("yama_") for n in ours
-                  if n != "delegate_investigation"),
+        check(all(n.startswith("yama_") for n in ours),
               "[conflicts] every tool of ours on main is yama_* (operator, "
               "2026-09-27)", sorted(ours))
         client = HERMES + [{"type": "function", "function": {
@@ -476,8 +472,7 @@ def test_tools_of_ours_never_conflict_with_the_clients():
         saved = proxy.tool_conflicts
         proxy.tool_conflicts = lambda o, c: (list(o), [])
         try:
-            tools, _o = proxy.main_tools(HERMES, None, think=True,
-                                         craft=True)
+            tools, _o = proxy.main_tools(HERMES, None, craft=True)
             ok, why = _no_conflicts(tools)
         finally:
             proxy.tool_conflicts = saved
@@ -596,4 +591,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # jjava is always in scope where skills serve (operator, 2026-09-29):
+    # offline, the STUBBED decider answers (mcp/decider_stub.py).
+    import decider_stub
+    with decider_stub.installed():
+        sys.exit(main())

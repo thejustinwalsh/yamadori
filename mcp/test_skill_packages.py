@@ -431,9 +431,16 @@ def test_index_upkeep():
               "armed since: stale", st)
     finally:
         code_search.embed = saved
+    import jobs
     import worker
-    check(worker.HANDLERS.get(M.QUEUE) is M.handle_build and M.LANE ==
-          "gpu", "[index] the worker runs the rebuild on the gpu lane")
+    # The embedder lives on the A4000, so its rebuild runs under the A4000's
+    # gpu scope (coordinator, 2026-09-30: jobs.GPU_SCOPES, A4000_QUEUES; it
+    # was lane "gpu", the main card's, until then).
+    check(worker.HANDLERS.get(M.QUEUE) is M.handle_build
+          and M.LANE == "gpu_a4000" and M.QUEUE in jobs.A4000_QUEUES
+          and jobs.gpu_scope(M.QUEUE, {"idle": True}, M.LANE) == "gpu_a4000",
+          "[index] the worker runs the rebuild on the A4000's gpu lane",
+          {"lane": M.LANE, "scope": jobs.gpu_scope(M.QUEUE, {}, M.LANE)})
     jid = M.schedule()
     again = M.schedule()
     check(jid and again is None, "[index] a stale index enqueues ONE "

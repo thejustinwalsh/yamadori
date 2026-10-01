@@ -3,7 +3,7 @@
 Why this matters more than any other retrieval knob: an embedding of half a
 function matches poorly against a question about what that function does.
 Character-window chunking routinely cuts mid-body, and every downstream stage
-(vector search, rerank, the model reading the snippet) inherits that damage.
+(vector search, the model reading the snippet) inherits that damage.
 
 Rather than hardcode node types per grammar, we accept any named node whose
 type looks like a definition. Grammars are remarkably consistent about this:

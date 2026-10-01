@@ -57,17 +57,17 @@ import api_errors  # noqa: E402
 import catalog  # noqa: E402
 import dash_data  # noqa: E402
 import dash_skills  # noqa: E402
-import dash_deep  # noqa: E402
 import dash_mcp  # noqa: E402
 import dash_harness  # noqa: E402
-import dash_nebari  # noqa: E402
+import dash_jjava  # noqa: E402
+import dash_perf  # noqa: E402
 import dash_tokens  # noqa: E402
-import dash_results  # noqa: E402
 import dash_static  # noqa: E402
 import dash_vitals  # noqa: E402
 import dashboard  # noqa: E402
 import cancel  # noqa: E402
 import images  # noqa: E402
+import jev_api  # noqa: E402
 import max_mode  # noqa: E402
 import nebari  # noqa: E402
 import messages_api  # noqa: E402
@@ -130,9 +130,10 @@ async def root(request: Request) -> Response:
         "endpoints": ["/v1/models", "/v1/models/{id}", "/v1/chat/completions",
                       "/v1/responses", "/v1/messages",
                       "/v1/messages/count_tokens", "/v1/images/generations",
+                      "/v1/systemone", "/jev/v1/systemone", "/jev/v1/models",
                       "/health",
                       ui,
-                      f"/dash{_PY}/data", f"/dash{_PY}/vitals", f"/dash{_PY}/results"],
+                      f"/dash{_PY}/data", f"/dash{_PY}/vitals"],
         "dashboard": DASH_UI,
         "note": "OpenAI-compatible. Point any client here; it needs no tool "
                 "configuration.",
@@ -252,12 +253,8 @@ async def dash_vitals_page() -> Response:
     return Response(content=payload, status_code=code, media_type=ctype)
 
 
-@app.get(f"/dash{_PY}/results")
-async def dash_results_page() -> Response:
-    # Same deal again: the shell is public and holds no measurement, and every
-    # number on it arrives from the gated /dash/api/results.
-    code, ctype, payload = dash_results.handle_get("/dash/results")
-    return Response(content=payload, status_code=code, media_type=ctype)
+# The classic benchmark page (/dash/classic/results) was retired 2026-09-30
+# with the React one: PERFORMANCE (/performance, /dash/api/perf) replaces it.
 
 
 # The caller's own settings. Declared BEFORE the /dash/api catch-all, which
@@ -299,8 +296,6 @@ async def dash_get(rest: str, request: Request) -> Response:
     if not hit:
         hit = await run_in_threadpool(dash_vitals.handle_get, path)
     if not hit:
-        hit = await run_in_threadpool(dash_results.handle_get, path)
-    if not hit:
         hit = await run_in_threadpool(dash_data.handle_get, path)
     if not hit:
         hit = await run_in_threadpool(dash_skills.handle_get, path)
@@ -308,19 +303,18 @@ async def dash_get(rest: str, request: Request) -> Response:
         # Tokens, electricity and the hosted-API comparison (mcp/dash_tokens.py).
         hit = await run_in_threadpool(dash_tokens.handle_get, path)
     if not hit:
-        # Deep thinking's triggers and learner (mcp/dash_deep.py, Phase 0.6).
-        hit = await run_in_threadpool(dash_deep.handle_get, path)
-    if not hit:
         # The MCP servers the proxy hosts (mcp/dash_mcp.py): read-only.
         hit = await run_in_threadpool(dash_mcp.handle_get, path)
-    if not hit:
-        # What the model can draw on: skills and held packages
-        # (mcp/dash_nebari.py, the NEBARI screen): read-only.
-        hit = await run_in_threadpool(dash_nebari.handle_get, path)
     if not hit:
         # HARNESS TOOLS: the harness kit entries and the per-harness export
         # (mcp/dash_harness.py).
         hit = await run_in_threadpool(dash_harness.handle_get, path)
+    if not hit:
+        # JJAVA and PERFORMANCE (mcp/dash_jjava.py, mcp/dash_perf.py):
+        # read-only, model-free (2026-09-30).
+        hit = await run_in_threadpool(dash_jjava.handle_get, path)
+    if not hit:
+        hit = await run_in_threadpool(dash_perf.handle_get, path)
     if not hit:
         return JSONResponse(status_code=404, content={"error": "not found"})
     code, ctype, payload = hit
@@ -347,8 +341,6 @@ async def dash_post(rest: str, request: Request) -> Response:
         # The skills API records the caller's account (a hash prefix, never
         # the key) as the author of an edit or a disable.
         hit = await run_in_threadpool(dash_skills.handle_post, path, body, who)
-    if not hit:
-        hit = await run_in_threadpool(dash_deep.handle_post, path, body, who)
     if not hit:
         hit = await run_in_threadpool(dash_harness.handle_post, path, body, who)
     if not hit:
@@ -459,6 +451,79 @@ async def messages_count_tokens(request: Request) -> Response:
     return JSONResponse(out)
 
 
+# THE JEV API (mcp/jev_api.py; operator, 2026-09-29: "the jjava api exact
+# public api endpoints that match Jev exposed through our proxy"). TypeSafe's
+# POST /v1/systemone and GET /v1/models, under /jev so a TypeSafe SDK works
+# with base_url "<public base>/jev" -- our GET /v1/models stays OpenAI's --
+# and POST /v1/systemone at the root too (it collides with nothing). Jev's
+# statuses and the error body its SDK reads ({"detail": ...}); proxy.py is
+# not involved. Declared before the /v1 and /jev catch-alls.
+def _jev_response(status: int, content: dict, headers: dict) -> JSONResponse:
+    return JSONResponse(status_code=status, content=content,
+                        headers=headers or None)
+
+
+def _jev_refusal(e: "jev_api.JevError", rid: str) -> JSONResponse:
+    return _jev_response(e.status, e.body(),
+                         dict(e.headers, **{jev_api.REQUEST_ID_HEADER: rid}))
+
+
+@app.post("/jev/v1/systemone")
+@app.post("/v1/systemone")
+async def jev_systemone(request: Request) -> Response:
+    rid = jev_api.new_request_id()
+    route = request.url.path
+    account, why = accounts.identify(request.headers.get("authorization"))
+    if account is None:
+        # recorded (jev_api.refused): the JJAVA page counts 401s too
+        return _jev_refusal(jev_api.refused(route, rid,
+                                            jev_api.unauthorised(why)), rid)
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except (ValueError, json.JSONDecodeError) as e:
+        return _jev_refusal(jev_api.refused(route, rid, jev_api.json_invalid(e),
+                                            account), rid)
+    status, content, headers = await run_in_threadpool(
+        jev_api.systemone, body, account, route=request.url.path,
+        request_id=rid)
+    return _jev_response(status, content, headers)
+
+
+@app.get("/jev/v1/models")
+async def jev_models(request: Request) -> Response:
+    rid = jev_api.new_request_id()
+    account, why = accounts.identify(request.headers.get("authorization"))
+    if account is None:
+        return _jev_refusal(jev_api.refused(request.url.path, rid,
+                                            jev_api.unauthorised(why)), rid)
+    content = await run_in_threadpool(jev_api.models_call, account, rid)
+    return _jev_response(200, content, {jev_api.REQUEST_ID_HEADER: rid})
+
+
+@app.api_route("/jev/{rest:path}",
+               methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+               include_in_schema=False)
+async def jev_unknown(rest: str, request: Request) -> Response:
+    """Every /jev path not served: 404 (or 405 for a served path by another
+    method) in the Jev API's body, {"detail": ...}, not OpenAI's."""
+    served = {"/jev/v1/systemone": "POST", "/jev/v1/models": "GET"}
+    path = request.url.path.rstrip("/") or "/"
+    rid = jev_api.new_request_id()
+    if path in served:
+        return _jev_response(405, {"detail": "Method Not Allowed"},
+                             {"Allow": served[path],
+                              jev_api.REQUEST_ID_HEADER: rid})
+    return _jev_response(404, {"detail": "Not Found"},
+                         {jev_api.REQUEST_ID_HEADER: rid})
+
+
+def _complete_on(token, body: dict) -> dict:
+    """proxy.complete under `token` (it binds the current token, or a new one): the blocking path's lease rides on
+    it (THE OTHER CARD: a routed turn releases its main-model lease, max_mode.set_current)."""
+    with cancel.bound(token):
+        return proxy.complete(body)
+
+
 async def _serve_turn(request: Request, account: str, body: dict,
                       public_name: str, responses=None,
                       messages=None) -> Response:
@@ -509,7 +574,7 @@ async def _serve_turn(request: Request, account: str, body: dict,
     body["_client"] = True
     if max_mode.ENABLED:
         tier_asked = max_mode.requested_tier(body)
-        decision = max_mode.decide(tier_asked, max_mode.is_utility(body))
+        decision = max_mode.decide(tier_asked, max_mode.is_utility(body), kind=max_mode.utility_kind(body))
         if decision.refuse:
             print(f"{route} refused: model_at_capacity ({decision.why}; retry after {decision.retry_after} s)",
                   flush=True)
@@ -562,9 +627,8 @@ async def _serve_turn(request: Request, account: str, body: dict,
         # -- a refusal, a prompt that does not fit, an upstream 400 -- reached
         # the client as assistant content on a 200. Now the stream's first
         # chunk is pulled HERE: proxy.stream_body yields nothing until the
-        # turn's first event (the first upstream generation has answered,
-        # or deep thinking's first heartbeat -- long pre-main work keeps its
-        # keep-alive), and raises the ApiError when the turn fails before
+        # turn's first event (the first upstream generation has answered),
+        # and raises the ApiError when the turn fails before
         # it. A client that hangs up while it waits cancels the token, as
         # _CancellingStream does once the stream is open.
         gen = proxy.stream_body(body, public_name, token=token)
@@ -611,9 +675,13 @@ async def _serve_turn(request: Request, account: str, body: dict,
                                           "X-Accel-Buffering": "no"})
 
     t0 = time.time()
+    # The lease rides on the turn's token, as on the streamed path (token.yamadori_lease): a turn routed to the
+    # other card releases it there (max_mode.set_current), so it never delays a swap of the main card
+    btok = cancel.Token()
+    btok.yamadori_lease = lease
     try:
         async with admission.admit("main"):
-            d = await run_in_threadpool(proxy.complete, body)
+            d = await run_in_threadpool(_complete_on, btok, body)
     except admission.Full as e:
         max_mode.release(lease)
         return _too_many(e, messages)
@@ -1059,7 +1127,7 @@ def main() -> None:
         print(f"  WARNING power sampler not started: {type(e).__name__}: {e}",
               flush=True)
     # Token ledger (mcp/token_ledger.py): every generation this process runs
-    # -- client turns, fan-out, deep thinking, internal calls -- is added to
+    # -- client turns, hidden hops, internal calls -- is added to
     # index/token_ledger.sqlite3. Enabled here, not on import, so test suites
     # that import the proxy never write it.
     import token_ledger
@@ -1074,8 +1142,8 @@ def main() -> None:
         "index", "slots_state.json")))
     print(f"  slot pins: {st['pins']} restored, {st['prompts']} prompts "
           f"({st['path']})", flush=True)
-    # This process empties the second brain's slot after each run and the
-    # transient slot after each side call (mcp/slots.py RELEASE). Here, not
+    # This process empties the transient slot after each side call
+    # (mcp/slots.py RELEASE). Here, not
     # on import: the worker and the tools API never do, and no test suite
     # sends a release to a model server unless it asks.
     slots.enable_release()
@@ -1083,6 +1151,10 @@ def main() -> None:
     # that imports max_mode can never make llama-swap load a model (2026-09-29, an unstubbed test started
     # flash-next on the running stack).
     max_mode.enable_swaps()
+    # x_yamadori.timing: the proxy times its turn's stages (mcp/stage_timing.py); never on import, so no offline
+    # suite or other process is wrapped
+    import stage_timing
+    stage_timing.install()
     print(f"  tier models: {'on' if max_mode.ENABLED else 'off'} ({max_mode.TABLE.source}); "
           f"{', '.join(f'{t}={m}' for t, m in max_mode.snapshot()['tiers'].items())}", flush=True)
     print(f"  slot release: on after second-brain runs and side calls "

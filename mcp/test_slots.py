@@ -27,6 +27,14 @@ side calls', the decider's and an as-sent compaction's, queued there -- and no
 conversation is ever pinned to it. And every grant carries the slots' KV
 RANKS (the primary conversation above the other, the child at the rank of
 the conversation it works for) for engine patch 0041.
+
+REMOVED 2026-09-29 (docs/REMOVED.md; the way back is commit e360d37): the
+second brain (shomen: deep thinking, fan-out's B/C, fix-ups) and with it the
+fan-out release check (one lane held across B and C). The placement and
+release rules it drove stay -- slots.HELPER and admission.helper_lane serve
+whatever helper work remains (model.post's helper role, summaries) -- so the
+checks below still say "second brain" / "deep thinking" for the multi-hop
+helper job they simulate.
 """
 from __future__ import annotations
 
@@ -381,38 +389,6 @@ def test_the_helper_slot_is_released_after_a_run_not_between_hops():
     _with_release(body)
 
 
-def test_fan_out_releases_after_c_not_between_b_and_c():
-    """fanout.run holds ONE lane across B and C and runs each as
-    shomen.run(held=True): C's prompt is B's with the last user turn
-    replaced, so C reuses B's history -- the release waits for both."""
-    import admission
-    import shomen
-    saved = shomen._run_job
-
-    def job(name, spec):
-        _hop()
-        return {"content": name}
-
-    def body(rel):
-        shomen._run_job = job
-        try:
-            with admission.helper_lane(what="fan-out"):
-                shomen.run("alternative", held=True)
-                check(rel.calls == [], "after B: nothing released",
-                      str(rel.calls))
-                shomen.run("tiebreak", held=True)
-                check(rel.calls == [], "after C, lane still held: nothing "
-                      "released", str(rel.calls))
-            check(rel.calls == [2], "the fan-out's lane let go: released "
-                  "once", str(rel.calls))
-            shomen.run("fixup", units=[], check=None)
-            check(rel.calls == [2, 2], "a job run on its own lane (fixup) "
-                  "releases at its own end", str(rel.calls))
-        finally:
-            shomen._run_job = saved
-    _with_release(body)
-
-
 def test_never_a_pinned_slot():
     def body(rel):
         # Two side calls at once: both on the child slot (2), never on the
@@ -578,6 +554,10 @@ def test_model_release_slot():
 
     def fake(req, timeout=None):
         url = req if isinstance(req, str) else req.full_url
+        if url.endswith("/running"):
+            # llama-swap lists bonsai ready: the release may read its /slots
+            # (model.release_slot asks /running first since 2026-09-30)
+            return _R(json.dumps({"running": [{"model": "bonsai", "state": "ready"}]}).encode())
         body = None if isinstance(req, str) else json.loads(req.data)
         sent.append((url.split("/upstream/bonsai")[-1], body))
         if url.endswith("/slots"):
@@ -627,13 +607,40 @@ def test_model_release_slot():
         check(r["ok"] and r.get("skipped") == "already empty"
               and len(sent) == 1, "an empty slot: nothing to send", str(r))
 
-        def down(req, timeout=None):
+        def slots_down(req, timeout=None):
+            url = req if isinstance(req, str) else req.full_url
+            if url.endswith("/running"):
+                return _R(json.dumps({"running": [{"model": "bonsai", "state": "ready"}]}).encode())
             raise OSError("connection refused")
-        urllib.request.urlopen = down
+        urllib.request.urlopen = slots_down
         r = model.release_slot(2)
         check(not r["ok"] and r.get("error", "").startswith("/slots"),
               "the server unreachable: an error recorded, never raised",
               str(r))
+
+        # A READ NEVER LOADS A MODEL (2026-09-30): llama-swap unreadable, or
+        # the model not in its /running -- nothing is asked of /upstream.
+        sent.clear()
+
+        def down(req, timeout=None):
+            raise OSError("connection refused")
+        urllib.request.urlopen = down
+        r = model.release_slot(2)
+        check(not r["ok"] and "could not be read" in str(r.get("skipped")),
+              "llama-swap /running unreadable: skipped with why, nothing asked",
+              str(r))
+
+        def not_loaded(req, timeout=None):
+            url = req if isinstance(req, str) else req.full_url
+            if url.endswith("/running"):
+                return _R(json.dumps({"running": [{"model": "embeddings", "state": "ready"}]}).encode())
+            sent.append((url, None))
+            raise AssertionError("asked /upstream for a model that is not loaded")
+        urllib.request.urlopen = not_loaded
+        r = model.release_slot(2)
+        check(not r["ok"] and "not loaded" in str(r.get("skipped")) and not sent,
+              "the model not loaded: nothing to release, /upstream never asked",
+              json.dumps([r, sent]))
     finally:
         urllib.request.urlopen, model._erase_ok = saved
 
@@ -1213,7 +1220,6 @@ def main() -> int:
                test_a_busy_or_short_slot_is_not_adopted,
                test_pins_survive_a_restart,
                test_the_helper_slot_is_released_after_a_run_not_between_hops,
-               test_fan_out_releases_after_c_not_between_b_and_c,
                test_never_a_pinned_slot,
                test_never_while_held,
                test_a_new_request_waits_for_a_release_in_flight,

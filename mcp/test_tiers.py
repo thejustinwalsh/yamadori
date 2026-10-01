@@ -19,6 +19,11 @@ then onto a request the chat template will accept. Its promises:
      never raised. (Until 2026-09-22 `[1]` or `{"floor": "big"}` raised.)
   6. `python mcp/tiers.py` runs. Its self-test crashed on a renamed key for
      long enough that PROTOCOL rule 14 was written about it.
+  7. The tier rows carry only what still exists (2026-09-29, docs/REMOVED.md:
+     retrieval, fan-out, deep thinking, the delegate arm, the code check and
+     repair were removed; the way back is commit e360d37): thinks, effort,
+     skills, seed, mcp_tools. A header naming a removed flag is dropped like
+     any unknown key, and so are the removed switches.
 """
 from __future__ import annotations
 
@@ -111,13 +116,21 @@ def test_the_ceiling_caps_the_request():
 
 
 def _with_template(tpl: str | None):
-    """Point tiers.accepted_efforts() at a fake /props answer (None = down)."""
+    """Point tiers.accepted_efforts() at a fake /props answer (None = down).
+    llama-swap's /running lists the model loaded, so /props may be asked
+    (2026-09-30: an unreadable /running answers the fallback)."""
     import io
+    import os as _os
     import urllib.request
+    import max_mode
+    served = max_mode.current(_os.environ.get("YAMADORI_MODEL", "bonsai"))
 
     def fake(url, timeout=None):
         if tpl is None:
             raise OSError("server down")
+        if str(url).endswith("/running"):
+            return io.BytesIO(json.dumps({"running": [
+                {"model": served, "state": "ready"}]}).encode())
         return io.BytesIO(json.dumps({"chat_template": tpl}).encode())
     real = urllib.request.urlopen
     urllib.request.urlopen = fake
@@ -180,6 +193,27 @@ def test_reading_the_efforts_never_loads_the_model():
           and not any("/upstream/" in u for u in asked),
           "with the model off the card, the efforts are the fallback, not "
           "kept, and /upstream (which would load it) is never asked",
+          json.dumps({"asked": asked, "kept": kept}))
+
+    # /running unreadable (llama-swap busy or restarting) says nothing about
+    # what is loaded: still no /upstream read (2026-09-30).
+    asked.clear()
+
+    def down(url, timeout=None):
+        asked.append(str(url))
+        if str(url).endswith("/running"):
+            raise OSError("llama-swap restarting")
+        return io.BytesIO(json.dumps({"chat_template": ""}).encode())
+    urllib.request.urlopen, tiers._accepted = down, None
+    try:
+        got = tiers.accepted_efforts()
+        kept = tiers._accepted
+    finally:
+        urllib.request.urlopen, tiers._accepted = real, pinned
+    check(got == tiers.FALLBACK_EFFORTS and kept is None
+          and not any("/upstream/" in u for u in asked),
+          "with /running unreadable, the efforts are the fallback, not kept, "
+          "and /upstream is never asked",
           json.dumps({"asked": asked, "kept": kept}))
 
 
@@ -441,9 +475,12 @@ def test_the_answer_allowance_is_added_to_the_thinking_breaker():
     # --- the split is read from budget.py, with a stated fallback --------
     saved = budget.budgets
     try:
-        budget.budgets = lambda pool=None: saved(200000)
+        # 160,000: under the pinned /props' kv_vram_cells, so the split
+        # layout (a pool above it is budget.py's CAP layout, which reads the
+        # VRAM line, not the pool; mcp/test_budget.py gates that).
+        budget.budgets = lambda pool=None: saved(160000)
         got = tiers.budget(None)
-        check(got["max_tokens"] == 125000,
+        check(got["max_tokens"] == 100000,
               "a different pool moves the window with it (read, not recalled)",
               json.dumps(got))
 
@@ -491,11 +528,10 @@ def test_thinking_is_off_only_at_minimal():
           "low: thinking on at medium, told to the template",
           json.dumps({k: lo.get(k) for k in ("chat_template_kwargs",
                       "reasoning_effort")}))
-    t = tiers.TIERS["low"]
-    check(not any(t[k] for k in ("retrieval", "skills", "investigate",
-                                 "check_code", "repair")) and t["fanout"] == 1
-          and tiers.TIERS["minimal"]["fanout"] == 1,
-          "low: none of our augmentation; neither low nor minimal fans out")
+    check(not any(tiers.TIERS[n][k] for n in ("minimal", "low")
+                  for k in ("skills", "seed", "mcp_tools")),
+          "low and minimal: none of our augmentation (skills, the seed, the "
+          "MCP tools)")
     t = tiers.resolve({"reasoning_effort": "low"}, overrides={"thinks": False})
     body = tiers.apply({"reasoning_effort": "low"}, t)
     check(body["enable_thinking"] is False and "reasoning_effort" not in body,
@@ -505,34 +541,40 @@ def test_thinking_is_off_only_at_minimal():
 
 def test_resolve_returns_a_copy():
     t = tiers.resolve({"reasoning_effort": "high"})
-    t["fanout"] = 99
-    check(tiers.TIERS["high"]["fanout"] == 3, "mutating a resolved tier leaves "
-          "the preset alone", str(tiers.TIERS["high"]["fanout"]))
+    t["seed"] = False
+    check(tiers.TIERS["high"]["seed"] is True, "mutating a resolved tier "
+          "leaves the preset alone", str(tiers.TIERS["high"]["seed"]))
 
 
 def test_overrides_break_the_bundle_and_say_so():
-    t = tiers.resolve({"reasoning_effort": "high"}, overrides={"fanout": 1})
-    # `repair` stands for the untouched rest (skills are off at every tier
-    # since 2026-09-29, so they no longer tell a change apart)
-    check(t["fanout"] == 1 and t["repair"] is True
+    t = tiers.resolve({"reasoning_effort": "high"}, overrides={"seed": False})
+    # `mcp_tools` stands for the untouched rest (skills are off at every
+    # tier since 2026-09-29, so they no longer tell a change apart)
+    check(t["seed"] is False and t["mcp_tools"] is True
           and t["skills"] is tiers.TIERS["high"]["skills"] and t["effort"] == "medium",
           "only the overridden field changes", json.dumps(t)[:160])
-    check(t["overridden"] == ["fanout"], "and the tier records what was overridden")
+    check(t["overridden"] == ["seed"], "and the tier records what was overridden")
     check("overridden" not in tiers.resolve({"reasoning_effort": "high"}),
           "a plain request records no override")
     off, on = tiers.ab("medium", "aug_off"), tiers.ab("medium", "aug_on")
-    same = {k for k in ("effort", "thinks", "fanout") if off[k] == on[k]}
-    check(same == {"effort", "thinks", "fanout"},
+    same = {k for k in ("effort", "thinks", "seed", "mcp_tools")
+            if off[k] == on[k]}
+    check(same == {"effort", "thinks", "seed", "mcp_tools"},
           "the A/B arms differ only in the augmentations", str(same))
-    check(off["retrieval"] is False and on["retrieval"] is True,
-          "and do differ in them")
+    check(off["skills"] is False and on["skills"] is True,
+          "and do differ in them (skills, the one augmentation left to arm)")
 
 
 def test_the_feature_header_is_parsed_defensively():
     check(tiers.from_header(None) is None and tiers.from_header("") is None,
           "no header, no overrides")
-    check(tiers.from_header('{"fanout": 1, "skills": false}')
-          == {"fanout": 1, "skills": False}, "a valid header is used")
+    check(tiers.from_header('{"seed": false, "skills": false}')
+          == {"seed": False, "skills": False}, "a valid header is used")
+    check(tiers.from_header('{"retrieval": true, "investigate": true, '
+                            '"fanout": 3, "delegate": true, '
+                            '"check_code": true, "repair": true}') is None,
+          "the flags of removed features are dropped like any unknown key "
+          "(an old benchmark header decides nothing)")
     check(tiers.from_header('{"hints": false}') == {"skills": False},
           "the flag's old name `hints` is read as `skills` (one release)")
     check(tiers.from_header('{"thinks": false, "admin": true}') is None,
@@ -544,12 +586,12 @@ def test_the_feature_header_is_parsed_defensively():
             check(out is None, f"header {bad!r} is ignored", repr(out))
         except Exception as e:                                   # noqa: BLE001
             check(False, f"header {bad!r} does not raise", f"{type(e).__name__}: {e}")
-    out = tiers.from_header('{"floor": "big", "fanout": "3", "skills": 1, '
-                            '"retrieval": true, "investigate": "yes", '
+    out = tiers.from_header('{"floor": "big", "reasoning_cap": "3", '
+                            '"skills": 1, "seed": true, "utility": "yes", '
                             '"effort": 5}')
-    check(out == {"retrieval": True},
+    check(out == {"seed": True},
           "values of the wrong type are dropped, the right ones kept", repr(out))
-    check(tiers.from_header('{"fanout": true}') is None,
+    check(tiers.from_header('{"reasoning_cap": true}') is None,
           "a boolean is not accepted as a count")
     try:
         t = tiers.resolve({}, tiers.from_header('{"floor": "big"}'))
@@ -563,7 +605,9 @@ def test_the_feature_header_is_parsed_defensively():
 def test_describe_lists_every_tier():
     d = tiers.describe()
     check(all(n in d for n in tiers.ORDER), "describe() names every tier")
-    check("fan-out x3" in d and "deep thinking" in d, "and what each adds")
+    check("concept seed" in d and "MCP tools" in d
+          and "fan-out" not in d and "deep thinking" not in d,
+          "and what each adds (nothing removed)")
 
 
 def test_the_self_test_runs():
@@ -634,48 +678,49 @@ def test_generic_client_spellings():
           "max_completion_tokens is the answer allowance and is not sent upstream",
           json.dumps({k: a.get(k) for k in ("max_tokens", "max_completion_tokens")}))
 
-def test_the_second_brains_nudge():
-    """A research hop (investigate, plan) is nudged toward its action -- the
-    search or the hand-off -- not "the best answer" (operator, 2026-09-26;
-    handle d28941fb); the other jobs keep NUDGE_MESSAGE; the switch works;
-    a rebudget keeps the text."""
-    for job in ("investigate", "plan"):
-        check(tiers.helper_nudge(job) == tiers.HELPER_NUDGE_MESSAGE,
-              f"a {job} hop gets the second brain's nudge", job)
-    for job in ("fixup", "alternative", "tiebreak", None):
-        check(tiers.helper_nudge(job) is None,
-              f"a {job} hop keeps NUDGE_MESSAGE (it ends in an answer)", job)
-    m = tiers.HELPER_NUDGE_MESSAGE
-    check(m.startswith("\n\nThe user is waiting for a response. Let me make "
-                       "the search") and "write the hand-off now" in m
-          and m.endswith("misleading.\n") and not m.endswith(" \n")
-          and not any(w in m.lower() for w in (" never ", " do not ", "don't")),
-          "the operator's wording, in the model's voice, ends on a newline, "
-          "no prohibition", repr(m))
-    got = tiers.budget(None, role="helper", step_cap=6144,
-                       nudge=tiers.helper_nudge("investigate"))
-    check(got.get("reasoning_budget_nudge") == m
-          and got.get("reasoning_budget_message") == tiers.BUDGET_MESSAGE,
-          "the budget carries it, and the hard stop keeps the operator's line",
-          json.dumps({k: got.get(k) for k in ("reasoning_budget_nudge",)}))
-    body = {"messages": [{"role": "user", "content": "x"}]}
-    out = tiers.apply(body, tiers.resolve({"reasoning_effort": "max"}),
-                      role="helper", step_cap=6144,
-                      nudge=tiers.helper_nudge("investigate"))
-    check(out.get("reasoning_budget_nudge") == m and out.get("_nudge") == m,
-          "apply keeps it for a rebudget", str(out.get("_nudge"))[:60])
-    os.environ["YAMADORI_HELPER_NUDGE"] = "0"
-    try:
-        check(tiers.helper_nudge("investigate") is None,
-              "YAMADORI_HELPER_NUDGE=0 switches it off")
-    finally:
-        os.environ.pop("YAMADORI_HELPER_NUDGE", None)
+def test_the_tier_rows_after_the_removal():
+    """2026-09-29 (docs/REMOVED.md): the flags and switches of the removed
+    features are gone from TIERS, FEATURE_COLUMNS and BEHAVIOURS; the
+    research jobs' nudge went with the jobs."""
+    keys = {n: set(tiers.TIERS[n]) for n in tiers.ORDER}
+    want = {"thinks", "effort", "skills", "seed", "mcp_tools", "why"}
+    check(all(k == want for k in keys.values()),
+          "every tier row is thinks, effort, skills, seed, mcp_tools, why",
+          json.dumps({n: sorted(k ^ want) for n, k in keys.items()}))
+    check([n for n in tiers.ORDER if tiers.TIERS[n]["seed"]]
+          == ["high", "xhigh", "max"],
+          "the concept seed at high, xhigh and max")
+    check([n for n in tiers.ORDER if tiers.TIERS[n]["mcp_tools"]]
+          == ["medium", "high", "xhigh", "max"],
+          "the MCP tools at medium and up")
+    check(tiers.FEATURE_COLUMNS == ("thinking", "skills", "MCP tools",
+                                    "images", "concept seed"),
+          "the feature matrix's columns", str(tiers.FEATURE_COLUMNS))
+    check(set(tiers.BEHAVIOURS) == {"work_log_reinject", "step_nudge",
+                                    "slot_release", "idle_clear",
+                                    "restore_reasoning", "mcp_tools"}
+          and tiers.OFF_BY_DEFAULT == frozenset(),
+          "the switches left, none off by default", str(sorted(tiers.BEHAVIOURS)))
+    check(tiers.from_header('{"auto_triggers": false, "deep_tool_hop": true, '
+                            '"seed_frame": false, "verify_directive": false}')
+          is None,
+          "a removed switch in the header is dropped")
+    check(all(tiers.helper_nudge(j) is None for j in
+              ("investigate", "plan", "fixup", "alternative", "tiebreak", None)),
+          "helper_nudge is None for every job: the research jobs' nudge went "
+          "with them")
+    check(not hasattr(tiers, "HELPER_NUDGE_MESSAGE")
+          and not hasattr(tiers, "check_code_offered")
+          and not hasattr(tiers, "repair_on"),
+          "and the removed helpers are gone")
 
 
 def test_the_thinking_caps():
     """AGENT_STEP_THINKING caps main on an agent step (step_cap), and
-    HELPER_THINKING every second-brain hop; a benchmark's reasoning_cap still
-    wins; rebudget keeps a step cap. (operator, 2026-09-25)"""
+    HELPER_THINKING every helper request (the skills pipeline's jobs since
+    the second brain was removed, 2026-09-29; JOB_THINKING ships empty); a
+    benchmark's reasoning_cap still wins; rebudget keeps a step cap.
+    (operator, 2026-09-25) The caps are pinned here to test the mechanics."""
     old = tiers.HELPER_THINKING, tiers.JOB_THINKING
     try:
         tiers.HELPER_THINKING, tiers.JOB_THINKING = 8192, {"fixup": 2048}
@@ -735,7 +780,7 @@ def test_the_thinking_caps():
 
 
 def main() -> int:
-    for fn in (test_the_second_brains_nudge, test_the_thinking_caps, test_generic_client_spellings, test_vendor_sampling_is_enforced,
+    for fn in (test_the_tier_rows_after_the_removal, test_the_thinking_caps, test_generic_client_spellings, test_vendor_sampling_is_enforced,
                test_the_fixture_uses_the_shipped_settings,
                test_every_spelling_resolves,
                test_every_alias_lands_on_a_real_tier,

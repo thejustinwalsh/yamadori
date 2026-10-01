@@ -123,10 +123,22 @@ def model_for(tier_name: str | None, utility: bool = False) -> str:
 
 
 def set_current(model: str | None) -> None:
-    """Bind the conversation's model to this request (its cancel token, which job threads re-bind)."""
+    """Bind the conversation's model to this request (its cancel token, which job threads re-bind).
+
+    ROUTED OFF THE MAIN CARD (THE OTHER CARD, mcp/slots.py; coordinator 2026-09-30): when the request's token
+    carries the lease server._serve_turn took for a MAIN model (`yamadori_lease`) and the request is re-bound to a
+    model that is not a main one (proxy._run_turn: check_owner routed it to bonsai-a4000), that lease is released
+    here -- the request runs on the other card and holds nothing on the main one, so it can never delay a swap
+    there. Recorded on the token (`yamadori_rerouted`); the server's later release is a no-op (Lease.release is
+    idempotent). A side call decided onto bonsai-a4000 from the start holds a lease for that model, not a main one:
+    untouched."""
     tok = cancel.current()
     if tok is not None and model:
         setattr(tok, "yamadori_model", model)
+        lease = getattr(tok, "yamadori_lease", None)
+        if lease is not None and not lease.released and is_main(lease.model) and not is_main(model):
+            lease.release()
+            setattr(tok, "yamadori_rerouted", {"from": lease.model, "to": model, "lease_released": True})
 
 
 def current(default: str | None = None) -> str:
@@ -158,6 +170,124 @@ def guard(model: str | None) -> None:
     request admitted to that very model (a swap the proxy decided)."""
     if model and blocks(model) and bound_model() != model:
         raise ModelAtCapacity(model)
+
+
+# ------------------------------------------------------------ helpers --
+# WHERE JJAVA AND SIDE CALLS RUN, per tier model (the table's `helpers`; operator, 2026-09-30, verbatim: "Agree, no
+# jjava slowing down this highly tuned masterpiece, it stays locked in once it is swapped, and we gotta get that
+# speed!"). Evidence: in Flash-Next's lane step main decode fell to 1.45 tok/s while jjava read on slot 1 (n=1).
+# A model whose row says `helpers: {decider: bonsai-a4000, side_calls: bonsai-a4000}` sends both to the second Bonsai
+# on the A4000; "self" (or no row) keeps them on the main card's lane. YAMADORI_DECIDER_MODEL, when set, names the
+# decider's model for every tier (the one-config switch).
+def _self_or(model: str, target) -> str:
+    return model if not target or target == "self" else str(target)
+
+
+def decider_model(default: str | None = None) -> str:
+    """The model jjava reads for the request this thread works for."""
+    env = (os.environ.get("YAMADORI_DECIDER_MODEL") or "").strip()
+    if env:
+        return env
+    cur = current(default)
+    return _self_or(cur, TABLE.helpers(cur).get("decider"))
+
+
+def side_call_model(on: str | None) -> str:
+    """Where a client's side call goes while `on` holds the card."""
+    on = on or MAIN
+    return _self_or(on, TABLE.helpers(on).get("side_calls"))
+
+
+def other_card(model: str | None) -> tuple[str | None, str]:
+    """(the OTHER card's model for a conversation served by `model`, why): the tier table's `other_card` for its row
+    (bonsai: bonsai-a4000; operator 2026-09-30: a second conversation gets the other card). A model with none
+    (flash-next, mirai-s: they do not run on the A4000) gets None -- the newcomer is refused 503, NEVER silently
+    downgraded -- unless the one switch YAMADORI_OTHER_CARD_DOWNGRADE=1 is on (operator: "may change this"): then
+    the default model's other card serves it, and the record says so."""
+    if not ENABLED:
+        return None, "one model (no tier table)"
+    m = model or current()
+    oc = TABLE.row(m).get("other_card") if TABLE.full else None
+    if oc:
+        return str(oc), f"{m}'s other card (the tier table)"
+    if os.environ.get("YAMADORI_OTHER_CARD_DOWNGRADE") == "1":
+        dc = TABLE.row(TABLE.default).get("other_card") if TABLE.full else None
+        if dc:
+            return str(dc), (f"{m} has no other card; DOWNGRADED to {TABLE.default}'s ({dc}) by "
+                             "YAMADORI_OTHER_CARD_DOWNGRADE=1")
+    return None, f"{m} does not run on the other card (tier table: no other_card)"
+
+
+def internal_model(target: str | None) -> str:
+    """Where an INTERNAL generation goes (mcp/model.py post: summarize_text, the worker, the skill pipeline's model
+    stages, skill_prove, the questions bank, skill_select's fallback decider -- anything that is not a
+    conversation's own turn). Coordinator, 2026-09-30: "every internal generation that isn't the conversation's own
+    turn goes to the table's helper (bonsai-a4000) whenever the card's model is locked, never onto the locked
+    card". So: a main-model target goes to the helper of the LOCKED model on the card (or of the target itself when
+    it is locked and nothing is on the card); anything else (bonsai-vision, the helper itself, a table off) as is."""
+    target = target or MAIN
+    if not ENABLED or not is_main(target):
+        return target
+    card = card_model()
+    lk = card if card and TABLE.locked(card) else (target if not card and TABLE.locked(target) else None)
+    if not lk:
+        return target
+    h = TABLE.helpers(lk)
+    helper = h.get("side_calls") or h.get("decider")
+    return target if not helper or helper == "self" or is_main(helper) else helper
+
+
+# THE WORKER'S CARD SCOPE (mcp/jobs.py, the gpu lane per card; coordinator 2026-09-30): the lane a worker thread's
+# job was claimed under -- "gpu" (the main card) or "gpu_a4000". A job claimed for the A4000 never touches the main
+# card (check_scope). Thread-local: set by worker.run_one around the handler.
+_SCOPE = threading.local()
+A4000_SCOPE = "gpu_a4000"
+
+
+def set_scope(scope: str | None) -> None:
+    _SCOPE.lane = scope
+
+
+def scope() -> str | None:
+    return getattr(_SCOPE, "lane", None)
+
+
+def check_scope(model: str | None) -> None:
+    """Raise ModelAtCapacity when this thread works for a job claimed for the A4000 and `model` is a main model (the
+    route changed after the claim: the card was unlocked). The worker defers it, without an attempt."""
+    if scope() == A4000_SCOPE and model and is_main(model):
+        raise ModelAtCapacity(model, card_model(),
+                              f"this job was claimed for the A4000 (lane {A4000_SCOPE}) and its route now names "
+                              f"{model} on the main card; it waits for its lane's card")
+
+
+def locked(model: str | None = None) -> bool:
+    """The card's model (or `model`) runs alone: nothing but its own conversation touches it."""
+    m = model or card_model()
+    return bool(m) and TABLE.locked(m)
+
+
+# What a LOCKED card still allows (coordinator, 2026-09-30: "The lock forbids OTHER work (jjava, side calls, other
+# conversations), not the conversation's own"; "The lock forbids work that competes for the card, not a cheap /slots
+# read of a model already loaded (never one that would load a model)"):
+#   compaction  the conversation's own summary, on its own slot (operator: "it compacts on the same card it came
+#               from right? To get cache gains.")
+#   warm        the conversation's own prefix work: its own slot extended with the turn as delivered
+#   slot_read   a GET /slots of the loaded model (the caller checks it is loaded: /running, never /upstream to an
+#               unloaded one)
+OWN_WORK = frozenset({"compaction", "warm", "slot_read"})
+
+
+def touch_allowed(what: str, model: str | None = None) -> tuple[bool, str]:
+    """(may this touch the main card now, why not). `what`: warm, slot_read, compaction (always allowed: OWN_WORK)
+    or decider, side_call, release (OTHER work: False while a LOCKED model holds or is loaded on the card)."""
+    if what in OWN_WORK:
+        return True, ""
+    m = model or card_model()
+    if m and TABLE.locked(m):
+        return False, (f"{m} runs alone on the card (locked, operator 2026-09-30: \"it stays locked in once it is "
+                       f"swapped\"): no {what} touches it")
+    return True, ""
 
 
 def at_max() -> bool:
@@ -369,23 +499,53 @@ def requested_tier(body: dict) -> str | None:
 
 
 def is_utility(body: dict) -> bool:
+    return utility_kind(body) is not None
+
+
+def utility_kind(body: dict) -> str | None:
+    """None for a task turn; else the side call's kind (selection.utility_kind: compaction | title | classifier |
+    structured | other)."""
     import proxy
+    import selection
     import system_roles
     msgs, _ = system_roles.one_system(body.get("messages") or [])
     try:
-        return bool(proxy.utility_of(body, proxy.strip_thinking(msgs)).get("utility"))
+        u = proxy.utility_of(body, proxy.strip_thinking(msgs))
     except Exception:                                                # noqa: BLE001
-        return False
+        return None
+    if not u.get("utility"):
+        return None
+    try:
+        return selection.utility_kind(u) or "other"
+    except Exception:                                                # noqa: BLE001
+        return "other"
 
 
-def decide(tier: str | None, utility: bool) -> Decision:
-    """Where this request goes, or why it is refused. Pure given the state; no waiting."""
+def decide(tier: str | None, utility: bool, kind: str | None = None) -> Decision:
+    """Where this request goes, or why it is refused. Pure given the state; no waiting. `kind`: the side call's
+    kind (utility_kind) -- a COMPACTION is not a side call for routing (operator, 2026-09-30, verbatim: "it compacts
+    on the same card it came from right? To get cache gains."): it stays on the card of the conversation it
+    summarises, on that conversation's own slot (mcp/slots.py), even while that card is LOCKED -- the one exception,
+    because it is the same conversation's own work. Never bonsai-a4000."""
     if not ENABLED:
         return Decision(MAIN, tier, utility, why="one model (no tier table: YAMADORI_TIER_MODELS unset)")
     h = holder_model()
+    if utility and kind == "compaction":
+        on = h or card_model()
+        if on:
+            return Decision(on, tier, utility, holder=h,
+                            why=f"a compaction stays on the card of the conversation it summarises ({on}), for its "
+                                f"cached prefix -- never a helper (operator 2026-09-30)")
+        return Decision(TABLE.model_for(tier), tier, utility,
+                        why="a compaction with no main model on the card: its tier's model")
     if utility:
         on = h or card_model()
         if on:
+            side = side_call_model(on)
+            if side != on:
+                return Decision(side, tier, utility, holder=h,
+                                why=f"a side call while {on} holds the card: served by {side} (the table's helpers; "
+                                    f"nothing else touches {on})")
             return Decision(on, tier, utility, holder=h,
                             why=f"a side call names no conversation: served by {on}, which is on the card")
         return Decision(MAIN, tier, utility, why="a side call with no main model on the card: the default model")
@@ -495,6 +655,11 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
         out["swap"] = {"from": sorted(on), "to": model, "load_s": round(time.time() - t1, 1), "ok": ok,
                        "how": how, "left_loaded": left}
         _last_swap = dict(out["swap"], at=time.time())
+        try:
+            import stats_store              # the PERFORMANCE page's swap history
+            stats_store.swap(out["swap"])
+        except Exception:                                            # noqa: BLE001
+            pass
         print(f"  tier model swap: {sorted(on) or 'nothing'} -> {model} in {out['swap']['load_s']} s ({how})"
               + (f"; STILL LOADED: {left}" if left else ""), flush=True)
     return out

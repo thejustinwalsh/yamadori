@@ -1,0 +1,178 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Tue, 29 Sep 2026 22:28:40 -0400
+Subject: [PATCH] cuda, llama: the attention KV in mapped host memory
+ (LLAMA_KV_HOST_MAPPED=1)
+
+The first step of Strata's KV streaming (Niko1221/Strata --kv-resident,
+MIT: the KV lives in RAM, the attention reads what it selects), done the
+llama.cpp way. qwen4exp's QSA attention already reads a sparse subset of
+the cells per query: the CUDA flash attention's sparse path gathers the
+top-k cells by index (fattn-common.cuh compact_mask, #28770). So the
+attention K/V need not be in VRAM at all: ggml-cuda gains a host-mapped
+twin of each device's buffer type (cudaHostAllocMapped, the device pointer
+from cudaHostGetDevicePointer; the same interface, so the scheduler and
+every CUDA op treat the tensors as that device's), reached through the
+registry proc address ggml_backend_cuda_host_mapped_buffer_type. With
+LLAMA_KV_HOST_MAPPED=1 llama_kv_cache places the ATTENTION cache's K/V
+there (an indexer cache, name_tag "idx_", stays in VRAM: the indexer reads
+every block).
+
+Flash-Next at -c 262144 q8_0: 3,264 MiB of VRAM freed for expert weights
+(the gate's vram probe), at the cost of the selected rows crossing PCIe
+(~2,051 cells x 12 layers per token). Strata's VRAM page window of recent
+cells is not ported here.
+---
+ ggml/src/ggml-cuda/ggml-cuda.cu | 67 +++++++++++++++++++++++++++++++--
+ src/llama-kv-cache.cpp          | 18 +++++++++
+ 2 files changed, 82 insertions(+), 3 deletions(-)
+
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 178e71b8e5ec6891f7b2c761b0b960ba7ab897c8..53dc92b1fd512ca49361f694d2612189fd0dd8e8 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -722,14 +722,21 @@ struct ggml_backend_cuda_buffer_context {
+     int device;
+     void * dev_ptr = nullptr;
+     std::string name;
++    // host-mapped (0012): the memory is pinned HOST memory mapped into the device's address space
++    // (cudaHostAllocMapped); kernels read and write it over PCIe. host_ptr is what cudaFreeHost takes.
++    void * host_ptr = nullptr;
+ 
+-    ggml_backend_cuda_buffer_context(int device, void * dev_ptr) :
++    ggml_backend_cuda_buffer_context(int device, void * dev_ptr, void * host_ptr = nullptr) :
+         device(device), dev_ptr(dev_ptr),
+-        name(GGML_CUDA_NAME + std::to_string(device)) {
++        name(GGML_CUDA_NAME + std::to_string(device)), host_ptr(host_ptr) {
+     }
+ 
+     ~ggml_backend_cuda_buffer_context() {
+-        CUDA_CHECK(cudaFree(dev_ptr));
++        if (host_ptr) {
++            CUDA_CHECK(cudaFreeHost(host_ptr));
++        } else {
++            CUDA_CHECK(cudaFree(dev_ptr));
++        }
+     }
+ };
+ 
+@@ -863,6 +870,7 @@ static const ggml_backend_buffer_i ggml_backend_cuda_buffer_interface = {
+ struct ggml_backend_cuda_buffer_type_context {
+     int device;
+     std::string name;
++    bool host_mapped = false;   // 0012: allocate pinned host memory mapped into the device (see below)
+ };
+ 
+ static const char * ggml_backend_cuda_buffer_type_get_name(ggml_backend_buffer_type_t buft) {
+@@ -880,6 +888,31 @@ static ggml_backend_buffer_t ggml_backend_cuda_buffer_type_alloc_buffer(ggml_bac
+ 
+     ggml_cuda_set_device(buft_ctx->device);
+ 
++    if (buft_ctx->host_mapped) {
++        // 0012: pinned host memory, mapped: the tensors are device tensors of this device to the scheduler and to
++        // every kernel (a UVA pointer), but the bytes live in RAM and each access crosses PCIe. For data a kernel
++        // reads sparsely (the QSA attention's selected KV cells), VRAM is freed at the cost of PCIe reads.
++        void * host_ptr = nullptr;
++        cudaError_t err = cudaHostAlloc(&host_ptr, size ? size : 1, cudaHostAllocMapped | cudaHostAllocPortable);
++        void * dev_ptr = nullptr;
++        if (err == cudaSuccess) {
++            err = cudaHostGetDevicePointer(&dev_ptr, host_ptr, 0);
++        }
++        if (err != cudaSuccess) {
++            (void)cudaGetLastError();
++            if (host_ptr) {
++                cudaFreeHost(host_ptr);
++            }
++            GGML_LOG_ERROR("%s: allocating %.2f MiB of mapped host memory for device %d failed: %s\n", __func__,
++                           size / 1024.0 / 1024.0, buft_ctx->device, cudaGetErrorString(err));
++            return nullptr;
++        }
++        GGML_LOG_INFO("%s: %.2f MiB of mapped host memory for %s\n", __func__, size / 1024.0 / 1024.0,
++                      buft_ctx->name.c_str());
++        ggml_backend_cuda_buffer_context * ctx = new ggml_backend_cuda_buffer_context(buft_ctx->device, dev_ptr, host_ptr);
++        return ggml_backend_buffer_init(buft, ggml_backend_cuda_buffer_interface, ctx, size);
++    }
++
+     void * dev_ptr;
+     cudaError_t err = ggml_cuda_device_malloc(&dev_ptr, size, buft_ctx->device);
+     if (err != cudaSuccess) {
+@@ -928,6 +961,11 @@ static const ggml_backend_buffer_type_i ggml_backend_cuda_buffer_type_interface
+     /* .is_host          = */ NULL,
+ };
+ 
++// 0012: the host-mapped twin of ggml_backend_cuda_buffer_type(device) -- the same interface (so the scheduler and
++// every CUDA op treat its tensors as this device's), memory from cudaHostAlloc(Mapped). Reached through the
++// registry's proc address "ggml_backend_cuda_host_mapped_buffer_type" (a ggml_backend_dev_t argument).
++static ggml_backend_buffer_type_t ggml_backend_cuda_host_mapped_buffer_type_of_dev(ggml_backend_dev_t dev);
++
+ ggml_backend_buffer_type_t ggml_backend_cuda_buffer_type(int device) {
+     static std::mutex mutex;
+     std::lock_guard<std::mutex> lock(mutex);
+@@ -5921,8 +5959,31 @@ static ggml_backend_feature * ggml_backend_cuda_get_features(ggml_backend_reg_t
+     GGML_UNUSED(reg);
+ }
+ 
++static ggml_backend_buffer_type_t ggml_backend_cuda_host_mapped_buffer_type_of_dev(ggml_backend_dev_t dev) {
++    static std::mutex mutex;
++    std::lock_guard<std::mutex> lock(mutex);
++    static ggml_backend_buffer_type types[GGML_CUDA_MAX_DEVICES];
++    static bool init[GGML_CUDA_MAX_DEVICES] = {};
++    const int device = ((ggml_backend_cuda_device_context *) dev->context)->device;
++    if (device < 0 || device >= ggml_backend_cuda_get_device_count()) {
++        return nullptr;
++    }
++    if (!init[device]) {
++        types[device] = {
++            /* .iface    = */ ggml_backend_cuda_buffer_type_interface,
++            /* .device   = */ ggml_backend_reg_dev_get(ggml_backend_cuda_reg(), device),
++            /* .context  = */ new ggml_backend_cuda_buffer_type_context{device, GGML_CUDA_NAME + std::to_string(device) + "_Mapped", true},
++        };
++        init[device] = true;
++    }
++    return &types[device];
++}
++
+ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, const char * name) {
+     GGML_UNUSED(reg);
++    if (strcmp(name, "ggml_backend_cuda_host_mapped_buffer_type") == 0) {
++        return (void *)ggml_backend_cuda_host_mapped_buffer_type_of_dev;
++    }
+     if (strcmp(name, "ggml_backend_comm_init") == 0) {
+         return (void *)ggml_backend_cuda_comm_init;
+     }
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 1c93f908b0830c3b6a13dc1a02c3b0301f423a23..0243783448ce03eb329f507124bd9f1608ca2019 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -8,6 +8,7 @@
+ #include <algorithm>
+ #include <cassert>
+ #include <cmath>
++#include <cstdlib>
+ #include <cstring>
+ #include <limits>
+ #include <map>
+@@ -218,6 +219,23 @@ llama_kv_cache::llama_kv_cache(
+             buft = ggml_backend_dev_buffer_type(dev);
+ 
+             dev_name = ggml_backend_dev_name(dev);
++
++            // 0012, LLAMA_KV_HOST_MAPPED=1: the ATTENTION cache's K/V (not an indexer cache: name_tag "") in pinned
++            // host memory mapped into the device -- the device's own ops read it over PCIe. For a model whose
++            // attention reads a sparse subset of the cells per query (qwen4exp's QSA: the top 2,051 of every cell,
++            // the CUDA FA's sparse path gathering them by index), this frees the whole KV from VRAM for weights
++            // at the cost of the selected rows crossing PCIe. The idea is Strata's KV streaming
++            // (Niko1221/Strata --kv-resident, MIT), here without its VRAM page window.
++            static const bool kv_mapped = [] { const char * e = getenv("LLAMA_KV_HOST_MAPPED"); return e && atoi(e) != 0; }();
++            if (kv_mapped && name_tag && name_tag[0] == '\0') {
++                auto * reg = ggml_backend_dev_backend_reg(dev);
++                using fn_t = ggml_backend_buffer_type_t (*)(ggml_backend_dev_t);
++                auto fn = reg ? (fn_t) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_host_mapped_buffer_type") : nullptr;
++                if (auto * mapped = fn ? fn(dev) : nullptr) {
++                    buft = mapped;
++                    dev_name = ggml_backend_buft_name(mapped);
++                }
++            }
+         }
+ 
+         LLAMA_LOG_DEBUG("%s: layer %3d: dev = %s\n", __func__, il, dev_name);

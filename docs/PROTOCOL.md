@@ -156,7 +156,8 @@ have detected the effect, on a system proven alive. Until then it stays.
 > the stub for that query set and is currently declared and never read.
 >
 > **This note does not rule between the two documents**, and nothing has been
-> cut: the reranker is still loaded and still gated at `RERANK_MAX_K = 2`. See
+> cut: the reranker is still loaded and still gated at `RERANK_MAX_K = 2` (until it was
+> removed 2026-10-01, docs/REMOVED.md). See
 > `docs/PLAN.md` "Cut criteria" and `docs/ROADMAP.md` §1.2 / §1.3 — §1.3's
 > explanation for the 199 zero ranks *was* wrong and has since been corrected in
 > place; it now says the same thing this note does.

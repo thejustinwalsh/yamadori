@@ -64,9 +64,15 @@ MARK = "tier models (bench/deploy_tier_models.py)"
 ENVS = {"YAMADORI_TIER_MODELS": "mcp\\tier_models.yaml"}
 MODEL_FILES = ["mirai-s-qwen3.8-27b-gguf"]
 MMPROJ_FILE = "mirai-s-mmproj"
-SLOTS = 3
+SLOTS = 2          # layout v3: one conversation + the jjava lane (operator, 2026-09-29)
 # the entries this deploy must leave byte-identical (other deploys own them)
-KEEP = ("bonsai", "bonsai-vision", "flash-next")
+KEEP = ("bonsai", "bonsai-vision")
+# THE SECOND BONSAI (operator, 2026-09-30: "no jjava slowing down this highly tuned masterpiece, it stays locked in
+# once it is swapped"): REQUIRED for max -- flash-next is LOCKED (-np 1, no lane) and its jjava and side calls run
+# on bonsai-a4000. config.bonsai-a4000.fragment.yaml with {{CTX}} from bench/a4000_fit.py (--a4000-fit DIR).
+A4000_FRAGMENT = "config.bonsai-a4000.fragment.yaml"
+A4000_ID = "bonsai-a4000"
+LOCKED_ID = "flash-next"
 
 
 def read(f: str) -> str:
@@ -105,12 +111,17 @@ def values_from_gate(gate: dict, over: dict) -> tuple[dict, list[str]]:
     if gate.get("mmproj", True) != mmproj:
         why.append(f"the gate ran with mmproj={gate.get('mmproj', True)} but this deploy asks mmproj={mmproj}: the "
                    f"fit differs (re-run the gate {'without' if not mmproj else 'with'} --no-mmproj)")
-    ctx = over.get("ctx") or gate.get("ctx_used")
+    # the window: --ctx, else the gate's deploy value (ctx_deploy: the fit's window less what the deepest measured
+    # prompt showed it needs to keep the margin), else the fit's own
+    ctx = over.get("ctx") or gate.get("ctx_deploy") or gate.get("ctx_used")
     if not ctx:
         why.append("no window: the gate's fit did not run and --ctx was not given")
     mc = (arms.get("mtp") or {}).get("corrupt") or {}
     mtp = bool(mc) and not mc.get("error") and not mc.get("guard") and over.get("mtp", True)
-    return {"ctx": int(ctx or 0), "mtp": mtp, "mmproj": mmproj}, why
+    # THE LAYOUT the gate's lane step decided (bench/mirai_s_gate.py LAYOUT; the operator's rule of 2026-09-30):
+    # -np 1 with jjava and side calls on bonsai-a4000 when the lane is material, else -np 2 with the lane
+    np_ = int(((gate.get("layout") or {}).get("np")) or SLOTS)
+    return {"ctx": int(ctx or 0), "mtp": mtp, "mmproj": mmproj, "np": np_}, why
 
 
 # ------------------------------------------------------------------ edits --
@@ -125,6 +136,10 @@ def fragment(text: str, values: dict, engine_bin: str) -> tuple[str, str]:
     block = f[f.index('\n  "mirai-s":\n') + 1:]
     block = block[:block.index("\n# groups:")] if "\n# groups:" in block else block
     block = re.sub(r" +$", "", block, flags=re.M).rstrip("\n") + "\n"
+    if int(values.get("np") or SLOTS) == 1:
+        if block.count("\n      -np 2\n") != 1:
+            raise ValueError("the fragment's -np 2 not found once")
+        block = block.replace("\n      -np 2\n", "\n      -np 1\n")
     if values.get("mtp"):
         block = block.replace("      # --spec-type draft-mtp\n", "      --spec-type draft-mtp\n")
         block = block.replace("      # --spec-draft-n-max 3\n", "      --spec-draft-n-max 3\n")
@@ -167,17 +182,86 @@ def edit_config(text: str, macro: str, block: str) -> str:
     return (c[:g0] + grp + c[g1:]).replace("\n", nl)
 
 
-def edit_table(text: str, ctx: int, vision: bool, lane_tokens: int) -> str:
-    """mirai-s's window and vision in mcp/tier_models.yaml (the rest byte-identical)."""
+def a4000_block(text: str, ctx: int) -> str:
+    """The bonsai-a4000 model block from its fragment, the fit's window filled."""
+    f, _ = _lf(text)
+    f = f.replace("{{CTX}}", str(int(ctx)))
+    if "{{" in f:
+        raise ValueError("bonsai-a4000 fragment: placeholders not filled")
+    blk = f[f.index('\n  "bonsai-a4000":\n') + 1:]
+    blk = blk[:blk.index("\n# groups:")]
+    return re.sub(r" +$", "", blk, flags=re.M).rstrip("\n") + "\n"
+
+
+def edit_config_a4000(text: str, block: str) -> str:
+    """config.yaml: the bonsai-a4000 entry after bonsai-vision, its own `helper` group (neither swap nor exclusive:
+    gpu_room decides the A4000), and flash-next LOCKED at -np 1 (one conversation, no lane). Idempotent refusal: a
+    second deploy is refused."""
+    c, nl = _lf(text)
+    if f'\n  "{A4000_ID}":\n' in c:
+        raise ValueError(f"config.yaml already has a {A4000_ID} entry")
+    i0 = c.index('\n  "bonsai-vision":\n')
+    i1 = re.search(r'\n  "[^"]+":\n|\n  # =====', c[i0 + 5:]).start() + i0 + 5
+    c = c[:i1] + "\n\n" + f"  # {MARK}\n" + block.rstrip("\n") + c[i1:]
+    # before the `decision` group while it existed; the CLM encoder's group went with CLM (docs/REMOVED.md), so
+    # before the `ondemand` group's comment (the vision group), else before the `ondemand` group itself
+    anchor = next((a for a in ('        "decision":\n', '        # Vision on demand', '        "ondemand":\n')
+                   if c.count(a) == 1), None)
+    if anchor is None:
+        raise ValueError("config.yaml: neither the `decision` nor the `ondemand` group found once")
+    grp = (f"        # {MARK}: the second Bonsai -- jjava and side calls of a LOCKED tier (flash-next); gpu_room\n"
+           "        # decides what leaves the A4000 for it (SIZES `bonsai-a4000`)\n"
+           '        "helper":\n          swap: false\n          exclusive: false\n          members:\n'
+           f'            - "{A4000_ID}"\n\n')
+    c = c.replace(anchor, grp + anchor, 1)
+    j0 = c.index(f'\n  "{LOCKED_ID}":\n')
+    j1 = re.search(r'\n  "[^"]+":\n', c[j0 + 5:]).start() + j0 + 5
+    fb = c[j0:j1]
+    new_fb, n = re.subn(r"\n(\s+)-np \d+( [^\n]*)?\n", lambda m: f"\n{m.group(1)}-np 1{m.group(2) or ''}\n", fb,
+                        count=1)
+    if n != 1:
+        raise ValueError(f"{LOCKED_ID}: -np not found once")
+    new_fb = new_fb.replace(f'\n  "{LOCKED_ID}":\n', f'\n  "{LOCKED_ID}":\n    # {MARK}: LOCKED -- -np 1, one '
+                            'conversation and nothing else on the card (operator 2026-09-30)\n', 1)
+    c = c[:j0] + new_fb + c[j1:]
+    return c.replace("\n", nl)
+
+
+def edit_table_a4000(text: str, ctx: int, lane_tokens: int) -> str:
+    """mcp/tier_models.yaml: bonsai-a4000's window from its fit (2 slots: side calls + jjava's lane)."""
+    t, nl = _lf(text)
+    i0 = t.index("\n  bonsai-a4000:\n")
+    blk = t[i0:]
+    win = (f"\n    window:\n      ctx: {ctx}\n      slots: 2\n      main_cap: {ctx - lane_tokens}\n"
+           f"      source: >-\n        measured: bench/a4000_fit.py (jjava + side calls as its load), written by {MARK}\n")
+    new, n = re.subn(r"\n    window: [^\n]*\n|\n    window:\n(?:      [^\n]*\n|        [^\n]*\n)+", win, blk, count=1)
+    if n != 1:
+        raise ValueError("bonsai-a4000: no window line in the table")
+    return (t[:i0] + new).replace("\n", nl)
+
+
+def edit_table(text: str, ctx: int, vision: bool, lane_tokens: int, np_: int = SLOTS) -> str:
+    """mirai-s's window and vision in mcp/tier_models.yaml (the rest byte-identical). At -np 1 (the gate's lane step
+    measured the lane material) also LOCKED, its jjava and side calls on bonsai-a4000, and no lane in its cap."""
     t, nl = _lf(text)
     i0 = t.index("\n  mirai-s:\n")
     i1 = t.index("\n  flash-next:\n", i0)
     blk = t[i0:i1]
-    win = (f"\n    window:\n      ctx: {ctx}\n      slots: {SLOTS}\n      main_cap: {ctx - lane_tokens}\n"
-           f"      source: >-\n        derived: config.yaml `mirai-s` -c {ctx} (bench/mirai_s_gate.py's fit) -np {SLOTS}"
-           f" --kv-unified,\n        written by {MARK}; the main cap is layout v2's rule (the line less the decider"
-           f" lane,\n        budget.LANE_TOKENS {lane_tokens}) with the line = the whole pool (no tiered KV cache on"
+    lane_c = lane_tokens if np_ >= 2 else 0
+    rule = (f"the main cap is layout v2's rule (the line less the decider lane,\n        budget.LANE_TOKENS "
+            f"{lane_tokens})" if np_ >= 2 else
+            "-np 1 (the gate's lane step: the lane is material), no lane: the main cap\n        is the whole pool")
+    win = (f"\n    window:\n      ctx: {ctx}\n      slots: {np_}\n      main_cap: {ctx - lane_c}\n"
+           f"      source: >-\n        derived: config.yaml `mirai-s` -c {ctx} (bench/mirai_s_gate.py's fit) -np {np_}"
+           f" --kv-unified,\n        written by {MARK}; {rule} with the line = the whole pool (no tiered KV cache on"
            f" this engine)\n")
+    if np_ == 1:
+        old_h = "\n    helpers:\n      decider: self\n      side_calls: self\n"
+        new_h = ("\n    locked: true\n    helpers:\n      decider: bonsai-a4000\n      side_calls: bonsai-a4000\n")
+        if old_h in blk:
+            blk = blk.replace(old_h, new_h, 1)
+        elif new_h not in blk:
+            raise ValueError("mirai-s: its helpers block not found")
     new, n = re.subn(r"\n    window: [^\n]*\n|\n    window:\n(?:      [^\n]*\n|        [^\n]*\n)+", win, blk, count=1)
     if n != 1:
         raise ValueError("mirai-s: no window line in the table")
@@ -261,9 +345,17 @@ def untouched(before: str, after: str) -> list[str]:
                         if ln.strip() and not ln.strip().startswith("#")]
         return m
     bad = [k for k in KEEP if norm((b.get("models") or {}).get(k)) != norm((a.get("models") or {}).get(k))]
+
+    def no_np(m):
+        m = norm(m)
+        m["cmd"] = [ln for ln in m.get("cmd", []) if not ln.startswith("-np ")]
+        return m
+    fb, fa = (b.get("models") or {}).get(LOCKED_ID), (a.get("models") or {}).get(LOCKED_ID)
+    if fb and no_np(fb) != no_np(fa):
+        bad.append(f"{LOCKED_ID} beyond its -np")
     gb = b["routing"]["router"]["settings"]["groups"]
     ga = a["routing"]["router"]["settings"]["groups"]
-    bad += [f"group {g}" for g in set(gb) | set(ga) if g != "primary" and gb.get(g) != ga.get(g)]
+    bad += [f"group {g}" for g in set(gb) | set(ga) if g not in ("primary", "helper") and gb.get(g) != ga.get(g)]
     pb, pa = dict(gb["primary"]), dict(ga["primary"])
     if [m for m in pa.pop("members") if m != MODEL_ID] != pb.pop("members") or pa != pb:
         bad.append("group primary beyond the new member")
@@ -273,8 +365,13 @@ def untouched(before: str, after: str) -> list[str]:
 def planned(values: dict, engine_bin: str) -> tuple[dict, dict]:
     old = {f: read(f) for f in FILES}
     macro, block = fragment(read(FRAGMENT), values, engine_bin)
-    new = {"config.yaml": edit_config(old["config.yaml"], macro, block),
-           TABLE: edit_table(old[TABLE], values["ctx"], values["mmproj"], lane()),
+    cfg = edit_config(old["config.yaml"], macro, block)
+    tbl = edit_table(old[TABLE], values["ctx"], values["mmproj"], lane(), int(values.get("np") or SLOTS))
+    if values.get("a4000_ctx"):
+        cfg = edit_config_a4000(cfg, a4000_block(read(A4000_FRAGMENT), values["a4000_ctx"]))
+        tbl = edit_table_a4000(tbl, values["a4000_ctx"], lane())
+    new = {"config.yaml": cfg,
+           TABLE: tbl,
            "scripts/start-stack.bat": edit_bat(old["scripts/start-stack.bat"]),
            "scripts/watchdog.ps1": edit_watchdog(old["scripts/watchdog.ps1"]),
            "engines/manifest.yaml": edit_engines(old["engines/manifest.yaml"]),
@@ -294,7 +391,21 @@ def selftest() -> int:
             "arms": {"base": {"corrupt": {"greedy": []}, "needles": {"PASS": True}},
                      "mtp": {"corrupt": {"greedy": []}}}}
     v, why = values_from_gate(gate, {})
-    check(not why and v == {"ctx": 98304, "mtp": True, "mmproj": False}, "the gate's window, MTP, no mmproj")
+    check(not why and v == {"ctx": 98304, "mtp": True, "mmproj": False, "np": 2},
+          "the gate's window, MTP, no mmproj; -np 2 when the gate recorded no layout")
+    g1 = dict(gate, layout={"np": 1, "why": "test"}, ctx_deploy=96256)
+    v1, _ = values_from_gate(g1, {})
+    _m1, b1 = fragment(read(FRAGMENT), v1, "C:/x/llama-server.exe")
+    t1 = edit_table(read(TABLE), v1["ctx"], False, 3072, v1["np"])
+    import yaml as _y
+    row1 = _y.safe_load(t1)["models"]["mirai-s"]
+    check(v1["np"] == 1 and v1["ctx"] == 96256 and "\n      -np 1\n" in b1 and "\n      -np 2\n" not in b1
+          and row1.get("locked") is True
+          and row1["helpers"] == {"decider": "bonsai-a4000", "side_calls": "bonsai-a4000"}
+          and row1["window"]["slots"] == 1 and row1["window"]["main_cap"] == 96256
+          and edit_table(t1, v1["ctx"], False, 3072, 1) == t1,
+          "the gate's layout -np 1: the fragment at -np 1, the row LOCKED with bonsai-a4000 helpers, no lane in its "
+          "cap; ctx_deploy wins over ctx_used; idempotent")
     _, why2 = values_from_gate(gate, {"mmproj": True})
     check(any("mmproj" in w for w in why2), "a deploy that differs from the gate's mmproj arm is refused")
     _, why3 = values_from_gate({}, {})
@@ -319,6 +430,19 @@ def selftest() -> int:
         check(False, "a second deploy is refused")
     except ValueError:
         check(True, "a second deploy is refused")
+    ab = a4000_block(read(A4000_FRAGMENT), 65536)
+    new2 = edit_config_a4000(new, ab)
+    y2 = yaml.safe_load(new2)
+    ac = str(y2["models"]["bonsai-a4000"]["cmd"])
+    fl = [ln.strip() for ln in str(y2["models"]["flash-next"]["cmd"]).splitlines()]
+    check("-c 65536" in ac and "GPU-43e37d0c" in str(y2["models"]["bonsai-a4000"]["env"])
+          and y2["routing"]["router"]["settings"]["groups"]["helper"]["members"] == ["bonsai-a4000"]
+          and any(x.startswith("-np 1") for x in fl) and not any(x.startswith("-np 2") or x.startswith("-np 4")
+                                                                 for x in fl),
+          "bonsai-a4000 on the A4000 in its own group; flash-next LOCKED at -np 1")
+    check(not untouched(cfg, new2), "everything else untouched (flash-next beyond its -np, the other groups)")
+    ta = edit_table_a4000(read(TABLE), 65536, 3072)
+    check(yaml.safe_load(ta)["models"]["bonsai-a4000"]["window"]["ctx"] == 65536, "the table: bonsai-a4000's window")
     tb = edit_table(read(TABLE), 98304, False, 3072)
     ty = yaml.safe_load(tb)
     check(ty["models"]["mirai-s"]["window"]["ctx"] == 98304 and ty["models"]["mirai-s"]["window"]["main_cap"] == 95232
@@ -352,6 +476,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--ctx", type=int, help="the window, instead of the gate's fit")
     ap.add_argument("--no-mtp", action="store_true")
     ap.add_argument("--mirai-mmproj", action="store_true", help="its own projector on the 5060 Ti")
+    ap.add_argument("--a4000-fit", help="bench/a4000_fit.py's output directory (fit.json): REQUIRED -- max's "
+                                        "jjava and side calls run on bonsai-a4000 (operator 2026-09-30)")
     ap.add_argument("--preview", action="store_true")
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--selftest", action="store_true")
@@ -367,6 +493,16 @@ def main(argv: list[str]) -> int:
     if not values["mmproj"] and '\n  "bonsai-vision":\n' not in read("config.yaml").replace("\r\n", "\n"):
         why.append("no bonsai-vision entry: vision off the main card needs layout v2 (bench/deploy_layout_v2.py) "
                    "first, or --mirai-mmproj")
+    fit = (json.load(open(os.path.join(a.a4000_fit, "fit.json"), encoding="utf-8"))
+           if a.a4000_fit and os.path.exists(os.path.join(a.a4000_fit, "fit.json")) else {})
+    values["a4000_ctx"] = fit.get("ctx")
+    if not values["a4000_ctx"]:
+        why.append("no bonsai-a4000 window: --a4000-fit DIR with bench/a4000_fit.py's fit.json is required (max is "
+                   "locked: its jjava and side calls run there)")
+    # ORDER (operator, 2026-09-30, "2. Yes": Bonsai's jjava and side calls on bonsai-a4000, its card -np 1): this
+    # deploy comes FIRST -- it brings bonsai-a4000 up -- and bench/deploy_layout_v3.py (-np 1) after it. Bonsai's own
+    # -np is not a precondition: a request for the helper server gets no slot id of the main card
+    # (slots._helper_server_grant), so bonsai-a4000 picks its own slot whatever bonsai runs.
     if why:
         print(json.dumps({"verdict": "REFUSED", "why": why}, indent=1))
         return 2

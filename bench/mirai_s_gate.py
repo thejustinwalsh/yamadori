@@ -13,7 +13,8 @@ Nothing here is a claim: each step MEASURES, and PASS/FAIL is per the rule writt
            GATED_DELTA_NET (its chunked prefill, rollback snapshots) -- plus MUL_MAT for the dense types the file
            carries (q8_0 MTP block, f16, f32). PASS: every case passes on both cards.
   fit      the window is DERIVED FROM TWO MEASUREMENTS, never from the card's claim: the arm launched at -c C1 and at
-           -c C2 (mmproj on the GPU, -np 3 --kv-unified, q8_0 K/V), each warmed with an 8K prompt, a 2K-token ubatch
+           -c C2 (-np 2 --kv-unified, q8_0 K/V; the mmproj
+           on the GPU unless --no-mmproj), each warmed with an 8K prompt, a 2K-token ubatch
            prefill and an image through the mmproj; peak used VRAM from the guard (nvidia-smi, 1 s). bytes per cell =
            (peak2 - peak1) / (C2 - C1); the largest -c whose peak keeps MARGIN_MIB free = the recommendation,
            rounded down to 1,024. Reported (the operator sets -c), with and without MTP.
@@ -33,6 +34,11 @@ Nothing here is a claim: each step MEASURES, and PASS/FAIL is per the rule writt
   needles  5 needles at 1K, 32K and 128K, and at the fitted window when it is larger. PASS: 5/5 at every depth.
   corrupt  engine_corruption.py's run_arm (greedy rep identity, 16 sampled runs scanned for the corruption
            symptoms, 10 tool calls; the image check -- the mmproj is loaded). PASS: its own rules.
+  lane     the jjava lane's three arms (layout v3): main decode tok/s at 8K/32K/64K, n=3, with the lane KEPT,
+           ACTIVE (a burst during the decode) and CLEARED after its burst, and the next burst's re-prefill ms.
+  decider  jjava on Mirai S (operator 2026-09-29), after `api` confirmed logprobs / top_logprobs:
+           bench/decider/measure_model.py and jevbench_run.py against this arm's server (--base-url), their
+           outputs where the Bonsai and Flash-Next runs put theirs (DECIDER_BENCHES). PASS: both exit 0.
   speed    prefill and decode tok/s at 4K / 32K / 64K / 128K, n=3, from llama-server's own timings, the idle-slot
            shape (an idle 64K slot beside an 8K decode), and the card's lowest free VRAM. Arms: base, mtp (3 draft
            tokens, the card's setting), mtp-np1 (the card's exact launch, to set our numbers beside theirs).
@@ -84,7 +90,7 @@ MIRAI_ARGV = [
     "-m", MODEL, "--mmproj", MMPROJ,
     "-dev", "CUDA0", "-ngl", "999",
     "-c", str(CTX_START), "--cache-type-k", "q8_0", "--cache-type-v", "q8_0", "-fa", "on",
-    "-np", "3", "--kv-unified", "-b", "2048", "-ub", "1024",
+    "-np", "2", "--kv-unified", "-b", "2048", "-ub", "1024",   # layout v3: one conversation + the lane
     "--jinja", "--reasoning-format", "deepseek", "--no-context-shift", "--no-cache-idle-slots",
     "--reasoning-budget", "32768",
     "--reasoning-budget-message", "Thinking budget reached. I will stop deliberating and write the final answer now.",
@@ -96,6 +102,14 @@ MTP = {"--spec-type": "draft-mtp", "--spec-draft-n-max": "3"}
 # to second card and swap in and out"; images go to bonsai-vision on the A4000). The fit then measures the window
 # the card holds without it, and the warm and the corruption check skip the image.
 NO_MMPROJ = {"on": False}
+# THE LAYOUT (operator, 2026-09-30, for Bonsai and Flash-Next: a model whose jjava lane MATERIALLY slows its decode
+# runs -np 1, its jjava and side calls on bonsai-a4000; coordinator 2026-10-01: Mirai S "measured at the layout the
+# operator's rules imply"). LAYOUT["np"] is set by main() from the lane step (run FIRST, at -np 2): ACTIVE material
+# at any depth -> 1, else 2. Every later arm (fit, api, decider, needles, corrupt, speed) runs at it.
+LAYOUT = {"np": 2, "why": "default (-np 2: the conversation + the lane) until the lane step decides"}
+# THE WINDOW IS THE 5060 Ti ONLY (coordinator 2026-10-01: "The Flash-Next agent is on the A4000"): --card-only
+# runs the kernel cases on the 5060 Ti alone (CUDA_VISIBLE_DEVICES = its UUID), never the A4000.
+CARD_ONLY = {"on": False}
 
 
 def argv() -> list[str]:
@@ -113,6 +127,11 @@ def argv() -> list[str]:
     return out
 
 
+# main()'s own parameter is named `argv`: the arms' command is reached there by this name (2026-10-01: the corrupt
+# step called the list)
+_argv = argv
+
+
 def engine_bin() -> str:
     env = os.environ.get("MIRAI_BIN")
     if env:
@@ -124,9 +143,9 @@ def engine_bin() -> str:
     return os.path.dirname(p)
 
 
-def arms(ctx: int = CTX_START) -> dict[str, dict]:
-    """name -> {env, args, checks}."""
-    c = {"-c": str(ctx)}
+def arms(ctx: int = CTX_START, np_: int | None = None) -> dict[str, dict]:
+    """name -> {env, args, checks}. `np_` (LAYOUT["np"] by default): -np for every arm but mtp-np1."""
+    c = {"-c": str(ctx), "-np": str(np_ or LAYOUT["np"])}
     table = {
         "base":    {"env": {}, "args": c, "checks": ["api", "needles", "corrupt", "speed"]},
         "mtp":     {"env": {}, "args": {**c, **MTP}, "checks": ["corrupt", "speed"]},
@@ -158,6 +177,21 @@ def derive_fit(points: list[tuple[int, int]], total_mib: int, margin_mib: int = 
             "total_mib": total_mib, "margin_mib": margin_mib, "max_ctx": max_ctx}
 
 
+# The repository text runs denser than the 4 characters a token the prompts are cut by: the 2026-10-01 gate's
+# "131,072-token" needle was 140,551 tokens (bench/results/mirai_s/gate-20261001/base.server.log) -- 1.0723x. A
+# depth is kept only when it fits the window at that measured ratio plus 8% (TOKENS_PER_EST), with the answer's room.
+TOKENS_PER_EST = 1.08
+
+
+def fits(depth_tokens: int, ctx: int | None, answer: int) -> bool:
+    return not ctx or depth_tokens * TOKENS_PER_EST + answer + 512 <= ctx
+
+
+def cap_depth(ctx: int, answer: int) -> int:
+    """The deepest estimated depth (whole 1,024s) that fits `ctx` (fits())."""
+    return int((ctx - answer - 512) / TOKENS_PER_EST) // 1024 * 1024
+
+
 def needle_prompt(depth_tokens: int, key: str, filler: str) -> str:
     """~depth_tokens of repository text with one sentence holding `key` in the middle (4 chars ~ 1 token)."""
     body = filler[: depth_tokens * 4]
@@ -176,16 +210,24 @@ def step_kernels(out: str) -> dict:
     exe = os.path.join(engine_bin(), "test-backend-ops.exe")
     rec: dict = {}
     runs = [(op, None) for op in KERNEL_OPS] + [("MUL_MAT", f"type_a={t}") for t in MUL_MAT_TYPES]
-    for dev in ("CUDA0", "CUDA1"):
+    env = None
+    devs = ("CUDA0", "CUDA1")
+    if CARD_ONLY["on"]:
+        # the 5060 Ti alone: the only CUDA device the process can see is CUDA0
+        env = dict(os.environ, CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=ec.CARD_UUID)
+        devs = ("CUDA0",)
+        rec["devices"] = {"CUDA0": f"{ec.CARD_NAME} ({ec.CARD_UUID}) only: --card-only (the A4000 is another "
+                                   "agent's window)"}
+    for dev in devs:
         for op, params in runs:
             key = f"{dev}/{op}" + (f"/{params}" if params else "")
             cmd = [exe, "test", "-o", op, "-b", dev] + (["-p", params] if params else [])
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, env=env)
             m = re.search(r"(\d+)/(\d+) tests passed", r.stdout)
             rec[key] = {"passed": int(m.group(1)), "total": int(m.group(2))} if m else {"error": r.stdout[-400:]}
             ec.log(f"kernels {key}: {rec[key]}")
     rec["PASS"] = all(v.get("total") and v.get("passed") == v.get("total")
-                      for v in rec.values() if isinstance(v, dict))
+                      for k, v in rec.items() if isinstance(v, dict) and k != "devices")
     json.dump(rec, open(os.path.join(out, "kernels.json"), "w"), indent=1)
     return rec
 
@@ -243,7 +285,7 @@ def warm(base: str, port: int) -> None:
     """The fit's worst case short of a full window: an 8K prompt, a 2K prompt read in ubatches, an image."""
     text = corpus()
     completion(base, text[: 8192 * 4], 64, slot=0)
-    completion(base, text[50_000: 50_000 + 2048 * 4], 16, slot=1)
+    completion(base, text[50_000: 50_000 + 2048 * 4], 16, slot=min(1, LAYOUT["np"] - 1))
     if NO_MMPROJ["on"]:
         return
     import base64
@@ -302,11 +344,12 @@ def step_api(port: int, arm: dict, out: str) -> dict:
                                                                         if st == 200 else txt[:300])}
         st, txt = ec.http("POST", b + "/tokenize", {"content": "Hello world", "with_pieces": True})
         rec["tokenize"] = {"status": st, "body": txt[:300]}
-        r = completion(b, "The quick brown fox", 0, slot=1)
+        lane = min(1, LAYOUT["np"] - 1)          # the lane at -np 2; the one slot at -np 1
+        r = completion(b, "The quick brown fox", 0, slot=lane)
         rec["completion_n0"] = r
         st, txt = ec.http("GET", b + "/slots")
         rec["slots"] = {"status": st, "n": len(json.loads(txt)) if st == 200 else None}
-        st, txt = ec.http("POST", b + "/slots/1?action=erase", {})
+        st, txt = ec.http("POST", b + f"/slots/{lane}?action=erase", {})
         rec["erase"] = {"status": st, "body": txt[:200], "fallback_needed": st == 501}
         body = {"model": "x", "messages": [{"role": "user", "content": "Say one word."}], "max_tokens": 1024,
                 "logprobs": True, "top_logprobs": 5, "reasoning_budget_tokens": 64,
@@ -320,7 +363,7 @@ def step_api(port: int, arm: dict, out: str) -> dict:
                        "top_logprobs_n": len((lp[0] or {}).get("top_logprobs") or []) if lp else 0,
                        "reasoning_chars": len((ch.get("message") or {}).get("reasoning_content") or ""),
                        "content": ((ch.get("message") or {}).get("content") or "")[:120], "body": txt[:200]}
-        again = completion(b, "The quick brown fox jumps", 0, slot=1)
+        again = completion(b, "The quick brown fox jumps", 0, slot=lane)
         rec["cache_n_after_extend"] = again.get("cache_n")
         rec["PASS"] = all([rec["props"]["status"] == 200, rec["tokenize"]["status"] == 200,
                            rec["slots"]["status"] == 200, rec["chat"]["status"] == 200,
@@ -329,6 +372,101 @@ def step_api(port: int, arm: dict, out: str) -> dict:
                            all(v["status"] == 200 for k, v in rec["apply_template"].items()
                                if k in ("low", "medium", "xhigh")),
                            rec["erase"]["status"] in (200, 501)])
+    finally:
+        rec.update(srv.stop())
+    return rec
+
+
+# JJAVA ON MIRAI S (operator, 2026-09-29: "Jjava should run on all models, every model should have the jjava
+# unlock"). The same three benches, the same output layout as the Bonsai and Flash-Next runs, so the three compare:
+#   bench/decider/measure_model.py --run --model mirai-s --base-url ...   -> results/models/mirai-s.json (labels,
+#       letter_prior, label_bias, tie_band, and legacy_vs_typed as its last part -> results/legacy_vs_typed.mirai-s.json)
+#   bench/decider/jevbench_run.py --run --model mirai-s --base-url ...    -> results/jevbench/<run>/ (the 231 public
+#       items of the clone at jevbench@bb05a335)
+# legacy_vs_typed.py is NOT run a second time: measure_model.py runs it as its last part and files its summary.
+# The runtime then reads results/models/mirai-s.json for every request mirai-s serves (decider_bonsai.profile keys by
+# max_mode.current(), the tier table's model). Only after the api step confirmed logprobs / top_logprobs.
+DECIDER_BENCHES = [
+    ["bench/decider/measure_model.py", "--run", "--model", "mirai-s"],
+    ["bench/decider/jevbench_run.py", "--run", "--model", "mirai-s"],
+]
+
+
+def step_decider(port: int, arm: dict, out: str) -> dict:
+    srv = Launched("decider", arm, port, out)
+    rec: dict = {"load_s": srv.load_s, "runs": []}
+    try:
+        for cmd in DECIDER_BENCHES:
+            full = [sys.executable, "-X", "utf8"] + cmd + ["--base-url", srv.base]
+            t0 = time.time()
+            logp = os.path.join(out, os.path.basename(cmd[0]).replace(".py", ".mirai-s.log"))
+            with open(logp, "w", encoding="utf-8") as lf:
+                r = subprocess.run(full, cwd=ROOT, stdout=lf, stderr=subprocess.STDOUT, timeout=6 * 3600)
+            rec["runs"].append({"cmd": " ".join(cmd + ["--base-url", srv.base]), "exit": r.returncode,
+                                "seconds": round(time.time() - t0, 1), "log": logp})
+            ec.log(f"decider {cmd[0]}: exit {r.returncode} in {rec['runs'][-1]['seconds']} s")
+            if r.returncode in (2, 3):          # the benches' NOT RUN: busy / unreachable -- stop, never a result
+                break
+    finally:
+        rec.update(srv.stop())
+    rec["PASS"] = all(x["exit"] == 0 for x in rec["runs"]) and len(rec["runs"]) == len(DECIDER_BENCHES)
+    return rec
+
+
+def step_lane(port: int, arm: dict, out: str) -> dict:
+    """THE LANE'S THREE ARMS on Mirai S (layout v3; the same step as bench/kv_rank.py --layout v3 lane3 for Bonsai):
+    main's decode tok/s on slot 0 at 8K / 32K / 64K (n=3 each) with the lane (slot 1) KEPT idle with a decider
+    state above the conversation's cells, ACTIVE (a 10-read burst during the decode) and CLEARED after its burst,
+    plus the next burst's re-prefill ms."""
+    import threading
+    srv = Launched("lane", arm, port, out)
+    rec: dict = {"load_s": srv.load_s}
+    lane_tokens = 3072                         # budget.LANE_TOKENS
+    try:
+        text = corpus()
+        state = text[-(lane_tokens - 64) * 4:]
+
+        def one(slot, prompt, n):
+            return completion(srv.base, prompt, n, slot=slot)
+
+        def burst():
+            t0 = time.time()
+            for _ in range(10):
+                one(1, state, 0)
+            return round((time.time() - t0) * 1000, 1)
+
+        def clear_lane():
+            one(1, "x", 0)
+        for k in (8, 32, 64):
+            convo = text[: k * 1024 * 4]
+            row = {"kept": [], "active": [], "cleared": [], "reprefill_ms": [], "burst_ms": []}
+            one(0, convo, 0)
+            one(1, state, 0)
+            for _ in range(3):
+                row["kept"].append(one(0, convo, 256)["tps"])
+            for _ in range(3):
+                got: list = []
+                th = threading.Thread(target=lambda: got.append(burst()))
+                th.start()
+                row["active"].append(one(0, convo, 256)["tps"])
+                th.join()
+                row["burst_ms"].append(got[0] if got else None)
+            for _ in range(3):
+                burst()
+                clear_lane()
+                row["cleared"].append(one(0, convo, 256)["tps"])
+                t0 = time.time()
+                one(1, state, 0)
+                row["reprefill_ms"].append(round((time.time() - t0) * 1000, 1))
+                clear_lane()
+            med = {a_: (sorted(v)[1] if len(v) == 3 and None not in v else None)
+                   for a_, v in (("kept", row["kept"]), ("active", row["active"]), ("cleared", row["cleared"]))}
+            cmin = min((x for x in row["cleared"] if x), default=None)
+            row["median_tps"] = med
+            row["material"] = {a_: (med[a_] is not None and cmin is not None and med[a_] < cmin)
+                               for a_ in ("kept", "active")}
+            rec[f"{k}k"] = row
+            ec.log(f"lane {k}k: kept {med['kept']} active {med['active']} cleared {med['cleared']} tok/s")
     finally:
         rec.update(srv.stop())
     return rec
@@ -376,14 +514,23 @@ def step_needles(name: str, arm: dict, port: int, out: str, fitted: int | None) 
     rec: dict = {}
     try:
         text = corpus()
-        depths = [1024, 32768, 131072] + ([fitted - 8192] if fitted and fitted - 8192 > 131072 else [])
+        want = [1024, 32768, 131072] + ([fitted - 8192] if fitted and fitted - 8192 > 131072 else [])
+        depths = [d for d in want if fits(d, fitted, 4096)]
+        if fitted and cap_depth(fitted, 4096) not in depths and cap_depth(fitted, 4096) > max(depths or [0]):
+            depths.append(cap_depth(fitted, 4096))           # the deepest that fits the window: the window's own end
+        rec["depths"] = depths
+        rec["skipped_depths"] = [d for d in want if d not in depths]
         for depth in depths:
             ok = 0
             for i in range(5):
                 key = hashlib.sha256(f"{depth}-{i}".encode()).hexdigest()[:8].upper()
-                r = ec.Server(port).chat([{"role": "user", "content": needle_prompt(depth, key, text[i * 997:])}],
-                                         max_tokens=4096, thinking=True,
-                                         sampling={"temperature": 0.0, "top_k": 1}, seed=0)
+                try:
+                    r = ec.Server(port).chat([{"role": "user", "content": needle_prompt(depth, key, text[i * 997:])}],
+                                             max_tokens=4096, thinking=True,
+                                             sampling={"temperature": 0.0, "top_k": 1}, seed=0)
+                except RuntimeError as e:
+                    rec[f"{depth}-{i}"] = {"hit": False, "error": str(e)[:200]}
+                    continue
                 ans = r["choices"][0]["message"].get("content") or ""
                 ok += key in ans
                 rec[f"{depth}-{i}"] = {"hit": key in ans, "answer": ans[:80]}
@@ -397,10 +544,15 @@ def step_needles(name: str, arm: dict, port: int, out: str, fitted: int | None) 
 def step_speed(name: str, arm: dict, port: int, out: str) -> dict:
     srv = Launched(name, arm, port, out)
     rec: dict = {"load_s": srv.load_s}
-    np_ = int(arm["args"].get("-np", "3"))
+    np_ = int(arm["args"].get("-np", "2"))
+    ctx = int(arm["args"].get("-c") or 0) or None
+    ks = [k for k in (4, 32, 64, 128) if fits(k * 1024, ctx, 256)]
+    if ctx and 128 not in ks:
+        ks.append(cap_depth(ctx, 256) // 1024)                # the deepest that fits, in place of 128K
+    rec["depths_k"] = ks
     try:
         text = corpus()
-        for k in (4, 32, 64, 128):
+        for k in ks:
             runs = []
             for rep in range(3):
                 prompt = text[rep * 4096: rep * 4096 + k * 1024 * 4]
@@ -454,6 +606,49 @@ def selftest() -> int:
     return 1 if fails else 0
 
 
+class StopWindow(Exception):
+    """A STOP-WINDOW check between stages said stop: production is restored in main()'s finally."""
+
+
+STACK_LOG = os.path.join(ROOT, "logs", "stack.log")
+# What llama-swap logs for a GENERATION the proxy sends (a client turn, or anything it runs for one): a POST for a
+# completion, or a POST to the main card's model. GETs are not counted -- the watchdog's /upstream/bonsai/health
+# polls every 5 minutes. (The gate's own arms run their own llama-server on --port, never through llama-swap.)
+CLIENT_RE = re.compile(r'"POST (?:/v1/(?:chat/)?completions|/v1/responses|/v1/messages|'
+                       r'/upstream/(?:bonsai|bonsai-agent)/)')
+_LOG_AT = {"offset": None}
+
+
+def stop_reason(out: str, t_start: float) -> str | None:
+    """Between stages (coordinator 2026-10-01): a STOP-WINDOW file (in --out or the repo root: the coordinator's or
+    main's signal), or a client request since the window started -- llama-swap's own log (logs/stack.log) shows a
+    request for the main card's model after the window began (read from the offset recorded at its start), or the
+    corpus's newest client event (mcp/idle.py last_request_at, read-only) is newer than the start -> why to stop;
+    None to go on."""
+    for f in (os.path.join(out, "STOP-WINDOW"), os.path.join(ROOT, "STOP-WINDOW")):
+        if os.path.exists(f):
+            return f"STOP-WINDOW file: {f}"
+    try:
+        if _LOG_AT["offset"] is not None and os.path.exists(STACK_LOG):
+            with open(STACK_LOG, "rb") as f:
+                f.seek(_LOG_AT["offset"])
+                new = f.read().decode("utf-8", "replace")
+            hit = next((ln for ln in new.splitlines() if CLIENT_RE.search(ln)), None)
+            if hit:
+                return f"a request for the main card's model reached llama-swap: {hit.strip()[:200]}"
+    except OSError as e:
+        ec.log(f"stop check: {STACK_LOG} could not be read ({e}); going on")
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "mcp"))
+        import idle                                                  # noqa: E402
+        at, _how = idle.last_request_at()
+        if at and at > t_start:
+            return f"a client request arrived at {time.strftime('%H:%M:%S', time.localtime(at))}"
+    except Exception as e:                                           # noqa: BLE001
+        ec.log(f"stop check: the corpus could not be read ({type(e).__name__}: {e}); going on")
+    return None
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--window", action="store_true")
@@ -462,16 +657,24 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out")
     ap.add_argument("--port", type=int, default=18096)
     ap.add_argument("--steps", nargs="*",
-                    default=["kernels", "fit", "api", "switches", "align", "needles", "corrupt", "speed"])
+                    default=["kernels", "fit", "api", "lane", "decider", "switches", "align", "needles", "corrupt",
+                             "speed"])
     ap.add_argument("--arms", nargs="*")
     ap.add_argument("--no-mmproj", action="store_true",
                     help="every arm without the projector (images on bonsai-vision, the A4000)")
     ap.add_argument("--ctx", type=int, help="the -c for every arm (default: the fit step's max_ctx, else "
                                             f"{CTX_START})")
+    ap.add_argument("--card-only", action="store_true",
+                    help="the window is the 5060 Ti alone: kernel cases on it only, never the A4000")
+    ap.add_argument("--np", type=int, choices=(1, 2),
+                    help="force the layout (default: the lane step decides; -np 2 without it)")
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
     NO_MMPROJ["on"] = bool(a.no_mmproj)
+    CARD_ONLY["on"] = bool(a.card_only)
+    if a.np:
+        LAYOUT.update(np=a.np, why=f"--np {a.np}")
     table = arms(a.ctx or CTX_START)
     names = a.arms or list(table)
     if a.dry_run:
@@ -492,24 +695,70 @@ def main(argv: list[str]) -> int:
     def save():
         json.dump(results, open(os.path.join(a.out, "gate.json"), "w"), indent=1)
 
+    # the main card's gpu lane is held FIRST (a job already running finishes; no new one starts while the stack
+    # quiets), then the quiet wait; released at every exit
+    sys.path.insert(0, os.path.join(ROOT, "mcp"))
+    lane_hold = ec.hold_lane("Mirai S gate (bench/mirai_s_gate.py)", 12 * 3600)
+    results["lane_hold"] = lane_hold
+    save()
+    # a gpu job already running on the main card (a skill prove's several generations) finishes first: its next
+    # generation would otherwise reach llama-swap mid-window and load bonsai beside the arm
+    import jobs                                                      # noqa: E402
+    t_jobs = time.time()
+    while jobs.running("gpu") and time.time() - t_jobs < 3600:
+        ec.log(f"waiting: {jobs.running('gpu')} gpu job(s) running on the main card")
+        time.sleep(20)
     why = ec.wait_quiet(prod_argv, 3600)
+    if not why and jobs.running("gpu"):
+        why = f"{jobs.running('gpu')} gpu job(s) still running on the main card after 3,600 s"
     if why:
+        results["lane"] = ec.release_lane(lane_hold)
+        results["not_run"] = why
+        save()
         print(f"not run: {why}")
         return 3
-    sys.path.insert(0, os.path.join(ROOT, "mcp"))
-    import jobs                                                        # noqa: E402
+    t_start = time.time()
+    _LOG_AT["offset"] = os.path.getsize(STACK_LOG) if os.path.exists(STACK_LOG) else None
+
+    def gate(stage: str) -> None:
+        why_stop = stop_reason(a.out, t_start)
+        if why_stop:
+            results["stopped"] = {"before": stage, "why": why_stop, "at": time.strftime("%H:%M:%S")}
+            ec.log(f"STOP before {stage}: {why_stop}")
+            raise StopWindow(why_stop)
     try:
-        jobs.pause("gpu", by=ec.LANE_BY, why="Mirai S gate (bench/mirai_s_gate.py)", ttl_seconds=6 * 3600)
         ec.http("POST", f"{ec.SWAP}/api/models/unload/{ec.PROD_ID}", timeout=120)
         t0 = time.time()
         while ec.PROD_ID in ec.running() or any("llama-server" in p for p in ec.card_pids()):
             if time.time() - t0 > 180:
                 raise RuntimeError("bonsai did not leave the card in 180 s")
             time.sleep(2)
+        if "lane" in a.steps:
+            # FIRST, at -np 2 (the lane needs its slot): it decides the layout every later arm runs at
+            # ("lane3": results["lane"] is the gpu-lane hold's record, ec.release_lane)
+            gate("lane")
+            results["lane3"] = step_lane(a.port, dict(table["base"], args={**table["base"]["args"], "-np": "2"}),
+                                         a.out)
+            if not a.np:
+                mat = {k: (results["lane3"].get(k) or {}).get("material") or {} for k in ("8k", "32k", "64k")}
+                active = [k for k, m in mat.items() if m.get("active")]
+                if active:
+                    LAYOUT.update(np=1, why=f"the lane is MATERIAL (ACTIVE below CLEARED's minimum at {active}): "
+                                            "-np 1, jjava and side calls on bonsai-a4000 (the operator's rule for "
+                                            "Bonsai and Flash-Next, 2026-09-30)")
+                else:
+                    LAYOUT.update(np=2, why="the lane is not material at any depth: -np 2 (the conversation + "
+                                            "the lane)")
+                table = arms(a.ctx or CTX_START)
+            results["layout"] = dict(LAYOUT)
+            ec.log(f"layout: -np {LAYOUT['np']} ({LAYOUT['why']})")
+            save()
         if "kernels" in a.steps:
+            gate("kernels")
             results["kernels"] = step_kernels(a.out)
             save()
         if "fit" in a.steps:
+            gate("fit")
             results["fit"] = {"base": step_fit("base", table["base"], a.port, a.out),
                               "mtp": step_fit("mtp", table["mtp"], a.port, a.out)}
             save()
@@ -519,12 +768,24 @@ def main(argv: list[str]) -> int:
                 if d:
                     table = arms(min(d))      # one window for every arm: the smaller (MTP holds more)
                     results["ctx_used"] = min(d)
+            results["fit"]["np"] = LAYOUT["np"]
         fitted = results.get("ctx_used") or a.ctx
         if "api" in a.steps:
+            gate("api")
             results["api"] = step_api(a.port, table["base"], a.out)
+            save()
+        if "decider" in a.steps:
+            gate("decider")
+            api = results.get("api") or {}
+            if (api.get("chat") or {}).get("has_logprobs") and (api.get("chat") or {}).get("top_logprobs_n", 0) >= 5:
+                results["decider"] = step_decider(a.port, table["base"], a.out)
+            else:
+                results["decider"] = {"PASS": False, "not_run": "the api step did not confirm logprobs / "
+                                                                "top_logprobs (run it first: --steps api decider)"}
             save()
         base_greedy = None
         if "switches" in a.steps:
+            gate("switches")
             r = step_switches("switch-base", table["base"], a.port, a.out, None)
             results["switches"] = {"base": r}
             base_greedy = {k: r[f"{k}k"]["greedy_sha256"] for k in (8, 32)}
@@ -532,31 +793,39 @@ def main(argv: list[str]) -> int:
         for n in names:
             arm, r = table[n], results["arms"].setdefault(n, {})
             if "switches" in a.steps and "switches" in arm["checks"]:
+                gate(f"{n} switches")
                 r["switches"] = step_switches(n, arm, a.port, a.out, base_greedy)
                 save()
             if "align" in a.steps and "align" in arm["checks"]:
+                gate(f"{n} align")
                 r["align"] = step_align(n, arm, a.port, a.out)
                 results["arms"].setdefault("base", {})["align"] = step_align("align-base", table["base"],
                                                                              a.port, a.out)
                 save()
             if "needles" in a.steps and "needles" in arm["checks"]:
+                gate(f"{n} needles")
                 r["needles"] = step_needles(n, arm, a.port, a.out, fitted)
                 save()
             if "corrupt" in a.steps and "corrupt" in arm["checks"]:
+                gate(f"{n} corrupt")
                 ec.VISION["on"] = not NO_MMPROJ["on"]
                 r["corrupt"] = ec.run_arm(n, os.path.join(engine_bin(), "llama-server.exe"), arm["env"],
-                                          argv(), {"CUDA_VISIBLE_DEVICES": ec.CARD_UUID}, a.port, a.out,
+                                          _argv(), {"CUDA_VISIBLE_DEVICES": ec.CARD_UUID}, a.port, a.out,
                                           3, 16, 10, arm["args"])
                 save()
             if "speed" in a.steps and "speed" in arm["checks"]:
+                gate(f"{n} speed")
                 r["speed"] = step_speed(n, arm, a.port, a.out)
                 save()
+    except StopWindow:
+        pass
     finally:
         results["restore"] = ec.restore(prod_argv)
+        results["lane"] = ec.release_lane(lane_hold)
         results["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         save()
     print(json.dumps({k: (v.get("PASS") if isinstance(v, dict) else v)
-                      for k, v in results.items() if k in ("kernels", "api")}, indent=1))
+                      for k, v in results.items() if k in ("kernels", "api", "decider")}, indent=1))
     return 0
 
 

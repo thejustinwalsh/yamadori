@@ -11,21 +11,19 @@
 // in pose.ts, and are not part of the determinism contract.
 import { mulberry32, substream } from './prng';
 
-export const SKELETON_VERSION = 1;
-
-/** high/max tiers fan out 3 (/dash/api/tiers); the superset holds that many. */
-export const MAX_FANOUT = 3;
+// 2: the fan-out limb slots went with fan-out (2026-09-29); the main and
+// child limbs, the roots and the trunk grow exactly as they did in 1.
+export const SKELETON_VERSION = 2;
 
 export type Kind = 'root' | 'trunk' | 'limb' | 'branch' | 'twig';
 
 /**
  * Limb slots. The trunk forks into the MAIN limb (the conversation's KV
- * budget) and the THINKING limb (the deep-thinking budget). Fan-out samples
- * are limbs from the same fork: sample 0 IS the main limb, samples 1..N-1
- * are the FANOUT slots.
+ * budget) and the CHILD limb (the child slot's KV budget: the decider lane
+ * since layout v2, budget.child()).
  */
-export const LIMB = { none: -1, main: 0, thinking: 1, fanout1: 2, fanout2: 3 } as const;
-export const LIMB_COUNT = 4;
+export const LIMB = { none: -1, main: 0, child: 1 } as const;
+export const LIMB_COUNT = 2;
 
 export type Branch = {
   id: number;
@@ -68,17 +66,11 @@ type Rng = () => number;
 const range = (r: Rng, lo: number, hi: number) => lo + (hi - lo) * r();
 
 /**
- * Limb seeds from the known concept words. `seeds[0]` is the main seed (the
- * vitals `seed.u32`). Slots with no word of their own get a substream of the
- * main seed -- deterministic, and labelled as derived by the caller.
+ * Limb seeds from the concept word. `seeds[0]` is the main seed (the vitals
+ * `seed.u32`); the child limb gets a substream of it -- deterministic.
  */
-export function limbSeeds(main: number, fanoutSeeds: number[] = []): number[] {
-  return [
-    main >>> 0,
-    substream(main, 1),
-    (fanoutSeeds[0] ?? substream(main, 2)) >>> 0,
-    (fanoutSeeds[1] ?? substream(main, 3)) >>> 0,
-  ];
+export function limbSeeds(main: number): number[] {
+  return [main >>> 0, substream(main, 1)];
 }
 
 export function growSkeleton(seeds: number[]): Skeleton {
@@ -144,14 +136,11 @@ export function growSkeleton(seeds: number[]): Skeleton {
 
   // --- limbs: each from its own seed -------------------------------------
   // The fork sits low on the trunk, as a bonsai's first branch does. Main
-  // leaves one side, thinking the other side a segment higher; fan-out
-  // samples are siblings of main from the same fork.
+  // leaves one side, the child the other side a segment higher.
   const forkYaw = range(base, 0, TAU);
   const slots = [
     { seg: 1, attach: 0.85, yaw: 0, r: 0.62 },
     { seg: 2, attach: 0.8, yaw: 3.141593, r: 0.66 },
-    { seg: 1, attach: 0.85, yaw: 1.4, r: 0.52 },
-    { seg: 1, attach: 0.85, yaw: -1.4, r: 0.52 },
   ];
   for (let limb = 0; limb < LIMB_COUNT; limb++) {
     const r = mulberry32(seeds[limb]!);

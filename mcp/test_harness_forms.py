@@ -7,12 +7,13 @@ template. No GPU, nothing live.
 WHAT THIS GATES (docs/HARNESS-PI.md, docs/HARNESS-OPENCODE.md, 2026-09-26):
 
   1. THE `developer` ROLE. Pi sends its instructions as `developer` when a
-     model has `reasoning: true`. The addendum (high and up) used to put a
-     SECOND system message in front of it; the template raised "System
-     message must be at the beginning" and the proxy answered 502, which Pi
-     retried three times. Now: one system message, `developer` mapped on the
-     way in, every turn alike (the prefix extends); a template refusal is a
-     400 `invalid_prompt`, never a 5xx.
+     model has `reasoning: true`. The addendum (high and up; removed
+     2026-09-29) used to put a SECOND system message in front of it; the
+     template raised "System message must be at the beginning" and the
+     proxy answered 502, which Pi retried three times. Now: one system
+     message, `developer` mapped on the way in (system_roles.one_system, so
+     any system text of ours joins it), every turn alike (the prefix
+     extends); a template refusal is a 400 `invalid_prompt`, never a 5xx.
   2. COMPACTION FORMS. Pi's `<conversation>` / `# Conversation` summaries and
      OpenCode's "Here is the conversation so far:" are recognised, mapped
      onto the stored conversation (its prompt, extended), and think at the
@@ -259,12 +260,12 @@ LOOKED = "A red square centred on white, with the white text PI-TEST."
 _real_run_our_tool = proxy.run_our_tool
 
 
-def _run_our_tool(name, args, db, root=None, turn=None, state=None):
+def _run_our_tool(name, args, state=None):
     if name == "yama_describe_image":
         if state is not None:
             state.setdefault("_vision", []).append({"ok": True})
         return json.dumps({"ok": True, "answer": LOOKED})
-    return _real_run_our_tool(name, args, db, root, turn, state)
+    return _real_run_our_tool(name, args, state)
 
 
 proxy.run_our_tool = _run_our_tool
@@ -342,8 +343,7 @@ class Client:
              "_client_ip": "127.0.0.1", "tools": self.tools,
              "messages": json.loads(json.dumps(self.msgs)),
              "_features": json.dumps(dict(
-                 {"skills": False, "investigate": False, "fanout": 1,
-                  "retrieval": False}, **self.features))}
+                 {"skills": False}, **self.features))}
         if self.effort:
             b["reasoning_effort"] = self.effort
         if self.key:
@@ -465,10 +465,9 @@ def test_the_developer_role():
         roles = [m.get("role") for m in up]
         check(d is not None and not _refused and roles[:1] == ["system"]
               and roles.count("system") == 1 and "developer" not in roles
-              and up[0]["content"].startswith(PI_SYSTEM)
-              and "A second model works beside you" in up[0]["content"],
-              f"{effort}: Pi's `developer` message is THE system message, "
-              f"the addendum at its end -- one system message, rendered",
+              and up[0]["content"].startswith(PI_SYSTEM),
+              f"{effort}: Pi's `developer` message is THE system message -- "
+              f"one system message, rendered",
               f"err={err!r} refused={_refused} roles={roles}")
         _refused.clear()
     # The same conversation over two turns: the second extends the first.
@@ -483,7 +482,7 @@ def test_the_developer_role():
     check((x.get("roles") or {}).get("merged") == 1,
           "x_yamadori.roles records the mapping (system_roles.one_system's "
           "record)", json.dumps(x.get("roles")))
-    # medium (no addendum): still mapped, the same rendering as `system`.
+    # medium: still mapped, the same rendering as `system`.
     _reset()
     c = Client("medium")
     t = c.turn([reply("Eight.")], user="What is 4+4?")
@@ -517,15 +516,6 @@ def test_the_developer_role():
             {"role": "user", "content": "hi"}]
     check(proxy.system_roles.one_system(same)[0] is same,
           "a request with one system message comes back as the same list")
-    # add_addendum on a developer message with list content.
-    out = proxy.add_addendum([{"role": "developer", "content": [
-        {"type": "text", "text": "Rules."}]},
-        {"role": "user", "content": "hi"}])
-    check(len(out) == 2 and out[0]["role"] == "system"
-          and out[0]["content"][-1]["text"] == proxy.addendum_text(),
-          "add_addendum: a developer message's list content gets the "
-          "addendum as its last text part, no second system message",
-          json.dumps(out)[:300])
 
 
 def test_a_template_refusal_is_a_400():
@@ -799,8 +789,9 @@ def test_the_cache_after_a_hidden_describe_image_hop():
     # AN ECHOING CLIENT WHOSE HOPS RAN ON ITS FIRST REQUEST (deploy check
     # 2026-09-27, h5). On a conversation's first request the proxy can only
     # GUESS whether the client echoes (_echo_guess: the account's history;
-    # a fresh account guesses "strips"), and the kickoff's inserted
-    # yama_plan hop always sits on that request. The hop echo was recorded
+    # a fresh account guesses "strips"), and then the kickoff's inserted
+    # yama_plan hop always sat on that request (the kickoff went 2026-09-29;
+    # a look at an attached image still does). The hop echo was recorded
     # only when the guess said "echoes", so the reasoning the client was
     # shown (the hops' and the answer's, run together; live: the planner's
     # 9,544 characters against the slot's 67) came back as the turn's own
@@ -830,8 +821,8 @@ def test_the_cache_after_a_hidden_describe_image_hop():
     e.tool_result("Successfully wrote to c.html")
     t2 = e.turn([reply("Done.", reasoning="Done.")], stream=True)
     _extends_fully(t1, t2, "an echoing client whose hidden hop ran on its "
-                           "FIRST request (the kickoff's place): the next "
-                           "request extends the slot")
+                           "FIRST request: the next request extends the "
+                           "slot")
     x2 = t2["d"].get("x_yamadori") or {}
     check(((x2.get("ledger") or {}).get("restored") or {})
           .get("hop_reasoning") == 1,
@@ -894,8 +885,7 @@ def test_a_text_parts_user_turn_gets_its_injection():
     try:
         c = Client("medium", key="pis1")
         c.tools = PI_TOOLS
-        body_feats = {"skills": True, "investigate": False, "fanout": 1,
-                      "retrieval": False}
+        body_feats = {"skills": True}
         c.body_feats = body_feats
         c.msgs.append({"role": "user", "content": [
             {"type": "text", "text": "Fix the export in js/audio.js so "

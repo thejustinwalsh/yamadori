@@ -521,17 +521,44 @@ def summary(recs: list[dict]) -> str:
 
 
 # -------------------------------------------------------------- restore ----
-def restore(prod_argv: list[str]) -> dict:
-    rec: dict = {}
+def hold_lane(why: str, ttl_seconds: float, lane: str = "gpu") -> dict:
+    """The worker's gpu lane, paused for a WHOLE window (every arm of a gate run, however many restores of
+    production happen between them), until release_lane() at the run's final exit. 2026-09-29: restore()
+    resumed the lane after every arm, the worker saw an idle stack between arms and put an idle-gated skill
+    PROVE job on the card, which kept the next arm waiting (the coordinator's fix). A live pause someone else
+    holds (the window's owner: an agent granted the card) is kept as it is, never overwritten or released.
+    `lane`: the CARD the window uses (mcp/jobs.py GPU_SCOPES, 2026-09-30): "gpu" the main card (the default, every
+    5060 Ti gate), "gpu_a4000" the A4000 (bench/a4000_fit.py) -- the other card's jobs keep running."""
+    sys.path.insert(0, os.path.join(ROOT, "mcp"))
+    import jobs                                                      # noqa: E402
+    p = jobs.paused(lane)
+    if p and not str(p.get("by", "")).startswith(LANE_BY):
+        return {"took": False, "holder": p.get("by"), "until": p.get("until"), "lane": lane}
+    jobs.pause(lane, by=LANE_BY, why=why, ttl_seconds=ttl_seconds)
+    return {"took": True, "holder": LANE_BY, "ttl_seconds": ttl_seconds, "lane": lane}
+
+
+def release_lane(hold: dict | None) -> dict:
+    """The end of a window: resume the lane only if hold_lane() took it (and the pause is still ours)."""
+    rec = {"held_by": (hold or {}).get("holder"), "resumed": False}
     try:
         sys.path.insert(0, os.path.join(ROOT, "mcp"))
         import jobs                                                  # noqa: E402
-        p = jobs.paused("gpu")
-        if p and str(p.get("by", "")).startswith(LANE_BY):
-            jobs.resume("gpu")
-        rec["lane_resumed"] = True
+        lane = (hold or {}).get("lane") or "gpu"
+        rec["lane"] = lane
+        p = jobs.paused(lane)
+        if hold and hold.get("took") and p and str(p.get("by", "")).startswith(LANE_BY):
+            rec["resumed"] = jobs.resume(lane)
     except Exception as e:                                           # noqa: BLE001
-        rec["lane_resumed"] = f"failed: {e!r}"
+        rec["error"] = repr(e)
+    log(f"lane: {rec}")
+    return rec
+
+
+def restore(prod_argv: list[str]) -> dict:
+    """Production back on the card. The gpu lane is NOT resumed here: a window holds it across every restore
+    between its arms (hold_lane), and only its final exit lets it go (release_lane)."""
+    rec: dict = {"lane_resumed": False}
     if PROD_ID not in running():
         t0 = time.time()
         while time.time() - t0 < 900:
@@ -594,6 +621,16 @@ def main(argv: list[str]) -> int:
 
     recs = []
     res: dict = {}
+    hold = hold_lane("T0 PDL corruption checks (bench/engine_corruption.py)",
+                     3600 * max(1, len(arms)) * a.attempts)
+    try:
+        return _run_arms(a, arms, prod_argv, prod_env, recs, res)
+    finally:
+        release_lane(hold)
+
+
+def _run_arms(a, arms, prod_argv, prod_env, recs, res) -> int:
+    """(split out so the lane is released at the one exit whatever happens)"""
     for name, binary, env, args in arms:
         rec: dict = {}
         for attempt in range(1, a.attempts + 1):
@@ -606,10 +643,6 @@ def main(argv: list[str]) -> int:
                 json.dump({"argv": prod_argv, "env": prod_env,
                            "llama_swap_cmd": (running().get(PROD_ID) or {}).get("cmd")}, f, indent=1)
             try:
-                sys.path.insert(0, os.path.join(ROOT, "mcp"))
-                import jobs                                          # noqa: E402
-                jobs.pause("gpu", by=LANE_BY, why="T0 PDL corruption checks (bench/engine_corruption.py)",
-                           ttl_seconds=3600)
                 st, txt = http("POST", f"{SWAP}/api/models/unload/{PROD_ID}", timeout=120)
                 log(f"[{name}] attempt {attempt}: unload {PROD_ID}: HTTP {st} {txt[:100]}")
                 t0 = time.time()

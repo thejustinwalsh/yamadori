@@ -1,0 +1,628 @@
+{
+ "arm": "mtp",
+ "binary": "C:/Users/jwals/engines/llama-mirai-s-a409701e/src/build/bin\\llama-server.exe",
+ "cmd": [
+  "C:/Users/jwals/engines/llama-mirai-s-a409701e/src/build/bin\\llama-server.exe",
+  "--port",
+  "18096",
+  "-m",
+  "C:/Users/jwals/textgen/user_data/models/mirai-s/Qwen3.8-27B-S-mirai.gguf",
+  "-dev",
+  "CUDA0",
+  "-ngl",
+  "999",
+  "-c",
+  "128000",
+  "--cache-type-k",
+  "q8_0",
+  "--cache-type-v",
+  "q8_0",
+  "-fa",
+  "on",
+  "-np",
+  "1",
+  "--kv-unified",
+  "-b",
+  "2048",
+  "-ub",
+  "1024",
+  "--jinja",
+  "--reasoning-format",
+  "deepseek",
+  "--no-context-shift",
+  "--no-cache-idle-slots",
+  "--reasoning-budget",
+  "32768",
+  "--reasoning-budget-message",
+  "Thinking budget reached. I will stop deliberating and write the final answer now.",
+  "--temp",
+  "1.0",
+  "--top-p",
+  "0.95",
+  "--top-k",
+  "20",
+  "--min-p",
+  "0.0",
+  "--presence-penalty",
+  "0",
+  "--repeat-penalty",
+  "1.0",
+  "--spec-type",
+  "draft-mtp",
+  "--spec-draft-n-max",
+  "3"
+ ],
+ "arg_overrides": {
+  "-c": "128000",
+  "-np": "1",
+  "--spec-type": "draft-mtp",
+  "--spec-draft-n-max": "3"
+ },
+ "env": {
+  "CUDA_VISIBLE_DEVICES": "GPU-de660e90-0e9c-d465-b389-6df63021b920"
+ },
+ "started": "2026-10-01T02:41:07-0400",
+ "gpu_before": {
+  "used": 0,
+  "free": 16050,
+  "util": 0
+ },
+ "load_s": 5.6,
+ "gpu_loaded": {
+  "used": 14988,
+  "free": 1063,
+  "util": 0
+ },
+ "device": [
+  "GPU-de660e90-0e9c-d465-b389-6df63021b920, 18508, C:\\Users\\jwals\\engines\\llama-mirai-s-a409701e\\src\\build\\bin\\llama-server.exe"
+ ],
+ "build_info": "b5-b59ae80f4",
+ "greedy": [
+  {
+   "prompt": "ts",
+   "rep": 0,
+   "finish": "stop",
+   "content": "```typescript\n/**\n * Debounces a function so it only executes after a specified delay has passed\n * since the last invocation. Returns a debounced function with a `cancel()`\n * method to clear any pending invocation.\n *\n * @param fn - The function to debounce.\n * @param ms - The delay in milliseconds before the function is executed.\n * @returns A debounced function that accepts the same arguments as `fn`,\n *          with an additional `cancel()` method to cancel any pending call.\n *\n * @example\n * const debouncedResize = debounce((width: number, height: number) => {\n *   console.log(`Resized to ${width}x${height}`);\n * }, 300);\n *\n * window.addEventListener('resize', (e) => {\n *   debouncedResize(e.width, e.height);\n * });\n *\n * // Later, if you need to cancel:\n * debouncedResize.cancel();\n */\nfunction debounce<T extends (...args: any[]) => void>(\n  fn: T,\n  ms: number\n): T & { cancel: () => void } {\n  let timeoutId: ReturnType<typeof setTimeout> | null = null;\n\n  const debounced: T & { cancel: () => void } = ((...args: Parameters<T>) => {\n    if (timeoutId !== null) {\n      clearTimeout(timeoutId);\n    }\n    timeoutId = setTimeout(() => {\n      timeoutId = null;\n      fn(...args);\n    }, ms);\n  }) as T & { cancel: () => void };\n\n  debounced.cancel = () => {\n    if (timeoutId !== null) {\n      clearTimeout(timeoutId);\n      timeoutId = null;\n    }\n  };\n\n  return debounced;\n}\n```",
+   "predicted_n": 393,
+   "tps": 70.3188709659481,
+   "prompt_tps": 256.7037554496945,
+   "draft_n": 342,
+   "draft_n_accepted": 281,
+   "wall": 5.9,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "bash",
+   "rep": 0,
+   "finish": "stop",
+   "content": "```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\nif [[ $# -ne 1 ]]; then\n    echo \"Usage: $0 <directory>\" >&2\n    exit 1\nfi\n\ntarget_dir=\"$1\"\n\nif [[ ! -d \"$target_dir\" ]]; then\n    echo \"Error: '$target_dir' is not a directory.\" >&2\n    exit 1\nfi\n\ncount=0\n\n# Use find to locate .log files older than 7 days\n# -name '*.log' matches the pattern\n# -mtime +7 means strictly older than 7 days (i.e., 8+ days old)\n# -print0 handles filenames with spaces/special characters safely\nwhile IFS= read -r -d '' file; do\n    # Only process if the file still exists (race condition safety)\n    if [[ -f \"$file\" ]]; then\n        # Gzip the file; -f forces overwrite if .gz already exists\n        gzip -f \"$file\"\n        ((count++))\n    fi\ndone < <(find \"$target_dir\" -type f -name '*.log' -mtime +7 -print0)\n\necho \"Compressed $count file(s).\"\n```",
+   "predicted_n": 264,
+   "tps": 71.01858472652174,
+   "prompt_tps": 277.3295683743445,
+   "draft_n": 228,
+   "draft_n_accepted": 190,
+   "wall": 4.06,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "prose",
+   "rep": 0,
+   "finish": "stop",
+   "content": "Imagine you are writing a long report, but you have a very slow, meticulous colleague who only writes one word at a time. Now, imagine you have a fast, slightly sloppy intern who can scribble down a draft in seconds. Speculative decoding works by leveraging this dynamic between two models: a large, slow \"target\" model and a smaller, fast \"draft\" model.\n\nIn standard text generation, the large model generates one token at a time, waiting for each calculation to finish before starting the next. This is sequential and slow. Speculative decoding changes the workflow. First, the small draft model quickly generates a sequence of candidate tokens, say five words, in a single pass. Because it is small, it is fast, but it might be less accurate.\n\nNext, these candidate tokens are fed into the large target model. Crucially, the large model processes all these candidates in parallel, not sequentially. It evaluates the probability of each token given the previous context. If the large model agrees with the draft\u2019s choices, it accepts them. If it disagrees, it rejects the draft\u2019s token and generates its own correct token for that position. The process then continues from that point.\n\nThe key insight is that the large model\u2019s final output is mathematically identical to what it would have produced if it had generated the text token-by-token on its own. The draft model does not influence the final content; it only provides a guess to speed up the verification process. If the draft is good, the large model accepts multiple tokens at once, effectively skipping several slow sequential steps. If the draft is bad, the large model corrects it, but the penalty is minimal because the large model was going to generate that correct token anyway.\n\nThis technique is safe because the acceptance criteria are based on the target model\u2019s own probability distribution. It ensures that the statistical properties of the generated text remain unchanged. You are not changing the model\u2019s mind; you are just asking it to verify a batch of guesses faster than it would have written them from scratch. For a new engineer, think of it as a \"look-ahead\" optimization. It trades a small amount of compute for the small model against a significant reduction in latency for the large model, resulting in faster generation without sacrificing quality or altering the underlying logic of the text.",
+   "predicted_n": 470,
+   "tps": 51.87211896831774,
+   "prompt_tps": 201.35038994858851,
+   "draft_n": 558,
+   "draft_n_accepted": 283,
+   "wall": 9.36,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "ts",
+   "rep": 1,
+   "finish": "stop",
+   "content": "```typescript\n/**\n * Debounces a function so it only executes after a specified delay has passed\n * since the last invocation. Returns a debounced function with a `cancel()`\n * method to clear any pending invocation.\n *\n * @param fn - The function to debounce.\n * @param ms - The delay in milliseconds before the function is executed.\n * @returns A debounced function that accepts the same arguments as `fn`,\n *          with an additional `cancel()` method to cancel any pending call.\n *\n * @example\n * const debouncedResize = debounce((width: number, height: number) => {\n *   console.log(`Resized to ${width}x${height}`);\n * }, 300);\n *\n * window.addEventListener('resize', (e) => {\n *   debouncedResize(e.width, e.height);\n * });\n *\n * // Later, if you need to cancel:\n * debouncedResize.cancel();\n */\nfunction debounce<T extends (...args: any[]) => void>(\n  fn: T,\n  ms: number\n): T & { cancel: () => void } {\n  let timeoutId: ReturnType<typeof setTimeout> | null = null;\n\n  const debounced: T & { cancel: () => void } = ((...args: Parameters<T>) => {\n    if (timeoutId !== null) {\n      clearTimeout(timeoutId);\n    }\n    timeoutId = setTimeout(() => {\n      timeoutId = null;\n      fn(...args);\n    }, ms);\n  }) as T & { cancel: () => void };\n\n  debounced.cancel = () => {\n    if (timeoutId !== null) {\n      clearTimeout(timeoutId);\n      timeoutId = null;\n    }\n  };\n\n  return debounced;\n}\n```",
+   "predicted_n": 393,
+   "tps": 70.31257707253945,
+   "prompt_tps": 262.07589889885156,
+   "draft_n": 345,
+   "draft_n_accepted": 280,
+   "wall": 5.9,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "bash",
+   "rep": 1,
+   "finish": "stop",
+   "content": "```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\nif [[ $# -ne 1 ]]; then\n    echo \"Usage: $0 <directory>\" >&2\n    exit 1\nfi\n\ntarget_dir=\"$1\"\n\nif [[ ! -d \"$target_dir\" ]]; then\n    echo \"Error: '$target_dir' is not a directory.\" >&2\n    exit 1\nfi\n\ncount=0\n\n# Use find to locate .log files older than 7 days\n# -name '*.log' matches the pattern\n# -mtime +7 means strictly older than 7 days (i.e., 8+ days old)\n# -print0 handles filenames with spaces/special characters safely\nwhile IFS= read -r -d '' file; do\n    # Only process if the file still exists (race condition safety)\n    if [[ -f \"$file\" ]]; then\n        # Gzip the file; -f forces overwrite if .gz already exists\n        gzip -f \"$file\"\n        ((count++))\n    fi\ndone < <(find \"$target_dir\" -type f -name '*.log' -mtime +7 -print0)\n\necho \"Compressed $count file(s).\"\n```",
+   "predicted_n": 264,
+   "tps": 71.3731322221197,
+   "prompt_tps": 285.05163321628936,
+   "draft_n": 228,
+   "draft_n_accepted": 190,
+   "wall": 3.94,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "prose",
+   "rep": 1,
+   "finish": "stop",
+   "content": "Imagine you are writing a long report, but you have a very slow, meticulous colleague who only writes one word at a time. Now, imagine you have a fast, slightly sloppy intern who can scribble down a draft in seconds. Speculative decoding works by leveraging this dynamic between two models: a large, slow \"target\" model and a smaller, fast \"draft\" model.\n\nIn standard text generation, the large model generates one token at a time, waiting for each calculation to finish before starting the next. This is sequential and slow. Speculative decoding changes the workflow. First, the small draft model quickly generates a sequence of candidate tokens, say five words, in a single pass. Because it is small, it is fast, but it might be less accurate.\n\nNext, these candidate tokens are fed into the large target model. Crucially, the large model processes all these candidates in parallel, not sequentially. It evaluates the probability of each token given the previous context. If the large model agrees with the draft\u2019s choices, it accepts them. If it disagrees, it rejects the draft\u2019s token and generates its own correct token for that position. The process then continues from that point.\n\nThe key insight is that the large model\u2019s final output is mathematically identical to what it would have produced if it had generated the text token-by-token on its own. The draft model does not influence the final content; it only provides a guess to speed up the verification process. If the draft is good, the large model accepts multiple tokens at once, effectively skipping several slow sequential steps. If the draft is bad, the large model corrects it, but the penalty is minimal because the large model was going to generate that correct token anyway.\n\nThis technique is safe because the acceptance criteria are based on the target model\u2019s own probability distribution. It ensures that the statistical properties of the generated text remain unchanged. You are not changing the model\u2019s mind; you are just asking it to verify a batch of guesses faster than it would have written them from scratch. For a new engineer, think of it as a \"look-ahead\" optimization. It trades a small amount of compute for the small model against a significant reduction in latency for the large model, resulting in faster generation without sacrificing quality or altering the underlying logic of the text.",
+   "predicted_n": 470,
+   "tps": 52.16249696645607,
+   "prompt_tps": 204.04369255603268,
+   "draft_n": 558,
+   "draft_n_accepted": 283,
+   "wall": 9.22,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "ts",
+   "rep": 2,
+   "finish": "stop",
+   "content": "```typescript\n/**\n * Debounces a function so it only executes after a specified delay has passed\n * since the last invocation. Returns a debounced function with a `cancel()`\n * method to clear any pending invocation.\n *\n * @param fn - The function to debounce.\n * @param ms - The delay in milliseconds before the function is executed.\n * @returns A debounced function that accepts the same arguments as `fn`,\n *          with an additional `cancel()` method to cancel any pending call.\n *\n * @example\n * const debouncedResize = debounce((width: number, height: number) => {\n *   console.log(`Resized to ${width}x${height}`);\n * }, 300);\n *\n * window.addEventListener('resize', (e) => {\n *   debouncedResize(e.width, e.height);\n * });\n *\n * // Later, if you need to cancel:\n * debouncedResize.cancel();\n */\nfunction debounce<T extends (...args: any[]) => void>(\n  fn: T,\n  ms: number\n): T & { cancel: () => void } {\n  let timeoutId: ReturnType<typeof setTimeout> | null = null;\n\n  const debounced: T & { cancel: () => void } = ((...args: Parameters<T>) => {\n    if (timeoutId !== null) {\n      clearTimeout(timeoutId);\n    }\n    timeoutId = setTimeout(() => {\n      timeoutId = null;\n      fn(...args);\n    }, ms);\n  }) as T & { cancel: () => void };\n\n  debounced.cancel = () => {\n    if (timeoutId !== null) {\n      clearTimeout(timeoutId);\n      timeoutId = null;\n    }\n  };\n\n  return debounced;\n}\n```",
+   "predicted_n": 393,
+   "tps": 70.223335285972,
+   "prompt_tps": 262.449123592025,
+   "draft_n": 345,
+   "draft_n_accepted": 280,
+   "wall": 5.84,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "bash",
+   "rep": 2,
+   "finish": "stop",
+   "content": "```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\nif [[ $# -ne 1 ]]; then\n    echo \"Usage: $0 <directory>\" >&2\n    exit 1\nfi\n\ntarget_dir=\"$1\"\n\nif [[ ! -d \"$target_dir\" ]]; then\n    echo \"Error: '$target_dir' is not a directory.\" >&2\n    exit 1\nfi\n\ncount=0\n\n# Use find to locate .log files older than 7 days\n# -name '*.log' matches the pattern\n# -mtime +7 means strictly older than 7 days (i.e., 8+ days old)\n# -print0 handles filenames with spaces/special characters safely\nwhile IFS= read -r -d '' file; do\n    # Only process if the file still exists (race condition safety)\n    if [[ -f \"$file\" ]]; then\n        # Gzip the file; -f forces overwrite if .gz already exists\n        gzip -f \"$file\"\n        ((count++))\n    fi\ndone < <(find \"$target_dir\" -type f -name '*.log' -mtime +7 -print0)\n\necho \"Compressed $count file(s).\"\n```",
+   "predicted_n": 264,
+   "tps": 71.03557991232643,
+   "prompt_tps": 273.4266574419693,
+   "draft_n": 228,
+   "draft_n_accepted": 190,
+   "wall": 3.95,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "prompt": "prose",
+   "rep": 2,
+   "finish": "stop",
+   "content": "Imagine you are writing a long report, but you have a very slow, meticulous colleague who only writes one word at a time. Now, imagine you have a fast, slightly sloppy intern who can scribble down a draft in seconds. Speculative decoding works by leveraging this dynamic between two models: a large, slow \"target\" model and a smaller, fast \"draft\" model.\n\nIn standard text generation, the large model generates one token at a time, waiting for each calculation to finish before starting the next. This is sequential and slow. Speculative decoding changes the workflow. First, the small draft model quickly generates a sequence of candidate tokens, say five words, in a single pass. Because it is small, it is fast, but it might be less accurate.\n\nNext, these candidate tokens are fed into the large target model. Crucially, the large model processes all these candidates in parallel, not sequentially. It evaluates the probability of each token given the previous context. If the large model agrees with the draft\u2019s choices, it accepts them. If it disagrees, it rejects the draft\u2019s token and generates its own correct token for that position. The process then continues from that point.\n\nThe key insight is that the large model\u2019s final output is mathematically identical to what it would have produced if it had generated the text token-by-token on its own. The draft model does not influence the final content; it only provides a guess to speed up the verification process. If the draft is good, the large model accepts multiple tokens at once, effectively skipping several slow sequential steps. If the draft is bad, the large model corrects it, but the penalty is minimal because the large model was going to generate that correct token anyway.\n\nThis technique is safe because the acceptance criteria are based on the target model\u2019s own probability distribution. It ensures that the statistical properties of the generated text remain unchanged. You are not changing the model\u2019s mind; you are just asking it to verify a batch of guesses faster than it would have written them from scratch. For a new engineer, think of it as a \"look-ahead\" optimization. It trades a small amount of compute for the small model against a significant reduction in latency for the large model, resulting in faster generation without sacrificing quality or altering the underlying logic of the text.",
+   "predicted_n": 470,
+   "tps": 52.11338093836976,
+   "prompt_tps": 196.507408329294,
+   "draft_n": 558,
+   "draft_n_accepted": 283,
+   "wall": 9.23,
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  }
+ ],
+ "plain": [
+  {
+   "i": 0,
+   "finish": "stop",
+   "reasoning_chars": 1620,
+   "content_chars": 2330,
+   "predicted_n": 802,
+   "tps": 47.59315305054881,
+   "reasoning": "The user wants a ~300-word explanation of speculative decoding for a new engineer. Let me think about how to explain this clearly in plain prose.\n\nSpeculative decoding works like this:\n- You have a \"draft\" model (small, fast) that generates candidate tokens\n- You have a \"target\" model (large, slow) that verifies those tokens\n- The draft model runs first, producing several candidate tokens quickly\n- The target model checks those tokens in parallel (it can evaluate multiple positions at once)\n- If the target model agrees with the draft tokens, you accept them all at once, saving time\n- If it disagrees at some point, you reject from that point and use the target model's correct token for that position, then continue\n\nThe key insight: the output distribution is identical to running the target model alone. The draft model is just a proposal mechanism. The target model still makes the final decision. It's like a fast but sloppy draftsperson who suggests words, and a slow but authoritative editor who accepts or rejects them.\n\nWhy is it faster? Because the target model can evaluate multiple positions in a single forward pass (parallel), whereas standard autoregressive generation must do one token at a time. So instead of N sequential passes through the big model, you might get several tokens from one verification pass.\n\nThe key constraint: the acceptance/rejection mechanism must preserve the target model's exact probability distribution. This is done by comparing probabilities and using a rejection-sampling-like procedure.\n\nLet me write this in about 300 words of plain prose, aimed at a new engineer.\n",
+   "content": "You already know how the big language model works: it predicts one token at a time, feeding each new token back in before producing the next. That sequential, one-at-a-time bottleneck is exactly what speculative decoding attacks.\n\nThe idea is to bring in a smaller, faster model\u2014call it the draft model\u2014to propose a short string of tokens, say five, in rapid succession. Then you hand that entire string to the large, authoritative target model and ask it to evaluate all five positions in a single forward pass. Because the target model can score every position in parallel in one shot, you've essentially turned what would have been five separate slow passes into one pass.\n\nNow comes the critical part. The target model compares its own probability distribution at each position against the draft model's. If the target agrees with the draft token, you accept it. If it disagrees, you reject that token and every token after it, but you still get to keep the target model's correct choice for that position\u2014because you already had it from the verification pass. Then you resume generating from that point.\n\nThe subtlety you need to internalize is that this isn't just a simple accept-or-reject. The acceptance probability at each position is calibrated so that the final output sequence is drawn from exactly the same distribution as the target model would have produced on its own. You're not introducing a shortcut that alters the statistics. The draft model is merely a fast guesser; the target model is the sole decision-maker. The output is bit-for-bit what the big model would have written if you'd run it alone, just with a different amount of compute spent along the way.\n\nWhy does this actually save time? In the common case where the small model is a decent approximation of the large one, the target model will accept most of the proposed tokens. You get, say, four or five tokens from one big-model pass instead of one. The overhead of running the draft model is cheap, and the net wall-clock time per generated token drops substantially. The tradeoff is that you need to store and run both models, and the speedup depends on how well the draft model aligns with the target. But the fundamental guarantee holds: the text you read is statistically indistinguishable from what the large model would have written solo.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 1,
+   "finish": "stop",
+   "reasoning_chars": 898,
+   "content_chars": 2874,
+   "predicted_n": 859,
+   "tps": 50.30834972605696,
+   "reasoning": "The user wants a plain prose explanation of how a hash map handles collisions and when it resizes. Let me think about what to cover:\n\n1. Collision handling:\n   - Chaining (linked list / vector at each bucket)\n   - Open addressing (linear probing, quadratic probing, double hashing)\n   - Which is most common? Chaining is most common in practice (Python's dict, Java's HashMap, C++'s unordered_map)\n\n2. Resizing:\n   - Load factor concept (typically around 0.75 to 1.0)\n   - When the table gets too full, performance degrades\n   - Double the size (typically)\n   - Rehash all elements into the new, larger table\n   - Amortized cost analysis\n\nLet me write this in plain, accessible prose. Avoid jargon where possible, or explain it when used. Keep it clear and well-structured but flowing as prose rather than bullet points. The user asked for \"plain prose\" so I should write in paragraphs, not lists.\n",
+   "content": "A hash map starts life as a fixed array of slots, each slot holding either nothing or a reference to a collection of entries. When you ask the map to store a key-value pair, it runs the key through a hash function, which spits out an integer. That integer gets mapped down into the array via a modulo operation, landing on a specific slot. Most of the time, that slot is empty, and you just drop your entry in. But if another key happened to hash to the same slot, you've got a collision.\n\nThe most common way to deal with a collision is chaining. Instead of replacing the occupant or erroring out, the slot holds a small list (or sometimes a tree) of entries that all hashed to that slot. When you later look up a key, you hash it, walk to the right slot, and then scan through that small list comparing keys until you find the one you want. In practice, the lists stay very short\u2014usually one or two items\u2014because a good hash function spreads things out. Some implementations switch to open addressing instead, where the map stores entries directly in the array and, on a collision, probes into the *next* slot, then the next, and so on (linear probing, quadratic probing, or a more sophisticated second hash) until it finds an empty slot or an empty marker. Either approach works, but chaining is the one you're most likely to encounter in mainstream languages like Python, Java, and C++.\n\nNow imagine you keep adding entries. The lists at each slot grow longer, and lookups, which should be O(1) on average, start looking more and more like O(n) as you scan through longer chains. To keep things fast, the map tracks its load factor: the ratio of occupied entries to total slots. Once that ratio crosses a threshold\u2014typically around 0.75 to 1.0, depending on the implementation\u2014the map decides the table is getting too crowded.\n\nAt that point it resizes. It allocates a new, larger array, usually twice the previous size, and rehashes every single entry that currently lives in the old table. Each key gets its hash recomputed (or rather, its old hash is remapped) into the new, bigger array, and the entries are scattered across the new slots. Because the array is now roughly double the size, the average number of entries landing in any one slot drops back down, and those short chains shrink. The old array gets garbage-collected.\n\nThe resizing step is expensive\u2014it touches every entry in the map\u2014so in a single operation it's O(n) rather than O(1). But because it happens so infrequently relative to the many cheap insertions and lookups that precede it, the *amortized* cost of an insert is still O(1) on average. You can think of it like paying for a new, bigger parking lot in one painful afternoon, then spending the next several months driving in and out without ever having to move again. The one-off cost is smoothed out over all the operations that followed.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 2,
+   "finish": "stop",
+   "reasoning_chars": 8299,
+   "content_chars": 1875,
+   "predicted_n": 2152,
+   "tps": 57.232918501548,
+   "reasoning": "The user wants me to explain speculative decoding to a new engineer in about 300 words of plain prose. Let me think about how to explain this clearly.\n\nSpeculative decoding works like this:\n1. You have a large \"target\" model that's slow (large parameters, maybe on less hardware).\n2. You have a smaller \"draft\" model that's fast.\n3. The draft model quickly generates several candidate tokens.\n4. The target model evaluates those tokens in parallel (it processes them in one forward pass instead of multiple sequential ones).\n5. If the target model agrees with the draft tokens, they're accepted. If not, the target model generates its own token at the point of disagreement, and you reject the remaining draft tokens.\n6. Repeat.\n\nThe key insight for the \"without changing what the model would have written\" part: the target model's output distribution is preserved exactly. Every token that gets accepted is one the target model would have generated (it's verified against the target's distribution). The draft model is just a proposal mechanism\u2014it speeds up the search by letting you propose multiple tokens at once rather than generating them one at a time. The final output is distributed identically to what you'd get running just the target model.\n\nLet me write this in plain prose, around 300 words, aimed at a new engineer. I should avoid jargon where possible or explain it when I use it. Let me aim for clarity over formality.\n\nLet me draft this and count words.\n\n---\n\nThe basic problem: a large language model generates text one token at a time, and each token requires running the entire model. That's slow because the model is big and each step depends on the previous one\u2014you can't parallelize it easily.\n\nSpeculative decoding fixes this by using a smaller, faster model as a suggestion engine. Here's the workflow:\n\n1. The small model quickly drafts, say, 5\u20138 tokens.\n2. The big model takes those drafted tokens and evaluates them all in a single forward pass (it can process them in parallel because they're already proposed\u2014it just needs to check whether each one is plausible given the context).\n3. The big model accepts the drafted tokens as long as they match what it would have generated. The moment it finds a token it wouldn't have produced, it rejects that token and everything after it, then generates its own correct token from that point.\n4. You repeat the cycle.\n\nWhy doesn't this change the output? Because every token that survives is verified against the target model's own probability distribution. The draft model is merely a guess-and-check shortcut. It's like a student scribbling possible next words, and a professor checking them in one glance rather than writing each one from scratch. If the professor disagrees, they write the right word themselves. The final text is distributed exactly as if the big model had been writing it token by token on its own.\n\nThe speedup comes from the fact that the big model can verify multiple proposed tokens in one pass (parallel) rather than generating them sequentially (one pass each). If the draft model agrees with the big model often, you get a big speedup\u2014sometimes 2\u20133\u00d7 or more\u2014while the quality and distribution of the text remain identical.\n\nThe tradeoff: you need the small model to be fast and somewhat aligned with the big model. If the small model is too different, the big model rejects most proposals and you waste compute on the failed check.\n\nLet me count words... Let me refine to hit ~300 words.\n\nLet me recount and adjust. I'll aim for roughly 300 words.\n\nLet me write it more naturally and count.\n\n\"A large language model writes text one token at a time, and every single token requires running the entire model forward. That sequential, one-at-a-time process is where the speed bottleneck lives. Speculative decoding attacks that bottleneck with a trick that feels almost like a rubber-stamp approval process.\n\nHere's how it works. You pair the big slow model\u2014call it the target\u2014with a much smaller, faster model\u2014the draft model. The draft model, being tiny, can rattle off, say, six candidate tokens in a fraction of the time it would take the target to produce even one. Then you hand those six candidates to the target model, which evaluates them all in a single forward pass. Because the tokens are already sitting there, the target just checks: does each one match the distribution I would have produced? It accepts the candidates that pass. The moment it hits one that doesn't match, it rejects that token and every token after it, and it generates its own correct token from that point. Then the loop repeats: the draft model proposes a new batch, the target stamps them or corrects them.\n\nThe crucial point for a new engineer: the output distribution is unchanged. Every token that gets accepted is one the target model independently verified as valid under its own probability distribution. The draft model never gets a veto or a pass; it merely proposes. The target model holds the final say on every token. So the text you get is, statistically, indistinguishable from what the target would have written token by token on its own. You haven't approximated the output\u2014you've just accelerated the same computation.\n\nThe speedup comes from parallelism. The target model checks six proposed tokens in one forward pass instead of needing six separate passes to generate them. If the draft model is well-matched to the target, most proposals get accepted and you get a two-to-three-fold speedup for free. If the draft model is too different, the target rejects most of them and the extra verification cost eats the gain. That's the whole tradeoff: pick a draft model that's fast enough to be useful and similar enough to be right most of the time.\"\n\nLet me count: roughly... let me estimate. About 340 words. Let me trim a bit.\n\nActually let me count more carefully. I'll aim for ~300. Let me trim some parts.\n\nLet me recount my draft:\n\nParagraph 1: \"A large language model writes text one token at a time, and every single token requires running the entire model forward. That sequential, one-at-a-time process is where the speed bottleneck lives. Speculative decoding attacks that bottleneck with a trick that feels almost like a rubber-stamp approval process.\" \u2014 ~55 words\n\nParagraph 2: \"Here's how it works. You pair the big slow model\u2014call it the target\u2014with a much smaller, faster model\u2014the draft model. The draft model, being tiny, can rattle off, say, six candidate tokens in a fraction of the time it would take the target to produce even one. Then you hand those six candidates to the target model, which evaluates them all in a single forward pass. Because the tokens are already sitting there, the target just checks: does each one match the distribution I would have produced? It accepts the candidates that pass. The moment it hits one that doesn't match, it rejects that token and every token after it, and it generates its own correct token from that point. Then the loop repeats: the draft model proposes a new batch, the target stamps them or corrects them.\" \u2014 ~150 words\n\nParagraph 3: \"The crucial point for a new engineer: the output distribution is unchanged. Every token that gets accepted is one the target model independently verified as valid under its own probability distribution. The draft model never gets a veto or a pass; it merely proposes. The target model holds the final say on every token. So the text you get is, statistically, indistinguishable from what the target would have written token by token on its own. You haven't approximated the output\u2014you've just accelerated the same computation.\" \u2014 ~80 words\n\nParagraph 4: \"The speedup comes from parallelism. The target model checks six proposed tokens in one forward pass instead of needing six separate passes to generate them. If the draft model is well-matched to the target, most proposals get accepted and you get a two-to-three-fold speedup for free. If the draft model is too different, the target rejects most of them and the extra verification cost eats the gain. That's the whole tradeoff: pick a draft model that's fast enough to be useful and similar enough to be right most of the time.\" \u2014 ~80 words\n\nTotal: ~365 words. That's a bit over. Let me trim to get closer to 300.\n\nLet me tighten it up.\n",
+   "content": "A large language model writes text one token at a time, and every token requires running the entire model forward. That sequential, one-at-a-time process is the speed bottleneck. Speculative decoding attacks it with a trick that feels like a rubber-stamp approval process.\n\nYou pair the big slow model\u2014the target\u2014with a much smaller, faster model\u2014the draft model. The draft model, being tiny, rattles off six candidate tokens in a fraction of the time it would take the target to produce even one. You then hand those six candidates to the target, which evaluates them all in a single forward pass. Because the tokens are already proposed, the target just checks whether each one matches the distribution it would have produced. It accepts the ones that pass. The moment it hits one that doesn't match, it rejects that token and everything after it, then generates its own correct token from that point. The loop repeats: draft proposes, target verifies or corrects.\n\nThe key point: the output distribution is unchanged. Every accepted token is one the target independently verified under its own probability distribution. The draft model merely proposes; the target holds final say on every token. The text you get is statistically indistinguishable from what the target would have written token by token alone. You haven't approximated the output\u2014you've just accelerated the same computation.\n\nThe speedup comes from parallelism. The target checks six proposed tokens in one forward pass instead of needing six separate passes to generate them. If the draft model is well-matched, most proposals get accepted and you get a two-to-three-fold speedup. If the draft is too different, the target rejects most of them and verification overhead eats the gain. That's the whole tradeoff: pick a draft model fast enough to be useful and similar enough to be right most of the time.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 3,
+   "finish": "stop",
+   "reasoning_chars": 975,
+   "content_chars": 2134,
+   "predicted_n": 669,
+   "tps": 49.603506106503474,
+   "reasoning": "The user wants a plain-prose explanation of how hash maps handle collisions and when they resize. Let me think about what to cover:\n\nCollisions:\n- Two different keys hash to the same bucket/index\n- Strategies: chaining (linked list at each bucket), open addressing (linear probing, quadratic probing, double hashing), or sometimes other methods\n- I should explain the core idea: hash function maps key to an index, and when two keys map to the same index, something needs to happen\n\nResizing:\n- Load factor threshold (typically 0.75 or 0.5 depending on implementation)\n- When to resize: when load factor exceeds threshold\n- What happens: allocate a new, larger array, rehash all existing entries\n- Why: to keep average lookup time O(1) \u2014 if too many elements pile up in one bucket (chaining) or too many probes (open addressing), performance degrades\n\nLet me write this in clear, accessible prose. Not too technical, but accurate. I'll aim for a natural flowing explanation.\n",
+   "content": "A hash map stores key-value pairs by first running the key through a hash function, which produces an integer that indexes into an array of buckets. The trouble starts when two different keys produce the same index. This is called a collision, and the map has to figure out where to put the second item.\n\nThe most common approach is **chaining**: each bucket holds a small linked list (or sometimes a mini array). When a collision happens, the new entry is simply appended to that bucket's list. Looking up a key means hashing to the bucket and then walking the short list comparing keys. It works well when lists stay short, but if one bucket grows to dozens of entries, lookups start feeling like a linear scan, and the map has lost most of its appeal.\n\nAn alternative is **open addressing**: instead of a list at each slot, the array holds the entries directly, and a collision means the map probes forward to the next available slot using a deterministic pattern (linear probing, quadratic probing, or double hashing). The array stays mostly flat and cache-friendly, but a cluster of consecutive filled slots can slow down insertions and lookups once it gets long.\n\nEither way, the map is tracking a **load factor**: the ratio of stored elements to the number of buckets. Once that ratio crosses a threshold\u2014usually around 0.75 for chaining, or a similar ballpark for open addressing\u2014the map decides the array is too crowded. The fix is to **resize**: allocate a new, larger array (often double the old capacity), and then rehash every existing key into the new buckets. This \"rehashing\" step temporarily costs O(n), which is why a hash map's amortized cost for insertions is described as O(1) but with occasional bursts. The resize spreads the entries out again, shortening the chains or breaking up the probe clusters, so average lookups stay fast.\n\nIn short, collisions are absorbed by the structure at each bucket (a list or a probe sequence), and resizing is the map's periodic housekeeping: it notices the buckets are getting too full, buys a bigger room, and rearranges everything so the whole thing keeps working smoothly.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 4,
+   "finish": "length",
+   "reasoning_chars": 9440,
+   "content_chars": 0,
+   "predicted_n": 3000,
+   "tps": 69.772656535618,
+   "reasoning": "The user wants me to explain speculative decoding to a new engineer in about 300 words of plain prose. Let me think about how to make this clear and accessible.\n\nKey concepts to cover:\n- What the problem is: autoregressive generation is slow because you have to generate one token at a time, and each token requires a full forward pass through the large model.\n- The core idea: use a smaller, faster \"draft\" model to propose a sequence of tokens, then the large model verifies those tokens in a single forward pass.\n- Why it's \"speculative\": the draft model guesses, and the large model accepts or rejects each token.\n- Why it doesn't change the output: the large model's output is used as the ground truth. If a draft token matches what the large model would have generated, it's accepted. If not, the large model's token is used instead, and generation continues from that point. The large model's probability distribution is what matters, not the draft model's.\n- Why it's faster: instead of N sequential forward passes through the big model, you do 1-2 passes through the small model (to draft) + 1 pass through the big model (to verify all drafted tokens at once). If most tokens are accepted, you get a big speedup.\n- Plain prose: no code, no math. Keep it conversational but precise.\n\nLet me aim for around 300 words. Let me draft this and count.\n\nDraft:\n\n\"Here's the bottleneck with text generation: a large language model produces one token at a time, and each token requires a full forward pass through its billions of parameters. Writing a hundred-token sentence means a hundred expensive, sequential trips through the big model. That sequential nature is what makes it slow.\n\nSpeculative decoding attacks this bottleneck with a clever trick. You pair the large model with a much smaller, faster \"draft\" model. The draft model greedily or probabilistically scribbles out, say, five candidate tokens in quick succession. Then you hand those five tokens to the large model in a single forward pass. Because of how autoregressive models work, that one pass lets the large model check all five positions at once: at each position it looks at the context it had at that point and reports what token it would have generated.\n\nIf the draft token matches the large model's pick, you accept it and move on. If it doesn't match, you replace it with the large model's token, and everything after that point gets discarded because the context has changed. You then restart the drafting process from the corrected token.\n\nThe critical detail is that the large model's output is the ground truth at every accepted position. The draft model never gets to keep a token it invented. So the distribution over outputs you end up with is exactly the distribution the large model would have produced on its own, token by token, had you done the slow sequential generation. You haven't changed what the model would have written; you've just changed the order and number of computations needed to arrive at the same answer.\n\nIn practice, the draft model gets most of the short sequence right, so a single verification pass covers several tokens at once. You've replaced, say, five slow big-model passes with two fast small-model passes plus one big-model pass. The total work drops substantially, the latency drops substantially, and the text is identical in distribution to what you would have gotten before.\"\n\nLet me count words... Let me recount more carefully.\n\nParagraph 1: \"Here's the bottleneck with text generation: a large language model produces one token at a time, and each token requires a full forward pass through its billions of parameters. Writing a hundred-token sentence means a hundred expensive, sequential trips through the big model. That sequential nature is what makes it slow.\"\nCount: Here's(1) the(2) bottleneck(3) with(4) text(5) generation(6) a(7) large(8) language(9) model(10) produces(11) one(12) token(13) at(14) a(15) time(16) and(17) each(18) token(19) requires(20) a(21) full(22) forward(23) pass(24) through(25) its(26) billions(27) of(28) parameters(29) Writing(30) a(31) hundred-token(32) sentence(33) means(34) a(35) hundred(36) expensive(37) sequential(38) trips(39) through(40) the(41) big(42) model(43) That(44) sequential(45) nature(46) is(47) what(48) makes(49) it(50) slow(51) = 51\n\nParagraph 2: \"Speculative decoding attacks this bottleneck with a clever trick. You pair the large model with a much smaller, faster \"draft\" model. The draft model greedily or probabilistically scribbles out, say, five candidate tokens in quick succession. Then you hand those five tokens to the large model in a single forward pass. Because of how autoregressive models work, that one pass lets the large model check all five positions at once: at each position it looks at the context it had at that point and reports what token it would have generated.\"\nCount: Speculative(1) decoding(2) attacks(3) this(4) bottleneck(5) with(6) a(7) clever(8) trick(9) You(10) pair(11) the(12) large(13) model(14) with(15) a(16) much(17) smaller(18) faster(19) draft(20) model(21) The(22) draft(23) model(24) greedily(25) or(26) probabilistically(27) scribbles(28) out(29) say(30) five(31) candidate(32) tokens(33) in(34) quick(35) succession(36) Then(37) you(38) hand(39) those(40) five(41) tokens(42) to(43) the(44) large(45) model(46) in(47) a(48) single(49) forward(50) pass(51) Because(52) of(53) how(54) autoregressive(55) models(56) work(57) that(58) one(59) pass(60) lets(61) the(62) large(63) model(64) check(65) all(66) five(67) positions(68) at(69) once(70) at(71) each(72) position(73) it(74) looks(75) at(76) the(77) context(78) it(79) had(80) at(81) that(82) point(83) and(84) reports(85) what(86) token(87) it(88) would(89) have(90) generated(91) = 91\n\nParagraph 3: \"If the draft token matches the large model's pick, you accept it and move on. If it doesn't match, you replace it with the large model's token, and everything after that point gets discarded because the context has changed. You then restart the drafting process from the corrected token.\"\nCount: If(1) the(2) draft(3) token(4) matches(5) the(6) large(7) model's(8) pick(9) you(10) accept(11) it(12) and(13) move(14) on(15) If(16) it(17) doesn't(18) match(19) you(20) replace(21) it(22) with(23) the(24) large(25) model's(26) token(27) and(28) everything(29) after(30) that(31) point(32) gets(33) discarded(34) because(35) the(36) context(37) has(38) changed(39) You(40) then(41) restart(42) the(43) drafting(44) process(45) from(46) the(47) corrected(48) token(49) = 49\n\nParagraph 4: \"The critical detail is that the large model's output is the ground truth at every accepted position. The draft model never gets to keep a token it invented. So the distribution over outputs you end up with is exactly the distribution the large model would have produced on its own, token by token, had you done the slow sequential generation. You haven't changed what the model would have written; you've just changed the order and number of computations needed to arrive at the same answer.\"\nCount: The(1) critical(2) detail(3) is(4) that(5) the(6) large(7) model's(8) output(9) is(10) the(11) ground(12) truth(13) at(14) every(15) accepted(16) position(17) The(18) draft(19) model(20) never(21) gets(22) to(23) keep(24) a(25) token(26) it(27) invented(28) So(29) the(30) distribution(31) over(32) outputs(33) you(34) end(35) up(36) with(37) is(38) exactly(39) the(40) distribution(41) the(42) large(43) model(44) would(45) have(46) produced(47) on(48) its(49) own(50) token(51) by(52) token(53) had(54) you(55) done(56) the(57) slow(58) sequential(59) generation(60) You(61) haven't(62) changed(63) what(64) the(65) model(66) would(67) have(68) written(69) you've(70) just(71) changed(72) the(73) order(74) and(75) number(76) of(77) computations(78) needed(79) to(80) arrive(81) at(82) the(83) same(84) answer(85) = 85\n\nParagraph 5: \"In practice, the draft model gets most of the short sequence right, so a single verification pass covers several tokens at once. You've replaced, say, five slow big-model passes with two fast small-model passes plus one big-model pass. The total work drops substantially, the latency drops substantially, and the text is identical in distribution to what you would have gotten before.\"\nCount: In(1) practice(2) the(3) draft(4) model(5) gets(6) most(7) of(8) the(9) short(10) sequence(11) right(12) so(13) a(14) single(15) verification(16) pass(17) covers(18) several(19) tokens(20) at(21) once(22) You've(23) replaced(24) say(25) five(26) slow(27) big-model(28) passes(29) with(30) two(31) fast(32) small-model(33) passes(34) plus(35) one(36) big-model(37) pass(38) The(39) total(40) work(41) drops(42) substantially(43) the(44) latency(45) drops(46) substantially(47) and(48) the(49) text(50) is(51) identical(52) in(53) distribution(54) to(55) what(56) you(57) would(58) have(59) gotten(60) before(61) = 61\n\nTotal: 51 + 91 + 49 + 85 + 61 = 337\n\nThat's a bit over 300. Let me trim. I can cut some words. Let me aim for closer to 300.\n\nLet me revise to get closer to 300. I'll trim some parts.\n\nLet me try cutting:\n- \"greedily or probabilistically\" \u2192 \"quickly\"\n- Remove some redundancy\n- Tighten paragraphs\n\nLet me rewrite more concisely:\n\n\"Here's the bottleneck: a large language model produces one token at a time, and each token requires a full forward pass through billions of parameters. Writing a hundred-token sentence means a",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 5,
+   "finish": "stop",
+   "reasoning_chars": 869,
+   "content_chars": 2336,
+   "predicted_n": 711,
+   "tps": 47.37198887625635,
+   "reasoning": "The user wants a plain prose explanation of how a hash map handles collisions and when it resizes. This is a technical topic but they want it in \"plain prose\" \u2014 so I should avoid jargon-heavy lists, bullet points, or code. I should write it in flowing paragraphs that explain the concepts clearly. Let me think about what to cover:\n\n1. How a hash map works at a basic level (bucket array, hash function, index)\n2. Collision handling strategies:\n   - Chaining (linked list or list in each bucket)\n   - Open addressing (linear probing, quadratic probing, etc.)\n3. When it resizes:\n   - Load factor threshold\n   - What happens during resize (rehashing all elements)\n   - Why resizing is necessary (performance degradation)\n\nLet me write this in a natural, flowing style. Plain prose means paragraphs, not bullet points. I'll aim for clarity without being overly academic.\n",
+   "content": "A hash map starts with an array of slots, often called buckets. When you insert a key, the hash function takes that key and boils it down to an integer, which you then use to pick a slot in the array. Ideally, each key maps to a unique slot, and lookups are fast. In practice, though, two different keys will sometimes hash to the same slot, and that's a collision.\n\nThe most common way to deal with a collision is chaining. Each slot doesn't just hold one item; it holds a small list (or linked list) of all the items whose hash pointed there. When you look up a key, you go to the slot and walk through the list, comparing the stored key to the one you're searching for. If the bucket gets too long, lookups slow down from constant time toward linear time, so the list stays short by design. An alternative approach is open addressing. Instead of a list, the map probes the array directly for the next available slot. If slot 42 is taken, it tries 43, then 44, or maybe 42, 44, 46, depending on the probing strategy. The slot you ultimately write into is just the first open one in that probe sequence.\n\nEither way, as you keep inserting items, the array fills up. With chaining, the lists get longer and lookups get slower. With open addressing, you start circling around the array and spending more time on each probe. To keep performance healthy, the hash map watches its load factor, which is the fraction of occupied slots to total slots. Once that ratio crosses a threshold\u2014commonly around 0.7 for open addressing, or a similar number for chaining\u2014the map decides to resize.\n\nResizing means allocating a larger array, typically double the old size, and then rehashing every existing key into the new, bigger array. This spreads the items out more, shortens the chains or reduces the number of probes needed, and resets the load factor back down to a comfortable level. The cost is that resizing takes time proportional to the number of elements already stored, so it's an occasional expensive step. But because it happens infrequently\u2014each element gets rehashed only every so many insertions\u2014the average cost of an insert or lookup over the lifetime of the map stays constant. That amortized constant-time behavior is the whole point: collisions are inevitable, but the structure keeps them brief by growing before they pile up.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 6,
+   "finish": "length",
+   "reasoning_chars": 8557,
+   "content_chars": 0,
+   "predicted_n": 3000,
+   "tps": 66.65368708905413,
+   "reasoning": "The user wants a ~300-word explanation of speculative decoding for a new engineer. They want plain prose (no jargon-heavy language, no bullet points), and the key points are: (1) how it speeds up text generation, and (2) why it doesn't change what the model would have written.\n\nLet me think about how to explain this clearly:\n\nSpeculative decoding works by using a smaller/faster model (the \"draft model\" or \"speculator\") to quickly generate several candidate tokens. Then the larger model (the \"target model\") verifies these tokens in parallel rather than one at a time. If the tokens match what the target model would have generated, they're accepted. If they don't, generation falls back to the target model from the point of disagreement.\n\nWhy it's faster: The large model would generate tokens one at a time (sequentially). With speculative decoding, the small model drafts a sequence quickly (say 5 tokens), then the large model can verify all 5 at once in a single forward pass (it can process them in parallel because it can attend to the whole sequence). If 4 out of 5 match, you've effectively gotten 4 tokens from one large-model pass instead of 4 separate passes. That's a speedup.\n\nWhy it doesn't change the output: The large model's probability distribution over each position is exactly what it would produce in standard autoregressive decoding. The draft model only proposes candidates; the large model is the final judge. The tokens that get accepted are exactly the ones the large model would have generated on its own. The distribution over outputs remains unchanged.\n\nLet me write this in plain prose, aiming for about 300 words. Let me count carefully.\n\nLet me draft:\n\n\"Imagine you're watching a very slow but very smart colleague type out a sentence one word at a time. Now imagine you have a fast but less careful coworker who can type a whole phrase in a flash. Here's the trick: you let the fast coworker type five words, and then you hand those five words to the slow, smart colleague, who reads them all at once and either confirms they're right or catches where the first mistake is. If the first four words are correct, you've saved yourself four slow typing passes. If all five are correct, you've saved five. If the very first word is wrong, you lose a little time on verification, but that's rare enough that on average you still come out ahead.\n\nThat's the core of speculative decoding. The \"fast coworker\" is a smaller model \u2014 sometimes called a draft model \u2014 that generates a short sequence of candidate tokens very quickly. The \"slow, smart colleague\" is the large language model you actually care about. Normally, the large model generates one token at a time: it looks at the current context, picks the next token, adds it to the context, and repeats. This is sequential, and each token costs a full forward pass through the network. With speculative decoding, the small model drafts, say, five tokens in rapid succession. Then the large model runs forward over all five at once, computing its own probability distribution at each position. Because it's processing a fixed-length input, those five positions are evaluated in parallel in a single pass rather than five separate passes.\n\nThe reason the output doesn't change is that the large model is always the final arbiter. At each position, the large model's probability distribution over the vocabulary is exactly what it would produce in standard autoregressive decoding. The draft model only proposes candidates; it never gets to keep a token it isn't verified. If the large model disagrees at position three, you discard everything from that point onward and resume normal generation from position two. The tokens you end up with are the ones the large model would have produced on its own, just arrived at faster. The distribution over possible outputs is identical. You've changed the order of operations, not the logic.\"\n\nLet me count words... Let me count more carefully.\n\nParagraph 1: \"Imagine you're watching...\" to \"you still come out ahead.\" \nLet me count: Imagine(1) you're(2) watching(3) a(4) very(5) slow(6) but(7) very(8) smart(9) colleague(10) type(11) out(12) a(13) sentence(14) one(15) word(16) at(17) a(18) time(19). Now(20) imagine(21) you(22) have(23) a(24) fast(25) but(26) less(27) careful(28) coworker(29) who(30) can(31) type(32) a(33) whole(34) phrase(35) in(36) a(37) flash(38). Here's(39) the(40) trick(41): you(42) let(43) the(44) fast(45) coworker(46) type(47) five(48) words(49), and(50) then(51) you(52) hand(53) those(54) five(55) words(56) to(57) the(58) slow(59), smart(60) colleague(61), who(62) reads(63) them(64) all(65) at(66) once(67) and(68) either(69) confirms(70) they're(71) right(72) or(73) catches(74) where(75) the(76) first(77) mistake(78) is(79). If(80) the(81) first(82) four(83) words(84) are(85) correct(86), you've(87) saved(88) yourself(89) four(90) slow(91) typing(92) passes(93). If(94) all(95) five(96) are(97) correct(98), you've(99) saved(100) five(101). If(102) the(103) very(104) first(105) word(106) is(107) wrong(108), you(109) lose(110) a(111) little(112) time(113) on(114) verification(115), but(116) that's(117) rare(118) enough(119) that(120) on(121) average(122) you(123) still(124) come(125) out(126) ahead(127).\n\nParagraph 2: \"That's the core...\" to \"rather than five separate passes.\"\nThat's(1) the(2) core(3) of(4) speculative(5) decoding(6). The(7) \"fast(8) coworker\"(9) is(10) a(11) smaller(12) model(13) \u2014 sometimes(14) called(15) a(16) draft(17) model(18) \u2014 that(19) generates(20) a(21) short(22) sequence(23) of(24) candidate(25) tokens(26) very(27) quickly(28). The(29) \"slow(30), smart(31) colleague\"(32) is(33) the(34) large(35) language(36) model(37) you(38) actually(39) care(40) about(41). Normally(42), the(43) large(44) model(45) generates(46) one(47) token(48) at(49) a(50) time(51): it(52) looks(53) at(54) the(55) current(56) context(57), picks(58) the(59) next(60) token(61), adds(62) it(63) to(64) the(65) context(66), and(67) repeats(68). This(69) is(70) sequential(71), and(72) each(73) token(74) costs(75) a(76) full(77) forward(78) pass(79) through(80) the(81) network(82). With(83) speculative(84) decoding(85), the(86) small(87) model(88) drafts(89), say(90), five(91) tokens(92) in(93) rapid(94) succession(95). Then(96) the(97) large(98) model(99) runs(100) forward(101) over(102) all(103) five(104) at(105) once(106), computing(107) its(108) own(109) probability(110) distribution(111) at(112) each(113) position(114). Because(115) it's(116) processing(117) a(118) fixed-length(119) input(120), those(121) five(122) positions(123) are(124) evaluated(125) in(126) parallel(127) in(128) a(129) single(130) pass(131) rather(132) than(133) five(134) separate(135) passes(136).\n\nParagraph 3: \"The reason...\" to end.\nThe(1) reason(2) the(3) output(4) doesn't(5) change(6) is(7) that(8) the(9) large(10) model(11) is(12) always(13) the(14) final(15) arbiter(16). At(17) each(18) position(19), the(20) large(21) model's(22) probability(23) distribution(24) over(25) the(26) vocabulary(27) is(28) exactly(29) what(30) it(31) would(32) produce(33) in(34) standard(35) autoregressive(36) decoding(37). The(38) draft(39) model(40) only(41) proposes(42) candidates(43); it(44) never(45) gets(46) to(47) keep(48) a(49) token(50) it(51) isn't(52) verified(53). If(54) the(55) large(56) model(57) disagrees(58) at(59) position(60) three(61), you(62) discard(63) everything(64) from(65) that(66) point(67) onward(68) and(69) resume(70) normal(71) generation(72) from(73) position(74) two(75). The(76) tokens(77) you(78) end(79) up(80) with(81) are(82) the(83) ones(84) the(85) large(86) model(87) would(88) have(89) produced(90) on(91) its(92) own(93), just(94) arrived(95) at(96) faster(97). The(98) distribution(99) over(100) possible(101) outputs(102) is(103) identical(104). You've(105) changed(106) the(107) order(108) of(109) operations(110), not(111) the(112) logic(113).\n\nTotal: 127 + 136 + 113 = 376. That's a bit over 300. Let me trim.\n\nI need to cut about 76 words. Let me tighten things up.\n\nLet me rewrite more concisely:\n\n\"Imagine a very slow but very smart colleague typing a sentence one word at a time. Now imagine a fast but less careful coworker who can type a whole phrase in a flash. The trick: let the fast coworker type five words, then hand them to the slow colleague, who reads all five at once and either confirms they're right or catches where the first mistake is. If four of five are correct, you've saved four slow passes. If all five are right, you've",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 7,
+   "finish": "stop",
+   "reasoning_chars": 856,
+   "content_chars": 2987,
+   "predicted_n": 840,
+   "tps": 48.41110875114169,
+   "reasoning": "The user wants a plain-prose explanation of how a hash map handles collisions and when it resizes. They want prose, not code, not bullet points \u2014 just clear written explanation. Let me think about what to cover:\n\n**Collision handling:**\n- When two keys hash to the same bucket, what happens?\n- Common strategies: chaining (linked list per bucket), open addressing (linear probing, quadratic probing, double hashing)\n- I should describe these in plain language\n\n**Resizing:**\n- What triggers a resize? Load factor threshold\n- What happens during resize? New table, rehash all keys\n- When exactly does it trigger? Typically when size / capacity exceeds a threshold like 0.75 or 0.85\n\nLet me write this as flowing prose, clear and accessible, avoiding jargon where possible or explaining it when necessary. I'll aim for a conversational but informative tone.\n",
+   "content": "A hash map stores key-value pairs by first running the key through a hash function, which spits out a number. That number points to a slot in an array of buckets. The problem, of course, is that two different keys can hash to the same number. You can't have both keys living in the same slot, so the map needs a plan for the crowded case.\n\nThe two most common plans are chaining and open addressing. With chaining, each bucket isn't a single slot but a small linked list. When two keys collide, the second one just gets appended to the list sitting in that bucket. Looking up a key means hashing it, jumping to the right bucket, and walking down the list comparing keys until you find the match. It's simple and forgiving \u2014 a bucket can hold many entries \u2014 but if your hash function is poor or your data is adversarial, one bucket could balloon into a long chain, and lookups degrade from the hoped-for constant time toward something closer to linear.\n\nOpen addressing takes a different approach. There is exactly one slot per bucket, and no separate list. When a key hashes to a slot that's already taken, the map doesn't give up; it probes to the next slot, then the next, and so on, following a deterministic pattern. The simplest pattern is linear probing: check slot *i*, then *i+1*, then *i+2*, and so on, wrapping around the array. Slightly smarter variants use quadratic spacing (skip by 1, then 2, then 3, then 4, in terms of slot offsets) or hash twice and use the second hash to decide the step size, which spreads out the probes more evenly. The downside of any probing scheme is clustering: a run of consecutive filled slots can make subsequent probes march a long way before finding an empty slot, slowing things down.\n\nEither way, the map is watching a ratio called the load factor: the number of keys stored divided by the total number of buckets. When that ratio crosses a threshold \u2014 often around three-quarters for chaining, a bit higher for open addressing because probing gets painful when the table is nearly full \u2014 the map decides the table is getting too crowded. It allocates a brand-new, larger array, typically twice the old size, and then rehashes every single key it currently holds, inserting each one into the new table. This is the resize. It's expensive in the moment \u2014 you're redoing every hash computation and every insertion \u2014 but it spreads the keys out so that the next batch of lookups and insertions run fast again. The map doesn't shrink; it just keeps doubling when it hits the ceiling, so the cost of a resize is amortized over the many cheap operations it enables.\n\nSo the whole dance is: hash a key, find its slot, deal with any collision through a small list or a probe sequence, keep an eye on how full the table is, and when it gets too packed, build a bigger table and rehash everything from scratch. Most of the time the operations are quick; the occasional resize is the price you pay to keep the average performance where it should be.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 8,
+   "finish": "stop",
+   "reasoning_chars": 2947,
+   "content_chars": 1990,
+   "predicted_n": 1067,
+   "tps": 50.32185927279627,
+   "reasoning": "The user wants a ~300-word explanation of speculative decoding for a new engineer. Let me think about how to explain this clearly in plain prose.\n\nSpeculative decoding:\n- A smaller/faster \"draft\" model proposes tokens\n- A larger/slower \"target\" model verifies those tokens in parallel (in one forward pass)\n- If the target model agrees, those tokens are accepted\n- If it disagrees, the target model generates its own tokens from that point\n- This works because the target model's output is deterministic given the context (greedy) or the verification step ensures the same distribution\n- Speedup comes from: instead of the big model doing N sequential steps, it does fewer steps because it can verify multiple tokens at once in a single forward pass\n\nKey points to cover:\n1. Why it's faster: parallel verification vs sequential generation\n2. Why it doesn't change output: the big model's logits at each position are what matter; if you verify k tokens and they match, it's as if you generated them one-by-one\n3. The \"no change\" aspect: the target model is still the one making decisions. The draft model is just a guess.\n4. Analogy: maybe a proofreader checking a draft, or a teacher checking a student's work\n\nLet me write this in plain, accessible prose around 300 words. No jargon without explanation.\n\nLet me draft this:\n\nThe core idea: text generation is usually slow because each token depends on the previous one, so you have to wait for one forward pass before you can start the next. Speculative decoding exploits the fact that the big model can verify multiple tokens at once.\n\nHow it works:\n- You have a small fast model (draft model) and the big model (target model)\n- The draft model quickly proposes, say, 5 tokens\n- The target model takes those 5 proposed tokens and runs them through in a single forward pass, checking position by position\n- If the target model agrees with the draft at each position, all 5 tokens are accepted and you move on\n- If it disagrees at position 3, the target model generates the correct token for position 3 and continues from there\n- Net result: you get 4 tokens (positions 1-4) in what would have taken 5 sequential passes of the big model, but you only used 1 pass of the big model plus 5 quick passes of the small model\n\nWhy output doesn't change:\n- The big model is still the one making the actual decisions. The draft model is just a guess.\n- At each verification step, the big model computes its own distribution over the vocabulary for that position. If the proposed token has high probability (or is the greedy argmax), it's accepted.\n- For greedy decoding: the big model picks its top token. If the draft proposed the same token, great. If not, the big model corrects it.\n- For sampling: the big model samples from its distribution. The acceptance criterion ensures the final distribution matches what you'd get from sequential generation.\n\nLet me write this in about 300 words, plain prose.\n",
+   "content": "Imagine the big model is a careful writer who produces one token at a time, and each token requires a full forward pass. That's the bottleneck: you get one token, wait, get the next, wait, and so on. Now suppose you hand a faster, less careful apprentice a rough draft of five tokens. The careful writer then takes that draft and checks it in a single forward pass, looking at all five positions at once. If the writer agrees with the apprentice at every position, all five tokens are accepted and you're five tokens ahead for the price of one expensive pass. If the writer spots a disagreement at position three, they correct that token and continue from there. Either way, the careful writer is the one actually making every decision. The apprentice is just a cheap guess.\n\nThis is speculative decoding. The \"apprentice\" is a smaller model that drafts a handful of tokens quickly. The \"careful writer\" is your real model, which verifies the draft in one shot rather than generating tokens one by one. Because the verification pass checks every position in parallel, the big model effectively clears five positions in one step instead of needing five separate steps. The small model's passes are cheap, so the total time drops.\n\nWhy does the output stay identical? Because the big model's probability distribution at each position is what matters. In greedy mode, the big model picks its top-voted token; if the draft proposed the same token, it's accepted, and if not, the big model overrides it. In sampling mode, the acceptance test is calibrated so the final tokens are drawn from exactly the same distribution the big model would produce on its own. The draft model never changes the target model's weights or inputs\u2014it just saves the target model from doing five sequential passes by giving it five positions to check in one. The target model's logits at each position are computed the same way they would have been, one after another. The answer is the same; you just got it faster.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 9,
+   "finish": "stop",
+   "reasoning_chars": 616,
+   "content_chars": 2388,
+   "predicted_n": 665,
+   "tps": 49.300702208315066,
+   "reasoning": "The user is asking for a plain-prose explanation of how hash maps handle collisions and when they resize. They want it in \"plain prose\" \u2014 so I should avoid bullet points, numbered lists, or overly technical jargon. I should write in flowing paragraphs, explain the concepts clearly, and make it accessible. Let me cover:\n\n1. How hash maps work at a basic level (hash function \u2192 bucket)\n2. Collision handling strategies (chaining, open addressing)\n3. When/why they resize (load factor threshold)\n4. What happens during resize (rehashing)\n\nI'll write this as a few paragraphs in a conversational but informative tone.\n",
+   "content": "A hash map stores key-value pairs in an array of \"buckets.\" When you insert a key, the map runs it through a hash function, which spits out an integer, and that integer gets mapped to one slot in the array. The trouble is that the hash function has a fixed range of outputs, so two different keys can end up with the same slot. That's a collision.\n\nThe most common way to deal with a collision is a technique called chaining. Each bucket doesn't actually hold a single entry; it holds the head of a small linked list. If the first key in slot 7 is already there and a second key also hashes to 7, the new pair gets tacked onto the end of that list. When you look up a key, you find its slot, walk down the list, and compare each entry's key to the one you're searching for. Another approach, called open addressing, keeps the array flat with no lists. Instead, when a slot is taken, the map probes the next slot, or the next-next slot, or follows some other stride pattern, until it finds an empty one. Collisions in this scheme create small clusters of occupied slots that sit close together in the array.\n\nEither way, collisions slow things down. If too many keys pile up in the same few buckets, lookups degrade from their average constant-time behavior toward something linear. To keep that from happening, the map watches its load factor \u2014 roughly the fraction of the array that's filled. In a chained map, the threshold is often around 0.75, meaning that when three-quarters of the buckets are occupied, the map considers itself too crowded. In open-addressing schemes the threshold is a bit lower, maybe 0.5 to 0.65, because once the array gets dense, probing patterns start bouncing around and missing.\n\nWhen the threshold is crossed, the map resizes. It allocates a larger array, typically twice the old size, and rehashes every existing key into the new array. Each key goes through the hash function again, this time with the new (larger) number of slots, so the entries spread out more evenly. The old array is discarded. This resize operation takes proportional time to the number of elements, which sounds expensive, but because resizes are infrequent \u2014 you have to insert a lot of new entries before the next one \u2014 the average cost per insertion still works out to a constant. The map is trading a rare, heavier operation for consistently fast lookups the rest of the time.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 10,
+   "finish": "stop",
+   "reasoning_chars": 3226,
+   "content_chars": 2182,
+   "predicted_n": 1126,
+   "tps": 58.205386683476725,
+   "reasoning": "The user wants a ~300-word plain prose explanation of speculative decoding for a new engineer. Let me think about what to cover:\n\n1. The core problem: autoregressive generation is slow because each token requires a full forward pass\n2. The key insight: use a small/faster \"draft\" model to propose tokens, then verify them with the big model\n3. Why it doesn't change the output: the big model verifies each token and rejects any that don't match what it would have generated. The distribution is preserved.\n4. The speedup mechanism: you get multiple tokens from one big-model forward pass (verification), compared to one token per forward pass in standard generation.\n\nLet me write this in plain, accessible language for a new engineer. Around 300 words. Let me aim for clarity over jargon, using analogies where helpful.\n\nLet me draft and count words:\n\n\"Normally, when a large language model generates text, it works one token at a time. It takes the current sequence, runs a full forward pass through billions of parameters, picks the next token, appends it, and repeats. That one-token-at-a-time loop is the bottleneck: you're paying the full compute cost of the big model for every single character of output.\n\nSpeculative decoding attacks that bottleneck with a two-model pipeline. You pair the large, expensive model with a much smaller \"draft\" model. The draft model takes the current sequence and, because it's small, it's fast. It greedily predicts a handful of tokens\u2014say five\u2014before stopping. So far it has just given you a rough draft.\n\nNow you hand that draft to the big model. But here's the crucial trick: the big model doesn't accept the draft one token at a time. It processes the entire sequence including the proposed tokens in a single forward pass. Because of how attention works, one pass lets it evaluate every proposed position simultaneously. The big model checks each draft token against its own probability distribution.\n\nIf the big model agrees with the first four draft tokens, it accepts all four and moves on. If it disagrees at token three, it rejects token three and everything after it. Then\u2014and this is the part that preserves correctness\u2014the big model generates the correct token for that position using its own distribution. The final output is sampled from the big model's true probabilities, never from the draft's. The draft model never gets to decide anything on its own; it only suggests.\n\nSo why is this faster? In standard generation, one forward pass through the big model yields one token. In speculative decoding, one forward pass can verify and accept multiple tokens at once. You've traded a few fast passes of the small model for one expensive pass of the large model that yields several accepted tokens instead of one. The arithmetic works out to a significant speedup\u2014often 2 to 3 times faster\u2014while the output distribution is mathematically identical to what you'd get from the big model alone. The big model still makes every final call; the small model just saves it time by presenting options in bulk.\"\n\nLet me count: that's roughly 310 words. Let me trim slightly to hit closer to 300.\n\nLet me recount more carefully... I'll aim for around 300. Let me trim a few words.\n",
+   "content": "Normally, when a large language model generates text, it works one token at a time. It takes the current sequence, runs a full forward pass through billions of parameters, picks the next token, appends it, and repeats. That one-token-at-a-time loop is the bottleneck: you pay the full compute cost of the big model for every single token of output.\n\nSpeculative decoding attacks that bottleneck with a two-model pipeline. You pair the large, expensive model with a much smaller draft model. The draft model takes the current sequence and, because it is small, it is fast. It greedily predicts a handful of tokens\u2014say five\u2014before stopping. So far it has just given you a rough draft.\n\nNow you hand that draft to the big model. The crucial trick is that the big model does not accept the draft one token at a time. It processes the entire sequence including all proposed tokens in a single forward pass. Because of how attention works, one pass lets it evaluate every proposed position simultaneously. The big model checks each draft token against its own probability distribution.\n\nIf the big model agrees with the first four draft tokens, it accepts all four. If it disagrees at token three, it rejects token three and everything after it. Then\u2014and this is the part that preserves correctness\u2014the big model generates the correct token for that position using its own distribution. The final output is always sampled from the big model's true probabilities, never from the draft's. The draft model never decides anything on its own; it only suggests.\n\nSo why is this faster? In standard generation, one forward pass through the big model yields one token. In speculative decoding, one forward pass can verify and accept multiple tokens at once. You trade a few fast passes of the small model for one expensive pass of the large model that yields several accepted tokens instead of one. The arithmetic works out to a significant speedup\u2014often two to three times faster\u2014while the output distribution is mathematically identical to what you would get from the big model alone. The big model still makes every final call; the small model just saves it time by presenting options in bulk.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 11,
+   "finish": "stop",
+   "reasoning_chars": 832,
+   "content_chars": 2931,
+   "predicted_n": 826,
+   "tps": 51.10097832048737,
+   "reasoning": "The user wants a plain-prose description of how a hash map handles collisions and when it resizes. This is a technical explanation request. Let me think about what to cover:\n\n**Collision handling:**\n- Two approaches: chaining (linked list / bucket) and open addressing (linear probing, quadratic probing, double hashing)\n- Which one to describe? I'll describe both briefly but focus on the intuition.\n\n**When it resizes:**\n- Load factor threshold (typically 0.75 in Java, varies by implementation)\n- Resize = allocate a new larger table, rehash all existing entries into new positions\n- Why: to keep average lookup time near O(1)\n\nLet me write this in clear, plain prose. Not overly formal, not overly casual. Just a competent explanation that a smart reader can follow. I'll avoid bullet points since they asked for \"plain prose.\"\n",
+   "content": "A hash map stores key-value pairs by computing a hash function on each key, which produces a numeric index into an internal array of \"buckets.\" The problem it must solve is what happens when two different keys hash to the same index. There are two main families of strategies for this.\n\nThe first family is called chaining. Each bucket in the array holds a small linked list (or, in some implementations, a small tree or vector) of entries. When a key hashes to slot *i*, you simply walk through the list stored at slot *i* and compare keys one by one until you find the right one or reach the end. Insertion and lookup are fast when lists are short, but if too many keys pile up in the same bucket, the list grows and lookups degrade toward linear time.\n\nThe second family is called open addressing. Instead of a list, the array itself holds the entries, and each slot is either empty or occupied. When a collision occurs, you probe to the next slot using a deterministic sequence\u2014linear probing steps one slot at a time, quadratic probing steps 1, 4, 9, 16, and so on, and double hashing uses a second hash function to pick the step size. You keep probing until you find an empty slot (for insertion) or the matching key (for lookup). Open addressing uses contiguous memory and tends to be faster in practice because of better cache locality, but it suffers more from \"clumping\" of probes if the array fills up.\n\nEither way, the map has to keep track of how full it is. The metric is called the **load factor**: the number of occupied slots divided by the total number of slots. When the load factor crosses a threshold\u2014commonly 0.75 in the Java HashMap, though other implementations pick different values\u2014the map triggers a resize. The reason is straightforward: as more entries crowd the array, chains get longer or probe sequences get longer, and the average cost of each operation creeps away from the O(1) that the hash map is supposed to offer.\n\nA resize works in three steps. First, the map allocates a new array, typically twice the old size. Second, it iterates over every existing entry and recomputes its hash using the new array's length, placing each entry into its new slot. Third, it discards the old array. This is an O(n) operation with respect to the number of stored elements, but because it happens only logarithmically many times over the life of the map (each resize doubles the size, so you only resize a handful of times as the map grows), the *amortized* cost of an insert remains O(1). Some implementations resize preemptively when a large bulk insert is anticipated, to avoid paying the rehash cost in the middle of that operation.\n\nIn short, collisions are handled by either keeping a small list at the colliding slot or probing to the next available slot, and the map resizes when the load factor gets too high, rehashing all entries into a larger array so that average operation times stay constant.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 12,
+   "finish": "stop",
+   "reasoning_chars": 5641,
+   "content_chars": 2051,
+   "predicted_n": 1638,
+   "tps": 58.75474820557543,
+   "reasoning": "The user wants a ~300-word explanation in plain prose for a new engineer about speculative decoding. Let me think about what makes this concept clear and how to explain it simply.\n\nKey ideas to cover:\n- The bottleneck: autoregressive generation is sequential (each token depends on the previous one), and the model is large, so each forward pass is expensive\n- The core trick: use a smaller/faster draft model to propose several candidate tokens at once, then have the large model verify them in a single forward pass\n- Why it doesn't change output: the verification step uses the exact same probability distribution as the big model. If a draft token has lower probability in the big model's distribution, it gets rejected and re-sampled from the big model. The final output is drawn from the big model's true distribution.\n- The speedup: one big model pass can verify N draft tokens at once (it processes them in parallel through the layers), effectively getting N token decisions per big-model step instead of 1\n\nLet me write this in plain prose, avoiding jargon where possible, keeping it around 300 words. Let me aim for clarity and a good analogy.\n\nLet me draft this:\n\n---\n\nThe big model has to generate text one token at a time, and each token requires a full forward pass through the network. That's the bottleneck: you can't parallelize the sequence because token 5 depends on token 4. So generating 100 tokens means 100 sequential, expensive passes through a huge model.\n\nSpeculative decoding attacks this bottleneck by bringing in a smaller, faster \"draft\" model. You give the big model the same prompt, but instead of making it compute the next token, you let the draft model greedily (or with light sampling) propose a short sequence of, say, five candidate tokens in quick succession.\n\nNow you hand those five candidates to the big model in a single forward pass. Because the big model processes the whole sequence in one shot (it already has the context of the prompt plus those five proposed tokens), it evaluates the probability of each proposed token *in its own* probability distribution, not the draft model's. This is the crucial part. If the big model agrees with a proposed token\u2014that is, the draft's token had high probability in the big model's distribution\u2014it accepts it. If the big model finds a mismatch, it rejects that token and everything after it, and resamples the correct token from its own distribution.\n\nHere's why the output is identical: every accepted token was verified against the big model's true probabilities, and every rejected token is replaced by a sample drawn from that same distribution. No token that wouldn't have been generated by running the big model alone is ever accepted. The draft model is just a *guess*; the big model is the *judge*. The final text is mathematically indistinguishable from what you'd get by running the big model sequentially, token by token.\n\nThe speedup comes from batching: one expensive pass through the big model verifies up to N draft tokens at once. If the draft model is a good guess (and it usually is, because it's trained on the same distribution), you accept most of those tokens, and you've effectively advanced N positions for the price of one pass instead of N passes. The draft model runs N times, but it's tiny and fast, so that cost is negligible compared to one big-model pass.\n\n---\n\nLet me count words... that looks roughly in the 300 range. Let me refine and count more carefully. Let me aim for about 300 words. Let me count:\n\n\"The big model has to generate text one token at a time, and each token requires a full forward pass through the network. That's the bottleneck: you can't parallelize the sequence because token 5 depends on token 4. So generating 100 tokens means 100 sequential, expensive passes through a huge model.\" - about 55 words\n\n\"Speculative decoding attacks this bottleneck by bringing in a smaller, faster \"draft\" model. You give the big model the same prompt, but instead of making it compute the next token, you let the draft model greedily propose a short sequence of, say, five candidate tokens in quick succession.\" - about 48 words\n\n\"Now you hand those five candidates to the big model in a single forward pass. Because the big model processes the whole sequence in one shot, it evaluates the probability of each proposed token in its own probability distribution. This is the crucial part. If the big model agrees with a proposed token it accepts it. If the big model finds a mismatch, it rejects that token and everything after it, and resamples the correct token from its own distribution.\" - about 67 words\n\n\"Here's why the output is identical: every accepted token was verified against the big model's true probabilities, and every rejected token is replaced by a sample drawn from that same distribution. No token that wouldn't have been generated by running the big model alone is ever accepted. The draft model is just a guess; the big model is the judge. The final text is indistinguishable from what you'd get by running the big model sequentially, token by token.\" - about 72 words\n\n\"The speedup comes from batching: one expensive pass through the big model verifies up to N draft tokens at once. If the draft model is a good guess, you accept most of those tokens, and you've effectively advanced N positions for the price of one pass instead of N passes. The draft model runs N times, but it's tiny and fast, so that cost is negligible compared to one big-model pass.\" - about 63 words\n\nTotal: roughly 305 words. That's about right. Let me clean it up and make sure the prose flows well and is plain.\n",
+   "content": "The big model generates text one token at a time, and each token requires a full forward pass through the network. That's the bottleneck: you can't parallelize the sequence, because token 5 depends on token 4. Generating 100 tokens means 100 sequential, expensive passes through a huge model.\n\nSpeculative decoding attacks this bottleneck by bringing in a smaller, faster \"draft\" model. You let the draft model quickly propose a short sequence of, say, five candidate tokens. It runs those five forward passes in rapid succession because its weights are a tiny fraction of the big model's size.\n\nNow you hand those five candidates to the big model in a single forward pass. Because the big model processes the entire sequence at once, it evaluates the probability of each proposed token in *its own* probability distribution, not the draft model's. This is the crucial part. If the big model agrees with a proposed token\u2014that is, the draft's token had high probability in the big model's distribution\u2014it accepts it. If it finds a mismatch, it rejects that token and everything after it, then resamples the correct token from its own distribution.\n\nHere's why the output is identical: every accepted token was verified against the big model's true probabilities, and every rejected token is replaced by a sample drawn from that same distribution. No token that wouldn't have been generated by running the big model alone is ever accepted. The draft model is just a guess; the big model is the judge. The final text is statistically indistinguishable from what you'd get by running the big model sequentially, token by token.\n\nThe speedup comes from batching: one expensive pass through the big model verifies up to N draft tokens at once. If the draft model is a good guess\u2014and it usually is, because it's trained on the same distribution\u2014you accept most of those tokens and advance N positions for the price of one pass instead of N. The draft model runs N times, but it's tiny and fast, so that cost is negligible compared to a single big-model pass.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 13,
+   "finish": "stop",
+   "reasoning_chars": 733,
+   "content_chars": 3334,
+   "predicted_n": 864,
+   "tps": 48.49251220544732,
+   "reasoning": "The user wants a plain prose explanation of how hash maps handle collisions and when they resize. They want it in plain prose, not bullet points or code. Let me think about how to explain this clearly and completely.\n\nKey topics to cover:\n1. Collisions - what happens when two keys hash to the same bucket\n   - Common strategies: chaining (linked list), open addressing (linear probing, quadratic probing, cuckoo hashing)\n2. Resizing - when it happens (load factor threshold)\n   - What happens during resize (rehash all entries, new table size)\n\nLet me write this in flowing, plain prose without code blocks or heavy formatting. The user said \"plain prose\" so I should avoid bullet points, numbered lists, and code. Just paragraphs.\n",
+   "content": "When you insert a key into a hash map, the map first runs the key through a hash function, which spits out an integer. That integer is reduced by taking it modulo the table's size, giving you a specific bucket. The problem, of course, is that the hash function isn't a perfect bijection: two different keys can end up mapping to the same bucket, and that's a collision.\n\nThere are two broad families of strategies for dealing with that. The first, often called chaining, treats each bucket as the head of a short linked list. When a collision happens, you simply append the new key-value pair to the end of the list sitting in that bucket. To look up a key, you compute its bucket, walk down the list in that bucket comparing keys until you find a match. This works fine as long as the lists stay short, which they do if the table is large enough relative to the number of stored items. A second family is open addressing, where instead of using a pointer to a separate list, you look for a nearby empty slot in the table itself. The most common variant is linear probing: if the target bucket is taken, you check the next bucket, and the next, wrapping around the end of the table, until you find an empty slot or the key you're looking for. Quadratic probing and double hashing are alternatives that spread the probes out more, but the core idea is the same\u2014collisions are resolved by searching a small neighborhood within the array.\n\nResizing is the mechanism that keeps those collision lists or probe chains from getting pathologically long. The map tracks a load factor, which is roughly the fraction of the table that is occupied. When that ratio crosses a threshold\u2014commonly 0.75 for chaining-based maps and 0.5 or 0.75 for open-addressing maps\u2014the map decides the table is getting crowded and needs to grow. It allocates a new array that is typically twice the old size (though some implementations use prime-sized arrays to distribute buckets more evenly), and then it rehashes every existing entry: it takes each stored key, computes its new bucket index in the larger table, and places it there. This rehashing spreads the entries out, shortening the chains or reducing the number of probes needed for collisions. After the rehash, the load factor drops back down and normal operations proceed with less contention.\n\nShrinking also happens, though less frequently. If you delete enough entries and the load factor falls below a lower threshold\u2014say 0.25\u2014the map can shrink the table to reclaim memory. The process is the same in reverse: allocate a smaller array and rehash everything into it. In many implementations, however, the table is only allowed to grow and is never shrunk, because resize operations are expensive and it's usually more practical to let the structure sit a bit large than to repeatedly resize back and forth.\n\nThe key intuition is that a hash map is trying to keep the average cost of lookups, insertions, and deletions close to O(1). Collisions are the thing that threatens that guarantee, and resizing is the periodic housekeeping that resets the collision pressure by spreading the data across more buckets. As long as the load factor stays in a healthy band, most operations land in or near the correct bucket on the first try, and the occasional collision is handled by a short, bounded search.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 14,
+   "finish": "stop",
+   "reasoning_chars": 3111,
+   "content_chars": 2000,
+   "predicted_n": 1102,
+   "tps": 57.70434807765905,
+   "reasoning": "The user wants me to explain speculative decoding to a new engineer in about 300 words of plain prose. Let me think about what to cover and how to structure this clearly.\n\nKey concepts to convey:\n1. The problem: autoregressive generation is slow because each token requires a full forward pass\n2. The solution: use a smaller \"draft\" model to propose tokens quickly\n3. The verification step: the larger \"target\" model checks the proposed tokens in one parallel pass\n4. Why it's correct: the target model's distribution is what matters \u2014 if it accepts a token, it's the same token it would have generated (or the next one it would have generated)\n5. Why it's faster: you get multiple tokens \"for the price of one\" forward pass through the big model\n6. The \"no change\" aspect: the output distribution is identical to what the big model would produce on its own\n\nLet me write this in plain, accessible prose. About 300 words. Let me aim for clarity over jargon.\n\nLet me draft this:\n\n---\n\nHere's the idea. A large language model generates text one token at a time. For each token, it runs a full forward pass through its entire network, produces a probability distribution over every possible next token, samples from that, and only then can it begin the next step. If you need a 50-token response, that's 50 sequential forward passes, each taking the same amount of time. The bottleneck is that the model is massive and you have to wait for it to finish computing before it can even look at the next token.\n\nSpeculative decoding breaks this sequential bottleneck by adding a second, smaller model. Call it the \"draft\" model. You run the draft model several times quickly \u2014 it's small, so each forward pass is fast. It proposes, say, 5 tokens in a row. Now you take those 5 proposed tokens and feed them all at once into the large \"target\" model. Because the target model can process all 5 positions in parallel (it already has the context from the first token onward), it does a single forward pass and evaluates the probability of each proposed token *at its respective position*.\n\nHere's the key insight: the target model is checking its *own* distribution at each position. If the draft model's suggestion matches what the target model would have sampled, it accepts it. If not, it rejects that token and re-samples from the target model's distribution at that exact position. Every accepted token is drawn from the target model's true distribution. Every rejected token is replaced by a draw from the target model's true distribution. So the final text is statistically identical to what you would have gotten running the target model alone, token by token.\n\nThe speedup comes from the asymmetry: 5 quick draft passes might replace 3 slower target passes (because 2 of the 5 proposals got rejected). You've generated more tokens per unit time. In practice, with a well-matched draft model, you can often get a 2x to 3x speedup with no change to output quality or distribution.\n\nLet me count words... that's roughly 300. Let me refine and make sure it's plain prose and hits the right tone for a \"new engineer.\"\n",
+   "content": "Here's the idea. A large language model generates text one token at a time. For each token, it runs a full forward pass through its entire network, produces a probability distribution over every possible next word, samples from that, and only then can it start the next step. If you need a 50-token response, that's 50 sequential forward passes, each taking the same wall-clock time. The bottleneck is that the model is enormous and you must wait for it to finish before it can even look at the next token.\n\nSpeculative decoding breaks that sequential bottleneck by adding a second, smaller model. Call it the \"draft\" model. You run the draft model several times quickly \u2014 it's small, so each pass is fast. It proposes, say, five tokens in a row. You then feed those five proposed tokens all at once into the large \"target\" model. Because the target model can evaluate all five positions in parallel (it already has the context from the first token onward), it does a single forward pass and checks the probability of each proposed token at its respective position.\n\nHere's the key insight: the target model is checking its *own* distribution at each position. If the draft's suggestion matches what the target would have sampled, it accepts it. If not, it rejects that token and re-samples from the target model's distribution at that exact position. Every accepted token came from the target's true distribution. Every rejected token was replaced by a draw from the target's true distribution. So the final text is statistically identical to what you would have gotten running the target model alone, token by token. No quality or distribution shift.\n\nThe speedup comes from the asymmetry: five quick draft passes might replace three slower target passes, because two of the five proposals got rejected. You've generated more tokens per unit of time. In practice, with a well-matched draft model, you routinely see a two- to three-fold speedup with zero change to what the model would have written.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 15,
+   "finish": "stop",
+   "reasoning_chars": 1052,
+   "content_chars": 2626,
+   "predicted_n": 792,
+   "tps": 46.7990929140671,
+   "reasoning": "The user wants a plain prose explanation of how a hash map handles collisions and when it resizes. I should explain this clearly, without code, in natural language. Let me think about what to cover:\n\nCollision handling:\n- When two different keys hash to the same bucket/index\n- Strategies: chaining (linked lists or lists at each slot), open addressing (linear probing, quadratic probing, cuckoo hashing)\n- I'll describe chaining as the most common and intuitive approach, and briefly mention open addressing\n\nResizing:\n- Load factor (ratio of entries to bucket capacity)\n- When load factor exceeds a threshold (typically 0.75 for Java, 1.0 or 2.0 for others)\n- The resize process: pick a new larger table (usually double the size), rehash all existing entries into the new table\n- Why this is necessary: to keep lookups O(1) amortized instead of degrading to O(n)\n\nLet me write this in clear, flowing prose without bullet points or code. The user said \"plain prose\" so I should avoid markdown formatting like headers or bullet lists. Just paragraphs.\n",
+   "content": "A hash map starts with an array of buckets, each one holding a slot in the table. When you insert a key, you run it through a hash function, which scatters it into one of those slots. Most of the time, the slot is empty, so the operation is quick and straightforward. The trouble begins when two different keys produce the same slot. That's a collision.\n\nThe most common way to deal with a collision is chaining. Each slot in the array doesn't actually hold a single value; it holds a short list (or linked list) of entries. If two keys hash to the same index, they simply pile up in that slot's list. When you look something up, you compute the slot, walk down the list at that position, and compare each key until you find the one you want. This works well when the lists stay short, which they do if the table has plenty of empty space relative to the number of entries. Another family of approaches is called open addressing: instead of stacking entries on top of each other, the map looks for the next free slot in the array, checking the current slot, then the next one, then the one after that, and so on, until it finds a gap. This keeps entries spread across the array rather than concentrated in a few slots, but it introduces its own subtleties around deletion and clustering.\n\nResizing happens because those short lists (or those probing chains) can grow. The map tracks a load factor, which is roughly the fraction of the array that is in use. Once that fraction crosses a threshold\u2014often somewhere around three-quarters to one, depending on the implementation\u2014the structure knows it is getting crowded. Lookups that used to take one or two comparisons might now take a dozen, and the average cost of operations starts creeping toward linear in the number of entries, which defeats the whole purpose of a hash map.\n\nSo the map creates a new array, typically twice the size of the old one. It then takes every entry from the old array and rehashes it against the new, larger set of slots. Because the new array has more slots, the entries spread out more evenly, and most of those long chains or probing sequences break apart. The old array is discarded, and from that point forward, operations resume at their usual constant-time pace. The resize is expensive in a single moment\u2014you are paying for every entry to be re-inserted\u2014but it is infrequent, so across many operations the average cost of an insert or lookup remains constant. This is the amortized guarantee that makes hash maps fast in practice: you occasionally pay a big lump sum to double the table, but between those rare resizes everything is quick.",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  }
+ ],
+ "tools": [
+  {
+   "i": 0,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "find_definition_opt",
+     "{\"symbol\":\"apply_budget\"}"
+    ]
+   ],
+   "reasoning": "The user wants to find where the function `apply_budget` is defined. I'll use the find_definition_opt tool.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 1,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "read_file_range",
+     "{\"path\":\"mcp/proxy.py\",\"start\":10,\"end\":40}"
+    ]
+   ],
+   "reasoning": "The user wants to see lines 10 to 40 of mcp/proxy.py. I'll use the read_file_range function.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 2,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "find_definition_opt",
+     "{\"symbol\":\"SessionStore\"}"
+    ]
+   ],
+   "reasoning": "The user wants to find the definition of class SessionStore.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 3,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "read_file_range",
+     "{\"path\":\"README.md\",\"start\":1,\"end\":20}"
+    ]
+   ],
+   "reasoning": "The user wants me to read the first 20 lines of README.md. I'll use the read_file_range function with the path \"README.md\" and start at line 1, end at line 20.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 4,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "find_definition_opt",
+     "{\"symbol\":\"run_check\"}"
+    ]
+   ],
+   "reasoning": "The user wants to know where `run_check` is defined in the repository.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 5,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "find_definition_opt",
+     "{\"symbol\":\"apply_budget\"}"
+    ]
+   ],
+   "reasoning": "The user is asking where the function `apply_budget` is defined in the repository. I'll use the `find_definition_opt` tool to search for it.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 6,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "read_file_range",
+     "{\"path\":\"mcp/proxy.py\",\"start\":10,\"end\":40}"
+    ]
+   ],
+   "reasoning": "The user wants to see lines 10 to 40 of mcp/proxy.py. I'll use the read_file_range function.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 7,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "find_definition_opt",
+     "{\"symbol\":\"SessionStore\"}"
+    ]
+   ],
+   "reasoning": "The user wants to find the definition of the class `SessionStore`. I'll use the `find_definition_opt` tool to search for it in the repository.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 8,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "read_file_range",
+     "{\"path\":\"README.md\",\"start\":1,\"end\":20}"
+    ]
+   ],
+   "reasoning": "The user wants me to read the first 20 lines of README.md.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  },
+  {
+   "i": 9,
+   "finish": "tool_calls",
+   "ok": true,
+   "calls": [
+    [
+     "find_definition_opt",
+     "{\"symbol\":\"run_check\"}"
+    ]
+   ],
+   "reasoning": "The user wants to know where `run_check` is defined. Let me use the `find_definition_opt` tool to find this.\n",
+   "content": "",
+   "symptom_runs": [],
+   "long_runs": [],
+   "punct_runs": [],
+   "word_repeats": []
+  }
+ ],
+ "gpu_min_free": 1047,
+ "gpu_max_used": 15004,
+ "guard": null,
+ "ended": "2026-10-01T02:48:28-0400"
+}

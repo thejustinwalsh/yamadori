@@ -8,9 +8,11 @@ What the door promises (mcp/model.py):
   3. A length finish raises BudgetEvent -- never returned as an answer and
      never reported as "the model returned nothing".
   4. Internal keys (leading underscore) never reach the model server.
-  5. `role` picks the share thinking comes out of, and deep thinking
-     (shomen._post) shapes with role="helper" -- 3/8 of the pool, never
-     the conversation's 5/8 (mcp/budget.py, the split of 2026-09-22).
+  5. `role` picks the share thinking comes out of: a helper request
+     (shape(..., role="helper"), then post) thinks within 3/8 of the pool,
+     never the conversation's 5/8 (mcp/budget.py, the split of
+     2026-09-22). Deep thinking (shomen._post), which shaped that way, was
+     removed 2026-09-29; the door and the role stay.
 
 Expected token numbers are computed with tiers.budget rather than written as
 constants, over a budget pinned to the shipped pool, so the suite needs no
@@ -30,7 +32,6 @@ sys.path.insert(0, HERE)
 
 import budget  # noqa: E402
 import model  # noqa: E402
-import shomen  # noqa: E402
 import tiers  # noqa: E402
 import served_fixture  # noqa: E402
 # The served model's /props, pinned (mcp/served_fixture.py): budget and
@@ -172,28 +173,29 @@ def test_shape_takes_its_thinking_from_the_role_share():
                    "max_tokens": 1000}, "the caller's body is untouched")
 
 
-def test_deep_thinking_posts_with_the_helper_share():
-    """shomen._post is the second brain's only door to the model."""
+def test_a_helper_request_posts_with_the_helper_share():
+    """shape(role='helper') then post: the door a helper job goes through."""
     SEEN.clear()
-    msgs = [{"role": "system", "content": "investigate"},
+    msgs = [{"role": "system", "content": "a helper job"},
             {"role": "user", "content": "where is sizeKvPool defined?"}]
-    d = shomen._post("/v1/chat/completions",
-                     {"messages": msgs, "max_tokens": 1500})
+    d = model.post(model.shape({"messages": msgs, "max_tokens": 1500},
+                               "xhigh", role="helper"))
     sent = SEEN[-1] if SEEN else {}
     want = _expect(msgs, 1500, role="helper")
     check(d["choices"][0]["message"]["content"] == "an answer",
-          "shomen._post reaches the (fake) upstream through model.post")
+          "model.post reaches the (fake) upstream")
     check(sent.get("max_tokens") == want["max_tokens"]
           and sent.get("reasoning_budget_tokens")
           == want["reasoning_budget_tokens"],
-          "and shapes with role='helper': thinking from its 55,296 share",
+          "and a role='helper' shape thinks from its 55,296 share",
           f"{sent.get('reasoning_budget_tokens')} vs "
           f"{want['reasoning_budget_tokens']}")
     check(sent.get("reasoning_budget_tokens")
           != _expect(msgs, 1500)["reasoning_budget_tokens"],
-          "not the conversation's half")
-    check(sent.get("reasoning_effort") == tiers.safe_effort("xhigh"),
-          "at the xhigh effort deep thinking runs at",
+          "not the conversation's share")
+    check(sent.get("reasoning_effort")
+          == tiers.safe_effort(tiers.TIERS["xhigh"]["effort"]),
+          "at the effort its tier sends (xhigh's: medium)",
           str(sent.get("reasoning_effort")))
 
 
@@ -236,7 +238,7 @@ def main() -> int:
                test_a_helper_call_is_shaped_like_a_proxy_request,
                test_a_large_answer_request_is_kept_whole,
                test_shape_takes_its_thinking_from_the_role_share,
-               test_deep_thinking_posts_with_the_helper_share,
+               test_a_helper_request_posts_with_the_helper_share,
                test_a_length_finish_is_a_budget_event,
                test_internal_keys_never_reach_the_server):
         print(f"\n--- {fn.__name__} ---")

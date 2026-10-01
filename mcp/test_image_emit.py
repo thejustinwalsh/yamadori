@@ -150,8 +150,8 @@ vision._from_store = _from_store
 
 
 # The real tools behind proxy.run_our_tool (test_ledger stubs yama_generate_image).
-def _run_our_tool(name, args, db, root=None, turn=None, state=None):
-    return T._real_run_our_tool(name, args, db, root, turn, state)
+def _run_our_tool(name, args, state=None):
+    return T._real_run_our_tool(name, args, state)
 
 
 proxy.run_our_tool = _run_our_tool
@@ -192,7 +192,7 @@ class Conv:
                 "_account": self.account, "_client_ip": "127.0.0.1",
                 "_public_base": BASE, "tools": [T.WRITE],
                 "messages": json.loads(json.dumps(self.msgs)),
-                "_features": json.dumps({"hints": True, "fanout": 1})}
+                "_features": json.dumps({"skills": True})}
 
     def turn(self, script: list[dict], user=None) -> dict:
         if user is not None:

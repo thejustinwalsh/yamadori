@@ -67,7 +67,7 @@ describe('events', () => {
     const b = marksOf(
       pulse([slot(0, 'idle')], {
         tools: tools(9, 10),
-        seed: { word: 'harbor', u32: 1, hex: '0x1', token_id: null, where: 'fanout', at: 77 },
+        seed: { word: 'harbor', u32: 1, hex: '0x1', token_id: null, where: 'session', at: 77 },
       }),
     );
     expect(newEvents(a, b)).toEqual(['request', 'tool', 'seed']);

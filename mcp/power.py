@@ -409,6 +409,14 @@ class Sampler:
         t = self._clock()
         self.ingest(t, rows)
         if self._read_tokens is not None:
+            # The proxy's sampler (start() passes read_tokens): the same read
+            # feeds the dashboard's GPU history (mcp/stats_store.py, one row
+            # per card per minute). A test's Sampler records nothing.
+            try:
+                import stats_store
+                stats_store.gpu_sample(t, rows)
+            except Exception:                                    # noqa: BLE001
+                pass
             try:
                 tok = self._read_tokens()
             except Exception as e:                               # noqa: BLE001
@@ -860,47 +868,6 @@ def series(s: Sampler | None = None, now: float | None = None) -> dict:
     if out["idle"] and out["idle"].get("from_window"):
         s._idle = {k: v for k, v in out["idle"].items() if k != "from_window"}
     return dict(out, running=s.running)
-
-
-def benchmark_estimate(seconds_total: float | None, n: int | None,
-                       watts: float | None = None) -> dict | None:
-    """Electricity per question and per 100 questions from wall seconds and
-    the measured generating draw. An ESTIMATE: nothing was metered during the
-    run. Priced at the cheapest and dearest cell of the rate table."""
-    if not isinstance(seconds_total, (int, float)) or not n:
-        return None
-    w = (MEASURED_GENERATING["watts"] if watts is None else watts) + extra_watts()
-    lo, hi = rate_range()
-    per_q_s = seconds_total / n
-    wh_q = w * per_q_s / 3600.0
-    return {"n": n, "seconds_per_question": round(per_q_s, 1),
-            "watts": round(w, 1),
-            "wh_per_question": round(wh_q, 3),
-            "kwh_per_100": round(wh_q * 100 / 1000.0, 4),
-            "cents_per_question": [round(wh_q / 1000.0 * lo, 4),
-                                   round(wh_q / 1000.0 * hi, 4)],
-            "dollars_per_100": [round(wh_q * 100 / 1000.0 * lo / 100.0, 4),
-                                round(wh_q * 100 / 1000.0 * hi / 100.0, 4)],
-            "cents_per_kwh": [lo, hi]}
-
-
-def benchmark_basis() -> dict:
-    lo, hi = rate_range()
-    return {"estimate": True,
-            "watts": MEASURED_GENERATING["watts"] + extra_watts(),
-            "gpu_watts": MEASURED_GENERATING["watts"],
-            "extra_watts": extra_watts(),
-            "evidence": MEASURED_GENERATING["evidence"],
-            "per_gpu": MEASURED_GENERATING["per_gpu"],
-            "seconds": "each arm's wall seconds per answered question "
-                       "(summary.json seconds.total / n, else the rows)",
-            "overlap": "wall seconds charge the whole GPU to each question; "
-                       "where requests overlapped (see the run's condition) "
-                       "this overstates the energy per question",
-            "cents_per_kwh": [lo, hi],
-            "rate": (RATE_SOURCE if flat_rate_cents() is None else
-                     "YAMADORI_POWER_RATE_CENTS flat rate"),
-            "priced": "cheapest and dearest cell of the rate table"}
 
 
 if __name__ == "__main__":

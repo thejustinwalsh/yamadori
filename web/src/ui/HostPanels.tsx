@@ -1,4 +1,4 @@
-// Three cockpit panels over what serves the model and what runs beside it:
+// Two cockpit panels over what serves the model and what runs beside it:
 //
 //   SERVING · MAX MODE      /dash/api/vitals `serving` (mcp/vitals.py over
 //                           mcp/max_mode.py and llama-swap's /running): which
@@ -6,12 +6,10 @@
 //                           which tier the max model serves
 //   MCP · HOSTED SERVERS    /dash/api/mcp (mcp/mcp_host.py status()): the MCP
 //                           servers the proxy runs for the model, read-only
-//   DEEP THINKING           /dash/api/deep (mcp/deep_learn.py overview()):
-//                           runs per trigger, the struggle threshold in force
 //
 // Each states what is missing in the server's own words; none advises.
 import * as stylex from '@stylexjs/stylex';
-import { deepRuns, DEEP_PATH, MCP_PATH, mcpState, type Deep, type Mcp, type McpServer } from '../api/host';
+import { MCP_PATH, mcpState, type Mcp, type McpServer } from '../api/host';
 import type { Failure } from '../api/client';
 import type { LoadedModel, Tiers, Vitals } from '../api/types';
 import { usePoll, useNow } from '../api/usePoll';
@@ -161,61 +159,6 @@ export function McpPanel({ fill }: P) {
               );
             })
           )}
-        </div>
-      )}
-    </Panel>
-  );
-}
-
-export function DeepPanel({ fill }: P) {
-  const p = usePoll<Deep>(DEEP_PATH, 60000);
-  const d = p.data;
-  const r = deepRuns(d, 7);
-  const thr = d?.thresholds?.struggle_threshold;
-  return (
-    <Panel kanji="深" title="DEEP THINKING · TRIGGERS" tag={d ? `${n(r.runs)} RUNS · 7 DAYS` : '—'} tagTone="cyan" stale={p.stale} fill={fill}>
-      {!d ? (
-        <PollState path={DEEP_PATH} failure={p.failure} />
-      ) : (
-        <div {...stylex.props(layout.stackSm)}>
-          <div {...stylex.props(layout.grid2)}>
-            <Stat label="REQUESTS · 7 DAYS" value={n(r.requests)} sub="decided (every request leaves a row)" />
-            <Stat label="STRUGGLE THRESHOLD" value={thr ? n(thr.value) : '—'} sub={thr ? `${thr.source}${thr.bounds ? ` · bounds ${thr.bounds.join('–')}` : ''}` : 'not reported'} tone="cyan" />
-          </div>
-          {r.byTrigger.length ? (
-            <div {...stylex.props(layout.rowWrap)}>
-              {r.byTrigger.map(([k, c]) => (
-                <Chip key={k} tone="cyan">
-                  {k} · {n(c)}
-                </Chip>
-              ))}
-            </div>
-          ) : (
-            <StateView kind="empty" title="no deep-thinking run in the last 7 days" />
-          )}
-          <Table
-            rows={r.days.slice().reverse()}
-            rowKey={(x) => x.day}
-            columns={[
-              { key: 'd', head: 'day', cell: (x) => x.day },
-              { key: 'r', head: 'requests', num: true, cell: (x) => n(x.requests) },
-              { key: 'k', head: 'runs', num: true, cell: (x) => n(Object.values(x.runs ?? {}).reduce((a, b) => a + b, 0)) },
-              {
-                key: 'l',
-                head: 'labels',
-                cell: (x) =>
-                  Object.entries(x.labels ?? {})
-                    .filter(([k]) => k !== 'same_episode')
-                    .map(([k, v]) => `${k} ${v}`)
-                    .join(' · ') || '—',
-              },
-            ]}
-          />
-          <p {...stylex.props(text.labelXs, s.note)}>
-            learner {d.learning?.idle ? 'idle enough to run' : 'waiting'}
-            {d.learning?.why ? ` · ${d.learning.why}` : ''}
-            {d.note ? ` · ${d.note}` : ''}
-          </p>
         </div>
       )}
     </Panel>

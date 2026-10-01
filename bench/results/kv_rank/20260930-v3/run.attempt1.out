@@ -1,0 +1,6 @@
+[17:13:00] waiting: card busy (74% mean utilisation over 10 s) | bonsai slots processing: [2]
+[17:13:31] waiting: card busy (80% mean utilisation over 10 s) | bonsai slots processing: [2]
+[17:14:02] waiting: card busy (81% mean utilisation over 10 s) | bonsai slots processing: [2]
+[17:14:02] [line] round 0: N=147456 -c 147456: min free None MiB (margin 1000, display_active Disabled)
+no line: pass --line N or run the fit
+[17:14:02] lane: {'held_by': 'engine_corruption', 'resumed': False}

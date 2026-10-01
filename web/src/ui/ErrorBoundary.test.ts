@@ -33,7 +33,7 @@ function mount(el: ReactElement): string {
   return host.textContent ?? '';
 }
 
-const TIER = { thinks: true, floor: 1500, effort: 'high', retrieval: true, hints: true, fanout: 3, investigate: false, why: 'w' };
+const TIER = { thinks: true, floor: 1500, effort: 'high', skills: false, why: 'w' };
 
 describe('the effort ladder that blanked the app', () => {
   it('renders a tiers payload with no `default` instead of throwing', () => {
@@ -129,24 +129,25 @@ describe('one bad panel fails alone', () => {
 describe('KV pool split', () => {
   const vit = (context: Vitals['context']) => ({ context }) as unknown as Vitals;
 
-  it('draws main plus one segment per deep-thinking context, from the API fields', () => {
+  it('draws main plus one segment per helper context, from the API fields', () => {
     const out = mount(
       createElement(KvPanel, {
         v: vit({ pool: 147456, main: 73728, helper: 36864, helpers: 2, reserve: 0, gib: 6.19 }),
         failure: null,
       }),
     );
-    expect(out).toContain('DEEP THINKING ×2');
+    expect(out).toContain('HELPER ×2');
+    expect(out).not.toContain('DEEP THINKING');
     expect(out).toContain('73,728'); // main, and 2 × 36,864
     expect(out).not.toContain('(DERIVED)');
     const bar = host!.querySelector('[role="img"]')!;
-    expect(bar.getAttribute('aria-label')).toContain('2 deep thinking contexts of 36,864');
+    expect(bar.getAttribute('aria-label')).toContain('2 helper contexts of 36,864');
     expect(bar.children.length).toBe(3); // main + 2 helpers, no reserve segment at 0
   });
 
   it('derives the count from a server that predates `helpers`, and says so', () => {
     const out = mount(createElement(KvPanel, { v: vit({ pool: 147456, main: 88473, helper: 36864, reserve: 22119, gib: 6.19 }), failure: null }));
-    expect(out).toContain('DEEP THINKING ×1');
+    expect(out).toContain('HELPER ×1');
     expect(out).toContain('(DERIVED)');
     expect(host!.querySelector('[role="img"]')!.children.length).toBe(3); // main + 1 helper + reserve
   });
@@ -154,13 +155,14 @@ describe('KV pool split', () => {
   it('names the cap layout: main is the VRAM line, the child its own, the rest a second conversation (2026-09-28)', () => {
     const out = mount(
       createElement(KvPanel, {
-        v: vit({ pool: 262144, main: 141824, helper: 65536, helpers: 1, reserve: 54784, gib: 11, layout: 'cap', cap_source: 'YAMADORI_MAIN_CAP', vram_line: 141824 }),
+        v: vit({ pool: 262144, main: 141824, helper: 65536, helpers: 1, reserve: 54784, gib: 11, layout: 'cap', cap_source: 'YAMADORI_MAIN_CAP', vram_line: 141824, child: { role: 'decider lane', serves: ['the decider', 'small side calls (titles)'] } }),
         failure: null,
       }),
     );
     expect(out).toContain('CAP LAYOUT');
     expect(out).toContain('MAIN · VRAM LINE');
-    expect(out).toContain('CHILD · DEEP THINKING');
+    expect(out).toContain('CHILD · DECIDER LANE');
+    expect(out).not.toContain('DEEP THINKING');
     expect(out).toContain('SECOND CONVERSATION');
     expect(out).not.toContain('RESERVE');
     expect(out).toContain('YAMADORI_MAIN_CAP');

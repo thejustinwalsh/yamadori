@@ -26,8 +26,10 @@ import { ParamSprings, stepSpring } from './spring';
 // running proxy predates both fields. The seed is the live one. `tree` is
 // mcp/tree_sources.py snapshot() as read on this machine on 2026-09-24 (19
 // package indexes, the code index and 2 repo indexes; 162,107 chunks + defs;
-// no request since the reading process started, so recent.fanout and
-// recent.foliage are null), added because the running proxy predates it.
+// no request since the reading process started, so recent.foliage is null),
+// added because the running proxy predates it. Its recent block lost the
+// fan-out fields (fanout, hold_s, decay_s) when fan-out was removed
+// (2026-09-29).
 const VITALS = liveVitals as unknown as Vitals;
 const SEED = VITALS.seed!;
 const DATASETS = liveDatasets as unknown as DatasetsOverview;
@@ -130,8 +132,8 @@ describe('inert channels emit inert values, never noise (§1, §7)', () => {
   it('a snapshot with nothing in it produces the INERT constants', () => {
     const st = treeState(null);
     expect(st).toEqual({
-      seed: null, mainShare: null, thinkingShare: null, reserveShare: null, activity: null,
-      memPressure: null, anyTight: null, endpoints: null, alarms: null, errored: null, fanout: null,
+      seed: null, mainShare: null, childShare: null, reserveShare: null, activity: null,
+      memPressure: null, anyTight: null, endpoints: null, alarms: null, errored: null,
       rootSpread: null, foliage: null, moss: null,
     } satisfies TreeState);
     const p = treeParams(st, SK);
@@ -187,34 +189,26 @@ describe('no fabrication (§7)', () => {
     const st = treeState(VITALS);
     const ctx = (liveVitals as unknown as Vitals).context as { pool: number; main: number; helper: number };
     expect(st.mainShare).toBeCloseTo(ctx.main / ctx.pool, 9);
-    expect(st.thinkingShare).toBeCloseTo(ctx.helper / ctx.pool, 9);
+    expect(st.childShare).toBeCloseTo(ctx.helper / ctx.pool, 9);
     const p = treeParams(st, SK);
     const girthOf = (limb: number) => p.branches[SK.branches.findIndex((b) => b.limb === limb && b.kind === 'limb')]!.girth;
-    expect(girthOf(LIMB.main)).toBeGreaterThan(girthOf(LIMB.thinking)); // this snapshot predates the 5/8 + 3/8 split: 73,728 main vs 36,864 per deep-thinking context; either way main is the thicker limb
+    expect(girthOf(LIMB.main)).toBeGreaterThan(girthOf(LIMB.child)); // this snapshot: 73,728 main vs 36,864 per helper context; main is the thicker limb
   });
 });
 
-describe('topology stability and fan-out arity (§7)', () => {
+describe('topology stability (§7)', () => {
   it('branch count is constant across every state', () => {
     for (const v of ADVERSARIAL) expect(treeParams(treeState(v as Vitals), SK).branches).toHaveLength(SK.branches.length);
   });
 
-  it.each([1, 2, 3])('fan-out %i: exactly N limbs grown; culled ones bleach, never vanish', (n) => {
-    const st: TreeState = { ...treeState(VITALS), fanout: { arity: n, chosen: 0 } };
-    const p = treeParams(st, SK);
-    const limbIdx = (limb: number) => SK.branches.findIndex((b) => b.kind === 'limb' && b.limb === limb);
-    const sampleSlots = [LIMB.main, LIMB.fanout1, LIMB.fanout2];
-    const grown = sampleSlots.filter((l) => p.branches[limbIdx(l)]!.growth > 0);
-    expect(grown).toHaveLength(n);
-    for (const l of grown.slice(1)) expect(p.branches[limbIdx(l)]!.bleach).toBe(1);
-    expect(p.branches[limbIdx(LIMB.main)]!.bleach).toBe(0);
-  });
-
-  it('with no fan-out signal the tree is a single trunk (arity 1)', () => {
+  it('both limbs are grown and unbleached with no errored job (no fan-out channel since 2026-09-29)', () => {
     const p = treeParams(treeState(VITALS), SK);
-    for (const b of SK.branches.filter((x) => x.limb === LIMB.fanout1 || x.limb === LIMB.fanout2)) {
-      expect(p.branches[b.id]!.growth).toBe(0);
+    for (const limb of [LIMB.main, LIMB.child]) {
+      const i = SK.branches.findIndex((b) => b.kind === 'limb' && b.limb === limb);
+      expect(p.branches[i]!.growth).toBe(1);
+      expect(p.branches[i]!.bleach).toBe(0);
     }
+    expect(CHANNELS.map((c) => c.name)).not.toContain('fanout');
   });
 
   it('errored jobs bleach twigs to shari, capped, never removed', () => {
@@ -257,7 +251,6 @@ const withTree = (tree: unknown): Vitals => ({ ...VITALS, tree: tree as Vitals['
 const { tree: _dropped, ...BARE } = VITALS;
 const NO_TREE = BARE as Vitals;
 const roots = (p: ReturnType<typeof treeParams>) => p.branches.filter((_, i) => SK.branches[i]!.kind === 'root');
-const limbIdx = (limb: number) => SK.branches.findIndex((b) => b.kind === 'limb' && b.limb === limb);
 
 describe('nebari.spread <- index breadth (vitals.tree.nebari.spread)', () => {
   it('the live fixture spreads and thickens the roots, and they are not inert', () => {
@@ -289,33 +282,8 @@ describe('nebari.spread <- index breadth (vitals.tree.nebari.spread)', () => {
   });
 });
 
-describe('fanout <- the last x_yamadori.fanout (vitals.tree.recent.fanout)', () => {
-  const tree = (fanout: unknown) => withTree({ ...VITALS.tree, recent: { fanout, foliage: null } });
-  it('arity 3, candidate 2 delivered: three limbs, the other two bleached', () => {
-    const st = treeState(tree({ arity: 3, chosen: 2, culled: [0, 1], age_s: 5, fade: 1 }));
-    expect(st.fanout).toEqual({ arity: 3, chosen: 2, fade: 1 });
-    const p = treeParams(st, SK);
-    expect(p.branches[limbIdx(LIMB.fanout2)]!.bleach).toBe(0);
-    expect(p.branches[limbIdx(LIMB.fanout1)]!.bleach).toBe(1);
-    expect(p.branches[limbIdx(LIMB.main)]!.bleach).toBe(1);
-    expect(p.branches[limbIdx(LIMB.fanout2)]!.growth).toBe(1);
-  });
-  it('after the hold the fork retracts with the fade, then is arity 1', () => {
-    const half = treeParams(treeState(tree({ arity: 2, chosen: 0, fade: 0.5 })), SK);
-    expect(half.branches[limbIdx(LIMB.fanout1)]!.growth).toBe(0.5);
-    const gone = treeState(tree({ arity: 2, chosen: 0, fade: 0 }));
-    expect(gone.fanout).toBeNull();
-    expect(treeParams(gone, SK).branches[limbIdx(LIMB.fanout1)]!.growth).toBe(0);
-  });
-  it('no recent fan-out is measured arity 1, not inert; no recent block is inert', () => {
-    expect(treeState(VITALS).fanout).toBeNull();
-    expect(inertChannels(treeState(VITALS))).not.toContain('fanout');
-    expect(inertChannels(treeState(NO_TREE))).toContain('fanout');
-  });
-});
-
 describe('foliage <- recall injected lately (vitals.tree.recent.foliage)', () => {
-  const tree = (foliage: unknown) => withTree({ ...VITALS.tree, recent: { fanout: null, foliage } });
+  const tree = (foliage: unknown) => withTree({ ...VITALS.tree, recent: { foliage } });
   const pads = (p: ReturnType<typeof treeParams>) => p.branches.filter((b) => b.foliage > 0);
   it('density lights the pads and varies their size only slightly; the recall path is kept', () => {
     const full = treeParams(treeState(tree({ density: 1, path: 'skills' })), SK);

@@ -1,0 +1,4 @@
+# What install.py creates: the venv, the verified wheel, node_modules.
+py/.venv/
+py/dist/
+js/node_modules/

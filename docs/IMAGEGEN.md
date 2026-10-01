@@ -1031,7 +1031,8 @@ doesn't drop them and load in what you need on use."
 
 `mcp/gpu_room.py` owns it. `images.generate` (both image models) and the
 vision call (through `model.post`) wrap their request in
-`gpu_room.use(model)`, as do the embedding and rerank calls. Before the
+`gpu_room.use(model)`, as do the embedding calls (and the rerank calls, until the reranker was
+removed 2026-10-01, docs/REMOVED.md). Before the
 request that would load the model:
 
 1. `GET /running` on llama-swap (it never loads anything) and nvidia-smi for
@@ -1062,7 +1063,7 @@ What that does to the two sequences above, by the table's numbers:
   kept as the backstop) then takes the rest of retrieval with it on load.
 - **Draw after a look:** vision is unloaded before the draw, never beside it.
 - **Search after a draw:** embeddings and the reranker load beside the idle
-  image server (319 MiB); nothing leaves.
+  image server (319 MiB); nothing leaves. (The reranker was removed 2026-10-01, docs/REMOVED.md.)
 
 `x_yamadori.gpu_room` records each decision: model, action (`loaded`, `fit`,
 `evicted`, `busy`, `no_room`, `uncoordinated`), need, free before and after,

@@ -2382,8 +2382,8 @@ _PLAN_PATH = re.compile(
 def plan_files_of(messages: list[dict]) -> list[str]:
     """The newest yama_plan result's FILES, as relative paths ([] when the
     messages carry no plan)."""
-    import deep
-    names = {deep.PLAN_TOOL_NAME, "plan"}
+    # The tool's name, literal since mcp/deep.py was removed (2026-09-29).
+    names = {"yama_plan", "plan"}
     pairs = _pair_results([m for m in messages or [] if isinstance(m, dict)])
     msgs = [m for m in messages or [] if isinstance(m, dict)]
     for i in range(len(msgs) - 1, -1, -1):
@@ -2469,9 +2469,9 @@ def _write_failed(res: str) -> bool:
                 d.get("success") is False or d.get("no_change") is True
         # A result cut short (a harness's display copy): its head.
         return bool(_FAILED_HEAD.search(t))
-    import deep
-    return deep.not_applied(t) or bool(re.match(
-        r"\s*(?:error|failed|failure)\b", t, re.I))
+    # (deep.not_applied read only a JSON `no_change` flag, handled above;
+    # mcp/deep.py was removed 2026-09-29.)
+    return bool(re.match(r"\s*(?:error|failed|failure)\b", t, re.I))
 
 
 def server_tool_triggers(msgs: list[dict], st: dict, *, kind: str,
@@ -2507,9 +2507,9 @@ def server_tool_triggers(msgs: list[dict], st: dict, *, kind: str,
     line ("Remember (server tool yama_think_deeply): ...") in front of the
     model; on pagoda-h5 three went out and the tool was never called. The
     lines are retired; the detection is this function."""
-    import deep
-    think = deep.TOOL_NAME if think_ok else None
-    plan = deep.PLAN_TOOL_NAME if plan_ok else None
+    # The tools' names, literal since mcp/deep.py was removed (2026-09-29).
+    think = "yama_think_deeply" if think_ok else None
+    plan = "yama_plan" if plan_ok else None
     if not (think or plan):
         return []
     fired = st.setdefault("fired", {})
@@ -2519,7 +2519,7 @@ def server_tool_triggers(msgs: list[dict], st: dict, *, kind: str,
         if key in fired or any(c["key"] == key for c in out):
             return
         out.append(dict({"key": key, "trigger": trigger, "tool": tool,
-                         "job": "plan" if tool == deep.PLAN_TOOL_NAME
+                         "job": "plan" if tool == "yama_plan"
                          else "investigate", "evidence": evidence}, **kw))
 
     if plan_files:
@@ -2759,38 +2759,6 @@ def _clean(text: str) -> str:
     return t[:1].lower() + t[1:] if t[:2] != t[:2].upper() else t
 
 
-def recall_line(s: dict, evidence: str = "", pool: list[dict] | None = None,
-                avoid: str | None = None) -> tuple[str | None, list[int]]:
-    """(the recall line, the item indexes it states) or (None, []): the
-    skill's FIRST DO (or WHEN) item and its FIRST DO NOT item -- the
-    operator's own form, "remember we don't do x, we do y" -- in the
-    versioned wording (skill_prompts CRAFT_RECALL_*). A structure, no
-    scoring: the item weights that picked "the items matching this turn's
-    evidence" were ours (removed 2026-09-27, docs/CONSTANTS-AUDIT.md). Never
-    `avoid` (the identical line twice in a row)."""
-    items = _items(s)
-    pos = next(((i, it) for i, it in enumerate(items)
-                if str(it.get("form") or "DO").upper() != "DO NOT"), None)
-    neg = next(((i, it) for i, it in enumerate(items)
-                if str(it.get("form") or "").upper() == "DO NOT"), None)
-    if pos is None:
-        return None, []
-    name = s.get("name") or s["id"]
-    i, it = pos
-    if str(it.get("form") or "").upper() == "WHEN" and it.get("situation"):
-        line = P.CRAFT_RECALL_WHEN.format(
-            name=name, situation=_clean(it["situation"]),
-            text=_clean(it["text"]))
-    else:
-        line = P.CRAFT_RECALL_DO.format(name=name, text=_clean(it["text"]))
-    refs = [i]
-    if neg is not None and L.RECALL_ITEMS > 1:
-        line += P.CRAFT_RECALL_NOT.format(text=_clean(neg[1]["text"]))
-        refs.append(neg[0])
-    line += "."
-    return (None, []) if line == avoid else (line, refs)
-
-
 def _render_turn(bodies: list[dict], recalls: list[str]) -> str:
     """What is appended: the bodies under the craft header, then the recall
     lines. The same text replays from the ledger."""
@@ -2982,6 +2950,7 @@ def decide(messages: list[dict], route_class: str | None = None,
             st.get("compactions_seen") or 0):
         st["chart"] = skill_chart.compacted(st)
         st["given"], st["recalls"] = {}, {}
+        st["items"], st["last_items"] = {}, {}
         st["packages"] = None
         st["compacted"] = int(st.get("compacted") or 0) + 1
         st["compactions_seen"] = int(compactions)
@@ -3194,93 +3163,13 @@ def decide(messages: list[dict], route_class: str | None = None,
     # here -- `cands` are the filter's candidates in its order -- and the
     # injector asks jjava about each candidate ITEM on this turn's state,
     # gates the shortlist, composes items across skills and renders them in
-    # the serving model's profile. It runs wherever a decider Turn is in
-    # scope (the proxy always opens one: decide_turn.current()); an offline
-    # caller with none keeps the per-skill bodies and recall lines below.
-    turn = _current_turn()
-    if _inject_on(turn):
-        return _decide_injected(cands, turn, st, rec, view, kind, chars,
-                                phase_now, phase_changed, now_ph, key)
-    return _decide_legacy(cands, st, rec, view, chars, evidence, pool,
-                          phase_now, phase_changed, now_ph, key)
-
-
-def _decide_legacy(cands: list[dict], st: dict, rec: dict, view, chars: int,
-                   evidence: str, pool: list[dict], phase_now,
-                   phase_changed: bool, now_ph: list, key: str | None
-                   ) -> tuple[str, dict, dict]:
-    """decide()'s end with no decider Turn in scope (an offline caller): the
-    per-skill bodies and recall lines, as before the injector."""
-    bodies, recalls, out, picks, indexed = [], [], [], [], []
-    for c in cands:
-        s, sid = c["skill"], c["skill"]["id"]
-        area = area_of(s.get("rule") or {})
-        entry = {"id": sid, "version": s.get("version"),
-                 "name": s.get("name"), "slot": c.get("slot") or c.get(
-                     "source"), "source": c.get("source"),
-                 "trigger": c["trigger"], "question": c.get("question"),
-                 "why": list(c.get("why") or [])[:4]}
-        if c.get("package"):
-            entry["package"] = c["package"]
-        if c["form"] == "index":
-            # Past BODIES_PER_DECISION: an index line the model can recall
-            # (yama_recall_craft); not given, so it can come later as a body.
-            indexed.append(sid)
-            out.append(dict(entry, form="index",
-                            tokens=L.tokens(_index_line(s))))
-            continue
-        if c["form"] == "body":
-            bodies.append(s)
-            st.setdefault("given", {})[sid] = {"chars": chars,
-                                               "req": st["req"]}
-            out.append(dict(entry, form="body",
-                            tokens=L.tokens(injected_text(s))))
-            picks.append({"id": sid, "area": area, "form": "body"})
-            continue
-        last = (st.get("recalls") or {}).get(area) or {}
-        if last and int(last.get("req") or 0) == st["req"]:
-            # A second recall for the same area in this ONE decision (an
-            # asked pick and an implied one): one line per area per turn.
-            rec["skipped"].append({"id": sid, "why": f"a recall for {area} "
-                                   "already in this turn"})
-            continue
-        line, refs = recall_line(s, evidence, pool, avoid=last.get("line"))
-        if not line:
-            rec["skipped"].append({"id": sid, "why": "the same line as "
-                                   "its area's last recall"})
-            continue
-        recalls.append(line)
-        st.setdefault("recalls", {})[area] = {"req": st["req"], "line": line,
-                                              "id": sid}
-        st.setdefault("given", {}).setdefault(sid, {"req": st["req"]})[
-            "chars"] = chars
-        out.append(dict(entry, form="recall", items=refs,
-                        tokens=L.tokens(line)))
-        picks.append({"id": sid, "area": area, "form": "recall"})
-    rec["chart"] = view.commit(picks)
-    st["chart"] = view.chart
-    if now_ph:
-        st["phase"] = now_ph
-    st["chars"] = chars
-    # The SERVER-TOOL RECALL lines were RETIRED 2026-09-27 (operator, after
-    # pagoda-h5: "this model isn't taking gentle hints, we need to tell it
-    # what to do ... at the right time"): their triggers now run the job
-    # itself (server_tool_triggers, deep.decide, proxy._deep_thinking).
-    text = _render_turn(bodies, recalls) + index_text(indexed, pool)
-    rec.update(decisions=out, phase=phase_now, phase_changed=phase_changed,
-               tokens=sum(d.get("tokens") or 0 for d in out),
-               ids=[d["id"] for d in out if d["form"] == "body"],
-               recalled=[d["id"] for d in out if d["form"] == "recall"],
-               versions=[d["version"] for d in out if d["form"] == "body"],
-               names=[d["name"] for d in out if d["form"] == "body"],
-               chars=len(text) + (1 if text else 0),
-               matched=[{**d, "decided_by": d["trigger"]} for d in out])
-    if key and not _unavailable(rec, text):
-        st["last_key"] = key
-        st["last"] = {"text": text, "rec": {k: rec[k] for k in (
-            "kind", "decisions", "ids", "recalled", "versions", "names",
-            "chars", "tokens", "phase", "chart")}}
-    return text, rec, st
+    # the serving model's profile. THE ONLY PATH (operator, 2026-09-29: "Why
+    # would jjava not be available? This sounds like a failure to build our
+    # platform."): the per-skill bodies and recall lines chosen without the
+    # decider are gone. With no decider Turn in scope, or one that is off
+    # or cannot answer, NOTHING goes in and x_yamadori.skills says why.
+    return _decide_injected(cands, _current_turn(), st, rec, view, kind,
+                            chars, phase_now, phase_changed, now_ph, key)
 
 
 def _current_turn():
@@ -3290,11 +3179,6 @@ def _current_turn():
         return decide_turn.current()
     except Exception:                                            # noqa: BLE001
         return None
-
-
-def _inject_on(turn) -> bool:
-    import skill_inject
-    return bool(skill_inject.ON and turn is not None)
 
 
 def _decide_injected(cands: list[dict], turn, st: dict, rec: dict, view,
@@ -3309,12 +3193,30 @@ def _decide_injected(cands: list[dict], turn, st: dict, rec: dict, view,
     Every voice is injected text at the tail (no prefill)."""
     import skill_inject
     pool_c = [c for c in cands if c["form"] in ("body", "recall")]
+    # STAGE 1's own record: what the filter offered, with the form the
+    # chart gave each (body: new to the conversation; recall: an event
+    # brings a given skill back; index: past the plan's bodies, a name the
+    # model could recall -- not an item source, so the injector does not
+    # take it) -- what the selection evals judge.
+    rec["stage1"] = [{"id": c["skill"]["id"], "name": c["skill"].get("name"),
+                      "version": c["skill"].get("version"),
+                      "form": c["form"], "trigger": c["trigger"],
+                      "slot": c.get("slot") or c.get("source"),
+                      "source": c.get("source"),
+                      "question": c.get("question")}
+                     for c in cands]
     skills_in = [c["skill"] for c in pool_c]
     events = {c["skill"]["id"]: c["trigger"] for c in pool_c}
     text, irec = skill_inject.inject(
         skills_in, kind, turn=turn, given=st.get("items") or {},
-        events=events)
+        events=events, last=st.get("last_items"))
     chosen = irec.get("chosen") or []
+    if chosen:
+        st["last_items"] = {k: events.get(k.split("#", 1)[0])
+                            for k in chosen}
+    same_last = {x.get("key", "").split("#", 1)[0] for x in
+                 (irec.get("stage1") or {}).get("left_out") or []
+                 if x.get("why") == "the same item as the last injection"}
     by_skill: dict[str, list[str]] = {}
     for k in chosen:
         by_skill.setdefault(k.split("#", 1)[0], []).append(k)
@@ -3323,8 +3225,9 @@ def _decide_injected(cands: list[dict], turn, st: dict, rec: dict, view,
         s, sid = c["skill"], c["skill"]["id"]
         keys = by_skill.get(sid)
         if not keys:
-            rec["skipped"].append({"id": sid, "why": "the injector chose none "
-                                   "of its items"})
+            rec["skipped"].append({"id": sid, "why": (
+                "the same item(s) as the last injection" if sid in same_last
+                else "the injector chose none of its items")})
             continue
         area = area_of(s.get("rule") or {})
         for k in keys:
@@ -3337,7 +3240,7 @@ def _decide_injected(cands: list[dict], turn, st: dict, rec: dict, view,
                     "trigger": c["trigger"], "question": c.get("question"),
                     "why": list(c.get("why") or [])[:4], "form": "items",
                     "items": [int(k.split("#", 1)[1]) for k in keys]})
-        picks.append({"id": sid, "area": area, "form": "body"})
+        picks.append({"id": sid, "area": area, "form": c["form"]})
     rec["chart"] = view.commit(picks)
     st["chart"] = view.chart
     if now_ph:
@@ -3351,12 +3254,11 @@ def _decide_injected(cands: list[dict], turn, st: dict, rec: dict, view,
                names=[d["name"] for d in out],
                chars=len(text) + (1 if text else 0),
                matched=[{**d, "decided_by": d["trigger"]} for d in out])
-    if key and not _unavailable(rec, text) and not (irec.get("gate") or {}
-                                                     ).get("failure"):
+    if key and not _unavailable(rec, text) and not irec.get("failure")             and not (irec.get("gate") or {}).get("failure"):
         st["last_key"] = key
         st["last"] = {"text": text, "rec": {k: rec[k] for k in (
             "kind", "decisions", "ids", "recalled", "versions", "names",
-            "chars", "tokens", "phase", "chart", "inject")}}
+            "chars", "tokens", "phase", "chart", "inject", "stage1")}}
     return text, rec, st
 
 

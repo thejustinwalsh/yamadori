@@ -199,11 +199,25 @@ def _day(ts: float) -> str:
 
 def record(role: str, *, account: str = "", usage: dict | None = None,
            timings: dict | None = None, cache: dict | None = None,
-           when: float | None = None) -> bool:
+           when: float | None = None, model: str | None = None,
+           stats_role: str | None = None) -> bool:
     """Add one generation to its day's row. Never raises: a dropped record
-    costs a row, never a request. Returns whether it was written."""
+    costs a row, never a request. Returns whether it was written.
+
+    `model` (2026-09-30): the generation also goes to the dashboard's
+    history (mcp/stats_store.py: its speed, by model), as `stats_role` when
+    given (model.post names a decider read so). A warm is recorded there
+    even without a model. The proxy's own generations reach the history
+    through record_upstream, never here twice."""
     if not _enabled:
         return False
+    if model is not None or role == "warm":
+        try:
+            import stats_store
+            stats_store.generation(model=model, role=stats_role or role,
+                                   timings=timings, usage=usage, cache=cache)
+        except Exception:                                        # noqa: BLE001
+            pass
     try:
         if role not in ROLES:
             role = "internal"
@@ -242,8 +256,8 @@ def role_of(payload: dict | None) -> str:
     slot = p.get("_slot") if isinstance(p.get("_slot"), dict) else {}
     if (isinstance(util, dict) and util.get("utility")) or slot.get("transient"):
         return "side_call"
-    if p.get("_role") == "helper":
-        return "second_brain"
+    # `second_brain` (a payload marked `_role: helper`) went with the second brain (2026-09-29): nothing sets it
+    # now; the role stays in ROLES for the rows already recorded
     return "main"
 
 
@@ -257,7 +271,16 @@ def record_upstream(payload: dict | None, response: dict | None) -> bool:
         r = response if isinstance(response, dict) else {}
         slot = p.get("_slot") if isinstance(p.get("_slot"), dict) else {}
         account = slot.get("account") or p.get("_account") or ""
-        return record(role_of(p), account=str(account), usage=r.get("usage"),
+        role = role_of(p)
+        try:
+            # The dashboard's history (mcp/stats_store.py): this
+            # generation's speed, by the model it went to.
+            import stats_store
+            stats_store.generation(model=p.get("model"), role=role,
+                                   cache=r.get("_cache"), usage=r.get("usage"))
+        except Exception:                                        # noqa: BLE001
+            pass
+        return record(role, account=str(account), usage=r.get("usage"),
                       cache=r.get("_cache"))
     except Exception as e:                                       # noqa: BLE001
         _state["errors"] += 1

@@ -53,7 +53,7 @@ WHAT YOU HAVE, and what each is best at
   read_file          cheap    you already have a path and a line range.
   find_references    cheap    what USES / CALLS / DEPENDS ON this. Ask before
                               renaming, deleting, or changing a signature.
-  search_code      ~182 tok   embeddings + cross-encoder reranker over the
+  search_code      ~182 tok   embeddings (cosine order) over the
                               index. Finds code that means what you asked even
                               when it says it differently. The expensive one,
                               and the only one that survives not knowing the

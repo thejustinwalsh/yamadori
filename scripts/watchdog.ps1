@@ -90,10 +90,12 @@ $Services = @(
     @{ Name = 'proxy';      Url = 'http://127.0.0.1:1234/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\server.py"); Log = "$root\logs\proxy.log"
        Match = 'mcp[\\/]server\.py'
-       # kv layout (bench/deploy_kv_rank.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '141824'; YAMADORI_CHILD_TOKENS = '65536' }
        # max mode (bench/deploy_flash_next.py)
        EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
+       # layout v3 (bench/deploy_layout_v3.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0' }
+       # tier models (bench/deploy_tier_models.py)
+       EnvTier = @{ YAMADORI_TIER_MODELS = 'mcp\tier_models.yaml' }
        # start-stack.bat's `set` lines never reach a watchdog restart, which
        # inherits the watchdog's own environment. docs/IMAGEGEN.md.
        Env = @{ YAMADORI_IMAGEGEN_URL = 'http://127.0.0.1:11434'
@@ -108,10 +110,12 @@ $Services = @(
     @{ Name = 'tools-api';  Url = 'http://127.0.0.1:1235/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\tools_api.py"); Log = "$root\logs\tools-api.log"
        Match = 'tools_api\.py'
-       # kv layout (bench/deploy_kv_rank.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '141824'; YAMADORI_CHILD_TOKENS = '65536' }
        # max mode (bench/deploy_flash_next.py)
-       EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' } }
+       EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
+       # layout v3 (bench/deploy_layout_v3.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0' }
+       # tier models (bench/deploy_tier_models.py)
+       EnvTier = @{ YAMADORI_TIER_MODELS = 'mcp\tier_models.yaml' } }
     # laya retired 2026-09-24 (docs/E1.md): E1 heads replace it
     # SearXNG web search (docs/SEARCH.md). Its own venv and source tree outside
     # the repo; the config path is the only thing it needs from the environment.
@@ -125,10 +129,12 @@ $Services = @(
     @{ Name = 'worker';     Url = $null;                             Kind = 'process'
        Exe = $py; Args = @("$root\mcp\worker.py"); Log = "$root\logs\worker.log"
        Match = 'mcp[\\/]worker\.py'
-       # kv layout (bench/deploy_kv_rank.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '141824'; YAMADORI_CHILD_TOKENS = '65536' }
        # max mode (bench/deploy_flash_next.py)
-       EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' } }
+       EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
+       # layout v3 (bench/deploy_layout_v3.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0' }
+       # tier models (bench/deploy_tier_models.py)
+       EnvTier = @{ YAMADORI_TIER_MODELS = 'mcp\tier_models.yaml' } }
 )
 
 function Write-Log([string]$msg) {
@@ -174,6 +180,11 @@ function Test-UpstreamsAlive {
     foreach ($m in @($running.running)) {
         $id = $m.model
         if (-not $id) { continue }
+        # ONLY A READY MODEL. A model llama-swap is still loading is in /running as `starting`, and its health
+        # route BLOCKS until the load ends: 2026-10-01 flash-next's swap took 131.9-272.5 s and this check timed
+        # out on it as WEDGED three times (06:11, 06:41, 06:56; a second strike would have restarted the stack
+        # mid-load). A load that never finishes is llama-swap's own healthCheckTimeout to end, not this check's.
+        if ($m.state -and $m.state -ne 'ready') { continue }
         $t0 = Get-Date
         try {
             Invoke-WebRequest -Uri "http://127.0.0.1:11434/upstream/$id/health" `
@@ -220,6 +231,8 @@ function Get-SlotProgress {
     $total = 0; $busy = 0; $read = $false
     foreach ($m in @($running.running)) {
         if (-not $m.model) { continue }
+        # a loading model's /slots blocks like its health route (above): only a ready one is read
+        if ($m.state -and $m.state -ne 'ready') { continue }
         try {
             $slots = Invoke-RestMethod -Uri "http://127.0.0.1:11434/upstream/$($m.model)/slots" -TimeoutSec 10
             $read = $true
@@ -324,6 +337,11 @@ function Restart-Service($svc) {
     if ($svc.Env2) {
         foreach ($k in $svc.Env2.Keys) {
             [Environment]::SetEnvironmentVariable($k, $svc.Env2[$k], 'Process')
+        }
+    }
+    if ($svc.EnvTier) {
+        foreach ($k in $svc.EnvTier.Keys) {
+            [Environment]::SetEnvironmentVariable($k, $svc.EnvTier[$k], 'Process')
         }
     }
     if ($svc.Env) {

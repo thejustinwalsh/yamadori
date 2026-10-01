@@ -104,11 +104,44 @@ except the one question it was measured to help (the weak-package veto).
 
 | | Jev | jjava | why |
 |---|---|---|---|
-| options per Choice | 255 | 26 | one single-token letter per option; the served Bonsai does not answer double letters (skill_match LABELS, 2026-09-27). Larger sets go in rounds (verify_moment CHUNK) or two stages (5.1) |
-| Score levels | "the API accepts up to 10" [TS score] | 2-26 | the same letter limit |
+| options per Choice | 255 | 26 | one single-token letter per option; the served Bonsai does not answer double letters (skill_match LABELS, 2026-09-27). Larger sets go in rounds (verify_moment CHUNK) or two stages (5.1). Over HTTP (2.1) up to 255 are accepted and run in two stages |
+| Score levels | "the API accepts up to 10" [TS score] | 2-26 | the same letter limit. Over HTTP (2.1) Jev's 2-10 is enforced |
 | questions | "evaluated in parallel" [TS fan-out] | read one after another on one slot, the state cached | llama-server; each question costs two one-token reads of its own suffix |
 | determinism | not deterministic across calls: 90.8% plurality agreement over 15 repeats [TS consistency choice] | batch nondeterminism below 0.0034 [ours] | quantized logits are not batch-invariant (DECIDER-RESEARCH 2.9) |
 | state | 32k tokens for the state plus the longest question [TS models] | cut head+tail to 2,048 tokens by the question sets (`decide_turn.STATE_TOKENS`, operator 2026-09-27) | the configuration every comparison measured; see 3.2 |
+
+### 2.1 Over HTTP: the Jev API (2026-09-29)
+
+Operator: "Also want the jjava api exact public api endpoints that match
+Jev exposed through our proxy." jjava answers TypeSafe's public HTTP API
+exactly (`mcp/jev_api.py`; the field-by-field table with every difference
+and its reason is docs/JEV-CONFORMANCE.md):
+
+| endpoint | what |
+|---|---|
+| `POST /jev/v1/systemone` | Jev's request (`state`, `model`, `questions`) -> Jev's response (`model`, `answers`, `usage`), plus `x_yamadori` (this section's diagnostics, per question) |
+| `GET /jev/v1/models` | TypeSafe's `{models: [{name, description, release_date}]}`; availability and measured priors in `x_yamadori` |
+| `POST /v1/systemone` | the root alias (our `GET /v1/models` stays OpenAI's, hence the `/jev` base: a TypeSafe SDK uses `base_url = "<base>/jev"`) |
+
+- **Models:** `jjava-latest` reads whichever main model holds the card;
+  `jjava-bonsai` / `jjava-mirai-s` / `jjava-flash-next` only while that
+  model is on it (else 529, never a swap); Jev's `jev-latest`,
+  `jev-preview`, `jev-1.13.0` are aliases of `jjava-latest`. The response's
+  `model` is the model that read it (`jjava-bonsai`).
+- **Limits:** Jev's, enforced: Choice up to 255 (more than 26 in two
+  stages: chunks of <= 26, then the winners; P(option) = P_final(chunk
+  winner) x P_chunk(option)), Score 2-10, state plus the longest question
+  <= 32k tokens (and the model's window), 64k per request.
+- **The lane:** the questions run on the decider lane (the child slot,
+  3,072 cells kept in VRAM), one after another on the cached state -- not
+  in parallel as on Jev; one Jev call at a time (a second is 429 at once).
+  A state larger than the lane runs past the VRAM line, recorded.
+- **Usage** is counted from the reads: the state once plus every read's
+  processed tokens; one output token per read.
+- **Records:** a corpus event of kind `jev_call` with its traffic class, so
+  live-suite calls never train anything.
+- Gate: `mcp/test_jev_api.py` (every API response example in the docs,
+  reproduced field for field). **Offline only; no live or SDK run yet.**
 
 ## 3. Thresholds belong to the question set
 
@@ -338,6 +371,154 @@ the live log. The same `--model / --base-url / --slot` work on
 Every number it writes is one run: repeat before citing a difference
 (docs/PROTOCOL.md).
 
+## 8. Readout hardening from SGLang's decision models (2026-09-30)
+
+SGLang serves the same kind of decider (`/v1/decisions`) and documents how
+its answers are computed (SG; validated there on Qwen3.8-27B -- the base
+Bonsai 2's card names -- and Qwen3.5-35B-A3B). Five of its findings bear on
+jjava. Each is below with what we built for it; nothing in this section
+changes a default answer until the window measures it.
+
+| SGLang says (SG) | ours before | built (2026-09-30) |
+|---|---|---|
+| thinking is turned off for every question; a request that re-enables it, or a prompt that leaves a reasoning block open, is refused | `body()` sent `enable_thinking: false` (body and `chat_template_kwargs`); nothing checked the rendering | **the think-block guard** (`decider_bonsai.guard_body`, on every body before it is sent; `prompt_guard` on a rendered prompt; `template_check` live) |
+| the probabilities move "by up to several hundredths (0.07 in our checks)" and the label mass "by up to about 0.14" between cold and prefix-cached requests and batch compositions; the chosen options stayed; the prefix cache off "gave identical values across sequential repeats" | `TIE_BAND` 0.0034: one measurement of one of those effects (cached vs `cache_prompt: false`, 100 questions, one run) | **the determinism measurement** (`bench/decider/determinism.py`, four regimes; for the window) |
+| its yes/no `label_mass` "counts only the lowercase yes and no tokens", and the model also puts mass on the capitalised ones | our legacy yes/no already SUMS every single-token spelling (`LABEL_SPELLINGS`); the typed readout reads letters, a noul as the lettered pair | **case-variant diagnostics** (`case_variants`): where the rest of the top K went |
+| score levels are labelled 0-9 (single tokens), options A-Z | every option, a score's levels included, lettered by position | **digit score labels, behind a switch** (default unchanged) |
+| a temperature over the label logits is the knob: exp(lp/T) normalised over the labels; the vocabulary's normaliser cancels, `label_mass` does not depend on T; the values are "not a calibrated probability that the decision is correct. Validate any threshold on labeled data" | T = 1 implicitly; thresholds tuned on the raw readout | **per-model, per-question-set temperature**: fitted held out by run, applied in `read()`, default T = 1 |
+
+### 8.1 The think-block guard
+
+How our server renders a question, read from the engine source (the same
+code in every tree under `engines/src`): a body that ends on an assistant
+message is a CONTINUATION (`tools/server/server-common.cpp`:
+`prefill_assistant` -> `continue_final_message` AUTO,
+`add_generation_prompt` false; two assistant messages at the end are
+refused). `common/chat.cpp` resolves AUTO to REASONING when the message has
+reasoning and no content, else CONTENT; `common/chat-auto-parser-generator.cpp`
+renders `messages[:-1]`, the generation prompt cut at the reasoning start,
+the start, the reasoning, and -- for CONTENT only -- the reasoning end, then
+the content. So jjava's prefill (`Answer:`, no reasoning) always closes the
+block: `<think>\n\n</think>\n\nAnswer:` on Bonsai. A reasoning-only prefill
+(the shape of `proxy.directive_prefill`) leaves it open. Thinking off also
+matters to the text: the template's `enable_thinking` decides its system
+lines and, with thinking on, its generation prompt ends inside `<think>`.
+
+`guard_body` refuses, before anything is sent and not retryable (it is a
+rendering bug, never a model's answer): `enable_thinking` not false in both
+the body and `chat_template_kwargs`, or a `reasoning_effort` other than
+`none` (`THINKING_ON`); reasoning on the prefill, or a `<think>` it opens
+and does not close (`THINK_BLOCK_OPEN`); no assistant prefill, an empty one,
+one not ending on `Answer:`, or two assistant messages at the end
+(`NO_ANSWER_PREFILL`). `prompt_guard` checks a rendered prompt after the
+question's last line (a `<think>` quoted in the state does not count).
+`template_check` asks the serving model's own `/apply-template` for jjava's
+canonical body and reads it back -- the per-model confirmation (Flash-Next
+and Mirai S run their own templates); it goes through the `/upstream` door,
+so it runs only in a GPU window (the determinism run does it first and stops
+if the block is open). Tested through the served template with a simulation
+of the continuation code above: every question form, both orders, closed;
+the reasoning-only prefill open; each refusal
+(`mcp/test_decider_bonsai.py` [guard]).
+
+### 8.2 Case-variant diagnostics
+
+Our readout sums every single-token spelling of a label (`yes`, ` yes`,
+`Yes`, ` Yes`, `YES`, ` YES`; a letter as `A` / ` A`), so the SGLang
+under-count does not apply to the probabilities. What was not visible is
+where the REST of the top K went. `case_variants` (per read; token text from
+the server's `top_logprobs`) reports `by_spelling` (each read spelling's own
+mass: `Yes` beside `yes`), `variant` (per label: an unread spelling in
+another case or spacing -- `a` beside `A`) and `word` (a lettered noul's
+option WORDS: the model answering "Yes" instead of the letter). `read()`
+carries them per order and as `variant_mass_max` / `word_mass_max`; the
+decisions log carries them. **Diagnostics only**: no answer, tie or
+threshold reads them (`mcp/test_decider_bonsai.py` [variants]). If the
+window shows real mass on the words, the question to ask is whether the
+lettered pair is the right noul rendering -- a measurement, not a patch.
+
+### 8.3 Digit labels for a score
+
+`YAMADORI_JJAVA_SCORE_LABELS=digits` (or `q_score(..., label_kind=
+"digits")`) prints each level with its OWN number in both orders (`2. <level
+2>`), so the label carries the level's meaning and the two orders still move
+its position; the instruction line is `SCORE_DIGITS` ("Answer with the
+number of one level.", UNMEASURED wording). More than 10 levels stay
+lettered and say so (`diagnostics.score_labels`). The readout is recorded as
+`typed/2+digits`, so a threshold tuned on letters is never read as one tuned
+on digits. **Default unchanged** (`letters`). Measured in the window as the
+injector's variant `e` (variant `a` with digits: `bench/skills/
+inject_decide.py`), separation and held-out precision beside `a`'s
+(`bench/skills/inject_tune.py --loro`); it ships per model only if it holds
+out better.
+
+### 8.4 The temperature
+
+`read()` applies the question set's temperature to each order's label
+distribution AS READ (p_i^(1/T), renormalised -- the same as T over the
+label logits), before the content-free prior and the exclusion, then
+averages the orders as always. T comes from the model's profile field
+`temperature` {sets: {question set: {value, n, heldout_ok}}} -- a set's full
+name, else its family (the THRESHOLDS keys) -- and is 1 when none is fitted
+or with `YAMADORI_JJAVA_TEMPERATURE=0`; another model's is never borrowed.
+A set not shown to hold out by run is rejected from the record. Every answer
+says which T it was read at (`diagnostics.temperature`), and every order
+keeps its `raw` distribution, so a later fit re-scores logged decisions
+without the card (`decider_bonsai.readout_of`).
+
+The fit: `bench/decider/fit_temperature.py --model M --inject` (the
+injector's labelled window decisions; or `--decisions` + `--labels` for
+label.py's) minimises the NLL of the truth under the exact readout over
+log T (golden section in [0.01, 100]; a minimum at the edge is never
+written), per question set, **held out by run**: each run's T fitted on the
+others and scored on it; `heldout_ok` needs two or more runs and the 95%
+interval (`package_eval.ALPHA`) of the per-decision NLL difference (fitted
+minus T = 1) entirely below zero. `--write` writes only such sets (the fit
+on all runs, with the held-out evidence). A single read's argmax never
+moves with T, the averaged orders' can (reported as `argmax_moved`), and
+every confidence and noul does -- so the ORDER is: fit T, then tune
+THRESHOLDS on tempered values (`inject_tune.py` re-scores from the logged
+raw orders at the fitted T: `retemper`). `mcp/test_jjava_hardening.py`
+[fit]: a synthetic over-confident reader (3x the logits) is fitted near 3
+and holds out; a calibrated one is fitted near 1 and does not.
+
+### 8.5 Determinism, and the window
+
+`bench/decider/determinism.py` (GPU, a granted window; `--dry-run` sends
+nothing) reads build intent (noul), phase (choice of 4) and the injector's
+item score (4 levels) over 10 states (`--cases`: the injector's labelled
+cases, 25-1,231 tokens; else the daily eval's) 5 times each, both orders,
+in four regimes: `cold` (`cache_prompt: false`), `cached` (the state placed
+once, the production path), and each again `_beside` a main-model decode on
+another slot (batch composition). It reports, per regime, the max and mean
+|p_i - p_1| per order and on the averaged answer, the share of groups whose
+repeats are identical, argmax flips, the label-mass spread, the seconds per
+question (median, p90, max) and processed tokens, and the case-variant
+masses; across regimes, each one's mean against cold's (the `TIE_BAND`
+quantity, four ways). First it runs `template_check`. 1,240 reads.
+
+**The rule** (operator, 2026-09-30, through the coordinator: "20s is not
+too slow"; "we would normally be paying 10s of minutes or more without
+jjava so it's a huge speed up"): the CHEAPEST read mode that repeats
+exactly becomes jjava's default, fully cold included. `determinism.choose`
+applies it: a mode (cold or cached) counts as exact only when BOTH its
+environments -- alone and beside a decode, which jjava cannot choose --
+repeat exactly (every order's probabilities and label mass identical to 6
+decimals, no argmax flip); the cheapest by median seconds per question
+wins. `record` writes the model's profile: `read_regime` {mode,
+repeats_exactly, the seconds, every mode's numbers} -- `decider_bonsai.
+read_cache()` then reads every question that way (`read()`/`decide()`
+default `cache=None` resolves to it; an explicit `cache=` still wins, and
+each answer says `diagnostics.read_regime`) -- and `tie_band`, derived IN
+THAT MODE: the largest difference one question's answer shows there
+(within either environment's repeats, and between the two environments'
+means). No mode exact: the regime stays cached (nothing written for it) and
+the band is measured for cached. A `read_regime` not marked
+`repeats_exactly` is rejected. Unmeasured, or for any other model: cached,
+as before. In cold mode the lane still holds the state, but each question
+re-reads it (`cache_prompt` false), which is the cost the operator
+accepted.
+
 ## Sources
 
 **TypeSafe documentation** (docs.typesafe.ai, read 2026-09-29; vendor):
@@ -356,7 +537,18 @@ Every number it writes is one run: repeat before citing a difference
 [cookbooks/consistency_noul_cookbook](https://docs.typesafe.ai/cookbooks/consistency_noul_cookbook.md) and
 [cookbooks/consistency_choice_cookbook](https://docs.typesafe.ai/cookbooks/consistency_choice_cookbook.md) (TS consistency),
 [cookbooks/classifying_rag_passages](https://docs.typesafe.ai/cookbooks/classifying_rag_passages.md) (TS classifying_rag_passages),
-[llms.txt](https://docs.typesafe.ai/llms.txt) and llms-full.txt (the response examples the confidence form was checked on).
+[llms.txt](https://docs.typesafe.ai/llms.txt) and llms-full.txt (the response examples the confidence form was checked on),
+[api](https://docs.typesafe.ai/api.md) and the Python / JavaScript SDK references (the HTTP API of 2.1; docs/JEV-CONFORMANCE.md lists each page).
+
+**SGLang documentation**: "Decision models", section "How answers are
+computed", docs.sglang.io/docs/supported-models/decision_models (read
+2026-09-30; SG in section 8; its numbers are SGLang's own checks on
+Qwen3.8-27B and Qwen3.5-35B-A3B, not ours).
+
+**Engine source** (section 8.1): `engines/src/*/tools/server/server-common.cpp`
+(prefill_assistant), `common/chat.cpp` (continue_final_message AUTO ->
+CONTENT / REASONING), `common/chat-auto-parser-generator.cpp` (the
+continuation's rendering).
 
 **Community**: "Jev in the Agent Loop", x.com/N01ennn/status/2103542021071978601
 (AL; read through the coordinator's summary: the page is script-rendered).

@@ -159,11 +159,23 @@ def pc_recorded(pc: str | None) -> bool:
 
 
 # --------------------------------------------------------------- window ----
+_LANE_HOLD: dict | None = None
+
+
+def _hold_lane_once(why: str) -> None:
+    """The gpu lane paused for the whole run (every in_window call), released at the process's exit: resuming it
+    after each window let the worker start an idle-gated gpu job between them (2026-09-29, the coordinator)."""
+    global _LANE_HOLD
+    if _LANE_HOLD is None:
+        import atexit
+        _LANE_HOLD = ec.hold_lane(why, 12 * 3600)
+        atexit.register(ec.release_lane, _LANE_HOLD)
+
+
 def in_window(name: str, s: dict, fn, out: str, attempts: int, wait_min: float):
     """Run fn(base_url, rec) against a fresh arm server inside a window:
     engine_corruption's discipline (quiet stack, lane paused, guard, restore)."""
     sys.path.insert(0, os.path.join(ROOT, "mcp"))
-    import jobs                                                      # noqa: E402
     rec: dict = {}
     res: dict = {}
     for attempt in range(1, attempts + 1):
@@ -171,7 +183,7 @@ def in_window(name: str, s: dict, fn, out: str, attempts: int, wait_min: float):
         if why:
             return {"arm": name, "error": f"not run: {why}"}, res
         try:
-            jobs.pause("gpu", by=LANE_BY, why=f"engine PHASE 2 ({name})", ttl_seconds=7200)
+            _hold_lane_once(f"engine PHASE 2 ({name})")
             st, txt = ec.http("POST", f"{ec.SWAP}/api/models/unload/{ec.PROD_ID}", timeout=120)
             log(f"[{name}] attempt {attempt}: unload bonsai: HTTP {st}")
             t0 = time.time()
@@ -182,12 +194,7 @@ def in_window(name: str, s: dict, fn, out: str, attempts: int, wait_min: float):
             time.sleep(3)
             rec = run_server(name, s, fn, out)
         finally:
-            try:
-                p = jobs.paused("gpu")
-                if p and str(p.get("by", "")).startswith(LANE_BY):
-                    jobs.resume("gpu")
-            except Exception:                                        # noqa: BLE001
-                pass
+            # the lane stays paused between windows of this run; released once, at exit (_hold_lane_once)
             res = ec.restore(s["prod_argv"])
         if not rec.get("guard"):
             break

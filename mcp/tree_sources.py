@@ -12,7 +12,7 @@
            armed_at in the jobs DB). moss = mean over the ages that
            exist of clamp(log2(1 + days) / log2(1 + MOSS_FULL_DAYS)): a day
            old is a trace, a month old is full cover.
-  recent   fan-out and recall from the last requests (mcp/recent_turns.py,
+  recent   recall from the last requests (mcp/recent_turns.py,
            in memory in the proxy process).
 """
 from __future__ import annotations

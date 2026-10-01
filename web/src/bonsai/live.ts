@@ -6,7 +6,7 @@
 // from the 5 s vitals snapshot:
 //
 //   activity   decode rate across llama-server slots (else GPU0 utilisation)
-//   busy       slots in prefill or decode: main plus deep-thinking helpers
+//   busy       slots in prefill or decode: conversations plus the child slot
 //   wind       sway amplitude: calm when idle, rising with busy slots
 //   gust       gust strength: only while more than nothing is running
 //   glow       ground and ring brightness, following activity

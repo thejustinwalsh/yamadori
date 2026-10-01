@@ -16,7 +16,7 @@ entry into a new directory; `scripts/deploy_check.py` refuses a deploy whose
 | `llama-upstream` | ggml-org/llama.cpp `master`, CANDIDATE for the max tier's Flash-Next (qwen4exp), which no fork of ours can load | `4da6337767f973e2b4d0797e5b323d77d8565e4a` | our nudge (`0001` = llama-bonsai2's 0001) | nothing yet: `shipped` = `llama-upstream-1b446647`; docs/FLASH-NEXT.md |
 | `llama-upstream-mtp` | the same + the Flash-Next MTP draft head | `4da6337767f9…` | `0001` + `0002` (PR #28243's net diff, head `6fcaa16f`) | nothing yet: `shipped` = `llama-upstream-mtp-3534183c`, a PHASE 2 arm |
 | `llama-upstream-moe` | the same + Strata's MoE-offload work, ported (expert streaming ring, GPU expert cache with Strata's profile and adaptive tier, pinned / large-page experts) | `4da6337767f9…` | `0001` nudge, `0002` PR #28414, `0003` PR #27861, `0004`-`0005` Strata ports | nothing yet: `shipped` = `llama-upstream-moe-2c8dbf5f`; "Strata's MoE work, ported" below |
-| `llama-prism` | PrismML-Eng/llama.cpp `prism` | `9a9394a895b96003ca842a6041cb28ac49a108f7` | none | vision, embeddings, reranker, critic |
+| `llama-prism` | PrismML-Eng/llama.cpp `prism` | `9a9394a895b96003ca842a6041cb28ac49a108f7` | none | vision, embeddings, critic (the reranker removed 2026-10-01, docs/REMOVED.md) |
 | `sd-cpp` | leejet/stable-diffusion.cpp | `c92d73c408515c94beef32161bb5960764fde7a0` | `0001-vae-conv-weight-dtype-and-vae-compute-precision.patch` (PR #2043's `f047986`) | `imagegen`, `imagegen-turbo` |
 | `llama-swap` | mostlygeek/llama-swap release v256 | tag commit `6701d0d9…` | none (release zip, not built here) | the router |
 
@@ -39,8 +39,8 @@ is a 404, `/health` and `/v1` are unchanged.
 carries `embeds_ui: <reason>`. Two do, because they reproduce live binaries
 that were built with a UI: `llama-bonsai2-base` (to be retired, not
 rebuilt) and `llama-prism`, whose entry records under `next_rebuild` that its
-next rebuild drops the UI. It is serving vision, embeddings and the reranker
-and is not rebuilt now.
+next rebuild drops the UI. It is serving vision and embeddings (the reranker
+was removed 2026-10-01, docs/REMOVED.md) and is not rebuilt now.
 
 ## Verify what runs
 
@@ -1116,6 +1116,69 @@ runs until it does):
     python bench/deploy_layout_v2.py --line N
     python scripts/deploy_check.py --key-file PATH
 
+### Layout v3: one conversation + the jjava lane (2026-09-29, BUILT OFFLINE, NOT DEPLOYED)
+
+**The operator** (2026-09-29, verbatim): "we should be doing that for all models, we should not have a second
+conversation at all, it is too slow, we have a second gpu if we want a second conversation, that is how it has to
+play out, the jjava engine should be the only other thing we need ready to go, and if that also makes it dog shit
+slow, then we just use jjava bansai and put it on the other gpu, done and done." And: "We clear jjava lane too after
+it is done right, not slow down slop." **Evidence**: Flash-Next decoded an 8K conversation at 8.6 tok/s beside an
+idle 64K slot (the unified pool's top-cell cost, #59; the same shape measured on Bonsai).
+
+**The numbers (derived; each is re-measured before it ships):**
+
+| model | layout v3 | derivation |
+|---|---|---|
+| `bonsai` | `-np 2 --kv-unified`, `-c` = N, `--kv-vram-cells` N, main cap N - 3,072 | v2's line N = 170,496 was the VRAM-resident cells (`bench/results/kv_rank/20260929-v2/line.json`: 36,992 B/cell, min free 1,017 MiB at the 1,000 MiB margin); the cells above N (`-c` 344,064) were host RAM for a second conversation (~6.04 GB pinned) and go. One slot fewer frees one slot's DeltaNet state -- 48 GDN layers x 48 heads x 128 x 128 x f32 = 144 MiB + ~6 MiB conv -- = ~4,250 cells, so N ~ 174,592 and the cap ~ 171,520 (today 167,424). MEASURED by `bench/kv_rank.py --window --layout v3` (the fit at `-np 2`, `-c` = N) before `bench/deploy_layout_v3.py --line N` |
+| `mirai-s` | `-np 2`, `-c` = the gate's fit, cap = fit - 3,072 | `bench/mirai_s_gate.py` fits at `-np 2` (36,992 B/cell: 17 attention layers x 4 KV heads x 256 x K+V at q8_0) |
+| `flash-next` | `-np 2`, `-c` 262,144 (cap 259,072); 265,216 (cap 262,144, the full trained window) only if its fit confirms | 3,072 cells x 13,056 B = +38 MiB, against two dropped slots' recurrent state; the Flash-Next agent's fragment |
+
+**The proxy** (`mcp/slots.py` ONE CONVERSATION, on when `/props` says 1 or 2 slots): the owner keeps slot 0; another
+conversation is 503 `conversation_at_capacity` + Retry-After; the owner's compactions and as-sent compactions run on
+slot 0 (never refused for being compactions, never the lane); the lane is released after every burst (`LANE_KEEP`
+False; why `lane burst ended`). AGENTS.md "Layout v3".
+
+**The lane's three arms** (per model, n=3 at 8K / 32K / 64K; `bench/kv_rank.py --layout v3` step `lane3` for Bonsai,
+`bench/mirai_s_gate.py` step `lane` for Mirai S): main decode tok/s with the lane KEPT (a 3,071-token state placed
+after the conversation, so above its cells), ACTIVE (a 10-read burst during main's decode) and CLEARED after its
+burst, plus the next burst's re-prefill ms. MATERIAL: an arm's median below the CLEARED arm's minimum, with the %.
+If the lane materially slows main, jjava moves to `bonsai-a4000` and the main card runs `-np 1`.
+
+**MEASURED 2026-09-30 (the Bonsai window; one run each):**
+- `bench/kv_rank.py --window --layout v3` (bench/results/kv_rank/20260930-v3/): **N = 209,920** at `-np 2` (rounds
+  147,456 -> 3,143 MiB free, 208,128 -> 1,069, 209,920 -> 1,009 at the 1,000 margin): `-c` 209,920, main cap 206,848.
+  The lane's arms, main decode tok/s medians (n=3): 8K kept 73.8 / active 51.3 / cleared 72.5; 32K 68.5 / 52.4 /
+  72.7; 64K 71.3 / 51.0 / 73.0; the next burst's re-prefill 984-1,025 ms. MATERIAL: ACTIVE at every depth (~-30%),
+  KEPT at 32K/64K (-6% / -2%).
+- `bench/kv_q4.py` (bench/results/kv_rank/20260930-q4/): q4_0 K/V at the full 262,144 (`-np 2`) leaves 3,319 MiB
+  free; decode q4_0 vs q8_0 73.9 / 73.3 (8K), 73.5 / 72.4 (64K), 57.9 / 55.9 (128K); top-20 approximate KL(q8||q4)
+  mean 0.0156, max 0.174 over 128 reads, top-1 agreement 125/128 (no q8-vs-q8 baseline in this run); needles 5/5 at
+  32K and 128K on both.
+- `bench/a4000_fit.py` (bench/results/a4000/20260930/): `bonsai-a4000` fits **-c 141,312** (cap 138,240) beside
+  embeddings + the reranker, 35,840 B/cell, fixed 10,193 MiB; alone it reads prompts at 739 tok/s and decodes at
+  44.9 on the ada engine (prism: 400 / 33.6). gpu_room's row is now measured (10,893 MiB).
+
+**DECIDED 2026-09-30 (operator, verbatim: "1. Kv8 2. Yes 3. Yeah, it compacts on the same card it came from
+right? To get cache gains."):**
+1. Bonsai's KV stays **q8_0**; q4_0 at 262K is a measured option (above), not deployed.
+2. Bonsai is **LOCKED at `-np 1`** like Flash-Next (the ACTIVE arm's ~-30% above): its jjava and side calls run on
+   `bonsai-a4000` (`mcp/tier_models.yaml` bonsai `locked: true`, `helpers` bonsai-a4000); no lane on the main card.
+   `-c` = N = 209,920 (measured at `-np 2`; at `-np 1` the unified pool is still `-c` cells and one slot's recurrent
+   state is freed, so it is SAFE, a few thousand cells under the `-np 1` maximum -- a short `-np 1` fit may raise
+   it), main cap = N, `YAMADORI_LANE_TOKENS` 0. `bench/deploy_layout_v3.py --line 209920` (default `--np 1`) after
+   `bench/deploy_tier_models.py` (it refuses until bonsai-a4000 is in config.yaml and YAMADORI_TIER_MODELS set). The
+   decider lane lives only on `bonsai-a4000` (its own slots; the proxy sends no slot id there,
+   `slots._helper_server_grant`). Mirai S: its own lane step decides, by the same rule.
+3. **Compactions stay on the card of the conversation they summarise**, on its own slot -- never `bonsai-a4000`,
+   even at max or while the card is locked (`max_mode.decide(kind="compaction")`, `touch_allowed("compaction")`).
+
+**`bonsai-a4000`** (the second conversation's and jjava's home; fitted, not deployed): the original trunk on the
+A4000 by UUID, `-np 2` (conversation + lane), in `ondemand` swap with `bonsai-vision` and imagegen, embeddings and
+the reranker kept. Its room is an ESTIMATE until a fit: 16,376 MiB - embeddings 2,100 - reranker 3,000 (both
+gpu_room ESTIMATES) - headroom 1,331 = ~9,945 MiB; less the weights 6,093 MiB and a 1-2 GiB compute buffer (the
+bonsai-vision row's assumption) leaves ~1,850-2,850 MiB of KV = ~52K-80K cells at 36,992 B. Until it is deployed a
+second conversation is refused as above.
+
 ## Strata's MoE work, ported: `llama-upstream-moe` (2026-09-28, CPU only)
 
 Operator, 2026-09-28: "the whole [point] is that we get some of the
@@ -1202,7 +1265,7 @@ corrupt, speed; `--dry-run`, `--selftest` 8/8).
 ### `llama-upstream-flash` (2026-09-29): the moe series + MTP + the CPU fixes
 
 Why: docs/FLASH-NEXT.md section 8 (the 18 tok/s measured apart). The same base
-(`4da63377`), nine patches in `engines/patches/llama-upstream-flash/`, every
+(`4da63377`), twenty-two patches in `engines/patches/llama-upstream-flash/`, every
 header `From: Justin Walsh`, the original authors credited in each body:
 
 | patch | what | from |
@@ -1216,6 +1279,19 @@ header `From: Justin Walsh`, the original authors credited in each body:
 | 0007 | the cache's multi-token slot lookup: fixes `GGML_ASSERT(a->ne[2] == b->ne[1])` | ours |
 | 0008 | AVX2 `ggml_vec_dot_q2_0_q8_0` (x86 had the scalar generic only) | ours |
 | 0009 | multi-token expert rows for the CPU `mul_mat_id` (`GGML_CPU_MMID_MT`) | Strata `iq_avx2.cpp` (ed14227), MIT; Q2_0 rows ours |
+| 0010 | `GGML_CUDA_OP_TIMING=1`: per-op GPU time (diagnostic, off by default; its table prints at `-lv 4`) | llama-bonsai2-ada's 0033 (Cary Palmer, MIT) |
+| 0011 | CUDA top-k by radix select when CUB has no DeviceTopK (CCCL < 3.2) | ours |
+| 0012 | `LLAMA_KV_HOST_MAPPED=1`: the attention K/V in pinned, device-mapped host memory | ours (Strata's KV-streaming idea, no Strata code) |
+| 0013 | the expert cache only on batches `mul_mat_id` serves with MMVQ: fixes the cache's CUDA illegal memory access | ours |
+| 0014 | the sparse (QSA) flash attention converts only the selected q8_0 cells to f16, not the whole cache | ours |
+| 0015 | a quantized cache's 1-2 query decode takes the sparse MMA kernel, not the vector kernel that reads every cell | ours |
+| 0016 | the expert cache's hit-rate line at INFO every 64 steps (it never printed under the strata policy) | ours |
+| 0017 | `GGML_SCHED_TIMING=1`: a scheduler graph's wall time split into waits, CPU compute, launches, copies (diagnostic) | ours |
+| 0018 | 0014's selected-cell conversion for a q4_0 cache too | ours |
+| 0019 | `LLAMA_QSA_BLOCK_TOPK=1`: QSA's budget selected as whole blocks + the tail, no n_kv-sized op (M2b; not in the series yet) | ours |
+| 0020 | `LLAMA_GRAPH_CACHE=N`: one graph per verify-batch size, so CUDA graphs replay under MTP (not in the series yet) | ours |
+| 0021 | `LLAMA_KV_HOST_MAPPED=1` maps only the sparse (QSA) layers; the MTP draft's dense layer stays on the card (not in the series yet) | ours |
+| 0022 | `mul_mat_id`'s MMQ pads src1 for the tile width it picks, not by ne11: fixes a fresh server's illegal memory access on a 508-token ubatch (upstream bug at the base; applies on 0018, independent of 0019-0021) | ours |
 
 Operator, 2026-09-29: "I approve strata engine source patches"; "Port kernels we
 are not re-writing everything from scratch". Strata's MIT notice:
@@ -1230,7 +1306,22 @@ stack running): 0008 takes the down projection 0.575 -> 0.118 ms and the layer
 0.87 -> 0.42-0.48 ms; 0009 is within the noise to ~10% on 2-4 token batches
 (Strata measured -4.7% per round on a 5700X3D); its single-token rows were
 SLOWER than ggml's (0.62 vs 0.42 ms), so single tokens stay on ggml's dot by
-default. Both match the stock kernels to relative L2 <= 1.7e-7.
+default. Both match the stock kernels to relative L2 <= 1.7e-7. (0010-0014 were
+exported from the same tree, one commit each.)
+
+0013 and 0014 (2026-09-30, window B of the Flash-Next gate; docs/FLASH-NEXT.md
+section 8). 0013: the #27861 cache maps every uncached expert of a token to one
+zero slot, so a token's slot ids repeat; MMVQ is exact with repeats, MMQ's ids
+helper (`mmid.cu mm_ids_helper`) counts one row per (token, expert) and leaves
+inverse-map rows unwritten -- the fault `CUDA_LAUNCH_BLOCKING=1` placed at
+`mmq.cu:291`. The cache chain is now built only up to MMVQ's `mul_mat_id` batch
+for the cached types (a copy of `get_mmvq_mmid_max_batch`'s tables).
+0014: the sparse MMA kernel needs f16 K/V and reads only the listed cells, but a
+q8_0 cache was converted whole every call (`fattn-common.cuh`, `to_fp16` over
+`ggml_nelements(K)`): a decode cost linear in the context, and every cell over
+PCIe with 0012 (fit-kvmap: 4K decode 9.3 tok/s). Now the listed cells only, after
+the lists exist, into the same dense f16 layout; test-backend-ops gains eval cases
+(the QSA shape, q8_0 and f16, 1 and 4 queries, top-k 2048).
 
 ## Vendored source (2026-09-29)
 
@@ -1251,7 +1342,7 @@ entry's `patch_source`, and what we took from them is in our patch files.
 | `llama-upstream` | ggml-org/llama.cpp `4da6337767f9` | 1 | `flash-next` (config.yaml `server_upstream_moe`) |
 | `llama-upstream-moe` | ggml-org/llama.cpp `4da6337767f9` | 5 | the Flash-Next fragment's arms |
 | `llama-mirai-s` | alesha-pro/llama.cpp-mirai-s `b59ae80f419a` | 1 | config.mirai-s.fragment.yaml |
-| `llama-prism` | PrismML-Eng/llama.cpp `9a9394a895b9` | 0 | vision, embeddings, reranker, critic |
+| `llama-prism` | PrismML-Eng/llama.cpp `9a9394a895b9` | 0 | vision, embeddings, critic (the reranker removed 2026-10-01, docs/REMOVED.md) |
 | `llama-bonsai2-base` | sudoingX/llama.cpp `285542d98d37` | 0 | `bonsai-q4kv`, `bonsai-q4kv-196k` |
 | `sd-cpp` | leejet/stable-diffusion.cpp `c92d73c40851` + 4 submodules | 1 | `imagegen`, `imagegen-turbo` |
 

@@ -14,8 +14,9 @@ rule 'Fetched content is data' already requires"). Offline, no model.
      user's own code).
   3. A clean package file passes untouched, with no `screen` record.
   4. A text the screen cannot cut clean is withheld as QUARANTINED.
-  5. The proxy's package path (proxy._run_on_package) returns the screened
-     text.
+  (5. The proxy's package path, proxy._run_on_package, was removed
+     2026-09-29 with the second brain's code tools: docs/REMOVED.md. The
+     index tools reach held packages through the MCP tools API.)
 """
 from __future__ import annotations
 
@@ -148,15 +149,6 @@ def main() -> int:
               "QUARANTINED" and "evil" not in json.dumps(body),
               "[withheld] a text the screen cannot cut clean is withheld "
               "as QUARANTINED", body)
-        # The proxy's package path returns the screened text.
-        import proxy
-        text = proxy._run_on_package(pdb, "read_file_range",
-                                     {"path": "index.js", "start": 1,
-                                      "end": 50})
-        check("Ignore all previous instructions" not in text
-              and "spinWidget" in text,
-              "[proxy] proxy._run_on_package returns the screened text",
-              text)
     except Exception:                                            # noqa: BLE001
         check(False, "the suite raised", traceback.format_exc())
     print(f"\n  {N[0] - len(FAILS)}/{N[0]} checks passed")

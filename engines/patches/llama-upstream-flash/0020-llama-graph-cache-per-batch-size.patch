@@ -1,0 +1,198 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Thu, 1 Oct 2026 02:15:40 -0400
+Subject: [PATCH] llama: keep one graph per batch size for speculative verify
+ (LLAMA_GRAPH_CACHE=N)
+
+llama_context reused its last graph only when the next ubatch had the same
+shape; anything else rebuilt the graph, re-split and re-allocated it. MTP's
+verify batch changes size from step to step (its drafts stop early under a
+p-min), so the target graph was rebuilt on almost every step, and ggml-cuda,
+seeing every GPU split's node properties change, re-warmed its CUDA graphs
+instead of replaying them: each verify step launched every kernel one by
+one. GGML_SCHED_TIMING (0017) on Flash-Next, the A4000, MTP 3, ~35K: 15.6-18
+ms of a 121-123 ms verify step in launches; the 5060 Ti at ~128K: 15.6 of
+84.3.
+
+With LLAMA_GRAPH_CACHE=N (N > 2) llama_context keeps up to N graph arenas
+keyed by (outputs, n_tokens), least recently used out. A size seen before
+whose graph still passes can_reuse is taken back instead of rebuilt: its
+nodes get back the sources they were built with (the scheduler points a
+node's sources at its own input copies when it splits a graph -- recorded
+right after the build), its tensors in a compute buffer are unplaced, and the
+scheduler splits and allocates it again; the allocator lays the same graph
+out the same way, so ggml-cuda finds the same node properties under a new
+split uid and replays its CUDA graphs. Off by default (N <= 2: the two
+arenas as before).
+
+Same card, same run shape, LLAMA_GRAPH_CACHE=8: launches 2.5-3.9 ms a
+verify step; decode 15.5 -> 18.4 tok/s at ~4K and 18.0 -> 18.6 at ~35K
+(n=1 each); greedy decode identical to the cache off, 200/200 tokens.
+---
+ src/llama-context.cpp | 91 +++++++++++++++++++++++++++++++++++++++++--
+ src/llama-context.h   | 13 ++++++-
+ 2 files changed, 98 insertions(+), 6 deletions(-)
+
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index c976e66b..db9ee45b 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1406,7 +1406,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+         return nullptr;
+     }
+ 
+-    auto * res = get_gf_res_prev();
++    auto * res = get_gf_res_prev(ubatch.n_tokens);
+     auto * gf  = res->get_gf();
+ 
+     // the new graph parameters
+@@ -1423,6 +1423,42 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+             ggml_backend_sched_synchronize(sched.get());
+         }
+ 
++        n_reused++;
++    } else if (!graph_reuse_disable && gf_res_prev.size() > 2 && gf_res_prev_active != res && res->get_gf() != nullptr &&
++               ggml_graph_n_nodes(res->get_gf()) > 0 && res->can_reuse(gparams)) {
++        // 0020: this size's graph is still built in its own arena -- only the scheduler has to take it back (split
++        // and allocate again: the allocator lays the same graph out the same way, so a CUDA graph keyed on it can
++        // replay instead of warming up again)
++        LLAMA_LOG_DEBUG("%s: graph cache: taking back the n_tokens = %u graph\n", __func__, ubatch.n_tokens);
++        {
++            auto it = gf_res_srcs.find(res);
++            GGML_ASSERT(it != gf_res_srcs.end() && (int) it->second.size() == ggml_graph_n_nodes(res->get_gf()));
++            for (int i = 0; i < ggml_graph_n_nodes(res->get_gf()); ++i) {
++                ggml_tensor * node = ggml_graph_node(res->get_gf(), i);
++                for (int j = 0; j < GGML_MAX_SRC; ++j) {
++                    node->src[j] = it->second[i][j];
++                }
++            }
++        }
++        // the graph's own tensors still point into the compute buffer as the last allocation of THIS graph left
++        // them, and ggml-alloc takes a tensor with data as already placed: unplace every tensor of its context
++        // that lives in a compute buffer (views included; weights, caches and other contexts are untouched)
++        for (ggml_tensor * t = ggml_get_first_tensor(res->get_ctx()); t != nullptr; t = ggml_get_next_tensor(res->get_ctx(), t)) {
++            if (t->buffer && ggml_backend_buffer_get_usage(t->buffer) == GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
++                t->data   = nullptr;
++                t->buffer = nullptr;
++            }
++        }
++        ggml_backend_sched_reset(sched.get());
++        ggml_backend_sched_set_eval_callback(sched.get(), cparams.cb_eval, cparams.cb_eval_user_data);
++
++        if (!ggml_backend_sched_alloc_graph(sched.get(), res->get_gf())) {
++            LLAMA_LOG_ERROR("%s: failed to allocate graph\n", __func__);
++            ret = GGML_STATUS_ALLOC_FAILED;
++            return nullptr;
++        }
++
++        gf_res_prev_active = res;
+         n_reused++;
+     } else {
+         gf_res_prev_active = nullptr;
+@@ -1443,6 +1479,18 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+             return nullptr;
+         }
+ 
++        // 0020: the graph's own sources, before the scheduler rewrites them (only kept with the graph cache on)
++        if (gf_res_prev.size() > 2) {
++            auto & srcs = gf_res_srcs[res];
++            srcs.resize(ggml_graph_n_nodes(gf));
++            for (int i = 0; i < ggml_graph_n_nodes(gf); ++i) {
++                ggml_tensor * node = ggml_graph_node(gf, i);
++                for (int j = 0; j < GGML_MAX_SRC; ++j) {
++                    srcs[i][j] = node->src[j];
++                }
++            }
++        }
++
+         if (!ggml_backend_sched_alloc_graph(sched.get(), gf)) {
+             LLAMA_LOG_ERROR("%s: failed to allocate graph\n", __func__);
+             ret = GGML_STATUS_ALLOC_FAILED;
+@@ -2429,11 +2477,46 @@ llm_graph_result * llama_context::get_gf_res_reserve() const {
+     return static_cast<llm_graph_result *>(gf_res_reserve.get());
+ }
+ 
+-llm_graph_result * llama_context::get_gf_res_prev() {
+-    auto & res = gf_res_prev[n_outputs > 0];
+-    if (!res) {
++llm_graph_result * llama_context::get_gf_res_prev(uint32_t n_tokens) {
++    // 0020: LLAMA_GRAPH_CACHE=N, N arenas keyed by (outputs, n_tokens)
++    static const int n_cache = [] { const char * e = getenv("LLAMA_GRAPH_CACHE"); return e ? std::max(2, atoi(e)) : 2; }();
++    if (n_cache <= 2 || n_tokens == 0) {
++        auto & res = gf_res_prev[n_outputs > 0];
++        if (!res) {
++            res.reset(new llm_graph_result(gf_res_reserve->get_max_nodes()));
++        }
++        return res.get();
++    }
++    if ((int) gf_res_prev.size() != n_cache) {
++        for (auto & r : gf_res_prev) {
++            r.reset();
++        }
++        gf_res_prev.resize(n_cache);
++        gf_res_key.assign(n_cache, {-1, 0});
++        gf_res_prev_active = nullptr;
++    }
++    const int64_t key = int64_t(n_tokens)*2 + (n_outputs > 0 ? 1 : 0);
++    size_t slot = 0;
++    bool found = false;
++    for (size_t i = 0; i < gf_res_prev.size(); ++i) {
++        if (gf_res_key[i].first == key) {
++            slot = i;
++            found = true;
++            break;
++        }
++        if (gf_res_key[i].second < gf_res_key[slot].second) {
++            slot = i;                                    // least recently used, the one to give up
++        }
++    }
++    auto & res = gf_res_prev[slot];
++    if (!found || !res) {
++        if (gf_res_prev_active == res.get()) {
++            gf_res_prev_active = nullptr;
++        }
+         res.reset(new llm_graph_result(gf_res_reserve->get_max_nodes()));
++        gf_res_key[slot].first = key;
+     }
++    gf_res_key[slot].second = ++gf_res_clock;
+     return res.get();
+ }
+ 
+diff --git a/src/llama-context.h b/src/llama-context.h
+index 35a7071e..e06cef80 100644
+--- a/src/llama-context.h
++++ b/src/llama-context.h
+@@ -12,6 +12,7 @@
+ #include "ggml-opt.h"
+ 
+ #include <array>
++#include <unordered_map>
+ #include <map>
+ #include <vector>
+ 
+@@ -261,7 +262,7 @@ public:
+     bool set_sampler(llama_seq_id seq_id, llama_sampler * sampler);
+ 
+ private:
+-    llm_graph_result * get_gf_res_prev();
++    llm_graph_result * get_gf_res_prev(uint32_t n_tokens = 0);
+ 
+     llm_graph_params graph_params(
+                         llm_graph_result * res,
+@@ -375,7 +376,15 @@ private:
+     std::vector<size_t>                     backend_buf_exp_size; // expected buffer sizes
+ 
+     // Separate arenas give batches with and without outputs distinct CUDA graph cache keys.
+-    std::array<llm_graph_result_ptr, 2> gf_res_prev;
++    // 0020: and, with LLAMA_GRAPH_CACHE=N (N > 2), up to N arenas keyed by (outputs, n_tokens), least recently used
++    // first out -- a speculative verify batch changes size step to step, and one arena per size keeps each size's
++    // graph (and so the backend's CUDA graphs for it) instead of rebuilding it on every change of size
++    std::vector<llm_graph_result_ptr> gf_res_prev = std::vector<llm_graph_result_ptr>(2);
++    std::vector<std::pair<int64_t, uint64_t>> gf_res_key;   // per arena: (key, last use); key -1 = none
++    // per arena: every node's sources as built -- the scheduler points a node's sources at its own input copies
++    // when it splits a graph, so a graph taken back must get its own sources again before it is split anew
++    std::unordered_map<const llm_graph_result *, std::vector<std::array<ggml_tensor *, GGML_MAX_SRC>>> gf_res_srcs;
++    uint64_t gf_res_clock = 0;
+     llm_graph_result_ptr gf_res_reserve;
+ 
+     llm_graph_result * gf_res_prev_active = nullptr;

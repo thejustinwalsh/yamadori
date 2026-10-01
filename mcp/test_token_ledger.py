@@ -174,10 +174,8 @@ def test_roles_from_proxy_payloads():
     check(tl.role_of({"_utility": {"utility": True, "kind": "compaction"},
                       "_slot": {"key": "k", "transient": False}}) == "side_call",
           "a compaction rewritten onto its conversation's slot is still a side call")
-    check(tl.role_of({"_role": "helper"}) == "second_brain",
-          "fan-out's helper candidates are the second brain")
-    check(tl.role_of({"_role": "main", "_slot": {"key": "k"}}) == "main",
-          "fan-out's candidate A is main")
+    check(tl.role_of({"_role": "helper"}) == "main",
+          "the stale `_role: helper` mark reads as nothing (the second brain is gone, 2026-09-29)")
     p = fresh("upstream.sqlite3")
     rec = slots.cache_record({"cache_n": 1000, "prompt_n": 24}, None, None)
     ok = tl.record_upstream(

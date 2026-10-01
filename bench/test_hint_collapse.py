@@ -14,14 +14,15 @@ Floors are deliberately set BELOW the measured numbers, wide enough that fp16
 batch jitter and a llama-swap restart cannot trip them, and tight enough that a
 real regression or a real improvement both show up.
 
-TWO MODES
+ONE MODE
 
-  default   score the CACHED run in bench/data/hint_collapse_runs.json. No GPU,
-            no network, ~1 s, runs anywhere.
-  --live    additionally hit the reranker on 11434 and assert the cache
-            still matches what it returns today, plus the two serving
-            diagnostics that explain the rerank arm. (The Laya check on 1237
-            is retired with Laya, 2026-09-24, docs/E1.md.)
+  Score the CACHED run in bench/data/hint_collapse_runs.json. No GPU, no
+  network, ~1 s, runs anywhere. The --live mode is gone: its Laya check on
+  1237 retired with Laya (2026-09-24, docs/E1.md), and its reranker checks --
+  the serving diagnostics behind docs/FINDINGS.md #20, one of them an
+  expected failure -- went with the reranker (operator, 2026-10-01: "Remove
+  reranker"; docs/REMOVED.md), as did the rerank arms' floors below. The way
+  back is commit e360d37.
 
 Regenerate the cache with:
 
@@ -30,7 +31,6 @@ Regenerate the cache with:
 Run:
 
     python -X utf8 bench/test_hint_collapse.py
-    python -X utf8 bench/test_hint_collapse.py --live
 """
 from __future__ import annotations
 
@@ -71,8 +71,6 @@ MEASURED = {
     "lexical":        (0.517, 0.468, 0.571),
     "embedding":      (0.719, 0.574, 0.881),
     "embedding_cond": (0.573, 0.447, 0.714),
-    "rerank":         (0.225, 0.277, 0.167),
-    "rerank_batched": (0.213, 0.255, 0.167),
     "laya":           (0.337, 0.298, 0.381),
     "laya_cond":      (0.449, 0.362, 0.548),
 }
@@ -81,8 +79,7 @@ TOL = 0.06          # the band a re-run must stay inside
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--live", action="store_true")
-    a = ap.parse_args(argv)
+    ap.parse_args(argv)
 
     print("DATA")
     buckets = H.load_jsonl(H.BUCKETS)
@@ -215,12 +212,6 @@ def main(argv=None) -> int:
           m["p"] < 0.05 and m["embedding_only"] > m["embedding_cond_only"],
           f"embedding_cond_only={m['embedding_cond_only']} "
           f"embedding_only={m['embedding_only']} p={m['p']:.3f}")
-    m = H.mcnemar(records, "laya", "rerank", contr)
-    check("laya vs rerank on contrastive buckets CANNOT be called: it is a "
-          "tie on too few discordant pairs",
-          m["p"] > 0.20,
-          f"laya_only={m['laya_only']} rerank_only={m['rerank_only']} "
-          f"discordant={m['discordant']} p={m['p']:.3f}")
 
     print("\nCOVERAGE (docs/HINTS.md table 2 -- an arm that abstains more must "
           "not be rewarded for it)")
@@ -248,7 +239,7 @@ def main(argv=None) -> int:
     print("\nDEGENERACY (docs/HINTS.md table 7 / docs/LAYA.md cross-cutting "
           "lesson)")
     shares = {}
-    for arm in ("embedding", "laya", "laya_cond", "rerank"):
+    for arm in ("embedding", "laya", "laya_cond"):
         hit = tot = 0
         for b in buckets:
             picks = [r["arms"][arm]["pick"] for r in records
@@ -266,9 +257,6 @@ def main(argv=None) -> int:
           "degeneracy but does not remove it",
           shares["laya"] > shares["laya_cond"] > 0.50,
           f"laya {shares['laya']:.2f} -> laya_cond {shares['laya_cond']:.2f}")
-    check("the batched reranker is the MOST degenerate arm -- the serving bug "
-          "in docs/HINTS.md finding 4", shares["rerank"] > 0.70,
-          f"modal share {shares['rerank']:.2f}")
 
     print("\nCONTRACT (the constraints this harness runs under)")
     check("YAMADORI_CORPUS_DB is redirected away from index/corpus.sqlite3",
@@ -294,62 +282,6 @@ def main(argv=None) -> int:
           "de-bias, not just forward+reversed)",
           all(len(cache["probes"][p["probe_id"]]["laya_orders"])
               == len(by_id[p["bucket_id"]]["members"]) for p in probes))
-
-    if a.live:
-        print("\nLIVE -- against the services")
-        try:
-            import code_search as cs
-            # RETIRED 2026-09-24: the Laya service on 1237 (docs/E1.md: E1
-            # alone, retire Laya). Its cached arm above stays the record.
-            print("  retired  laya on 1237 still returns what the cache "
-                  "recorded (Laya retired 2026-09-24, docs/E1.md); not run")
-
-            # The serving diagnostic behind docs/HINTS.md finding 4.
-            docs = ["The capital of France is Paris.",
-                    "A red panda is a small mammal native to the Himalayas.",
-                    "To reverse a linked list in place, walk it keeping prev, "
-                    "cur and next pointers.",
-                    "Sourdough bread relies on a wild yeast starter fermented "
-                    "over several days."]
-            q = "what is the capital of France"
-            batched = dict(cs.rerank(q, docs, len(docs)))
-            solo = {i: cs.rerank(q, [d], 1)[0][1] for i, d in enumerate(docs)}
-            check("scored ONE AT A TIME the reranker puts the Paris document "
-                  "first", max(solo, key=solo.get) == 0,
-                  f"{ {i: f'{s:.2e}' for i, s in solo.items()} }")
-            # LEFT AS IT IS, FAILING (2026-09-24, #15d in
-            # docs/SELF-IMPROVEMENT-LOG.md). On the live gate the batched
-            # Paris probe put index 0 first, so this check fails -- while the
-            # 89-probe self-retrieval check below still measured the batch
-            # contamination (16/89 batched vs 66/89 solo). One four-document
-            # probe flipping is one data point (PROTOCOL rule 10), and
-            # docs/FINDINGS.md #20 says the reranker is neither cut nor
-            # defended until its rank path is fixed and re-measured. So the
-            # probe is not rewritten to pass: its failure is reported as "this
-            # probe no longer discriminates", and the decision belongs to the
-            # #20 re-measurement, not to a test edit.
-            check("scored AS A BATCH it does not -- the batch contaminates the "
-                  "scores, which is why arm_rerank sends one document per call",
-                  max(batched, key=batched.get) != 0,
-                  f"batched top index {max(batched, key=batched.get)}")
-
-            ok_solo = ok_batch = 0
-            for b in buckets:
-                ds = [m["recipe"] for m in b["members"]]
-                for i, m in enumerate(b["members"]):
-                    s = [cs.rerank(m["recipe"], [d], 1)[0][1] for d in ds]
-                    ok_solo += max(range(len(s)), key=lambda j: s[j]) == i
-                    ok_batch += cs.rerank(m["recipe"], ds, len(ds))[0][0] == i
-            n = sum(len(b["members"]) for b in buckets)
-            check("self-retrieval, one document per call, is far better than "
-                  "batched -- the size of the serving bug",
-                  ok_solo > ok_batch + 20, f"solo {ok_solo}/{n} vs "
-                  f"batched {ok_batch}/{n}")
-            check("even one at a time the reranker cannot reliably retrieve a "
-                  "document from its own verbatim text",
-                  ok_solo < n, f"{ok_solo}/{n}")
-        except Exception as e:                                   # noqa: BLE001
-            check("live services reachable", False, f"{type(e).__name__}: {e}")
 
     print(f"\n{_PASSES} passed, {len(_FAILURES)} failed")
     for f in _FAILURES:

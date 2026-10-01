@@ -110,6 +110,14 @@ TS_LIB = os.environ.get("YAMADORI_TS_LIB") or os.path.join(
     ROOT, "web", "node_modules", "typescript", "lib")
 NODE_TYPES = os.environ.get("YAMADORI_NODE_TYPES") or os.path.join(
     ROOT, "web", "node_modules", "@types", "node")
+# The web-text tokenizer tokenizer_words() reads: the pinned Qwen3-8B
+# tokenizer.json (models/manifest.yaml qwen3-8b-tokenizer). It was CLM's
+# (mcp/clm.py TOKENIZER_PATH, same default path and override) until CLM was
+# removed, 2026-09-29.
+WORDS_TOKENIZER = os.environ.get("YAMADORI_CLM_TOKENIZER") or os.path.join(
+    os.environ.get("YAMADORI_MODELS_DIR",
+                   "C:/Users/jwals/textgen/user_data/models"),
+    "Qwen3-8B", "tokenizer.json")
 # The prose corpus for "a plain English word" (see the module docstring).
 PROSE_GLOBS = (
     # the README of every npm package the dashboard installs, and the long
@@ -435,11 +443,10 @@ def tokenizer_words() -> set[str]:
     when the word is frequent in its training text, so these are the words
     common in text at large ("water", "decoration", "spawn"), a rare API
     name ("updateEach", "metalness") is not one. The pinned Qwen3-8B
-    tokenizer (CLM's, models/manifest.yaml qwen3-8b-tokenizer), read only;
-    absent, the prose corpus stands alone."""
+    tokenizer (WORDS_TOKENIZER), read only; absent, the prose corpus stands
+    alone."""
     try:
-        import clm
-        with open(clm.TOKENIZER_PATH, encoding="utf-8") as f:
+        with open(WORDS_TOKENIZER, encoding="utf-8") as f:
             vocab = json.load(f)["model"]["vocab"]
     except Exception:                                            # noqa: BLE001
         return set()

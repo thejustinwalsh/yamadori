@@ -130,6 +130,7 @@ structured response in the stack, not just Laya's.
                       127.0.0.1:11434; the proxy owns :1234 (`scripts/start-stack.bat`)
     canopy    GPU0     Bonsai 2 27B ternary, 147,456 ctx, q8 KV
     rootstock GPU1     embeddings + reranker + Laya, always resident --
+                       (the reranker removed 2026-10-01, docs/REMOVED.md; Laya retired)
                        see "Retrieval" below: the cut rule fired on both and
                        neither has been removed
     graft     GPU1     vision, on demand

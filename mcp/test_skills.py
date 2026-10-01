@@ -1039,10 +1039,12 @@ def test_attach_gates_and_the_sticky_cache():
         # a real armed skill, through the store
         # A language-keyed skill: a language named in prose is a WORD (React,
         # asked, is a fact since 2026-09-27), so this is the ask path.
+        # Its lines are DO items: the injector composes ITEMS (a skill with
+        # none has nothing it can hand a model).
         s = skills.create(text="---\ndescription: Rust ownership guidance."
-                               "\n---\n# Rust\n\nRust borrows must not "
-                               "outlive the Rust value they borrow from.\n\n"
-                               "Keep Rust lifetimes explicit on public "
+                               "\n---\n# Rust\n\n- DO: Rust borrows must not "
+                               "outlive the Rust value they borrow from.\n"
+                               "- DO: Keep Rust lifetimes explicit on public "
                                "functions that return references.\n")
         drain()
         check(skills.get(s["id"])["status"] == "armed", "fixture skill armed",
@@ -1107,8 +1109,10 @@ def test_nothing_that_leaves_the_process_carries_an_internal_path():
         bad += re.findall(r"[A-Za-z]:\\\\|[A-Za-z]:/(?:Users|Windows)|"
                           r"source\.bin|index/skills|\.sqlite3", blob)
         check(not bad, f"{name}: no filesystem path", bad[:3])
-    check(rec and "items" not in json.dumps(rec)
-          and "Keep React effects" not in json.dumps(rec),
+    # The injector names items by KEY ("<skill id>#<index>"), never by
+    # their text: the text check is what counts.
+    check(rec and "Keep React effects" not in json.dumps(rec)
+          and "- DO:" not in json.dumps(rec),
           "x_yamadori.skills carries ids, versions and titles, not the "
           "skill's text")
 
@@ -1818,4 +1822,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # jjava is always in scope where skills serve (operator, 2026-09-29):
+    # offline, the STUBBED decider answers (mcp/decider_stub.py).
+    import decider_stub
+    with decider_stub.installed():
+        sys.exit(main())

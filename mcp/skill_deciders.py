@@ -18,20 +18,20 @@ ever compared against a number or across questions.
               deterministic ranking the rounds    eval; today's default
               computed: prior, tier)
     lexical   the state's and the options' TEXT   TEST-ONLY (never served): a
-              only (IDF-weighted word overlap)    text stand-in for CLM
-    clm       the state's and the options' TEXT   YAMADORI_SKILL_DECIDER=clm
-              (CLM-v0.1-8B: a frozen Qwen3-8B     (mcp/clm.py: the encoder is
-              encoder + state/action heads)       llama-swap's clm-encoder on
-                                                  the A4000; not yet run live
-                                                  for skill questions)
+              only (IDF-weighted word overlap)    text stand-in for a text
+                                                  decider
     fallback  the model, one call (skill_select's LAST RESORT: options the
               FALLBACK_SYSTEM, thinking off)      evidence cannot settle (an
                                                   `ask` tier) and no model
                                                   decider answered
 
-A decider that cannot answer returns None (the CLM service down, the stub
-facing only unconfirmed options); the orchestrator (skill_select) then tries
-the next. `YAMADORI_SKILL_DECIDER` names the first (stub | clm).
+The `clm` decider (CLM-v0.1-8B, a frozen Qwen3-8B encoder + heads, served as
+llama-swap's clm-encoder) was retired 2026-09-28 for the Bonsai decider and
+its code removed 2026-09-29 (the way back is commit e360d37).
+
+A decider that cannot answer returns None (the stub facing only unconfirmed
+options); the orchestrator (skill_select) then tries the next.
+`YAMADORI_SKILL_DECIDER` names the first (stub only today).
 
 Every decider is order-invariant: shuffling the options changes no
 probability (checked by mcp/test_skill_questions.py).
@@ -118,7 +118,7 @@ class EvidenceStub(Decider):
     NONE sits one below the weakest eligible option, so the best eligible
     option wins and NONE wins when nothing is eligible. Abstains (None) when
     the only candidates are unconfirmed `ask`-tier options: the evidence
-    cannot settle them, a model must (the fallback, or CLM)."""
+    cannot settle them, a model must (the fallback)."""
     name = "stub"
 
     def decide(self, state, options, question=None):
@@ -152,7 +152,7 @@ def _words(text: str) -> set[str]:
 
 
 class LexicalStub(Decider):
-    """`lexical`: TEXT ONLY, like CLM -- the state and each option's text,
+    """`lexical`: TEXT ONLY -- the state and each option's text,
     nothing else. Logit = the IDF-weighted share of the option's words found
     in the state (IDF over this question's own options, so it is
     set-relative); NONE's text is scored the same way. A stand-in for a
@@ -177,100 +177,19 @@ class LexicalStub(Decider):
             idf = {w: math.log((n + 1) / (df[w] + 0.5)) for w in ws}
             hit = sum(idf[w] for w in ws if w in sw)
             logits[k] = self.SCALE * hit / (sum(idf.values()) or 1.0)
-        # NONE is scored like any option, from its own text (as CLM scores
-        # it): no floor, no number outside the set.
+        # NONE is scored like any option, from its own text: no floor, no
+        # number outside the set.
         return softmax(logits)
 
 
-class ClmDecider(Decider):
-    """`clm`: CLM-v0.1-8B through the in-process client (mcp/clm.py: the
-    Qwen3-8B encoder is llama-swap's `clm-encoder` on the A4000, behind
-    gpu_room; the heads run in numpy on the CPU; option vectors are cached
-    per text, so per skill revision, in index/clm_actions.npz).
-
-    The state head reads `state + "\\n\\n" + instructions` (the question
-    last; clm.fit_state cuts whole evidence pieces from the FRONT to 2,047
-    tokens, CLM's own left truncation). All the skill questions of a turn
-    share clm.INSTRUCTIONS, so the state is ENCODED ONCE for all of them
-    (clm.decide_detail_many); NONE is clm.NONE_OPTION, the wording the
-    fidelity set and the fine-tune data use. A category question has its
-    own instruction (one more state encoding, only when it is asked).
-
-    Abstains (None) on any failure: clm.ClmUnavailable (the encoder not
-    loaded or no room on the A4000: retryable), a missing artefact, or a
-    client error. The orchestrator then falls through to the stub and the
-    last resort, and the question's record says so."""
-    name = "clm"
-    CATEGORY_INSTRUCTIONS = ("Which area of software work is this request "
-                             "about, if any?")
-
-    def __init__(self, heads=None):
-        self.heads = heads
-        self.last_error: dict | None = None
-
-    def _instructions(self, question: Question | None) -> str:
-        import clm
-        if question is not None and question.kind == "category":
-            return self.CATEGORY_INSTRUCTIONS
-        return clm.INSTRUCTIONS
-
-    def decide_batch(self, questions: list[Question]
-                     ) -> dict[str, dict[str, float] | None]:
-        """{qid: probabilities or None}: one state encoding per distinct
-        (state, instructions) pair."""
-        out: dict[str, dict[str, float] | None] = {q.qid: None
-                                                   for q in questions}
-        try:
-            import clm
-        except Exception as e:                                   # noqa: BLE001
-            self.last_error = {"code": "CLM_IMPORT", "situation": str(e)[:160],
-                               "retryable": False}
-            return out
-        groups: dict[tuple[str, str], list[Question]] = {}
-        for q in questions:
-            groups.setdefault((q.state or "", self._instructions(q)),
-                              []).append(q)
-        for (state, instr), qs in groups.items():
-            none_text = clm.NONE_OPTION if instr == clm.INSTRUCTIONS \
-                else NONE_TEXT
-            lists = [[o.text for o in q.options] + [none_text] for q in qs]
-            try:
-                kw = {"instructions": instr, "keep": "tail"}
-                if self.heads is not None:
-                    kw["heads"] = self.heads
-                d = clm.decide_detail_many(state, lists, **kw)
-            except Exception as e:                               # noqa: BLE001
-                facts = getattr(e, "facts", None)
-                self.last_error = facts() if callable(facts) else {
-                    "code": type(e).__name__, "situation": str(e)[:160],
-                    "retryable": False}
-                continue
-            for q, probs in zip(qs, d.get("probabilities") or []):
-                ids = [o.id for o in q.options] + [NONE]
-                if len(probs) != len(ids):
-                    continue
-                out[q.qid] = {k: round(float(v), 6)
-                              for k, v in zip(ids, probs)}
-                q.meta["clm"] = {
-                    "state_tokens": (d.get("state") or {}).get("tokens"),
-                    "truncated": (d.get("state") or {}).get("truncated"),
-                    "ms": (d.get("timing") or {}).get("total_ms"),
-                    "heads": d.get("heads")}
-        return out
-
-    def decide(self, state, options, question=None):
-        q = question or Question("q", "evidence", "", state, list(options))
-        return self.decide_batch([q]).get(q.qid)
-
-
-DECIDERS = {"stub": EvidenceStub, "lexical": LexicalStub, "clm": ClmDecider}
+DECIDERS = {"stub": EvidenceStub, "lexical": LexicalStub}
 
 
 # The deciders a DEPLOYMENT may name (YAMADORI_SKILL_DECIDER). `lexical` is
 # TEST-ONLY since 2026-09-27 (docs/CONSTANTS-AUDIT.md "LexicalStub SCALE /
 # IDF smoothing"): its SCALE, smoothing and stop words are ours, so it is
 # reachable only by a test or replay that names it (chain("lexical")).
-SERVING = ("stub", "clm")
+SERVING = ("stub",)
 
 
 def configured() -> str:

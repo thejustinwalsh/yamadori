@@ -145,8 +145,8 @@ def test_run():
     p = run.plan(12, 3)
     check(p["arms"]["q4"]["accuracy_requests"] == 9 * 12 * 3 and p["hours_total"] > 0,
           "plan counts requests offline", p["arms"]["q4"]["accuracy_requests"])
-    check(all(v is False for k, v in run.FEATURES.items() if k != "fanout")
-          and run.FEATURES["fanout"] == 1, "every augmentation forced off")
+    check(run.FEATURES == {"skills": False, "seed": False},
+          "every augmentation forced off", run.FEATURES)
     sent = {}
 
     class Fake:
@@ -164,8 +164,9 @@ def test_run():
     check(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", px.session) is not None,
           "session token is valid for X-Yamadori-Session", px.session)
     check(run.to_wsl(r"C:\Users\jwals\k.txt") == "/mnt/c/Users/jwals/k.txt", "WSL path translation")
-    check("kv-q8" in run.ARMS_SNIPPET and '"check_code": False' in run.ARMS_SNIPPET,
-          "the LiveBench arm snippet forces check_code off")
+    check("kv-q8" in run.ARMS_SNIPPET and '"skills": False' in run.ARMS_SNIPPET
+          and '"seed": False' in run.ARMS_SNIPPET,
+          "the LiveBench arm snippet forces every augmentation off")
     check(set(run.GATES) == {"floor_mib", "speed_min_ratio", "acc_max_drop_points",
                              "acc_alpha", "quality_alpha", "quality_max_drop_questions"},
           "gates are the documented six")

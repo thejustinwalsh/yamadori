@@ -176,6 +176,30 @@ def main() -> int:
                                         "request): build a game")
           and seen_states[1].endswith("Assistant called terminal: ls"),
           seen_states)
+    # the Codex pass-C kit (bench/skills/codex_label/label_codex.py)
+    sys.path.insert(0, os.path.join(HERE, "codex_label"))
+    import label_codex as LC
+    batch = [{"case": "c1", "kind": "step", "task": "t", "state": "s",
+              "items": [{"key": "k#0", "skill": "x", "fact": "f0"},
+                        {"key": "k#1", "skill": "x", "fact": "f1"}]}]
+    got, why = LC.parse('{"labels": [{"case": "c1", "key": "k#0", '
+                        '"level": 3}, {"case": "c1", "key": "k#1", '
+                        '"level": 1}]}', batch)
+    check("codex kit: a full reply parses into pass B's schema",
+          got == {"c1": {"k#0": 3, "k#1": 1}} and why is None, (got, why))
+    got, why = LC.parse('{"labels": [{"case": "c1", "key": "k#0", '
+                        '"level": 7}]}', batch)
+    check("codex kit: an out-of-range level or a missing fact is refused "
+          "with why", got == {} and "2 of 2" in why, (got, why))
+    check("codex kit: the call is read-only, ephemeral, schema-bound, and "
+          "carries no dangerous flag",
+          all(x in open(LC.__file__, encoding="utf-8").read() for x in (
+              '"read-only"', '"--ephemeral"', '"--output-schema"'))
+          and "dangerously" not in open(
+              LC.__file__, encoding="utf-8").read().replace(
+                  "no dangerous flag", "").split('"""', 2)[2]
+          and "full-auto" not in open(LC.__file__, encoding="utf-8").read(
+          ).split('"""', 2)[2])
     import prefill_check as PC
     open_ = ("<|im_start|>user\nx<|im_end|>\n<|im_start|>assistant\n"
              "<think>\n" + PC.LINE)

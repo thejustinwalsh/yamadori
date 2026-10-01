@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ServingPanel } from '../ui/HostPanels';
 import { SlotsCard } from '../bonsai/scene/Telemetry';
-import { deepRuns, mcpState, servedOnCard, type Deep } from './host';
-import { flareRoots, itemsOf, type NebariSkills } from './nebari';
+import { mcpState, servedOnCard } from './host';
+import { areaRows, itemsOf, toolsFor, type Areas, type HeldPackage } from './library';
 import type { Serving, Vitals } from './types';
 
 const serving = (over: Partial<Serving> = {}): Serving => ({
@@ -73,47 +73,30 @@ describe('mcpState', () => {
   });
 });
 
-describe('deepRuns', () => {
-  const d: Deep = {
-    thresholds: { struggle_threshold: { value: 3, source: 'default' } },
-    per_day: [
-      { day: '2026-09-20', requests: 5, runs: { kickoff: 9 }, labels: {} },
-      { day: '2026-09-27', requests: 10, runs: { kickoff: 1, struggle: 2 }, labels: {} },
-      { day: '2026-09-28', requests: 20, runs: { auto: 3, kickoff: 1 }, labels: {} },
-    ],
-  };
-  it('sums the last N days by trigger, largest first', () => {
-    const r = deepRuns(d, 2);
-    expect(r.requests).toBe(30);
-    expect(r.runs).toBe(7);
-    expect(r.byTrigger[0]).toEqual(['auto', 3]);
-    expect(r.days.map((x) => x.day)).toEqual(['2026-09-27', '2026-09-28']);
-  });
-  it('is empty, not a crash, for a missing payload', () => {
-    expect(deepRuns(null).runs).toBe(0);
-  });
-});
-
-describe('flareRoots (NEBARI)', () => {
-  const s: NebariSkills = {
+describe('the Skills library panels (folded in from NEBARI, 2026-09-30)', () => {
+  const s: Areas = {
     counts: { armed: 3 },
     total: 3,
     served: 3,
     served_by: { framework: { r3f: 2, react: 5 }, language: { typescript: 7 } },
     labels: { framework: { r3f: 'React Three Fiber', react: 'React' }, language: { typescript: 'TypeScript' } },
   };
-  it('one heavy root per framework, one thin per language, by count, with taxonomy names', () => {
-    expect(flareRoots(s)).toEqual([
-      { label: 'React', n: 5, heavy: true },
-      { label: 'React Three Fiber', n: 2, heavy: true },
-      { label: 'TypeScript', n: 7, heavy: false },
+  it('areas: largest first, with the taxonomy names', () => {
+    expect(areaRows(s, 'framework')).toEqual([
+      { id: 'react', label: 'React', n: 5 },
+      { id: 'r3f', label: 'React Three Fiber', n: 2 },
     ]);
+    expect(areaRows(s, 'phase')).toEqual([]);
+    expect(areaRows(null, 'framework')).toEqual([]);
   });
-  it('no skills payload: no roots', () => {
-    expect(flareRoots(null)).toEqual([]);
-  });
+  const pkg = (over: Partial<HeldPackage> = {}): HeldPackage => ({ package: 'x', version: '1', chunks: 3, defs: null, files: null, embedded: null, complete: null, published: null, ...over });
   it('items are chunks plus definitions', () => {
-    expect(itemsOf({ package: 'x', version: '1', chunks: 3, defs: null, files: null, embedded: null, complete: null, published: null, unseen: null })).toBe(3);
+    expect(itemsOf(pkg())).toBe(3);
+  });
+  it('find_by_meaning reads a package only when its index is embedded', () => {
+    const readers = [{ who: 'code search', tools: ['find_by_pattern', 'find_by_meaning'], needs_embedding: ['find_by_meaning'], source: 's' }];
+    expect(toolsFor(pkg({ embedded: false }), readers)).toEqual(['find_by_pattern']);
+    expect(toolsFor(pkg({ embedded: true }), readers)).toEqual(['find_by_pattern', 'find_by_meaning']);
   });
 });
 

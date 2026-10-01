@@ -266,7 +266,7 @@ them. The word "hemisphere" survives only in comments and prose, where it is
 the right engineering word for a reader.
 
 The **reranker conflict is resolved** in `docs/PLAN.md`: not cut, not trusted,
-not used. It is corrupt as deployed (FINDINGS #20 — scores depend on batch
+not used. (Since then removed 2026-10-01, docs/REMOVED.md.) It is corrupt as deployed (FINDINGS #20 — scores depend on batch
 composition, 15–16/89 batched vs 68/89 one at a time), so every reranker
 number in the repo is void, including the ones that argued for cutting it.
 Nothing is deleted and nothing unmeasured is trusted, which satisfies both the

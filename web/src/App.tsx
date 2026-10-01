@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Suspense, type ReactNode } from 'react';
 import { DataProvider, useShared } from './api/data';
 import { useKey } from './api/usePoll';
-import { useRoute } from './router';
+import { useLegacyRedirect, useRoute } from './router';
 import { screens } from './routes';
 import { Cockpit } from './screens/Cockpit';
 import { colors } from './tokens/tokens.stylex';
@@ -13,10 +13,10 @@ import { StateView } from './ui/StateView';
 
 // Lazy screens that nav links preload on intent (src/routes.ts).
 const Phase0 = screens.phase0.Component;
-const Nebari = screens.nebari.Component;
 const Naedoko = screens.naedoko.Component;
 const DatasetDetail = screens.dataset.Component;
-const Sentei = screens.sentei.Component;
+const Performance = screens.perf.Component;
+const Jjava = screens.jjava.Component;
 const Settings = screens.settings.Component;
 const Skills = screens.skills.Component;
 const SkillScreen = screens.skill.Component;
@@ -40,18 +40,19 @@ function Gate({ children }: { children: ReactNode }) {
 
 function Screen() {
   const route = useRoute();
+  useLegacyRedirect();
   const body = (() => {
     switch (route.name) {
       case 'tokonoma':
         return <Cockpit />;
-      case 'nebari':
-        return <Nebari />;
       case 'naedoko':
         return <Naedoko />;
       case 'dataset':
         return <DatasetDetail id={route.id} />;
-      case 'sentei':
-        return <Sentei />;
+      case 'perf':
+        return <Performance />;
+      case 'jjava':
+        return <Jjava />;
       case 'settings':
         return <Settings />;
       case 'skills':

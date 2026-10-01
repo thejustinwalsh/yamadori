@@ -1,0 +1,749 @@
+{
+ "about": "Every distinct API response example in docs.typesafe.ai/llms-full.txt (read 2026-09-29), verbatim, each with its request (provenance per example). mcp/test_jev_api.py reproduces each through POST /jev/v1/systemone with a stubbed decider that reads the example's probabilities.",
+ "examples": [
+  {
+   "source": "https://docs.typesafe.ai/api",
+   "request_provenance": "verbatim: the page's JSON request",
+   "request": {
+    "state": "Help! My payouts have been failing for 3 days.",
+    "model": "jev-latest",
+    "questions": {
+     "is_urgent": {
+      "type": "noul",
+      "instructions": "Does this convey urgency?"
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "is_urgent": {
+      "type": "noul",
+      "noul": 0.95
+     }
+    },
+    "usage": {
+     "input_tokens": 296,
+     "output_tokens": 20
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/api",
+   "request_provenance": "verbatim: the page's JSON request",
+   "request": {
+    "state": "Help! My payouts have been failing for 3 days.",
+    "model": "jev-latest",
+    "questions": {
+     "is_urgent": {
+      "type": "noul",
+      "instructions": "Does this convey urgency?",
+      "criteria": {
+       "true": "Explicitly time-sensitive",
+       "false": "No urgency expressed"
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "is_urgent": {
+      "type": "noul",
+      "noul": 0.95
+     }
+    },
+    "usage": {
+     "input_tokens": 307,
+     "output_tokens": 20
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/api",
+   "request_provenance": "verbatim: the page's JSON request",
+   "request": {
+    "state": "Help! My payouts have been failing for 3 days.",
+    "model": "jev-latest",
+    "questions": {
+     "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {
+       "billing": "Payments, invoicing, refunds",
+       "technical": "Bugs, outages, integrations",
+       "sales": "Pricing, upgrades, new accounts"
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "department": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "technical": 0.12,
+       "sales": 0.0
+      },
+      "confidence": 0.81
+     }
+    },
+    "usage": {
+     "input_tokens": 318,
+     "output_tokens": 34
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/api",
+   "request_provenance": "verbatim: the page's JSON request",
+   "request": {
+    "state": "Help! My payouts have been failing for 3 days.",
+    "model": "jev-latest",
+    "questions": {
+     "frustration": {
+      "type": "score",
+      "instructions": "How frustrated is the customer?",
+      "criteria": [
+       "Calm",
+       "Frustrated",
+       "Very angry"
+      ]
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "frustration": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "Calm",
+       "1": "Frustrated",
+       "2": "Very angry"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "usage": {
+     "input_tokens": 304,
+     "output_tokens": 18
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/introduction/quickstart",
+   "request_provenance": "verbatim: the page's JSON request",
+   "request": {
+    "state": "Hi, I've been trying to connect my Stripe account for 3 days and the integration keeps failing. I'm losing sales. Please help ASAP.",
+    "model": "jev-latest",
+    "questions": {
+     "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this",
+      "criteria": {
+       "billing": "Payment or subscription issues",
+       "technical": "Bugs or integration problems",
+       "sales": "Pricing or account questions"
+      }
+     },
+     "frustration": {
+      "type": "score",
+      "instructions": "How frustrated the customer appears",
+      "criteria": [
+       "Calm, just stating facts",
+       "Frustrated but civil",
+       "Very angry, strong language"
+      ]
+     },
+     "is_urgent": {
+      "type": "noul",
+      "instructions": "The message conveys urgency or time-sensitivity"
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "department": {
+      "type": "choice",
+      "choice": "technical",
+      "confidence": 0.78,
+      "probabilities": {
+       "technical": 0.85,
+       "sales": 0.0,
+       "billing": 0.15
+      }
+     },
+     "frustration": {
+      "type": "score",
+      "score": 1.0,
+      "confidence": 1.0,
+      "legend": {
+       "0": "Calm, just stating facts",
+       "1": "Frustrated but civil",
+       "2": "Very angry, strong language"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 1.0,
+       "2": 0.0
+      }
+     },
+     "is_urgent": {
+      "type": "noul",
+      "noul": 1.0
+     }
+    },
+    "usage": {
+     "input_tokens": 392,
+     "output_tokens": 65
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/choice",
+   "request_provenance": "from the page's Python request (typesafe_sdk.Choice), as the wire body",
+   "request": {
+    "state": "My running shoes arrived in the wrong size. Can I swap them for a size 10?",
+    "model": "jev-latest",
+    "questions": {
+     "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {
+       "returns": "Exchanges, wrong or damaged items",
+       "shipping": "Delivery status, delays, lost packages",
+       "billing": "Charges, invoices, payment problems"
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "department": {
+      "type": "choice",
+      "choice": "returns",
+      "confidence": 1.0,
+      "probabilities": {
+       "shipping": 0.0,
+       "returns": 1.0,
+       "billing": 0.0
+      }
+     }
+    },
+    "usage": {
+     "input_tokens": 328,
+     "output_tokens": 34
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/choice",
+   "request_provenance": "questions from the page's Python TRIAGE_QUESTIONS; the ticket (state) is a widget not in llms-full.txt: reconstructed",
+   "request": {
+    "state": "I ordered running shoes in size 9 but got a 10, and I was charged twice for them. The replacement I asked about last week still hasn't shipped.",
+    "model": "jev-latest",
+    "questions": {
+     "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {
+       "returns": "Exchanges, wrong or damaged items",
+       "shipping": "Delivery status, delays, lost packages",
+       "billing": "Charges, invoices, payment problems"
+      }
+     },
+     "return_reason": {
+      "type": "choice",
+      "instructions": "If the customer wants to return something, why?",
+      "criteria": {
+       "wrong_size": "The item doesn't fit",
+       "wrong_item": "A different product was delivered",
+       "damaged": "The item arrived broken or faulty",
+       "changed_mind": "The item is fine, the customer no longer wants it",
+       "other": "A return reason that fits none of the above"
+      }
+     },
+     "shipping_issue": {
+      "type": "choice",
+      "instructions": "If this is a shipping problem, which kind is it?",
+      "criteria": {
+       "not_delivered": "The package never arrived",
+       "delayed": "The package is late but still on its way",
+       "wrong_address": "The package went to the wrong place",
+       "damaged_in_transit": "The package arrived damaged",
+       "other": "A shipping problem that fits none of the above"
+      }
+     },
+     "requested_resolution": {
+      "type": "choice",
+      "instructions": "What does the customer want to happen?",
+      "criteria": {
+       "exchange": "Swap the item for a different one",
+       "refund": "Money back",
+       "replacement": "The same item sent again",
+       "information": "Just an answer, no action needed"
+      }
+     },
+     "tone": {
+      "type": "choice",
+      "instructions": "What is the customer's tone?",
+      "criteria": {
+       "calm": null,
+       "frustrated": null,
+       "angry": null
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "department": {
+      "type": "choice",
+      "choice": "returns",
+      "confidence": 0.42,
+      "probabilities": {
+       "shipping": 0.04,
+       "billing": 0.35,
+       "returns": 0.61
+      }
+     },
+     "return_reason": {
+      "type": "choice",
+      "choice": "wrong_size",
+      "confidence": 1.0,
+      "probabilities": {
+       "other": 0.0,
+       "wrong_size": 1.0,
+       "changed_mind": 0.0,
+       "damaged": 0.0,
+       "wrong_item": 0.0
+      }
+     },
+     "shipping_issue": {
+      "type": "choice",
+      "choice": "delayed",
+      "confidence": 0.67,
+      "probabilities": {
+       "wrong_address": 0.0,
+       "other": 0.26,
+       "not_delivered": 0.0,
+       "damaged_in_transit": 0.0,
+       "delayed": 0.74
+      }
+     },
+     "requested_resolution": {
+      "type": "choice",
+      "choice": "refund",
+      "confidence": 0.2,
+      "probabilities": {
+       "replacement": 0.34,
+       "refund": 0.4,
+       "information": 0.02,
+       "exchange": 0.24
+      }
+     },
+     "tone": {
+      "type": "choice",
+      "choice": "frustrated",
+      "confidence": 0.76,
+      "probabilities": {
+       "frustrated": 0.84,
+       "angry": 0.16,
+       "calm": 0.0
+      }
+     }
+    },
+    "usage": {
+     "input_tokens": 589,
+     "output_tokens": 212
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/choice",
+   "request_provenance": "the page's request is a widget not in llms-full.txt: reconstructed from the response and the page's prose (structured criteria saying what each option is not for)",
+   "request": {
+    "state": "I sent my shoes back two weeks ago. Has my return been processed yet?",
+    "model": "jev-latest",
+    "questions": {
+     "return_topic": {
+      "type": "choice",
+      "instructions": "What is the customer asking about their return?",
+      "criteria": {
+       "return_policy": {
+        "covers": "What can be returned, the time window, and the conditions",
+        "not_for": "Where a return that was already sent is (return_status)",
+        "examples": [
+         "Can I return worn shoes?",
+         "How long do I have to return an item?"
+        ]
+       },
+       "return_status": {
+        "covers": "Where a return the customer already sent is, and its refund",
+        "not_for": "The rules for returning an item (return_policy)",
+        "examples": [
+         "Did you get my return?",
+         "When will my refund arrive?"
+        ]
+       }
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "return_topic": {
+      "type": "choice",
+      "choice": "return_status",
+      "confidence": 1.0,
+      "probabilities": {
+       "return_policy": 0.0,
+       "return_status": 1.0
+      }
+     }
+    },
+    "usage": {
+     "input_tokens": 407,
+     "output_tokens": 32
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/noul",
+   "request_provenance": "from the page's Python request (typesafe_sdk.Noul, NoulCriteria), as the wire body",
+   "request": {
+    "state": "I have asked three times now. Can I please just talk to a real person?",
+    "model": "jev-latest",
+    "questions": {
+     "is_human_escalation": {
+      "type": "noul",
+      "instructions": "Is the customer asking for a human agent?"
+     },
+     "is_repeat_contact": {
+      "type": "noul",
+      "instructions": "Has the customer contacted support about this before?",
+      "criteria": {
+       "true": "Mentions a prior attempt, ticket, or that they have asked before",
+       "false": "No sign of any previous contact"
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "is_human_escalation": {
+      "type": "noul",
+      "noul": 0.99
+     },
+     "is_repeat_contact": {
+      "type": "noul",
+      "noul": 0.93
+     }
+    },
+    "usage": {
+     "input_tokens": 360,
+     "output_tokens": 39
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/noul",
+   "request_provenance": "the page's request is a widget not in llms-full.txt: reconstructed from the response and the API page's structured-instructions example",
+   "request": {
+    "state": {
+     "resume": {
+      "name": "John Smith",
+      "location": "Oakland, CA",
+      "last_employer": "Google"
+     }
+    },
+    "model": "jev-latest",
+    "questions": {
+     "same_as_record_18": {
+      "type": "noul",
+      "instructions": {
+       "potential_duplicate": {
+        "name": "John Smith",
+        "location": "Oakland, California",
+        "last_employer": "Google"
+       },
+       "question": "Is the resume for the same person as `potential_duplicate`?"
+      }
+     },
+     "same_as_record_42": {
+      "type": "noul",
+      "instructions": {
+       "potential_duplicate": {
+        "name": "Jon Smithers",
+        "location": "Austin, Texas",
+        "last_employer": "Dell"
+       },
+       "question": "Is the resume for the same person as `potential_duplicate`?"
+      }
+     },
+     "same_as_record_77": {
+      "type": "noul",
+      "instructions": {
+       "potential_duplicate": {
+        "name": "Joan Smith",
+        "location": "Boston, Massachusetts",
+        "last_employer": "Fidelity"
+       },
+       "question": "Is the resume for the same person as `potential_duplicate`?"
+      }
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "same_as_record_18": {
+      "type": "noul",
+      "noul": 0.74
+     },
+     "same_as_record_42": {
+      "type": "noul",
+      "noul": 0.09
+     },
+     "same_as_record_77": {
+      "type": "noul",
+      "noul": 0.08
+     }
+    },
+    "usage": {
+     "input_tokens": 535,
+     "output_tokens": 58
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/score",
+   "request_provenance": "from the page's Python request (typesafe_sdk.Score), as the wire body",
+   "request": {
+    "state": "The export button crashes the settings page in Safari. It works in Chrome, but a few of our customers only use Safari.",
+    "model": "jev-latest",
+    "questions": {
+     "bug_severity": {
+      "type": "score",
+      "instructions": "How severe is the reported issue?",
+      "criteria": [
+       "Cosmetic; no impact to functionality",
+       "Broken or degraded feature, but workaround exists",
+       "Blocking issue; no workaround exists"
+      ]
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "bug_severity": {
+      "type": "score",
+      "score": 1.43,
+      "confidence": 0.35,
+      "legend": {
+       "0": "Cosmetic; no impact to functionality",
+       "1": "Broken or degraded feature, but workaround exists",
+       "2": "Blocking issue; no workaround exists"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.57,
+       "2": 0.43
+      }
+     }
+    },
+    "usage": {
+     "input_tokens": 332,
+     "output_tokens": 18
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/score",
+   "request_provenance": "questions from the page's Python TRIAGE_QUESTIONS; the ticket (state) reconstructed",
+   "request": {
+    "state": "The export button crashes the settings page in Safari. It works in Chrome, but a few of our customers only use Safari.",
+    "model": "jev-latest",
+    "questions": {
+     "severity": {
+      "type": "score",
+      "instructions": "How severe is the reported issue?",
+      "criteria": [
+       "Cosmetic; no impact to functionality",
+       "Broken or degraded feature, but workaround exists",
+       "Blocking issue; no workaround exists"
+      ]
+     },
+     "frustration": {
+      "type": "score",
+      "instructions": "How frustrated is the customer?",
+      "criteria": [
+       "Calm, just stating facts",
+       "Frustrated but civil",
+       "Very angry, strong language or threatening to leave"
+      ]
+     },
+     "report_quality": {
+      "type": "score",
+      "instructions": "How much does the report give an engineer to work with?",
+      "criteria": [
+       "No detail; just says something is broken",
+       "Names the feature but no steps or environment",
+       "Steps to reproduce or environment, but not both",
+       "Steps to reproduce and environment"
+      ]
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "severity": {
+      "type": "score",
+      "score": 1.24,
+      "confidence": 0.64,
+      "legend": {
+       "0": "Cosmetic; no impact to functionality",
+       "1": "Broken or degraded feature, but workaround exists",
+       "2": "Blocking issue; no workaround exists"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.76,
+       "2": 0.24
+      }
+     },
+     "frustration": {
+      "type": "score",
+      "score": 1.28,
+      "confidence": 0.58,
+      "legend": {
+       "0": "Calm, just stating facts",
+       "1": "Frustrated but civil",
+       "2": "Very angry, strong language or threatening to leave"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.72,
+       "2": 0.28
+      }
+     },
+     "report_quality": {
+      "type": "score",
+      "score": 3.0,
+      "confidence": 1.0,
+      "legend": {
+       "0": "No detail; just says something is broken",
+       "1": "Names the feature but no steps or environment",
+       "2": "Steps to reproduce or environment, but not both",
+       "3": "Steps to reproduce and environment"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.0,
+       "2": 0.0,
+       "3": 1.0
+      }
+     }
+    },
+    "usage": {
+     "input_tokens": 468,
+     "output_tokens": 43
+    }
+   }
+  },
+  {
+   "source": "https://docs.typesafe.ai/primitives/score",
+   "request_provenance": "the page's request is a widget: reconstructed from the response's legend (the criteria as objects)",
+   "request": {
+    "state": "The export button crashes the settings page in Safari. It works in Chrome, but a few of our customers only use Safari.",
+    "model": "jev-latest",
+    "questions": {
+     "bug_severity": {
+      "type": "score",
+      "instructions": "How severe is the reported issue?",
+      "criteria": [
+       {
+        "what": "Cosmetic; no impact to functionality",
+        "examples": [
+         "typo in a label",
+         "misaligned icon"
+        ]
+       },
+       {
+        "what": "Broken or degraded feature, but workaround exists",
+        "examples": [
+         "export fails in one browser but works in another"
+        ]
+       },
+       {
+        "what": "Blocking issue; no workaround exists",
+        "examples": [
+         "cannot log in",
+         "data loss"
+        ]
+       }
+      ]
+     }
+    }
+   },
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "bug_severity": {
+      "type": "score",
+      "score": 1.09,
+      "confidence": 0.87,
+      "legend": {
+       "0": {
+        "what": "Cosmetic; no impact to functionality",
+        "examples": [
+         "typo in a label",
+         "misaligned icon"
+        ]
+       },
+       "1": {
+        "what": "Broken or degraded feature, but workaround exists",
+        "examples": [
+         "export fails in one browser but works in another"
+        ]
+       },
+       "2": {
+        "what": "Blocking issue; no workaround exists",
+        "examples": [
+         "cannot log in",
+         "data loss"
+        ]
+       }
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.91,
+       "2": 0.09
+      }
+     }
+    },
+    "usage": {
+     "input_tokens": 379,
+     "output_tokens": 18
+    }
+   }
+  }
+ ]
+}

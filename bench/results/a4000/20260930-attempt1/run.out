@@ -1,0 +1,43 @@
+Exception in thread Thread-28 (<lambda>):
+Traceback (most recent call last):
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\threading.py", line 1044, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\threading.py", line 995, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\llama-stack\bench\a4000_fit.py", line 99, in <lambda>
+    th = threading.Thread(target=lambda: post(base, {"prompt": side, "n_predict": 64, "id_slot": 0,
+                                         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                     "cache_prompt": True, "temperature": 0}))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\llama-stack\bench\a4000_fit.py", line 88, in post
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\urllib\request.py", line 189, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\urllib\request.py", line 495, in open
+    response = meth(req, response)
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\urllib\request.py", line 604, in http_response
+    response = self.parent.error(
+        'http', request, response, code, msg, hdrs)
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\urllib\request.py", line 533, in error
+    return self._call_chain(*args)
+           ~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\urllib\request.py", line 466, in _call_chain
+    result = func(*args)
+  File "C:\Users\jwals\textgen\installer_files\env\Lib\urllib\request.py", line 613, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 400: Bad Request
+[18:37:10] lane: {'held_by': 'tier models (Bonsai window)', 'resumed': False}
+{
+ "ctx": 0,
+ "fit": {
+  "bytes_per_cell": 0,
+  "fixed_mib": 16154,
+  "total_mib": 16376,
+  "margin_mib": 1331,
+  "max_ctx": 0
+ }
+}

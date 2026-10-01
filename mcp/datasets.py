@@ -27,7 +27,10 @@ leaves three facts nowhere on disk:
 
 THE STAGES
 
-    submitted -> clarify -> extract -> index -> (label) -> (train)
+    submitted -> clarify -> extract -> index -> complete
+
+(The `laya` kind's optional `label` and `train` stages were removed with
+Laya on 2026-09-29; the way back is commit e360d37.)
 
 `submitted` and `clarify` are cheap and mostly human. After `clarify` the agent
 runs the rest unattended: `mcp/worker.py` advances a dataset the moment the job
@@ -37,11 +40,11 @@ on `/dash`. EXTRACT EMITS SKILLS (2026-09-26, the Phase 0.7 unification):
 the verified rows are compiled into atomic skills (mcp/skill_compile.py)
 that walk the one skill pipeline -- screen -> classify -> tests -> validate
 -> arm -- and `index` builds their trigger vectors. The recipe file stays as
-the rows' provenance and the label/train branch's input.
+the rows' provenance.
 
-`extract`, `index` and
-`train` need the card, so they are `gpu` lane jobs and they are SERIALISED --
-two of them at once is not slow, it is wrong (see `jobs.py`). `label` is cpu.
+`extract` and `index` need the card, so they are `gpu` lane jobs and they
+are SERIALISED -- two of them at once is not slow, it is wrong (see
+`jobs.py`).
 A URL source gets a `net` fetch job at `submitted`; pasted text does not,
 because there is nothing to fetch.
 
@@ -87,14 +90,9 @@ import domains as domain_gate  # noqa: E402
 import jobs  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Stages. The tuple is the order; `label` and `train` are skipped unless the
-# dataset says it is a Laya training set, because refitting a head on a corpus
-# that was never labelled for it is work nobody asked for.
+# Stages. The tuple is the order.
 # ---------------------------------------------------------------------------
-STAGES = ("submitted", "clarify", "extract",
-          "index", "label", "train", "complete")
-
-OPTIONAL_STAGES = ("label", "train")
+STAGES = ("submitted", "clarify", "extract", "index", "complete")
 
 # Stages a human moves the dataset out of. `clarify` is the only one, and only
 # for what the source cannot establish: the assist job (ASSIST below) fills a
@@ -109,9 +107,7 @@ HUMAN_STAGES = ("clarify",)
 # resource, not the speed -- see jobs.LANES.
 ENQUEUE = {
     "extract": ("dataset.extract", "gpu"),   # needs the model to read a source
-    "index":   ("dataset.index", "gpu"),     # the skills' trigger vectors
-    "label":   ("dataset.label", "cpu"),     # pair construction, no model
-    "train":   ("dataset.train", "gpu"),     # scripts/train_laya.py
+    "index":   ("dataset.index", "gpu_a4000"),  # the skills' trigger vectors: the embedder, on the A4000 (jobs.GPU_SCOPES)
 }
 
 # A dataset whose source is a URL needs fetching before anything can read it,
@@ -137,7 +133,7 @@ ASSISTED = ("source_name", "licence", "language", "domains")
 # the dashboard. `operator` is any value a person typed, including at create.
 PROVENANCE = ("evidence", "proposed", "operator")
 
-KINDS = ("recipes", "laya", "package")
+KINDS = ("recipes", "package")
 
 # ---------------------------------------------------------------------------
 # KIND "package": a PACKAGE ONBOARDING (docs/PACKAGE-ONBOARDING.md; operator,
@@ -156,10 +152,10 @@ PACKAGE_STAGES = ("submitted", "resolve", "clarify", "index", "vocab",
                   "rebuild", "evaluate", "complete")
 PACKAGE_ENQUEUE = {
     "resolve":  ("package.resolve", "net"),
-    "index":    ("package.index", "gpu"),       # the embedder; idle-gated
+    "index":    ("package.index", "gpu_a4000"),  # the embedder (the A4000: jobs.GPU_SCOPES); idle-gated
     "vocab":    ("package.vocab", "cpu"),
     "examples": ("package.examples", "net"),
-    "knn":      ("package.knn", "gpu"),         # the embedder; idle-gated
+    "knn":      ("package.knn", "gpu_a4000"),    # the embedder (the A4000: jobs.GPU_SCOPES); idle-gated
     "sources":  ("package.sources", "net"),
     "retire":   ("package.retire", "cpu"),
     "evaluate": ("package.evaluate", "cpu"),
@@ -715,18 +711,13 @@ def assist_jobs(dataset_id: str) -> list[dict]:
 
 
 def next_stage(ds: dict) -> str | None:
-    """The stage after this one, skipping the optional ones when they do not
-    apply. None once the dataset is complete."""
+    """The stage after this one. None once the dataset is complete."""
     stage = ds.get("stage") or "submitted"
     order = stages_of(ds)
     if stage not in order:
         return None
     i = order.index(stage)
-    for nxt in order[i + 1:]:
-        if nxt in OPTIONAL_STAGES and ds.get("kind") != "laya":
-            continue
-        return nxt
-    return None
+    return order[i + 1] if i + 1 < len(order) else None
 
 
 def _unfinished(dataset_id: str, *, queue: str | None = None,
@@ -1018,9 +1009,11 @@ def overview() -> dict:
     return {
         "datasets": out,
         "stages": list(STAGES),
-        "stages_by_kind": {"recipes": list(STAGES), "laya": list(STAGES),
+        "stages_by_kind": {"recipes": list(STAGES),
                            "package": list(PACKAGE_STAGES)},
-        "optional_stages": list(OPTIONAL_STAGES),
+        # None since the `laya` kind was removed (2026-09-29); the pages
+        # still read the key.
+        "optional_stages": [],
         "human_stages": list(HUMAN_STAGES),
         # Which stages actually put a row in the queue, so the page can say
         # "enqueue extract" and "move to review" and mean both literally.

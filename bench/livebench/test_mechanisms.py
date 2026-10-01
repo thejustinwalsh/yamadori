@@ -126,6 +126,22 @@ check("health: deep thinking allowed 2, ran 2, produced 0", h["mechanisms"]["dee
       and h["mechanisms"]["deep_thinking"]["ran"] == 2 and h["mechanisms"]["deep_thinking"]["produced"] == 0)
 check("health: retrieval produced unknown", h["mechanisms"]["retrieval"]["produced"] is None)
 
+# the 2026-09-29 schema: deep thinking, fan-out, check_code and repair were
+# removed (docs/REMOVED.md); x_yamadori carries none of their keys and
+# `selection` is {skills, utility, because, signals}. A current answer is
+# not a stack error, and the removed mechanisms read as not allowed, not run.
+now = {"tier": "max", "effort_sent": "xhigh", "hops": 1, "images": [],
+       "selection": {"skills": False, "utility": False,
+                     "because": {"utility": "a task turn", "skills": "off"},
+                     "signals": {}},
+       "skills": {"ids": []}}
+rn = M.record(now)
+check("2026-09-29 schema: not a stack error", rn["stack_error"] == [])
+check("2026-09-29 schema: removed mechanisms not allowed, not run",
+      not rn["deep_thinking"]["allowed"] and not rn["deep_thinking"]["ran"]
+      and rn["fanout"]["allowed_n"] == 1 and not rn["fanout"]["ran"]
+      and not rn["check_code"]["offered"] and not rn["repair"]["enabled"])
+
 passed = sum(ok for _, ok in checks)
 print(f"{passed}/{len(checks)} checks passed")
 sys.exit(0 if passed == len(checks) else 1)

@@ -1,14 +1,15 @@
 #!/usr/bin/env python
 """MCP server exposing codebase search backed by the local llama-stack.
 
-The model sees ONE tool, `search_code`. It has no idea an embedding model or a
-reranker exist. Inside, each call runs:
+The model sees ONE tool, `search_code`. It has no idea an embedding model
+exists. Inside, each call runs:
 
-    query -> embeddings model -> cosine search over the index
-          -> reranker (cross-encoder) -> top N snippets
+    query -> embeddings model -> cosine search over the index -> top N snippets
 
-Both models are served by llama-swap on the same port as the chat model, so
-this server needs no GPU of its own and no separate model management.
+The embedding model is served by llama-swap on the same port as the chat
+model, so this server needs no GPU of its own and no separate model
+management. (The cross-encoder reranker that once reordered the top N was
+removed 2026-10-01: docs/REMOVED.md.)
 
 Why a tool and not a prompt-injecting proxy: tool results append at the END of
 the conversation, which leaves the cached prompt prefix intact. Injecting
@@ -79,54 +80,16 @@ def bound_index(db: str | None):
 
 
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "embeddings")
-RERANK_MODEL = os.environ.get("RERANK_MODEL", "reranker")
 
-# Retrieve wide, rerank narrow. The embedding model is cheap and recall-oriented;
-# the cross-encoder is expensive and precision-oriented.
+# How many nearest chunks the cosine search considers before the top_k cut.
 CANDIDATES = 40
-# Per-document cap when reranking. Keeps query+docs inside the cross-encoder's
-# context; the untruncated text is still returned to the caller.
-RERANK_DOC_CHARS = 1200
 DEFAULT_TOP_K = 5
 
-# Reranking is skipped above this k. This is a LATENCY decision, not an
-# accuracy one -- be careful not to restate it as the latter.
-#
-# scripts/eval_rerank.py, 11 queries with a known correct file:
-#
-#   correct at #1     embed 1/11    rerank 3/11    Fisher exact p ~= 0.6: NOT
-#                                                  a result. Do not cite it.
-#   correct in top-5  embed 7/11    rerank 7/11    identical, for ~1s/query
-#   mean rank         5.36          5.36
-#
-# What the numbers do support: the reranker permutes within the top 5 and does
-# not change which files reach the caller at the shipped cutoff. Since all five
-# snippets land in context and get read, paying a second to reorder them buys
-# nothing measurable. Skipping it takes search_code from ~1100ms to 96ms.
-#
-# THAT LATENCY FIGURE, QUALIFIED WHERE IT IS QUOTED. One search_code call,
-# warm (index loaded, both models resident), embeddings ON, over the three.js
-# index -- the same corpus scripts/eval_rerank.py uses, where the cross-encoder
-# scores the full CANDIDATES=40 pool. The ONLY thing varying between 1100 and
-# 96 is whether that cross-encoder round trip happens.
-#
-# It is a DIFFERENT measurement from the 1284ms -> 729ms quoted in
-# docs/BUILD.md and docs/PLAN.md. That one is a search_fused call on the
-# gauntlet index where the varying thing is CODE_SEARCH_SEMANTIC=1 -> 0, i.e.
-# the EMBEDDING round trip. Different component, different corpus, different
-# entry point. The two savings do not compose and neither number may be quoted
-# in place of the other.
-#
-# Two caveats that keep this provisional: the corpus was three.js, which is in
-# every training set, and 11 queries is far too few to detect anything but a
-# huge effect. Re-run against an uncontaminated index before drawing a
-# conclusion about accuracy in either direction.
-RERANK_MAX_K = 2
-
-
-# Laya decision engine. Separate process AND separate venv: laya needs a newer
-# transformers than the rest of the stack, so it cannot share an interpreter.
-LAYA_URL = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
+# THE RERANKER WAS REMOVED 2026-10-01 (operator: "Remove reranker";
+# docs/REMOVED.md). It reordered the top 2 only (RERANK_MAX_K = 2: above that
+# it was skipped for latency), docs/FINDINGS.md #20 found its scores depend on
+# batch composition, and nothing on the request path trusted it. The way
+# back is commit e360d37.
 
 
 def _post_json(url: str, payload: dict, timeout: int = 120) -> dict:
@@ -143,8 +106,8 @@ def _post(path: str, payload: dict, timeout: int = 120) -> dict:
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    # THE A4000'S ROOM (mcp/gpu_room.py): embeddings and the reranker live on
-    # the A4000 beside the image and vision models. A loaded model only takes
+    # THE A4000'S ROOM (mcp/gpu_room.py): embeddings live on the A4000
+    # beside the image and vision models. A loaded model only takes
     # a lease; an unloaded one gets room made first. Raises gpu_room.NoRoom.
     with gpu_room.use(payload.get("model"), upstream=STACK):
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -168,12 +131,6 @@ def embed(texts: list[str], is_query: bool = False) -> np.ndarray:
     # normalise so a dot product is cosine similarity
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     return vecs / np.clip(norms, 1e-9, None)
-
-
-def rerank(query: str, docs: list[str], top_n: int) -> list[tuple[int, float]]:
-    d = _post("/v1/rerank", {"model": RERANK_MODEL, "query": query,
-                             "documents": docs, "top_n": top_n})
-    return [(r["index"], r["relevance_score"]) for r in d.get("results", [])]
 
 
 @dataclass
@@ -498,7 +455,6 @@ _ARGSPEC: dict[str, tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]] = 
     "summarize_text":      (("text",),    ("focus",),              ("max_words",)),
     "describe_index":      ((),           (),                      ()),
     "run_check":           ((),           ("check",),              ()),
-    "judge":               (("state", "question"), (),             ()),
     "record_step":         ((), ("kind", "summary", "detail", "outcome"), ()),
     "read_rings":          ((),           ("kind",),               ("limit",)),
 }
@@ -774,48 +730,16 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
     top = top[np.argsort(-sims[top])]
 
     cand = [chunks[i] for i in top]
-    # Truncate for reranking only. A cross-encoder reads query+document
-    # together, so N large chunks can overflow its context and it then scores
-    # everything 0.0000 -- silently replacing a good embedding ranking with
-    # noise. The full text is still what we return to the caller.
-    docs = [f"{c.path}:{c.start}-{c.end}\n{c.text[:RERANK_DOC_CHARS]}" for c in cand]
-
-    embed_order = [(i, float(sims[top[i]])) for i in range(min(top_k, len(cand)))]
-
-    if top_k > RERANK_MAX_K:
-        # Measured: no gain at this cutoff. Skip the GPU round trip.
-        ranked = embed_order
-    else:
-        try:
-            ranked = rerank(query, docs, min(top_k, len(docs)))
-            # Only ORDER matters from a reranker; the absolute scale does not.
-            #
-            # An earlier version rejected any result where every score was below
-            # 1e-6, on the assumption scores are probabilities. They are not
-            # always: this setup returns correctly-ordered scores around 1e-13,
-            # and that guard was silently discarding a good ranking in favour of
-            # raw embedding order -- exactly the degradation it existed to
-            # prevent.
-            #
-            # The real degenerate case is a reranker that cannot separate the
-            # documents at all, i.e. every score identical. Detect that instead.
-            scores = [s for _, s in ranked]
-            if not ranked or (len(set(scores)) == 1):
-                ranked = embed_order
-        except Exception:
-            ranked = embed_order
 
     out = []
-    for idx, score in ranked:
+    for idx in range(min(top_k, len(cand))):
         c = cand[idx]
-        # Two different numbers, and only one of them means anything absolute.
-        # `score` is the cross-encoder's, useful for ORDER only -- it comes back
-        # around 1e-13 on correctly-ranked results. `sim` is cosine similarity
-        # against the query embedding, which IS calibrated, so it is the only
-        # one a threshold may be applied to.
+        # Embedding order. `score` and `sim` are both the cosine similarity
+        # against the query embedding (`score` was the reranker's order-only
+        # score until 2026-10-01); both keys stay for callers that read either.
+        sim = round(float(sims[top[idx]]), 4)
         out.append(dict(path=c.path, start=c.start, end=c.end,
-                        score=round(float(score), 4),
-                        sim=round(float(sims[top[idx]]), 4), text=c.text))
+                        score=sim, sim=sim, text=c.text))
     return out
 
 
@@ -824,48 +748,10 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
 # so the stack has no extra pip dependency beyond numpy.
 # --------------------------------------------------------------------------
 
-# `judge` is implemented below and reachable over the Laya HTTP/WS service, but
-# it is deliberately NOT in TOOLS: it is not calibrated enough to put in front
-# of a model. scripts/eval_judge.py, on unambiguous yes/no engineering
-# questions, scored 6/10 against a 5/10 coin flip, and the errors were
-# systematic rather than noisy -- three of four misses were false positives on
-# the NEGATIVE cases, all landing at 0.67-0.69:
-#
-#   printf(ptr) then free(ptr)   "uses memory after free"   want F, got 0.69
-#   f(): number { return 42 }    "return type is wrong"     want F, got 0.68
-#   borrow-legal Rust            "violates borrow rules"    want F, got 0.67
-#
-# It is scoring what the passage is ABOUT, not whether the proposition holds --
-# the same failure that made it rate the nonsense query "quantum teapot
-# recursion" above every genuine one. A judge a model trusts and that is wrong
-# turns an open question into a confident wrong answer, which is worse than
-# having no judge. Re-expose it only when eval_judge.py passes.
-TOOLS_DISABLED_JUDGE = """
-{
-        "name": "judge",
-        "description": (
-            "Get a typed decision with a calibrated probability in ~25ms, from a small "
-            "classifier (Laya) rather than by reasoning. It does NOT explain and cannot "
-            "write -- it only decides. Use it to gate work you would otherwise think "
-            "through: is this diff an improvement, is this failure infrastructure or a "
-            "real regression, is this snippet relevant, is this worth benchmarking. "
-            "Omit options for a true/false judgement."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "state": {"type": "string",
-                          "description": "The text being judged: diff, log, test output, snippet."},
-                "question": {"type": "string",
-                             "description": "What to decide, phrased as an instruction."},
-                "options": {"type": "array", "items": {"type": "string"},
-                            "description": "Choices for a multiple-choice decision. "
-                                           "Omit for true/false."},
-            },
-            "required": ["state", "question"],
-        },
-    },
-"""
+# `judge` -- a Laya typed decision, never in TOOLS (scripts/eval_judge.py
+# scored it 6/10 against a 5/10 coin flip: it scored what a passage is ABOUT,
+# not whether the proposition holds) -- was removed with Laya, 2026-09-29.
+# The way back is commit e360d37.
 
 # WHAT THESE TOOLS ARE, SAID THE SAME WAY IN EVERY CODE TOOL.
 #
@@ -878,8 +764,9 @@ TOOLS_DISABLED_JUDGE = """
 # "the indexed codebase", which reads as the user's codebase.
 #
 # So each code tool ends with the same short sentence. (Since 2026-09-24
-# these tools are the second brain's only -- proxy.deep_thinking_tools; main
-# gets the client's tools and the addendum, proxy.ADDENDUM.) Positive wording: a
+# these tools are not on main; from 2026-09-24 to 2026-09-29 they were the
+# second brain's, removed with it: today the MCP surface's only.) Positive
+# wording: a
 # negative instruction fires attention on the thing it forbids (AGENTS.md,
 # "Prompting this model"). test_tools.test_descriptions_say_remote_read_only
 # pins it.
@@ -1073,7 +960,10 @@ VERIFY_TIMEOUT = int(os.environ.get("VERIFY_TIMEOUT", "900"))
 # TWO SURFACES, AND THE LINE BETWEEN THEM.
 #
 # TOOLS is the MCP surface: what an outside client may call.
-# INTERNAL_TOOLS is what only this stack's own reasoning invokes, via the proxy.
+# INTERNAL_TOOLS is what only this stack's own reasoning invoked, via the proxy
+# (the second brain, removed 2026-09-29: docs/REMOVED.md; nothing in the proxy
+# calls them now -- it writes and reads the work log with rings.record /
+# rings.read -- yet `tools/call` still dispatches them by name).
 #
 # The work log used to be appended here -- `TOOLS = TOOLS + rings.TOOLS` -- so
 # it sat on both. That breaks the moment a tool needs something only one caller
@@ -1494,31 +1384,6 @@ def _handle(req: dict) -> dict | None:
                                      f"first. Use calls_only to narrow, or "
                                      f"read_file_range on a path above.)")
                     text = "\n\n".join(parts)
-
-            elif name == "judge":
-                opts = args.get("options") or []
-                if opts:
-                    # empty criterion strings are legal: the option label is the
-                    # description when no elaboration is given
-                    q = {"v": {"type": "choice", "instructions": args["question"],
-                               "criteria": {o: "" for o in opts}}}
-                else:
-                    q = {"v": {"type": "noul", "instructions": args["question"]}}
-                try:
-                    d = _post_json(LAYA_URL + "/decide",
-                                   {"state": args["state"], "questions": q})
-                    a = d["answers"]["v"]
-                    if "choice" in a:
-                        probs = sorted(a.get("probabilities", {}).items(), key=lambda x: -x[1])
-                        text = (f"{a['choice']}   (confidence {a.get('confidence')})\n"
-                                + "\n".join(f"  {k}: {v:.3f}" for k, v in probs))
-                    else:
-                        text = (f"probability true: {a.get('noul'):.3f}   "
-                                f"(confidence {a.get('confidence')})")
-                    text += f"\n[{d.get('elapsed_ms')} ms]"
-                except Exception as e:
-                    text = (f"judge unavailable ({type(e).__name__}: {e}). "
-                            "Is the laya service running on 1237?")
 
             elif name == "find_by_pattern":
                 import re as _re

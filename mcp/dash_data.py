@@ -125,7 +125,6 @@ main{max-width:1180px}
   border-color:var(--on-surface-variant)}
 .track .st.is-here{color:var(--on-surface);border-color:var(--on-surface);
   background:var(--surface-container-high);font-weight:600}
-.track .st.is-skipped{border-style:dashed}
 
 .tallies{display:flex;flex-wrap:wrap;gap:var(--space-md) var(--space-lg);
   margin-bottom:var(--space-sm)}
@@ -339,15 +338,12 @@ function trackHTML(d){
   const here=DATA.stages.indexOf(d.stage);
   return '<div class="track" aria-label="pipeline stages">'+
     DATA.stages.map((s,i)=>{
-      const skipped=DATA.optional_stages.indexOf(s)>=0&&d.kind!=='laya';
       let cls='st';
-      if(skipped)cls+=' is-skipped';
-      else if(i<here)cls+=' is-past';
+      if(i<here)cls+=' is-past';
       else if(i===here)cls+=' is-here';
       return '<span class="'+cls+'" title="'+
-        (skipped?'skipped: not a Laya training set'
-               :i<here?'passed':i===here?'current stage':'not reached')+
-        '">'+esc(s)+(skipped?' (skipped)':'')+'</span>';
+        (i<here?'passed':i===here?'current stage':'not reached')+
+        '">'+esc(s)+'</span>';
     }).join('')+'</div>';
 }
 function questionsHTML(d){

@@ -21,8 +21,8 @@ What is checked, per harness:
   - the shell cannot reach the host either (#48 probe, curl);
   - an installed package's API comes back without reading node_modules:
     OpenCode's `lsp` hover and goToDefinition on koota's createWorld, Pi's
-    `package-api` skill script (--package-dir; see PACKAGE_STEPS), and Pi
-    lists every loadout skill in its system prompt.
+    and Codex's `package-api` skill script (--package-dir; see
+    PACKAGE_STEPS), and Pi and Codex list every loadout skill.
 
 The key is a dummy (the stand-in ignores it). Every request body the
 harness sent is kept under --out, and one row per harness is appended to
@@ -94,6 +94,10 @@ PACKAGE_STEPS = {
                                             "filePath": "/work/src/api_use.ts",
                                             "line": 1, "character": 12}}],
     "pi": [{"tool": ["bash"], "args": {"command": API_PI}}],
+    # Codex: the same script from $CODEX_HOME/skills, through exec_command
+    "codex": [{"tool": ["exec_command"],
+               "args": {"cmd": API_PI.replace("~/.agents/skills/", "~/.codex/skills/"),
+                        "yield_time_ms": 60000}}],
 }
 
 
@@ -218,7 +222,7 @@ def judge_package(harness: str, results: list[str]) -> dict:
         return {"lsp_hover_package": "createWorld" in r[0] and "World" in r[0]
                 and "No LSP server" not in r[0],
                 "lsp_definition_package": "node_modules/koota/dist/index.d.ts" in r[1]}
-    if harness == "pi":
+    if harness in ("pi", "codex"):
         return {"package_api_signature": bool(re.search(r"^  createWorld\(.*\): World$", r[0], re.M))
                 and "API_RC=0" in r[0],
                 "package_api_member": "World.query<T extends QueryParameter[]>" in r[0],
@@ -312,10 +316,15 @@ def check(harness: str, key_file: str, out: str, port: int, timeout: int,
                                                              "allowed_hosts", "denied_sample")},
            "verdict": {**judge(harness, results),
                        **(judge_package(harness, results) if pkg else {}),
-                       # the loadout skills are listed in Pi's system prompt
+                       # the loadout skills are listed in what the harness sends the
+                       # model (Pi: its system prompt; Codex: its instructions)
                        **({"skills_listed": bool(with_tools) and all(
-                           n in json.dumps(with_tools[0].get("messages", [])[:1])
-                           for n in hb.loadout_skills("pi"))} if harness == "pi" else {}),
+                           n in json.dumps(with_tools[0].get("messages", [])[:1]
+                                           if harness == "pi" else
+                                           [with_tools[0].get("instructions"),
+                                            with_tools[0].get("input")])
+                           for n in hb.loadout_skills(harness))}
+                          if harness in ("pi", "codex") else {}),
                        # Pi: PI_CACHE_RETENTION=long names the session (prompt_cache_key)
                        **({"prompt_cache_key_sent": bool(with_tools)
                            and all(b.get("prompt_cache_key") for b in with_tools)}

@@ -321,7 +321,8 @@ The configs, per harness:
     box's network (localhost, the gate, the forward) to Codex's shell, as
     OpenCode's and Pi's already have it. The key stays excluded from that
     shell.
-  - The skill `type-check` in `$CODEX_HOME/skills`.
+  - The skills `type-check` and (2026-09-30) `package-api` in
+    `$CODEX_HOME/skills` (the SKILL.md path rewritten to `~/.codex/skills/`).
 
 **Checked with no model:** `python bench/sandbox/loadout_check.py all
 --key-file <dummy>`. A scripted stand-in (`scripted_model.py`, on
@@ -340,7 +341,7 @@ on the recorded image, one row per harness in
 | type errors | `write` result: `LSP errors detected ... TS2322`; pyright `reportArgumentType` | `tsc`: TS2322; `pyright`: reportArgumentType | the same, through `exec_command` |
 | key in the model's shell | 1 (known) | 1 (known) | 0 |
 | checks passed | 10/10 | 11/11 | 9/9 |
-| 2026-09-29, with the package-API steps (koota 0.6.6 copied into the project) | 12/12: `lsp` hover `(alias) function createWorld(options: WorldOptions): World (+1 overload)`, goToDefinition `node_modules/koota/dist/index.d.ts` | 19/19: `package-api` printed both `createWorld` overloads and `World.query`, the entry points, a miss; plus screenshot + `read` as image, the skills listed, `prompt_cache_key` | not rerun |
+| 2026-09-29, with the package-API steps (koota 0.6.6 copied into the project) | 12/12: `lsp` hover `(alias) function createWorld(options: WorldOptions): World (+1 overload)`, goToDefinition `node_modules/koota/dist/index.d.ts` | 19/19: `package-api` printed both `createWorld` overloads and `World.query`, the entry points, a miss; plus screenshot + `read` as image, the skills listed, `prompt_cache_key` | 2026-09-30: `package-api` added to Codex; the box run NOT RUN (Docker Desktop down) |
 
 The gate's record for each run shows 3 denials, exactly the three host
 probes. It allowed only `example.com`, plus OpenCode's own

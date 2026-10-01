@@ -62,14 +62,14 @@ an invented number.
 from __future__ import annotations
 
 # Nav destinations, in the order an operator moves through them: what goes
-# into the corpus, what the corpus says, whether the machine is alive, what
-# the benchmark measured. DATA leads because it is where a corpus starts;
-# CORPUS is still the review surface and is unchanged.
+# into the corpus, what the corpus says, whether the machine is alive. DATA
+# leads because it is where a corpus starts; CORPUS is still the review
+# surface and is unchanged. The benchmark page (RESULTS) was retired
+# 2026-09-30 for the React PERFORMANCE page (/performance).
 NAV = (
     ("data", "DATA", "/dash/data"),
     ("corpus", "CORPUS", "/dash"),
     ("vitals", "VITALS", "/dash/vitals"),
-    ("results", "RESULTS", "/dash/results"),
 )
 
 # ---------------------------------------------------------------------------

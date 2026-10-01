@@ -102,8 +102,12 @@ def stat_pairs(check: dict | None, row: dict, blind: bool) -> list[tuple[str, st
                 ("wall", f"{row.get('wall_s')} s"),
                 ("tokens", f"prompt {u.get('prompt_tokens')}, completion {u.get('completion_tokens')}"
                            f", reasoning {det.get('reasoning_tokens')}"),
-                ("stack", f"tier {x.get('tier')}, route {x.get('route')}, fan-out {x.get('fanout_n')}"
-                          f", deep {json.dumps(x.get('deep'))}, skills {len(x.get('skills') or [])}"
+                # fan-out and deep: rows recorded before their removal
+                # (2026-09-29) carry them; a current row does not.
+                ("stack", f"tier {x.get('tier')}, route {x.get('route')}"
+                          + (f", fan-out {x.get('fanout_n')}" if "fanout_n" in x else "")
+                          + (f", deep {json.dumps(x.get('deep'))}" if "deep" in x else "")
+                          + f", skills {len(x.get('skills') or [])}"
                           f", images {x.get('images')}")]
     ex = row.get("extract") or {}
     if "files_written" in ex:                  # task r3f-stack: a project, not a page

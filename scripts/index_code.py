@@ -289,8 +289,8 @@ def embed_batch(texts: list[str], attempt: int = 0) -> np.ndarray:
 # 18,750 zero vectors were committed under a progress bar reading "indexed".
 # Search over three.js and typegpu returned whatever `argpartition` happened
 # to surface from an all-zero similarity array, for days, with no error
-# anywhere -- and retrieval quality, including a verdict on the reranker, was
-# judged on that.
+# anywhere -- and retrieval quality, including a verdict on the reranker
+# (removed 2026-10-01, docs/REMOVED.md), was judged on that.
 #
 # So the run now checks itself and refuses to leave a dead index on disk.
 _DEAD = {"n": 0}

@@ -1,0 +1,56 @@
+# The llama-swap entry for THE SECOND BONSAI on the A4000, PREPARED, NOT ENABLED (tier models, 2026-09-30).
+# Nothing reads this file at run time. bench/deploy_tier_models.py inserts it into config.yaml with {{CTX}} from
+# bench/a4000_fit.py (the A4000's measured room with jjava + side calls as its load).
+#
+# WHY (operator, 2026-09-30, verbatim): "Agree, no jjava slowing down this highly tuned masterpiece, it stays locked in
+# once it is swapped, and we gotta get that speed!" -- in Flash-Next's lane step main decode fell to 1.45 tok/s while
+# jjava read on slot 1 (n=1). While a LOCKED model holds the 5060 Ti (Flash-Next at max; mcp/tier_models.yaml), jjava
+# (the decider, the skills injector, the Jev API) and the client's side calls (titles, summaries) run HERE. REQUIRED
+# for max. Any tier whose lane step measures material moves here too (its row's `helpers`).
+#
+# models:  (added after the `bonsai-vision` block)
+  "bonsai-a4000":
+    name: "Bonsai 2 27B ternary -- jjava + side calls (A4000)"
+    env:
+      - "CUDA_VISIBLE_DEVICES=GPU-43e37d0c-4104-9056-2552-6109d4d3382c"
+      # the main `bonsai`'s batch-invariant kernels: jjava's label probabilities as measured on bonsai (its profile,
+      # bench/decider/results/models/bonsai.json) read the same here
+      - "GGML_CUDA_BATCH_INVARIANT=1"
+    cmd: |
+      ${server_nudge}
+      --port ${PORT}
+      # the ORIGINAL trunk, as bonsai-vision (the main `bonsai` is this trunk with an MTP head grafted on:
+      # docs/MTP-STAGING.md -- stripping the head gives this file byte for byte); no MTP here: jjava reads one
+      # token at a time and side calls are short
+      -m ${models}/Ternary-Bonsai-2-27B-PTQ1_0.gguf
+      -dev CUDA0
+      -ngl 999
+      # the fit's window (bench/a4000_fit.py): the largest -c whose peak keeps gpu_room's HEADROOM_MIB free beside
+      # embeddings and the reranker (measured with it resident; the reranker was removed 2026-10-01, the -c is kept),
+      # with bonsai-vision and imagegen evicted
+      -c {{CTX}}
+      --cache-type-k q8_0 --cache-type-v q8_0
+      -fa on
+      # slot 0 the side calls (and, when it is built, a second conversation), slot 1 jjava's lane -- the same slot
+      # id slots.acquire hands the decider (layout v3's lane is slot 1 of -np 2); one unified pool
+      -np 2
+      --kv-unified
+      -b 1024 -ub 512
+      --jinja
+      --reasoning-format deepseek
+      --no-context-shift
+      --no-cache-idle-slots
+      --reasoning-budget 32768
+      --reasoning-budget-message "Thinking budget reached. I will stop deliberating and write the final answer now."
+      ${sampling}
+    # never unloaded by time: jjava needs it on every request of a locked tier; mcp/gpu_room.py evicts it only to
+    # make room (a draw, a look), and the next decider call loads it again
+    ttl: 0
+
+# groups:  its own, neither swap nor exclusive -- mcp/gpu_room.py decides what leaves the A4000 for it (SIZES
+# `bonsai-a4000`), as for bonsai-vision:
+#        "helper":
+#          swap: false
+#          exclusive: false
+#          members:
+#            - "bonsai-a4000"

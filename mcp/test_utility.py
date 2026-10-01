@@ -5,8 +5,8 @@ WHAT THIS IS GATING (the live Hermes session of 2026-09-23, 20:45-22:10)
 
   1. A harness's own side calls -- the approval classifier, the session
      title, the compaction -- get the bare model at tier `minimal`: no
-     capability block, no tools, no skills, no deep thinking, no fan-out
-     (selection.utility_call, proxy.prepare). They got all of it; one
+     capability block, no tools, no skills (selection.utility_call,
+     proxy.prepare). They got all of it; one
      classifier call took 409 s for one word and called run_check.
   2. A utility call has no session: it neither inherits nor writes the
      conversation's offered-tools flag, work log or pins (proxy.session_context).
@@ -385,9 +385,16 @@ def test_the_header_decides_when_it_speaks():
                                     _features='{"utility": true}'))
     check(on["utility"] and "forced on" in on["because"],
           "utility=true forces a request that is not one", on["because"])
-    fan = proxy.utility_of(dict(body, _features='{"fanout": 3}'))
-    check(not fan["utility"] and "fanout" in fan["because"],
+    # skills: the one augmentation left (proxy._AUGMENTATIONS; fan-out
+    # went 2026-09-29, and a header naming it is dropped like any unknown
+    # key, so it no longer beats the rule).
+    sk = proxy.utility_of(dict(body, _features='{"skills": true}'))
+    check(not sk["utility"] and "skills" in sk["because"],
           "a header that forces an augmentation ON wins over the rule",
+          sk["because"])
+    fan = proxy.utility_of(dict(body, _features='{"fanout": 3}'))
+    check(fan["utility"],
+          "a header naming a removed augmentation (fanout) forces nothing",
           fan["because"])
 
 
@@ -614,8 +621,9 @@ def test_slots():
     c = slots.acquire("conv-a")
     h = slots.acquire(slots.HELPER)
     check(c["slot"] == 0 and h["slot"] == 2,
-          "the second brain uses the child slot (2 of 3), in every "
-          "process, so the worker's calls never land on a conversation's",
+          "helper work (slots.HELPER) uses the child slot (2 of 3), in "
+          "every process, so the worker's calls never land on a "
+          "conversation's",
           f"{c} {h}")
     slots.release(c)
     slots.release(h)
@@ -651,11 +659,11 @@ def test_a_hermes_session_replayed():
     x = d.get("x_yamadori") or {}
     main_slot = up.get("id_slot")
     check(names(up) == [t["function"]["name"] for t in CLIENT_TOOLS],
-          "main turn: the client's tools, untouched, and none of ours (our "
-          "tools are the second brain's since 2026-09-24)", str(names(up)))
+          "main turn: the client's tools, untouched, and none of ours (the "
+          "code tools left main 2026-09-24)", str(names(up)))
     check(system_of(up) == HERMES_SYSTEM,
           "main turn at medium: the client's system prompt as sent (the "
-          "addendum is added only where the fixup runs, high and up)")
+          "addendum that once rode at high and up was removed 2026-09-29)")
     check(main_slot == 0 and up.get("cache_prompt") is True,
           "main turn: pinned to a slot, cache_prompt sent", str(main_slot))
     check(x.get("utility") is False and (x.get("selection") or {}).get("utility") is False,
@@ -726,13 +734,14 @@ def test_a_hermes_session_replayed():
               json.dumps({k: x.get(k) for k in ("utility", "tier", "tier_requested",
                                                 "tier_overridden")}))
         sel = x.get("selection") or {}
-        check(sel.get("utility") is True and not sel.get("investigate")
-              and sel.get("fanout_n") == 1
+        check(sel.get("utility") is True and sel.get("skills") is False
               and "one_word" in (sel.get("because") or {}).get("utility", ""),
               f"classifier #{attempt}: selection.utility with its because",
               json.dumps(sel.get("because"))[:240])
-        check(x.get("tools_gate") is None,
-              f"classifier #{attempt}: no tool gate, so no OFFERED_EARLIER_THIS_SESSION")
+        check(((x.get("route") or {}).get("signals") or {}).get("gate") is None
+              and (x.get("route") or {}).get("class") == "utility",
+              f"classifier #{attempt}: no tool gate, so no OFFERED_EARLIER_THIS_SESSION",
+              json.dumps(x.get("route"))[:200])
         check(up.get("id_slot") == 3 and x["cache"]["mode"] == "transient",
               f"classifier #{attempt}: a slot no conversation holds (not {main_slot})",
               str(up.get("id_slot")))
@@ -1065,8 +1074,8 @@ def test_an_idle_conversation_is_cleared_and_resumes_cold():
 
 
 def test_internal_generation_is_pinned_to_the_helper_slot():
-    """model.post (deep thinking's hops, summarize_text) is the one door for
-    internal generation; left alone the server would hand it the least
+    """model.post (summarize_text, the decider, the skills pipeline's
+    jobs) is the one door for internal generation; left alone the server would hand it the least
     recently used idle slot -- possibly a conversation's."""
     import model
     slots.reset(n=4)
@@ -1274,8 +1283,12 @@ def test_record_step_is_a_trigger_condition():
         check(needle in desc, f"record_step description: {why}", needle)
     check(desc.lower().count("never") + desc.count("NEVER") == 0,
           "no prohibition in it (AGENTS.md: prohibitions degrade routing)")
-    check("record_step" in proxy.OUR_NAMES and "read_rings" in proxy.OUR_NAMES,
-          "the Jane Street names are unchanged")
+    # The work-log tools are served by the MCP tools API (:1235,
+    # code_search / rings), no longer run by the proxy (2026-09-29).
+    check({t["name"] for t in rings.TOOLS} >= {"record_step", "read_rings"}
+          and not {"record_step", "read_rings"} & proxy.OUR_NAMES,
+          "the Jane Street names are unchanged (served by the tools API, not "
+          "the proxy)")
 
 
 # --------------------------------------------------------------------------
@@ -1791,20 +1804,38 @@ def test_an_in_place_compaction_reuses_the_conversation():
 
     db = os.path.join(REPO, "index", "corpus.sqlite3")
     if os.path.exists(db):
-        n = hit = 0
+        # Each row is replayed ENDING AS ITS REQUEST ENDED (`ends_on`, recorded
+        # since 2026-09-24; older rows say None and are replayed ending on the
+        # user turn, as before). `request` is the LAST USER turn, not the last
+        # message: an agent step after Pi's compaction carries Pi's summary
+        # turn ("The conversation history before this point was compacted
+        # into the following summary: ...") as its last user turn and ends on
+        # a tool result -- 377 such rows from the 2026-09-28/29 pagoda runs,
+        # all recorded route agent_step, utility False. Replayed as if the
+        # summary turn were last, they read as in-place compactions, which
+        # the request as sent never was.
+        n = hit = n_tool = 0
         for _t, raw in _producer_events(db, "SELECT turn, payload FROM events "
                                             "WHERE kind='turn'"):
             p = json.loads(raw)
             if p.get("first_turn"):
                 continue
             n += 1
-            hit += ip([{"role": "system", "content": p.get("system_head") or "s"},
-                       {"role": "user", "content": "x"},
-                       {"role": "assistant", "content": "y"},
-                       {"role": "user", "content": p.get("request") or ""}])
+            msgs = [{"role": "system", "content": p.get("system_head") or "s"},
+                    {"role": "user", "content": "x"},
+                    {"role": "assistant", "content": "y"},
+                    {"role": "user", "content": p.get("request") or ""}]
+            if p.get("ends_on") == "tool":
+                n_tool += 1
+                msgs += [{"role": "assistant", "content": "", "tool_calls": [
+                              {"id": "c1", "type": "function", "function": {
+                                  "name": "read", "arguments": "{}"}}]},
+                         {"role": "tool", "tool_call_id": "c1", "content": "r"}]
+            hit += ip(msgs)
         check(n >= 369 and hit == 0,
               f"no corpus turn with answers in it reads as an in-place "
-              f"compaction ({hit} of {n}; the 17 post-compaction turns among them)")
+              f"compaction ({hit} of {n}, {n_tool} of them ending on a tool "
+              f"result as sent; the post-compaction turns among them)")
 
     slots.reset(n=4)
     compaction.reset()
@@ -1890,10 +1921,11 @@ def test_an_in_place_compaction_reuses_the_conversation():
                                              "reasoning_effort", "max_tokens",
                                              "temperature")}))
     check(HINT_MARK not in text_of(dict(messages=up["messages"][n_stored:]))
-          and not (x.get("selection") or {}).get("investigate")
-          and (x.get("selection") or {}).get("fanout_n") == 1
-          and x.get("repair") is None,
-          "nothing added: no hint, no deep thinking, no fan-out, no repair")
+          and not (x.get("selection") or {}).get("skills")
+          and (x.get("selection") or {}).get("compaction") is True,
+          "nothing added: no hint, no skills (deep thinking, fan-out and "
+          "repair were removed 2026-09-29)",
+          json.dumps(x.get("selection"))[:200])
     st = nebari.load(k1)
     check(st.get("tools_offered") is True and st.get("lineage") == state0.get("lineage"),
           "the conversation's session row keeps its tools flag and lineage")

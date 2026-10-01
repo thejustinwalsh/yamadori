@@ -60,8 +60,8 @@ def first_text(m) -> str:
 # HARNESS CONTEXT TURNS (2026-09-26, mcp/test_harness_decisions.py
 # codex/responses/first-turn): a user message the HARNESS writes, before the
 # user's own, to state its environment. It is context, never the user
-# speaking: not an earlier user turn (deep.kickoff read Codex's as one, so
-# no Codex conversation was ever a kickoff), not a still-broken report.
+# speaking: not an earlier user turn (the removed deep-thinking kickoff read
+# Codex's as one, so no Codex conversation was ever a kickoff).
 # Each row is the harness's own markup, seen in its captured requests; the
 # other harnesses' fixtures (bench/harness_shapes: Hermes, OpenCode, Pi)
 # carry none.

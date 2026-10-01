@@ -388,9 +388,8 @@ artifacts:
       licence: apache-2.0
 
   - id: qwen3-reranker-0.6b-q8
-    role: "the reranker (`reranker`); resident, but its scores are not trusted (docs/FINDINGS.md #20)"
-    status: in_service
-    config_entries: [reranker]
+    role: "RETIRED 2026-10-01 (operator: \"Remove reranker\"; docs/REMOVED.md; e360d37). the reranker (`reranker`); was resident, but its scores were never trusted (docs/FINDINGS.md #20)"
+    status: retired
     path: "${models}/Qwen3-Reranker-0.6B-Q8_0.gguf"
     size: 639150752
     sha256: c525a7449243f690a7062e6377d6cf5adbb289354bd4316312367cd20e187ab7
@@ -410,9 +409,8 @@ artifacts:
   # 2026-09-27; the Q6_K (39/40 decisions) and Q4_K_M (37/40) were measured
   # and deleted (docs/CLM.md "Fidelity").
   - id: qwen3-8b-clm-q8
-    role: "the CLM encoder (`clm-encoder`): Qwen3-8B Q8_0, last-token embeddings for the CLM heads (mcp/clm.py)"
-    status: in_service
-    config_entries: [clm-encoder]
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). the CLM encoder (`clm-encoder`): Qwen3-8B Q8_0, last-token embeddings for the CLM heads (mcp/clm.py)"
+    status: retired
     path: "${models}/Qwen3-8B-Q8_0.gguf"
     size: 8709518688
     sha256: 1633fc3e60add8eebb2aede44d8ba6a82872c339c673da6dc6efaa6a86ec860a
@@ -443,8 +441,8 @@ artifacts:
         notes: "Run from the llama-prism checkout (clean tree at the commit). llama-quantize initialises CUDA when it can see a GPU; the re-run hid the GPUs and gave the same bytes. The converter set add_bos_token false and no add_eos: llama-server's /tokenize matched the HF tokenizer (add_special_tokens=False) on all 185 fidelity texts."
 
   - id: qwen3-8b-clm-bf16
-    role: "input to the CLM encoder's quantization only: Qwen3-8B converted to GGUF at bf16 (the recipe's intermediate; re-quantize other types from it)"
-    status: input
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). input to the CLM encoder's quantization only: Qwen3-8B converted to GGUF at bf16 (the recipe's intermediate; re-quantize other types from it)"
+    status: retired
     path: "${models}/Qwen3-8B-BF16.gguf"
     size: 16388044128
     sha256: 9992dae57b55989222bbad7e5fa96ca596d096560ec8554d6de46698740ec820
@@ -460,47 +458,47 @@ artifacts:
         notes: "inputs as qwen3-8b-clm-q8 (all five shards, the tokenizer and the JSON files)"
 
   - id: qwen3-8b-hf-shard-1
-    role: "input: Qwen/Qwen3-8B safetensors shard 1/5 (the CLM encoder's source; the CPU fp32 reference of bench/clm/fidelity.py reads the shards)"
-    status: input
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). input: Qwen/Qwen3-8B safetensors shard 1/5 (the CLM encoder's source; the CPU fp32 reference of bench/clm/fidelity.py reads the shards)"
+    status: retired
     path: "${models}/Qwen3-8B/model-00001-of-00005.safetensors"
     size: 3996250744
     sha256: 31d6a825ae35f11fb85b195b4c42c146c051e446433125a215336abdf95cbf5f
     provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00001-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
 
   - id: qwen3-8b-hf-shard-2
-    role: "input: Qwen/Qwen3-8B safetensors shard 2/5"
-    status: input
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). input: Qwen/Qwen3-8B safetensors shard 2/5"
+    status: retired
     path: "${models}/Qwen3-8B/model-00002-of-00005.safetensors"
     size: 3993160032
     sha256: 5991236cea6fe21f3d43cab0f0e84448734fbbe0789816202989f2ddc9d18282
     provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00002-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
 
   - id: qwen3-8b-hf-shard-3
-    role: "input: Qwen/Qwen3-8B safetensors shard 3/5"
-    status: input
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). input: Qwen/Qwen3-8B safetensors shard 3/5"
+    status: retired
     path: "${models}/Qwen3-8B/model-00003-of-00005.safetensors"
     size: 3959604768
     sha256: c5185c4794be2d8a9784d5753c9922db38df478ce11f9ed0b415b7304d896836
     provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00003-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
 
   - id: qwen3-8b-hf-shard-4
-    role: "input: Qwen/Qwen3-8B safetensors shard 4/5"
-    status: input
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). input: Qwen/Qwen3-8B safetensors shard 4/5"
+    status: retired
     path: "${models}/Qwen3-8B/model-00004-of-00005.safetensors"
     size: 3187841392
     sha256: b5ee7de71fbf17db3d5704e0c8f2bc7d005ca9e1d7ca2aeb19827b0cfcaa917a
     provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00004-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
 
   - id: qwen3-8b-hf-shard-5
-    role: "input: Qwen/Qwen3-8B safetensors shard 5/5"
-    status: input
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). input: Qwen/Qwen3-8B safetensors shard 5/5"
+    status: retired
     path: "${models}/Qwen3-8B/model-00005-of-00005.safetensors"
     size: 1244659840
     sha256: 20c2d6366ab85c90786ccdd829cd2b9e7d30ef3b2ebbb998280e7e4014b542ff
     provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: model-00005-of-00005.safetensors, checked: "2026-09-27", licence: apache-2.0}
 
   - id: qwen3-8b-tokenizer
-    role: "the CLM client's tokenizer (mcp/clm.py): token ids are computed here and sent to `clm-encoder`, so truncation to CLM's 2,047 tokens is exact"
+    role: "skill_packages.WORDS_TOKENIZER: the English-word lexicon (its vocabulary's whole-word tokens). It was the CLM client's tokenizer until CLM was removed 2026-09-29 (docs/REMOVED.md)"
     status: candidate
     loaded_by: code
     severity: warn
@@ -510,18 +508,16 @@ artifacts:
     provenance: {status: pinned, repo: Qwen/Qwen3-8B, revision: b968826d9c46dd6066d109eabc6255188de91218, revision_basis: download, filename: tokenizer.json, checked: "2026-09-27", licence: apache-2.0}
 
   - id: clm-v0.1-8b-pt
-    role: "input: the official CLM-v0.1-8B projection heads (a torch pickle; read with weights_only=True by mcp/clm_heads.py extract, never on the request path)"
-    status: input
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). input: the official CLM-v0.1-8B projection heads (a torch pickle; read with weights_only=True by mcp/clm_heads.py extract, never on the request path)"
+    status: retired
     path: "${models}/CLM-v0.1-8B/CLM_v0.1-8B.pt"
     size: 75557149
     sha256: b2b4a8c9c2d39263eff78a351eb909a342ce9b3bf21a3f07c1d1bf15f1c4eda5
     provenance: {status: pinned, repo: Contrastive-LM/CLM-v0.1-8B, revision: e939398d4556fcd9400c76fa8c5a513202f42b0a, revision_basis: download, filename: CLM_v0.1-8B.pt, checked: "2026-09-27", licence: apache-2.0, notes: "code: https://github.com/Contrastive-LM/CLM @ bb42c6c5bf914fd449bed2f6ca65be80602cb1f7 (Apache-2.0), read only"}
 
   - id: clm-heads-v0.1
-    role: "the CLM state/action heads as numpy arrays (mcp/clm_heads.py): width 1536, depth 3, LayerNorm, GELU, projection 512, scale 100"
-    status: candidate
-    loaded_by: code
-    severity: warn
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). the CLM state/action heads as numpy arrays (mcp/clm_heads.py): width 1536, depth 3, LayerNorm, GELU, projection 512, scale 100"
+    status: retired
     path: "${repo}/index/clm/heads/CLM_v0.1-8B.npz"
     size: 75555716
     sha256: 4f751c4a05c0958c6caa4ba7714d4968435c544727415fe3f39b155aa7c1a416
@@ -537,10 +533,8 @@ artifacts:
         command: "python mcp/clm_heads.py extract --pt <models>/CLM-v0.1-8B/CLM_v0.1-8B.pt\npython mcp/clm_heads.py parity --pt <models>/CLM-v0.1-8B/CLM_v0.1-8B.pt"
 
   - id: clm-heads-skills-v1
-    role: "the CLM heads fine-tuned on the skills' activation tests (Tier 1, docs/CLM.md): the release's heads warm-started, train/finetune.py --task choice on our served Q8_0 encoder's embeddings; the daily eval held out. NOT the default (YAMADORI_CLM_HEADS selects it): on the daily eval it scored as the release did, 445/464"
-    status: candidate
-    loaded_by: code
-    severity: warn
+    role: "RETIRED 2026-09-29 with CLM (docs/REMOVED.md; e360d37). the CLM heads fine-tuned on the skills' activation tests (Tier 1, docs/CLM.md): the release's heads warm-started, train/finetune.py --task choice on our served Q8_0 encoder's embeddings; the daily eval held out. NOT the default (YAMADORI_CLM_HEADS selects it): on the daily eval it scored as the release did, 445/464"
+    status: retired
     path: "${repo}/index/clm/heads/CLM_v0.1-8B_skills-v1.npz"
     size: 75555897
     sha256: a23464863f07ef68be7c09a7a7e45cf0a6f9d13f74225674031c33f90e29c686
@@ -812,8 +806,8 @@ artifacts:
 
   - id: flash-next-mmproj
     role: "CANDIDATE: Flash-Next's own vision encoder + projector (BF16), loaded WITH the main model on the 5060 Ti (operator, 2026-09-27: vision folds into the main model; bonsai-vision on the A4000 retires)"
-    status: in_service
-    config_entries: [flash-next]
+    status: candidate
+    config_entries: []
     path: "${models}/flash-next/mmproj-Qwen3.8-Flash-Next-BF16.gguf"
     size: 907543008
     sha256: b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0
@@ -894,8 +888,8 @@ artifacts:
 
   - id: flash-next-mtp-draft-q8_0
     role: "CANDIDATE MTP draft for llama-upstream-mtp (--spec-draft-model): flash-next-mtp-draft-bf16 at Q8_0 (2,647 MiB, 8.52 BPW; its 512 routed experts are 2.5 GB of it, so they go to CPU with the trunk's). A speed arm in PHASE 2, not in config.yaml"
-    status: candidate
-    config_entries: []
+    status: in_service
+    config_entries: [flash-next]
     path: "${models}/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf"
     size: 2786568160
     sha256: 79abc660ca830b37c7204c728b2b38f2562db59e3559b85fc08cb1817d13149c
@@ -929,8 +923,8 @@ artifacts:
   # convert_hf_to_gguf.py --mmproj (Mirai ships the language model only).
   - id: mirai-s-qwen3.8-27b-gguf
     role: "CANDIDATE main model: Mirai S Qwen3.8-27B (2.4-bit trellis) as a GGUF for engines llama-mirai-s ONLY (4 fork-only ggml types, ids 90-93: mainline llama.cpp and our PTQ1_0 forks cannot load it). arch qwen35, 65 blocks (64 + MTP blk.64 Q8_0, 451 MB), 1,303 tensors; token_embd F16 2,542,796,800 B (host-side lookups); embedded chat template byte-identical to our Bonsai GGUF's (sha256 c3cf9e34...), tokenizer arrays hash-equal to Bonsai's. general.name reads 'Vllm' (converter artefact)"
-    status: candidate
-    config_entries: []
+    status: in_service
+    config_entries: [mirai-s]
     path: "${models}/mirai-s/Qwen3.8-27B-S-mirai.gguf"
     size: 11173346688
     sha256: 5aa4365c3362983e52ff71d8ec2452c2e2e199e299f91594dc85523aa62a43ce
@@ -1112,3 +1106,49 @@ runtimes:
     # Its tool descriptions carry "CRITICAL RULES" prose aimed at the model;
     # the model never sees them (our yama_* descriptions replace them).
     versions: {packagelens_mcp: "0.1.11", mcp_sdk: "0.5.0 (protocol 2024-11-05)", node: "24.21.0"}
+
+  # TYPESAFE'S SDKs, the test clients of the Jev API (mcp/jev_api.py;
+  # mcp/test_jev_sdk.py; docs/JEV-CONFORMANCE.md section 6). Installed by
+  # tools/typesafe-sdk/install.py into isolated locations, never the stack's
+  # Python. The pins below were read from the registries' own metadata
+  # (pypi.org/pypi/typesafe-sdk/0.7.2/json; registry.npmjs.org/@typesafe-ai/sdk/0.6.0),
+  # 2026-09-30. Until install.py --run has run, both interpreters/trees are
+  # absent and verify() says so (warn).
+  - id: typesafe-sdk-python
+    role: "TypeSafe's Python SDK (typesafe-sdk 0.7.2, MIT) in its own venv: a test client of the Jev API (mcp/test_jev_sdk.py)"
+    check: lock
+    severity: warn
+    interpreter: "C:/Users/jwals/llama-stack/tools/typesafe-sdk/py/.venv/Scripts/python.exe"
+    lock: locks/typesafe-sdk.lock.txt
+    freeze: pip
+    package:
+      name: typesafe-sdk
+      version: "0.7.2"
+      licence: "MIT (PyPI classifier: License :: OSI Approved :: MIT License)"
+      wheel: typesafe_sdk-0.7.2-py3-none-any.whl
+      sha256: 0a961148187d52e18276ed7f2d02617cfac48e3b97673cb631a8749397d43d1e
+      size: 36448
+      uploaded: "2026-09-26T21:20:23Z"
+      requires_python: ">=3.10"
+      requires: "httpx2>=2.0.0 (BSD-3-Clause), pydantic>=2.12.0 (MIT), pydantic-core>=2.41.1 (MIT), tenacity>=9.0.0 (Apache-2.0), typing-extensions>=4.13.0 (PSF-2.0); resolved at install, recorded in the lock"
+      repository: "https://github.com/typesafe-ai/typesafe-sdk-python"
+    notes: "install.py downloads the wheel alone and checks this sha256 before installing anything; the lock is the venv's pip freeze after the install"
+
+  - id: typesafe-sdk-js
+    role: "TypeSafe's JavaScript SDK (@typesafe-ai/sdk 0.6.0, MIT) in tools/typesafe-sdk/js/node_modules: a test client of the Jev API (mcp/test_jev_sdk.py)"
+    check: files
+    severity: warn
+    doc: tools/typesafe-sdk/install.py
+    # The recipe, byte for byte (tools/typesafe-sdk/js/.gitattributes: -text).
+    files:
+      - {path: "C:/Users/jwals/llama-stack/tools/typesafe-sdk/js/package.json", sha256: bcedf8ee5398c5a34ff6176933952134e80d2347c3a582f2bf3e4d81635150cd}
+      - {path: "C:/Users/jwals/llama-stack/tools/typesafe-sdk/js/package-lock.json", sha256: dff60dc6a1a7eac921eb6b97672b05ece11e7817dae925cb8ab69d8b47ac8b07}
+    package:
+      name: "@typesafe-ai/sdk"
+      version: "0.6.0"
+      licence: MIT
+      integrity: "sha512-IddX+Q0XM+VagOUZFeP7wZjaO4SHMdvnh2zEBdrZZnXedWI3BNK1lKhMx3ayrkFWvVLbVcUHJy6AVZlY+e6Jaw=="
+      shasum: dbba30689e77c317e7619fbee006caa18f37a76a
+      tarball: "https://registry.npmjs.org/@typesafe-ai/sdk/-/sdk-0.6.0.tgz (unpacked 209,203 bytes, 9 files)"
+      dependencies: "none (the registry's metadata declares no dependencies); engines node >=20"
+      repository: "https://github.com/typesafe-ai/typesafe-sdk-js"

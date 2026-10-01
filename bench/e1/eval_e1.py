@@ -6,9 +6,7 @@ and the one training run that ships route_in v1.
     $PY bench/e1/eval_e1.py embed        # single-text vectors -> E1 store
     $PY bench/e1/eval_e1.py stability    # fit stability per weight decay
     $PY bench/e1/eval_e1.py train        # route_in v1 (+ seeds, MLP check)
-    $PY bench/e1/eval_e1.py laya         # Laya's answers on set 2 (live :1237)
-    $PY bench/e1/eval_e1.py narrow       # E1 alone vs E1 -> Laya
-    $PY bench/e1/eval_e1.py set2         # every arm on held-out set 2
+    $PY bench/e1/eval_e1.py set2         # E1 and the rule on both held-out sets
     $PY bench/e1/eval_e1.py latency      # head arithmetic + embedding call
     $PY bench/e1/eval_e1.py offline      # predictions the live check compares
 
@@ -21,23 +19,29 @@ second blind pass on 29 rows: bench/e1/route_heldout2_second_pass.jsonl.
 Nothing trains on either. No question text is printed or written here:
 results carry ids, labels, predictions and counts.
 
-THE CARD. Embeddings and Laya are on the A4000, shared with the Octopus run's
+LAYA, removed 2026-09-29 (the way back is commit e360d37): the Laya arms
+(`laya`, `narrow`, the Laya and selection columns of `set2`, the torch
+comparison in `stability`) went with it; their recorded numbers stay in
+results/ and docs/E1.md.
+
+THE CARD. Embeddings are on the A4000, shared with the Octopus run's
 search. Before every call block this reads nvidia-smi by UUID and WAITS
 while free memory is under 1,331 MiB, an image server is on the card, or
 llama-swap does not report `embeddings` ready: it never loads or evicts
 anything (a missing model is waited for, not loaded). Waits are recorded.
 
-STATISTICS. Exact two-sided McNemar on the discordant pairs, exact
-Clopper-Pearson intervals -- bench/eval_route_heldout.py's, imported.
+STATISTICS. Exact two-sided McNemar on the discordant pairs (e1.mcnemar),
+exact Clopper-Pearson intervals (below; bench/eval_route_heldout.py's, moved
+here when that script was removed with Laya).
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import math
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 
@@ -49,20 +53,48 @@ sys.path.insert(0, os.path.join(ROOT, "mcp"))
 sys.path.insert(0, os.path.join(ROOT, "bench"))
 
 import e1  # noqa: E402
-from eval_route_heldout import clopper_pearson, mcnemar_exact  # noqa: E402
+
+mcnemar_exact = e1.mcnemar
 
 RESULTS = os.path.join(HERE, "results")
 SET1 = os.path.join(ROOT, "bench", "laya_routing_heldout_packages.jsonl")
 SET2 = "set2"            # e1.heldout2_rows(): labels in bench/, text in index/
-BATCHED = os.path.join(ROOT, "bench", "tev1", "results", "control_embeddings.npz")
-LAYA_STAGE = os.path.join(ROOT, "index", "laya_staging_20260922_191425")
-LAYA_HEAD = os.path.join(ROOT, "index", "laya", "route_in.json")
-LAYA_URL = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
+# The batched vectors the Tev1 evaluation's control made (16 per call; it
+# lived in bench/tev1/results/, removed 2026-09-29, moved here).
+BATCHED = os.path.join(HERE, "results", "control_embeddings.npz")
 STACK = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
 CARD_UUID = "GPU-43e37d0c-4104-9056-2552-6109d4d3382c"   # A4000 only
 HEADROOM_MIB = 1331
 LABELS = e1.HEADS["route_in"]["labels"]
 WAITS: list[dict] = []
+
+
+# ------------------------------------------------------------ stats ---------
+def _binom_cdf(k: int, n: int, p: float) -> float:
+    if k < 0:
+        return 0.0
+    if k >= n:
+        return 1.0
+    return sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k + 1))
+
+
+def clopper_pearson(k: int, n: int, alpha: float = 0.05) -> tuple[float, float]:
+    """Exact binomial CI by bisection on the binomial CDF (no scipy needed)."""
+    if n == 0:
+        return float("nan"), float("nan")
+
+    def solve(f, lo=0.0, hi=1.0):
+        for _ in range(100):
+            mid = (lo + hi) / 2
+            if f(mid):
+                hi = mid
+            else:
+                lo = mid
+        return (lo + hi) / 2
+
+    lower = 0.0 if k == 0 else solve(lambda p: 1 - _binom_cdf(k - 1, n, p) >= alpha / 2)
+    upper = 1.0 if k == n else solve(lambda p: _binom_cdf(k, n, p) <= alpha / 2)
+    return lower, upper
 
 
 # ------------------------------------------------------------ card ----------
@@ -166,7 +198,7 @@ def binary_ok(pred: list, truth: list[str]) -> list[bool]:
 def cmd_embed(args) -> None:
     """Every training, set-1 and set-2 state, embedded ONE TEXT PER CALL --
     exactly as E1 serves -- into the E1 store. Compared with the batched
-    vectors bench/tev1 made (16 per call) on the rows both have."""
+    vectors (BATCHED, 16 per call) on the rows both have."""
     tr = e1.gold_route_rows()
     all_texts = [r["text"] for r in tr] + texts(rows(SET1)) + texts(rows(SET2))
     todo = [t for t in dict.fromkeys(all_texts) if e1.cached_vector(t) is None]
@@ -207,8 +239,9 @@ def _q(xs: list[float]) -> dict:
 # ------------------------------------------------------------ stability -----
 def cmd_stability(args) -> None:
     """Is the fit reproducible at each decay? float32 (the served fit)
-    against the same algorithm in float64, on the batched vectors bench/tev1
-    measured, and against torch (scripts/train_laya._fit_linear)."""
+    against the same algorithm in float64, on the batched vectors
+    (BATCHED). The torch comparison (scripts/train_laya._fit_linear) went
+    with Laya; its record is results/stability.json."""
     z = np.load(BATCHED)
     tr = e1.gold_route_rows()
     y = [LABELS.index(r["label"]) for r in tr]
@@ -219,16 +252,6 @@ def cmd_stability(args) -> None:
         p32 = e1.probs(W, b, z["te"]).argmax(1)
         p64 = (z["te"].astype(np.float64) @ W64.T + b64).argmax(1)
         rec = {"argmax_agree_f32_f64": int((p32 == p64).sum()), "n": 120}
-        try:
-            sys.path.insert(0, os.path.join(ROOT, "scripts"))
-            import train_laya as TL
-            Wt, bt = TL._fit_linear(z["tr"].tolist(), y, 3, wd, seed=0)
-            pt = np.asarray(TL.predict_probs(Wt, bt, z["te"].tolist()))
-            rec["argmax_agree_numpy_torch"] = int((pt.argmax(1) == p32).sum())
-            rec["max_prob_diff_numpy_torch"] = float(
-                np.abs(pt - e1.probs(W, b, z["te"])).max())
-        except Exception as e:                                   # noqa: BLE001
-            rec["torch"] = f"not run: {type(e).__name__}: {e}"
         out[str(wd)] = rec
         print(wd, rec)
     print("->", save("stability.json", out))
@@ -258,81 +281,6 @@ def _fit64(X, y, k, wd, steps=e1.STEPS, lr=e1.LR):
     return W / sd, b - (W * mu / sd).sum(1)
 
 
-# ------------------------------------------------------------ Laya ----------
-def laya_set1() -> list[dict]:
-    """Laya's served route_in head on set 1, from the cached frozen features
-    (live == offline on 120/120, bench/laya_factcheck/live_route_check.txt)."""
-    import importlib
-    lh = importlib.import_module("laya_head")
-    with open(os.path.join(LAYA_STAGE, "features_heldout.json"),
-              encoding="utf-8") as fh:
-        fe = json.load(fh)["by_state"]
-    h = lh.TrainedHead.load(LAYA_HEAD)
-    return [h.decide(fe[lh.render_state("route_in", r)]) for r in rows(SET1)]
-
-
-def _post(url: str, body: dict, timeout: int = 60) -> dict:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
-
-
-def laya_pair(state: str, pair: list[str]) -> dict:
-    """Laya zero-shot `choice` over TWO route options (its own trained
-    descriptions), averaged over both orders -- Laya is order-sensitive
-    (shomen._choice_averaged's rule)."""
-    import importlib
-    spec = importlib.import_module("laya_head").TASKS["route_in"]["question"]
-    acc = {k: 0.0 for k in pair}
-    for order in (pair, pair[::-1]):
-        d = _post(LAYA_URL + "/decide", {"state": state, "questions": {
-            "pick": {"type": "choice", "instructions": spec["instructions"],
-                     "criteria": {k: spec["criteria"][k] for k in order}}}})
-        p = d["answers"]["pick"].get("probabilities") or {}
-        for k in pair:
-            acc[k] += float(p.get(k, 0.0)) / 2
-    return {"choice": max(acc, key=acc.get), "probabilities": acc}
-
-
-def cmd_laya(args) -> None:
-    """Laya's answers that need the live service (read-only, :1237): the
-    trained head on set 2 (/route engine trained), and the two-option
-    zero-shot choices over E1's top two on both sets (/decide)."""
-    import importlib
-    lh = importlib.import_module("laya_head")
-    e1p = load("e1_preds.json")
-    if not e1p:
-        raise SystemExit("run `eval_e1.py train` first")
-    out = load("laya_live.json") or {"set2_trained": {}, "pair": {}}
-    s2 = rows(SET2)
-    for i, r in enumerate(s2):
-        if r["id"] in out["set2_trained"]:
-            continue
-        if i % 20 == 0:
-            wait_for_room(need_embeddings=False)
-        d = _post(LAYA_URL + "/route", {"task": "route_in", "engine": "trained",
-                                        "question": r["question"],
-                                        "context": r.get("context") or ""})
-        out["set2_trained"][r["id"]] = {k: d.get(k) for k in
-                                        ("choice", "probabilities", "margin",
-                                         "abstain", "elapsed_ms")}
-    for name, rs, key in (("set1", rows(SET1), None), ("set2", s2, "id")):
-        top2 = e1p[name]["top2"]
-        for i, r in enumerate(rs):
-            rid = f"{name}:{r[key] if key else i}"
-            if rid in out["pair"]:
-                continue
-            if i % 20 == 0:
-                wait_for_room(need_embeddings=False)
-            out["pair"][rid] = laya_pair(lh.render_state("route_in", r),
-                                         top2[i])
-        save("laya_live.json", out)
-    out["waits"] = WAITS
-    print(f"set2 trained {len(out['set2_trained'])}, pairs {len(out['pair'])}")
-    print("->", save("laya_live.json", out))
-
-
 # ------------------------------------------------------------ train ---------
 def cmd_train(args) -> None:
     """route_in v1: E1's recorded recipe (5-fold CV seed 0 over the stable
@@ -344,8 +292,6 @@ def cmd_train(args) -> None:
     t1 = [r["label"] for r in s1]
     t2 = [r["label"] for r in s2]
     Xtr, X1, X2 = X_of(tr), X_of(s1), X_of(s2)
-    laya1 = [d["choice"] for d in laya_set1()]
-    laya1_ok = binary_ok(laya1, t1)
     report: dict = {}
 
     # (a) the recorded control, on the batched vectors, full train_laya grid
@@ -367,13 +313,11 @@ def cmd_train(args) -> None:
             p1 = [LABELS[i] for i in e1.probs(W, b, X1).argmax(1)]
             p2 = [LABELS[i] for i in e1.probs(W, b, X2).argmax(1)]
             ok1 = binary_ok(p1, t1)
-            m = mcnemar_exact(laya1_ok, ok1)
             per.append({"seed": s, "wd": cv["wd"], "cv": cv["accuracy"],
-                        "set1": sum(ok1), "set2": sum(binary_ok(p2, t2)),
-                        "vs_laya_set1": m})
+                        "set1": sum(ok1), "set2": sum(binary_ok(p2, t2))})
         seeds[grid_name] = per
-        print(grid_name, [(p["seed"], p["wd"], p["cv"], p["set1"], p["set2"],
-                           round(p["vs_laya_set1"]["p"], 5)) for p in per])
+        print(grid_name, [(p["seed"], p["wd"], p["cv"], p["set1"], p["set2"])
+                          for p in per])
     report["seeds"] = seeds
 
     # (c) MLP only if it beats logistic in CV (same folds, seed 0)
@@ -489,119 +433,12 @@ def _mlp_check(X: np.ndarray, y: list[int], hidden: int = 64, steps: int = 400,
             "adopt_mlp": wins >= 5}
 
 
-# ------------------------------------------------------------ narrowing -----
-ARMS = {
-    "N0_e1": "E1 alone (argmax)",
-    "N1_e1top2_layahead": "E1's top two -> Laya's trained head picks between "
-                          "them (its probabilities restricted to the two)",
-    "N2_e1top2_layazs": "E1's top two -> Laya zero-shot choice over the two "
-                        "(its own option descriptions, both orders averaged)",
-    "N3_lowmargin_layahead": "Laya's trained head (restricted to E1's top "
-                             "two) only where E1's margin is under the 25th "
-                             "percentile of its out-of-fold training margins",
-    "N4_lowmargin_layazs": "as N3 with the zero-shot two-way choice",
-    "N5_average": "exploratory: average of E1's and Laya's head "
-                  "probabilities",
-}
-
-
-def _laya_head_set(name: str) -> list[dict]:
-    if name == "set1":
-        return laya_set1()
-    live = load("laya_live.json") or {}
-    return [live["set2_trained"][r["id"]] for r in rows(SET2)]
-
-
-def narrow_arms(name: str, rs: list[dict]) -> dict:
-    e1p = load("e1_preds.json")[name]
-    cut = float(np.percentile(load("e1_preds.json")["oof_margin_train"], 25))
-    laya = _laya_head_set(name)
-    live = load("laya_live.json") or {"pair": {}}
-    key = "id" if name == "set2" else None
-    arms: dict[str, list] = {}
-    arms["N0_e1"] = e1p["choice"]
-    n1, n2, n3, n4, n5 = [], [], [], [], []
-    for i, r in enumerate(rs):
-        a, b = e1p["top2"][i]
-        lp = laya[i]["probabilities"]
-        head_pick = a if lp[a] >= lp[b] else b
-        zs = live["pair"].get(f"{name}:{r[key] if key else i}")
-        zs_pick = zs["choice"] if zs else None
-        low = e1p["margin"][i] < cut
-        n1.append(head_pick)
-        n2.append(zs_pick)
-        n3.append(head_pick if low else e1p["choice"][i])
-        n4.append((zs_pick if low else e1p["choice"][i]))
-        avg = {lab: (e1p["probs"][i][j] + lp[lab]) / 2
-               for j, lab in enumerate(LABELS)}
-        n5.append(max(avg, key=avg.get))
-    arms.update(N1_e1top2_layahead=n1, N2_e1top2_layazs=n2,
-                N3_lowmargin_layahead=n3, N4_lowmargin_layazs=n4,
-                N5_average=n5)
-    arms["laya_head_alone"] = [d["choice"] for d in laya]
-    return {"arms": arms, "cut": cut,
-            "low_margin_rows": sum(1 for m in e1p["margin"] if m < cut)}
-
-
-def cmd_narrow(args) -> None:
-    out = {"arms_preregistered": ARMS,
-           "rule": "a combination is adopted only if it beats N0 with exact "
-                   "McNemar p < 0.05 on set 1 AND is not behind N0 on set 2; "
-                   "5 pre-registered combinations, so Bonferroni alpha is "
-                   "0.01 -- reported beside the raw p"}
-    for name, path in (("set1", SET1), ("set2", SET2)):
-        rs = rows(path)
-        truth = [r["label"] for r in rs]
-        na = narrow_arms(name, rs)
-        ok = {k: binary_ok(v, truth) for k, v in na["arms"].items()
-              if all(p is not None for p in v)}
-        res = {"n": len(rs), "cut": na["cut"],
-               "low_margin_rows": na["low_margin_rows"], "correct": {},
-               "vs_N0": {}}
-        for k, v in ok.items():
-            res["correct"][k] = sum(v)
-            if k != "N0_e1":
-                res["vs_N0"][k] = mcnemar_exact(ok["N0_e1"], v)
-        out[name] = res
-        print(f"\n{name} n={len(rs)} (low-margin cut {na['cut']:.3f}: "
-              f"{na['low_margin_rows']} rows)")
-        for k, c in res["correct"].items():
-            m = res["vs_N0"].get(k)
-            print(f"  {k:24s} {fmt(c, len(rs))}"
-                  + (f"   vs N0: N0-only {m['a_only']} arm-only {m['b_only']} "
-                     f"p={m['p']:.4g}" if m else ""))
-    print("->", save("narrow.json", out))
-
-
 # ------------------------------------------------------------ set 2 ---------
-def _selection(rs: list[dict], second: list[dict | None], name: str
-               ) -> list[bool]:
-    tmp = tempfile.mkdtemp(prefix="e1_sel_")
-    os.environ.setdefault("YAMADORI_CORPUS_DB", os.path.join(tmp, "c.sqlite3"))
-    os.environ.setdefault("LLAMA_STACK_URL", "http://127.0.0.1:1")
-    import domains
-    import selection
-    import tiers
-    t = tiers.resolve({"reasoning_effort": "max"}, tiers.from_header(None))
-    dbs = selection.symbol_dbs()
-    out = []
-    for r, s in zip(rs, second):
-        msgs = ([{"role": "user", "content": r["context"]}]
-                if r.get("context") else []) + \
-            [{"role": "user", "content": r["question"]}]
-        gate = domains.tool_admission(msgs, None)
-        if s is None:
-            d = selection.decide(msgs, t, gate, dbs=dbs)
-        else:
-            d = selection.decide(msgs, t, gate, laya=s,
-                                 laya_status="answered", dbs=dbs,
-                                 second=name)
-        out.append(bool(d["investigate"]))
-    return out
-
-
 def cmd_set2(args) -> None:
-    """Every arm on BOTH sets, investigate-vs-not, paired."""
+    """E1 and the rule on BOTH held-out sets, investigate-vs-not, paired.
+    (The Laya-head and selection.decide columns were removed with Laya and
+    selection's investigate decision, 2026-09-29; results/set2.json keeps
+    their last numbers.)"""
     import selection
     out = {}
     for name, path in (("set1", SET1), ("set2", SET2)):
@@ -609,38 +446,19 @@ def cmd_set2(args) -> None:
         truth = [r["label"] for r in rs]
         tb = [t == "investigate" for t in truth]
         e1c = load("e1_preds.json")[name]["choice"]
-        laya = _laya_head_set(name)
         rule = [selection.rule_baseline({"question": r["question"],
                                          "context": r.get("context") or ""})
                 for r in rs]
-        sel = _selection(rs, [None] * len(rs), "Laya")
-        sel_l = _selection(rs, [{"choice": d["choice"], "abstain":
-                                 bool(d.get("abstain")), "margin":
-                                 d.get("margin")} for d in laya], "Laya")
-        sel_e = _selection(rs, [{"choice": c, "abstain": False, "margin": None}
-                                for c in e1c], "E1")
-        corr = {"laya_head": binary_ok([d["choice"] for d in laya], truth),
-                "E1": binary_ok(e1c, truth),
-                "rule": binary_ok(rule, truth),
-                "selection": [p == t for p, t in zip(sel, tb)],
-                "selection+laya": [p == t for p, t in zip(sel_l, tb)],
-                "selection+E1": [p == t for p, t in zip(sel_e, tb)]}
+        corr = {"E1": binary_ok(e1c, truth), "rule": binary_ok(rule, truth)}
+        preds = {"E1": [c == "investigate" for c in e1c],
+                 "rule": [c == "investigate" for c in rule]}
         res = {"n": len(rs), "investigate": sum(tb), "correct": {},
                "missed": {}, "unneeded": {}, "mcnemar": {}}
-        preds = {"laya_head": [d["choice"] == "investigate" for d in laya],
-                 "E1": [c == "investigate" for c in e1c],
-                 "rule": [c == "investigate" for c in rule],
-                 "selection": sel, "selection+laya": sel_l,
-                 "selection+E1": sel_e}
         for k, c in corr.items():
             res["correct"][k] = sum(c)
             res["missed"][k] = sum(1 for p, t in zip(preds[k], tb) if t and not p)
             res["unneeded"][k] = sum(1 for p, t in zip(preds[k], tb) if p and not t)
-        for a, b in (("laya_head", "E1"), ("rule", "E1"), ("selection", "E1"),
-                     ("selection+laya", "selection+E1"),
-                     ("selection+E1", "E1"), ("laya_head", "rule"),
-                     ("selection", "laya_head")):
-            res["mcnemar"][f"{a} vs {b}"] = mcnemar_exact(corr[a], corr[b])
+        res["mcnemar"]["rule vs E1"] = mcnemar_exact(corr["rule"], corr["E1"])
         if name == "set2":
             src = {}
             for i, r in enumerate(rs):
@@ -651,7 +469,6 @@ def cmd_set2(args) -> None:
                     src[s][k] += corr[k][i]
             res["by_source"] = src
             res["three_way_e1"] = sum(p == t for p, t in zip(e1c, truth))
-            res["laya_abstained"] = sum(1 for d in laya if d.get("abstain"))
         out[name] = res
         print(f"\n{name}: n={len(rs)}, {sum(tb)} investigate")
         for k in corr:
@@ -663,7 +480,7 @@ def cmd_set2(args) -> None:
         if name == "set2":
             for s, d in res["by_source"].items():
                 print(f"  source {s}: {d}")
-    print("->", save("set2.json", out))
+    print("->", save("set2_e1_rule.json", out))
 
 
 # ------------------------------------------------------------ latency -------
@@ -711,8 +528,8 @@ def cmd_offline(args) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["embed", "stability", "train", "laya",
-                                    "narrow", "set2", "latency", "offline"])
+    ap.add_argument("cmd", choices=["embed", "stability", "train", "set2",
+                                    "latency", "offline"])
     ap.add_argument("--force", action="store_true",
                     help="train: save a new version even if one is current")
     a = ap.parse_args()

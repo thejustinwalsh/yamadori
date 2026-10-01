@@ -996,46 +996,13 @@ def handle_assist(job: dict, ctx: Context) -> dict:
     return result
 
 
-# ---------------------------------------------------------------------------
-# dataset.label  (cpu)  and  dataset.train  (gpu)
-#
-# Refused, on purpose, with the exact gap named. The TARGET format is defined:
-# docs/LAYA.md "RUNBOOK" gives each task's label glob and required fields
-# (route_in: question/context/label; grounded_excerpt: finding/cites/excerpt/
-# label), and scripts/train_laya.py picks up any new file matching the glob.
-# What is NOT defined is the step before: what a `laya` dataset's source rows
-# are and how they become labelled rows -- the labels are judgements
-# (investigate / answer_directly / clarify), and no process here can make
-# them. Training is also not automatic in the runbook: a retrain is promoted
-# only if it beats the regex and passes the floors in bench/laya_baseline.json
-# via bench/test_laya_head.py. A handler that "succeeded" here would either
-# invent labels or overwrite a serving artefact without that gate.
-# ---------------------------------------------------------------------------
-def handle_label(job: dict, ctx: Context) -> dict:
-    raise Permanent(
-        "a laya dataset has no defined mapping from its source to labelled "
-        "rows; the target format exists (docs/LAYA.md RUNBOOK step 1) but the "
-        "labels are judgements no job can make",
-        "decide what a laya dataset's source is (pre-labelled rows to "
-        "validate and copy into bench/laya_<task>_labels_<slug>.jsonl is the "
-        "simplest), then implement worker.handle_label", owner="developer")
-
-
-def handle_train(job: dict, ctx: Context) -> dict:
-    raise Permanent(
-        "retraining is gated in docs/LAYA.md RUNBOOK steps 2-3: train_laya.py "
-        "writes serving artefacts to index/laya/, and a head is promoted only "
-        "if it beats the regex and passes bench/test_laya_head.py floors",
-        "implement worker.handle_train to train into a staging --out-dir, run "
-        "the floors test, and promote only on pass", owner="developer")
-
-
+# The `laya` dataset kind's dataset.label (cpu) and dataset.train (gpu)
+# stages, both refusals naming the gap, were removed with Laya on 2026-09-29
+# (the way back is commit e360d37).
 HANDLERS = {
     datasets.FETCH[0]: handle_fetch,
     "dataset.extract": handle_extract,
     "dataset.index": handle_index,
-    "dataset.label": handle_label,
-    "dataset.train": handle_train,
     datasets.ASSIST[0]: handle_assist,
 }
 
@@ -1059,17 +1026,6 @@ def _register_prices() -> None:
 
 
 _register_prices()
-
-
-def _register_deep() -> None:
-    """Deep thinking's idle-time learner (mcp/deep_learn.py, Phase 0.6):
-    one cpu-lane job, enqueued by the loop below only when the stack is
-    idle and labelled rows are pending."""
-    import deep_learn
-    HANDLERS[deep_learn.LEARN[0]] = deep_learn.handle_learn
-
-
-_register_deep()
 
 
 def _register_onboarding() -> None:
@@ -1152,6 +1108,10 @@ def run_one(job: dict) -> str:
     beater = threading.Thread(target=_heartbeat, args=(job["id"], stop),
                               daemon=True)
     beater.start()
+    # THE CARD SCOPE (mcp/jobs.py GPU_SCOPES): a job claimed for the A4000 never touches the main card
+    # (max_mode.check_scope); every other job runs as before
+    import max_mode
+    max_mode.set_scope(job.get("card"))
     try:
         if (job.get("payload") or {}).get("idle"):
             # AN IDLE-GATED JOB (docs/PACKAGE-ONBOARDING.md 3.2): checked
@@ -1159,7 +1119,7 @@ def run_one(job: dict) -> str:
             # onboarding, its skills' model stages and the index rebuilds
             # wait the same way. A job already running is never interrupted.
             import idle
-            st = idle.stack_idle(job["id"])
+            st = idle.stack_idle(job["id"])       # its card scope: max_mode.scope(), set above
             if not st["idle"]:
                 raise Deferred(st["until"] or time.time(),
                                f"waiting for an idle stack: {st['why']}")
@@ -1177,6 +1137,10 @@ def run_one(job: dict) -> str:
         return jobs.fail(job["id"], e.text(), retry=False)
     except Exception as e:                                       # noqa: BLE001
         stop.set()
+        if type(e).__name__ == "WindowExceeded":
+            # mcp/model.py fit_window: the job does not fit the window of the server it was routed to; the same job
+            # is as large next time
+            return jobs.fail(job["id"], str(e), retry=False)
         if type(e).__name__ == "ModelAtCapacity":
             # MAX MODE (mcp/max_mode.py): the job asked for a model that is off the card; back to the queue without
             # an attempt, looked at again when max mode may have freed it
@@ -1193,6 +1157,7 @@ def run_one(job: dict) -> str:
         return jobs.fail(job["id"], msg, retry=True)
     finally:
         stop.set()
+        max_mode.set_scope(None)
     result = dict(result or {})
     jobs.finish(job["id"], result)
     try:
@@ -1293,16 +1258,6 @@ def run(once: bool = False, lanes: dict | None = None) -> int:
                           flush=True)
             except Exception as e:                               # noqa: BLE001
                 print(f"[worker] skill scheduling failed: {e}",
-                      file=sys.stderr, flush=True)
-            # Deep thinking's learner (Phase 0.6): thresholds within bounds
-            # and description proposals from labelled outcomes, when idle.
-            try:
-                import deep_learn
-                if deep_learn.schedule():
-                    print("[worker] idle: enqueued a deep learn job",
-                          flush=True)
-            except Exception as e:                               # noqa: BLE001
-                print(f"[worker] deep learn scheduling failed: {e}",
                       file=sys.stderr, flush=True)
             # The skill library's PROVE backlog (mcp/skill_prove.py): one
             # idle-gated gpu-lane proof at a time for armed skills not yet

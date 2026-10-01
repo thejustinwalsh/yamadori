@@ -380,10 +380,11 @@ function renderCtx(c){
   const cap=c.layout==='cap';
   const L=cap?{main:'main, the VRAM line',helper:'child',reserve:'second conversation',
     kmain:'main, the window every conversation gets'+(c.cap_source?' ('+esc(c.cap_source)+')':''),
-    khelper:'child: deep thinking, the decider and side calls; its own window',
+    khelper:'child: '+esc((c.child&&c.child.role)||'decider lane')+
+      ((c.child&&c.child.serves)?', '+c.child.serves.map(esc).join(', '):'')+'; its own window',
     kreserve:'the rest: a second concurrent conversation, in host RAM when it spills'}
    :{main:'main',helper:'helper, each',reserve:'reserve',kmain:'main, the conversation',
-    khelper:'deep thinking, one helper at a time',
+    khelper:'helper: '+esc((c.child&&c.child.role)||'decider lane')+', one at a time',
     kreserve:'reserve, whatever the shares leave unclaimed'};
   el.className='';
   el.innerHTML=`
@@ -466,8 +467,8 @@ function renderSeed(s){
   const el=$('seed');
   el.classList.remove('skel');
   if(!s){
-    el.innerHTML='No seed has been put in a prompt yet. <code>concept_seed.phrase()</code> '+
-      'records each one to <code>index/concept_seed_last.json</code> as it is injected.';
+    el.innerHTML='No seed has been put in a prompt yet. <code>concept_seed.user_turn_line()</code> '+
+      'records each one (the first user turn of a conversation) to <code>index/concept_seed_last.json</code>.';
     return;
   }
   // The word, then the number that grows its limb: FNV-1a u32 in hex, the

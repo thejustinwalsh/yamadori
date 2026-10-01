@@ -410,3 +410,222 @@ Q2_0 file (37.6 GB, ISTA @ `ed59f920`, sha256 checked) as the all-Q2_0 arm. Gate
 (`bench/flashnext_gate.py --dry-run`). Output: `C:/Users/jwals/octo/flashnext-gate-20260929` (seeded with the
 2026-09-28 base logits and its KL yardstick: mean KLD 0.010993, same top-1 96.757%, batch 8 vs 16 on the base
 engine, 8 x 4,096 tokens).
+
+**Operator decision, 2026-09-29, on `flash-cpu`'s KL REPORT** (the AVX2 Q2_0 kernel alone; mean KLD 0.010793 vs the
+yardstick's 0.010993, same top-1 96.464% vs 96.757%, 8 x 4,096 tokens, llama-perplexity at batch 16): "Acceptable,
+continue" -- the drift is accepted (recorded in `flashnext-gate-20260929/operator-decisions.json` and gate.json).
+
+**OPEN ENGINE BUG (2026-09-29): the GPU expert cache faults on CUDA with multi-token batches.** `llama-upstream-flash`
+with `--moe-expert-cache N` (0003 #27861 + 0004 + 0007's flat-row slot lookup), the profile policy, pinned experts:
+- `llama-perplexity` at `-b/-ub 16` (the KL step): `CUDA error: an illegal memory access was encountered`, surfacing in
+  `launch_mul_mat_q` (`mmq.cuh:1417`, `cudaFuncSetAttribute`) on the first chunk
+  (`C:/Users/jwals/octo/flashnext-gate-20260929/kl-flash-cache-b16.log`);
+- `llama-server` (the speed step): the same error at the tail of a ~142K-token prompt, in
+  `ggml_backend_cuda_synchronize` (`flash-cache.server.log`), after 16 clean runs (single-token decode and 512-token
+  batches).
+Suspect: the cache chain's `mul_mat_id` over the slot tensors with a `[n_expert_used, n_tokens]` id table for
+2-31 token batches (0004 extended #27861's one-token chain to them; 0007 fixed only the graph-build assert). Not
+investigated in the GPU window (the coordinator, 2026-09-29). Before it faulted, the cache at 46 slots a layer (the
+VRAM left beside MTP, ~9% of experts) decoded within ~3% of `flash-cpu` (4K 26.3 vs 25.6 tok/s; ~35K 20.8/16.9/17.1
+vs 19.9/16.3/16.5; ~68K 14.4/12.3 vs 13.8/11.8; n=2-3). The combined arms place whole expert layers instead.
+
+M0, the one bounded attempt (window B, 2026-09-30; `bench/flashnext_gate.py --arms fault-cache --steps fault`, n=1
+each): with `CUDA_LAUNCH_BLOCKING=1` the fault is reported in `ggml_cuda_mul_mat_q` at `mmq.cu:291` on the first
+16-token batch (`fault-blocking.log`). In the shipped source that line is the check after the `mul_mat_id` path's
+src1 quantization (`quantize_scatter_mmq_q8_1_cuda` / its FP4 twin: the activations are broadcast, ne11 == 1, so
+the dedup scatter runs); the ids helper before it passed its own check (line 254). So the kernel that faults reads
+the activations through the inverse id map built from the cache's slot ids -- a lead, not a diagnosis (0007 fixed
+the graph-build `get_rows` assert only). compute-sanitizer 2025.1 (the toolchain's
+`sanitizer:` row) could not instrument it: "Failed to initialize WDDM debugger interface. Please run
+EnableDebuggerInterface.bat as an administrator" (`fault-memcheck.log`); that is a system setting, for the operator.
+Left open.
+
+**What a working cache would buy (decode), simulated.** `bench/moe_hit_sim.py` over a routing trace of flash-cpu's own
+decode (`GGML_MOE_LOG`, arm `probe-trace`: 512 tokens at ~4K and ~35K of the gate's corpus, 48 layers, 245,370 routed
+reads, 15,279 distinct (layer, expert) pairs; n=1 text; `moe_hit_sim.txt`), the share of routed reads a VRAM cache of N
+experts serves:
+
+| N experts (1.32 MiB each: 676 MiB a layer / 512) | Strata profile, static | Strata adaptive tier (0004's rule) | LRU | best static set (oracle) |
+|---:|---:|---:|---:|---:|
+| 2,200 (46 a layer: the VRAM beside MTP) | 18.1% | 56.4% | 57.4% | 50.9% |
+| 3,000 | 23.3% | 64.7% | 65.5% | 60.3% |
+| 4,000 | 30.1% | 71.2% | 77.0% | 69.6% |
+| 5,000 | 36.4% | 75.0% | 83.7% | 76.8% |
+| 7,000 | 47.9% | 80.9% | 89.9% | 87.2% |
+
+Whole static layers in the same VRAM serve 4 of 48 layers' reads (8.3%). Strata's shipped profile is a poor seed for
+this text (18% at 2,200); the adaptive tier recovers to within a point of LRU. The simulation charges nothing for a
+swap (the adaptive tier moves at most 96 experts per 4 tokens, ~32 MiB a token over PCIe).
+
+**Window B (2026-09-30): what held the decode, and 0013-0016.** Every row `bench/flashnext_gate.py --steps probe`: one
+256-token decode (ignore_eos) at ~4.4K and at ~35K of the gate's corpus, n=1 each -- probes, not the gate's n=3 speed
+step. Layout: the operator's (-np 2, -c 265,216, one pool), MTP unless marked, P-cores, pinned experts, no projector.
+
+| arm (engine) | experts on the card | KV | 4.4K decode | ~35K decode | lowest free MiB |
+|---|---|---|---:|---:|---:|
+| fit-kvmap (0001-0012) | none | host-mapped | 9.3 | 7.7 | 8,845 |
+| fit-kvmap-nomtp (0001-0014) | none | host-mapped, no MTP | 4.9 | 0.9 | 10,001 |
+| fit-kvmap-nomtp (0001-0016) | none | host-mapped, no MTP | 19.9 | 18.2 | 10,001 |
+| probe-q8-cpu (0001-0016) | none | card | 19.3 | 26.1 | 5,023 |
+| cache-fit (0001-0016, first 0016) | 63-slot adaptive cache a layer (3,024) | card | 29.8 | 35.0 | 767 |
+
+Three engine causes, each found from these rows and fixed:
+- **0015**: with a q8_0 cache, ggml-cuda sent a 1-2 query decode to the VECTOR flash-attention kernel, which reads
+  every cell; only an f16 cache was tested for the sparse (top-k) kernel. On the card that is a context-linear cost;
+  host-mapped, a latency-bound walk over PCIe (0.9 tok/s at 35K). Fixed: a quantized cache takes the sparse test too.
+- **0014**: the sparse MMA kernel converted a q8_0 K/V to f16 WHOLE on every call (MTP's 4-query verify took it).
+  The op profile (0010, `probe-opt-all`, -lv 4) put the flash-attention node at 0.087 ms a graph at ~35K before and
+  0.046 after (n=1 each). Fixed: only the selected cells.
+- **0013**: the expert cache's CUDA fault (M0 above). Fixed: the cache chain only on MMVQ-served batches.
+With them the adaptive expert cache (0003/0004, Strata's policy) is usable again and is the first arm past 30 tok/s.
+The profile lines are GPU time with CUDA graphs off and an event per node, so they rank ops, they do not add up to
+a token's time. A `GET_ROWS q8_0` over every cell per QSA layer remains (the indexer pools every block's key every
+token, `qwen4exp.cpp build_qsa_top_k`): Strata keeps pooled block keys; not ported (M2).
+
+**The first 0014 lost needles, and the fix.** cache-all on that build: needles 7/15 (1K 5/5; 32K 2/5; 128K 0/5, the
+misses empty: 4,096 tokens of thinking and no answer). Bisected at 32K, 5 needles an arm, env switches in one binary:
+0015 off 3/5, no cache 2/5, 0014 and 0015 off (cache on) 5/5 -- 0014. The sparse MMA kernel pads a tile past a list's
+count by gathering ROW 0 (fattn-mma-f16.cuh, the cp.async load) and relies on the -inf mask; 0014 left row 0 stale,
+and a masked score times a non-finite row is NaN. 0014 now converts row 0 too. test-backend-ops passed the broken
+version (its buffers held finite leftovers); `GGML_CUDA_FA_SPARSE_ROWS_POISON=1` (tests only) fills the f16 buffers
+with NaN first: broken, 6 q8_0 sparse cases fail (369/375); fixed, all 4,004 FLASH_ATTN_EXT cases pass. New eval
+cases at the model's own sizes (top-k 2,051, the permuted cache view, 1 query past 4,096 cells, 2 and 4 past
+16,384). The gate's kernels step runs them poisoned.
+
+**The fixed build's gate (cache-all on `llama-upstream-flash-74746ec1`, 0001-0016, run B12, 2026-09-30).** Kernels
+pass on both cards (the poisoned sparse-FA cases 26/26 each); KL 0.011094 / 96.532% (identical to the first build:
+batch 4 never reaches the sparse path); needles **15/15**, every answer the exact key; corrupt clean (0 symptom rows
+of 35, tools 10/10). Decode seen in the needle runs (server log, n=1 each, not the speed step): ~35K 31-36 tok/s,
+~142K 18-25 tok/s (the broken build: 9.6). The window stopped at 10:20; contract, lane and speed ran in window C
+(below); the base arm's ~35K row and jjava ran 10:22-11:41 -- after the card was declared released, because the
+chain's shell survived its stop (no client request reached the stack meanwhile; reported). No deploy. The arm:
+`-np 2 -c 265216`, q8_0 K/V on the card, every layer's experts in RAM (pinned), a 63-slot adaptive cache a layer
+(Strata's profile + adaptive tier, 4,236.8 MiB), MTP, P-cores, `-b 2048 -ub 512`, no projector.
+
+**Window C (2026-09-30, the rest of the gate on 74746ec1's cache-all; `bench/flashnext_gate.py`, runs C1-C4).**
+Contract PASS (every item; the slot-count check read ">= 3", the four-slot layout's, until it was fixed to the
+arm's `-np`). Speed, n=3 each, 256 tokens, `-np 2` (lane idle), with the cache's hit rate over each row:
+
+| context | decode tok/s | prompt tok/s | VRAM hit rate | MTP accepted/drafted |
+|---|---|---|---:|---|
+| 4.4K | 28.2 / 32.9 / 29.3 | 50 (first, cold) / 141 / 150 | 59.7% | 127/167, 158/195, 138/179 |
+| ~35K | 27.5 / 38.4 / 42.2 | 131 / 162 / 162 | 62.4% | 142/177, 180/205, 181/198 |
+| ~68K | 22.3 / 27.1 / 31.4 | 130 / 149 / 148 | 61.5% | 130/169, 168/220, 176/201 |
+| ~140K | 17.1 / 20.5 / 21.5 | 128 / 136 / 137 | 57.5% | 125/155, 163/215, 158/219 |
+
+Against, same card: the stock engine (`base`, -np 4, no MTP) 16.8-17.4 at 4.4K and 15.0 / 12.5 / 12.7 at ~35K (B13,
+n=3); `flash-all` (-np 4, 4 static GPU expert layers) 23.9 / 22.7 / 21.5 at ~35K and 15.4 / 17.5 / 14.4 at ~142K.
+Strata's own claim (5070 12 GB + 7600, IQ2_XS): 82 -> 48 tok/s from 1K to 262K; their 5060 Ti Q2_0 estimate
+~80-87 at 1-4K. We are at about 35-45% of it.
+
+The lane step (slot 0 decodes, n=3, while a thread sends jjava-shaped reads to slot 1: ~1.5K-token state, 1 token,
+top_logprobs 5; 325 reads, median 3.5 s each): idle 26.5-32.0 / 27.4-42.6 / 22.4-36.7 tok/s at 4K / 35K / 68K;
+ACTIVE 1.7-2.2 / 2.0-2.8 / 1.5-2.4 -- the lane takes the main conversation to ~2 tok/s. The operator, 2026-09-30:
+"no jjava slowing down this highly tuned masterpiece, it stays locked in once it is swapped" -- Flash-Next at
+`-np 1`; jjava and side calls go to a Bonsai on the A4000. The `-np 1` fit (`cache-fit-np1`, the same arm with one
+slot and `-c 262144`, n=1 probe): lowest free 1,289 MiB against `-np 2`'s 767 -- 522 MiB more, 7 more slot rows of
+66.2 MiB (63 -> 70 a layer at the same margin); decode 26.9 / 28.5 tok/s at 4.4K / ~35K (hit 64.8% / 61.4%).
+
+jjava on Flash-Next's own server (measurement only, B14; `bench/decider/results/models/flash-next.json`,
+`bench/decider/results/jevbench/flash-next-20260930-111001`): the letter prior leans hard on A (0.92-0.97 at 2-5
+options, typed/2), tie band 0.052, build_intent label bias 0.107 (noul); legacy vs typed on intent 0.909 each
+(n=99, in-sample); JevBench public 83.16 (easy 1.00, standard 0.972, hard 0.757; calibration on hard 79.96).
+
+**Window D (2026-09-30/10-01, build `llama-upstream-flash-a9be47e4`, 0001-0018; kernels pass on both cards, the
+poisoned sparse-FA cases 37/37 each).** All at `-np 1 -c 262144`, the operator's layout. n=3 each, 256 tokens:
+
+| arm | 4.4K | ~35K | ~68K | ~140K | VRAM hit | verdict |
+|---|---|---|---|---|---|---|
+| cache-all-np1 (70 slots, q8_0 K/V, MTP 3) | 29.3 / 29.6 / 30.0 | 29.4 / 40.2 / 45.6 | 19.2 / 33.4 / 34.9 | 22.3 / 38.0 / 28.7 | 63-64% | **winner** |
+| cache-all-np1-q4kv (93 slots, q4_0 K/V) | 28.3 / 31.3 / 32.6 | 32.6 / 43.2 / 44.5 | 23.3 / 38.5 / 35.2 | 19.2 / 29.3 / 29.7 | 66-70% | FAILS: KL 0.026247 / 94.516% (2.4x the yardstick), needles 13/15 (two refusals without the key); corrupt clean |
+| cache-all-np1-draft5 (MTP draft 5) | 27.5 / 33.5 / 28.7 | 31.0 / 40.5 / 47.3 | 23.9 / 32.5 / 32.5 | 18.5 / 27.3 / 24.8 | 59-65% | no gain: keep 3 |
+
+Against `-np 2` at 63 slots (window C): ~140K went 17.1 / 20.5 / 21.5 -> 22.3 / 38.0 / 28.7 and the hit rate 57.5% ->
+63.9%; the first run of each row is the cold one. The 0017 profile on this card (D1, ~128K, one MTP verify step of
+~4 tokens): 84.3 ms = 41.0 waiting on the GPU + 15.6 in launches + 22.9 CPU experts + 4.6 copies. The launches read
+as CUDA graphs that never replay: MTP's drafts stop early (p-min 0.5), so the verify batch changes step to step and
+ggml-cuda re-warms (`ggml_cuda_graph_update_required`). D5 (`--spec-draft-p-min 0`, n=1 probe): 30.2 / 29.6 / 21.6
+tok/s at 4.4K / ~35K / ~128K against D1's 28.8 / 27.9 / 21.9, with acceptance down to 0.44-0.52 -- no clear net
+effect, and no decode-only profile line came out of it (fewer than 100 verify graphs a context). The engine-side
+candidate stays open: keep one llama graph (and so one CUDA graph) per verify-batch size instead of rebuilding on
+every size change. Not built.
+
+**Window E1 (2026-10-01, `llama-upstream-flash-cand0020`, 0001-0020; kernels pass on both cards).** 0020's graph cache
+(`LLAMA_GRAPH_CACHE=8`) on cache-all-np1, speed n=3: 4.4K 27.1 / 33.0 / 33.2 (mean 31.1 vs 29.6 without), ~35K 27.7 /
+41.3 / 44.9 (38.0 vs 38.4), ~68K 24.3 / 35.8 / 39.0 (33.0 vs 29.2), ~140K 20.6 / 26.2 / 29.5 (25.4 vs 29.7):
+inconclusive. The 0017 profile (768-token decodes, ~128K): a verify step 83.5 ms = 47.4 waiting on the GPU + 27.2
+CPU + 3.6 launches + 5.2 copies, against D1's 84.3 = 41.0 + 22.9 + 15.6 + 4.6 -- the launches went, the wait on the
+GPU grew by as much: the one-by-one launches had overlapped GPU execution, and the step is GPU-bound. Greedy
+identity cannot be judged on this card: the same arm run twice also differs (the ~32K slot state; the greedy text
+at chars 435 / 169), as the graph cache's run does against it (248 / 10). Not shipped; 0020 stays a pinned patch,
+off.
+
+**The 1,024-token crash (2026-10-01; 0022).** The deployed entry (a9be47e4, cache-all, 70 slots, MTP, `-np 1`) died on
+its first request twice in the coordinator's deploy check (06:42:57, 06:59:51; llama-swap: "upstream process exited
+unexpectedly"; the driver logged Xid 13 "MMU NACK" at both instants). Reproduced outside llama-swap with the entry's
+exact command and env: a FRESH server whose first prompt is exactly 1,024 tokens -- "Reply with exactly: ok" + the
+concept seed + the two image tools -- faults 5 of 5 times ("an illegal memory access" in MUL_MAT_ID, blk.0's
+`ffn_moe_gate`, src0 the op-offloaded iq2_s experts, a 508-token ubatch: llama-server ran the prompt as 512 + 508 + 4).
+Not the cause: the expert cache (`--moe-expert-cache 0` still faults), MTP (off still faults), host memory. It passes
+with 1,025 tokens, on a warm server, and with `--no-op-offload`. The bug is upstream's, at our base: `mul_mat_id`'s MMQ
+padded its packed src1 by `ggml_cuda_mmq_get_J_max(..., ne11)` columns -- 0 when the activations are broadcast (ne11
+= 1) -- while the tile width it picks (up to 128) follows the tokens, so the last expert's last tile read up to J-1
+columns past the buffer; on a fresh process that ran off the CUDA VMM pool's mapped end. test-backend-ops reproduces it
+with the model's shape (iq2_s, 2560 -> 640, 512 experts, top-10, broadcast): n = 508 faults, and it is the only n in
+440..600 that does (one process per n, before the fix). 0022 pads by the widest tile the switch can pick (128 columns,
+18 KiB a call): the shape passes at 500..516, MUL_MAT_ID 932/932 on the 5060 Ti, and
+`llama-upstream-flash-cand0022` (0001-0018 + 0022) serves the fresh 1,024-token request (n=1).
+
+**Prefill, cand0022, deployed entry, a warm server** (`C:/Users/jwals/octo/fn-crash/prefill.py`: a fresh prompt each
+run, `cache_prompt` false, the server's own `prompt_per_second`; n=3, tok/s):
+
+| prompt | op offload on (as deployed) | `--no-op-offload` |
+|---|---|---|
+| ~1K (1,038) | 101 / 236 / 260 (the first right after a fresh server's first request) | 97 / 99 / 100 |
+| ~8K (8,024) | 247 / 313 / 318 | 92 / 101 / 101 |
+| ~32K (32,032) | 231 / 234 / 233 | 95 / 96 / 96 |
+
+The tens of tok/s on a first request are cold: 12-30 tok/s on each fresh server's first ~1K prompt (the deployed run's
+21), 40 for `--no-op-offload`'s warm-up, and the second request of the same size runs at ~240. Op offload is 2.4x
+faster warm, and it stays.
+
+**Operator, 2026-09-30, on cache-all's KL** (mean KLD 0.011094, same top-1 96.532%, batch 4, against the yardstick's
+0.010993 / 96.757%): "Yes accept and deploy" -- the deploy passes `--accept-kl`, conditional on the rest of the
+gate passing on the fixed build (`C:/Users/jwals/octo/flashnext-gate-20260929/operator-decisions.json`).
+
+At 03:29:50 a Python-urllib client asked llama-swap for `GET /upstream/bonsai/slots` (10 s timeout, `logs/stack.log`),
+which started `bonsai` on the card during the window; the gate's guard killed that arm (kvcache-fit, first attempt).
+
+## 9. Every Strata speed mechanism, against `llama-upstream-flash` (2026-09-29)
+
+Strata's claims are theirs (RTX 5070 12 GB + Ryzen 5 7600 AVX-512 unless stated; n=1 per cell); ours name the script
+and n. "Ported" = in `engines/patches/llama-upstream-flash/`.
+
+| mechanism | Strata's claim (commit) | status here |
+|---|---|---|
+| MTP draft layer, 3 drafts, verify window | 2.7-3.2 tokens per round, acceptance 0.63-0.86 (speed-0114) | PORTED as upstream PR #28243 (0006); the draft's experts on the CPU (`--spec-draft-n-cpu-moe 49`); costs ~2.4 GB VRAM beside the trunk (RS 450 -> 1,801 MiB at `-np 4`, draft ~1 GB: fit2). Gate: `flash-all`, `flash-mtp` |
+| Profile-ranked VRAM expert cache + adaptive swaps | 70-92% of routed reads from VRAM on 16 GB (layer-split README), ~4,000 experts on 12 GB | PORTED (0003 #27861 + 0004 Strata + 0007); the CUDA fault fixed by 0013 (2026-09-30), hit rate logged by 0016. The deploy candidate `cache-all`: 63 slots a layer (3,024 experts, 4,236.8 MiB beside the KV and MTP), hit rate 61-67% (cache-fit probe, n=1); every layer's experts in RAM otherwise |
+| CPU expert kernels: AVX2 multi-token i-quant rows | round 50.9 -> 48.5 ms (-4.7%) on a 5700X3D + 5060 Ti (`ed14227`) | PORTED (0009, Strata's iq_avx2.cpp @ 3ce2523c, MIT) + our Q2_0 rows; ours measured within noise to ~10% on 2-4 token batches (moe_cpu_bench, n=300) |
+| Q2_0 CPU kernel (ggml has only scalar on x86) | their own AVX-512/AVX2 Q2_0 rows (`pool.cpp:383`) | OURS (0008): down layer 0.575 -> 0.118 ms; whole-arm decode 17 -> 26 tok/s at 4.4K (`flash-cpu` vs `base`, n=3) |
+| E-2: 2 KB row prefetch ahead of the AVX-512 decode | 37.1 -> 36.5 ms/round (`df6980d`) | not ported (AVX-512 path; ~2%) |
+| Pinned expert arena + helper copy threads | part of 0.1.13's 2x prompt (`928b0e07`) | PORTED (0005 `LLAMA_PIN_EXPERTS`) |
+| Windows large-page arena | part of 0.1.13 (`0bf3216e`, PR #42) | PORTED (0005 `GGML_CUDA_HOST_LARGE_PAGES`); needs "Lock pages in memory" (a system policy we do not change) -- not run |
+| Expert streaming ring (prefill: next layer's experts over PCIe during attention) | part of 0.1.13: Q2_0 32K prompt 572 -> 1,290 (`2026-09-28-prefill-speed`) | PORTED as upstream PR #28414 (0002 `--prefetch-experts-slots`); not in the combined arms yet |
+| MMQ experts in the prompt path | part of 0.1.13 | llama.cpp's own (MMQ is the default for these types) |
+| Larger prompt chunks (8K) | part of 0.1.13 | `-ub`: 4096 needs a 14.5 GB compute buffer on this model, 1024 3.8 GB (vram-*.log); the `flash-ub1k` arm |
+| Batched PLE block; embedding in one gather; PLE rows by 4 threads | Q2_0 4K PLE 591 -> 291 ms (`5b7e316`) | not ported (llama.cpp's lazy PLE gather; upstream PR #29030 is the candidate) |
+| D-1 QSA prompt attention on tensor cores | 32K prompt +18.8% (`dce4598`) | not ported (prompt side) |
+| QSA select on tensor cores + register top-k | 128K prompt +14.6%, "decode uses it too" (`731899f`) | the DECODE half addressed our own way: 0011 (upstream's radix select for GGML_OP_TOP_K; ggml sorted the whole KV row 12x a token); 0014/0015 (ours): the sparse attention reads only the selected q8_0 cells, and a 1-2 query decode takes it |
+| C-1/C-2 select grid on active blocks; chunked indexer appends | Coder 4K +18%, 20K +13% (`758eb1a`) | not ported (prompt side) |
+| D-2 GDN recurrence split; C-3 short conv tiled | 32K prompt 1,258 -> 1,308 (`66f4341`, `2575cb1`) | not ported (prompt side) |
+| D-4/D-5 queued refills; stream issuer thread | 162 -> 96 ms/prompt; IQ3_S 32K 1,143 -> 1,213 (`581765a`, `cf68b00`) | not applicable as is (their cache slots and stager) |
+| E-6 device plan: a layer whose experts are all resident skips the host | not quantified (`efddd74`) | not ported (needs the cache) |
+| Batched verify-window kernels | not quantified (`1e4515c`, PR #109) | llama.cpp batches a verify window natively |
+| PCIe share: the GPU computes some missed experts by copying them | 5060 Ti x8 probes 14.1 GB/s -> `pcie_frac` 0.29 (`7a4b627`) | not ported |
+| KV streaming `--kv-resident` (KV in RAM, the read window in VRAM) | Q2_0 262K 50.9 -> 62.6 tok/s; ~+6% at 128K | PART: 0012 puts the attention K/V in host-mapped memory (frees ~3.8 GB); 0014/0015 make the decode read only the selected cells. Without Strata's VRAM page window it is still slower than the KV on the card (kvcache-fit 16.2 / 17.9 tok/s at 4K / 35K vs cache-fit 24.7 / 37.9, n=1): the page window is M3, not ported |
+| q4_0 KV + Hadamard | ~4% at 128K, perplexity +8-12% | not taken (q8_0 kept) |
+| Prompt-lookup (suffix) drafter beside MTP | code edits 6-11% faster | not ported (llama.cpp has `ngram-*` speculative types; combining with MTP untested) |
+| Conversation cache: pinned shared prefix, a checkpoint at the system prompt's end | re-reads only what follows the system prompt (`6fb2085`, `c1e9033`) | llama-server's slots + `--cache-ram` + context checkpoints already do this for us |
+| Layer split over several GPUs | Coder 5080+3090: prompt +18-20%, decode +0-7% | the `flash-a4000` arm: experts of m layers on the A4000 via `-ot` (static), measured in this window |
+| Bulk expert-arena reads on MSVC | load time (`5edb9d6`) | not applicable (llama.cpp mmap) |
+| Experimental speed projection (a refusal-direction ablation) | top-1 changes at 10% of positions | NOT TAKEN (a behaviour change, not a speed one) |

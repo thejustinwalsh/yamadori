@@ -24,6 +24,12 @@ hit@1 and hit@5 answer different questions and an intervention can move one
 without the other. That is exactly what the first reranker run saw (1/11 to
 3/11 at rank 1, 7/11 either way at rank 5) and it is why both are reported.
 
+THE RERANK ARM WENT WITH THE RERANKER (operator, 2026-10-01: "Remove
+reranker"; docs/REMOVED.md). `embed+rerank` (the same search with the
+cross-encoder forced on) is at commit e360d37; the rows it wrote in
+bench/retrieval_results.jsonl (`rerank_rank`, `rerank_ms`) stay as the record,
+void per docs/FINDINGS.md #20. A new run writes the two other conditions.
+
 STATISTICS
 
 McNemar's exact test on the discordant pairs, because the data is paired and
@@ -92,7 +98,7 @@ def rank_of(truth: str, results: list[str]) -> int:
     return 0
 
 
-def search_paths(query: str, top_k: int, rerank_cutoff: int) -> list[str]:
+def search_paths(query: str, top_k: int) -> list[str]:
     """Ranked paths, or a raised exception. Never a quietly empty list.
 
     An earlier version caught everything here and returned []. The embedding
@@ -102,13 +108,8 @@ def search_paths(query: str, top_k: int, rerank_cutoff: int) -> list[str]:
     and the harness has to be able to tell them apart -- rule 3.
     """
     import code_search as cs
-    old = cs.RERANK_MAX_K
-    cs.RERANK_MAX_K = rerank_cutoff          # top_k > cutoff means "skip rerank"
-    try:
-        return [c["path"] if isinstance(c, dict) else c.path
-                for c in cs.search(query, top_k=top_k)]
-    finally:
-        cs.RERANK_MAX_K = old
+    return [c["path"] if isinstance(c, dict) else c.path
+            for c in cs.search(query, top_k=top_k)]
 
 
 def symbol_paths(db: str, symbol: str, top_k: int) -> list[str]:
@@ -294,13 +295,8 @@ def main() -> None:
                 sym = symbol_paths(db, query, args.top_k)
                 t_sym = time.time() - t0
                 t0 = time.time()
-                # top_k > cutoff disables reranking inside search(), so a
-                # cutoff of 0 is "never rerank" and a large one is "always".
-                base = search_paths(query, args.top_k, rerank_cutoff=0)
+                base = search_paths(query, args.top_k)
                 t_base = time.time() - t0
-                t0 = time.time()
-                rr = search_paths(query, args.top_k, rerank_cutoff=999)
-                t_rr = time.time() - t0
             except Exception as e:                               # noqa: BLE001
                 errors.append({"id": t["id"], "error": f"{type(e).__name__}: {e}"})
                 continue
@@ -310,10 +306,8 @@ def main() -> None:
                 "truth": t["truth"]["path"],
                 "symbol_rank": rank_of(t["truth"]["path"], sym),
                 "embed_rank": rank_of(t["truth"]["path"], base),
-                "rerank_rank": rank_of(t["truth"]["path"], rr),
                 "symbol_ms": round(t_sym * 1000, 1),
                 "embed_ms": round(t_base * 1000, 1),
-                "rerank_ms": round(t_rr * 1000, 1),
             })
             if (i + 1) % 25 == 0:
                 print(f"    {i + 1}/{len(group)}", end="\r", flush=True)
@@ -347,12 +341,11 @@ def main() -> None:
 CONDITIONS = (
     ("symbol table", "symbol_rank", "symbol_ms"),
     ("embedding", "embed_rank", "embed_ms"),
-    ("embed+rerank", "rerank_rank", "rerank_ms"),
 )
 
 
 def report(rows: list[dict]) -> None:
-    """Three conditions, because two of them were answering the wrong question.
+    """Two conditions (three until the rerank arm went, 2026-10-01).
 
     "Where is X defined?" is a lookup, not a retrieval problem: the tree-sitter
     index in `defs` holds the answer exactly and a B-tree finds it. The first
@@ -395,9 +388,7 @@ def report(rows: list[dict]) -> None:
     print(f"  {'latency':<10}" + "".join(cells))
 
     print("\n  McNemar, paired and exact -- only discordant tasks count")
-    pairs = (("symbol table", "symbol_rank", "embedding", "embed_rank"),
-             ("embedding", "embed_rank", "embed+rerank", "rerank_rank"),
-             ("symbol table", "symbol_rank", "embed+rerank", "rerank_rank"))
+    pairs = (("symbol table", "symbol_rank", "embedding", "embed_rank"),)
     for a_name, a_rk, b_name, b_rk in pairs:
         b = sum(1 for r in rows if r[b_rk] == 1 and r[a_rk] != 1)
         c = sum(1 for r in rows if r[a_rk] == 1 and r[b_rk] != 1)

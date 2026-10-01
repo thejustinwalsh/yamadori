@@ -33,7 +33,7 @@ describe('submissionBody', () => {
     expect(submissionBody('  https://example.com/docs  ', 'recipes')).toEqual({ url: 'https://example.com/docs', kind: 'recipes' });
   });
   it('sends anything else as {text}, including a URL with prose around it', () => {
-    expect(submissionBody('see https://example.com/docs', 'laya')).toEqual({ text: 'see https://example.com/docs', kind: 'laya' });
+    expect(submissionBody('see https://example.com/docs', 'recipes')).toEqual({ text: 'see https://example.com/docs', kind: 'recipes' });
     expect(submissionBody('line one\nline two', 'recipes')).toEqual({ text: 'line one\nline two', kind: 'recipes' });
   });
   it('refuses an empty paste with a reason rather than posting it', () => {

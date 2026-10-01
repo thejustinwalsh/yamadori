@@ -125,7 +125,7 @@ const seg = stylex.create({
   grow: (n: number) => ({ flexGrow: n }),
 });
 
-/** Segmented split, e.g. the KV pool: main / deep thinking / reserve. */
+/** Segmented split, e.g. the KV pool: main / child / reserve. */
 export function SplitBar({ parts, label }: { parts: { value: number; tone: Tone | 'hatch' }[]; label: string }) {
   return (
     <div role="img" aria-label={label} {...stylex.props(seg.row)}>

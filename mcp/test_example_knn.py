@@ -321,7 +321,8 @@ def test_index():
     j1 = K.schedule()
     j2 = K.schedule()
     job = jobs.get(j1) if j1 else None
-    check(j1 and j2 is None and job and job["lane"] == "gpu"
+    check(j1 and j2 is None and job and job["lane"] == "gpu_a4000"   # the embedder: the A4000 (jobs.GPU_SCOPES)
+         
           and (job.get("payload") or {}).get("idle") is True,
           "[upkeep] schedule enqueues ONE idle-gated gpu rebuild", (j1, j2,
                                                                      job))

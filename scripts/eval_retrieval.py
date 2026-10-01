@@ -7,7 +7,8 @@ seconds, so it can carry the sample size the end-to-end eval never will.
 
 THE ARMS
 
-  search_code   embeddings over AST chunks (optionally reranked)
+  search_code   embeddings over AST chunks (the rerank option went with the
+                reranker, 2026-10-01)
   keyword       the honest baseline: ripgrep-style scoring over the same files
                 using the content words of the query
 

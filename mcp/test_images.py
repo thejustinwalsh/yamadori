@@ -21,8 +21,7 @@ and GET /media/<sha>.png. The promises, each asserted below:
      expired exp and a sig moved to another sha are each 403; `../` and
      non-hex ids never touch the filesystem.
   6. yama_generate_image is offered whenever an image server is configured, on
-     every tier (minimal included) even when the code tools are withheld,
-     and to deep thinking (mockups and designs while it investigates).
+     every tier (minimal included).
   7. A chat turn that calls it gets a result carrying the signed URL on the
      client's public base and a markdown line, and x_yamadori records it.
   8. The markdown the tool hands the model is what a markdown renderer turns
@@ -542,7 +541,7 @@ def test_tool_is_offered_only_when_configured_and_allowed():
     msgs = [{"role": "user", "content": "draw me a lighthouse at dusk"}]
     for url, effort, want, why in (
             (None, "low", False, "unconfigured, tier low"),
-            (IMG_URL, "low", True, "configured, tier low, code tools withheld"),
+            (IMG_URL, "low", True, "configured, tier low"),
             (IMG_URL, "minimal", True, "configured, tier minimal (a capability, "
                                         "offered everywhere)"),
             (IMG_URL, "high", True, "configured, tier high")):

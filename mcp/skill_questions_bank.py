@@ -214,12 +214,27 @@ def verify(q: dict, skill: dict, n_items: int, seen: set) -> str | None:
 # ---------------------------------------------------------------------------
 # One skill.
 # ---------------------------------------------------------------------------
+SLOTS_WHY: dict = {"why": None}      # why the last slots_busy() read nothing
+
+
 def slots_busy(model: str = MAIN_MODEL) -> list[int] | None:
     """The main model's slots that are processing (another consumer is
-    generating), [] when none, None when /slots cannot be read."""
+    generating), [] when none, None when /slots cannot be read.
+
+    A READ NEVER LOADS A MODEL (2026-09-30): /upstream/<model>/slots only
+    while llama-swap's GET /running lists the model ready. Not loaded: []
+    (nothing is generating on it); /running unreadable: None (busy, the
+    batch waits). SLOTS_WHY says which."""
+    import gpu_room
     import max_mode
+    SLOTS_WHY["why"] = None
     if max_mode.blocks(model):
+        SLOTS_WHY["why"] = max_mode.blocked_reason(model)
         return None        # MAX MODE: the model is off the card; asking would load it (mcp/max_mode.py)
+    loaded, why = gpu_room.model_loaded(UPSTREAM, model)
+    if not loaded:
+        SLOTS_WHY["why"] = why
+        return None if loaded is None else []
     try:
         with urllib.request.urlopen(f"{UPSTREAM}/upstream/{model}/slots",
                                     timeout=10) as r:
@@ -242,7 +257,8 @@ def wait_idle(log=print) -> dict:
             return {"waited_s": round(time.time() - t0, 1), "looks": looks}
         if looks == 1 or looks % 20 == 0:
             log(f"  paused: main model slots {busy if busy is not None else '(unreadable)'} "
-                "are processing; waiting")
+                "are processing; waiting"
+                + (f" ({SLOTS_WHY['why']})" if SLOTS_WHY.get("why") else ""))
         time.sleep(BUSY_POLL_S)
 
 

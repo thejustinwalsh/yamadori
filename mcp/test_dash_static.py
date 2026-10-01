@@ -39,6 +39,14 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+# --staged: check the STAGED bundle (web/dist-next, `npm run build:stage`)
+# instead of the served one -- the live proxy serves web/dist from disk, so
+# a new bundle is verified beside it and swapped in at deploy
+# (scripts/swap_dash_dist.py). YAMADORI_DASH_DIST names any other.
+STAGED = "--staged" in sys.argv
+if STAGED:
+    os.environ["YAMADORI_DASH_DIST"] = os.path.join(os.path.dirname(HERE), "web", "dist-next")
+
 import dash_static  # noqa: E402
 
 try:  # module-level: `from __future__ import annotations` resolves handler
@@ -77,7 +85,9 @@ def _mini_root() -> str:
 
 def test_the_committed_bundle_matches_its_source():
     c = dash_static.check_buildinfo()
-    check(c["ok"], "web/dist matches web/src (rebuild with `npm run build` in web/ if not)",
+    name = os.path.relpath(dash_static.DIST, os.path.dirname(HERE)).replace("\\", "/")
+    check(c["ok"], f"{name} matches web/src (build with `npm run build:stage` in web/, "
+          "check with --staged, swap with scripts/swap_dash_dist.py)",
           "; ".join(c["problems"][:5]))
     check(c["checked"] >= 20, f"it actually hashed the sources ({c['checked']} files)",
           "a check over zero files is not a check")
@@ -268,12 +278,40 @@ def test_mode_selection():
                 os.environ[k] = v
 
 
+def test_the_staged_swap():
+    """scripts/swap_dash_dist.py on a throwaway web/: a current stage swaps
+    in and the served bundle is set aside; a stale stage is refused and
+    nothing moves; rollback puts the set-aside back."""
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "scripts"))
+    import swap_dash_dist as S
+    root = _mini_root()
+    try:
+        dist, nxt, prev = (os.path.join(root, n) for n in ("dist", "dist-next", "dist-prev"))
+        shutil.copytree(dist, nxt)
+        with open(os.path.join(nxt, "index.html"), "w") as f:
+            f.write("<!doctype html><div id=root>next</div>")
+        check(S.swap(root) == 0 and "next" in open(os.path.join(dist, "index.html")).read()
+              and os.path.isdir(prev) and not os.path.isdir(nxt),
+              "a current stage swaps in; the served bundle is set aside as dist-prev")
+        shutil.copytree(dist, nxt)
+        with open(os.path.join(root, "src", "App.tsx"), "wb") as f:
+            f.write(b"export const a = 3;\n")
+        check(S.swap(root) == 1 and os.path.isdir(nxt)
+              and "next" in open(os.path.join(dist, "index.html")).read(),
+              "a stale stage is refused and nothing moves")
+        check(S.rollback(root) == 0 and "next" not in open(os.path.join(dist, "index.html")).read(),
+              "rollback puts the set-aside bundle back")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main() -> int:
+    print(f"  bundle checked: {dash_static.DIST}{' (STAGED)' if STAGED else ''}")
     for fn in (test_the_committed_bundle_matches_its_source,
                test_the_checker_notices_what_it_exists_to_notice,
                test_the_spa_owns_the_root_and_never_shadows_the_server,
                test_dev_mode_never_serves_the_bundle,
-               test_mode_selection):
+               test_mode_selection, test_the_staged_swap):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

@@ -31,8 +31,9 @@ separates best is the one tuned; a variant whose AUROC's 95% interval (the
 Hanley-McNeil standard error at the repo's ALPHA) includes 0.5 does NOT
 separate, and is reported as such, never tuned to a default.
 
-THE TARGETS: tune.py takes the owner's target accuracies. Here they are
-DERIVED as break-even precisions -- the precision p at which an injected
+THE TARGETS -- OPERATOR-ACCEPTED 2026-09-29 (verbatim: "yes"), each with
+the derivation it was accepted on. tune.py takes the owner's target
+accuracies; these are DERIVED as break-even precisions -- the precision p at which an injected
 item's expected gain equals its expected cost, p* = C / (G + C):
   medium  Skills in the Wild 2604.04323 (Qwen3.5-397B, 84 tasks x 3 runs):
           curated force-loaded skills +20.7 pp over none (41.2 vs 20.5);
@@ -44,7 +45,8 @@ item's expected gain equals its expected cost, p* = C / (G + C):
           cost.
   The bound is tune.py's Wilson lower bound at package_eval.ALPHA, so a
   tier is proposed only where the LOWER end of its precision clears p*.
-  --high-accuracy / --medium-accuracy override them (the operator's call).
+  --high-accuracy / --medium-accuracy exist for a later operator decision
+  only; the accepted values are the defaults.
 
 Nothing is written. The owner pastes an accepted row into skill_inject.
 THRESHOLDS with its n and date.
@@ -68,8 +70,13 @@ import inject_labels as IL  # noqa: E402
 
 RESULTS = os.path.join(HERE, "inject", "results")
 TRUTH = ["rubric"]               # --truth: rubric (default) | hindsight
-TARGET_MEDIUM = round(7.5 / (20.7 + 7.5), 3)     # 0.266, Skills in the Wild
-TARGET_HIGH = round(11.5 / (16.6 + 11.5), 3)     # 0.409, SkillsBench
+# OPERATOR-ACCEPTED 2026-09-29 ("yes"), as derived (module docstring):
+# medium 7.5 / (20.7 + 7.5) = 0.266 -- Skills in the Wild 2604.04323
+#   (Qwen3.5-397B: curated skills +20.7 pp, distractors -7.5 pp);
+# high 11.5 / (16.6 + 11.5) = 0.409 -- SkillsBench 2602.12670v4 (curated
+#   +16.6 pp, worst self-generated pack -11.5 pp).
+TARGET_MEDIUM = round(7.5 / (20.7 + 7.5), 3)     # 0.266, accepted
+TARGET_HIGH = round(11.5 / (16.6 + 11.5), 3)     # 0.409, accepted
 
 
 def auroc(pos: list[float], neg: list[float]) -> dict:
@@ -96,7 +103,60 @@ def auroc(pos: list[float], neg: list[float]) -> dict:
 def load(model: str) -> list[dict]:
     path = os.path.join(RESULTS, f"run_{model}.jsonl")
     with open(path, encoding="utf-8") as f:
-        return [json.loads(ln) for ln in f if ln.strip()]
+        runs = [json.loads(ln) for ln in f if ln.strip()]
+    return retemper(runs, model)
+
+
+def retemper(runs: list[dict], model: str) -> list[dict]:
+    """THRESHOLDS ARE TUNED ON TEMPERED VALUES (docs/JJAVA.md 8): where the
+    model's profile has a FITTED temperature for a question set
+    (bench/decider/fit_temperature.py --write), every belief, pass and
+    stage-3 noul of that set is recomputed from the decisions log's
+    per-order raw distributions at that T (decider_bonsai.readout_of, the
+    readout read() makes). T = 1 everywhere: the rows are unchanged."""
+    import decider_bonsai as D
+    path = os.path.join(RESULTS, f"decisions_{model}.jsonl")
+    dec = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if r.get("row") == "decision" and all(
+                        isinstance(o.get("raw"), dict)
+                        for o in r.get("orders") or [{}]):
+                    dec[r["id"]] = r
+    band = D.tie_band_of(model)["value"]
+
+    def redo(did):
+        d = dec.get(did)
+        if d is None:
+            return None
+        t = D.temperature_of(d["question"]["name"], model)
+        if not t["fitted"]:
+            return None
+        return D.readout_of([o["raw"] for o in d["orders"]], t["value"],
+                            [k for k in d["question"]["keys"]
+                             if k not in (d.get("excluded") or [])])
+    for r in runs:
+        for it in r["items"]:
+            p = redo(it.get("decision_id"))
+            if p is None:
+                continue
+            top = "true" if "true" in p else str(len(p) - 1)
+            it["belief"] = round(p[top], 6)
+            it["tie"] = D.decision(p, band)["tie"]
+            it["pass"] = (not it["tie"]) and max(p, key=p.get) == top
+            it["retempered"] = True
+        s3 = r.get("stage3") or {}
+        p = redo(s3.get("decision_id"))
+        if p is not None:
+            s3["noul"] = round(p["true"], 6)
+            s3["tie"] = D.decision(p, band)["tie"]
+            s3["retempered"] = True
+    return runs
 
 
 def rows_for(runs: list[dict], variant: str, truth: dict) -> tuple[list, list]:

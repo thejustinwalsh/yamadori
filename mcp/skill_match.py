@@ -703,7 +703,7 @@ def plan_turn(*, pool: list[dict], old: list[dict], pkg_play: dict,
 # stale.
 # ---------------------------------------------------------------------------
 QUEUE = "skill.match_index"
-LANE = "gpu"
+LANE = "gpu_a4000"  # the embedder, on the A4000: jobs.GPU_SCOPES (2026-09-30)
 
 
 def index_state(pool: list[dict] | None = None) -> dict:

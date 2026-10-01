@@ -51,16 +51,17 @@ MARK = "max mode (bench/deploy_flash_next.py)"
 MODEL_ID = "flash-next"
 MODEL_FILES = ["flash-next-iq2xs-shard1", "flash-next-iq2xs-shard2-ngram", "flash-next-mmproj"]
 ENVS = {"YAMADORI_MAX_MODEL": MODEL_ID}
+LANE_TOKENS = 3072    # mcp/budget.py LANE_TOKENS (layout v2): the decider lane's cells
 # the MTP arm's flags (bench/flashnext_gate.py `mtp`: Strata's --spec 4 --spec-min-p 0.5 as llama.cpp's; the draft
 # layer's experts on the CPU like the trunk's)
 MTP_ARGS = ("--spec-type draft-mtp --spec-draft-model ${models}/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf "
-            "-ngld 999 --spec-draft-n-cpu-moe 1 --spec-draft-n-max 3 --spec-draft-p-min 0.5")
+            "-ngld 999 --spec-draft-n-cpu-moe 49 --spec-draft-n-max 3 --spec-draft-p-min 0.5")
 QUANT_FILES = {"IQ2_XS": ["flash-next-iq2xs-shard1", "flash-next-iq2xs-shard2-ngram"],
                "Q2_0": ["flash-next-q2_0-shard1", "flash-next-q2_0-shard2-ngram"]}
 
 
-def model_files(quant: str, mtp: bool) -> list[str]:
-    return QUANT_FILES[quant] + ["flash-next-mmproj"] + (["flash-next-mtp-draft-q8_0"] if mtp else [])
+def model_files(quant: str, mtp: bool, mmproj: bool = False) -> list[str]:
+    return QUANT_FILES[quant] + (["flash-next-mmproj"] if mmproj else []) + (["flash-next-mtp-draft-q8_0"] if mtp else [])
 
 
 def read(f: str) -> str:
@@ -94,29 +95,48 @@ def values_from_gate(gate: dict, over: dict) -> tuple[dict, list[str]]:
         return bool(r.get("PASS")) or r.get("verdict") == "PASS"
     derived = ((gate.get("fit") or {}).get("derived") or {})
     v = {"N_CPU_MOE": over.get("n_cpu_moe") or derived.get("n_cpu_moe_if_static"),
-         "NP": over.get("np") or 3, "UB": over.get("ub") or 512,
+         # one conversation + the jjava lane (operator, 2026-09-29): -np 2, the native window + LANE_TOKENS
+         "NP": over.get("np") or 2, "CTX": 262144 + (LANE_TOKENS if (over.get("np") or 2) == 2 else 0),
+         "UB": over.get("ub") or 512,
+         # the logical batch; the gate's flash arms ran -b 2048 -ub 512 (empty = -b equal to -ub, the first deploy's)
+         "BATCH": over.get("batch") or over.get("ub") or 512,
          "EAGER": "EAGER" if passed("eager", "exact") and over.get("eager", True) else "LAZY",
-         "PIN_EXPERTS": "1" if passed("pinned", "exact") and over.get("pin", True) else "0",
+         # pinned experts: the 2026-09-28 `pinned` arm's exact step, or --pin when the deployed arm itself ran pinned
+         # (every 2026-09-29/30 flash arm sets LLAMA_PIN_EXPERTS=1)
+         "PIN_EXPERTS": "1" if (passed("pinned", "exact") and over.get("pin", True)) or over.get("pin_arm") else "0",
          "PREFETCH_SLOTS": "3" if passed("prefetch", "exact") and over.get("prefetch", True) else "0",
          # one KV pool the slots share, as the gate ran it: without it upstream gives each slot -c/-np
          # (65,536 at -np 4; the gate's 128K needle was refused, 2026-09-28)
          "KV_UNIFIED": "--no-kv-unified" if over.get("no_kv_unified") else "--kv-unified",
          "PROFILE": "", "CACHE_POLICY": "", "CACHE_SLOTS": 0,
+         # 0012: the attention KV in mapped host memory (the gate's kvmap arms)
+         "KV_HOST_MAPPED": "1" if over.get("kv_host_mapped") else "0",
+         # 0020: LLAMA_GRAPH_CACHE (the gate's gcache arm); 0 = off
+         "GRAPH_CACHE": str(over.get("graph_cache") or 0),
          # 2026-09-29: the quant (the file), CPU threads, MTP and where the projector runs; each from an option,
          # the defaults are the first deploy's (IQ2_XS, llama.cpp's threads, no MTP, projector on the card)
          "QUANT": over.get("quant") or "IQ2_XS",
          "THREADS": over.get("threads") or "",
          "MTP": (MTP_ARGS if over.get("mtp") else ""),
-         "MMPROJ_OFFLOAD": "" if not over.get("mmproj_cpu") else "--no-mmproj-offload",
-         "MMPROJ_WHERE": "on the 5060 Ti with it" if not over.get("mmproj_cpu") else "on the CPU: its VRAM holds experts"}
+         # layout v2 (operator, 2026-09-29): no projector on the main card by default
+         "MMPROJ": ("--mmproj ${models}/flash-next/mmproj-Qwen3.8-Flash-Next-BF16.gguf"
+                    if over.get("mmproj") == "card" else "")}
     cache = over.get("cache")            # "strata" | "lru" | None
     if cache:
-        arm = "cache-strata" if cache == "strata" else "cache-lru"
+        # the gate arm that measured this cache: 2026-09-30 cache-all (KV on the card, every layer's experts in RAM,
+        # the adaptive cache over all 48; 0013-0016); before, the 2026-09-28 arms cache-strata / cache-lru
+        arm = over.get("cache_arm") or ("cache-strata" if cache == "strata" else "cache-lru")
         kl = ((arms.get(arm) or {}).get("kl") or {}).get("verdict")
         if kl != "PASS" and not over.get("accept_kl"):
             why.append(f"{arm}: KL verdict {kl!r}; the operator decides (--accept-kl)")
         if not (arms.get(arm) or {}).get("needles", {}).get("PASS"):
             why.append(f"{arm}: needles did not pass")
+        if over.get("cache_arm"):
+            corr = (arms.get(arm) or {}).get("corrupt") or {}
+            if not corr or corr.get("error") or corr.get("guard"):
+                why.append(f"{arm}: the corruption checks did not run clean")
+            if not ((arms.get(arm) or {}).get("contract") or {}).get("PASS"):
+                why.append(f"{arm}: the llama-server contract did not pass")
         v["CACHE_SLOTS"] = over.get("cache_slots") or derived.get("cache_slots_per_cpu_layer") or 0
         if cache == "strata":
             v["PROFILE"] = "${models}/flash-next/expert-profile-strata-d551edf4.bin"
@@ -137,7 +157,8 @@ def fragment(text: str, values: dict, engine_bin: str) -> tuple[str, str]:
     lines, keep = f.split("\n"), []
     for ln in lines:
         if ln.strip() == "" and keep and keep[-1].lstrip().startswith("#") and ln.startswith("      "):
-            keep.pop()
+            while keep and keep[-1].lstrip().startswith("#") and keep[-1].startswith("      "):
+                keep.pop()                       # every comment line that described the emptied option
             continue
         keep.append(ln)
     f = "\n".join(keep)
@@ -163,31 +184,90 @@ def fragment(text: str, values: dict, engine_bin: str) -> tuple[str, str]:
     return macro, block
 
 
+def _entry_end(c: str, i: int) -> int:
+    """The end of the model entry whose name line starts at c[i] (LF text): the name line, then every line indented
+    four spaces or more, or blank -- less the blank lines at its tail. A line at two spaces ("  # ...", the next
+    entry's name) is not the entry's: a comment header after an entry (the CONTEXT TRIAL block, another deploy's
+    "# tier models" label) belongs to what follows it and is never touched (2026-10-01: the region up to the next
+    entry's name line swallowed ~50 such lines on a redeploy)."""
+    end = c.find("\n", i)
+    end = len(c) if end < 0 else end
+    last = end
+    while end < len(c):
+        nxt = c.find("\n", end + 1)
+        nxt = len(c) if nxt < 0 else nxt
+        line = c[end + 1:nxt]
+        if line.strip() == "":
+            end = nxt
+            continue
+        if not line.startswith("    "):
+            break
+        end = last = nxt
+    return last
+
+
+def _strip(text: str) -> tuple[str, str, int | None, int | None, bool, bool, bool]:
+    """(the LF text without the flash-next macro line and entry, its newline, where the macro line was, where the
+    entry was, whether an entry was there, whether each of the two carried our marker line). Only the macro line
+    (with our marker line right above it) and the entry (with our marker line and the blank line before it) are
+    removed; edit_config puts the new ones back at the same places -- marked as they were -- so a redeploy changes
+    nothing else byte for byte."""
+    c, nl = _lf(text)
+    had = '\n  "flash-next":\n' in c
+    at_macro = at_entry = None
+    macro_marked = entry_marked = True
+    m = re.search(r"\n(  # " + re.escape(MARK) + r"\n)?  server_upstream_moe: [^\n]*", c)
+    if m:
+        c = c[:m.start()] + c[m.end():]
+        at_macro = m.start()
+        macro_marked = m.group(1) is not None
+    if '\n  "flash-next":\n' in c:
+        i0 = c.index('\n  "flash-next":\n')
+        i1 = _entry_end(c, i0 + 1)
+        entry = c[i0 + 1:i1]
+        if "${server_upstream_moe}" not in entry:
+            raise ValueError("config.yaml has a flash-next entry this script did not write: edit it by hand")
+        # another deploy's comment lines inside our entry ("# tier models ...") are carried into the new entry
+        CARRIED[:] = [ln for ln in entry.split("\n") if ln.startswith("    # tier models")]
+        mark = "\n\n  # " + MARK
+        entry_marked = c[:i0].endswith(mark)
+        if entry_marked:
+            i0 -= len(mark)
+        c = c[:i0] + c[i1:]
+        at_entry = i0
+    return c, nl, at_macro, at_entry, had, macro_marked, entry_marked
+
+
 def strip_flash_next(text: str) -> tuple[str, bool]:
     """config.yaml without a flash-next macro and entry this script wrote earlier (a REDEPLOY replaces them:
     a new engine, new values); (text, whether one was there). The group membership is kept."""
-    c, nl = _lf(text)
-    had = '\n  "flash-next":\n' in c
-    c = re.sub(r"\n  # " + re.escape(MARK) + r"\n  server_upstream_moe: [^\n]*", "", c)
-    m = re.search(r"\n\n  # " + re.escape(MARK) + r'\n  "flash-next":\n', c)
-    if m:
-        nxt = re.search(r'\n  "[^"]+":\n', c[m.end():])
-        end = m.end() + nxt.start() if nxt else len(c)
-        c = c[:m.start()] + c[end:]
-    if '\n  "flash-next":\n' in c:
-        raise ValueError("config.yaml has a flash-next entry this script did not write: edit it by hand")
+    c, nl, _, _, had, _, _ = _strip(text)
     return c.replace("\n", nl), had
 
 
+# comment lines of another deploy inside an old flash-next entry, re-inserted under the new entry's name line
+CARRIED: list[str] = []
+
+
 def edit_config(text: str, macro: str, block: str) -> str:
-    c, nl = _lf(strip_flash_next(text)[0])
-    m = re.search(r"^  server_nudge: .*$", c, re.M)
-    if not m:
-        raise ValueError("server_nudge macro not found")
-    c = c[:m.end()] + "\n" + f"  # {MARK}\n" + macro + c[m.end():]
-    i0 = c.index('\n  "bonsai":\n')
-    i1 = re.search(r'\n  "[^"]+":\n', c[i0 + 5:]).start() + i0 + 5
-    c = c[:i1] + "\n\n" + f"  # {MARK}\n" + block.rstrip("\n") + c[i1:]
+    CARRIED[:] = []
+    c, nl, at_macro, at_entry, _, macro_marked, entry_marked = _strip(text)
+    if at_macro is None:
+        m = re.search(r"^  server_nudge: .*$", c, re.M)
+        if not m:
+            raise ValueError("server_nudge macro not found")
+        at_macro = m.end()
+    ins = "\n" + (f"  # {MARK}\n" if macro_marked else "") + macro
+    c = c[:at_macro] + ins + c[at_macro:]
+    if at_entry is not None:
+        i1 = at_entry + (len(ins) if at_entry >= at_macro else 0)   # where the old entry was
+    else:
+        i0 = c.index('\n  "bonsai":\n')                              # a first deploy: right after bonsai's entry
+        i1 = _entry_end(c, i0 + 1)
+    blk = block.rstrip("\n")
+    if CARRIED:
+        blk = blk.replace('  "flash-next":\n', '  "flash-next":\n' + "\n".join(CARRIED) + "\n", 1)
+    c = c[:i1] + ("\n\n" + f"  # {MARK}\n" if entry_marked else "\n") + blk + c[i1:]
     g0 = c.index('\n        "primary":\n')
     g1 = c.index("\n\n", g0)
     grp = c[g0:g1]
@@ -317,39 +397,87 @@ def selftest() -> int:
     if had:     # the live config holds the first deploy: undo the group edit too, to test a first deploy
         cfg = cfg.replace(f"          # {MARK}: bonsai and flash-next swap each other on the 5060 Ti\n", "")
         cfg = cfg.replace("          swap: true", "          swap: false", 1)
-        cfg = cfg.replace('            - "bonsai"\n            - "flash-next"', '            - "bonsai"', 1)
+        # (wherever the member line sits: the tier models' deploy put mirai-s between them, 2026-10-01)
+        cfg = cfg.replace('            - "flash-next"\n', '', 1)
     new = edit_config(cfg, macro, block)
     check('\n  "flash-next":' in new.replace("\r\n", "\n") and new.count('"flash-next"') >= 2,
           "config.yaml gains the entry and the group member")
     import yaml
     y = yaml.safe_load(new)
     grp = y["routing"]["router"]["settings"]["groups"]["primary"]
-    check(grp["swap"] is True and grp["members"] == ["bonsai", "flash-next"] and grp["persistent"] is True,
+    check(grp["swap"] is True and {"bonsai", "flash-next"} <= set(grp["members"]) and grp["persistent"] is True,
           "the primary group: persistent, swap, both members", )
     check(y["models"]["bonsai"] == yaml.safe_load(cfg)["models"]["bonsai"], "bonsai's entry is untouched")
     fn = y["models"]["flash-next"]
-    check("--mmproj" in fn["cmd"] and "-dev CUDA0" in fn["cmd"] and fn["ttl"] == 0, "flash-next: its mmproj, the 5060")
+    check("--mmproj" not in fn["cmd"] and "-dev CUDA0" in fn["cmd"] and fn["ttl"] == 0,
+          "flash-next: no projector on the 5060 (layout v2: images go to bonsai-vision), the 5060")
     check(y["macros"]["server_upstream_moe"] == "C:/x/llama-server.exe", "the macro")
+    check("-np 2 " in fn["cmd"] and "-c 265216 " in fn["cmd"],
+          "one conversation + the jjava lane: -np 2, -c = the native window + LANE_TOKENS (operator, 2026-09-29)")
     check("--spec-type" not in fn["cmd"] and "-t " not in fn["cmd"] and "IQ2_XS-00001" in fn["cmd"]
-          and "--no-mmproj-offload" not in fn["cmd"], "the defaults: IQ2_XS, no MTP, default threads, projector on the card")
+          , "the defaults: IQ2_XS, no MTP, default threads")
     vq, _ = values_from_gate(gate, {"quant": "Q2_0", "mtp": True, "threads": "-t 16 -C 0xFFFF --cpu-strict 1",
-                                    "mmproj_cpu": True})
+                                    "mmproj": "card"})
     _, bq = fragment(read(FRAGMENT), vq, "C:/z/llama-upstream-flash-1/llama-server.exe")
     cq = yaml.safe_load("models:\n" + bq)["models"]["flash-next"]["cmd"]
     check("Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001" in cq and "--spec-type draft-mtp" in cq and "-C 0xFFFF" in cq
-          and "--no-mmproj-offload" in cq and "--moe-expert-cache" in cq,
+          and "--mmproj" in cq and "--moe-expert-cache" in cq,
           "the options fill: Q2_0, MTP, threads, projector on the CPU; a flash engine keeps the MoE flags")
-    check(model_files("Q2_0", True) == ["flash-next-q2_0-shard1", "flash-next-q2_0-shard2-ngram", "flash-next-mmproj",
+    fq = yaml.safe_load("models:\n" + bq)["models"]["flash-next"]["env"]
+    vk, _ = values_from_gate(gate, {"kv_host_mapped": True})
+    _, bk = fragment(read(FRAGMENT), vk, "C:/z/llama-upstream-flash-1/llama-server.exe")
+    check("LLAMA_KV_HOST_MAPPED=0" in fq and "LLAMA_KV_HOST_MAPPED=1" in
+          yaml.safe_load("models:\n" + bk)["models"]["flash-next"]["env"], "0012's switch fills the env line")
+    vg, _ = values_from_gate(gate, {"graph_cache": 8})
+    _, bg = fragment(read(FRAGMENT), vg, "C:/z/llama-upstream-flash-1/llama-server.exe")
+    check("LLAMA_GRAPH_CACHE=0" in fq and "LLAMA_GRAPH_CACHE=8" in
+          yaml.safe_load("models:\n" + bg)["models"]["flash-next"]["env"], "0020's switch fills the env line")
+    check(model_files("Q2_0", True, True) == ["flash-next-q2_0-shard1", "flash-next-q2_0-shard2-ngram", "flash-next-mmproj",
                                         "flash-next-mtp-draft-q8_0"], "a quant and MTP choose the model files")
     macro2, block2 = fragment(read(FRAGMENT), dict(v, N_CPU_MOE=38), "C:/y/llama-server.exe")
     again = edit_config(new, macro2, block2)
     y2 = yaml.safe_load(again)
     check(y2["macros"]["server_upstream_moe"] == "C:/y/llama-server.exe" and "--n-cpu-moe 38" in
           y2["models"]["flash-next"]["cmd"] and again.count('"flash-next":') == 1
-          and y2["routing"]["router"]["settings"]["groups"]["primary"]["members"] == ["bonsai", "flash-next"]
+          and y2["routing"]["router"]["settings"]["groups"]["primary"]["members"].count("flash-next") == 1
           and {k: w for k, w in y2["models"].items() if k != "flash-next"}
           == {k: w for k, w in y["models"].items() if k != "flash-next"},
           "a redeploy replaces the macro and the entry, nothing else")
+    # A REDEPLOY REPLACES ONLY THE ENTRY (2026-10-01): today's layout -- a marked flash-next entry carrying another
+    # deploy's comment line, then a comment header, a stray marker and the next entry's own label -- keeps every
+    # line outside the entry and the macro's value byte for byte
+    old_entry = ('  "flash-next":\n    # tier models (bench/deploy_tier_models.py): LOCKED\n    name: "old"\n'
+                 '    env:\n      - "A=1"\n\n    cmd: |\n      ${server_upstream_moe}\n      --port ${PORT}\n    ttl: 0\n')
+    after = ("\n  # =====================================================================\n"
+             "  # CONTEXT TRIAL -- q4_0 K/V + K-cache mean-centering. NOT IN SERVICE.\n  #\n"
+             "  # ttl 1800, not 0.\n  # =====================================================================\n\n"
+             f"  # {MARK}\n\n  # tier models (bench/deploy_tier_models.py)\n"
+             '  "mirai-s":\n    name: "m"\n    cmd: |\n      x\n    ttl: 0\n')
+    fixture = ("macros:\n  server_nudge: \"C:/n.exe\"\n"
+               f"  # {MARK}\n  server_upstream_moe: \"C:/old/llama-server.exe\"\n  models: \"C:/m\"\n"
+               'models:\n  "bonsai":\n    name: "b"\n    cmd: |\n      y\n    ttl: 0\n\n'
+               f"  # {MARK}\n" + old_entry + after +
+               "routing:\n  router:\n    settings:\n      groups:\n        \"primary\":\n          swap: true\n"
+               "          members:\n            - \"bonsai\"\n            - \"flash-next\"\n\n")
+    got = edit_config(fixture, macro2, block2)
+    want = (fixture.replace('"C:/old/llama-server.exe"', '"C:/y/llama-server.exe"')
+            .replace(old_entry, block2.replace('  "flash-next":\n', '  "flash-next":\n'
+                                               '    # tier models (bench/deploy_tier_models.py): LOCKED\n', 1)))
+    check(got == want, "a redeploy replaces only the entry and the macro's value: the comment header after it, "
+          "the stray marker and the next entry's label stay byte for byte")
+    check(edit_config(got, macro2, block2) == got, "... and a second redeploy changes nothing")
+    unmarked = fixture.replace(f"  # {MARK}\n" + old_entry, old_entry)
+    check(edit_config(unmarked, macro2, block2) == want.replace(f"  # {MARK}\n" + block2.split("\n")[0], block2.split("\n")[0], 1),
+          "an unmarked entry is replaced in place, unmarked")
+    live = read("config.yaml")
+    live_new = edit_config(live, macro2, block2)
+
+    def outside(t: str) -> list[str]:
+        c, _, _, _, _, _, _ = _strip(t)
+        return c.split("\n")
+    check(outside(live_new) == outside(live) and "CONTEXT TRIAL" in live_new
+          and live_new.count(f"# {MARK}") == live.count(f"# {MARK}"),
+          "today's config.yaml: every line outside the flash-next entry and macro survives a redeploy unchanged")
     bat = edit_bat(read("scripts/start-stack.bat"))
     check(bat.count('set "YAMADORI_MAX_MODEL=flash-next"') == 1 and edit_bat(bat) == bat,
           "start-stack.bat: YAMADORI_MAX_MODEL once, idempotent")
@@ -360,8 +488,8 @@ def selftest() -> int:
     i0, i1 = _engine_block(_lf(eng)[0], ENGINE)
     check("config_refs: [flash-next]" in _lf(eng)[0][i0:i1] and _lf(eng)[0].count("config_refs: [flash-next]") == 1
           and edit_engines(eng) == eng, "engines manifest: config_refs on the deployed engine only, idempotent")
-    mod = edit_models(read("models/manifest.yaml"))
-    check(mod.count("config_entries: [flash-next]") == 3, "models manifest: three files in service")
+    mod = edit_models(read("models/manifest.yaml"), model_files("IQ2_XS", False))
+    check(mod.count("config_entries: [flash-next]") == 2, "models manifest: the two shards in service, no projector")
     print(f"\n{'all passed' if not bad else f'{bad} FAILED'}")
     return 1 if bad else 0
 
@@ -376,6 +504,10 @@ def main(argv: list[str]) -> int:
                          "the gate's base arm ran (no MoE switches)")
     ap.add_argument("--cache", choices=["strata", "lru"])
     ap.add_argument("--cache-slots", type=int)
+    ap.add_argument("--cache-arm", help="the gate arm that measured the cache (e.g. cache-all); its needles, corrupt,"
+                                         " contract and KL decide")
+    ap.add_argument("--pin", action="store_true", help="LLAMA_PIN_EXPERTS=1: the deployed arm ran pinned")
+    ap.add_argument("--batch", type=int, help="-b (the logical batch); default = -ub")
     ap.add_argument("--accept-kl", action="store_true", help="the operator accepts a cache arm outside the yardstick")
     ap.add_argument("--no-kv-unified", action="store_true")
     ap.add_argument("--ub", type=int)
@@ -383,7 +515,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--quant", choices=sorted(QUANT_FILES), default="IQ2_XS")
     ap.add_argument("--threads", default="", help='e.g. "-t 16 -C 0xFFFF --cpu-strict 1" (the best thread arm of the gate)')
     ap.add_argument("--mtp", action="store_true", help="the MTP draft layer (the gate's mtp arm)")
-    ap.add_argument("--mmproj-cpu", action="store_true", help="the projector on the CPU (--no-mmproj-offload)")
+    ap.add_argument("--graph-cache", type=int, default=0,
+                    help="LLAMA_GRAPH_CACHE (0020): graph arenas kept per verify-batch size; 0 = off")
+    ap.add_argument("--kv-host-mapped", action="store_true",
+                    help="the attention KV in mapped host memory (0012; the gate's kvmap arms)")
+    ap.add_argument("--mmproj", choices=["none", "card"], default="none",
+                    help="none (layout v2, default): images go to bonsai-vision on the A4000; card: its own projector")
     ap.add_argument("--preview", action="store_true")
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--selftest", action="store_true")
@@ -398,7 +535,9 @@ def main(argv: list[str]) -> int:
     values, why = values_from_gate(gate, {"n_cpu_moe": a.n_cpu_moe, "cache": a.cache, "cache_slots": a.cache_slots,
                                           "accept_kl": a.accept_kl, "no_kv_unified": a.no_kv_unified,
                                           "ub": a.ub, "np": a.np, "quant": a.quant, "threads": a.threads,
-                                          "mtp": a.mtp, "mmproj_cpu": a.mmproj_cpu})
+                                          "mtp": a.mtp, "mmproj": a.mmproj,
+                                          "kv_host_mapped": a.kv_host_mapped, "cache_arm": a.cache_arm,
+                                          "pin_arm": a.pin, "batch": a.batch, "graph_cache": a.graph_cache})
     if why:
         print(json.dumps({"verdict": "REFUSED: the gate does not allow a deploy", "why": why}, indent=1))
         return 2
@@ -413,7 +552,7 @@ def main(argv: list[str]) -> int:
            "scripts/start-stack.bat": edit_bat(old["scripts/start-stack.bat"]),
            "scripts/watchdog.ps1": edit_watchdog(old["scripts/watchdog.ps1"]),
            "engines/manifest.yaml": edit_engines(old["engines/manifest.yaml"], a.engine),
-           "models/manifest.yaml": edit_models(old["models/manifest.yaml"], model_files(a.quant, a.mtp))}
+           "models/manifest.yaml": edit_models(old["models/manifest.yaml"], model_files(a.quant, a.mtp, a.mmproj == "card"))}
     if a.preview:
         for f, t in new.items():
             sys.stdout.writelines(difflib.unified_diff(_lf(old[f])[0].splitlines(True), _lf(t)[0].splitlines(True),

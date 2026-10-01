@@ -14,8 +14,7 @@ WHAT THIS IS GATING
   request_energy()   x_yamadori.energy: window mean, rolling fallback, no
                      sampler; and _x_yamadori really carries it
   live()             the /dash/api/power payload shape, and the route
-  vitals.gpus()      parses power.draw / uuid, and still parses five columns
-  dash_results       LiveBench electricity per question from seconds x watts
+  vitals.gpus()      parses power.draw / uuid / temperature, and still parses five columns
 
 nvidia-smi is never started: every reader here is a fake.
 """
@@ -274,13 +273,13 @@ def test_request_energy():
 def test_x_yamadori_carries_energy():
     import proxy
     payload = {"_tier": {"name": "medium"}, "_t_start": time.time() - 3}
-    x = proxy._x_yamadori(payload, hops=1, fan=None, think=None)
+    x = proxy._x_yamadori(payload, hops=1)
     e = x.get("energy")
     check(isinstance(e, dict) and e.get("seconds") is not None and e["seconds"] >= 3,
           "_x_yamadori carries energy with the request's wall seconds", str(e))
     check(set(("seconds", "gpu_watts_avg", "wh", "cents", "rate_period")) <= set(e or {}),
           "with every field the brief names", str(e))
-    x = proxy._x_yamadori({"_tier": {"name": "medium"}}, hops=1, fan=None, think=None)
+    x = proxy._x_yamadori({"_tier": {"name": "medium"}}, hops=1)
     check("energy" in x and x["energy"] is None, "a payload with no start time: energy None")
 
 
@@ -360,6 +359,14 @@ def test_vitals_parses_power():
         g = vitals.gpus()
         check(g and g[0]["watts"] is None and g[0]["free_mib"] == 9376,
               "a five-column answer still parses", str(g))
+        check("temperature.gpu" in cmd[0][1], "the query asks for the temperature "
+              "(2026-09-30, the PERFORMANCE page's history)", str(cmd))
+        vitals._sh = lambda cmd, timeout=25: (
+            "0, NVIDIA GeForce RTX 5060 Ti, 14466, 16311, 99, GPU-de66, 181.18, 180.00, 63\n"
+            "1, NVIDIA RTX A4000, 7567, 16376, 0, GPU-43e3, [N/A], 140.00, [N/A]\n")
+        g = vitals.gpus()
+        check(g[0]["temp_c"] == 63.0 and g[1]["temp_c"] is None,
+              "temperature.gpu is read; [N/A] is None", str(g))
     finally:
         vitals._sh = real
 
@@ -372,44 +379,11 @@ def test_power_route():
           "/dash/api/power answers with the live() payload", str(code))
 
 
-def test_livebench_electricity():
-    import dash_results
-    root = os.path.join(_TMP, "lb")
-    run = os.path.join(root, "lb-test")
-    os.makedirs(run)
-    json.dump({"arms": {"bonsai": {"categories": {
-        "coding": {"n": 10, "score": 50, "seconds": {"n": 10, "total": 3600.0}},
-        "math": {"n": 10, "score": 50, "seconds": {"n": 10, "total": 3600.0}}}}}},
-        open(os.path.join(run, "summary.json"), "w"))
-    with open(os.path.join(run, "rows_extra_coding.jsonl"), "w") as f:
-        for sec in (100.0, 300.0):
-            f.write(json.dumps({"arm": "extra", "status": "ok", "seconds": sec}) + "\n")
-        f.write(json.dumps({"arm": "extra", "status": "not_run", "seconds": 999}) + "\n")
-    s = dash_results.livebench_summary(root)
-    r = s["runs"][0]
-    arms = {a["arm"]: a for a in r["arms"]}
-    e = arms["bonsai"]["electricity"]
-    check(e and e["n"] == 20 and near(e["seconds_per_question"], 360.0),
-          "seconds per question from summary totals over every category", str(e))
-    check(near(e["wh_per_question"], 138.5 * 360 / 3600, 1e-3),
-          "Wh per question = 138.5 W x seconds / 3600", str(e))
-    check(near(e["kwh_per_100"], e["wh_per_question"] * 100 / 1000, 1e-4), "kWh per 100 questions")
-    check(e["cents_per_kwh"] == [18.435, 24.133]
-          and near(e["dollars_per_100"][0], e["kwh_per_100"] * 18.435 / 100, 1e-4),
-          "$ per 100 priced at the cheapest and dearest cell", str(e))
-    x = arms["extra"]["electricity"]
-    check(x and x["n"] == 2 and x["seconds_from"] == "rows" and near(x["seconds_per_question"], 200.0),
-          "an arm with no summary seconds falls back to its ok rows", str(x))
-    b = r["electricity_basis"]
-    check(b and b["estimate"] is True and b["watts"] == 138.5 and "594" in b["evidence"],
-          "the run carries the estimate's basis", str(b))
-
-
 def main() -> int:
     for fn in (test_rate_periods, test_flat_and_extra_overrides, test_integration,
                test_ledger_persists, test_request_energy, test_x_yamadori_carries_energy,
                test_live_payload, test_sampler_thread, test_vitals_parses_power,
-               test_power_route, test_livebench_electricity):
+               test_power_route):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

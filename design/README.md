@@ -41,7 +41,7 @@ add a token or drop the concept; do not hardcode it.
 The mockups show `4x RTX 4090`, `96 GB VRAM pool`, a `70B` model, `8.4M`
 embeddings, `128K` context, `1,180W`. **None of that is this stack.** Live
 hardware is one 5060 Ti (bonsai, `-dev CUDA0`) and one A4000 (embeddings,
-reranker, Laya, `-dev CUDA1`), running a 27B ternary model at `-c 147456`,
+reranker -- removed 2026-10-01 --, Laya, `-dev CUDA1`), running a 27B ternary model at `-c 147456`,
 measured at 15.5-16.3 tok/s.
 
 Wire these panels to `/dash/api/vitals` and friends, never to the mockup

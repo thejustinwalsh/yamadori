@@ -66,6 +66,22 @@ _DIAG = re.compile(r"^(?P<file>[^\s(]+)\((?P<line>\d+),(?P<col>\d+)\): "
                    r"error (?P<code>TS\d+): (?P<msg>.*)$")
 
 
+# GLOBAL-ONLY TYPE PACKAGES (2026-09-30, the TypeGPU pitfall area): a
+# package that declares only globals and is NOT under @types/ is never
+# included automatically (tsc's automatic inclusion covers node_modules/
+# @types only), so its globals (`GPUDevice`, `navigator.gpu`) fail unless
+# the probe references it. A triple-slash reference, not compilerOptions
+# `types`, so the automatic @types inclusion of the other packages stays.
+GLOBAL_TYPE_PACKAGES = ("@webgpu/types",)
+
+
+def global_type_refs(packages: list[str]) -> str:
+    """`/// <reference types="..." />` lines for the global-only type
+    packages among `packages` ("" when none)."""
+    return "".join(f'/// <reference types="{p}" />\n' for p in packages
+                   if p in GLOBAL_TYPE_PACKAGES)
+
+
 def _box_image() -> str:
     sys.path.insert(0, os.path.join(ROOT, "bench", "sandbox"))
     import harness_box
@@ -247,7 +263,7 @@ def check(code: str, lang: str | None, packages: list[str], *,
     if kind == "python":
         files["probe.py"] = code
     else:
-        files[f"probe.{ext}"] = code
+        files[f"probe.{ext}"] = global_type_refs(packages) + code
         files["tsconfig.json"] = json.dumps(dict(
             TSCONFIG, include=[f"probe.{ext}"]))
     vol = _volume_for(specs) if specs else None

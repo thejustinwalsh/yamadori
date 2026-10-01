@@ -1,0 +1,19 @@
+# Lock for runtime `typesafe-sdk-python` -- written by scripts/verify_artifacts.py --write-locks; checked by verify().
+# interpreter: C:\Users\jwals\llama-stack\tools\typesafe-sdk\py\.venv\Scripts\python.exe
+# python: 3.13.15 | packaged by conda-forge | (main, Sep  2 2026, 21:52:43) [MSC v.1944 64 bit (AMD64)]
+# method: pip freeze
+# written: 2026-09-30
+annotated-types==0.8.0
+anyio==4.15.1
+h11==0.16.0
+httpcore2==2.13.1
+httpx2==2.13.1
+idna==3.20
+pip==26.2.1
+pydantic==2.13.5
+pydantic_core==2.46.5
+tenacity==9.1.4
+truststore==0.10.4
+#local: typesafe-sdk @ file:///C:/Users/jwals/llama-stack/tools/typesafe-sdk/py/dist/typesafe_sdk-0.7.2-py3-none-any.whl#sha256=0a961148187d52e18276ed7f2d02617cfac48e3b97673cb631a8749397d43d1e
+typing-inspection==0.4.4
+typing_extensions==4.16.0

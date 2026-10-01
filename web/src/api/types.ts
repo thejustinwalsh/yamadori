@@ -1,6 +1,7 @@
 // Shapes of the /dash/api/* JSON, read from the Python that produces them
 // (mcp/vitals.py, mcp/budget.py, mcp/datasets.py, mcp/jobs.py,
-// mcp/dash_results.py, mcp/concept_seed.py). Every field the server can omit
+// mcp/concept_seed.py; the JJAVA and SOKUDO pages'
+// in ./stats.ts). Every field the server can omit
 // is optional here, so the compiler forces each panel to handle its absence.
 
 export type Gpu = {
@@ -19,6 +20,8 @@ export type Gpu = {
   uuid?: string | null;
   watts?: number | null;
   watts_limit?: number | null;
+  /** temperature.gpu (°C), 2026-09-30; absent on older servers, null for [N/A] */
+  temp_c?: number | null;
   /** true on the card the main model runs on (by UUID, mcp/vitals.py); absent on older servers */
   main?: boolean;
 };
@@ -95,9 +98,9 @@ export type ContextPool =
   | {
       pool: number;
       main: number;
-      /** tokens per deep-thinking context */
+      /** tokens per helper context (the child slot in the cap layout) */
       helper: number;
-      /** how many deep-thinking contexts; absent on servers older than the field */
+      /** how many helper contexts; absent on servers older than the field */
       helpers?: number;
       reserve: number;
       gib: number;
@@ -109,8 +112,12 @@ export type ContextPool =
       window?: number;
       /** /props kv_vram_cells as served (engine patch 0041); null when not reported; absent on older servers */
       vram_line?: number | null;
+      /** budget.child(): the child slot's role, named by the server (layout v2: "decider lane"); absent on older servers */
+      child?: { role?: string; tokens?: number; serves?: string[]; kept?: boolean; ranked?: boolean; rank?: number | null; slot?: number | null } | null;
+      /** how the pool was read this time (2026-09-30: a view never loads a model): direct from the main model's server, or cached and why */
+      pool_read?: string;
     }
-  | { error: string };
+  | { error: string; pool_read?: string };
 
 /** mcp/concept_seed.py record(): the concept seed most recently put in a prompt. */
 export type Seed = {
@@ -154,7 +161,7 @@ export type Vitals = {
   /** GPU power and electricity cost; absent on servers older than mcp/power.py */
   power?: PowerLive | Partial<PowerLive> | null;
   /** mcp/tree_sources.py: index breadth (nebari), staleness (moss) and the
-   *  last requests' fan-out and recall; absent on older servers. Read by
+   *  last requests' recall; absent on older servers. Read by
    *  bonsai/mapping.ts treeSources(), which checks every field it uses. */
   tree?: Record<string, unknown> | null;
   /** mcp/vitals.py serving(): which main model holds the card (max mode); absent on older servers */
@@ -394,435 +401,14 @@ export type DatasetsOverview = {
   read_at: number;
 };
 
-export type Power = {
-  n_paired: number;
-  min_discordant_for_sig: number | null;
-  max_possible_discordant: number;
-  alpha: number;
-  comparison_possible: boolean;
-};
-
-export type Pair = {
-  a: string;
-  b: string;
-  b_only: number;
-  a_only: number;
-  discordant: number;
-  p: number;
-  verdict: string | null;
-  underpowered: boolean;
-  both_solved?: number;
-};
-
-export type SectionMeta = { file: string; exists: boolean; file_age_s: number | null; bad_lines: number };
-
-export type EmptySection = SectionMeta & { state: 'empty'; how: string; note: string };
-export type ErrorSection = { state: 'error'; component: string; error: string; check: string };
-
-/** where a scored row ended: passed, or the grader stage it failed at */
-export type StageCounts = { pass?: number; extract: number; compile: number; test: number };
-
-export type LcbArm = {
-  arm: string; k: number; n: number; rate: number | null; lo: number; hi: number;
-  mean_s: number | null; tok_in: number | null; tok_out: number | null;
-  empty?: number; len_cut?: number; errors?: number;
-  // bench/domain/analyse.py only (absent in the livecodebench section)
-  stages?: StageCounts;
-  median_s?: number | null;
-  tok_total?: number | null;
-  /** mean tool rounds the proxy ran for the model (x_yamadori.hops - 1, summed over requests) */
-  tool_hops?: number | null;
-  investigate_hops?: number | null;
-  /** rows whose final answer got past extract and compile */
-  final_compiles?: number;
-  self_check?: boolean;
-  // S arms (the model may call check_solution) only
-  twin?: string;
-  check_rounds_mean?: number | null;
-  check_rounds_median?: number | null;
-  check_rounds_max?: number | null;
-  checked_any?: number;
-  last_check_ok?: number;
-  final_public_ok?: number;
-  final_public_n?: number;
-  rounds_mean?: number | null;
-  // the separate style score (grade_style.py); never part of pass/fail
-  lint_n?: number;
-  lint_errors_mean?: number | null;
-  lint_warnings_mean?: number | null;
-  lint_clean?: number;
-  modern_flags?: Record<string, number>;
-  modern_credits?: Record<string, number>;
-  /** per mechanism: rows where the arm allowed it, and of those where it ran / produced data */
-  mechanism_health?: Record<string, MechanismHealth>;
-};
-
-export type MechanismHealth = {
-  rows: number; allowed: number; allowed_pct: number | null;
-  ran: number; ran_pct: number | null; data: number; data_pct: number | null;
-};
-
-/** an S arm against its one-shot twin (S0 vs A0, S5 vs A5, S6 vs A6) */
-export type SelfCheckTwin = {
-  s: string; one_shot: string; n_paired: number;
-  s_pass: number; one_shot_pass: number; s_only: number; one_shot_only: number;
-  discordant: number; p: number; p_bonferroni: number | null;
-  /** one-shot failed at compile, S arm passed */
-  fixed_by_checking: number;
-  /** fixed_by_checking, counting only S rows that called check_solution at least once */
-  fixed_with_check?: number;
-  compile_to_test: number; extract_to_pass: number; test_to_pass: number;
-  one_shot_compile_fail: number; s_compile_fail: number;
-  one_shot_compiles: number; s_compiles: number;
-};
-
-export type DomainPair = {
-  domain: string; a: string; b: string; n_paired: number;
-  b_only: number; a_only: number; p_uncorrected: number;
-};
-export type LcbSection = SectionMeta & {
-  state: 'ready';
-  arms: string[];
-  suspect: { identical_across_arms: boolean; extreme: string[] };
-  progress: { rows: number; attempted: number; scored_rows: number; errors: number; complete_all_arms: number; errors_by_arm: Record<string, Record<string, number>> };
-  power: Power;
-  arm_table: LcbArm[];
-  raw: { arm: string; attempts: number; passed: number; rate: number; lo: number; hi: number }[];
-  pairs: Pair[];
-  difficulty: {
-    difficulty: string;
-    n: number;
-    by_arm: Record<string, { k: number; n: number; rate: number; lo?: number; hi?: number; stages?: StageCounts }>;
-  }[];
-  failures: Record<string, { passed: number; failed: number; buckets: { bucket: string; n: number; scaffolding: boolean }[] }>;
-  scaffolding_total: number;
-  // bench/domain/analyse.py only
-  twins?: SelfCheckTwin[];
-  domain_pairs?: DomainPair[];
-  excluded_contaminated?: { tasks: number; domains: string[] };
-  /** clean=false: seconds and tokens/s were measured sharing the GPU with `concurrent_with` */
-  timing?: { concurrent_with: string[]; clean: boolean; label: string };
-};
-
-export type RetrievalArm = {
-  arm: string; n: number; hit1: number; hit1_rate: number; hit1_lo: number; hit1_hi: number;
-  hit5: number; hit5_rate: number; hit5_lo: number; hit5_hi: number; mrr: number;
-  mean_ms: number; absent: number; extreme: boolean; cost_x: number;
-};
-export type RetrievalSection = SectionMeta & {
-  state: 'ready';
-  n: number;
-  arms: string[];
-  power: Power;
-  arm_table: RetrievalArm[];
-  pairs: Pair[];
-  sources: { source: string; n: number; by_arm: Record<string, number> }[];
-  caveats: string[];
-};
-
-export type RecipeSection = SectionMeta & {
-  state: 'ready';
-  arms: string[];
-  progress: { attempted: number; errors: number; complete_all_arms: number };
-  power: Power;
-  arm_table: { arm: string; k: number; n: number; rate: number | null; lo: number; hi: number; median_max_s: number | null; median_peak_kb: number | null }[];
-  oracle: { k: number; n: number; rate: number | null };
-};
-
-export type Section<T> = T | EmptySection | ErrorSection;
-
-/**
- * One arm, in the columns of README "Effort tiers" (mcp/dash_results.py
- * legend_from_features / legend_from_tier). "auto" = the tier allows it and
- * mcp/selection.py decides per request.
- */
-export type LegendRow = {
-  arm: string;
-  kind: 'features' | 'tier' | 'unknown';
-  note?: string;
-  tier?: string;
-  thinking_sent?: string | null;
-  retrieval?: string;
-  hints?: string;
-  fanout?: string;
-  deep_thinking?: string;
-  check?: string;
-  repair?: string;
-  client_tool?: string | null;
-  /** SWE-bench: reasoning_effort sent in the body (the tier), beside the header */
-  body_effort?: string | null;
-  reasoning_cap?: number;
-};
-
-export type Ci = [number, number] | null;
-export type Dist = { n: number; median: number | null; p90: number | null; max: number | null; total: number };
-
-/** bench/livebench/mechanisms.py health(): per mechanism, counts over answers */
-export type MechHealth = {
-  answers: number;
-  recorded: number;
-  stack_errors?: number;
-  mechanisms?: Record<string, Record<string, number | null>>;
-};
-
-export type LbCategory = {
-  score: number | null;
-  ci95: Ci;
-  n: number | null;
-  tasks: Record<string, { score: number | null; ci95: Ci; n: number | null }>;
-  finish_reason: Record<string, number>;
-  seconds?: Dist | null;
-  output_tokens?: Dist | null;
-};
-
-export type LbArm = {
-  arm: string;
-  label: string | null;
-  overall: { score: number | null; ci95: Ci; categories_included: string[] };
-  categories: Record<string, LbCategory>;
-  status: Record<string, number>;
-  finish_reason: Record<string, number>;
-  rows: number;
-  mechanism_health: MechHealth;
-  /** estimate: seconds per question x measured generating watts (mcp/power.py benchmark_estimate) */
-  electricity?: LbElectricity | null;
-};
-
-/** [cheapest, dearest] cell of the rate table, or a flat rate twice */
-export type Range2 = [number, number];
-export type LbElectricity = {
-  n: number;
-  seconds_per_question: number;
-  watts: number;
-  wh_per_question: number;
-  kwh_per_100: number;
-  cents_per_question: Range2;
-  dollars_per_100: Range2;
-  cents_per_kwh: Range2;
-  seconds_from: 'summary' | 'rows';
-};
-export type LbElectricityBasis = {
-  estimate: true;
-  watts: number;
-  gpu_watts: number;
-  extra_watts: number;
-  evidence: string;
-  per_gpu: Record<string, number>;
-  seconds: string;
-  overlap: string;
-  cents_per_kwh: Range2;
-  rate: string;
-  priced: string;
-};
-
-export type LbPaired = {
-  a: string;
-  b: string;
-  n_pairs: number | null;
-  diff: number | null;
-  ci95: Ci;
-  categories: Record<
-    string,
-    {
-      n_pairs: number | null; a_score: number | null; b_score: number | null; diff: number | null; ci95: Ci;
-      binary: boolean | null; b_only_correct: number | null; a_only_correct: number | null; mcnemar_p: number | null;
-    }
-  >;
-};
-
-export type LbProgress = {
-  arm: string; category: string; log: string; log_age_s: number | null;
-  at: string | null; answered: number; of: number | null; err_rows: number;
-};
-
-export type LbRef = { model: string; overall: number | null; n: number | null; missing: number | null; categories: Record<string, number | null> };
-
-export type LbRun = {
-  run_id: string;
-  dir: string;
-  state: 'ready' | 'running' | 'empty';
-  frozen: string | null;
-  condition: { min_p?: number; server_sampling?: string; requests_in_flight?: number; shared_with?: string; note?: string; [k: string]: unknown };
-  generated_at: string | null;
-  summary_age_s: number | null;
-  release: string[] | string | null;
-  population: Record<string, number>;
-  method: { bootstrap_B?: number; ci?: string; aggregation?: string };
-  arms: LbArm[];
-  legend: LegendRow[];
-  paired: LbPaired[];
-  progress: LbProgress[];
-  same_question_refs: Record<string, LbRef[]>;
-  published_2024_11_25: Record<string, { categories: Record<string, number>; global: number }>;
-  current_leaderboard_base: { date: string | null; models: Record<string, { global: number; categories: Record<string, number> }>; comparable: false } | null;
-  electricity_basis?: LbElectricityBasis | null;
-};
-
-export type LiveBenchSection = SectionMeta & { state: 'ready'; current: string | null; runs: LbRun[] };
-
-export type SweArm = {
-  arm: string; attempted: number; scored: number; resolved: number;
-  rate: number | null; lo: number | null; hi: number | null;
-  outcomes: Record<string, number>;
-  exit_status: Record<string, number>;
-  median_steps: number | null; median_seconds: number | null;
-  median_prompt_tokens: number | null; median_completion_tokens: number | null;
-  format_errors: number; length_events: number; proxy_error_lines: number;
-  finish_reasons: Record<string, number>;
-  mechanisms: Record<string, number>;
-  tiers_reported: Record<string, number>;
-  instances: { instance: string; eval_status: string; exit_status: string; steps: number | null; seconds: number | null; prompt_tokens: number | null; completion_tokens: number | null }[];
-};
-
-export type SweBoard = {
-  source: string;
-  n_instances?: number;
-  tables: { key: string; caption: string; same_scaffold: boolean; rows: { model: string; verified: number | null; detail: Record<string, string> }[] }[];
-};
-
-export type SweSection = SectionMeta & {
-  state: 'ready' | 'running';
-  run_id: string; subset: string | null; dataset: string | null; planned: number | null;
-  stopped: string | null; arms: SweArm[]; legend: LegendRow[]; leaderboard: SweBoard;
-};
-
-export type MtpBuild = { run: string; build: string; head: string; bi: string; mean_tps: number | null; by_content: Record<string, number | null>; acceptance: string | null };
-export type MtpAcceptance = { content: string; n_prompts: number | null; acceptance: number | null; accepted: number | null; drafted: number | null; tps_on: number | null; tps_off: number | null };
-
-export type LongCtxCell = { L: number; k: number; n: number; rate: number | null; lo: number | null; hi: number | null; budget?: number; stack_errors?: number };
-export type LongCtxSection = SectionMeta & {
-  state: 'ready';
-  arms: string[];
-  arm_table: {
-    arm: string; model: string | null; n_ctx: number | null; usable_context: number | null; ref_L: number | null;
-    decode_tps_first: number | null; decode_tps_longest: number | null; prefill_tps_first: number | null; prefill_tps_longest: number | null;
-    speculating: boolean; draft_accept_first: number | null; draft_accept_longest: number | null; errors: number;
-  }[];
-  curves: Record<string, { speed: { L: number; n: number; decode_tps: number | null; prefill_tps: number | null; draft_accept_rate: number | null; vram_peak_mib: number | null }[]; accuracy: Record<string, LongCtxCell[]> }>;
-  note?: string;
-};
-
-export type SpeedSection = {
-  state: 'ready';
-  mtp: {
-    source: string;
-    section6: string | null;
-    builds: { heading: string; rows: MtpBuild[]; method: string } | null;
-    acceptance: { file: string; rows: MtpAcceptance[] }[];
-    file_age_s?: number | null;
-  };
-  longctx: LongCtxSection | EmptySection | ErrorSection;
-};
-
-export type ImageConfig = {
-  config: string; size: string; rows: number; status: Record<string, number>; images: number; attempts_run?: number;
-  steps: number | null; median_wall_s: number | null; min_wall_s: number | null; max_wall_s: number | null;
-  median_sample_s: number | null; median_sec_per_step: number | null; median_decode_s: number | null; median_encode_s: number | null;
-  max_delta_peak_mib: number | null; min_free_mib: number | null; max_temp_c: number | null;
-  kills: { why: string; min_free_mib: number | null; delta_peak_mib: number | null }[];
-  skips: string[]; errors: string[];
-};
-
-export type ImagegenSection = SectionMeta & {
-  state: 'ready';
-  configs: ImageConfig[];
-  server: { config: string | null; images: number; ok: number; median_seconds: number | null; delta_peak_mib: number | null; min_free_mib: number | null; killed: boolean | null }[];
-  idle_probes: { base_used_mib: number | null; idle_after_mib: number | null; after_kill_mib: number | null; gen_512_s: number | null; at: string | null }[];
-  partiprompts: { file: string; prompts: number | null; categories: Record<string, number> } | null;
-};
-
-export type ModelCardSection = {
-  state: 'ready';
-  publisher: string;
-  source: string;
-  measured_here: false;
-  columns: string[];
-  rows: { bench: string; values: (number | null)[] }[];
-};
-
-/** A bench/domain/analyse.py comparison (pairwise, on the tasks both arms scored). */
-export type DomainComparison = {
-  a: string; b: string; n_paired: number; a_pass: number; b_pass: number;
-  b_only: number; a_only: number; discordant: number; both_solved: number;
-  p: number; p_bonferroni?: number; family?: string; family_size?: number; could_reach_significance?: boolean;
-};
-export type DomainBlock = {
-  label?: string; tasks?: number;
-  families?: Record<string, { size: number; alpha_corrected: number; min_discordant_for_sig: number | null }>;
-  comparisons?: DomainComparison[];
-};
-export type DomainArmStats = {
-  attempted_pairs: number; scored: number; passed: number; rate: number | null; lo: number; hi: number;
-  stack_error_rows: number; stack_error_kinds: Record<string, number>; fail_stages: Record<string, number>;
-  median_seconds: number | null; median_prompt_tokens: number | null; median_completion_tokens: number | null;
-  stages?: StageCounts; lint_n?: number; lint_errors_mean?: number | null; lint_clean?: number;
-  modern_flags?: Record<string, number>; modern_credits?: Record<string, number>;
-  tool_hops_mean?: number | null; investigate_hops_mean?: number | null; final_compiles?: number; n?: number;
-  /** bench/domain/analyse.py mechanism_health(): per mechanism over the arm's scored rows */
-  mechanism_health?: Record<string, DomainMechCount>;
-};
-export type DomainMechCount = { rows: number; allowed: number; ran: number; data: number; allowed_pct?: number | null; ran_pct?: number | null; data_pct?: number | null };
-export type DomainGroup = {
-  group: string; dirs: string[]; age_s: number; rows: number; stale_rows: number;
-  stale: { reason: string; rows: number; arms: Record<string, number> }[];
-  planned_pairs: number | null; scored_pairs: number; arms: string[]; conditions: Record<string, unknown>;
-};
-export type Rate = { k: number; n: number; rate: number };
-export type DomainTriggers = {
-  n: number;
-  tools_offered?: Rate; hints_selected?: Rate; hints_emitted?: Rate; investigate_chosen?: Rate;
-  investigate_searched?: Rate; investigate_injected?: Rate; fanned_out?: Rate; main_hops_gt1?: Rate;
-};
-export type DomainExtras = {
-  run_id?: string; group?: string; merged_run_dirs?: string[];
-  current?: DomainGroup;
-  groups?: DomainGroup[];
-  conditions?: Record<string, unknown>;
-  rows_total?: number; stale_rows?: number;
-  stale?: { reason: string; rows: number; arms: Record<string, number> }[];
-  task_counts?: { all: number; uncontaminated: number; contaminated: number; contaminated_domains: string[] };
-  caveats?: string[];
-  headline?: DomainBlock;
-  contaminated_block?: DomainBlock;
-  per_arm_headline?: Record<string, DomainArmStats>;
-  by_domain?: Record<string, {
-    contaminated: boolean; tasks: number;
-    by_arm: Record<string, { k: number; n: number; rate: number | null; lo: number; hi: number; stages: StageCounts; stack_errors: number }>;
-    vs_A0: DomainComparison[];
-  }>;
-  triggers?: Record<string, DomainTriggers>;
-  legend?: LegendRow[];
-};
-
-/** a domain group that is planned or running with nothing scorable yet */
-export type DomainRunning = SectionMeta & DomainExtras & { state: 'running'; how: string };
-
-export type Results = {
-  served_at: number;
-  sections: {
-    /** bench/domain/analyse.py: the named group (overnight-0923-minp0), lcb-shaped plus the analysis */
-    domain?: Section<LcbSection & DomainExtras> | DomainRunning;
-    livebench?: Section<LiveBenchSection>;
-    swebench?: Section<SweSection> | (EmptySection & { leaderboard?: SweBoard });
-    speed?: Section<SpeedSection>;
-    imagegen?: Section<ImagegenSection>;
-    model_card?: Section<ModelCardSection>;
-    lcb?: Section<LcbSection>;
-    retrieval?: Section<RetrievalSection>;
-    recipe?: Section<RecipeSection>;
-    [k: string]: unknown;
-  };
-};
-
 export type TierSpec = {
-  thinks: boolean; floor?: number; effort: string; retrieval: boolean;
+  thinks: boolean; floor?: number; effort: string;
   /** retired with hints (2026-09-26): skills are the knowledge system; kept optional for old payloads */
   hints?: boolean;
   skills?: boolean;
-  fanout: number; investigate: boolean; why: string;
+  why: string;
   /** the model that serves the tier (mcp/max_mode.py model_for); absent on older servers */
   model?: string | null;
-  check_code?: boolean; repair?: boolean;
   /** the reasoning_effort the proxy actually sends (tiers.safe_effort); absent until the server reports it */
   sent_effort?: string;
   /** what RUNS at this tier, one cell per feature column (tiers.features, the one matrix the docs also read) */

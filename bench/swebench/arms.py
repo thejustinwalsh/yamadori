@@ -6,41 +6,43 @@ Windows (the stack interpreter) and by wsl_side.py in the WSL venv.
 THE ARMS (names are the operator's, 2026-09-22)
 
   bonsai          everything forced off: the bare model, as it ships.
-  yamadori-auto   nothing forced: the selection engine decides what fires
-                  (the header carries only the pinned effort).
-  yamadori        everything forced on: retrieval over the HELD package
-                  indexes, hints, deep thinking, fan-out N=3. The headline
-                  row next to the other models.
+  yamadori-auto   nothing forced: the tier decides what fires (the header
+                  carries only the pinned effort).
+  yamadori        everything forced on: skills, the concept seed and the MCP
+                  host's tools. The headline row next to the other models.
+                  Until 2026-09-29 it also forced retrieval over the HELD
+                  package indexes, deep thinking and fan-out N=3; those were
+                  removed from the proxy (docs/REMOVED.md), and results
+                  recorded before then keep what they recorded.
 
 The header values are bench/domain/run.py's A0, A5 and A6, byte for byte in
 meaning. As there, every arm also sends `reasoning_effort: "max"` in the BODY
 (through litellm's `extra_body`) so the tier ALLOWS everything and the header
 alone decides; `effort` in the header pins the thinking style to `medium` on
 every arm, so effort is held fixed across arms (bench/domain/run.py, "THE
-ARMS"). Without the body field the default tier (`medium`) would forbid deep
-thinking and fan-out, and `yamadori-auto` could never choose them.
+ARMS").
 
 "yamadori" does NOT stage, index or bind the SWE-bench repository on the
 host. The caller's source reaches the model only through the caller's own
 harness tools -- here, the bash commands mini-swe-agent runs in the container
 (proxy.resolve_repo returns None by contract). What the server adds is what
-it holds: package indexes, hints, deep thinking, fan-out.
+it holds: skills, the concept seed, the MCP host's package lookups.
 """
 from __future__ import annotations
 
 import json
 
 ARMS: dict[str, dict] = {
-    "bonsai": {"retrieval": False, "hints": False, "investigate": False,
-               "fanout": 1, "effort": "medium"},
+    "bonsai": {"skills": False, "seed": False, "mcp_tools": False,
+               "effort": "medium"},
     "yamadori-auto": {"effort": "medium"},
-    "yamadori": {"retrieval": True, "hints": True, "investigate": True,
-                 "fanout": 3, "effort": "medium"},
+    "yamadori": {"skills": True, "seed": True, "mcp_tools": True,
+                 "effort": "medium"},
 }
 ARM_NOTES = {
     "bonsai": "everything off: the bare model (bench/domain A0)",
-    "yamadori-auto": "all allowed, the selection engine decides (A5)",
-    "yamadori": "everything on, held package indexes (A6)",
+    "yamadori-auto": "nothing forced, the tier decides (A5)",
+    "yamadori": "everything on: skills, concept seed, MCP tools (A6)",
 }
 # Sent in the body on every arm; see the module docstring.
 BODY_EFFORT = "max"

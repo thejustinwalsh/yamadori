@@ -110,8 +110,11 @@ SHARD1_Q2 = f"{FN}/Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf"
 # one thread per logical CPU of the 8 P-cores (i7-13700K: logical 0-15 are the P-cores' two threads each, 16-23 the
 # E-cores; read with GetLogicalProcessorInformationEx semantics in docs/FLASH-NEXT.md section 8)
 P_CORES = {"-t": "16", "-C": "0xFFFF", "--cpu-strict": "1"}
-MTP_ARGS = {"--spec-type": "draft-mtp", "--spec-draft-model": MTP_DRAFT, "-ngld": "999", "--spec-draft-n-cpu-moe": "1",
-            "--spec-draft-n-max": "3", "--spec-draft-p-min": "0.5"}
+MTP_ARGS = {"--spec-type": "draft-mtp", "--spec-draft-model": MTP_DRAFT, "-ngld": "999", "--spec-draft-n-cpu-moe": "49",
+            "--spec-draft-n-max": "3", "--spec-draft-p-min": "0.5",
+            # an explicit split: with it the draft never divides the free memory (0 MiB on a full card: NaN splits,
+            # devices.at() out of range -- "invalid vector subscript", 2026-09-29, bisect-*.log)
+            "-ts": "1"}
 
 
 A4000_UUID = "GPU-43e37d0c-4104-9056-2552-6109d4d3382c"      # config.yaml's A4000 (CUDA1 by PCI order)
@@ -119,8 +122,8 @@ EXPERT_MIB_PER_LAYER = EXPERT_BYTES_PER_LAYER / 2**20          # 676 MiB (IQ2_XS
 A4000_RESERVE_MIB = 1500     # the margin (1,000) + CUDA1's own compute buffers at -ub 4096 (~500, an estimate the
                              # arm's measured A4000 peak replaces in the report)
 # the A4000's on-demand models the gate may unload for the a4000 arm (llama-swap reloads them on their next use);
-# embeddings and the reranker stay
-A4000_ONDEMAND = ["imagegen-turbo", "imagegen", "bonsai-vision"]
+# embeddings stay (the reranker beside it was removed 2026-10-01)
+A4000_ONDEMAND = ["imagegen-turbo", "imagegen", "bonsai-vision", "clm-encoder"]
 
 
 def a4000_free() -> int:
@@ -160,15 +163,21 @@ def a4000_layers(free_mib: int) -> int:
     return max(0, min(N_LAYER, int((free_mib - A4000_RESERVE_MIB) // EXPERT_MIB_PER_LAYER)))
 
 
-def a4000_args(m: int, slots_all: int) -> dict:
-    """The LAST m layers' routed experts on CUDA1 (-ot), the first 48-m in RAM (--n-cpu-moe) with the profile cache
-    over them (the same total VRAM slots as the all-RAM arm: slots x 48 / (48 - m) per RAM layer), every dense
-    weight, the KV and the draft on CUDA0 (-ts 1,0, -devd CUDA0)."""
-    k = N_LAYER - m
-    layers = "|".join(str(i) for i in range(k, N_LAYER))
+def static_layers(slots_per_layer: int) -> int:
+    """The VRAM fit2 measured for a cache, as whole expert LAYERS on the card instead (slots x 48 of 512 experts
+    per layer). 2026-09-29: the cache's multi-token GPU chain faults (CUDA illegal memory access in the KL step's
+    batch-16 path and at a 142K prompt's tail batch, flash-cache.server.log / kl-flash-cache-b16.log) and bought
+    ~3% on decode at 46 slots a layer, so the combined arms place whole layers, as llama.cpp does, instead."""
+    return max(0, int(slots_per_layer * N_LAYER // 512))
+
+
+def a4000_args(m: int, g: int) -> dict:
+    """The first k = 48 - m - g layers' routed experts in RAM (--n-cpu-moe), the next m on CUDA1 (-ot), the last g
+    on CUDA0; every dense weight, the KV and the draft on CUDA0 (-ts 1,0, -devd CUDA0)."""
+    k = max(0, N_LAYER - m - g)
+    layers = "|".join(str(i) for i in range(k, min(N_LAYER, k + m)))
     return {"-dev": "CUDA0,CUDA1", "-ts": "1,0", "--n-cpu-moe": str(k),
-            "-ot": rf"blk\.({layers})\.ffn_(up|gate|down)_exps\.weight=CUDA1",
-            "--moe-expert-cache": str(max(1, (slots_all * N_LAYER) // max(1, k)))}
+            "-ot": rf"blk\.({layers})\.ffn_(up|gate|down)_exps\.weight=CUDA1"}
 
 
 def arms(n_cpu_moe: int = 42, cache_slots: int = 0, all_slots: dict | None = None, a4000_m: int = 0) -> dict[str, dict]:
@@ -180,8 +189,9 @@ def arms(n_cpu_moe: int = 42, cache_slots: int = 0, all_slots: dict | None = Non
     slots = str(cache_slots or 1)
     s = all_slots or {}
     all_slots, all_slots_q2, all_slots_mmcpu = (str(s.get(k) or 1) for k in ("iq2", "q2", "mmcpu"))
+    g_iq2, g_q2 = static_layers(int(all_slots)), static_layers(int(all_slots_q2))
     strata = {"LLAMA_MOE_CACHE_PROFILE": PROFILE, "LLAMA_MOE_CACHE_POLICY": "strata"}
-    return {
+    table = {
         "base":       {"bin": up,  "env": {}, "args": base_args, "checks": ["exact", "kl", "needles", "corrupt", "speed"]},
         "moe-off":    {"bin": moe, "env": {}, "args": base_args, "checks": ["exact"]},
         "prefetch":   {"bin": moe, "env": {}, "args": {**base_args, "--prefetch-experts-slots": "3"},
@@ -209,47 +219,224 @@ def arms(n_cpu_moe: int = 42, cache_slots: int = 0, all_slots: dict | None = Non
         "ub4096":     {"bin": up,  "env": {}, "args": {**base_args, "-b": "4096", "-ub": "4096"}, "checks": ["speed"]},
         "mtp":        {"bin": mtp, "env": {}, "args": {**base_args, "--spec-type": "draft-mtp",
                                                        "--spec-draft-model": MTP_DRAFT, "-ngld": "999",
-                                                       "--spec-draft-n-cpu-moe": "1",
-                                                       "--spec-draft-n-max": "3", "--spec-draft-p-min": "0.5"},
+                                                       "--spec-draft-n-cpu-moe": "49",
+                                                       "--spec-draft-n-max": "3", "--spec-draft-p-min": "0.5",
+            # an explicit split: with it the draft never divides the free memory (0 MiB on a full card: NaN splits,
+            # devices.at() out of range -- "invalid vector subscript", 2026-09-29, bisect-*.log)
+            "-ts": "1"},
                        "checks": ["corrupt", "speed"]},
         # ---- 2026-09-29 (docs/FLASH-NEXT.md section 8): the causes of 18 tok/s, one arm each, then together.
         # threads: the base engine, 16 threads held to the P-cores
         "t16p":       {"bin": up,  "env": {}, "args": {**base_args, **P_CORES}, "checks": ["speed"]},
         # the AVX2 Q2_0 kernel alone (every down expert is Q2_0): changes rounding, so KL, not exact
-        "flash-cpu":  {"bin": fl,  "env": {}, "args": base_args, "checks": ["kl", "speed"]},
-        # + pinned experts and a 4K prompt batch (PCIe-bound prefill: fewer expert copies per token)
-        "flash-ub4k": {"bin": fl,  "env": {"LLAMA_PIN_EXPERTS": "1"},
-                       "args": {**base_args, "-b": "4096", "-ub": "4096"}, "checks": ["speed"]},
-        # + the profile-ranked VRAM expert cache over EVERY layer (the ggml_get_rows crash fixed), pinned
+        "flash-cpu":  {"bin": fl,  "env": {}, "args": {**base_args, **NO_MMPROJ}, "checks": ["kl", "speed"]},
+        # + pinned experts, every layer's experts in RAM and a 1K prompt batch (PCIe-bound prefill: half the expert
+        # copies per token of -ub 512; -ub 4096 measured a 14,502 MiB compute buffer, 1024 3,770: vram-*.log)
+        "flash-ub1k": {"bin": fl,  "env": {"LLAMA_PIN_EXPERTS": "1"},
+                       "args": {**base_args, **NO_MMPROJ, "--n-cpu-moe": "48", "-b": "2048", "-ub": "1024"}, "checks": ["speed"]},
+        # + the profile-ranked VRAM expert cache over EVERY layer (the ggml_get_rows crash fixed), pinned. Needles run
+        # on flash-all (the same cache with MTP): a 128K needle prompt is ~15 min at this prompt rate
         "flash-cache": {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1", **strata},
-                        "args": {**base_args, "--n-cpu-moe": "48", "--moe-expert-cache": all_slots},
-                        "checks": ["kl", "needles", "speed"]},
+                        "args": {**base_args, **NO_MMPROJ, "--n-cpu-moe": "48", "--moe-expert-cache": all_slots},
+                        "checks": ["kl", "speed"]},
         # + MTP (the draft layer's experts on the CPU)
-        "flash-mtp":  {"bin": fl,  "env": {}, "args": {**base_args, **MTP_ARGS}, "checks": ["corrupt", "speed"]},
+        "flash-mtp":  {"bin": fl,  "env": {}, "args": {**base_args, **NO_MMPROJ, **MTP_ARGS}, "checks": ["corrupt", "speed"]},
         # everything
-        "flash-all":  {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1", **strata},
-                       "args": {**base_args, "--n-cpu-moe": "48", "--moe-expert-cache": all_slots, "-b": "4096",
-                                "-ub": "4096", **P_CORES, **MTP_ARGS},
+        "flash-all":  {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1"},
+                       "args": {**base_args, **NO_MMPROJ, "--n-cpu-moe": str(N_LAYER - g_iq2), "-b": "2048",
+                                "-ub": "512", **P_CORES, **MTP_ARGS},
                        "checks": ["kl", "needles", "corrupt", "contract", "speed"]},
-        # everything, the projector on the CPU (its ~1.9 GB of VRAM holds experts instead)
-        "flash-all-mmcpu": {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1", **strata},
-                            "args": {**base_args, "--n-cpu-moe": "48", "--moe-expert-cache": all_slots_mmcpu,
-                                     "-b": "4096", "-ub": "4096", **P_CORES, **MTP_ARGS, "--no-mmproj-offload": ""},
-                            "checks": ["needles", "speed"]},
         # the operator's second-GPU question (2026-09-29): the experts the 5060 Ti cannot hold on the A4000 instead
         # of the CPU -- the last m layers' experts on CUDA1, the rest in RAM with the cache, as flash-all otherwise
-        "flash-a4000": {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1", **strata,
+        "flash-a4000": {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1",
                                            "CUDA_VISIBLE_DEVICES": f"{ec.CARD_UUID},{A4000_UUID}"},
-                        "args": {**base_args, "-b": "4096", "-ub": "4096", **P_CORES, **MTP_ARGS, "-devd": "CUDA0",
-                                 **a4000_args(a4000_m or 1, int(all_slots))},
-                        "checks": ["kl", "needles", "corrupt", "speed"], "a4000": True},
+                        "args": {**base_args, **NO_MMPROJ, "-b": "2048", "-ub": "512", **P_CORES, **MTP_ARGS, "-devd": "CUDA0",
+                                 **a4000_args(a4000_m or 1, g_iq2)},
+                        "checks": ["kl", "corrupt", "speed"], "a4000": True},
         # everything on the Q2_0 file (all experts Q2_0: the AVX2 kernel serves every CPU expert). A different
         # quant: its quality is ISTA's table, not our KL yardstick (no kl step)
-        "flash-all-q2": {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1", **strata},
-                         "args": {**base_args, "-m": SHARD1_Q2, "--n-cpu-moe": "48", "--moe-expert-cache": all_slots_q2,
-                                  "-b": "4096", "-ub": "4096", **P_CORES, **MTP_ARGS},
+        "flash-all-q2": {"bin": fl, "env": {"LLAMA_PIN_EXPERTS": "1"},
+                         "args": {**base_args, **NO_MMPROJ, "-m": SHARD1_Q2, "--n-cpu-moe": str(N_LAYER - g_q2),
+                                  "-b": "2048", "-ub": "512", **P_CORES, **MTP_ARGS},
                          "checks": ["needles", "corrupt", "contract", "speed"]},
     }
+    # WINDOW B STEP 1 (the coordinator, 2026-09-29): routing traces for the hit-rate simulation and the op profile
+    opt = {"GGML_CUDA_OP_TIMING": "1", "GGML_CUDA_DISABLE_GRAPHS": "1"}
+    table["probe-trace"] = dict(table["flash-cpu"], env={**table["flash-cpu"]["env"],
+                                                        "GGML_MOE_LOG": "C:/Users/jwals/octo/moe-trace-flash-cpu.txt"},
+                                args={**table["flash-cpu"]["args"], "--n-cpu-moe": "48"}, checks=["probe"])
+    # -lv 4: 0010 prints with GGML_LOG_INFO, which common_log maps to TRACE (4) and drops at the default verbosity 3
+    # (common/log.cpp common_log_get_verbosity; the first probe run, 2026-09-30, printed no table)
+    lv = {"-lv": "4"}
+    table["probe-opt-cpu"] = dict(table["flash-cpu"], env={**table["flash-cpu"]["env"], **opt},
+                                  args={**table["flash-cpu"]["args"], **lv}, checks=["probe"])
+    table["probe-opt-cache"] = dict(table["flash-cache"], env={**table["flash-cache"]["env"], **opt},
+                                    args={**table["flash-cache"]["args"], **lv}, checks=["probe"])
+    table["probe-opt-all"] = dict(table["flash-all"], env={**table["flash-all"]["env"], **opt},
+                                  args={**table["flash-all"]["args"], **lv}, checks=["probe"])
+    # M3 step 1 (0012): the attention KV in mapped host memory, the operator's layout (-np 2 + the lane). fit-kvmap
+    # measures the VRAM that frees (every layer's experts in RAM; its probe records the card's lowest free MiB);
+    # the kvmap arms then put G whole expert layers on the card: FLASHNEXT_KVMAP_GPU (with MTP) and
+    # FLASHNEXT_KVMAP_GPU_NOMTP (without: the draft's ~1 GB and the MTP recurrent snapshots freed too)
+    kv = {"LLAMA_KV_HOST_MAPPED": "1"}
+    lay = {"-np": "2", "-c": str(262144 + LANE_TOKENS)}
+    g_mtp = int(os.environ.get("FLASHNEXT_KVMAP_GPU", "0") or 0)
+    g_nomtp = int(os.environ.get("FLASHNEXT_KVMAP_GPU_NOMTP", "0") or 0)
+    base_all = {k: v for k, v in table["flash-all"]["args"].items()}
+    no_mtp = {k: None for k in MTP_ARGS if k != "-ts"}
+    table["fit-kvmap"] = {"bin": fl, "env": {**table["flash-all"]["env"], **kv},
+                          "args": {**base_all, **lay, "--n-cpu-moe": "48"}, "checks": ["probe"]}
+    table["fit-kvmap-nomtp"] = {"bin": fl, "env": {**table["flash-all"]["env"], **kv},
+                                "args": {**base_all, **lay, **no_mtp, "--n-cpu-moe": "48"}, "checks": ["probe"]}
+    # f16 K/V: ggml-cuda's sparse flash attention (the MMA kernel, the only one with the sparse gather) needs f16 K and
+    # V, and converts a q8_0 cache WHOLE on every call (fattn-common.cuh: to_fp16 over ggml_nelements(K)) -- over PCIe
+    # when the cache is host-mapped (fit-kvmap, 2026-09-30: 4K decode 9.3 tok/s). An f16 cache is read only at the
+    # cells the selection names.
+    f16kv = {"--cache-type-k": "f16", "--cache-type-v": "f16"}
+    table["fit-kvmap-f16"] = {"bin": fl, "env": {**table["flash-all"]["env"], **kv},
+                              "args": {**base_all, **lay, **f16kv, "--n-cpu-moe": "48"}, "checks": ["probe"]}
+    # the same with the caches on the card (f16 K/V is ~2x q8_0's VRAM, so every expert layer in RAM) and with q8_0 on
+    # the card: the conversion's cost with and without PCIe in the way
+    table["probe-f16-cpu"] = {"bin": fl, "env": {**table["flash-all"]["env"]},
+                              "args": {**base_all, **lay, **f16kv, "--n-cpu-moe": "48"}, "checks": ["probe"]}
+    table["probe-q8-cpu"] = {"bin": fl, "env": {**table["flash-all"]["env"]},
+                             "args": {**base_all, **lay, "--n-cpu-moe": "48"}, "checks": ["probe"]}
+    # M3 + M4 (0012-0014): the KV in host memory and the freed VRAM as the profile-seeded adaptive expert cache over
+    # EVERY layer (Strata's recipe: --kv-resident + the expert cache). FLASHNEXT_KVCACHE_SLOTS slots a layer, derived
+    # from fit-kvmap's lowest free MiB less the 1,000 MiB reserve the kvmap arms use, over 48 layers of 1.379 MiB
+    # experts, less the layer's zero slot (the cache's own log at 63 slots: "4236.8 MiB device memory" = 64 rows x 48
+    # layers x 1.379 MiB; cache-fit, 2026-09-30). 123 (from 1.32 MiB) left 30 MiB free: kvcache-fit, the same day
+    kvslots = os.environ.get("FLASHNEXT_KVCACHE_SLOTS", "0") or "0"
+    table["kvcache-fit"] = {"bin": fl, "env": {**table["flash-all"]["env"], **kv, **strata},
+                            "args": {**base_all, **lay, "--n-cpu-moe": "48", "--moe-expert-cache": kvslots, **lv},
+                            "checks": ["probe"]}
+    table["kvcache-all"] = {"bin": fl, "env": {**table["flash-all"]["env"], **kv, **strata},
+                            "args": {**base_all, **lay, "--n-cpu-moe": "48", "--moe-expert-cache": kvslots, **lv},
+                            "checks": ["needles", "corrupt", "contract", "lane", "speed"]}
+    # the same cache with the KV on the card: FLASHNEXT_CACHE_SLOTS from probe-q8-cpu's lowest free MiB, the same rule
+    cslots = os.environ.get("FLASHNEXT_CACHE_SLOTS", "0") or "0"
+    table["cache-fit"] = {"bin": fl, "env": {**table["flash-all"]["env"], **strata},
+                          "args": {**base_all, **lay, "--n-cpu-moe": "48", "--moe-expert-cache": cslots, **lv},
+                          "checks": ["probe"]}
+    table["cache-all"] = {"bin": fl, "env": {**table["flash-all"]["env"], **strata},
+                          "args": {**base_all, **lay, "--n-cpu-moe": "48", "--moe-expert-cache": cslots, **lv},
+                          "checks": ["kl", "needles", "corrupt", "contract", "lane", "speed"],
+                          # 0013 builds the cache chain only on batches <= MMVQ's (7 here): KL at 4 (an MTP verify
+                          # window) so the cache serves the scored tokens
+                          "kl_batch": 4}
+    table["kvmap-all"] = {"bin": fl, "env": {**table["flash-all"]["env"], **kv},
+                          "args": {**base_all, **lay, "--n-cpu-moe": str(N_LAYER - g_mtp)},
+                          "checks": ["kl", "needles", "corrupt", "contract", "lane", "speed"]}
+    table["kvmap-nomtp"] = {"bin": fl, "env": {**table["flash-all"]["env"], **kv},
+                            "args": {**base_all, **lay, **no_mtp, "--n-cpu-moe": str(N_LAYER - g_nomtp)},
+                            "checks": ["kl", "speed"]}
+    table["kvmap-a4000"] = {"bin": fl, "env": {**table["flash-a4000"]["env"], **kv},
+                            "args": {**table["flash-a4000"]["args"], **lay,
+                                     **a4000_args(a4000_m or 1, g_mtp)},
+                            "checks": ["kl", "corrupt", "lane", "speed"], "a4000": True}
+    # THE OPERATOR'S LAYOUT (2026-09-29): one conversation slot + the jjava lane: -np 2, the window of one conversation
+    # plus budget.LANE_TOKENS (3,072) in one unified pool. final-<x> is arm <x> in that layout, with the lane step.
+    for src in ("flash-all", "flash-a4000", "flash-all-q2"):
+        f = dict(table[src], args={**table[src]["args"], "-np": "2", "-c": str(262144 + LANE_TOKENS)})
+        f["checks"] = ["needles", "corrupt", "contract", "lane", "speed"]
+        table["final-" + src.split("-", 1)[1]] = f
+    table["fault-cache"] = dict(table["flash-cache"], checks=["fault"])
+    # 2026-09-30 diagnosis: cache-all answered 7/15 needles (nothing at 128K, 2/5 at 32K; flash-all 15/15). One switch
+    # each: 0015 off (the vector kernel for a q8_0 decode), 0014 and 0015 off, and no expert cache
+    table["diag-nosq"] = dict(table["cache-all"], env={**table["cache-all"]["env"], "GGML_CUDA_FA_SPARSE_QUANT": "0"},
+                              checks=["needles"])
+    table["diag-norows"] = dict(table["cache-all"], env={**table["cache-all"]["env"], "GGML_CUDA_FA_SPARSE_QUANT": "0",
+                                                        "GGML_CUDA_FA_SPARSE_ROWS": "0"}, checks=["needles"])
+    table["diag-nocache"] = dict(table["probe-q8-cpu"], checks=["needles"])
+    # NEXT WINDOW (prepared offline, 2026-09-30): where cache-all's decode goes as the context grows (31-36 tok/s at
+    # ~35K, 18-25 at ~142K in its needle runs), and the prompt-side switches already built
+    table["probe-opt-cache-all"] = dict(table["cache-all"], env={**table["cache-all"]["env"], **opt}, checks=["probe"])
+    table["cache-all-nomtp"] = dict(table["cache-all"], args={**table["cache-all"]["args"], **no_mtp}, checks=["probe"])
+    table["cache-all-prefetch"] = dict(table["cache-all"], args={**table["cache-all"]["args"],
+                                                                 "--prefetch-experts-slots": "3"}, checks=["probe"])
+    # a 1K prompt batch halves the expert copies per prompt token (op offload copies every expert of a layer per
+    # ubatch) and costs 1,898 MiB more compute buffer (3,770 vs 1,872 MiB: vram-cache48-ub1024.log / vram-cache48.log)
+    # = 29 slot rows of 66.2 MiB (4,236.8 MiB / 64 rows): 63 - 29 = 34 slots a layer
+    table["cache-all-ub1k"] = dict(table["cache-all"], args={**table["cache-all"]["args"], "-ub": "1024",
+                                                             "--moe-expert-cache": os.environ.get(
+                                                                 "FLASHNEXT_CACHE_SLOTS_UB1K", "34")},
+                                   checks=["probe"])
+    # THE OPERATOR, 2026-09-30: "no jjava slowing down this highly tuned masterpiece, it stays locked in once it is
+    # swapped" -- Flash-Next at -np 1 (one conversation, no lane; jjava goes to a Bonsai on the A4000). The same arm
+    # with one slot and the native window: its probe records the VRAM that frees for experts against -np 2
+    np1 = {"-np": "1", "-c": "262144"}
+    table["cache-fit-np1"] = dict(table["cache-all"], args={**table["cache-all"]["args"], **np1}, checks=["probe"])
+    # -np 1's freed VRAM as slots: 1,289 - 767 MiB (cache-fit-np1 vs cache-fit) = 522 = 7 rows of 66.2 -> 70
+    s_np1 = os.environ.get("FLASHNEXT_CACHE_SLOTS_NP1", "70")
+    table["cache-all-np1"] = dict(table["cache-all"], args={**table["cache-all"]["args"], **np1,
+                                                           "--moe-expert-cache": s_np1},
+                                  # speed only: the cache is exact (a GPU chain added to the CPU sum) and needles/corrupt
+                                  # passed on the same path at 63 slots (cache-all); only the slot count changes
+                                  checks=["speed"])
+    # 0017 on the 5060 Ti: where a token's time goes (waits on the GPU, CPU experts, copies), cache-all at -np 1
+    table["probe-sched-np1"] = dict(table["cache-all-np1"], env={**table["cache-all-np1"]["env"],
+                                                                 "GGML_SCHED_TIMING": "1"}, checks=["probe"])
+    # q4_0 K/V (upstream rotates a quantized cache with a Walsh-Hadamard matrix: llama-kv-cache.cpp attn_rot_k/v):
+    # 3,264 MiB of q8_0 at 262,144 cells (vram-cache48.log) x 0.5625/1.0625 bytes a value = 1,728 -> 1,536 MiB = 23
+    # rows more -> 93. KL at batch 4 (the cache serves those batches), needles, then speed
+    table["cache-all-np1-q4kv"] = dict(table["cache-all"], args={**table["cache-all"]["args"], **np1,
+                                                                "--cache-type-k": "q4_0", "--cache-type-v": "q4_0",
+                                                                "--moe-expert-cache": os.environ.get(
+                                                                    "FLASHNEXT_CACHE_SLOTS_Q4KV", "93")},
+                                       checks=["kl", "needles", "corrupt", "speed"], kl_batch=4)
+    # M2b (0019, LLAMA_QSA_BLOCK_TOPK=1): the QSA budget chosen as whole blocks, no n_kv-sized op per QSA layer. It
+    # changes which cells are attended (KLD ~0.009 vs the cell path on the A4000, the size of any one-block change),
+    # so needles and corrupt on the model itself, then speed
+    table["cache-all-np1-blk"] = dict(table["cache-all"], env={**table["cache-all"]["env"], "LLAMA_QSA_BLOCK_TOPK": "1"},
+                                      args={**table["cache-all"]["args"], **np1,
+                                            "--moe-expert-cache": s_np1},
+                                      checks=["kl", "needles", "corrupt", "speed"], kl_batch=4)
+    # a verify batch of one fixed size: MTP's drafts stop early under --spec-draft-p-min 0.5, so the target graph's
+    # batch varies step to step, every GPU split's properties change and ggml-cuda re-warms its CUDA graphs instead
+    # of replaying them (ggml_cuda_graph_update_required); D1 on the 5060 Ti put 15.6 ms of a ~128K verify step in
+    # launches. p-min 0 always drafts the full n: the batch is constant and the graphs can replay
+    table["cache-all-np1-pmin0"] = dict(table["cache-all"], env={**table["cache-all"]["env"], "GGML_SCHED_TIMING": "1"},
+                                        args={**table["cache-all"]["args"], **np1, "--moe-expert-cache": s_np1,
+                                              "--spec-draft-p-min": "0"},
+                                        checks=["probe"])
+    # 0020, LLAMA_GRAPH_CACHE=8: one graph per verify-batch size, so ggml-cuda's CUDA graphs replay instead of warming
+    # up on every MTP step (A4000: launches 15.5-18 -> 2.5-3.9 ms a verify step, greedy output identical). Exact:
+    # speed, and the probe's sched timing beside it
+    table["cache-all-np1-gcache"] = dict(table["cache-all"], env={**table["cache-all"]["env"], "LLAMA_GRAPH_CACHE": "8"},
+                                         args={**table["cache-all"]["args"], **np1, "--moe-expert-cache": s_np1},
+                                         checks=["speed"])
+    # E2 (0021): the QSA layers' K/V in host-mapped memory (LLAMA_KV_HOST_MAPPED=1 maps only the sparse layers; the
+    # MTP draft's dense layer stays on the card) and the VRAM it frees as slots: ~3.2 GB = ~48 rows of 66.2 MiB on top
+    # of 70 -> 118 (FLASHNEXT_CACHE_SLOTS_KV; the fit probe's lowest free MiB decides). No graph cache: window E1 was
+    # inconclusive and 0020 stays pinned and off (coordinator, 2026-10-01: "no graph cache")
+    kvenv = {"LLAMA_KV_HOST_MAPPED": "1"}
+    s_kv = os.environ.get("FLASHNEXT_CACHE_SLOTS_KV", "118")
+    table["kvcache-fit-np1"] = dict(table["cache-all"], env={**table["cache-all"]["env"], **kvenv},
+                                    args={**table["cache-all"]["args"], **np1, "--moe-expert-cache": s_kv},
+                                    checks=["probe"])
+    table["cache-all-np1-kv"] = dict(table["kvcache-fit-np1"], checks=["kl", "needles", "corrupt", "speed"], kl_batch=4)
+    # M2b on the E2 base (the graph cache on, K/V on the card)
+    table["cache-all-np1-blk-gc"] = dict(table["cache-all-np1-blk"],
+                                         env={**table["cache-all-np1-blk"]["env"], "LLAMA_GRAPH_CACHE": "8"})
+    # the greedy-identity check: the exact step (slot-state hashes and the greedy text at ~8K and ~32K) on the two arms
+    table["exact-np1"] = dict(table["cache-all-np1"], checks=["exact"])
+    table["exact-np1-gcache"] = dict(table["cache-all-np1-gcache"], checks=["exact"])
+    # the same arm again, for the card's own run-to-run variation
+    table["exact-np1-rerun"] = dict(table["cache-all-np1"], checks=["exact"])
+    table["probe-sched-np1-gcache"] = dict(table["cache-all-np1-gcache"],
+                                           env={**table["cache-all-np1-gcache"]["env"], "GGML_SCHED_TIMING": "1"},
+                                           checks=["probe"])
+    # a longer MTP draft: the verify window amortises the per-layer GPU latency (GGML_SCHED_TIMING, 2026-09-30)
+    table["cache-all-np1-draft5"] = dict(table["cache-all"], args={**table["cache-all"]["args"], **np1,
+                                                                  "--moe-expert-cache": s_np1,
+                                                                  "--spec-draft-n-max": "5"},
+                                         checks=["speed"])
+    # the base arm's ~35K row again (its first was n=1, EOS-cut): run with FLASHNEXT_SPEED_CONTEXTS="32"
+    table["base-35k"] = dict(table["base"], checks=["speed"])
+    # jjava on a winner: --arms jjava-<arm> runs the arm as configured with only the jjava step
+    for src in ("kvmap-all", "kvmap-nomtp", "kvmap-a4000", "flash-all", "final-all", "cache-all", "kvcache-all"):
+        table["jjava-" + src] = dict(table[src], checks=["jjava"])
+    return table
 
 
 def command(arm: dict, port: int) -> list[str]:
@@ -270,7 +457,11 @@ def derive_fit(free_mib_after_warm: int, n_cpu_moe_now: int) -> dict:
 
 
 EXPERT_BYTES_Q2 = (37_623_740_192 - 3_759_953_920) // (N_LAYER * 512)   # Q2_0 shard 1 less the dense part
-MMPROJ_MIB = 1865            # the projector (865 MiB file) + its ~1 GB compute buffer (docs/FLASH-NEXT.md section 4)
+# 2026-09-29, the coordinator (layout v2, the operator's "Vision can go to second card and swap in and out"):
+# Flash-Next carries no projector on the 5060 Ti; images at max go to bonsai-vision on the A4000
+NO_MMPROJ = {"--mmproj": None}
+MMPROJ_MIB = 1865
+LANE_TOKENS = 3072         # mcp/budget.py LANE_TOKENS (layout v2): the decider lane's cells            # the projector (865 MiB file) + its ~1 GB compute buffer (docs/FLASH-NEXT.md section 4)
 
 
 def derive_cache_all(free_mib: int, extra_free_mib: int = 0, per_expert: int = EXPERT_BYTES_PER_LAYER // 512) -> int:
@@ -331,6 +522,16 @@ def step_kernels(out: str) -> dict:
                 m = re.search(r"(\d+)/(\d+) tests passed", r.stdout)
                 rec[key] = {"passed": int(m.group(1)), "total": int(m.group(2))} if m else {"error": r.stdout[-400:]}
                 ec.log(f"kernels {key}: {rec[key]}")
+        # 0014: the sparse (top-k) flash attention over q8_0 and f16 caches, the QSA shape (its eval cases: top-k 2,048
+        # and the model's own 2,051), with the f16 buffers poisoned so a read of an unconverted row is a NaN, not a pass
+        # (the first 0014 passed these unpoisoned and lost needles at 32K/128K, 2026-09-30)
+        key = f"{dev}/FLASH_ATTN_EXT/n_kv_max=20xx+poison"
+        r = subprocess.run([exe, "test", "-o", "FLASH_ATTN_EXT", "-b", dev, "-p", "n_kv_max=20"],
+                           capture_output=True, text=True, timeout=3600,
+                           env={**os.environ, "GGML_CUDA_FA_SPARSE_ROWS_POISON": "1"})
+        m = re.search(r"(\d+)/(\d+) tests passed", r.stdout)
+        rec[key] = {"passed": int(m.group(1)), "total": int(m.group(2))} if m else {"error": r.stdout[-400:]}
+        ec.log(f"kernels {key}: {rec[key]}")
     rec["PASS"] = all(v.get("passed") == v.get("total") and v.get("total") for v in rec.values() if isinstance(v, dict))
     json.dump(rec, open(os.path.join(out, "kernels.json"), "w"), indent=1)
     return rec
@@ -372,9 +573,14 @@ class Launched:
         return {"gpu_min_free": self.guard.min_free, "gpu_max_used": self.guard.max_used, "guard": self.guard.tripped}
 
 
-def completion(base: str, prompt: str, n: int, slot: int = 0) -> dict:
+def completion(base: str, prompt: str, n: int, slot: int = 0, ignore_eos: bool = False) -> dict:
     body = {"prompt": prompt, "id_slot": slot, "n_predict": n, "cache_prompt": True, "temperature": 0.0,
             "top_k": 1, "seed": 0}
+    if ignore_eos:
+        # the speed step measures decoding, not where the model would stop: a raw slice of source code sometimes
+        # greedily ends at once (2026-09-29, base arm: 3 of 15 runs decoded 1 token, 2 decoded 11), which left
+        # rows with 0.0 tok/s or a rate over 11 tokens. Every speed run now decodes exactly n tokens.
+        body["ignore_eos"] = True
     st, txt = ec.http("POST", base + "/completion", body, timeout=7200)
     if st != 200:
         raise RuntimeError(f"/completion: HTTP {st}: {txt[:300]}")
@@ -383,7 +589,8 @@ def completion(base: str, prompt: str, n: int, slot: int = 0) -> dict:
     # draft_n / draft_n_accepted: llama-server's speculative counts (MTP acceptance; absent without a draft)
     return {"content": r.get("content") or "", "prompt_n": t.get("prompt_n"), "prompt_tps": t.get("prompt_per_second"),
             "predicted_n": t.get("predicted_n"), "tps": t.get("predicted_per_second"),
-            "draft_n": t.get("draft_n"), "draft_n_accepted": t.get("draft_n_accepted")}
+            "draft_n": t.get("draft_n"), "draft_n_accepted": t.get("draft_n_accepted"),
+            "stop_type": r.get("stop_type"), "n_ctx_used": (t.get("prompt_n") or 0) + (t.get("cache_n") or 0)}
 
 
 def corpus() -> str:
@@ -429,6 +636,10 @@ def step_kl(name: str, arm: dict, out: str, base_logits: str, batch: int = 16, w
             cmd += [k] + ([v] if v != "" else [])
         elif k in ("--n-cpu-moe", "-dev"):
             cmd[cmd.index(k) + 1] = v
+        elif k in ("--cache-type-k", "--cache-type-v") and v == "q4_0":
+            # the KV type is what a q4kv arm tests; every earlier KL (and the base logits) ran llama-perplexity's
+            # default f16 cache, so only a q4_0 arm passes its type through
+            cmd += [k, v]
     env = dict(os.environ)
     env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     env["CUDA_VISIBLE_DEVICES"] = ec.CARD_UUID
@@ -444,7 +655,9 @@ def step_needles(name: str, arm: dict, port: int, out: str) -> dict:
     try:
         text = corpus()
         ok = 0
-        for depth in (1024, 32768, 131072):
+        # FLASHNEXT_NEEDLE_DEPTHS (e.g. "32768"): a diagnosis at one depth; PASS then means every needle asked
+        depths = [int(x) for x in (os.environ.get("FLASHNEXT_NEEDLE_DEPTHS") or "1024 32768 131072").split()]
+        for depth in depths:
             for i in range(5):
                 key = hashlib.sha256(f"{depth}-{i}".encode()).hexdigest()[:8].upper()
                 r = ec.Server(port).chat([{"role": "user", "content": needle_prompt(depth, key, text[i * 997:])}],
@@ -455,7 +668,8 @@ def step_needles(name: str, arm: dict, port: int, out: str) -> dict:
                 ok += hit
                 rec[f"{depth}-{i}"] = {"hit": hit, "answer": ans[:80]}
         rec["hits"] = ok
-        rec["PASS"] = ok == 15
+        rec["PASS"] = ok == 5 * len(depths)
+        rec["depths"] = depths
     finally:
         rec.update(srv.stop())
     return rec
@@ -472,7 +686,10 @@ def step_contract(name: str, arm: dict, port: int, out: str) -> dict:
     b = srv.base
     try:
         st, txt = ec.http("GET", b + "/slots")
-        rec["slots"] = st == 200 and isinstance(json.loads(txt), list) and len(json.loads(txt)) >= 3
+        # every slot the arm asks for (-np; the operator's layout is 2: the conversation and the jjava lane -- this
+        # read ">= 3" until 2026-09-30, the four-slot layout's check, and failed every -np 2 arm)
+        n_slots = int(arm["args"].get("-np") or 4)
+        rec["slots"] = st == 200 and isinstance(json.loads(txt), list) and len(json.loads(txt)) >= n_slots
         st, txt = ec.http("GET", b + "/props")
         rec["props_template"] = st == 200 and "<|im_start|>" in (json.loads(txt).get("chat_template") or "")
         msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
@@ -486,8 +703,13 @@ def step_contract(name: str, arm: dict, port: int, out: str) -> dict:
         again = ec.http("POST", b + "/completion", {"prompt": p, "id_slot": 1, "n_predict": 1, "cache_prompt": True,
                                                   "temperature": 0.0}, timeout=600)
         cache_n = (json.loads(again[1]).get("timings") or {}).get("cache_n") if again[0] == 200 else None
+        # a hybrid (recurrent) model resumes at its rollback snapshot: the last 1 + n_rs_seq tokens are read again,
+        # n_rs_seq = the MTP draft's --spec-draft-n-max (the snapshots a verify window may roll back; llama-memory-
+        # hybrid-idx TAG_RECURRENT_ROLLBACK_SPLITS), 0 without MTP; one more for the repeat's own last token
+        n_rs = int(arm["args"].get("--spec-draft-n-max") or 0) if "--spec-type" in arm["args"] else 0
         rec["slot_cache_reuse"] = {"first_prompt_n": first.get("prompt_n"), "repeat_cache_n": cache_n,
-                                   "ok": bool(cache_n) and cache_n >= (first.get("prompt_n") or 1) - 2}
+                                   "allowed_reread": n_rs + 2,
+                                   "ok": bool(cache_n) and cache_n >= (first.get("prompt_n") or 1) - (n_rs + 2)}
         r = ec.Server(port).chat([{"role": "user", "content": "Answer with one letter: A, B or C. Which is first?"}],
                                  max_tokens=8, thinking=False, sampling={"temperature": 0.0}, seed=0,
                                  extra={"logprobs": True, "top_logprobs": 5})
@@ -517,24 +739,226 @@ def step_contract(name: str, arm: dict, port: int, out: str) -> dict:
     return rec
 
 
+def step_lane(name: str, arm: dict, port: int, out: str) -> dict:
+    """The operator's layout (2026-09-29: "we should not have a second conversation at all ... the jjava engine should
+    be the only other thing we need ready to go"): -np 2, slot 0 the conversation, slot 1 the decider lane. Slot 0's
+    decode tok/s at ~4K / ~35K / ~68K, n=3 each, with the lane IDLE (nothing on slot 1) and ACTIVE (a thread sending
+    decider-shaped reads to slot 1 the whole time slot 0 decodes: a ~1.5K-token state, n_predict 1, top_logprobs 5,
+    the prompt cached -- jjava's shape). Decides whether jjava stays on the main card."""
+    import threading
+    srv = Launched(name, arm, port, out)
+    rec: dict = {"load_s": srv.load_s}
+    text = corpus()
+    lane_state = text[-6000:]
+    try:
+        for mode in ("idle", "active"):
+            stop = threading.Event()
+            reads = {"n": 0, "errors": 0, "ms": []}
+
+            def lane():
+                q = 0
+                while not stop.is_set():
+                    body = {"prompt": lane_state + f"\n\nQuestion {q % 7}: which option fits? Answer with one letter:",
+                            "id_slot": 1, "n_predict": 1, "cache_prompt": True, "temperature": 0.0, "n_probs": 5}
+                    t0 = time.time()
+                    st, _ = ec.http("POST", srv.base + "/completion", body, timeout=600)
+                    reads["ms"].append(round((time.time() - t0) * 1000))
+                    reads["n"] += 1
+                    reads["errors"] += st != 200
+                    q += 1
+            for k in (4, 32, 64):
+                runs = []
+                for rep in range(3):
+                    prompt = text[rep * 4096: rep * 4096 + k * 1024 * 4]
+                    completion(srv.base, prompt, 0, slot=0)           # read the prompt first, lane quiet
+                    t = threading.Thread(target=lane, daemon=True) if mode == "active" else None
+                    if t:
+                        stop.clear()
+                        t.start()
+                    r = completion(srv.base, prompt, 256, slot=0, ignore_eos=True)
+                    if t:
+                        stop.set()
+                        t.join(timeout=600)
+                    runs.append({kk: r[kk] for kk in ("predicted_n", "tps", "stop_type", "n_ctx_used", "draft_n",
+                                                      "draft_n_accepted")})
+                rec[f"{mode}_{k}k"] = runs
+            if mode == "active":
+                ms = sorted(reads["ms"]) or [0]
+                rec["lane_reads"] = {"n": reads["n"], "errors": reads["errors"], "ms_median": ms[len(ms) // 2],
+                                     "ms_p90": ms[int(len(ms) * 0.9)]}
+    except Exception as e:                                               # noqa: BLE001
+        rec["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        rec.update(srv.stop())
+    return rec
+
+
+OPT_RE = re.compile(r"op timing over (\d+) graphs: ([0-9.]+) ms per graph")
+OPT_ROW = re.compile(r"^\s*([0-9.]+) ms/graph\s+([0-9.]+)%\s+x(\d+)\s+(.*)$")
+
+
+def step_probe(name: str, arm: dict, port: int, out: str) -> dict:
+    """Window B's step 1 (the coordinator, 2026-09-29): a decode at ~4K and ~35K (256 tokens each, ignore_eos) under
+    the arm's diagnostic env -- GGML_MOE_LOG (routing traces for bench/moe_hit_sim.py) or GGML_CUDA_OP_TIMING
+    (0010's per-op GPU time; needs GGML_CUDA_DISABLE_GRAPHS=1). Records the decode timings and, for op timing, the
+    last printed top-30 table per context from the server log."""
+    srv = Launched(name, arm, port, out)
+    rec: dict = {"load_s": srv.load_s, "env": {k: v for k, v in arm["env"].items() if k.startswith("GGML_")}}
+    logp = os.path.join(out, f"{name}.server.log")
+    try:
+        text = corpus()
+        # FLASHNEXT_PROBE_CONTEXTS (e.g. "4 32 128"): the contexts probed, in K tokens (default 4 and 32)
+        for k in [int(x) for x in (os.environ.get("FLASHNEXT_PROBE_CONTEXTS") or "4 32").split()]:
+            mark = os.path.getsize(logp)
+            c0 = cache_counts(logp)
+            r = completion(srv.base, text[: k * 1024 * 4], int(os.environ.get("FLASHNEXT_PROBE_N") or 256), slot=0,
+                           ignore_eos=True)  # FLASHNEXT_PROBE_N: tokens decoded (768 gives 0017 a decode-only window)
+            row = {kk: r[kk] for kk in ("prompt_n", "prompt_tps", "predicted_n", "tps", "stop_type", "n_ctx_used",
+                                        "draft_n", "draft_n_accepted")}
+            with open(logp, encoding="utf-8", errors="replace") as f:
+                f.seek(mark)
+                tail = f.read().splitlines()
+            tables = [i for i, ln in enumerate(tail) if OPT_RE.search(ln)]
+            if tables:
+                i = tables[-1]
+                m = OPT_RE.search(tail[i])
+                rows = []
+                for ln in tail[i + 1: i + 31]:
+                    mm = OPT_ROW.match(ln.split(" I ", 1)[-1] if " I " in ln else ln)
+                    if mm:
+                        rows.append({"ms_per_graph": float(mm.group(1)), "pct": float(mm.group(2)),
+                                     "n": int(mm.group(3)), "op": mm.group(4)})
+                row["op_timing"] = {"graphs": int(m.group(1)), "ms_per_graph": float(m.group(2)), "top": rows}
+            hr = cache_rate(c0, cache_counts(logp))
+            if hr:
+                row["cache"] = hr
+            sched = [ln.split(" I ", 1)[-1].strip() for ln in tail if "sched timing" in ln]
+            if sched:
+                row["sched_timing"] = sched[-3:]
+            rec[f"{k}k"] = row
+    except Exception as e:                                               # noqa: BLE001
+        rec["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        rec.update(srv.stop())
+    return rec
+
+
+SANITIZER = ("C:/Users/jwals/engines/tools/cuda-sanitizer-api-12.8.93/pkg/Library/compute-sanitizer/"
+             "compute-sanitizer.exe")      # engines/manifest.yaml toolchains msvc-cuda128 sanitizer
+
+
+def step_fault(name: str, arm: dict, out: str) -> dict:
+    """M0, ONE bounded attempt (the coordinator, 2026-09-29) at the expert cache's multi-token fault: the KL step's
+    command (llama-perplexity at -b/-ub 16, the batch that faulted) for ONE chunk, first with CUDA_LAUNCH_BLOCKING=1
+    (the faulting kernel named at its launch), then under compute-sanitizer memcheck (the first bad access)."""
+    exe = os.path.join(arm["bin"], "llama-perplexity.exe")
+    textf = os.path.join(out, "kl-text.txt")
+    cmd = [exe, "-m", SHARD1, "-f", textf, "-c", "4096", "--chunks", "1", "-b", "16", "-ub", "16",
+           "-dev", "CUDA0", "-ngl", "999", "-lm", "mmap", "--lazy-mode", "on"]
+    for k, v in arm["args"].items():
+        if k in ("--moe-expert-cache", "--n-cpu-moe", "-t", "-C", "--cpu-strict"):
+            cmd += [k] + ([v] if v != "" else [])
+    env = dict(os.environ, CUDA_DEVICE_ORDER="PCI_BUS_ID", CUDA_VISIBLE_DEVICES=ec.CARD_UUID, **arm["env"])
+    rec: dict = {}
+    for tag, pre, extra, tmo in (("blocking", [], {"CUDA_LAUNCH_BLOCKING": "1"}, 1800),
+                                 ("memcheck", [SANITIZER, "--tool", "memcheck", "--print-limit", "20",
+                                               "--show-backtrace", "device"], {}, 3600)):
+        logf = os.path.join(out, f"fault-{tag}.log")
+        t0 = time.time()
+        try:
+            with open(logf, "w", encoding="utf-8") as f:
+                p = subprocess.run(pre + cmd, env={**env, **extra}, stdout=f, stderr=subprocess.STDOUT, timeout=tmo)
+            code = p.returncode
+        except subprocess.TimeoutExpired:
+            code = "timeout"
+        tail = open(logf, encoding="utf-8", errors="replace").read().splitlines()
+        rec[tag] = {"exit": code, "seconds": round(time.time() - t0), "log": logf,
+                    "errors": [ln for ln in tail if re.search(r"error|Invalid|illegal|out of bounds|at 0x", ln,
+                                                              re.I)][:30]}
+        ec.log(f"fault {tag}: exit {code}")
+    return rec
+
+
+def step_jjava(name: str, arm: dict, port: int, out: str) -> dict:
+    """jjava on this engine (the operator, 2026-09-29: "every model should have the jjava unlock"): the decider's
+    per-model measurement (bench/decider/measure_model.py: labels, letter priors, label bias, tie band,
+    legacy_vs_typed) and JevBench's 231 public items (bench/decider/jevbench_run.py), against this arm's own server
+    by base URL (never llama-swap's /upstream). Records each script's exit code and its log; the records land where
+    the runtime reads them (bench/decider/results/models/flash-next.json and the jevbench run dir)."""
+    srv = Launched(name, arm, port, out)
+    rec: dict = {"load_s": srv.load_s}
+    py = sys.executable
+    try:
+        for tag, cmd, tmo in (
+                ("measure_model", [py, os.path.join(ROOT, "bench", "decider", "measure_model.py"), "--run",
+                                   "--model", "flash-next", "--base-url", srv.base], 4 * 3600),
+                ("jevbench", [py, os.path.join(ROOT, "bench", "decider", "jevbench_run.py"), "--run",
+                              "--model", "flash-next", "--base-url", srv.base], 4 * 3600)):
+            logf = os.path.join(out, f"jjava-{tag}.log")
+            t0 = time.time()
+            with open(logf, "w", encoding="utf-8") as f:
+                p = subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, timeout=tmo)
+            rec[tag] = {"exit": p.returncode, "seconds": round(time.time() - t0), "log": logf}
+            ec.log(f"jjava {tag}: exit {p.returncode} in {rec[tag]['seconds']} s")
+    except Exception as e:                                               # noqa: BLE001
+        rec["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        rec.update(srv.stop())
+    return rec
+
+
+CACHE_RE = re.compile(r"moe-cache: steps=(\d+) hits=(\d+) misses=(\d+)")
+
+
+def cache_counts(logp: str) -> list[tuple[int, int, int]]:
+    """0016's moe-cache lines in a server log (-lv 4): (steps, hits, misses), running totals."""
+    try:
+        with open(logp, encoding="utf-8", errors="replace") as f:
+            return [tuple(int(x) for x in m.groups()) for m in CACHE_RE.finditer(f.read())]
+    except OSError:
+        return []
+
+
+def cache_rate(before: list, after: list) -> dict | None:
+    """The VRAM cache's hit rate between two readings of cache_counts (the lines printed in between)."""
+    if not after or after == before:
+        return None
+    s0, h0, m0 = before[-1] if before else (0, 0, 0)
+    s1, h1, m1 = after[-1]
+    return {"steps": s1 - s0, "hits": h1 - h0, "misses": m1 - m0,
+            "hit_rate": round((h1 - h0) / max(1, (h1 - h0) + (m1 - m0)), 4)}
+
+
 def step_speed(name: str, arm: dict, port: int, out: str) -> dict:
     srv = Launched(name, arm, port, out)
     rec: dict = {"load_s": srv.load_s}
+    logp = os.path.join(out, f"{name}.server.log")
     try:
         text = corpus()
-        for k in (4, 32, 64, 128):
+        # FLASHNEXT_SPEED_CONTEXTS (e.g. "32"): only those rows -- a like-for-like rerun of one row of another arm
+        ks = [int(x) for x in (os.environ.get("FLASHNEXT_SPEED_CONTEXTS") or "4 32 64 128").split()]
+        for k in ks:
             runs = []
+            c0 = cache_counts(logp)
             for rep in range(3):
                 prompt = text[rep * 4096: rep * 4096 + k * 1024 * 4]
-                r = completion(srv.base, prompt, 256, slot=rep % 2)
+                r = completion(srv.base, prompt, 256, slot=rep % 2, ignore_eos=True)
                 runs.append({kk: r[kk] for kk in ("prompt_n", "prompt_tps", "predicted_n", "tps", "draft_n",
-                                                  "draft_n_accepted")})
+                                                  "draft_n_accepted", "stop_type", "n_ctx_used")})
             rec[f"{k}k"] = runs
+            hr = cache_rate(c0, cache_counts(logp))
+            if hr:
+                rec[f"{k}k_cache"] = hr
+        if int(arm["args"].get("-np") or 4) < 4 or os.environ.get("FLASHNEXT_SPEED_CONTEXTS"):
+            # the operator's layout (-np 2: one conversation + the jjava lane) has no second conversation to idle
+            return rec
         # placement: an idle 64K conversation on slot 2 while slot 3 decodes at 8K (the #59 shape)
         completion(srv.base, text[: 64 * 1024 * 4], 0, slot=2)
         rec["8k_with_idle_64k"] = [
-            {kk: r[kk] for kk in ("prompt_n", "prompt_tps", "predicted_n", "tps")}
-            for r in (completion(srv.base, text[rep * 997: rep * 997 + 8 * 1024 * 4], 256, slot=3) for rep in range(3))]
+            {kk: r[kk] for kk in ("prompt_n", "prompt_tps", "predicted_n", "tps", "draft_n", "draft_n_accepted",
+                                  "stop_type", "n_ctx_used")}
+            for r in (completion(srv.base, text[rep * 997: rep * 997 + 8 * 1024 * 4], 256, slot=3, ignore_eos=True)
+                      for rep in range(3))]
     finally:
         rec.update(srv.stop())
     return rec
@@ -566,19 +990,20 @@ def selftest() -> int:
           "outside the yardstick is reported, not passed")
     b = arms(42, 7, {"iq2": 60, "q2": 66, "mmcpu": 80})
     ca = command(b["flash-all-q2"], 18100)
-    check(ca[ca.index("-m") + 1].endswith("Q2_0-00001-of-00002.gguf") and ca[ca.index("--moe-expert-cache") + 1] == "66"
-          and ca[ca.index("--n-cpu-moe") + 1] == "48" and "--spec-type" in ca and ca[ca.index("-C") + 1] == "0xFFFF",
-          "flash-all-q2: the Q2_0 file, its own slot count, every layer's experts in RAM, MTP, the P-cores")
-    cm = command(b["flash-all-mmcpu"], 18100)
-    check("--no-mmproj-offload" in cm and cm[cm.index("--moe-expert-cache") + 1] == "80", "flash-all-mmcpu")
+    check(ca[ca.index("-m") + 1].endswith("Q2_0-00001-of-00002.gguf") and "--moe-expert-cache" not in ca
+          and ca[ca.index("--n-cpu-moe") + 1] == str(48 - 66 * 48 // 512) and "--spec-type" in ca
+          and ca[ca.index("-C") + 1] == "0xFFFF",
+          "flash-all-q2: the Q2_0 file, its measured room as whole GPU expert layers, MTP, the P-cores")
+    check("--mmproj" not in ca and "--mmproj" not in command(b["flash-cpu"], 18100)
+          and "--mmproj" in command(b["base"], 18100), "flash arms carry no projector; base keeps the deployed one")
     check(derive_cache_all(1000) == 1 and derive_cache_all(1000 + 48 * 3) >= 2 and
           derive_cache_all(1000, MMPROJ_MIB) > derive_cache_all(1000), "fit2: slots from the measured free VRAM")
     c4 = command(arms(42, 7, {"iq2": 60, "q2": 66, "mmcpu": 80}, 12)["flash-a4000"], 18100)
-    check(c4[c4.index("--n-cpu-moe") + 1] == "36" and c4[c4.index("-dev") + 1] == "CUDA0,CUDA1"
-          and c4[c4.index("-ts") + 1] == "1,0" and "blk\\.(36|37|" in c4[c4.index("-ot") + 1]
-          and c4[c4.index("-ot") + 1].endswith("47)\\.ffn_(up|gate|down)_exps\\.weight=CUDA1")
-          and c4[c4.index("--moe-expert-cache") + 1] == str(60 * 48 // 36),
-          "flash-a4000: the last 12 layers' experts on CUDA1, 36 in RAM with the same total cache slots")
+    check(c4[c4.index("--n-cpu-moe") + 1] == "31" and c4[c4.index("-dev") + 1] == "CUDA0,CUDA1"
+          and c4[c4.index("-ts") + 1] == "1,0" and r"blk\.(31|32|" in c4[c4.index("-ot") + 1]
+          and c4[c4.index("-ot") + 1].endswith(r"42)\.ffn_(up|gate|down)_exps\.weight=CUDA1")
+          and "--moe-expert-cache" not in c4,
+          "flash-a4000: 31 layers in RAM, the next 12 on CUDA1, the last 5 on CUDA0 (60 slots -> 5 layers)")
     check(a4000_layers(11076) == int((11076 - A4000_RESERVE_MIB) // EXPERT_MIB_PER_LAYER) and a4000_layers(100) == 0,
           "a4000: layers from the free VRAM less the reserve")
     p = needle_prompt(100, "ABCD1234", "x" * 1000)
@@ -597,6 +1022,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--steps", nargs="*",
                     default=["kernels", "fit", "fit2", "exact", "kl", "needles", "corrupt", "contract", "speed"])
     ap.add_argument("--arms", nargs="*")
+    ap.add_argument("--redo", nargs="*", default=[],
+                    help="arms whose finished steps in --out are run again, not reused (a changed engine or arm)")
     ap.add_argument("--n-cpu-moe", type=int, default=42)
     ap.add_argument("--cache-slots", type=int, default=0)
     ap.add_argument("--all-slots", help="iq2,q2,mmcpu slots per layer for the all-layer cache arms (else fit2's)")
@@ -625,14 +1052,24 @@ def main(argv: list[str]) -> int:
     os.makedirs(a.out, exist_ok=True)
     prod_argv, _prod_env = ec.production_command()
     results: dict = {"started": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "arms": {}, "steps": a.steps}
+    # what an earlier run into this --out recorded is carried from the start, so a run that fails early (a launch
+    # that exits) does not overwrite gate.json without it (2026-09-29: fit2's failure dropped the seeded yardstick)
+    try:
+        _prev0 = json.load(open(os.path.join(a.out, "gate.json"), encoding="utf-8"))
+    except Exception:                                                    # noqa: BLE001
+        _prev0 = {}
+    for _k in ("kernels", "fit", "fit2", "kl_yardstick"):
+        if _prev0.get(_k):
+            results[_k] = _prev0[_k]
+    results["arms"].update(_prev0.get("arms") or {})
     why = ec.wait_quiet(prod_argv, 3600)
     if why:
         print(f"not run: {why}")
         return 3
     sys.path.insert(0, os.path.join(ROOT, "mcp"))
-    import jobs                                                        # noqa: E402
+    lane_hold = None
     try:
-        jobs.pause("gpu", by=ec.LANE_BY, why="Flash-Next gate (bench/flashnext_gate.py)", ttl_seconds=6 * 3600)
+        lane_hold = ec.hold_lane("Flash-Next gate (bench/flashnext_gate.py)", 12 * 3600)
         ec.http("POST", f"{ec.SWAP}/api/models/unload/{ec.PROD_ID}", timeout=120)
         t0 = time.time()
         while ec.PROD_ID in ec.running() or any("llama-server" in p for p in ec.card_pids()):
@@ -654,10 +1091,13 @@ def main(argv: list[str]) -> int:
             # the all-layer cache configuration at ONE slot per layer (flash-all: -ub 4096, MTP, the profile), warmed
             # with a prompt longer than one 4K batch; its lowest free VRAM sizes the cache (derive_cache_all)
             probe = arms(a.n_cpu_moe, a.cache_slots, {"iq2": 1, "q2": 1, "mmcpu": 1})["flash-all"]
+            # -lv 4: the engine's own allocation log (every buffer it reserves), to name what grows after load
+            probe = dict(probe, args={**probe["args"], "-lv": "4"})
             srv = Launched("fit2", probe, a.port, a.out)
+            g_load = ec.gpu() or {}
             completion(srv.base, corpus()[: 12288 * 4], 64)
             g = ec.gpu() or {}
-            rec = {"load_s": srv.load_s, "gpu_after_warm": g, **srv.stop()}
+            rec = {"load_s": srv.load_s, "gpu_after_load": g_load, "gpu_after_warm": g, **srv.stop()}
             free = min(g.get("free") or 0, rec.get("gpu_min_free") or g.get("free") or 0)
             all_slots = {"iq2": derive_cache_all(free), "q2": derive_cache_all(free, 0, EXPERT_BYTES_Q2),
                          "mmcpu": derive_cache_all(free, MMPROJ_MIB)}
@@ -712,11 +1152,14 @@ def main(argv: list[str]) -> int:
             # Recorded as each step finishes, so a later step's failure keeps the earlier steps' results.
             results["arms"][n] = r
             done_before = (prev.get("arms") or {}).get(n) or {}
+            # the steps this run does not ask for stay as recorded (2026-09-30: a run with --steps contract lane speed
+            # rewrote cache-all's record without its kl, needles and corrupt)
+            r.update({k: v for k, v in done_before.items() if k not in a.steps})
 
             def reuse(step: str, n=n, r=r, done_before=done_before) -> bool:
                 """A rerun into the same --out keeps a step this arm FINISHED there (no error, no guard)."""
                 got = done_before.get(step)
-                if not isinstance(got, dict) or got.get("error") or got.get("guard"):
+                if n in (a.redo or []) or not isinstance(got, dict) or got.get("error") or got.get("guard"):
                     return False
                 r[step] = dict(got, reused_from=prev.get("started"))
                 ec.log(f"{step} {n}: reusing the run started {prev.get('started')}")
@@ -732,7 +1175,7 @@ def main(argv: list[str]) -> int:
             if "kl" in a.steps and "kl" in arm["checks"] and n != "base" and reuse("kl"):
                 pass
             elif "kl" in a.steps and "kl" in arm["checks"] and n != "base":
-                r["kl"] = step_kl(n, arm, a.out, base_logits, 16)
+                r["kl"] = step_kl(n, arm, a.out, base_logits, arm.get("kl_batch", 16))
                 r["kl"]["verdict"] = kl_verdict(r["kl"], results.get("kl_yardstick") or {})
                 save()
             if "needles" in a.steps and "needles" in arm["checks"] and reuse("needles"):
@@ -747,6 +1190,26 @@ def main(argv: list[str]) -> int:
                 r["corrupt"] = ec.run_arm(n, os.path.join(arm["bin"], "llama-server.exe"), arm["env"],
                                           FLASHNEXT_ARGV, {"CUDA_VISIBLE_DEVICES": ec.CARD_UUID}, a.port, a.out,
                                           3, 16, 10, arm["args"])
+                save()
+            if "fault" in a.steps and "fault" in arm["checks"] and reuse("fault"):
+                pass
+            elif "fault" in a.steps and "fault" in arm["checks"]:
+                r["fault"] = step_fault(n, arm, a.out)
+                save()
+            if "jjava" in a.steps and "jjava" in arm["checks"] and reuse("jjava"):
+                pass
+            elif "jjava" in a.steps and "jjava" in arm["checks"]:
+                r["jjava"] = step_jjava(n, arm, a.port, a.out)
+                save()
+            if "probe" in a.steps and "probe" in arm["checks"] and reuse("probe"):
+                pass
+            elif "probe" in a.steps and "probe" in arm["checks"]:
+                r["probe"] = step_probe(n, arm, a.port, a.out)
+                save()
+            if "lane" in a.steps and "lane" in arm["checks"] and reuse("lane"):
+                pass
+            elif "lane" in a.steps and "lane" in arm["checks"]:
+                r["lane"] = step_lane(n, arm, a.port, a.out)
                 save()
             if "contract" in a.steps and "contract" in arm["checks"] and reuse("contract"):
                 pass
@@ -769,6 +1232,7 @@ def main(argv: list[str]) -> int:
                 r["exact"]["PASS"] = bool(keys) and all(r["exact"].get(k) == base_exact.get(k) for k in keys)
     finally:
         results["restore"] = ec.restore(prod_argv)
+        results["lane"] = ec.release_lane(lane_hold)
         results["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         json.dump(results, open(os.path.join(a.out, "gate.json"), "w"), indent=1)
     print(json.dumps({n: {s: (v.get("PASS", v.get("verdict")) if isinstance(v, dict) else v) for s, v in r.items()}

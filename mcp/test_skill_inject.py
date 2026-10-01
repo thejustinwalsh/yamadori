@@ -329,8 +329,8 @@ def test_profiles() -> None:
 def test_no_decider() -> None:
     text, rec = I.inject([KOOTA], "user", turn=None, model="bonsai")
     check("no decider -> nothing goes in, and the record says why",
-          text == "" and "safe default" in rec["why"],
-          rec)
+          text == "" and "nothing goes in" in rec["why"]
+          and rec["failure"]["code"] == "NO_DECIDER", rec)
 
     class Down:
         on = True
@@ -375,8 +375,19 @@ def test_select_wiring() -> None:
               text2 == text and rec2.get("replayed"))
         text3, rec3, _ = S.decide(msgs, "code_generation", [KOOTA], [],
                                   None, key="k3", select_fn=sel)
-        check("no Turn in scope (an offline caller): the per-skill path",
-              "inject" not in rec3 and text3, rec3.get("decisions"))
+        check("no Turn in scope: NOTHING goes in -- no path picks skills "
+              "without jjava (operator, 2026-09-29) -- and the record says "
+              "why", text3 == "" and rec3["inject"]["failure"]["code"]
+              == "NO_DECIDER" and rec3["decisions"] == [], rec3)
+        import decider_stub
+        with decider_stub.installed(want=decider_stub.evidence):
+            with T.Turn(msgs, on=None, key="conv", request="req10") as t4:
+                text4, rec4, _ = S.decide(msgs, "code_generation", [KOOTA],
+                                          [], None, key="k4", select_fn=sel)
+        check("the offline stub decider (mcp/decider_stub.py): the real "
+              "Turn, on, answering by its evidence rule",
+              t4.on and "world.query" in text4
+              and rec4["inject"]["chosen"], rec4.get("inject"))
     finally:
         S.select = orig
         skill_match.plan_turn = orig_plan

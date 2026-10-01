@@ -129,6 +129,20 @@ class Table:
         out["source"] = str(w.get("source") or "")
         return out
 
+    def helpers(self, model: str | None) -> dict:
+        """Where this model's jjava (the decider, the skills injector, the Jev API) and the client's side calls
+        run: {decider, side_calls}, each a llama-swap model id, or "self" (the main card's lane). Only a table FILE
+        routes helpers (the older forms keep today's behaviour)."""
+        h = self.row(model).get("helpers") if self.full else None
+        return dict(h) if isinstance(h, dict) else {}
+
+    def locked(self, model: str | None) -> bool:
+        """The model runs ALONE on the card: one conversation slot, no lane, and no OTHER work touches it -- no
+        decider, no side calls, no other conversation, no release (operator, 2026-09-30, for Flash-Next, then Bonsai).
+        Its own conversation's work is allowed: its compactions, its warms, and a /slots read of the loaded model
+        (max_mode.OWN_WORK; coordinator 2026-09-30)."""
+        return bool(self.full and self.row(model).get("locked"))
+
     def vision(self, model: str | None) -> bool | None:
         v = self.row(model).get("vision")
         return None if v is None else bool(v)
@@ -275,7 +289,7 @@ def describe() -> dict:
             prof[k] = {"value": (f"<{len(val)} chars>" if isinstance(val, str) and len(val) > 40 else val),
                        "class": v.get("class")}
         out["models"][m] = {"rank": t.rank(m), "tiers": t.tiers_of(m), "window": t.window(m),
-                            "vision": t.vision(m), "profile": prof}
+                            "vision": t.vision(m), "locked": t.locked(m), "helpers": t.helpers(m), "profile": prof}
     return out
 
 

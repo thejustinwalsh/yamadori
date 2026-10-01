@@ -37,13 +37,29 @@ A CASE (bench/skills/pitfalls/<area>.jsonl, one per line):
                        is a GAP (reported: to be filled through the ONE
                        skills pipeline from the cited source, never by hand)
   source               {url, quote, licence}: the docs page and the VERBATIM
-                       sentence the case comes from (react.dev: text CC BY
-                       4.0, code MIT); the quotes are the ones the recipe
+                       sentence the case comes from (react.dev: CC BY 4.0,
+                       its LICENSE-DOCS.md); the quotes are the ones the recipe
                        corpus already holds (bench/recipes/react_dev_*.jsonl
                        `evidence`, fetched from reactjs/react.dev)
   examples             {pitfall: code, good: code}: the rules' own test -- the
                        pitfall example must trip the pitfall rule and not the
                        good one, and the reverse (--self-test)
+  THE AREAS PAST REACT (operator, 2026-09-30: "Yes to everything pending,
+  queue it up lets go"; r3f v10 + three, TSL, TypeGPU, koota, pmndrs math,
+  TypeScript, Rust/WASM) add:
+  never_in_prompt      the good pattern's names; the test asserts none is in
+                       the prompt
+  source.file          the PINNED copy (pitfalls/sources/<slug>/, its
+                       MANIFEST.json: commit or fetch date, sha256, licence);
+                       the quote must be a verbatim substring of it
+  packages             the held npm packages tsc installs ([] = plain TS)
+  typecheck "none"     + typecheck_why, where tsc cannot apply (Rust)
+  example_lang         the fence a bare example is wrapped in (default tsx)
+  Their rules live in bench/skills/pitfall_rules/<area>.py (loaded into
+  RULES; a duplicate name is an error); their gaps in pitfalls/gaps/<area>
+  .json, filled through the ONE pipeline by bench/skills/pitfall_gap_fill.py
+  in a GPU window. Code reads Rust (tree-sitter rust), TOML, C headers and
+  WGSL/HTML/shell text besides TS/JSON.
 
 A RUN, per case: the same prompt WITHOUT and WITH the skill's items rendered
 by mcp/skill_inject.render in each VARIANT (the per-model renderer's
@@ -113,7 +129,8 @@ def blocks(answer: str) -> list[dict]:
             i += 1
             continue
         prev = lines[i - 1].strip() if i else ""
-        nm = re.search(r"([\w./-]+\.(?:tsx?|jsx?|json|mjs|cjs))", prev)
+        nm = re.search(r"([\w./-]+\.(?:json|tsx|ts|jsx|js|mjs|cjs|rs|toml"
+                       r"|wgsl|html|h|hpp|c))\b", prev)
         j = i + 1
         body = []
         while j < len(lines) and not re.match(r"^\s*```\s*$", lines[j]):
@@ -125,9 +142,19 @@ def blocks(answer: str) -> list[dict]:
     return out
 
 
+RUST_LANGS = ("rust", "rs")
+TOML_LANGS = ("toml",)
+C_LANGS = ("c", "h", "cpp", "hpp", "c++")
+RAW_LANGS = ("wgsl", "html", "sh", "bash", "shell", "console")
+
+
 class Code:
     """The answer's code as rules read it: every JS/TS block parsed as tsx
-    (tree-sitter), and the JSON blocks parsed as JSON."""
+    (tree-sitter), the JSON blocks parsed as JSON; since 2026-09-30 (the
+    pitfall areas past React) Rust blocks parsed with tree-sitter's rust
+    grammar (`rust`), TOML blocks with tomllib (`toml`: Cargo.toml,
+    cbindgen.toml), C headers with tree-sitter's c grammar (`c`), and WGSL,
+    HTML and shell blocks kept as text (`raw`)."""
 
     def __init__(self, answer: str):
         from tree_sitter_language_pack import get_parser
@@ -135,12 +162,35 @@ class Code:
         self.blocks = blocks(answer)
         self.trees = []
         self.json = []
+        self.rust = []
+        self.toml = []
+        self.c = []
+        self.raw = []
         for b in self.blocks:
             if b["lang"] == "json" or b["name"].endswith(".json"):
                 try:
                     self.json.append((b, json.loads(b["code"])))
                 except ValueError:
                     pass
+                continue
+            if b["lang"] in RUST_LANGS or b["name"].endswith(".rs"):
+                src = b["code"].encode("utf-8")
+                self.rust.append((b, src, get_parser("rust").parse(src)))
+                continue
+            if b["lang"] in TOML_LANGS or b["name"].endswith(".toml"):
+                import tomllib
+                try:
+                    self.toml.append((b, tomllib.loads(b["code"])))
+                except (ValueError, tomllib.TOMLDecodeError):
+                    pass
+                continue
+            if b["lang"] in C_LANGS or re.search(r"\.(h|hpp|c)$", b["name"]):
+                src = b["code"].encode("utf-8")
+                self.c.append((b, src, get_parser("c").parse(src)))
+                continue
+            if b["lang"] in RAW_LANGS or re.search(r"\.(wgsl|html)$",
+                                                   b["name"]):
+                self.raw.append(b)
                 continue
             if b["lang"] in ("", "ts", "tsx", "typescript", "js", "jsx",
                              "javascript", "mjs") or re.search(
@@ -149,8 +199,11 @@ class Code:
                 self.trees.append((b, src, self.parser.parse(src)))
 
     # -- walking
-    def nodes(self, types=None):
-        for b, src, t in self.trees:
+    def nodes(self, types=None, lang: str = "ts"):
+        """Every node of the TS/JS trees (lang "ts"), the Rust trees
+        ("rust") or the C trees ("c"), optionally of the given types."""
+        trees = {"ts": self.trees, "rust": self.rust, "c": self.c}[lang]
+        for b, src, t in trees:
             stack = [t.root_node]
             while stack:
                 n = stack.pop()
@@ -222,9 +275,40 @@ class Code:
                     out.append((en, an, val))
         return out
 
-    def all_code(self) -> str:
+    def all_code(self, lang: str = "ts") -> str:
+        trees = {"ts": self.trees, "rust": self.rust, "c": self.c}[lang]
         return "\n".join(self.text(src, t.root_node)
-                         for _b, src, t in self.trees)
+                         for _b, src, t in trees)
+
+    def files(self, suffix: str) -> list[dict]:
+        """The blocks whose file name ends with `suffix` (e.g. "Cargo.toml",
+        "tsconfig.json", ".wgsl")."""
+        return [b for b in self.blocks if b["name"].endswith(suffix)]
+
+    def toml_of(self, suffix: str) -> list[dict]:
+        """Parsed TOML of the blocks named ...`suffix` (e.g. "Cargo.toml");
+        an unnamed TOML block counts when it is the only one."""
+        named = [d for b, d in self.toml if b["name"].endswith(suffix)]
+        if named:
+            return named
+        unnamed = [d for b, d in self.toml if not b["name"]]
+        return unnamed if len(self.toml) == 1 else []
+
+    def json_of(self, suffix: str) -> list:
+        """Parsed JSON of the blocks named ...`suffix` (e.g.
+        "tsconfig.json"); tsconfig allows comments and trailing commas, so a
+        block that JSON rejects is read again with those removed."""
+        out = [d for b, d in self.json if b["name"].endswith(suffix)]
+        for b in self.blocks:
+            if b["name"].endswith(suffix) and not any(
+                    b is x for x, _d in self.json):
+                t = re.sub(r"//[^\n]*|/\*.*?\*/", "", b["code"], flags=re.S)
+                t = re.sub(r",\s*([}\]])", r"\1", t)
+                try:
+                    out.append(json.loads(t))
+                except ValueError:
+                    pass
+        return out
 
 
 # ----------------------------------------------------------------- rules ---
@@ -294,21 +378,27 @@ def r_no_effect(c: Code) -> bool:
     return not any(True for _ in c.effect_bodies())
 
 
-def r_fetch_in_effect(c: Code) -> bool:
-    for src, cb, _n in c.effect_bodies():
-        if any(c.callee(src, x).split(".")[-1] in ("fetch", "post", "send",
-                                                   "sendMessage")
-               for x in c.within(src, cb, {"call_expression"})):
+_IO_CALL = re.compile(r"^(fetch|load|post|send|sendMessage|axios)\w*$")
+
+
+def _io_calls(c: Code, src, node) -> bool:
+    """A call in `node` whose callee has a segment naming network IO
+    (fetch..., load..., post, send...)."""
+    for x in c.within(src, node, {"call_expression"}):
+        segs = re.split(r"[.(]", c.callee(src, x))
+        if any(_IO_CALL.match(g) for g in segs if g):
             return True
     return False
+
+
+def r_fetch_in_effect(c: Code) -> bool:
+    return any(_io_calls(c, src, cb) for src, cb, _n in c.effect_bodies())
 
 
 def r_fetch_in_effect_no_cleanup(c: Code) -> bool:
     """A fetch in an Effect whose callback returns no cleanup function."""
     for src, cb, _n in c.effect_bodies():
-        calls = [c.callee(src, x) for x in c.within(src, cb,
-                                                    {"call_expression"})]
-        if not any(x.split(".")[-1] == "fetch" for x in calls):
+        if not _io_calls(c, src, cb):
             continue
         body = cb.child_by_field_name("body")
         rets = c.within(src, body, {"return_statement"}) if body is not None \
@@ -436,13 +526,22 @@ def _vite_trees(c: Code):
 
 
 def r_compiler_configured(c: Code) -> bool:
-    """The React Compiler on per the docs: the Vite config passes
-    babel-plugin-react-compiler to @vitejs/plugin-react's babel plugins, and
-    package.json lists the plugin."""
+    """The React Compiler on per react.dev's installation page (pinned
+    75ef18a, learn/react-compiler/installation.md): package.json lists
+    `babel-plugin-react-compiler` ("Install React Compiler as a
+    devDependency") AND the Vite config turns it on in one of the page's
+    three forms -- `reactCompilerPreset()` from @vitejs/plugin-react >= 6
+    with @rolldown/plugin-babel, the Babel plugin by name in
+    @rolldown/plugin-babel's plugins, or (plugin-react < 6) the inline
+    `babel: { plugins: ['babel-plugin-react-compiler'] }`."""
     in_vite = False
     for b, src, t in _vite_trees(c):
         for n in Code.within(src, t.root_node, {"string"}):
             if "babel-plugin-react-compiler" in Code.text(src, n):
+                in_vite = True
+        for n in Code.within(src, t.root_node, {"call_expression"}):
+            f = n.child_by_field_name("function")
+            if f is not None and Code.text(src, f) == "reactCompilerPreset":
                 in_vite = True
     in_pkg = any("babel-plugin-react-compiler" in json.dumps(j)
                  for _b, j in c.json)
@@ -453,8 +552,188 @@ def r_compiler_missing(c: Code) -> bool:
     return not r_compiler_configured(c)
 
 
+_FUNCS = {"function_declaration", "function_expression", "arrow_function",
+          "function", "method_definition"}
+
+
+def _components(c: Code):
+    """(src, body node) of every component: a function declaration, or an
+    arrow / function assigned to a const, whose name starts with a capital
+    letter."""
+    for b, src, n in c.nodes({"function_declaration"}):
+        nm = n.child_by_field_name("name")
+        body = n.child_by_field_name("body")
+        if nm is not None and body is not None and \
+                c.text(src, nm)[:1].isupper():
+            yield src, body
+    for b, src, n in c.nodes({"variable_declarator"}):
+        nm = n.child_by_field_name("name")
+        val = n.child_by_field_name("value")
+        if nm is not None and val is not None and val.type in (
+                "arrow_function", "function_expression") and \
+                c.text(src, nm)[:1].isupper():
+            body = val.child_by_field_name("body")
+            if body is not None:
+                yield src, body
+
+
+def _top_level(node):
+    """The nodes of a function body outside any nested function."""
+    out, stack = [], list(node.children)
+    while stack:
+        x = stack.pop()
+        if x.type in _FUNCS:
+            continue
+        out.append(x)
+        stack.extend(x.children)
+    return out
+
+
+def r_ref_current_in_render(c: Code) -> bool:
+    """`.current` read or written in a component's render body (outside any
+    nested function), except the docs' one-time initialisation idiom
+    `if (!ref.current) ref.current = ...`."""
+    for src, body in _components(c):
+        lazy = set()
+        for x in _top_level(body):
+            if x.type == "if_statement":
+                cond = x.child_by_field_name("condition")
+                if cond is not None and re.search(
+                        r"!\s*[\w$.]+\.current\b|[\w$.]+\.current\s*===?\s*"
+                        r"null", c.text(src, cond)):
+                    for y in Code.within(src, x, {"member_expression"}):
+                        lazy.add(y.id)
+        for x in _top_level(body):
+            if x.type == "member_expression" and x.id not in lazy and \
+                    c.text(src, x).endswith(".current"):
+                return True
+    return False
+
+
+def r_no_ref_current_in_render(c: Code) -> bool:
+    return bool(c.trees) and not r_ref_current_in_render(c)
+
+
+def _effect_cleanup(c: Code, src, cb) -> bool:
+    body = cb.child_by_field_name("body")
+    if body is None:
+        return False
+    if body.type != "statement_block":
+        return body.type in _FUNCS
+    for r in _top_level(body):
+        if r.type == "return_statement" and r.named_children and \
+                r.named_children[0].type in ("arrow_function",
+                                             "function_expression",
+                                             "identifier"):
+            return True
+    return False
+
+
+def r_ref_guard_in_effect(c: Code) -> bool:
+    """An Effect guarded by a ref so it "runs once" (`if (!x.current)` /
+    `if (x.current) return`) -- the docs' "Don't use refs to prevent
+    Effects from firing"."""
+    for src, cb, _n in c.effect_bodies():
+        for x in c.within(src, cb, {"if_statement"}):
+            cond = x.child_by_field_name("condition")
+            if cond is not None and ".current" in c.text(src, cond):
+                return True
+    return False
+
+
+def r_effect_cleanup_no_guard(c: Code) -> bool:
+    bodies = list(c.effect_bodies())
+    return bool(bodies) and not r_ref_guard_in_effect(c) and all(
+        _effect_cleanup(c, src, cb) for src, cb, _n in bodies
+        if _io_calls(c, src, cb) or "connect" in c.text(src, cb))
+
+
+def r_use_cached_promise(c: Code) -> bool:
+    return r_uses_use_hook(c) and not r_use_of_render_promise(c)
+
+
+def r_imperative_handle(c: Code) -> bool:
+    return c.called("useImperativeHandle")
+
+
+def r_open_as_prop(c: Code) -> bool:
+    """The modal's visibility is a prop (`isOpen` / `open`), not an
+    imperative handle."""
+    if r_imperative_handle(c):
+        return False
+    if any(a in ("isOpen", "open") and en[:1].isupper()
+           for en, a, _v in c.jsx_attrs()):
+        return True
+    for b, src, n in c.nodes({"object_pattern"}):
+        if re.search(r"(^|[{,\s])(isOpen|open)\s*[,}:=]", c.text(src, n)):
+            return True
+    return False
+
+
+def _is_compiler_entry(src, k) -> bool:
+    """A Babel plugins-array entry that IS the compiler: its name as a
+    string, or `[name, options]`."""
+    name = "babel-plugin-react-compiler"
+    if k.type == "string":
+        return name in Code.text(src, k)
+    if k.type == "array" and k.named_children:
+        return k.named_children[0].type == "string" and \
+            name in Code.text(src, k.named_children[0])
+    return False
+
+
+def _compiler_plugins_array(c: Code):
+    """The Babel plugins array the compiler is listed in (the innermost
+    array with the compiler as a direct entry)."""
+    for b, src, t in _vite_trees(c):
+        for n in Code.within(src, t.root_node, {"array"}):
+            kids = n.named_children
+            if any(_is_compiler_entry(src, k) for k in kids):
+                return src, kids
+    return None, None
+
+
+def r_compiler_first(c: Code) -> bool:
+    src, kids = _compiler_plugins_array(c)
+    return bool(kids) and _is_compiler_entry(src, kids[0])
+
+
+def r_compiler_not_first(c: Code) -> bool:
+    return not r_compiler_first(c)
+
+
 RULES = {k[2:]: v for k, v in dict(globals()).items()
          if k.startswith("r_") and callable(v)}
+# THE OTHER AREAS' RULES (2026-09-30): bench/skills/pitfall_rules/<area>.py,
+# each a module of `r_<name>(c: Code) -> bool` functions (they import
+# pitfall_harness for Code). A name defined twice is an error, never a
+# silent override.
+RULES_DIR = os.path.join(HERE, "pitfall_rules")
+
+
+def _load_rule_modules() -> None:
+    import importlib.util
+    if not os.path.isdir(RULES_DIR):
+        return
+    for fn in sorted(os.listdir(RULES_DIR)):
+        if not fn.endswith(".py") or fn.startswith("_"):
+            continue
+        spec = importlib.util.spec_from_file_location(
+            f"pitfall_rules_{fn[:-3]}", os.path.join(RULES_DIR, fn))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        for k, v in vars(mod).items():
+            if k.startswith("r_") and callable(v) \
+                    and getattr(v, "__module__", "") == mod.__name__:
+                if k[2:] in RULES:
+                    raise ValueError(f"pitfall rule {k[2:]!r} defined twice "
+                                     f"({fn})")
+                RULES[k[2:]] = v
+
+
+if __name__ == "__main__":
+    sys.modules.setdefault("pitfall_harness", sys.modules["__main__"])
+_load_rule_modules()
 
 
 # ----------------------------------------------------------------- cases ---
@@ -486,12 +765,10 @@ def self_test() -> dict:
     res = []
     for case in load_cases():
         ex = case.get("examples") or {}
-        bad = check_answer(case, "```tsx\n" + ex.get("pitfall", "") + "\n```"
-                           if not ex.get("pitfall", "").startswith("```")
-                           else ex["pitfall"])
-        good = check_answer(case, "```tsx\n" + ex.get("good", "") + "\n```"
-                            if not ex.get("good", "").startswith("```")
-                            else ex["good"])
+        def wrap(x: str, lang=case.get("example_lang", "tsx")) -> str:
+            return x if "```" in x else f"```{lang}\n" + x + "\n```"
+        bad = check_answer(case, wrap(ex.get("pitfall", "")))
+        good = check_answer(case, wrap(ex.get("good", "")))
         ok = bad["pitfall"] and not bad["good"] and not good["pitfall"] \
             and good["good"]
         res.append({"id": case["id"], "ok": ok, "pitfall_example": bad,
@@ -500,31 +777,38 @@ def self_test() -> dict:
             "failed": [r for r in res if not r["ok"]]}
 
 
-def _skill_ref(x) -> tuple[str, list[int] | None]:
-    """A case's skill entry: a name (every item) or {name, items: [index]}
-    (only those items: a skill whose other lines are about something else
-    injects only the lines the case is about)."""
+def _skill_ref(x) -> tuple[str, list[str] | None]:
+    """A case's skill entry: a name (every item) or {name, match: [text]}
+    (only the items whose text contains one of the given pieces: a skill
+    whose other lines are about something else injects only the lines the
+    case is about; matched by text, not by position, because the served row
+    leaves doubt-bearing lines out)."""
     if isinstance(x, dict):
-        return x["name"], list(x.get("items") or []) or None
+        return x["name"], list(x.get("match") or []) or None
     return str(x), None
 
 
 def library_skills(refs: list) -> tuple[list[dict], list[str]]:
     """(armed skill rows, in order, each cut to the items the case names;
-    the names not armed)."""
+    the names not armed, and a name whose `match` found no item)."""
     import skills
+    import skill_select
     by = {s.get("name"): s for s in skills.armed()}
     got, missing = [], []
     for x in refs:
-        name, idx = _skill_ref(x)
+        name, match = _skill_ref(x)
         s = by.get(name)
         if s is None:
             missing.append(name)
             continue
-        if idx is not None:
-            import skill_select
-            its = skill_select._items(s)
-            s = dict(s, items=[its[i] for i in idx if i < len(its)])
+        if match is not None:
+            its = [it for it in skill_select._items(s)
+                   if any(m.lower() in str(it.get("text") or "").lower()
+                          for m in match)]
+            if not its:
+                missing.append(f"{name} (no item matches {match})")
+                continue
+            s = dict(s, items=its)
         got.append(s)
     return got, missing
 
@@ -590,11 +874,148 @@ def generate(b: dict) -> tuple[str | None, dict]:
         return None, gen
 
 
+_IMPORT = re.compile(
+    r"^[ \t]*import\s+(?P<clause>[^;]*?)\s*from\s*(?P<q>['\"])(?P<src>[^'\"]+)"
+    r"(?P=q)[ \t]*;?[ \t]*$|^[ \t]*import\s*(?P<q2>['\"])(?P<side>[^'\"]+)"
+    r"(?P=q2)[ \t]*;?[ \t]*$", re.M | re.S)
+_TOP_DECL = re.compile(
+    r"^\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?"
+    r"(?:function\s*\*?|class|const|let|var|interface|type|enum|"
+    r"abstract\s+class)\s+([A-Za-z_$][\w$]*)", re.M)
+_ID = r"[A-Za-z_$][\w$]*"
+
+
+def _clause(clause: str) -> dict:
+    """An import clause read: {type_only, default, namespace, named:
+    [(imported, local, is_type)]}."""
+    c = " ".join(clause.split())
+    type_only = bool(re.match(r"^type\s+(?!from\b)", c))
+    if type_only:
+        c = c[5:].strip()
+    out = {"type_only": type_only, "default": None, "namespace": None,
+           "named": []}
+    m = re.search(r"\{(.*)\}", c, re.S)
+    if m:
+        for part in m.group(1).split(","):
+            p = part.strip()
+            if not p:
+                continue
+            is_type = p.startswith("type ")
+            p = p[5:].strip() if is_type else p
+            mm = re.match(rf"({_ID})(?:\s+as\s+({_ID}))?$", p)
+            if mm:
+                out["named"].append((mm.group(1), mm.group(2) or mm.group(1),
+                                     is_type or type_only))
+        c = c[:m.start()] + c[m.end():]
+    ns = re.search(rf"\*\s*as\s+({_ID})", c)
+    if ns:
+        out["namespace"] = ns.group(1)
+        c = c[:ns.start()] + c[ns.end():]
+    d = re.match(rf"^\s*({_ID})\s*,?", c)
+    if d and d.group(1) not in ("type",):
+        out["default"] = d.group(1)
+    return out
+
+
+def ts_probe(answer: str) -> str:
+    """ONE type-check probe from an answer's TS/JS blocks (2026-09-30, the
+    coordinator's harness fixes; the TypeScript area found both bugs):
+      - the task's OWN modules ('./chat', '../api') exist only in the
+        prompt, or as another block of the answer: a name imported from one
+        is declared here UNLESS the answer itself defines it -- a TYPE-only
+        import as `type X = any`, a value import as BOTH `declare const X:
+        any` and `type X = any` (legal: separate declaration spaces), so a
+        later type use of X no longer fails ("refers to a value");
+      - package imports are MERGED per module across blocks (a name
+        imported by two files is imported once: no duplicate identifier);
+      - only the first block keeps an `export default` (a second one is a
+        plain declaration; `export default <name>;` lines go), so several
+        files joined are one valid module.
+    The type check judges the package API use, not a missing file."""
+    codes = [b["code"] for b in blocks(answer)
+             if b["lang"] in ("", "ts", "tsx", "typescript", "js", "jsx",
+                              "javascript")]
+    bodies, locals_, pkgs, side = [], {}, {}, []
+    seen_default = False
+    for code in codes:
+        def take(m):
+            if m.group("side"):
+                if m.group("side") not in side:
+                    side.append(m.group("side"))
+                return ""
+            src, cl = m.group("src"), _clause(m.group("clause"))
+            if src.startswith("."):
+                for n, t in ([(cl["default"], cl["type_only"])]
+                             if cl["default"] else []) + \
+                        ([(cl["namespace"], cl["type_only"])]
+                         if cl["namespace"] else []) + \
+                        [(loc, t) for _i, loc, t in cl["named"]]:
+                    locals_[n] = locals_.get(n, True) and t
+                return ""
+            e = pkgs.setdefault(src, {"default": None, "namespace": [],
+                                      "named": {}, "type_only": True})
+            e["type_only"] = e["type_only"] and cl["type_only"] and \
+                not cl["default"] and not cl["namespace"]
+            if cl["default"]:
+                e["default"] = e["default"] or cl["default"]
+            if cl["namespace"] and cl["namespace"] not in e["namespace"]:
+                e["namespace"].append(cl["namespace"])
+            for imp, loc, t in cl["named"]:
+                prev = e["named"].get(loc)
+                e["named"][loc] = (imp, (prev[1] if prev else True) and t)
+            return ""
+        body = _IMPORT.sub(take, code)
+        if re.search(r"^\s*export\s+default\b", body, re.M):
+            if seen_default:
+                body = re.sub(r"^(\s*)export\s+default\s+(?=(?:async\s+)?"
+                              r"(?:function|class)\b)", r"\1", body,
+                              flags=re.M)
+                body = re.sub(rf"^\s*export\s+default\s+{_ID}\s*;?\s*$", "",
+                              body, flags=re.M)
+            seen_default = True
+        bodies.append(body)
+    joined = "\n".join(bodies)
+    defined = set(_TOP_DECL.findall(joined))
+    head = [f"import '{s}';" for s in side]
+    for src, e in pkgs.items():
+        named = ", ".join(
+            ("type " if t and not e["type_only"] else "")
+            + (imp if imp == loc else f"{imp} as {loc}")
+            for loc, (imp, t) in e["named"].items())
+        parts = [p for p in (e["default"], "{ " + named + " }" if named
+                             else None) if p]
+        kw = "import type" if e["type_only"] and not e["default"] else \
+            "import"
+        if parts:
+            head.append(f"{kw} {', '.join(parts)} from '{src}';")
+        for ns in e["namespace"]:
+            head.append(f"import * as {ns} from '{src}';")
+    for n, type_only in locals_.items():
+        if n in defined:
+            continue
+        head.append(f"type {n} = any;" if type_only
+                    else f"declare const {n}: any; type {n} = any;")
+    return "\n".join(head) + ("\n" if head else "") + joined
+
+
 def types_ok(case: dict, answer: str) -> bool | None:
-    import skill_prove as SP
-    ok, _why = SP.run_check({"kind": "types"}, answer, "tsx",
-                            case.get("packages") or ["react"])
-    return ok
+    """tsc (mcp/typecheck.py, the held React 19.2.8 + @types/react 19.2.18)
+    over ONE probe of the answer's TS/JS blocks (ts_probe: the task's
+    own modules declared `any`, package imports merged, one default
+    export); a setup case (config files) is not type-checked."""
+    if case["kind"] != "pitfall" or case.get("typecheck") == "none":
+        return None
+    import typecheck
+    if not any(b["code"].strip() for b in blocks(answer)
+               if b["lang"] in ("", "ts", "tsx", "typescript", "js", "jsx",
+                                "javascript")):
+        return None
+    code = ts_probe(answer)
+    # `packages` absent: React (the first area); present and empty: plain
+    # TypeScript, no package installed (the typescript area)
+    r = typecheck.check(code, "tsx", case["packages"]
+                        if "packages" in case else ["react"])
+    return bool(r.get("ok")) if r.get("ran") else None
 
 
 def run_case(case: dict, model: str, effort: str, repeats: int,
@@ -750,6 +1171,34 @@ def main(argv=None) -> int:
         print(json.dumps(report(recs), indent=1))
         return 0
     variants = [v for v in a.variants.split(",") if v in VARIANTS]
+    # THE PREFILL ARM needs the engine check (coordinator, 2026-09-29: "if
+    # prefill_check fails (the think block doesn't stay open), drop the
+    # first_person_prefill arm from the harness run and record why"):
+    # bench/skills/prefill_check.py's verdict for this model, read here.
+    if "first_person_prefill" in variants:
+        pc = os.path.join(RESULTS, f"prefill_check_{a.model}.json")
+        try:
+            with open(pc, encoding="utf-8") as f:
+                pcr = json.load(f)
+        except (OSError, ValueError):
+            pcr = None
+        if not (pcr or {}).get("confirmed"):
+            variants.remove("first_person_prefill")
+            why = ("prefill_check has not run for this model" if pcr is None
+                   else "prefill_check did not confirm the think block stays "
+                   "open and the generation continues it: " + json.dumps(
+                       {"template": (pcr.get("template") or {}).get(
+                           "confirmed"), "generation": (pcr.get(
+                               "generation") or {}).get("confirmed")}))
+            if not a.dry_run:
+                os.makedirs(RESULTS, exist_ok=True)
+                with open(os.path.join(RESULTS,
+                                       f"pitfall_{a.model}_notes.jsonl"),
+                          "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"ts": time.time(), "dropped":
+                                        "first_person_prefill", "why": why})
+                            + "\n")
+            print(f"  first_person_prefill arm DROPPED: {why}", flush=True)
     if a.dry_run:
         print(json.dumps({"cases": len(cases), "variants": variants,
                           "repeats": a.repeats,

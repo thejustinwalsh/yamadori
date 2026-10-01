@@ -83,6 +83,13 @@ PACKAGE_DOMAINS = {
     # the tool gate for every task -- HELD_SOURCE_UNMAPPED offers -- so all
     # 342 LiveCodeBench prompts were offered ~2,700 tokens of tools again.
     "@types/three": {"gpu", "web-frontend", "types"},
+    # Indexed 2026-09-29 beside react@19.2.8. A DefinitelyTyped @types/X
+    # types X, so X's domains plus "types", as @types/three above. Its 10
+    # files import only csstype (in one file), which nothing maps, so DERIVED
+    # DOMAINS found none and the gate reopened as HELD_SOURCE_UNMAPPED for
+    # every request (all 342 LiveCodeBench prompts, mcp/test_domains.py,
+    # 2026-10-01). @types/react-dom derives from its react imports (6 files).
+    "@types/react": {"web-frontend", "ui-component", "types"},
     "@typegpu/noise": {"gpu"},
     "@typegpu/three": {"gpu", "web-frontend"},
     "@react-three/postprocessing": {"gpu", "web-frontend"},

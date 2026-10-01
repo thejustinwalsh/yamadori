@@ -4,16 +4,16 @@
 WHY THE INTERNAL NAMES MUST NOT LEAK
 
 Until now `/v1/models` was proxied straight through, so a client saw `bonsai`,
-`bonsai-vision`, `critic-disabled`, `embeddings` and `reranker`. Three things
-are wrong with that.
+`bonsai-vision`, `critic-disabled`, `embeddings` and (until it was removed,
+2026-10-01) `reranker`. Three things are wrong with that.
 
 It advertises a bypass. Anything a client can name, it can request, and a
 request naming `bonsai` is a request that skipped the retrieval, the tier
 resolution, the secret filtering and the audit log. The proxy stops being the
 way in and becomes one of two ways in.
 
-It advertises a footgun. `embeddings` and `reranker` are in the list, they are
-not chat models, and a client that picks one gets a confusing failure rather
+It advertises a footgun. `embeddings` is in the list, it is not a chat
+model, and a client that picks it gets a confusing failure rather
 than a clear refusal.
 
 It advertises implementation. `Ternary-Bonsai-2-27B-Abliterated-PTQ1_0` is a
@@ -51,7 +51,7 @@ import time
 # request asks for, or the default.
 #
 # Everything else is an implementation detail. Tier variants, the vision
-# model, the embedding and rerank endpoints all still RESOLVE if a caller
+# model, the embedding endpoint all still RESOLVE if a caller
 # names them, because breaking a working integration to tidy a list is a bad
 # trade -- but they are not offered, so no model picker can present them and
 # no one can come to depend on a name that is really a build decision.
@@ -91,7 +91,8 @@ INTERNAL = {
     # saw from 2026-09-27 until then)
     "yamadori-vision": ("bonsai-vision", None),
     "yamadori-embed": ("embeddings", None),
-    "yamadori-rerank": ("reranker", None),
+    # `yamadori-rerank` (-> `reranker`) went with the reranker, 2026-10-01
+    # (docs/REMOVED.md).
 }
 
 CATALOG = {**PUBLIC, **INTERNAL}
@@ -339,8 +340,8 @@ def _chat_card(window: int | None) -> dict:
 
 
 def _is_chat(name: str) -> bool:
-    """Does this name serve the chat model? The vision copy, embeddings and
-    reranker have windows and parameters of their own, so the chat card
+    """Does this name serve the chat model? The vision copy and embeddings
+    have windows and parameters of their own, so the chat card
     would be false of them."""
     return CATALOG.get(name, LEGACY.get(name, (None,)))[0] == "bonsai"
 

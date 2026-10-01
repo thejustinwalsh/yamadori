@@ -1085,7 +1085,7 @@ One row per item. The "action" column says what was done or what remains.
 | refuse when card unreadable | mcp/gpu_room.py:127 | rule | no on-demand load into unknown VRAM | B | safety (never load into an OOM); pre-deploy review 2026-09-24. | keep |
 | eviction breaker | mcp/gpu_room.py:776 | len(evicted) > len(SIZES) | stop an eviction loop | B | correctness bound derived from the table size. | keep |
 | SIZES embeddings | mcp/gpu_room.py:161 | 2100 MiB | A4000 need of the embedder | B | arithmetic: weights 610 + f16 KV 896 + ~600 assumed; measured only together (7,565 with reranker + Laya). | keep |
-| SIZES reranker | mcp/gpu_room.py:169 | 3000 MiB | A4000 need of the reranker | B | arithmetic: 610 + 1,792 + ~600 assumed. | keep |
+| SIZES reranker | mcp/gpu_room.py:169 | 3000 MiB | A4000 need of the reranker | B | arithmetic: 610 + 1,792 + ~600 assumed. | REMOVED 2026-10-01 with the reranker (docs/REMOVED.md) |
 | SIZES bonsai-vision | mcp/gpu_room.py:175 | 9449 MiB | A4000 need of the vision model | B | upper end of config's 8,265-9,449 MiB estimate; never measured alone. | keep |
 | SIZES imagegen | mcp/gpu_room.py:181 | 6389 peak / 319 idle | A4000 need of image generation | C | docs/IMAGEGEN.md: +6,389 at 1344x1344 (n=1), +6,281-6,371 at 1024x1024 (n=13), +319 idle (n=1). | keep |
 | SIZES imagegen-turbo | mcp/gpu_room.py:186 | 6389 / 319 | A4000 need of turbo | B | borrowed from imagegen (same server/budget); own peak read once 5,527 (n=1). | keep |
@@ -1124,10 +1124,10 @@ One row per item. The "action" column says what was done or what remains.
 | bonsai-vision ttl | config.template.yaml:531 | 300 s | unload vision after idle | A | operator 2026-09-23T19:42 "I would let image have at least 5 minutes if you tighten it"; code "(operator, 2026-09-23; was 900)". | keep |
 | bonsai-vision -c | config.template.yaml:521 | 16384 | vision context | B-value-arbitrary | VRAM fit (9,449 MiB estimate); value unmeasured for need. | keep (the bound is forced); derive the value |
 | embeddings -c 8192, -b 2048 -ub 512 | config.template.yaml:551 | 8192 / 2048 / 512 | embedder window and batches | B | VRAM: -b 8192 -ub 2048 left GPU1 at 13.9 of 16.4 GB (config.template.yaml:554-557). | keep |
-| reranker -c 16384 | config.template.yaml:585 | 16384 | cross-encoder window | B | correctness: overflow returns 0.0 for every document (config.template.yaml:571-574). | keep |
+| reranker -c 16384 | config.template.yaml:585 | 16384 | cross-encoder window | B | correctness: overflow returns 0.0 for every document (config.template.yaml:571-574). | REMOVED 2026-10-01 with the reranker (docs/REMOVED.md) |
 | clm-encoder -c 2048 -np 1 -b/-ub 2048 | config.template.yaml:625 | 2048 / 1 / 2048 | CLM encoder window | B | CLM recipe max-model-len 2048; one micro-batch per embedding. | keep |
 | llama-swap groups (ondemand exclusive, imagegen swap) | config.template.yaml:728 | swap/exclusive flags | backstop for A4000 co-residence | A + B | operator 2026-09-24 A4000 rule; VRAM arithmetic (vision 8,265-9,449 vs 8,605 free beside retrieval). | keep |
-| hooks preload | config.template.yaml:791 | bonsai, embeddings, reranker | models loaded at startup | B | resident models by design. | keep |
+| hooks preload | config.template.yaml:791 | bonsai, embeddings (reranker until 2026-10-01) | models loaded at startup | B | resident models by design. | keep; the reranker's line REMOVED 2026-10-01 with the reranker (docs/REMOVED.md) |
 
 ### Fan-out, repair, routing: fanout.py, tool_code.py, code_check.py, route.py, selection.py, progress.py, repeats.py, fusion.py, rings.py, concept_seed.py, session_id.py, ...
 
@@ -1663,9 +1663,9 @@ One row per item. The "action" column says what was done or what remains.
 |---|---|---|---|---|---|---|
 | CODE_SEARCH_SEMANTIC default off | mcp/code_search.py:679 | 0 (semantic retriever off) | find_by_meaning uses lexical+symbol only; embeddings not consulted | C | scripts/eval_retrieval.py: 'semantic 77/120 against keyword 92/120, McNemar p=0.0041' (gauntlet, 120 gold queries). Caveat in code: gold queries derived from symbol names flatter lexical (655-657) | keep |
 | CANDIDATES | mcp/code_search.py:85 | 40 | embedding candidate pool before rerank | D | No measurement or derivation; comment says only 'retrieve wide, rerank narrow'. Dormant while semantic is off. | PENDING (unassigned): Dormant (semantic off). If semantic returns, use the full pool or measure. No tests reference it. |
-| RERANK_DOC_CHARS | mcp/code_search.py:88 | 1200 | per-doc truncation sent to cross-encoder | B-value-arbitrary | Existence: keeps query+docs inside the cross-encoder context. 1200 not derived from the reranker's ctx. Reranker 'not trusted, not used' (AGENTS.md). | keep (the bound is forced); derive the value |
+| RERANK_DOC_CHARS | mcp/code_search.py:88 | 1200 | per-doc truncation sent to cross-encoder | B-value-arbitrary | Existence: keeps query+docs inside the cross-encoder context. 1200 not derived from the reranker's ctx. Reranker 'not trusted, not used' (AGENTS.md). | REMOVED 2026-10-01 with the reranker (docs/REMOVED.md) |
 | DEFAULT_TOP_K | mcp/code_search.py:89 | 5 | default snippets from find_by_meaning; stated in model-visible schema | D | No evidence. | PENDING (unassigned): Leave to caller; if a default is needed, cite a measurement. No tests reference it. |
-| RERANK_MAX_K | mcp/code_search.py:123 | 2 (no rerank above k=2) | reranking skipped for top_k>2 (latency) | C | scripts/eval_rerank.py, n=11: correct in top-5 7/11 vs 7/11; ~1100 ms -> 96 ms. Comment: provisional, three.js contaminated; FINDINGS #20 voids rerank numbers. | keep |
+| RERANK_MAX_K | mcp/code_search.py:123 | 2 (no rerank above k=2) | reranking skipped for top_k>2 (latency) | C | scripts/eval_rerank.py, n=11: correct in top-5 7/11 vs 7/11; ~1100 ms -> 96 ms. Comment: provisional, three.js contaminated; FINDINGS #20 voids rerank numbers. | REMOVED 2026-10-01 with the reranker (docs/REMOVED.md) |
 | QUERY_INSTRUCT prefix | mcp/code_search.py:158 | 'Instruct: Given a question about a codebase, retrieve...' | query-side instruction for Qwen3-Embedding | B | Qwen3-Embedding is asymmetric: queries need an instruction prefix; observed score 0.002 without it (152-157). Task sentence wording ours. | keep |
 | search_fused wide | mcp/code_search.py:647 | max(top_k*3, 10) | per-retriever depth before fusion | D | No evidence for 3x or floor 10. | PENDING (unassigned): Take all ranker hits (fusion is cheap) or measure recall vs depth. |
 | search_fused output cap | mcp/code_search.py:746 | rows[:max(top_k*2, 8)] | fused rows kept before tiering | D | No evidence. | PENDING (unassigned): Return top_k fused rows, or measure. |

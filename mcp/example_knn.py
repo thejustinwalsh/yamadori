@@ -77,7 +77,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 QUEUE = "package.example_knn_index"
-LANE = "gpu"
+LANE = "gpu_a4000"  # the embedder, on the A4000: jobs.GPU_SCOPES (2026-09-30)
 KNN_VERSION = "knn/1"
 # docs/PACKAGE-ONBOARDING.md 6.4; unmeasured wording.
 TASK = ("Given code an agent is reading or writing, retrieve example code "

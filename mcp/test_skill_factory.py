@@ -120,7 +120,6 @@ REAL_TAIL = proxy._skills_tail
 import test_ledger as T  # noqa: E402  (its temp paths + the fake upstream)
 
 proxy._skills_tail = REAL_TAIL
-import research_tools  # noqa: E402
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -713,10 +712,13 @@ def test_selection_through_the_proxy_replays_byte_identically():
           "x_yamadori.skills names it (ids, versions, names, chars)",
           json.dumps({k: sk1.get(k) for k in ("ids", "names", "chars",
                                                "why")}))
-    check(sent1.startswith(ask) and "Browser App Entry Point" in sent1
+    import skill_prompts
+    check(sent1.startswith(ask) and skill_prompts.CRAFT_HEADER in sent1
+          and "- DO:" in sent1 and "Game.init(" in sent1
           and "metadata" not in sent1 and "When to use" not in sent1,
-          "[proxy] the skill's title and items are appended to the user "
-          "turn, never its frontmatter", sent1[-400:])
+          "[proxy] the skill's ITEMS (the injector composes items, not "
+          "whole skills) are appended to the user turn under the craft "
+          "header, never its frontmatter", sent1[-400:])
     check(len(sent1) - len(ask) == sk1.get("chars"),
           "[proxy] chars is exactly what was appended",
           (len(sent1) - len(ask), sk1.get("chars")))
@@ -763,21 +765,9 @@ def test_selection_through_the_proxy_replays_byte_identically():
 
 
 # ===========================================================================
-# 10. the knowledge base
+# 10. the knowledge base: REMOVED 2026-09-29 with find_in_knowledge_base
+# (mcp/research_tools.py, the second brain's tool; docs/REMOVED.md)
 # ===========================================================================
-def test_the_knowledge_base_is_skills_only():
-    reset_store()
-    out = research_tools.find_in_knowledge_base("browser entry point init")
-    check('"NO_KNOWLEDGE"' in out or "NO_KNOWLEDGE" in out,
-          "[kb] an empty store says so, with the remedy", out[:200])
-    skill_migrate.install_authored()
-    out = research_tools.find_in_knowledge_base("browser app entry point "
-                                                "init")
-    sid = skills.find("browser-app-entry-point")["id"]
-    check(f"skill:{sid}" in out and "hint:" not in out
-          and "Browser App Entry Point" in out,
-          "[kb] a match is cited skill:<id>, with its body; nothing else is "
-          "searched", out[:400])
 
 
 # ===========================================================================
@@ -1247,4 +1237,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # jjava is always in scope where skills serve (operator, 2026-09-29):
+    # offline, the STUBBED decider answers (mcp/decider_stub.py).
+    import decider_stub
+    with decider_stub.installed():
+        sys.exit(main())

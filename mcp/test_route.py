@@ -11,12 +11,11 @@ WHAT THIS IS GATING (operator, 2026-09-24)
      where the misroute count must be 0.
   3. The benchmark prompt sets (LiveCodeBench, bench/domain) route to
      code_generation / code_edit, every prompt.
-  4. The features READ the class: fan-out on the code classes only, repair
-     on the code classes only (proxy.prepare) -- and a header that forces
-     one still forces it. Deep thinking no longer reads it (Phase 0.6,
-     docs/SELF-IMPROVEMENT-PLAN.md, operator 2026-09-24): it runs when a
-     trigger fires (mcp/deep.py), on any class; mcp/test_deep.py gates the
-     triggers themselves.
+  4. proxy.prepare records the class (payload `_route`, x_yamadori.route)
+     and selection records it in its signals; the skills decision does not
+     read it. The features that read the class -- fan-out and the repair
+     pass on the code classes -- were removed 2026-09-29 (docs/REMOVED.md;
+     the way back is commit e360d37), and deep thinking with them.
 
 The labelled-set and benchmark checks replay files that may be absent on a
 fresh checkout; each says so when skipped. The labelled-set thresholds are
@@ -42,6 +41,10 @@ os.environ["YAMADORI_CORPUS_DB"] = os.path.join(_TMP, "corpus.sqlite3")
 os.environ["YAMADORI_NEBARI_DB"] = os.path.join(_TMP, "nebari.sqlite3")
 os.environ["RINGS_DB"] = os.path.join(_TMP, "rings.sqlite3")
 os.environ["CODE_INDEX_DB"] = os.path.join(_TMP, "code.sqlite3")
+# Every other store the proxy writes (the concept seed's last draw, the
+# skills' records, ...) at a temp path too (mcp/offline_stores.py).
+import offline_stores  # noqa: E402
+offline_stores.isolate("yamadori_test_route_stores_")
 
 import route  # noqa: E402
 import selection  # noqa: E402
@@ -292,126 +295,70 @@ def test_the_signals_parse_rather_than_match():
           "the legacy `function` role is a tool result")
 
 
-def test_the_features_read_the_class():
+def test_selection_records_the_class():
+    """selection reads the route only to record it: skills are decided by the
+    tier and the header, never by the class (the fan-out rule that read the
+    code classes was removed 2026-09-29)."""
     t = tiers.resolve({"reasoning_effort": "max"})
     msgs = user("Write a Python function that reverses a string.")
     code = cls(msgs)
-    d = selection.decide(msgs, t, OFFER_NONE, dbs={}, route=code)
-    check(d["fanout_n"] == 3 and "route code_generation" in d["because"]["fanout"],
-          "code_generation fans out at max", d["because"]["fanout"])
-    # Phase 0.6: no trigger, no deep thinking -- and the reason is no longer
-    # the class ("library questions only" is gone).
-    check(not d["investigate"] and "library questions only"
-          not in d["because"]["investigate"]
-          and "trigger" in d["because"]["investigate"],
-          "and deep thinking stays out without a trigger, saying why",
-          d["because"]["investigate"])
+    d = selection.decide(msgs, t, route=code)
+    check(d["signals"]["route"] == "code_generation"
+          and set(d) == {"skills", "because", "signals"}
+          and set(d["because"]) == {"skills"},
+          "selection records the route class; it decides skills only",
+          json.dumps(d["because"]))
     design = user("How should we design the retry policy? Trade-offs?")
-    d = selection.decide(design, t, OFFER_NONE, dbs={},
-                         route=cls(design, gate=OFFER_NONE))
-    check(d["fanout_n"] == 1 and "code_generation / code_edit only"
-          in d["because"]["fanout"],
-          "a design question (prose) no longer fans out", d["because"]["fanout"])
-    d0 = selection.decide(design, t, OFFER_NONE, dbs={})
-    check(d0["fanout_n"] == 3, "without a route the word rule is unchanged "
-          "(every older caller)", str(d0["fanout_n"]))
-    lib = user("Which retry policy does our proxy apply when the upstream "
-               "returns a 503?")
-    d = selection.decide(lib, t, BOUND, dbs={}, route=cls(lib, gate=BOUND))
-    check(not d["investigate"] and d["signals"]["route"] == "library_question"
-          and d["signals"].get("rule") is None,
-          "library_question alone no longer runs deep thinking, and the "
-          "rule + Laya path is not consulted (Phase 0.6)",
-          d["because"]["investigate"])
-    area = {"fire": True, "kind": "area", "job": "investigate",
-            "question": "q", "because": "known-hard area: pkg@1.0.0-alpha.1"}
-    d = selection.decide(lib, t, BOUND, dbs={}, route=cls(lib, gate=BOUND),
-                         trigger=area)
-    check(d["investigate"] and d["because"]["investigate"].startswith(
-              "known-hard area") and d["signals"]["trigger"] == "area",
-          "with a trigger that fired, it runs, and the reason is the "
-          "trigger's", d["because"]["investigate"])
-    step = after_tool("Write a function")
-    d = selection.decide(step, t, OFFER_NONE, dbs={}, client_tools=HERMES_TOOLS,
-                         route=cls(step, HERMES_TOOLS))
-    check(d["fanout_n"] == 1 and not d["investigate"],
-          "agent_step: no fan-out, no deep thinking without a trigger")
-    struggle = {"fire": True, "kind": "struggle", "job": "investigate",
-                "question": "q", "because": "struggle: 3 signals"}
-    d = selection.decide(step, t, OFFER_NONE, dbs={}, client_tools=HERMES_TOOLS,
-                         route=cls(step, HERMES_TOOLS), trigger=struggle)
-    check(d["fanout_n"] == 1 and d["investigate"],
-          "agent_step with a struggle trigger: deep thinking runs on the "
-          "agent path (the gate that kept it to library questions is gone)",
-          d["because"]["investigate"])
-    off = tiers.resolve({"reasoning_effort": "max"},
-                        tiers.from_header('{"investigate": false}'))
-    d = selection.decide(step, off, OFFER_NONE, dbs={},
-                         client_tools=HERMES_TOOLS,
-                         route=cls(step, HERMES_TOOLS), trigger=struggle)
-    check(not d["investigate"] and "forced off" in d["because"]["investigate"],
-          "a header that forces deep thinking off beats a trigger",
-          d["because"]["investigate"])
-    high = tiers.resolve({"reasoning_effort": "high"})
-    d = selection.decide(step, high, OFFER_NONE, dbs={},
-                         client_tools=HERMES_TOOLS,
-                         route=cls(step, HERMES_TOOLS), trigger=struggle)
-    check(not d["investigate"], "and a tier that does not allow it (high) "
-          "never runs it", d["because"]["investigate"])
+    d2 = selection.decide(design, t, route=cls(design, gate=OFFER_NONE))
+    check(d2["signals"]["route"] == "prose" and d2["skills"] == d["skills"],
+          "the skills decision does not read the class",
+          f"{d2['skills']} vs {d['skills']}")
+    d0 = selection.decide(design, t)
+    check(d0["signals"]["route"] is None,
+          "without a route, none is recorded (every older caller)")
     forced = tiers.resolve({"reasoning_effort": "max"},
-                           tiers.from_header('{"investigate": true, '
-                                             '"fanout": 3}'))
-    d = selection.decide(msgs, forced, OFFER_NONE, dbs={}, route=code)
-    check(d["investigate"] and d["fanout_n"] == 3,
-          "a header still forces deep thinking on a code request")
+                           tiers.from_header('{"skills": true}'))
+    d = selection.decide(msgs, forced, route=code)
+    check(d["skills"] and "forced on" in d["because"]["skills"],
+          "a header still forces skills on a code request",
+          d["because"]["skills"])
 
 
-def test_prepare_records_the_route_and_gates_repair():
+def test_prepare_records_the_route():
     import proxy
-    
+
     def prep(text, effort="high", header=None, tools=None, msgs=None):
         body = {"model": "yamadori", "reasoning_effort": effort,
                 "messages": msgs or user(text), "_client_ip": "127.0.0.1",
                 "_features": json.dumps(header or {"skills": False,
-                                                   "investigate": False})}
+                                                   "seed": False})}
         if tools:
             body["tools"] = tools
         return proxy.prepare(body)
     out = prep("Write a Python function that reverses a string.")
-    check(out["_route"]["class"] == "code_generation" and out["_repair"],
-          "prepare: a code request at high gets the route and repair",
+    check(out["_route"]["class"] == "code_generation",
+          "prepare: a code request gets its route",
           json.dumps(out["_route"])[:160])
     out = prep("Explain quicksort in three paragraphs.")
-    check(out["_route"]["class"] == "prose" and out["_repair"] is False,
-          "a prose request at high: no repair pass", str(out["_repair"]))
-    out = prep("Explain quicksort in three paragraphs.",
-               header={"skills": False, "investigate": False, "repair": True})
-    check(out["_repair"] is True, "a header that forces repair still forces it")
-    out = prep("Write a function.", effort="medium")
-    check(out["_repair"] is False and out["_fixup"] is False
-          and out["_tool_code"] is True,
-          "medium: client writes are checked and noted, nothing is repaired "
-          "(operator, 2026-09-24)")
-    out = prep("Write a Python function that reverses a string.")
-    check(out["_fixup"] is True and out["_tool_code"] is True,
-          "high: client writes are checked and repaired")
+    check(out["_route"]["class"] == "prose", "a prose request routes prose",
+          json.dumps(out["_route"])[:160])
     wf = [{"type": "function", "function": {
         "name": "write_file", "parameters": {"type": "object"}}}]
     out = prep(None, msgs=after_tool("go"), tools=wf)
-    check(out["_route"]["class"] == "agent_step" and out["_repair"] is False
-          and out["_tool_code"] is True,
-          "agent_step at high: no final-answer repair, the tool-call check on",
-          f"{out['_route']['class']} {out['_repair']} {out['_tool_code']}")
+    check(out["_route"]["class"] == "agent_step",
+          "a turn ending on a client tool result routes agent_step",
+          out["_route"]["class"])
     side = user("<command>ls</command>\n\nRespond with exactly one word: "
                 "APPROVE, DENY, or ESCALATE", REVIEWER)
     out = prep(None, msgs=side)
-    check(out["_route"]["class"] == "utility" and not out["_repair"]
-          and not out["_tool_code"],
-          "utility: no repair, no tool-call check")
-    x = proxy._x_yamadori(out, hops=1, fan=None, think=None)
-    check(x.get("route", {}).get("class") == "utility"
-          and "tool_code" in x and x["tool_code"] is None,
-          "x_yamadori carries route and tool_code", json.dumps(x.get("route"))[:120])
+    check(out["_route"]["class"] == "utility", "a side call routes utility")
+    x = proxy._x_yamadori(out, hops=1)
+    check(x.get("route", {}).get("class") == "utility",
+          "x_yamadori carries the route", json.dumps(x.get("route"))[:120])
+    check(not {"fanout", "investigate", "deep", "tool_code", "repair",
+               "check_code"} & set(x),
+          "and none of the removed records (fan-out, deep thinking, the "
+          "code check and repair)", str(sorted(x)))
 
 
 def test_the_labelled_corpus_set():
@@ -468,8 +415,8 @@ def main() -> int:
     for fn in (test_each_class_on_real_shapes,
                test_utility_and_agent_step_never_route_to_code,
                test_the_signals_parse_rather_than_match,
-               test_the_features_read_the_class,
-               test_prepare_records_the_route_and_gates_repair,
+               test_selection_records_the_class,
+               test_prepare_records_the_route,
                test_the_labelled_corpus_set,
                test_the_benchmark_sets_route_to_code):
         print(f"\n--- {fn.__name__} ---")

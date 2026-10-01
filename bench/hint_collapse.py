@@ -11,8 +11,13 @@ Its input is
 one scalar per option marker, softmax ACROSS the markers in a single forward
 pass. The options are therefore normalised AGAINST EACH OTHER. Nothing else in
 this stack has that property: `code_search.embed()` scores every candidate
-independently and compares afterwards, and `code_search.rerank()` cross-encodes
-(query, doc) one document at a time.
+independently and compares afterwards.
+
+THE RERANK ARMS WENT WITH THE RERANKER (operator, 2026-10-01: "Remove
+reranker"; docs/REMOVED.md). `rerank` (code_search.rerank(), one (probe, hint)
+pair per call) and `rerank_batched` (the batched call, docs/FINDINGS.md #20),
+their cached scores and their checks are at commit e360d37; docs/HINTS.md
+keeps their numbers as history.
 
 Joint normalisation should only pay off where the candidates genuinely COMPETE
 -- a set of alternatives of which exactly one applies. So that is the only place
@@ -21,7 +26,7 @@ this stack, and that is a completely acceptable answer.
 
 WHAT IS MEASURED, AND AGAINST WHAT
 
-Three headline arms, three floors and three diagnostics, on identical buckets
+Two headline arms, three floors and two diagnostics, on identical buckets
 and identical probes:
 
     random          floor. Seeded per (seed, probe) so a rerun draws the same
@@ -36,18 +41,14 @@ and identical probes:
                     prefix applied inside embed()), the hints as DOCUMENTS with
                     no prefix. Getting that backwards returns near-random
                     results silently.
-    rerank          code_search.rerank(), the Qwen3-Reranker cross-encoder, one
-                    (probe, hint) pair at a time -- see arm_rerank for why one
-                    at a time is mandatory and not a style choice.
     laya            permutation-averaged joint choice over ALL bucket members at
                     once, through bench/mechanisms/selectors.py:_laya_choice.
 
     embedding_cond  diagnostic: embed only each hint's applicability CONDITION.
     laya_cond       diagnostic: the same, as Laya's option text.
-    rerank_batched  diagnostic: the batched rerank call, which is broken.
 
-The three diagnostics exist because "the mechanism lost" is only a result once
-the obvious repair has been tried and reported. Two of them move the number and
+The diagnostics exist because "the mechanism lost" is only a result once
+the obvious repair has been tried and reported. Both move the number and
 neither changes the verdict.
 
 HINTS MUST NEVER HARM, SO COVERAGE IS SCORED, NOT JUST ACCURACY
@@ -61,10 +62,6 @@ is only allowed to look better if it is better at the same workload.
 
 Confidence signal per arm, all top-1 minus top-2 within one bucket:
     embedding   cosine margin
-    rerank      margin after sum-normalising the bucket's scores. The rerank
-                scale is meaningless in absolute terms (~1e-6 here), so an
-                un-normalised gap is not comparable between buckets. This is a
-                CHOICE and it is the most favourable honest one available.
     laya        the permutation-averaged probability margin, i.e. the same
                 number `LAYA_MARGIN_FLOOR` / `TREE_MARGIN_GATE` are gates on.
     lexical     margin after sum-normalising the overlap scores.
@@ -78,7 +75,7 @@ RUNNING IT
     python -X utf8 bench/hint_collapse.py --replay   # no GPU, from the cache
     python -X utf8 bench/hint_collapse.py --arms laya,embedding
 
-Raw per-ordering Laya probabilities, raw cosines and raw rerank scores go to
+Raw per-ordering Laya probabilities and raw cosines go to
 bench/data/hint_collapse_runs.json so every table replays without a GPU.
 
 RESULTS AND THE VERDICT ARE IN docs/HINTS.md. This file regenerates them.
@@ -139,7 +136,7 @@ RANDOM_SEED = 20260922
 COVERAGE_GRID = (1.00, 0.90, 0.75, 0.60, 0.50, 0.40, 0.30, 0.20)
 
 ARMS = ("random", "fixed", "lexical", "embedding", "embedding_cond",
-        "rerank", "rerank_batched", "laya", "laya_cond")
+        "laya", "laya_cond")
 
 LAYA_INSTRUCTIONS = (
     "Exactly one of these applies to the situation described. Pick it.")
@@ -290,45 +287,6 @@ def arm_embedding(problem: str, members: list[dict], text=None
             for m, v in zip(members, dv)}
 
 
-def arm_rerank(problem: str, members: list[dict]) -> dict[str, float]:
-    """ONE DOCUMENT PER CALL. This is not a style choice, it is a bug workaround.
-
-    The brief's definition of this arm is "cross-encodes (query, doc) one doc at
-    a time", and the served /v1/rerank endpoint turns out to REQUIRE that. Sent a
-    batch, it contaminates the scores across the batch: with four documents and
-    the query "what is the capital of France", the sourdough document scores
-    0.443 inside the batch and 1.6e-09 alone, and the Paris document -- which is
-    the top-scoring document when scored alone -- comes LAST. Four identical
-    batched calls inside one process return identical numbers, so it is not
-    sampling noise, but the same call in a later session returned a different
-    winner: it is state leaking between slots in one rerank request.
-
-    The measurable consequence is in `arm_rerank_batched`: batched, the endpoint
-    retrieves a document from its own VERBATIM text 16/89 times. Scored one at a
-    time, the same endpoint gets 68/89. `bench/test_hint_collapse.py --live`
-    asserts both, so this stops being a mystery if it is ever fixed.
-    """
-    import code_search as cs
-    return {m["member_id"]: float(cs.rerank(problem, [m["recipe"]], 1)[0][1])
-            for m in members}
-
-
-def arm_rerank_batched(problem: str, members: list[dict]) -> dict[str, float]:
-    """The batched call, kept as a DIAGNOSTIC, not as the rerank arm.
-
-    Reported so the serving bug above is visible as a number instead of a
-    footnote, and so a fix to llama-swap can be detected by this arm's score
-    moving.
-    """
-    import code_search as cs
-    docs = [m["recipe"] for m in members]
-    ranked = cs.rerank(problem, docs, len(docs))
-    scores = {m["member_id"]: 0.0 for m in members}
-    for idx, s in ranked:
-        scores[members[idx]["member_id"]] = float(s)
-    return scores
-
-
 def condition_text(m: dict) -> str:
     """The applicability CONDITION of a hint, not the whole hint.
 
@@ -420,7 +378,7 @@ def _rank(scores: dict[str, float]) -> tuple[str, float]:
     ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
     vals = [v for _, v in ranked]
     lo = min(vals)
-    shifted = [v - lo for v in vals]          # rerank/cosine can be negative
+    shifted = [v - lo for v in vals]          # cosine can be negative
     total = sum(shifted) or 1.0
     norm = [v / total for v in shifted]
     margin = norm[0] - norm[1] if len(norm) > 1 else 1.0
@@ -544,18 +502,6 @@ def run(buckets: list[dict], probes: list[dict], arms: tuple,
             store[name] = s
             pick, margin = _rank(s)
             out[name] = {"pick": pick, "margin": margin, "scores": s}
-        for name, fn in (("rerank", arm_rerank),
-                         ("rerank_batched", arm_rerank_batched)):
-            if name not in arms:
-                continue
-            s = cached.get(name)
-            if s is None:
-                if replay:
-                    raise RuntimeError(f"no cached {name} for {p['probe_id']}")
-                s = fn(p["problem"], members)
-            store[name] = s
-            pick, margin = _rank(s)
-            out[name] = {"pick": pick, "margin": margin, "scores": s}
         for name, opt in (("laya", None), ("laya_cond", condition_text)):
             if name not in arms:
                 continue
@@ -646,7 +592,7 @@ def report(buckets: list[dict], probes: list[dict], records: list[dict],
     gates = {"laya": sel.LAYA_MARGIN_FLOOR,
              "laya_cond": sel.LAYA_MARGIN_FLOOR,
              "embedding": 0.05, "embedding_cond": 0.05,
-             "rerank": 0.05, "lexical": 0.05}
+             "lexical": 0.05}
     print("  laya gate is selectors.LAYA_MARGIN_FLOOR; the retrieval gates are "
           "an\n  arbitrary small margin and are shown only so the shape is "
           "visible.\n  Table 2 is the comparison that means something.")
@@ -668,7 +614,7 @@ def report(buckets: list[dict], probes: list[dict], records: list[dict],
 
     _hr("TABLE 4 -- PER-BUCKET ACCURACY")
     heads = [a for a in arms
-             if a in ("lexical", "embedding", "embedding_cond", "rerank",
+             if a in ("lexical", "embedding", "embedding_cond",
                       "laya", "laya_cond")]
     print(f"  {'bucket':28s} {'type':12s} {'k':>2s} " +
           " ".join(f"{h:>14s}" for h in heads))
@@ -684,9 +630,9 @@ def report(buckets: list[dict], probes: list[dict], records: list[dict],
     _hr("TABLE 5 -- PAIRED McNEMAR (exact, two-sided)")
     print("  n is small by construction. The DISCORDANT count is the number "
           "that\n  decides whether anything could have been detected at all.")
-    pairs = [("laya", "embedding"), ("laya", "rerank"), ("laya", "lexical"),
+    pairs = [("laya", "embedding"), ("laya", "lexical"),
              ("laya_cond", "embedding"), ("laya_cond", "laya"),
-             ("embedding_cond", "embedding"), ("embedding", "rerank")]
+             ("embedding_cond", "embedding")]
     for a, b in pairs:
         if a not in arms or b not in arms:
             continue
@@ -705,15 +651,13 @@ def report(buckets: list[dict], probes: list[dict], records: list[dict],
 
     _hr("TABLE 6 -- WHERE LAYA IS ALONE IN BEING RIGHT, AND ALONE IN BEING "
         "WRONG")
-    if "laya" in arms and "embedding" in arms and "rerank" in arms:
+    if "laya" in arms and "embedding" in arms:
         won = [r for r in records
                if r["arms"]["laya"]["pick"] == r["correct"]
-               and r["arms"]["embedding"]["pick"] != r["correct"]
-               and r["arms"]["rerank"]["pick"] != r["correct"]]
+               and r["arms"]["embedding"]["pick"] != r["correct"]]
         lost = [r for r in records
                 if r["arms"]["laya"]["pick"] != r["correct"]
-                and r["arms"]["embedding"]["pick"] == r["correct"]
-                and r["arms"]["rerank"]["pick"] == r["correct"]]
+                and r["arms"]["embedding"]["pick"] == r["correct"]]
         print(f"  laya alone right: {len(won)}   laya alone wrong: {len(lost)}")
         for tag, rows in (("ONLY LAYA RIGHT", won), ("ONLY LAYA WRONG", lost)):
             print(f"\n  {tag}")
@@ -732,7 +676,7 @@ def report(buckets: list[dict], probes: list[dict], records: list[dict],
           "every probe returns one member is a constant, and its\n  margin is "
           "measuring the option wordings, not the problem.")
     heads2 = [a for a in arms if a in ("lexical", "embedding",
-                                       "embedding_cond", "rerank",
+                                       "embedding_cond",
                                        "laya", "laya_cond")]
     print(f"\n  {'bucket':28s} {'1/k':>5s} " +
           " ".join(f"{h:>14s}" for h in heads2))
@@ -759,23 +703,21 @@ def report(buckets: list[dict], probes: list[dict], records: list[dict],
     _hr("THE STATED PREDICTION")
     print('  "Laya beats both on CONTRASTIVE buckets (alternatives separated by')
     print('   one condition), and ties or loses on TOPICALLY DISTINCT ones."')
-    if all(a in arms for a in ("laya", "embedding", "rerank")):
-        lc, le, lr = (acc["laya"][1]["acc"], acc["embedding"][1]["acc"],
-                      acc["rerank"][1]["acc"])
-        tc, te, tr = (acc["laya"][2]["acc"], acc["embedding"][2]["acc"],
-                      acc["rerank"][2]["acc"])
-        beats_c = lc > le and lc > lr
-        print(f"\n  contrastive: laya {_pct(lc)}  embedding {_pct(le)}  "
-              f"rerank {_pct(lr)}   -> laya "
-              f"{'BEATS both' if beats_c else 'does NOT beat both'}")
-        print(f"  topical    : laya {_pct(tc)}  embedding {_pct(te)}  "
-              f"rerank {_pct(tr)}   -> laya "
-              f"{'ahead' if tc > max(te, tr) else 'behind or tied'}")
+    # "both" was embedding and the reranker; the rerank arm went with the
+    # reranker (2026-10-01), so this half is checked against embedding alone.
+    if all(a in arms for a in ("laya", "embedding")):
+        lc, le = acc["laya"][1]["acc"], acc["embedding"][1]["acc"]
+        tc, te = acc["laya"][2]["acc"], acc["embedding"][2]["acc"]
+        beats_c = lc > le
+        print(f"\n  contrastive: laya {_pct(lc)}  embedding {_pct(le)}"
+              f"   -> laya "
+              f"{'BEATS embedding' if beats_c else 'does NOT beat embedding'}")
+        print(f"  topical    : laya {_pct(tc)}  embedding {_pct(te)}"
+              f"   -> laya "
+              f"{'ahead' if tc > te else 'behind or tied'}")
         mc_e = mcnemar(records, "laya", "embedding", contrastive)
-        mc_r = mcnemar(records, "laya", "rerank", contrastive)
         print(f"\n  paired, contrastive: vs embedding discordant="
-              f"{mc_e['discordant']} p={mc_e['p']:.3f}; vs rerank discordant="
-              f"{mc_r['discordant']} p={mc_r['p']:.3f}")
+              f"{mc_e['discordant']} p={mc_e['p']:.3f}")
         print(f"\n  VERDICT: {'CONFIRMED' if beats_c else 'REFUTED'} on the "
               "first half of the prediction.")
 

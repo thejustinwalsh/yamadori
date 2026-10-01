@@ -52,7 +52,7 @@ describe('superset topology', () => {
     for (const w of WORDS.slice(0, 20)) {
       const sk = skeletonOf(w);
       const limbs = new Set(sk.branches.filter((b) => b.kind === 'limb').map((b) => b.limb));
-      expect([...limbs].sort()).toEqual([0, 1, 2, 3]);
+      expect([...limbs].sort()).toEqual([LIMB.main, LIMB.child]);
       expect(sk.seeds).toHaveLength(LIMB_COUNT);
       // parent always precedes child, so one forward pass can pose the tree
       for (const b of sk.branches) expect(b.parent).toBeLessThan(b.id);
@@ -61,14 +61,20 @@ describe('superset topology', () => {
 
   it("a limb's shape depends only on its own seed", () => {
     const main = fnv1a32('harbor');
-    const a = growSkeleton(limbSeeds(main, [fnv1a32('ember'), fnv1a32('fern')]));
-    const b = growSkeleton(limbSeeds(main, [fnv1a32('quartz'), fnv1a32('fern')]));
+    const a = growSkeleton([main, fnv1a32('ember')]);
+    const b = growSkeleton([main, fnv1a32('quartz')]);
     const pick = (sk: typeof a, limb: number) =>
       JSON.stringify(sk.branches.filter((x) => x.limb === limb).map(({ id: _id, parent: _p, ...rest }) => rest));
     expect(pick(a, LIMB.main)).toBe(pick(b, LIMB.main));
-    expect(pick(a, LIMB.thinking)).toBe(pick(b, LIMB.thinking));
-    expect(pick(a, LIMB.fanout2)).toBe(pick(b, LIMB.fanout2));
-    expect(pick(a, LIMB.fanout1)).not.toBe(pick(b, LIMB.fanout1));
+    expect(pick(a, LIMB.child)).not.toBe(pick(b, LIMB.child));
+  });
+
+  it('the main and child limbs grow as they did before the fan-out slots were removed (version 1)', () => {
+    // SKELETON_VERSION 1 grew two more limbs AFTER these, from their own
+    // seeds, so every branch here is the same as it was in version 1.
+    const sk = skeletonOf('harbor');
+    expect(sk.version).toBe(2);
+    expect(sk.branches.every((b) => b.limb === LIMB.none || b.limb === LIMB.main || b.limb === LIMB.child)).toBe(true);
   });
 
   it('no Math.random, Date or performance anywhere in src/bonsai (non-test code)', () => {
@@ -82,12 +88,14 @@ describe('superset topology', () => {
 });
 
 // Recorded 2026-09-22 from a separate vitest process after the genome was
-// final (SKELETON_VERSION 1). A change here is a change to every tree ever
-// grown from these words: bump SKELETON_VERSION and re-record deliberately.
+// final (SKELETON_VERSION 1); re-recorded 2026-09-29 for SKELETON_VERSION 2,
+// when the fan-out limb slots were removed with fan-out. A change here is a
+// change to every tree ever grown from these words: bump SKELETON_VERSION
+// and re-record deliberately.
 const GOLDEN: Record<string, string> = {
-  harbor: '078b26e4610e807c91f4cf144c1286d1a6377d513fa86b8a40ac3c39c6a3110f', // 62 branches
-  juniper: '63045723b92dbec77863f12551f51d828b79b0bd646cf0f6ecb3c9494965bafa', // 60 branches
-  obsidian: 'd94f328e7f3ac79354cb3ce97073b24e7ab472eca0d9390da5f6578c01d1a7bd', // 66 branches
-  盆栽: '77036e88128b9dad009bb4da21de12f840eed55662c59e126a1de7851f78de42', // 64 branches
-  '': '4619ca2be9cedabfd14121de263820354af11433bf183f5fa88ecda5561ac920', // 62 branches
+  harbor: '41bdc2c1a93d17e2be3b68399fe1d4434b45c73c54dae7af951f3a938653a1e5', // 36 branches
+  juniper: '7b9deebd6a6fddc31915b747928d78865987acc48b9f5b4aa27d70be4285ad84', // 32 branches
+  obsidian: '4d093f402863cbd471d7e0d754168a5042b8e8af8bdae99381e51fc33204f105', // 43 branches
+  盆栽: '3e41cf0e59e8e4c8d136c09c5bb2f3963bdc144f29b4a6d8c66f549b119d2cf5', // 37 branches
+  '': '6473483456c8d3ee7cf5ec326ba7fee9078049400be45a46c4353b0ebadea0a2', // 38 branches
 };

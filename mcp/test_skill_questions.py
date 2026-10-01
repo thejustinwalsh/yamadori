@@ -18,9 +18,8 @@ WHAT IS GATED
   3. THE DECIDERS: decide(state, options) -> probabilities; the pick is the
      argmax when it beats NONE; every decider is order-invariant; the stub
      abstains on options only a model can settle (and the last resort, the
-     fallback, is asked ONCE); CLM (mcp/clm.py, faked here) encodes the
-     state once for all of a turn's skill questions and abstains on
-     ClmUnavailable, the chain falling through to the stub.
+     fallback, is asked ONCE). (The CLM decider's checks went with
+     mcp/clm.py, removed 2026-09-29; the way back is commit e360d37.)
   4. THE STATECHART: the transition table (a guard returning None is an
      illegal event), legality in front of the questions (a cooling area's
      question is never asked), the chart persisted in the skill state and
@@ -48,8 +47,7 @@ for _k, _v in (("YAMADORI_CORPUS_DB", "corpus.sqlite3"),
                ("RINGS_DB", "rings.sqlite3"),
                ("CODE_INDEX_DB", "code.sqlite3"),
                ("YAMADORI_SLOTS_STATE", "slots_state.json"),
-               ("CONCEPT_SEED_LAST", "seed_last.json"),
-               ("YAMADORI_CLM_ACTIONS", "clm_actions.npz")):
+               ("CONCEPT_SEED_LAST", "seed_last.json")):
     os.environ[_k] = os.path.join(_TMP, _v)
 os.environ.setdefault("YAMADORI_GPU_ROOM", "0")
 os.environ["YAMADORI_SKILL_DECIDER"] = "stub"
@@ -390,113 +388,6 @@ def test_the_deciders():
           "[pick] a tie with NONE is not a pick")
 
 
-class _FakeClm:
-    """Stands in for mcp/clm.py's decide_detail_many: counts state
-    encodings, scores an option by the words it shares with the state."""
-
-    def __init__(self, fail=None):
-        self.calls = []
-        self.fail = fail
-
-    def __call__(self, state, lists, instructions=None, keep="tail",
-                 heads=None, **_kw):
-        import clm
-        if self.fail:
-            raise clm.ClmUnavailable("CLM_NOT_LOADED", "the encoder is not "
-                                     "loaded", True, "load clm-encoder")
-        self.calls.append((instructions, len(lists)))
-        sw = set(str(state).lower().split())
-        out = []
-        for opts in lists:
-            sc = [len(sw & set(t.lower().split())) + (0.5 if t in (
-                clm.NONE_OPTION, D.NONE_TEXT) else 0.0) for t in opts]
-            out.append(list(D.softmax({str(i): float(v) for i, v in
-                                       enumerate(sc)}).values()))
-        return {"probabilities": out, "state": {"tokens": 12,
-                                                "truncated": False},
-                "timing": {"total_ms": 1.0}, "heads": "fake"}
-
-
-def test_the_clm_decider():
-    import clm
-    saved = clm.decide_detail_many
-    fake = _FakeClm()
-    clm.decide_detail_many = fake
-    try:
-        dec = D.ClmDecider()
-        st = "a koota world query with updateEach fails"
-        qs = [D.Question("evidence:koota", "evidence", "koota", st, _opts([
-                  ("q", "koota world query updateEach", {}),
-                  ("t", "koota traits spawn", {})])),
-              D.Question("evidence:css", "evidence", "css", st, _opts([
-                  ("c", "sticky header css", {})])),
-              D.Question("category", "category", "*", st, _opts([
-                  ("koota", "Koota: an ECS world", {})]))]
-        got = dec.decide_batch(qs)
-        check(len(fake.calls) == 2 and fake.calls[0] == (clm.INSTRUCTIONS, 2)
-              and fake.calls[1][0] == dec.CATEGORY_INSTRUCTIONS,
-              "[clm] the turn's skill questions share ONE state encoding "
-              "(clm.INSTRUCTIONS); the category question has its own",
-              fake.calls)
-        p = got["evidence:koota"]
-        check(set(p) == {"q", "t", D.NONE} and D.pick(p) == "q"
-              and abs(sum(p.values()) - 1) < 1e-6
-              and "clm" in qs[0].meta,
-              "[clm] probabilities map back to option ids with NONE "
-              "(clm.NONE_OPTION); the pick is the argmax over NONE", p)
-        # Through select(): CLM answers every question, decided_by clm.
-        os.environ["YAMADORI_SKILL_DECIDER"] = "clm"
-        offline()
-        chosen, rec = S.select(U("Use koota: the world query with "
-                                 "updateEach and readEach."),
-                               "code_generation", POOL)
-        check(chosen and rec["decider"] == "clm" and all(
-                  q["decider"] == "clm" for q in rec["questions"])
-              and rec["matched"][0]["decided_by"] == "clm",
-              "[clm] YAMADORI_SKILL_DECIDER=clm: CLM answers the questions",
-              (rec["questions"], rec.get("matched")))
-        fake.fail = True
-        offline()
-        chosen, rec = S.select(U("Use koota: the world query with "
-                                 "updateEach and readEach."),
-                               "code_generation", POOL)
-        q = rec["questions"][0] if rec["questions"] else {}
-        check(chosen and q.get("decider") == "stub"
-              and (q.get("abstained") or {}).get("clm", {}).get("code")
-              == "CLM_NOT_LOADED",
-              "[clm] ClmUnavailable: CLM abstains (recorded, retryable) and "
-              "the chain falls through to the stub", q)
-    finally:
-        clm.decide_detail_many = saved
-        os.environ["YAMADORI_SKILL_DECIDER"] = "stub"
-    # The real client with a synthetic checkpoint and a fake encoder (as
-    # mcp/test_clm.py builds them): a permutation of the options permutes
-    # the probabilities.
-    try:
-        import test_clm as TC
-        path = os.path.join(_TMP, "heads.npz")
-        TC.synthetic_npz(path)
-        import clm_heads
-        TC.fresh(path)
-        dec = D.ClmDecider(heads=clm_heads.load(path))
-        opts = _opts([("a", "koota world query", {}),
-                      ("b", "slide decks", {}), ("c", "sticky css", {})])
-        p1 = dec.decide("a koota query throws", opts,
-                        D.Question("q", "evidence", "k", "a koota query "
-                                   "throws", opts))
-        rev = list(reversed(opts))
-        p2 = dec.decide("a koota query throws", rev,
-                        D.Question("q", "evidence", "k", "a koota query "
-                                   "throws", rev))
-        check(p1 and p2 and all(abs(p1[k] - p2[k]) < 1e-6 for k in p1)
-              and abs(sum(p1.values()) - 1) < 1e-4,
-              "[clm] through the real client (synthetic heads, fake "
-              "encoder): order-invariant, a softmax over the set", (p1, p2))
-    except Exception as e:                                       # noqa: BLE001
-        check(False, "[clm] the real client with a synthetic checkpoint "
-              "ran", f"{type(e).__name__}: {e}")
-
-
 # ======================================================= 4. statechart ==
 def test_the_transition_table():
     t = CH.transition
@@ -547,15 +438,15 @@ def test_the_chart_gates_the_questions():
     check(("given", "ERROR", "recall_eligible") in tr
           and ("recall_eligible", "RECALLED", "given") in tr
           and "debug" in str(r2["chart"]["state"])
-          and "Remember (craft" in t2,
+          and "updateEach" in t2 and "Remember (craft" not in t2,
           "[chart] an error step: koota given --ERROR--> recall_eligible "
           "--RECALLED--> given; the top state is debug (every phase the "
           "evidence raises)", (tr, r2["chart"]["state"]))
     m = step(m, "terminal", {"command": "npm run dev"}, err, 3)
     t3, r3, st = S.decide(m, "agent_step", POOL, [], st, key="q3")
-    check(not t3 and any("same line" in x["why"] for x in r3["skipped"]),
+    check(not t3 and any("same item" in x["why"] for x in r3["skipped"]),
           "[chart] the same error again: legal (no cooldown), but the "
-          "identical recall line is never sent twice in a row",
+          "identical items are never sent twice in a row (the injector)",
           (r3["questions"], r3["skipped"]))
     check(json.loads(json.dumps(st))["chart"]["areas"].get("koota") ==
           "given" and st["chart"]["skill_area"].get("k_queries") == "koota",
@@ -566,7 +457,7 @@ def test_the_chart_gates_the_questions():
                           compactions=1)
     check(st.get("compacted") and any(x["event"] == "BODY"
                                       for x in r4["chart"]["transitions"])
-          and any(d["form"] == "body" for d in r4["decisions"]),
+          and any(d["form"] == "body" for d in r4["stage1"]),
           "[chart] a compaction: every area back to unseen, the next need "
           "is a body again", r4["chart"])
     view = CH.View(st, chars=10, req=99, phase_now="implement",
@@ -627,7 +518,8 @@ def test_through_the_served_template():
         last_tool = [m for m in req3 if m.get("role") == "tool"][-1]
         tr = [(x["from"], x["event"], x["to"]) for x in (x3.get("chart") or {})
               .get("transitions") or [] if x.get("area") == "koota"]
-        check("Remember (craft koota-" in (last_tool.get("content") or "")
+        check("updateEach" in (last_tool.get("content") or "")
+              and "Remember (craft" not in (last_tool.get("content") or "")
               and ("given", "ERROR", "recall_eligible") in tr
               and ("recall_eligible", "RECALLED", "given") in tr,
               "[served] the recall is appended to the error's tool result, "
@@ -650,7 +542,7 @@ def main() -> int:
                test_a_negated_name_places_nothing,
                test_one_question_per_area_capped_with_none,
                test_an_asked_area_the_evidence_cannot_pick_is_one_question,
-               test_the_deciders, test_the_clm_decider,
+               test_the_deciders,
                test_the_transition_table, test_the_chart_gates_the_questions,
                test_through_the_served_template):
         print(f"\n--- {fn.__name__} ---")
@@ -671,4 +563,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # jjava is always in scope where skills serve (operator, 2026-09-29):
+    # offline, the STUBBED decider answers (mcp/decider_stub.py).
+    import decider_stub
+    with decider_stub.installed():
+        sys.exit(main())

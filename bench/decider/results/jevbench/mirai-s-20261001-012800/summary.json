@@ -1,0 +1,181 @@
+{
+ "version": "jevbench-jjava/1",
+ "release": "JevBench v1.3.0 scoring (jevbench/composite_v13.py; reference rows results/v1.2)",
+ "n_items": 231,
+ "n_run": 231,
+ "n_failed": 0,
+ "complete": true,
+ "tiers": {
+  "easy": 1.0,
+  "standard": 0.9583,
+  "hard": 0.7658
+ },
+ "intelligence_public": 82.94529347955627,
+ "intelligence_release_chances": 82.92055996361533,
+ "public_chances": {
+  "easy": 0.284375,
+  "standard": 0.3111111111111111,
+  "hard": 0.33618618618618623
+ },
+ "calibration_public_hard": 80.9792753153153,
+ "ece_public_hard": 0.08426284684684696,
+ "n_ece": 111,
+ "mean_tvd_public_probability": 0.21188879999999996,
+ "n_tvd": 10,
+ "latency_s": {
+  "p50": 0.983263700036332,
+  "p95": 3.9822699000360444,
+  "note": "not comparable: our shared card vs their rented GPUs over the network"
+ },
+ "references": {
+  "jev-1.13.0": {
+   "display": "Jev 1.13.0",
+   "tiers_public": {
+    "easy": 1.0,
+    "standard": 0.9861,
+    "hard": 0.7297
+   },
+   "intelligence_public": 82.25146214831624,
+   "paired_on_items_run": {
+    "n": 231,
+    "only_ours_right": 10,
+    "only_theirs_right": 8,
+    "mcnemar_p": 0.8145294189453125
+   },
+   "published_all_items": {
+    "intelligence": 85.69176285262259,
+    "calibration": 82.6528888888889,
+    "ece_hard": 0.06061111111111118,
+    "probability_fidelity": 77.42800000000001,
+    "tiers_all_items": {
+     "easy": 1.0,
+     "standard": 0.9895833333333334,
+     "judge": 0.9452054794520548,
+     "hard": 0.740909090909091
+    }
+   }
+  },
+  "reflex-27b": {
+   "display": "reflex-27b (Qwen3.8-27B)",
+   "tiers_public": {
+    "easy": 1.0,
+    "standard": 0.9583,
+    "hard": 0.7568
+   },
+   "intelligence_public": 82.37981055714054,
+   "paired_on_items_run": {
+    "n": 231,
+    "only_ours_right": 7,
+    "only_theirs_right": 6,
+    "mcnemar_p": 1.0
+   },
+   "published_all_items": {
+    "intelligence": 85.77522217678047,
+    "calibration": 86.17813284090909,
+    "ece_hard": 0.046629459090909105,
+    "probability_fidelity": 81.6821575,
+    "tiers_all_items": {
+     "easy": 1.0,
+     "standard": 0.9583333333333334,
+     "judge": 0.958904109589041,
+     "hard": 0.759090909090909
+    }
+   }
+  },
+  "simplejev-qwen3.8-27b": {
+   "display": "SimpleJev Qwen3.8-27B",
+   "tiers_public": {
+    "easy": 1.0,
+    "standard": 0.9722,
+    "hard": 0.7387
+   },
+   "intelligence_public": 82.03289489152051,
+   "paired_on_items_run": {
+    "n": 231,
+    "only_ours_right": 7,
+    "only_theirs_right": 5,
+    "mcnemar_p": 0.7744140625
+   },
+   "published_all_items": {
+    "intelligence": 84.70717465474874,
+    "calibration": 81.14491951146204,
+    "ece_hard": 0.06112991220300847,
+    "probability_fidelity": 74.51582146352575,
+    "tiers_all_items": {
+     "easy": 1.0,
+     "standard": 0.96875,
+     "judge": 0.9315068493150684,
+     "hard": 0.75
+    }
+   }
+  }
+ },
+ "status": "complete",
+ "clone": {
+  "path": "C:\\Users\\jwals\\AppData\\Local\\Temp\\claude\\C--Users-jwals-llama-stack\\d16e1f09-4699-483b-a257-1ba77b329ce7\\scratchpad\\jevbench",
+  "commit": "bb05a335bc809e61b20c0f745d25499a82b326fc",
+  "pinned": "bb05a335bc809e61b20c0f745d25499a82b326fc",
+  "commit_ok": true,
+  "files": {
+   "easy.jsonl": {
+    "tier": "easy",
+    "sha256": "314cd493a4c080fca5ad90e1c8a7c2b3f24137e66dc06f8fceaf51ea54f38467",
+    "raw_matches_manifest": false,
+    "canonical_sha256": "3cbd0e951fa8059741955ef2bd3273b0bb60aecae8f4a68b89872f55f7376b3d",
+    "matches": true
+   },
+   "original.jsonl": {
+    "tier": "standard",
+    "sha256": "b2abe9ac8cabd953a3bc452abd4b229da42ca6d0e647bf93f7638076f42db19f",
+    "raw_matches_manifest": false,
+    "canonical_sha256": "914276022fa5f0ea70e4231f2af98e68c67b274b61bea8c440b33890401cd2f9",
+    "matches": true
+   },
+   "hard.jsonl": {
+    "tier": "hard",
+    "sha256": "8c8f1efb5a04b7016f9c8cd8a70a485f58a70a918aac3e3c1107f41172ca91b6",
+    "raw_matches_manifest": false,
+    "canonical_sha256": "e816e106f562dec75a8da12e69b75e957a4bbd9f6300f1145fc71837327a3c61",
+    "matches": true
+   }
+  }
+ },
+ "model": "mirai-s",
+ "target": {
+  "model": "mirai-s",
+  "mode": "base-url",
+  "base": "http://127.0.0.1:18096",
+  "slot": 0,
+  "model_path": "Qwen3.8-27B-S-mirai.gguf",
+  "build": "b5-b59ae80f4",
+  "total_slots": 1,
+  "n_ctx": 128000
+ },
+ "model_profile": {
+  "model": "mirai-s",
+  "record": "C:\\Users\\jwals\\llama-stack\\bench\\decider\\results\\models\\mirai-s.json",
+  "measured": [
+   "label_bias",
+   "labels",
+   "legacy_vs_typed",
+   "letter_prior",
+   "tie_band"
+  ],
+  "unmeasured": [
+   "readout",
+   "legacy_form",
+   "temperature",
+   "read_regime"
+  ],
+  "tie_band": {
+   "value": 0.000346,
+   "measured": true,
+   "source": "C:\\Users\\jwals\\llama-stack\\bench\\decider\\results\\models\\mirai-s.json"
+  },
+  "note": "unmeasured for mirai-s: readout, legacy_form, temperature, read_regime"
+ },
+ "template": "bonsai-decider/1",
+ "readout": "typed/2",
+ "seconds": 363.5,
+ "started": "mirai-s-20261001-012800"
+}

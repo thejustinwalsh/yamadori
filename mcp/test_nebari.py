@@ -5,10 +5,15 @@ THE BUG THIS GATES
 
 `nebari.key_of()` hashed only the first two messages. Two callers with a
 common harness system prompt and the same opening line got ONE session: one
-work log (`read_rings`), one discovered-package list, one tool-offer history.
+work log (mcp/rings.py), one discovered-package list, one tool-offer history.
 Found 2026-09-22 when a fresh conversation from the test key was logged
 OFFERED_EARLIER_THIS_SESSION. The account is now part of the key, and the
 proxy passes it from `accounts.identify()` through `body["_account"]`.
+
+The work log is written by the proxy itself (`proxy._log_turn`, the client
+calls the model made) under the conversation's lineage and read back by
+`proxy._work_log_block` (the model's record_step / read_rings tools are
+gone), so its scoping is checked through those two.
 """
 from __future__ import annotations
 
@@ -62,22 +67,27 @@ def test_the_key_is_scoped_to_the_account():
           "later turns do not change the key (it is the first two messages)")
 
 
+def _did(summary: str) -> dict:
+    """An assistant turn with one client call, as _log_turn reads it."""
+    return {"role": "assistant", "content": "",
+            "tool_calls": [{"id": "call_1", "type": "function", "function": {
+                "name": "terminal",
+                "arguments": '{"command": "%s"}' % summary}}]}
+
+
 def test_the_proxy_threads_the_account_into_the_session():
     _, sa = proxy.session_context(MSGS, "acct-a")
     _, sb = proxy.session_context(MSGS, "acct-b")
     check(sa["_key"] != sb["_key"],
           "session_context gives two accounts two sessions",
           f"{sa['_key']} {sb['_key']}")
-    ra = proxy.run_our_tool("record_step", {"kind": "did",
-                                            "summary": "only account A did this"},
-                            None, None, None, sa)
-    check("recorded" in ra.lower(), "account A records a step", ra[:120])
-    rb = proxy.run_our_tool("read_rings", {}, None, None, None, sb)
+    proxy._log_turn(sa, _did("only account A did this"))
+    ra = proxy._work_log_block(sa)
+    check("only account A did this" in ra,
+          "account A's call is in its own work log", ra[:200])
+    rb = proxy._work_log_block(sb)
     check("only account A did this" not in rb,
           "and account B's work log does not contain it", rb[:200])
-    ra2 = proxy.run_our_tool("read_rings", {}, None, None, None, sa)
-    check("only account A did this" in ra2,
-          "while account A's own log does", ra2[:200])
 
 
 def test_an_explicit_session_token_separates_identical_openings():
@@ -103,12 +113,12 @@ def test_an_explicit_session_token_separates_identical_openings():
     _, sa = proxy.session_context(MSGS, "acct-a", "row-A")
     _, sb = proxy.session_context(MSGS, "acct-a", "row-B")
     check(sa["_key"] != sb["_key"], "session_context threads the token")
-    proxy.run_our_tool("record_step", {"kind": "did",
-                                       "summary": "only row A did this"},
-                       None, None, None, sa)
-    rb = proxy.run_our_tool("read_rings", {}, None, None, None, sb)
-    check("only row A did this" not in rb,
-          "and row B's work log does not see row A's", rb[:200])
+    proxy._log_turn(sa, _did("only row A did this"))
+    ra = proxy._work_log_block(sa)
+    rb = proxy._work_log_block(sb)
+    check("only row A did this" in ra and "only row A did this" not in rb,
+          "and row B's work log does not see row A's", f"{ra[:120]!r} "
+          f"{rb[:120]!r}")
     seen = []
     real = proxy.session_context
     proxy.session_context = lambda m, a="", s="", **k: (seen.append(s),

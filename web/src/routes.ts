@@ -4,9 +4,10 @@
 import { lazy, type ComponentType } from 'react';
 import { peek, prefetch } from './api/cache';
 import { PATHS } from './api/data';
-import { NEBARI_PATH } from './api/nebari';
+import { LIBRARY_PATH } from './api/library';
 import { IMAGE_SETTINGS_PATH } from './api/settings';
 import { HARNESS_KIT_PATH } from './api/harness';
+import { JJAVA_PATH, PERF_PATH } from './api/stats';
 import { ONBOARDING_PATH, onboardingPath } from './api/onboarding';
 import { PROMPTS_PATH, RECENT_PATH, SELECTIONS_PATH, SKILLS_PATH, skillPath } from './api/skills';
 import type { Route } from './router';
@@ -42,10 +43,10 @@ function chunk<P extends object>(load: () => Promise<ComponentType<P>>): Chunk<P
 }
 
 export const screens = {
-  nebari: chunk(() => import('./screens/Nebari').then((m) => m.Nebari)),
   naedoko: chunk(() => import('./screens/Naedoko').then((m) => m.Naedoko)),
   dataset: chunk(() => import('./screens/DatasetDetail').then((m) => m.DatasetDetail)),
-  sentei: chunk(() => import('./screens/Sentei').then((m) => m.Sentei)),
+  perf: chunk(() => import('./screens/Performance').then((m) => m.PerformanceScreen)),
+  jjava: chunk(() => import('./screens/Jjava').then((m) => m.JjavaScreen)),
   settings: chunk(() => import('./screens/Settings').then((m) => m.Settings)),
   skills: chunk(() => import('./screens/Skills').then((m) => m.Skills)),
   skill: chunk(() => import('./screens/SkillDetail').then((m) => m.SkillScreen)),
@@ -60,16 +61,18 @@ export const screens = {
  */
 export function dataFor(route: Route): string[] {
   switch (route.name) {
-    case 'nebari':
-      return [NEBARI_PATH, PATHS.results];
     case 'dataset':
       return [PATHS.dataset(route.id)];
-    case 'sentei':
-      return [PATHS.results];
+    // the window the page last showed is the viewer's (StatsParts useWindow);
+    // intent warms the default one
+    case 'perf':
+      return [PERF_PATH];
+    case 'jjava':
+      return [JJAVA_PATH];
     case 'settings':
       return [IMAGE_SETTINGS_PATH];
     case 'skills':
-      return route.view === 'selections' ? [SKILLS_PATH, RECENT_PATH, SELECTIONS_PATH] : route.view === 'prompts' ? [PROMPTS_PATH] : route.view === 'create' ? [SKILLS_PATH, ONBOARDING_PATH] : [SKILLS_PATH];
+      return route.view === 'selections' ? [SKILLS_PATH, RECENT_PATH, SELECTIONS_PATH, JJAVA_PATH] : route.view === 'prompts' ? [PROMPTS_PATH] : route.view === 'create' ? [SKILLS_PATH, ONBOARDING_PATH] : [SKILLS_PATH, LIBRARY_PATH];
     case 'skill':
       return [SKILLS_PATH, skillPath(route.id)];
     case 'onboarding':
@@ -83,10 +86,10 @@ export function dataFor(route: Route): string[] {
 
 function chunkFor(route: Route): Pick<Chunk<object>, 'preload' | 'loaded'> | null {
   switch (route.name) {
-    case 'nebari':
     case 'naedoko':
     case 'dataset':
-    case 'sentei':
+    case 'perf':
+    case 'jjava':
     case 'settings':
     case 'skills':
     case 'skill':

@@ -89,7 +89,8 @@ class Turn:
         answer we already had. Re-running them bought nothing; it only meant
         the model spent a quarter of an hour to reach the same dead end.
 
-        The model gets the situation (proxy._EMPTY_AGAIN) and decides.
+        The model got the situation (proxy._EMPTY_AGAIN, removed 2026-09-29
+        with the second brain's code tools) and decided.
         """
         return normalise(name, args) in self.empty
 
@@ -98,8 +99,9 @@ class Turn:
     # a per-tool next-step hint to our tool results. The wording's only
     # evidence was a Laya margin (0.288 vs 0.493), not this model, and no
     # operator decision backs it. The repeat itself is still recorded, and an
-    # identical empty search is still answered from the cache with the
-    # situation (proxy._EMPTY_AGAIN). proxy.py's three calls are gone too.
+    # identical empty search was answered from the cache with the situation
+    # (proxy._EMPTY_AGAIN) until the proxy stopped running the code tools
+    # (2026-09-29). proxy.py's three calls are gone too.
 
 
 def _empty(text: str) -> bool:

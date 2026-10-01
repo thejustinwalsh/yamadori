@@ -560,11 +560,17 @@ def daily(pool: list[dict], path: str = DAILY, verbose: bool = False
                                     dbs={})["class"]
             except Exception:                                    # noqa: BLE001
                 rc = None
-            text, rec, state = skill_select.decide(
-                clean, rc, pool, tools, state, key=f"{row['id']}:{ti}")
+            # STAGE 1 is what this eval judges (which skills are offered,
+            # as a body or a recall); the injector's gate is jjava's, run
+            # here by the STUB decider (mcp/decider_stub.py, pass_all), and
+            # tuned on its own labels (bench/skills/inject_labels.py).
+            import decider_stub
+            with decider_stub.installed():
+                text, rec, state = skill_select.decide(
+                    clean, rc, pool, tools, state, key=f"{row['id']}:{ti}")
             got = [{"name": d["name"], "form": d["form"],
                     "trigger": d["trigger"], "slot": d.get("slot")}
-                   for d in rec.get("decisions") or []]
+                   for d in rec.get("stage1") or []]
             label = row["id"] + (f"#{ti}" if len(turns) > 1 else "")
             cs, areas, want = _judge(t["expect"], got, text, pool_area, label)
             checks += cs
@@ -778,13 +784,15 @@ def transcript(run: str, pool: list[dict], server: bool = True) -> dict:
                                 dbs={})["class"]
         except Exception:                                        # noqa: BLE001
             rc = None
-        _t, rec, state = skill_select.decide(
-            upto, rc, pool, tools, state, key=f"t:{i}",
-            server_tools=({"yama_think_deeply", "yama_plan"} if server
-                          else None), plan_files=plan)
+        import decider_stub
+        with decider_stub.installed():
+            _t, rec, state = skill_select.decide(
+                upto, rc, pool, tools, state, key=f"t:{i}",
+                server_tools=({"yama_think_deeply", "yama_plan"} if server
+                              else None), plan_files=plan)
         got = [{"name": d["name"], "trigger": d["trigger"],
                 "form": d["form"], "evidence": d.get("evidence")}
-               for d in rec.get("decisions") or []]
+               for d in rec.get("stage1") or []]
         if got:
             out.append({"index": i - 1, "kind": rec.get("kind"),
                         "got": got})

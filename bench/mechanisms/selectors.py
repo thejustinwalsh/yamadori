@@ -135,11 +135,9 @@ LAYA_PERMUTATIONS = 2
 LAYA_MARGIN_FLOOR = 0.15
 TREE_MARGIN_GATE = 0.3
 
-# A cross-encoder reads query and document together. Overflowing its context
-# makes it score everything identically -- silently replacing a ranking with
-# noise -- so the problem statement is truncated for reranking only.
-RERANK_QUERY_CHARS = 2000
-RERANK_DOC_CHARS = 1200
+# THE `rerank` SELECTOR WENT WITH THE RERANKER (operator, 2026-10-01: "Remove
+# reranker"; docs/REMOVED.md): select_rerank, its backend hook, its mock and
+# its two dry-run checks (7 and 8 below) are at commit e360d37.
 
 # PLACEHOLDER, not a result. The deployable floor is "always inject the best
 # single arm", and which arm that is comes from the per-recipe table in
@@ -165,12 +163,11 @@ class LayaContractError(SelectorError):
 
 
 # --------------------------------------------------------------- backends ---
-# Indirection, not reimplementation. The real calls are code_search.embed,
-# code_search.rerank and code_search._post_json; these hooks exist so the dry
+# Indirection, not reimplementation. The real calls are code_search.embed
+# and code_search._post_json; these hooks exist so the dry
 # run can substitute mocks without a GPU or a network, and for no other reason.
 
 _EMBED_HOOK = None
-_RERANK_HOOK = None
 _POST_HOOK = None
 
 
@@ -181,13 +178,6 @@ def _embed(texts: list[str], is_query: bool):
     return cs.embed(texts, is_query=is_query)
 
 
-def _rerank(query: str, docs: list[str], top_n: int):
-    if _RERANK_HOOK is not None:
-        return _RERANK_HOOK(query, docs, top_n)
-    import code_search as cs
-    return cs.rerank(query, docs, top_n)
-
-
 def _post_json(url: str, payload: dict, timeout: int = 30):
     if _POST_HOOK is not None:
         return _POST_HOOK(url, payload, timeout)
@@ -196,15 +186,15 @@ def _post_json(url: str, payload: dict, timeout: int = 30):
 
 
 @contextlib.contextmanager
-def mock_backends(embed=None, rerank=None, post=None):
-    """Swap the three backends for the duration of a block. Dry run only."""
-    global _EMBED_HOOK, _RERANK_HOOK, _POST_HOOK
-    prev = (_EMBED_HOOK, _RERANK_HOOK, _POST_HOOK)
-    _EMBED_HOOK, _RERANK_HOOK, _POST_HOOK = embed, rerank, post
+def mock_backends(embed=None, post=None):
+    """Swap the two backends for the duration of a block. Dry run only."""
+    global _EMBED_HOOK, _POST_HOOK
+    prev = (_EMBED_HOOK, _POST_HOOK)
+    _EMBED_HOOK, _POST_HOOK = embed, post
     try:
         yield
     finally:
-        _EMBED_HOOK, _RERANK_HOOK, _POST_HOOK = prev
+        _EMBED_HOOK, _POST_HOOK = prev
 
 
 # ----------------------------------------------------------------- result ---
@@ -412,51 +402,6 @@ def select_embedding(problem_text: str, recipes: list[dict] | None = None,
     return Selection(ids=[i for i, _ in ranked[:k]], mechanism="embedding",
                      confidence=round(ranked[0][1], 4), margin=margin,
                      scores={i: round(s, 4) for i, s in ranked})
-
-
-def select_rerank(problem_text: str, recipes: list[dict] | None = None,
-                  k: int = 1) -> Selection:
-    """Cross-encoder rerank of the whole pool against the problem.
-
-    Only ORDER is meaningful from a reranker. The absolute scale is not: this
-    setup returns correctly-ordered scores around 1e-13, and an earlier guard
-    that rejected "too small" scores was discarding good rankings. So no
-    confidence is reported, and the margin is flagged ordinal.
-
-    The degenerate case that IS worth catching is a reranker that cannot
-    separate the documents at all -- every score identical -- which is what
-    context overflow looks like.
-    """
-    pool = _pool(recipes)
-    k = _clamp_k(k, len(pool))
-    docs = [f"{r['id']}: {r['text'][:RERANK_DOC_CHARS]}" for r in pool]
-    try:
-        ranked = _rerank(problem_text[:RERANK_QUERY_CHARS], docs, len(docs))
-    except Exception as e:                                       # noqa: BLE001
-        ranked = None
-        reason = f"{type(e).__name__}: {e}"
-    if ranked:
-        scores = [s for _, s in ranked]
-        if len(set(scores)) == 1:
-            ranked, reason = None, ("all scores identical -- the cross-encoder "
-                                    "did not separate the documents")
-    elif ranked is not None:
-        ranked, reason = None, "reranker returned no rows"
-    if ranked is None:
-        # Declared chain: rerank -> embedding -> fixed. Embedding first because
-        # it is a real ranking over the same pool, not a constant.
-        sel = select_embedding(problem_text, pool, k)
-        sel.mechanism = "rerank"
-        sel.fallback = f"embedding: {reason}"
-        sel.notes = "DEGRADED -- cross-encoder unusable, embedding order used."
-        return sel
-    ids = [pool[i]["id"] for i, _ in ranked]
-    gap = (round(float(ranked[0][1]) - float(ranked[1][1]), 12)
-           if len(ranked) > 1 else None)
-    return Selection(ids=ids[:k], mechanism="rerank", confidence=None,
-                     margin=gap,
-                     scores={pool[i]["id"]: float(s) for i, s in ranked},
-                     notes="margin is ORDINAL only; rerank scale is meaningless")
 
 
 # ================================================================= LAYA =====
@@ -1000,7 +945,6 @@ SELECTORS = {
     "random": select_random,
     "fixed": select_fixed,
     "embedding": select_embedding,
-    "rerank": select_rerank,
     "laya": select_laya,
     "tree": select_tree,
     "oracle": select_oracle,
@@ -1052,22 +996,6 @@ def mock_embed(texts: list[str], is_query: bool = False, dim: int = 1024):
         n = math.sqrt(sum(x * x for x in v)) or 1.0
         out.append([x / n for x in v])
     return out
-
-
-def mock_rerank(query: str, docs: list[str], top_n: int, degenerate=False):
-    """Word-overlap order, at the ~1e-13 scale the real reranker returns.
-
-    `degenerate=True` reproduces context overflow: every score identical, which
-    is the case the code must catch, as opposed to "scores are small", which it
-    must NOT treat as failure.
-    """
-    q = _content_words(query)
-    rows = []
-    for i, d in enumerate(docs):
-        overlap = len(q & _content_words(d))
-        rows.append((i, 1e-13 if degenerate else overlap * 1e-13 + 1e-15))
-    rows.sort(key=lambda x: -x[1])
-    return rows[:top_n]
 
 
 class MockLaya:
@@ -1147,13 +1075,11 @@ def run_dry_run() -> int:                                        # noqa: C901
           f"(placebo excluded -- it is the control arm)\n")
 
     laya = MockLaya()
-    with mock_backends(embed=mock_embed,
-                       rerank=lambda q, d, n: mock_rerank(q, d, n),
-                       post=laya):
+    with mock_backends(embed=mock_embed, post=laya):
 
         # 1. shape contract, every deployable selector, every k
         ok, detail = True, ""
-        for name in ("random", "fixed", "embedding", "rerank", "laya", "tree"):
+        for name in ("random", "fixed", "embedding", "laya", "tree"):
             for k in (1, 2, 3):
                 sel = select(name, IO_PROBLEM, pool, k)
                 if len(sel.ids) != k or not set(sel.ids) <= ids \
@@ -1186,21 +1112,6 @@ def run_dry_run() -> int:                                        # noqa: C901
         ck("embedding picks the content-matching recipe and reports cosine",
            sel.ids == ["structures"] and sel.confidence is not None
            and sel.margin is not None, f"{sel.ids} conf={sel.confidence}")
-
-        # 7. rerank uses the cross-encoder ordering
-        sel = select_rerank(SEQ_PROBLEM, pool, 1)
-        ck("rerank returns cross-encoder order with an ordinal margin only",
-           sel.ids == ["structures"] and sel.confidence is None
-           and sel.fallback is None, f"{sel.ids}")
-
-        # 8. degenerate reranker (context overflow) -> declared fallback
-        with mock_backends(embed=mock_embed,
-                           rerank=lambda q, d, n: mock_rerank(q, d, n, True),
-                           post=laya):
-            sel = select_rerank(SEQ_PROBLEM, pool, 1)
-        ck("identical rerank scores degrade to embedding, not to empty",
-           len(sel.ids) == 1 and sel.fallback and sel.fallback.startswith("embedding"),
-           sel.fallback or "")
 
         # 9. LAYA CONTRACT: candidates in criteria only, never in state
         laya.calls.clear()
@@ -1244,7 +1155,7 @@ def run_dry_run() -> int:                                        # noqa: C901
                                                for r in pool}}}})
         fwd_pick = max(fwd["answers"]["pick"]["probabilities"],
                        key=fwd["answers"]["pick"]["probabilities"].get)
-        with mock_backends(embed=mock_embed, rerank=mock_rerank, post=strong):
+        with mock_backends(embed=mock_embed, post=strong):
             avg = select_laya(SEQ_PROBLEM, pool, 1)
         ck("laya: averaging overturns the first-option artefact",
            fwd_pick == keys[0] and avg.ids[0] == "structures",
@@ -1260,7 +1171,7 @@ def run_dry_run() -> int:                                        # noqa: C901
         ck("laya: repeating a candidate inside `state` raises", raised)
 
         # 14. laya failure -> declared fallback, never a silent empty list
-        with mock_backends(embed=mock_embed, rerank=mock_rerank,
+        with mock_backends(embed=mock_embed,
                            post=MockLaya(fail=True)):
             sel = select_laya(IO_PROBLEM, pool, 2)
         ck("laya failure degrades to the declared fixed fallback",
@@ -1270,7 +1181,7 @@ def run_dry_run() -> int:                                        # noqa: C901
         # 15. embedding failure -> declared fallback too
         def boom(*_a, **_k):
             raise OSError("mock embeddings: connection refused")
-        with mock_backends(embed=boom, rerank=mock_rerank, post=laya):
+        with mock_backends(embed=boom, post=laya):
             sel = select_embedding(IO_PROBLEM, pool, 1)
         ck("embedding failure degrades to the declared fixed fallback",
            len(sel.ids) == 1 and sel.fallback and sel.fallback.startswith("fixed"),
@@ -1309,7 +1220,7 @@ def run_dry_run() -> int:                                        # noqa: C901
         ck("tree: candidate descriptions never leak into `state`", clean)
 
         # 19. an undecidable node abstains instead of guessing
-        with mock_backends(embed=mock_embed, rerank=mock_rerank,
+        with mock_backends(embed=mock_embed,
                            post=MockLaya(uniform=True)):
             sel = select_tree(VAGUE_PROBLEM, pool, 1)
         ck("tree: a below-gate margin abstains rather than guessing",
@@ -1318,7 +1229,7 @@ def run_dry_run() -> int:                                        # noqa: C901
            f"margin={sel.margin} fallback={sel.fallback}")
 
         # 20. abstention can hand off to a declared mechanism instead
-        with mock_backends(embed=mock_embed, rerank=mock_rerank,
+        with mock_backends(embed=mock_embed,
                            post=MockLaya(uniform=True)):
             sel = select_tree(SEQ_PROBLEM, pool, 1, on_abstain="embedding")
         ck("tree: abstention can degrade to embedding, still flagged",
@@ -1326,7 +1237,7 @@ def run_dry_run() -> int:                                        # noqa: C901
            and sel.fallback.startswith("embedding"), sel.fallback or "")
 
         # 21. laya down mid-walk -> declared fallback with the trace kept
-        with mock_backends(embed=mock_embed, rerank=mock_rerank,
+        with mock_backends(embed=mock_embed,
                            post=MockLaya(fail=True)):
             sel = select_tree(IO_PROBLEM, pool, 1)
         ck("tree: laya failure degrades to fixed and keeps the trace",

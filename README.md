@@ -37,7 +37,7 @@ Bonsai has a vocabulary for cutting things away, and it fits.
 
 | | |
 |---|---|
-| **剪定 · sentei** | Pruning. Eight tools on the MCP surface, eleven the model sees (twelve with the `delegate_investigation` benchmark flag). `judge` was cut at 6/10 against a coin flip and now dispatches nowhere. |
+| **剪定 · sentei** | Pruning. Eight tools on the MCP surface; the model sees your client's tools plus a few of ours (images, package lookups). `judge` was cut at 6/10 against a coin flip; deep thinking, fan-out and the fix-up were cut on 2026-09-29 ([docs/REMOVED.md](docs/REMOVED.md)). |
 | **芽摘み · metsumi** | Bud-pinching. Sample many answers. Keep the one that compiles. |
 | **舎利 · shari** | Deadwood, bleached and kept. Every failed idea stays in the repo with its evidence. |
 | **根張り · nebari** | Root flare. Retrieval you can see: `taproot`, `branch`, `shoot`. |
@@ -48,12 +48,12 @@ Bonsai has a vocabulary for cutting things away, and it fits.
 
 You point any OpenAI client at one URL. That is the whole setup.
 
-The stack reads the source of every library you import, at the version you
-use, and searches it on the model's behalf. Your own code stays with your
+The stack gives the model what it gets wrong on its own: the exact names,
+versions and READMEs of the packages you use, looked up in the registries when
+the model asks (the MCP host's package lookups). Your own code stays with your
 client: the model reads it through your harness's file tools, and the server
-never looks at your disk. It checks the code it writes before it answers, and
-it remembers what it already did, so a long session does not redo its own
-work.
+never looks at your disk. It remembers what it already did, so a long session
+does not redo its own work, and it never breaks the model's prompt cache.
 
 The client never learns any of this. It thinks it added a model.
 
@@ -64,13 +64,15 @@ The tree is not finished. It will not be.
 Nothing here is asserted without a measurement, and the measurements have
 been unkind. BM25 beat the embedding index 92 to 77 and the embeddings got
 switched off. Every reranker number turned out to be void, because its
-scores change with what else is in the batch (`docs/FINDINGS.md` #20). A fan-out
+scores change with what else is in the batch (`docs/FINDINGS.md` #20), and
+the reranker was removed (2026-10-01, `docs/REMOVED.md`). A fan-out
 experiment returned a clean null. And two separate things happened to the
 decision model, which used to be written here as one sentence and are not
 related:
 
 - **Calibration went nowhere.** Temperature-scaling it on 151 held-out
-  contrastive pairs (`index/calibration.json`, `scripts/calibrate_laya.py`)
+  contrastive pairs (`index/calibration.json`, `scripts/calibrate_laya.py`,
+  deleted with Laya on 2026-09-29 and in git at `e360d37`)
   moved ECE from 0.279 to 0.032 and left accuracy at **0.5066 against a 0.500
   majority baseline the pairs have by construction** — which is the only
   outcome possible, because a single scalar divisor is monotonic and cannot
@@ -78,7 +80,8 @@ related:
   Finding 10.
 - **A different tool was cut.** `judge` — the decision model asked to say
   whether a proposition holds — scored **6/10 against a 5/10 coin flip** on
-  unambiguous yes/no engineering questions (`scripts/eval_judge.py`), with
+  unambiguous yes/no engineering questions (`scripts/eval_judge.py`, also
+  deleted with Laya), with
   three of four misses being false positives on the *negative* cases. It is
   now advertised in no tool list and no longer dispatches by name.
 
@@ -114,63 +117,46 @@ endpoints keep working if ZeroTier reassigns the IP.
 ## Effort tiers
 
 The standard `reasoning_effort` field is the only switch a client needs. Each
-tier turns on one more augmentation (`mcp/tiers.py`, `TIERS`); nothing else has
-to be configured. A tier says what is *allowed*: the selection engine still
-decides per request whether fan-out and deep thinking are worth running, and
-every decision comes back on the response as `x_yamadori`.
-
-Fan-out means **up to 3** candidates, the original answer included, generated
-**in sequence by the second brain** (the helper context deep thinking also
-uses), never in parallel: the second brain writes one more answer, the code
-check grades the two, and only when neither clearly wins does it write a
-tie-breaker from both candidates and their check results. At most two
-contexts are live at once. A code answer's winner is delivered; for a prose
-answer, the second answer's differing points follow the model's own answer
-and the model weighs them in its own turn.
+tier says what the service may add (`mcp/tiers.py`, `TIERS`); nothing else
+has to be configured, and every decision comes back on the response as
+`x_yamadori`.
 
 Our code-search tools are not offered to the model you talk to: it sees your
-client's tools (plus image tools where an image server is configured, and at
-`xhigh` and `max` one more, `yama_think_deeply`, to call when it is stuck). The
-service works beside it -- library definitions after a library question, the
-second brain's investigation, repair and comparison -- and folds the result
-back in fixed phrases ("After thinking deeply,", "Verified", "Repaired",
-"Compared two approaches"), each second-brain result opening with "Today I
-was inspired by <word>." for the concept seed it drew. Everything it adds is
-replayed byte for byte on every request, so the model's prompt cache is
-never broken by the service.
+client's tools, plus image tools where an image server is configured and, from
+`medium` up, the MCP host's package lookups (`yama_find_package`,
+`yama_list_package_versions`, `yama_read_package_readme`,
+`yama_resolve_packages`). Everything the service adds is replayed byte for
+byte on every request, so the model's prompt cache is never broken by it.
+
+**Removed 2026-09-29** ([docs/REMOVED.md](docs/REMOVED.md); the way back is
+commit `e360d37`): the second brain -- deep thinking, fan-out, the fix-up
+repair and its "Verified / Repaired" notes -- the addendum, library
+definitions, Laya and CLM. They were tried and did not help.
 
 **Skills are off at every tier** (operator, 2026-09-29: "Stop skills until we
 have a good skill injector." -- "Skills are still valuable we just haven't
 found the unlock yet. TBD."). Nothing of the skills system reaches the
 model's context; the skills code stays.
 
-| `reasoning_effort` | thinking | library help | skills | code check | fan-out | deep thinking | addendum | images | concept seed | adds |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `minimal` | off | – | – | – | 1 | – | – | yes | – | the fastest answer: no thinking, nothing of ours (least injection-resistant) |
-| `low` | on | – | – | – | 1 | – | – | yes | – | nothing: the model as it ships, the benchmark baseline |
-| `medium` | on | definitions | – | note | 1 | – | – | yes | – | library definitions for a library question, a note when a client write does not parse (skills: off, 2026-09-29) |
-| `high` | on | definitions | – | repair | up to 3 | – | yes | yes | yes | the second brain: code that does not parse is repaired, a second approach is compared, and the addendum says so |
-| `xhigh` | on | definitions | – | repair | up to 3 | allowed | yes | yes | yes | everything: deep thinking on top of `high` |
-| `max` | on | definitions | – | repair | up to 3 | allowed | yes | yes | yes | everything, with the longest thinking (slowest) |
+| `reasoning_effort` | thinking | skills | MCP tools | images | concept seed | adds |
+|---|---|---|---|---|---|---|
+| `minimal` | off | – | – | yes | – | the fastest answer: no thinking, nothing of ours (least injection-resistant) |
+| `low` | on | – | – | yes | – | nothing: the model as it ships, the benchmark baseline |
+| `medium` | on | – | yes | yes | – | the MCP host's package lookups (skills: off, 2026-09-29) |
+| `high` | on | – | yes | yes | yes | a concept seed on the conversation's first user turn |
+| `xhigh` | on | – | yes | yes | yes | the same as `high`: the effort-matched pair to `max` |
+| `max` | on | – | yes | yes | yes | everything, with the longest thinking (slowest) |
 
-- **Code check:** syntax and lint of what the model writes; its code is
-  changed only where a repair of real errors needs it (formatting is
-  reported, never applied).
-- **Deep thinking** (`xhigh`, `max`) runs on a trigger, on any kind of
-  request, agent steps included: the model calls `yama_think_deeply`; the
-  service sees the work stall (the same error again, a failing command
-  re-run, "still broken"); the conversation uses a library newer than the
-  model; or a large new task arrives, whose plan the second brain writes
-  first. It researches library source, skills, the service's notes and the
-  web (a local SearXNG). Every trigger and non-trigger is recorded with its
-  outcome, and the thresholds are tuned from them within bounds
-  (`mcp/deep.py`, `mcp/deep_learn.py`, `GET /dash/api/deep`).
+- **Concept seed:** one word drawn from the model's own vocabulary, once per
+  conversation, appended to its first user turn so the conversation starts
+  somewhere the model would not otherwise go; `x_yamadori.session.seed`
+  names it.
 - **Default:** `medium`, when a client sends nothing.
 - **Accepted values:** any of the six names above picks its tier; anything
   else gets the default, never an error.
 - **Thinking budget:** it isn't set by the tier. It comes from the request's
-  share of the KV cache: 5/8 of the pool for the conversation, minus the
-  prompt and the answer allowance.
+  share of the KV cache, minus the prompt and the answer allowance, and is
+  capped per kind of turn (`mcp/tiers.py`).
 - **Images:** `yama_generate_image` is offered on every tier when image generation
   is configured: it is a capability, not a gate (`docs/IMAGEGEN.md`).
 
@@ -222,12 +208,11 @@ configs for Claude Code, OpenCode and Hermes are in `docs/TOOLS-API.md`.
 | `GET /status` | index coverage |
 | `GET /openapi.json` | self-discovery for tooling |
 
-> **Retrieval defaults.** `CODE_SEARCH_SEMANTIC=0` and `RERANK_MAX_K=2`, so at
-> shipped defaults `/search` runs BM25 plus the symbol table; embeddings are off
-> and the reranker only participates at k<=2, where its scores are unreliable
-> (`docs/FINDINGS.md` #20). The 4B reranker is NOT used: its
-> GGUF returns inverted near-zero scores through llama.cpp's rank path and fails
-> silently. See `docs/SELECTION.md` for when each mechanism applies.
+> **Retrieval defaults.** `CODE_SEARCH_SEMANTIC=0`, so at shipped defaults
+> `/search` runs BM25 plus the symbol table; embeddings are off. The reranker
+> that reordered results at k<=2 was removed 2026-10-01 (`docs/REMOVED.md`;
+> its scores were unreliable, `docs/FINDINGS.md` #20). See `docs/SELECTION.md`
+> for when each mechanism applies.
 
 
 ## Models
@@ -242,7 +227,8 @@ resolves to it (`mcp/catalog.py`). The ids below are llama-swap's, on loopback
 | `bonsai-agent` | same process, same settings, alias only | 5060 Ti | thinking ON (see config.yaml) |
 | `bonsai-vision` | + multimodal projector | A4000 | on demand, ttl 900 |
 | `embeddings` | Qwen3-Embedding-0.6B | A4000 | resident |
-| `reranker` | Qwen3-Reranker-0.6B | A4000 | resident |
+
+(`reranker`, Qwen3-Reranker-0.6B, was removed 2026-10-01: `docs/REMOVED.md`.)
 
 ### `bonsai-agent` is now an alias and nothing more
 
@@ -319,10 +305,9 @@ docs/HERMES.md       wiring an agent to this stack
 docs/KNOWN-ISSUES.md open problems, with the measurements behind them
 mcp/server.py        the front door on :1234 (auth, /v1, dashboard at /); logic in proxy.py
 mcp/model.py         the one door for internal generation (same tiers.apply)
-mcp/selection.py     per-request: skills, deep thinking, fan-out
-mcp/deep.py          deep thinking's triggers, their records and outcome labels
-mcp/deep_learn.py    idle-time learner: thresholds within bounds, reversible
-mcp/research_tools.py  the second brain's skills, notes and web sources
+mcp/selection.py     per-request: may skills run; the side-call (utility) rule
+mcp/mcp_host.py      the MCP client the proxy runs (PackageLens), yama_* lookups
+mcp/pinned_fetch.py  the pinned GET the MCP host reads READMEs through
 mcp/skills.py        the skill store (Agent Skills folders under index/skills/library)
 mcp/skill_pipeline.py  the one skill pipeline; prompts in skill_prompts.py
 mcp/skill_select.py  which skills a request gets; docs/SKILL-FACTORY.md is the API
@@ -396,11 +381,6 @@ vendored in `engines/src`, each recorded with its origin in
 **Embeddings are asymmetric.** Qwen3-Embedding needs an instruction prefix on
 *queries* and none on documents. Getting it wrong does not error — it silently
 returns near-random results. Handled in `mcp/code_search.py`.
-
-**Rerankers fail silently too.** A cross-encoder reads query+document together;
-overflow its context and it returns `0.0000` for everything, replacing a good
-embedding ranking with noise. Documents are truncated before reranking and
-there is a fallback to embedding order when scores look degenerate.
 
 **VRAM headroom matters.** 240k context *loads* on the 5060 Ti but leaves ~2%
 free, and then dies when a long prefill allocates its compute buffer. 208k was

@@ -19,8 +19,8 @@ What changes:
                        re-recorded from the SERVED /props after the restart (n_ctx, total_slots,
                        kv_vram_cells), and checked against what was intended.
   config.yaml, the retrieval entries (operator, 2026-09-28)
-                       `--cache-ram 0` on `embeddings` (Qwen3-Embedding-0.6B) and `reranker`
-                       (Qwen3-Reranker-0.6B). Observed by the operator: their llama-servers committed 10.8 /
+                       `--cache-ram 0` on `embeddings` (Qwen3-Embedding-0.6B) and, until it was removed
+                       2026-10-01 (docs/REMOVED.md), `reranker` (Qwen3-Reranker-0.6B). Observed by the operator: their llama-servers committed 10.8 /
                        6.8 GB private with a 0.06 GB working set (paged out; system commit 90.7 / 97.7 GB).
                        The suspected cause, READ FROM THE SOURCE of the binary they run
                        (C:/Users/jwals/llamacpp-prism-official, tools/server/server-context.cpp and
@@ -212,13 +212,14 @@ def edit_watchdog(text: str, envs: dict) -> str:
     return ps.replace("\n", nl)
 
 
-RETRIEVAL = {"embeddings": "Qwen3-Embedding-0.6B", "reranker": "Qwen3-Reranker-0.6B"}
+# `reranker` (Qwen3-Reranker-0.6B) was the second entry until its removal, 2026-10-01 (docs/REMOVED.md).
+RETRIEVAL = {"embeddings": "Qwen3-Embedding-0.6B"}
 CACHE_LINES = re.compile(r"prompt cache|cache size limit|cache state:|saving idle slot|making room for prompt "
                          r"cache|cache token limit", re.I)
 
 
 def edit_retrieval(text: str) -> str:
-    """config.yaml with `--cache-ram 0` in the embeddings and reranker entries (once; idempotent)."""
+    """config.yaml with `--cache-ram 0` in the embeddings entry (once; idempotent)."""
     c, nl = _lf(text)
     for entry, model in RETRIEVAL.items():
         m = re.search(r'\n  "' + re.escape(entry) + r'":\n', c)
@@ -251,7 +252,7 @@ def retrieval_commit() -> dict:
     ps = r"""
 $out = @{}
 foreach ($p in Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'") {
-  foreach ($m in @('Qwen3-Embedding-0.6B','Qwen3-Reranker-0.6B')) {
+  foreach ($m in @('Qwen3-Embedding-0.6B')) {
     if ($p.CommandLine -like "*$m*") {
       $g = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
       if ($g) { $out[$m] = @{ pid = $p.ProcessId; private_bytes = $g.PrivateMemorySize64;
@@ -283,7 +284,8 @@ $out | ConvertTo-Json -Depth 4 -Compress
 # 6.8 GB commit with the same defaults is the rest of the case. With the operator's observation (10.8 / 6.8 GB
 # private, 0.06 GB working set) and this script's `--commit` reading at 08:53 (11.61 GB / 7.26 GB private,
 # 0.07 GB working sets; system commit 103.6 of 104.9 GB), --cache-ram 0 is applied UNCONDITIONALLY to both
-# (coordinator, 2026-09-28); --no-retrieval-cache-ram is the opt-out.
+# (coordinator, 2026-09-28); --no-retrieval-cache-ram is the opt-out. The reranker's file and bytes stay as the
+# evidence recorded then; the reranker itself was removed 2026-10-01 (docs/REMOVED.md).
 EVIDENCE_FILES = {"embeddings": "C:/Users/jwals/octo/emb-log-20260928.txt",
                   "reranker": "C:/Users/jwals/octo/rr-log-20260928.txt"}
 EVIDENCE_BEFORE_UNLOAD = {"at": "2026-09-28T08:53:37-0400",
@@ -323,7 +325,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--dry", action="store_true", help="make and check the edits, then put everything back")
     ap.add_argument("--preview", action="store_true", help="print the edits as diffs; write nothing")
     ap.add_argument("--no-retrieval-cache-ram", action="store_true",
-                    help="leave the embeddings/reranker entries as they are")
+                    help="leave the embeddings entry as it is")
     ap.add_argument("--commit", action="store_true",
                     help="only print the retrieval servers' committed bytes now (read-only)")
     a = ap.parse_args(argv)

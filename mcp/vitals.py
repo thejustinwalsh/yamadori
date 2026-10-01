@@ -63,7 +63,8 @@ PORTS = {1234: "proxy", TOOLS_API_PORT: "tools-api",
 # loads a model or starts work: llama-swap's model list, the tools API's
 # /health (the one route it answers without a key, docs/TOOLS-API.md) and
 # SearXNG's /healthz (the watchdog's own probe).
-PROBES = (("http://127.0.0.1:11434/v1/models", "llama-swap"),
+SWAP_URL = (os.environ.get("LLAMA_STACK_URL") or "http://127.0.0.1:11434").rstrip("/")
+PROBES = ((f"{SWAP_URL}/v1/models", "llama-swap"),
           (f"http://127.0.0.1:{TOOLS_API_PORT}/health", "tools-api"),
           (f"{SEARCH_URL}/healthz", "searxng"))
 PROBE_TIMEOUT = 4
@@ -117,9 +118,12 @@ def gpus(timeout: int = 25) -> list[dict]:
     `watts_limit` power.limit; mcp/power.py integrates `watts` into energy.
     The three power-era fields are appended after the original five, so a
     five-column answer still parses (and reports watts None)."""
+    # temperature.gpu (2026-09-30, the PERFORMANCE page's history) is
+    # appended last, as the power fields were, so a shorter answer still
+    # parses (temp_c None).
     out = _sh(["nvidia-smi",
                "--query-gpu=index,name,memory.used,memory.total,utilization.gpu,"
-               "uuid,power.draw,power.limit",
+               "uuid,power.draw,power.limit,temperature.gpu",
                "--format=csv,noheader,nounits"], timeout=timeout)
     rows = []
     for line in out.strip().splitlines():
@@ -133,7 +137,8 @@ def gpus(timeout: int = 25) -> list[dict]:
                      "util": int(p[4] or 0),
                      "uuid": p[5] if len(p) > 5 and p[5] else None,
                      "watts": _float_or_none(p[6]) if len(p) > 6 else None,
-                     "watts_limit": _float_or_none(p[7]) if len(p) > 7 else None})
+                     "watts_limit": _float_or_none(p[7]) if len(p) > 7 else None,
+                     "temp_c": _float_or_none(p[8]) if len(p) > 8 else None})
     # The card the main model runs on, by UUID (config.yaml pins `bonsai` by
     # UUID; mcp/power.py uses the same constant). Index order is PCI order and
     # would silently name the wrong card if the cards ever changed slots.
@@ -327,10 +332,51 @@ def _with_line(ctx: dict) -> dict:
     return ctx
 
 
-def context_pool() -> dict:
+def main_loaded() -> bool | None:
+    """Is the main model loaded, per llama-swap's GET /running (which never
+    loads anything)? True / False, None when /running cannot be read."""
+    rows = running_rows()
+    if rows is None:
+        return None
+    return any(str(r.get("model")) == MAIN_MODEL and _live_row(r)
+               for r in rows)
+
+
+def cached_context(how: str = "cached: the pool this process last read"
+                   ) -> dict:
+    """budget.budgets() over the pool this process last READ; asks nothing.
+    An explained unknown when no pool was ever read."""
     try:
         import budget
-        return _with_line(budget.budgets(budget.pool_size(refresh=True)))
+        pool = budget.known_pool()
+        if pool is None:
+            return {"error": f"the pool is not known yet: {MAIN_MODEL} has not "
+                             "been read by this process and is not loaded "
+                             "(a view never loads a model)",
+                    "pool_read": how}
+        return dict(_with_line(budget.budgets(pool)), pool_read=how)
+    except Exception as e:                                       # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def context_pool() -> dict:
+    """budget.budgets() for the dashboard. A VIEW NEVER LOADS A MODEL
+    (2026-09-30): the pool is re-read only from the main model's own server
+    (budget.refresh_direct: never llama-swap's /upstream) and only while
+    llama-swap's /running lists it; otherwise the pool this process last
+    read, or an explained unknown. `pool_read` says which."""
+    try:
+        import budget
+        loaded = main_loaded()
+        if loaded:
+            _, how = budget.refresh_direct()
+        elif loaded is None:
+            how = ("cached: llama-swap /running could not be read, so nothing "
+                   "was asked (a view never loads a model)")
+        else:
+            how = (f"cached: {MAIN_MODEL} is not loaded (llama-swap /running), "
+                   "so nothing was asked")
+        return cached_context(how)
     except Exception as e:                                       # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"}
 
@@ -480,13 +526,18 @@ def serving() -> dict:
 
 def _slots_target() -> tuple[str, str]:
     """(the /slots URL, the model it belongs to): the main model's server,
-    or the max model's while it holds the card -- llama-swap gives it its
-    own port, so SLOTS_URL would only say the main model is not loaded."""
+    or another tier model's while it holds the card (the table's MODELS:
+    flash-next, mirai-s) -- llama-swap gives it its own port, read from GET
+    /running (which never loads), so SLOTS_URL would only say the main model
+    is not loaded. Never /upstream/<model>/: that would load an unloaded
+    one."""
     mm = _max_mode()
     if mm is not None and getattr(mm, "ENABLED", False):
+        others = {m for m in list(getattr(mm, "MODELS", None) or []) + [getattr(mm, "MAX", "")]
+                  if m and m != MAIN_MODEL}
         for r in running_rows() or []:
-            if str(r.get("model")) == mm.MAX and _live_row(r) and r.get("proxy"):
-                return str(r["proxy"]).rstrip("/") + "/slots", mm.MAX
+            if str(r.get("model")) in others and _live_row(r) and r.get("proxy"):
+                return str(r["proxy"]).rstrip("/") + "/slots", str(r.get("model"))
     return SLOTS_URL, MAIN_MODEL
 
 
@@ -552,6 +603,7 @@ def slots(url: str | None = None) -> dict:
     llama-swap is not listening, which is a state, not an outage. `model`
     names whose server answered (the max model's while it holds the card)."""
     t0 = time.time()
+    mm = _max_mode()
     target, model = (url, None) if url else _slots_target()
     try:
         with urllib.request.urlopen(target, timeout=SLOTS_TIMEOUT) as r:
@@ -570,8 +622,12 @@ def slots(url: str | None = None) -> dict:
     with _lock:
         rows = [_slot_row(s, now) for s in data if isinstance(s, dict)]
     _slot_roles(rows)
+    # A LOCKED model's slots are READ (coordinator, 2026-09-30: a cheap /slots read of a loaded model does not
+    # compete for the card); the flag says the card runs its one conversation alone (the tier table)
+    locked = bool(model and mm is not None and getattr(mm, "ENABLED", False) and getattr(mm, "TABLE", None) is not None
+                  and mm.TABLE.locked(model))
     return {"ok": True, "slots": rows, "ms": round((now - t0) * 1000),
-            "model": model,
+            "model": model, "locked": locked,
             "decoding": sum(1 for s in rows if s["state"] == "decode"),
             "prefilling": sum(1 for s in rows if s["state"] == "prefill"),
             "tps": round(sum(s["tps"] for s in rows), 1)}
@@ -703,11 +759,9 @@ def pulse() -> dict:
         st = strata()
         with _lock:
             _strata_cache = (now, st)
-    try:
-        import budget
-        ctx = _with_line(budget.budgets())   # cached pool: no request unless unset
-    except Exception as e:                                       # noqa: BLE001
-        ctx = {"error": f"{type(e).__name__}: {e}"}
+    # The cached pool only: no request at all (snapshot() re-reads it, and
+    # only from the main model's own server while it is loaded).
+    ctx = cached_context()
     return {"at": now, "gpus": _gpu_cache[1], "slots": slots(),
             "lanes": lanes(), "tools": tools(), "queue": queue(),
             "seed": seed(), "strata": _strata_cache[1], "context": ctx,

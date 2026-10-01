@@ -25,10 +25,9 @@ outages in under a second).
 
 WHICH INTERPRETER
 
-A suite that imports torch, transformers or the Laya training code -- or
-names `.venv-laya` in its own usage line -- runs under .venv-laya. Everything
-else runs under the main environment. Override with YAMADORI_PY and
-YAMADORI_LAYA_PY.
+Every suite runs under the main environment (override with YAMADORI_PY).
+The .venv-laya interpreter, for suites that imported torch, transformers or
+the Laya training code, went with Laya's code on 2026-09-29.
 
 LIVE SUITES ARE OPT-IN
 
@@ -129,7 +128,6 @@ import time
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 _MAIN_DEFAULT = r"C:/Users/jwals/textgen/installer_files/env/python.exe"
-_LAYA_DEFAULT = os.path.join(ROOT, ".venv-laya", "Scripts", "python.exe")
 
 
 def _interpreter(env_name: str, default: str) -> str:
@@ -138,7 +136,6 @@ def _interpreter(env_name: str, default: str) -> str:
 
 
 MAIN_PY = _interpreter("YAMADORI_PY", _MAIN_DEFAULT)
-LAYA_PY = _interpreter("YAMADORI_LAYA_PY", _LAYA_DEFAULT)
 
 # Needs the card: skipped unless --live.
 LIVE_ONLY = {"mcp/test_tools_live.py", "mcp/test_live_stack.py"}
@@ -153,21 +150,17 @@ MAINTENANCE_ARGS = {"mcp/test_live_stack.py": ["--maintenance"]}
 # (or served one on an alternate port), which no longer runs. They still run
 # OFFLINE in every mode -- their cached numbers are the record docs/LAYA.md
 # and docs/E1.md cite -- but --live never passes them --live/--serve, and
-# --live-only skips them. bench/test_hint_collapse.py keeps its live arm:
-# its reranker checks are live and #15d is a documented, open finding; only
-# its Laya check is retired (in the file).
+# --live-only skips them. bench/test_hint_collapse.py has no live arm since
+# the reranker's removal (2026-10-01, docs/REMOVED.md): its Laya check had
+# retired, and its reranker checks went with the reranker.
 # EXPECTED FAILURES: checks that fail on purpose, each a documented, open
 # finding. A suite whose ONLY failing checks are listed here passes the gate;
 # they are named in the table and the summary every run, never hidden. A
 # listed check that starts PASSING is reported too (the finding moved).
-EXPECTED_FAIL = {
-    "bench/test_hint_collapse.py": {
-        "scored AS A BATCH it does not":
-            "docs/FINDINGS.md #20 (the reranker's batched scores depend on "
-            "batch composition) / docs/SELF-IMPROVEMENT-LOG.md #15d: open "
-            "until the rank path is fixed and re-measured",
-    },
-}
+# Empty since 2026-10-01: its one entry, bench/test_hint_collapse.py's
+# "scored AS A BATCH it does not" (docs/FINDINGS.md #20, the reranker's
+# batched scores), went with the reranker.
+EXPECTED_FAIL: dict[str, dict[str, str]] = {}
 _FAIL_LINE = re.compile(r"^\s*FAIL\b:?\s+(.*?)\s*(?:\[.*|\(.*|<-.*)?$",
                         re.M)
 
@@ -187,20 +180,40 @@ def expected_only(name: str, output: str) -> tuple[bool, list[str], list[str]]:
 
 RETIRED_LIVE = {
     "bench/test_guardrail.py": "Laya's live service check (:1237)",
-    "bench/test_laya_calibration.py": "Laya's live service check (:1237)",
-    "bench/test_laya_head.py": "Laya's alternate-port service (--serve)",
 }
 
 # SUITES RETIRED WITH THEIR COMPONENT: skipped in every mode, named in the
-# notes every run. CLM (operator, 2026-09-28: "We retired Laya and CLM and
-# went all in on custom bonsai / flash implementation in the server"; the
-# decider is mcp/decider_bonsai.py).
-RETIRED_SUITES = {
-    "mcp/test_clm.py": "CLM, retired 2026-09-28 for the Bonsai decider",
+# notes every run. Empty since 2026-09-29: the retired suites (mcp/test_clm.py,
+# bench/test_laya_head.py, bench/test_laya_calibration.py) were deleted with
+# their code (operator: "It should be in GitHub if we want to go back"; the
+# way back is commit e360d37).
+RETIRED_SUITES: dict[str, str] = {}
+
+# SUITES THAT NEED A TOOL INSTALLED OUTSIDE THE STACK: skipped in every mode,
+# with a note naming the install, until every path exists. The TypeSafe SDKs
+# (mcp/test_jev_sdk.py) are an operator-approved download into their own
+# venv and node_modules (tools/typesafe-sdk/install.py --run).
+_TS = os.path.join("tools", "typesafe-sdk")
+REQUIRES: dict[str, tuple[list[list[str]], str]] = {
+    "mcp/test_jev_sdk.py": (
+        [[os.path.join(_TS, "py", ".venv", "Scripts", "python.exe"),
+          os.path.join(_TS, "py", ".venv", "bin", "python")],
+         [os.path.join(_TS, "js", "node_modules", "@typesafe-ai", "sdk",
+                       "package.json")]],
+        "the TypeSafe SDKs: python tools/typesafe-sdk/install.py --run"),
 }
 
-_LAYA_IMPORT = re.compile(
-    r"^\s*(?:import|from)\s+(?:torch|transformers|laya_head|train_laya)\b", re.M)
+
+def missing_requirement(name: str) -> str | None:
+    """The install a suite still needs (REQUIRES), or None."""
+    need = REQUIRES.get(name)
+    if not need:
+        return None
+    groups, what = need
+    for alternatives in groups:
+        if not any(os.path.exists(os.path.join(ROOT, p)) for p in alternatives):
+            return what
+    return None
 
 _COUNTS = (
     (re.compile(r"(\d+)/(\d+) (?:live )?checks passed"),
@@ -272,6 +285,11 @@ LIVE_WRITERS = (
     ("index/accounts/*", "stack", "proxy (keys created on the dashboard)"),
     ("index/harness_kit.sqlite3*", "stack", "proxy (HARNESS TOOLS entries, "
                                             "written through the dashboard API)"),
+    # mcp/stats_store.py: every generation's speed and the dashboard's
+    # JJAVA / SOKUDO series, written off the response path while the stack
+    # serves (2026-10-01: 22 suites were failed for the stack's own rows)
+    ("index/stats.sqlite3*", "stack", "proxy (generation stats for the "
+                                      "dashboard's JJAVA and SOKUDO pages)"),
     ("index/skills/*", "job", "worker skill jobs (arm, learn: labels)"),
     ("index/packages/registry_history.json", "job", "worker deps jobs"),
     ("index/packages/*.sqlite3", "job", "worker deps jobs (package index)"),
@@ -404,12 +422,6 @@ def attribute(changes: list[tuple[str, str]], t0: float, t1: float,
     return fails, notes
 
 
-def needs_laya(path: str) -> bool:
-    with open(path, encoding="utf-8", errors="replace") as f:
-        src = f.read()
-    return bool(_LAYA_IMPORT.search(src)) or ".venv-laya" in src
-
-
 def accepts_live(path: str) -> bool:
     with open(path, encoding="utf-8", errors="replace") as f:
         return '"--live"' in f.read()
@@ -433,7 +445,9 @@ class Masker:
         return text.replace(self.secret, "***") if self.secret else text
 
 
-_NOT_RUN = re.compile(r"(\d+) tests? NOT RUN \(429\)")
+# A live suite's "not run": a 429 (the stack refused for load), a route
+# not deployed yet, or no key -- none of them says the feature is broken.
+_NOT_RUN = re.compile(r"(\d+) tests? NOT RUN \((?:429|not deployed|no key)")
 
 
 def not_run(output: str) -> int:
@@ -571,7 +585,6 @@ def main(argv: list[str]) -> int:
     suites = [s for s in suites if args.k in rel(s)]
 
     print(f"  main interpreter  {MAIN_PY}")
-    print(f"  laya interpreter  {LAYA_PY}")
     if args.live:
         print("  mode              LIVE -- opt-in suites run against the card "
               "and live services")
@@ -595,11 +608,16 @@ def main(argv: list[str]) -> int:
                          f"(run with --live)")
             print(f"  skip  {name}  (opt-in, needs the GPU; pass --live)")
             continue
+        need = missing_requirement(name)
+        if need:
+            notes.append(f"skipped {name}: not installed ({need})")
+            print(f"  skip  {name}  (needs {need})")
+            continue
         if name in RETIRED_SUITES:
             notes.append(f"skipped {name}: retired ({RETIRED_SUITES[name]})")
             print(f"  skip  {name}  (retired: {RETIRED_SUITES[name]})")
             continue
-        py = LAYA_PY if needs_laya(path) else MAIN_PY
+        py = MAIN_PY
         extra: list[str] = []
         is_live_run = False
         if args.live and name in RETIRED_LIVE:
@@ -622,7 +640,6 @@ def main(argv: list[str]) -> int:
         env = base_env if is_live_run else offline_env
         timeout = args.live_timeout if is_live_run else args.timeout
         print(f"  run   {name}" + (f" {' '.join(extra)}" if extra else "")
-              + ("  [laya venv]" if py == LAYA_PY and py != MAIN_PY else "")
               + ("  [live env]" if is_live_run else ""),
               flush=True)
         if args.list:
@@ -669,7 +686,7 @@ def main(argv: list[str]) -> int:
             ok, why = False, "ran zero checks"
         elif rc == 3 and nr and c[0] == c[1]:
             # Nothing failed; something was refused with a 429.
-            ok, incomplete, why = True, True, f"INCOMPLETE: {nr} not run (429)"
+            ok, incomplete, why = True, True, f"INCOMPLETE: {nr} not run (429 / not deployed)"
         elif rc != 0 and expected_only(name, out)[0]:
             hit = expected_only(name, out)[1]
             ok, why = True, ("EXPECTED failure(s): " + "; ".join(

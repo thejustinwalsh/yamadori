@@ -5,20 +5,26 @@ WHAT IT IS. A registry of small heads, one per decision, each a multinomial
 logistic regression over the Qwen3-Embedding-0.6B vector of the REQUEST,
 computed once by the resident `embeddings` model (code_search.embed, so the
 gpu_room lease applies) and cached per text. A head is an affine map: its
-inference is arithmetic over one vector (docs/E1.md measures it). It replaces
+inference is arithmetic over one vector (docs/E1.md measures it). It replaced
 Laya's trained route_in head, which scored 80/120 on the held-out package
 questions against E1's 104/120 (docs/TEV1-EVAL.md; re-measured in docs/E1.md
 with this module's own trainer).
 
     route_in       investigate / answer_directly / clarify. Trained on the 289
                    labels Laya's head used (bench/laya_routing_labels*.jsonl).
-    escalate       struggle: escalate now, or continue. UNTRAINED: labelled
-                   from deep_decisions outcomes as they accumulate.
-    (kickoff -- plan a new task first, or act -- was removed 2026-09-27,
-    untrained: every new task is planned, operator.)
     skill_applies  does this armed skill apply to the request? UNTRAINED:
                    labelled from skill_learn's fallback records
                    (index/skills/router_labels.jsonl).
+
+REMOVED 2026-09-29 with the modules they served (operator: failed decisions
+are deleted, "It should be in GitHub if we want to go back"; the way back is
+commit e360d37): Laya itself (laya_head, the service, the Laya callers in
+selection, shomen and fanout), the `escalate` head (struggle: escalate now,
+or continue -- untrained; its labels were deep_decisions outcomes and its
+only caller was deep.py's struggle trigger), the deep_decisions label source
+and the idle job that called learn() (deep_learn). E1 is HELD, not deleted
+(operator, 2026-09-29: "HOLD until the Jev rewrite"). (kickoff was removed
+2026-09-27, untrained: every new task is planned, operator.)
 
 A head with fewer than MIN_TRAIN_N labels (or under MIN_PER_LABEL of a label)
 is never served: `decide` returns None and the caller falls back to its rule.
@@ -26,10 +32,11 @@ MIN_TRAIN_N and MIN_PER_LABEL are CHOICES, not measurements.
 
 ONE EMBEDDING PER REQUEST. Every head reads the same vector: the embedding of
 `render(question, context)` -- the route_in state, byte for byte what Laya's
-trainer rendered (laya_head.render_state), with the retrieval query
-instruction code_search.embed prepends. Heads that need more than the text
-append their own small scalar features (the struggle counts);
-skill_applies reads the product of the request and skill vectors. The
+trainer rendered (laya_head.render_state, removed with Laya), with the
+retrieval query instruction code_search.embed prepends. A head that needs
+more than the text appends its own small scalar features (HEADS[...]
+["extra"]; none today); skill_applies reads the product of the request and
+skill vectors. The
 feature contract (embedding model, instruction, render revision, extras) is
 stored in each artefact and checked before serving: a head fitted on one
 rendering and served another would silently degrade.
@@ -39,9 +46,10 @@ base64), the training n and per-label counts, the CV accuracy and the weight
 decay it chose, the fold seed, the date, the evaluation that promoted or
 rejected it. index/e1/heads/<head>/state.json names the CURRENT version and
 keeps a log of every promotion and revert. Every version is kept; revert()
-serves an older one. index/ is not tracked by git, as with index/laya.
+serves an older one. index/ is not tracked by git.
 
-SELF-TUNING (learn(), called by deep_learn's idle job on the cpu lane): when
+SELF-TUNING (learn(); its idle job, deep_learn, was removed 2026-09-29, so
+it runs only when called): when
 a head has at least LEARN_MIN_NEW labels its current version never saw, a
 candidate is fitted on the current version's rows plus 70% of the new ones
 and scored against the current version (or, for an untrained slot, the
@@ -53,9 +61,9 @@ hand-labelled held-out sets. The learner embeds nothing (cpu lane): a row
 whose vector is not in the store is counted and skipped, and vectors reach
 the store when E1 serves a request (YAMADORI_E1=1).
 
-THE FLAG. YAMADORI_E1=1 turns E1 on in the proxy: selection's second signal
-and deep.py's trigger consults read E1, and nothing on the request path calls
-Laya (laya_allowed()). Default OFF until the live check in
+THE FLAG. YAMADORI_E1=1 turns E1 on: skill_select's question step reads the
+skill_applies head, and laya_allowed() is False (skill_select.laya_pick, the
+last Laya caller, checks it). Default OFF until the live check in
 mcp/test_live_stack.py (`e1`) passes.
 """
 from __future__ import annotations
@@ -88,7 +96,8 @@ LEARN_MIN_NEW = int(os.environ.get("YAMADORI_E1_LEARN_MIN_NEW", "30"))
 MIN_EVAL_N = int(os.environ.get("YAMADORI_E1_MIN_EVAL_N", "20"))
 EVAL_FRAC = 0.3
 PROMOTE_P = 0.05
-# The fit is scripts/train_laya.py's _fit_linear, re-implemented in numpy so
+# The fit is scripts/train_laya.py's _fit_linear (removed with Laya
+# 2026-09-29; commit e360d37), re-implemented in numpy so
 # the worker needs no torch: standardise, zero init, full-batch Adam (lr
 # 0.05, weight decay on every parameter, as torch applies it), 600 steps,
 # folded back into one affine map. Weight decay by 5-fold CV over WD_GRID.
@@ -114,14 +123,6 @@ HEADS: dict[str, dict] = {
         "rule": "selection.rule_baseline (+ the held-symbol lookup)",
         "what": "does answering need source read first?",
     },
-    "escalate": {
-        "labels": ["escalate", "continue"],
-        "extra": ["struggle_count", "tool_error_repeat", "file_rewritten",
-                  "failing_command_rerun", "fixup_capped",
-                  "user_still_broken"],
-        "rule": "deep.py: struggle signals >= struggle_threshold",
-        "what": "is the agent stuck enough to escalate now?",
-    },
     "skill_applies": {
         "labels": ["applies", "not_applies"],
         "extra": [],
@@ -133,22 +134,23 @@ HEADS: dict[str, dict] = {
 
 
 def enabled() -> bool:
-    """YAMADORI_E1=1: E1 decides in the proxy and Laya is off the request
-    path. Read per call so a test can flip it."""
+    """YAMADORI_E1=1: E1 decides where it is consulted and Laya is never
+    called. Read per call so a test can flip it."""
     return os.environ.get("YAMADORI_E1", "0").strip() == "1"
 
 
 def laya_allowed() -> bool:
-    """False when E1 is on: every Laya caller on the request path checks
-    this first (selection.laya_signal, skill_select.laya_pick,
-    fanout._choice_averaged; shomen's Laya call was deleted 2026-09-27)."""
+    """False when E1 is on. skill_select.laya_pick checks it (the Laya
+    service was retired 2026-09-24 and its code removed 2026-09-29;
+    selection's, shomen's and fanout's Laya calls went with them)."""
     return not enabled()
 
 
 # ------------------------------------------------------------ render --------
 def render(question: str, context: str = "") -> str:
     """The route_in state -- laya_head.render_state("route_in", ...) byte for
-    byte (mcp/test_e1.py asserts it), capped at STATE_CHARS."""
+    byte (the rendering the 289 labels were trained on; mcp/test_e1.py pins
+    it), capped at STATE_CHARS."""
     q = (question or "").strip()
     ctx = (context or "").strip()
     s = f"question: {q}\ncontext: {ctx}" if ctx else f"question: {q}"
@@ -288,7 +290,7 @@ def features(head: str, v: np.ndarray, extra: dict | None = None,
 def fit_logistic(X: np.ndarray, y: list[int], k: int, wd: float,
                  steps: int = STEPS, lr: float = LR
                  ) -> tuple[np.ndarray, np.ndarray]:
-    """scripts/train_laya.py `_fit_linear` in numpy float32: standardise
+    """scripts/train_laya.py `_fit_linear` (removed) in numpy float32: standardise
     (unbiased std, as torch), zero init, full-batch Adam with L2 weight decay
     on weight AND bias, cross-entropy; folded back into (W, b) so serving
     needs no stored statistics. Zero init + full batch: no randomness."""
@@ -333,8 +335,8 @@ def probs(W: np.ndarray, b: np.ndarray, X: np.ndarray) -> np.ndarray:
 
 
 def kfold(y: list[int], k: int, seed: int) -> list[tuple[list[int], list[int]]]:
-    """scripts/train_laya.py `kfold` with no groups, reproduced exactly (the
-    string sort of indices included) so its seeds reproduce."""
+    """scripts/train_laya.py `kfold` (removed) with no groups, reproduced
+    exactly (the string sort of indices included) so its seeds reproduce."""
     rnd = random.Random(seed)
     by_class: dict[int, list[int]] = {}
     for i in range(len(y)):
@@ -604,7 +606,7 @@ def decide(head: str, question: str, context: str = "",
 
 def consult(question: str, context: str = "",
             extras: dict | None = None) -> dict:
-    """Every non-pair head on ONE embedding of the request, for deep.py:
+    """Every non-pair head on ONE embedding of the request:
     {state, heads: {name: prediction | None}, status: {name: why}, embed}.
     A head that is not servable reports why; the embedding is made only if
     at least one head is."""
@@ -639,7 +641,8 @@ def consult(question: str, context: str = "",
 
 
 def route_signal(question: str, context: str = "") -> tuple[dict | None, str]:
-    """selection's second signal, shaped like laya_signal's reply."""
+    """route_in's answer, shaped like the reply selection's second signal
+    (Laya, then E1) read: (prediction | None, status)."""
     d, status = decide("route_in", question, context)
     if d is None:
         return None, f"E1 route_in: {status}"
@@ -649,8 +652,8 @@ def route_signal(question: str, context: str = "") -> tuple[dict | None, str]:
 # ------------------------------------------------------------ labels --------
 def gold_route_rows() -> list[dict]:
     """The 289 route_in training labels, as scripts/train_laya.load_labels
-    reads them: every bench/laya_routing_labels*.jsonl, sorted by path,
-    de-duplicated on the rendered state."""
+    (removed) read them: every bench/laya_routing_labels*.jsonl, sorted by
+    path, de-duplicated on the rendered state."""
     rows, seen = [], set()
     for path in sorted(glob.glob(os.path.join(BENCH,
                                               "laya_routing_labels*.jsonl"))):
@@ -722,95 +725,14 @@ def gold_heldout_rows() -> list[dict]:
     return out
 
 
-# deep_decisions outcome -> the label each head learns from it. A label that
-# says nothing about the decision (skipped, unobserved, not_helped: the run
-# happened and the struggle went on -- neither "should not have run" nor
-# "helped") is not used. CHOICES, stated in docs/E1.md.
-def _deep_label(head: str, r: dict) -> str | None:
-    lab, ran, trig = r.get("label"), bool(r.get("ran")), r.get("trigger")
-    # A run labelled under the old rule (deep.LABEL_RULE, #52: `helped`
-    # needed no project change) is not learned from; `no_effect` reads as
-    # `wasted` (the run did not help).
-    if ran:
-        try:
-            import deep
-            if int(r.get("label_rule") or 0) < deep.LABEL_RULE:
-                return None
-        except Exception:                                        # noqa: BLE001
-            return None
-        if lab == "no_effect":
-            lab = "wasted"
-    try:
-        sig = json.loads(r.get("signals") or "{}")
-    except ValueError:
-        sig = {}
-    if head == "escalate":
-        if int((sig.get("struggle") or {}).get("count") or 0) < 1:
-            return None
-        if ran and trig == "struggle":
-            return {"helped": "escalate", "wasted": "continue"}.get(lab)
-        if not ran:
-            return {"missed": "escalate", "escalated_later": "escalate",
-                    "fine": "continue"}.get(lab)
-        return None
-    if head == "route_in":
-        if r.get("route") not in ("library_question", "prose"):
-            return None
-        if ran:
-            return {"helped": "investigate",
-                    "wasted": "answer_directly"}.get(lab)
-        return {"missed": "investigate", "escalated_later": "investigate",
-                "fine": "answer_directly"}.get(lab)
-    return None
-
-
-def _deep_extra(head: str, r: dict) -> dict:
-    try:
-        sig = json.loads(r.get("signals") or "{}")
-    except ValueError:
-        sig = {}
-    if head == "escalate":
-        st = sig.get("struggle") or {}
-        kinds = st.get("kinds") or {}
-        return dict({"struggle_count": st.get("count") or 0}, **kinds)
-    return {}
-
-
-def _deep_rule(head: str, r: dict) -> str:
-    trig = r.get("trigger")
-    if head == "escalate":
-        return "escalate" if trig == "struggle" else "continue"
-    return "investigate" if r.get("fired") else "answer_directly"
-
-
 def live_rows(head: str) -> list[dict]:
-    """Labelled client rows of deep_decisions for `head`, with the state
-    text E1 embedded when it served the request (deep.py stores it)."""
+    """Labelled rows a head learns from beyond the gold set: skill_applies'
+    fallback records. (route_in and escalate also read deep_decisions
+    outcomes; that source went with deep.py, 2026-09-29.) Replaced in
+    tests."""
     if head == "skill_applies":
         return _skill_rows()
-    try:
-        import deep
-        con = deep._db()
-    except Exception:                                            # noqa: BLE001
-        return []
-    try:
-        cols = {c[1] for c in con.execute("PRAGMA table_info(deep_decisions)")}
-        if "e1_state" not in cols:
-            return []
-        rs = [dict(x) for x in con.execute(
-            "SELECT * FROM deep_decisions WHERE traffic='client' AND label "
-            "IS NOT NULL AND e1_state IS NOT NULL ORDER BY created")]
-    finally:
-        con.close()
-    out = []
-    for r in rs:
-        lab = _deep_label(head, r)
-        if lab is None:
-            continue
-        out.append({"text": r["e1_state"], "label": lab,
-                    "extra": _deep_extra(head, r), "source": "deep_decisions",
-                    "rule": _deep_rule(head, r), "id": r["id"]})
-    return out
+    return []
 
 
 def _skill_rows() -> list[dict]:
@@ -890,7 +812,7 @@ def _rule_choice(head: str, r: dict) -> str:
 
 def _decision_ok(head: str, pred: str, truth: str) -> bool:
     """What the decision uses: route_in is scored investigate-vs-not (the
-    binary selection and deep.py read); the others are two-way already."""
+    binary its callers read); the others are two-way already."""
     if head == "route_in":
         return (pred == "investigate") == (truth == "investigate")
     return pred == truth
@@ -925,7 +847,8 @@ def train(head: str, rows: list[dict], seed: int = 0) -> dict:
 
 
 def learn(author: str = "learner", seed: int | None = None) -> list[dict]:
-    """One self-tuning pass over every head (deep_learn calls it). Returns
+    """One self-tuning pass over every head (deep_learn called it until
+    2026-09-29; now only a caller that asks). Returns
     one record per head: skipped (why), or a candidate version with its
     paired test and whether it was promoted. Embeds nothing."""
     out = []
@@ -1037,8 +960,9 @@ def _gold_guard(cur: Head, cand: dict) -> dict:
 
 # ------------------------------------------------------------ overview ------
 def overview() -> dict:
-    """For GET /dash/api/deep: every head, its current version and every
-    version with n, CV accuracy, status and evaluation. No text."""
+    """Every head, its current version and every version with n, CV
+    accuracy, status and evaluation. No text. (GET /dash/api/deep served it
+    until dash_deep was removed, 2026-09-29; `python mcp/e1.py` prints it.)"""
     heads = {}
     for name, spec in HEADS.items():
         h, why = load(name)

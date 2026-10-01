@@ -297,7 +297,7 @@ class CClient:
         chat.update(_account=self.account, _client_ip="127.0.0.1",
                     _public_base=BASE, _session_token="")
         chat["_features"] = M.merge_features(chat.get("_features"), json.dumps(
-            {"skills": True, "investigate": False, "fanout": 1}))
+            {"skills": True}))
         return chat, ctx
 
     def turn(self, script: list[dict], user=None) -> dict:
@@ -726,7 +726,7 @@ def test_blocking_tool_loop_extends_the_slot():
     th = _blocks(msg, "thinking")
     tu = _blocks(msg, "tool_use")
     s1 = t1["x"].get("session") or {}
-    check(kinds == ["thinking", "text", "tool_use"]
+    check(kinds == ["thinking", "tool_use"]
           and th[0]["thinking"].endswith("Plan: write it.")
           and M.verify_thinking(th[0]["thinking"], th[0]["signature"],
                                 c.account)
@@ -735,13 +735,14 @@ def test_blocking_tool_loop_extends_the_slot():
           and tu[0]["name"] == "write_file"
           and tu[0]["input"] == {"path": "a.py", "content": "x = 1"}
           and session_id.of_call_id(tu[0]["id"]) == s1.get("carrier")
-          and _text(msg).startswith("Verified a.py (python)")
+          and _text(msg) == ""
           and msg["stop_reason"] == "tool_use"
           and msg["id"].startswith("msg_") and msg["type"] == "message"
           and msg["role"] == "assistant" and msg["model"] == "yamadori",
           "a Message: thinking (signed, verifiable only for this account), "
-          "the check note as text, tool_use (input an object, the id "
-          "carrying the conversation's carrier); stop_reason tool_use",
+          "tool_use (input an object, the id carrying the conversation's "
+          "carrier), no text block (the check note went 2026-09-29); "
+          "stop_reason tool_use",
           json.dumps(msg["content"])[:500])
     check(s1.get("source") == "prompt_cache_key"
           and isinstance(t1["x"].get("tool_turns"), dict)

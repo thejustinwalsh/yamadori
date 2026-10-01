@@ -8,8 +8,8 @@ beginning." for a system message anywhere else; llama-server hands it a
 `instructions` AND a leading developer message (then more developer
 messages mid-session), Pi and OpenCode a leading developer item, chat
 clients a `developer` first message (docs/HARNESS-RESPONSES.md). And the
-proxy appends its addendum to the system text (proxy.add_addendum), which
-must find it.
+proxy appends to the system text (proxy.add_system_tail: the MCP host's
+line, the craft index), which must find it.
 
 THE RULE (one helper for both wires: /v1/chat/completions and
 mcp/responses_api.py):

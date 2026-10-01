@@ -165,14 +165,14 @@ def main() -> int:
               sorted(arms.ARMS) == ["bonsai", "yamadori", "yamadori-auto"])
         check("bonsai forces everything off",
               json.loads(arms.header("bonsai")) == {
-                  "retrieval": False, "hints": False, "investigate": False,
-                  "fanout": 1, "effort": "medium"})
+                  "skills": False, "seed": False, "mcp_tools": False,
+                  "effort": "medium"})
         check("yamadori-auto forces nothing but effort",
               json.loads(arms.header("yamadori-auto")) == {"effort": "medium"})
-        check("yamadori forces everything on, fan-out 3",
+        check("yamadori forces everything on (skills, seed, MCP tools)",
               json.loads(arms.header("yamadori")) == {
-                  "retrieval": True, "hints": True, "investigate": True,
-                  "fanout": 3, "effort": "medium"})
+                  "skills": True, "seed": True, "mcp_tools": True,
+                  "effort": "medium"})
     finally:
         shutil.rmtree(root, ignore_errors=True)
     n = sum(ok for _, ok in CHECKS)

@@ -3,9 +3,14 @@
 
 WHAT THIS IS GATING
 
-`domains.tool_admission` decides whether a request carries the capability
-block and our twelve tool definitions. Both directions of error are measured
-harms, which is why each one has checks here:
+`domains.tool_admission` decides whether any library source this server
+holds can bear on a request. It once decided whether a request carried the
+capability block and our twelve tool definitions; since 2026-09-24 no tool
+of ours rides on main for it, and since 2026-09-29 the injections that read
+it are removed (docs/REMOVED.md) -- what reads it now is the route
+(mcp/route.py: a library_question needs it; proxy.prepare records the
+gate's situation in `_route.signals.gate`). Both directions of error were
+measured harms, which is why each one has checks here:
 
   offered wrongly    bench/lcb_after.jsonl: a LiveCodeBench puzzle carried
                      3,145 prompt tokens against `minimal`'s 416 -- 2,729 of
@@ -75,9 +80,10 @@ served_fixture.no_embedder()   # skill selection's embedder: an outage
 REAL_STORE = os.path.join(REPO, "index", "packages")
 REAL_NEBARI = os.path.abspath(os.path.join(REPO, "index", "nebari.sqlite3"))
 
-# Retrieval on, hints and fan-out off. Hints would call the live embeddings
-# model; this suite must not need one.
-FEATURES = '{"retrieval": true, "hints": false, "fanout": 1, "investigate": false}'
+# Skills off: skill selection would call the live embeddings model; this
+# suite must not need one. (The retrieval / fan-out / deep-thinking flags it
+# once set were removed with their features, 2026-09-29.)
+FEATURES = '{"skills": false}'
 
 # Built by bench/livecodebench.py's PROMPT_STDIN, verbatim template, on a real
 # AtCoder-shaped question. The template is the part that matters: every one of
@@ -170,6 +176,25 @@ def body(messages: list[dict]) -> dict:
     return {"model": "yamadori", "reasoning_effort": "medium",
             "messages": messages, "_client_ip": "127.0.0.1",
             "_features": FEATURES}
+
+
+def prepare_gated(b: dict) -> tuple[dict, dict | None]:
+    """proxy.prepare, and the gate decision it made (proxy.tool_gate's
+    return). The decision is no longer carried on the payload (the
+    `_tools_gate` record went with x_yamadori.tools_gate, 2026-09-29); the
+    route's signals carry its situation only for a question."""
+    seen: list = []
+    real = proxy.tool_gate
+
+    def spy(*a, **k):
+        seen.append(real(*a, **k))
+        return seen[-1]
+    proxy.tool_gate = spy
+    try:
+        out = proxy.prepare(b)
+    finally:
+        proxy.tool_gate = real
+    return out, (seen[-1] if seen else None)
 
 
 def our_tool_names(payload: dict) -> set[str]:
@@ -361,16 +386,16 @@ def test_a_word_counts_only_in_its_domain_sense():
 
 def test_prepare_hands_the_clients_tools_to_selection():
     """A Hermes-shaped request through proxy.prepare at max: the client's
-    own tools reach selection, and a request to act locally gets neither
-    deep thinking nor fan-out -- while our tools stay offered."""
-    import selection
-    prev, prev_laya = domains.PACKAGE_STORE, selection.LAYA_URL
+    own tools reach selection and the route, and main gets the client's
+    tools untouched and first. (The deep-thinking / fan-out decision this
+    once checked was removed 2026-09-29, with yama_think_deeply and
+    yama_plan.)"""
+    prev = domains.PACKAGE_STORE
     domains.PACKAGE_STORE = HELD
-    selection.LAYA_URL = "http://127.0.0.1:1"     # never a real Laya
     try:
         b = {"model": "yamadori", "reasoning_effort": "max",
              "_client_ip": "127.0.0.1",
-             "_features": '{"retrieval": true, "hints": false}',
+             "_features": '{"skills": false}',
              "messages": [
                  {"role": "system", "content": "You are Hermes Agent."},
                  {"role": "user", "content":
@@ -384,31 +409,22 @@ def test_prepare_hands_the_clients_tools_to_selection():
         out = proxy.prepare(b)
         sel = out["_selection"]
         check(sel["signals"]["client_tools"] == 2,
-              "the client's tools reach selection, ours (re-sent by name) "
-              "excluded", json.dumps(sel["signals"].get("client_tools")))
-        # The conversation's INITIAL prompt is always planned (operator,
-        # 2026-09-27; deep.kickoff): the one pre-main run an act-locally
-        # request gets, delivered as an inserted yama_plan hop.
-        check(sel["fanout_n"] == 1 and sel["signals"]["acts_locally"]
-              and (sel["investigate"] is False or (
-                  out["_deep"].get("kind") == "kickoff"
-                  and out["_deep"].get("job") == "plan")),
-              "act locally: no fan-out at max, and no deep thinking but the "
-              "initial prompt's plan", json.dumps(sel["because"])[:240])
-        # Since Phase 0.6 (2026-09-24) tools of ours ride at max, after the
-        # client's: yama_think_deeply, the model-chosen deep-thinking
-        # trigger, and yama_plan (2026-09-27).
-        check(sorted(out["_ours"]) == ["yama_plan", "yama_think_deeply"]
-              and [t["function"]["name"] for t in out["tools"]]
-              == ["write_file", "terminal", "find_by_meaning",
-                  "yama_think_deeply", "yama_plan"],
+              "the client's tools reach selection, a name that was once ours "
+              "(find_by_meaning, re-sent) excluded",
+              json.dumps(sel["signals"].get("client_tools")))
+        check(out["_route"]["class"] == "agent_step",
+              "act locally with the client's tools: the client's agent loop",
+              json.dumps(out["_route"])[:240])
+        names = [t["function"]["name"] for t in out["tools"]]
+        check(names[:3] == ["write_file", "terminal", "find_by_meaning"]
+              and not {"yama_think_deeply", "yama_plan"} & set(names)
+              and set(names[3:]) == set(out["_ours"]),
               "main gets the client's tools untouched and first -- its own "
-              "find_by_meaning included -- and of ours only yama_think_deeply "
-              "and yama_plan at max (the code tools are the second brain's "
-              "since 2026-09-24)",
-              json.dumps([t["function"]["name"] for t in out["tools"]]))
+              "find_by_meaning included -- and of ours only what is offered "
+              "after them (no yama_think_deeply or yama_plan: removed)",
+              json.dumps({"tools": names, "ours": out["_ours"]}))
     finally:
-        domains.PACKAGE_STORE, selection.LAYA_URL = prev, prev_laya
+        domains.PACKAGE_STORE = prev
 
 
 def test_an_unmapped_held_package_turns_domain_off():
@@ -549,19 +565,19 @@ def test_prepare_withholds_offers_and_keeps():
     prev = domains.PACKAGE_STORE
     domains.PACKAGE_STORE = HELD
     try:
-        out = proxy.prepare(body(user(LCB_PROMPT)))
-        # CHANGED 2026-09-24: no tool of ours reaches main at all; the gate
-        # decides whether library help (definitions, deep thinking) can have
-        # anything to read.
+        out, gate = prepare_gated(body(user(LCB_PROMPT)))
+        # CHANGED 2026-09-24: no tool of ours reaches main for the gate;
+        # it decides whether any held source can bear on the request, and
+        # the route reads it (its signals record the situation).
         check(our_tool_names(out) == set(),
               "prepare(): a puzzle gets none of our tools on main",
               json.dumps(sorted(our_tool_names(out))))
         check(not [m for m in out["messages"] if m.get("role") == "system"],
               "and no system text added at medium")
-        check((out.get("_tools_gate") or {}).get("situation")
-              == "DOMAIN_OUTSIDE_HELD_SOURCES",
-              "and the decision rides along for the log",
-              json.dumps(out.get("_tools_gate"))[:160])
+        check((gate or {}).get("situation") == "DOMAIN_OUTSIDE_HELD_SOURCES"
+              and not gate["offer"],
+              "and prepare's gate withholds it",
+              json.dumps(gate)[:200])
         client_tool = {"type": "function", "function": {
             "name": "read_file", "description": "x", "parameters": {}}}
         b = body(user(LCB_PROMPT))
@@ -573,14 +589,16 @@ def test_prepare_withholds_offers_and_keeps():
               json.dumps([t["function"]["name"] for t in out["tools"]]))
 
         convo = user("In three.js, where is Object3D defined?")
-        out = proxy.prepare(body(convo))
+        out, gate = prepare_gated(body(convo))
         names = our_tool_names(out)
-        check(out["_tools_gate"]["offer"] and not names,
-              "prepare(): a three.js question: the gate offers library help, "
-              "and no tool of ours goes to main", json.dumps(sorted(names)))
+        check(gate["offer"] and gate["situation"] == "NAMES_HELD_SOURCE"
+              and out["_route"]["signals"].get("gate") == "NAMES_HELD_SOURCE"
+              and not names,
+              "prepare(): a three.js question: the gate offers, and no tool "
+              "of ours goes to main for it", json.dumps(sorted(names)))
         check(out["_route"]["class"] == "library_question",
-              "and it is routed as a library question (definitions / deep "
-              "thinking read that)", json.dumps(out["_route"])[:200])
+              "and it is routed as a library question",
+              json.dumps(out["_route"])[:200])
 
         # The flip this rule exists for: a first turn with no evidence is
         # offered (nothing inferred from an absence), and a later turn adds
@@ -592,11 +610,9 @@ def test_prepare_withholds_offers_and_keeps():
         # property of nebari's key, found here, and noted in _remember_offered.
         opening = [{"role": "system", "content": "You are a helpful assistant."}]
         opening += user("hello, I have a question coming")
-        out = proxy.prepare(body(opening))
-        check(out["_tools_gate"]["situation"] == "NO_DOMAIN_EVIDENCE"
-              and out["_tools_gate"]["offer"],
-              "an opening with no evidence is offered",
-              out["_tools_gate"]["situation"])
+        out, gate = prepare_gated(body(opening))
+        check(gate["situation"] == "NO_DOMAIN_EVIDENCE" and gate["offer"],
+              "an opening with no evidence is offered", gate["situation"])
         # The opening is a new conversation (#41); its answer made no tool
         # call, so the proxy records the id with it when it delivers it
         # (_run_turn, THE ANSWER RECORD) -- done here by hand, since
@@ -606,18 +622,21 @@ def test_prepare_withholds_offers_and_keeps():
                            {"role": "user", "content": LCB_PROMPT}]
         check(not domains.tool_admission(later, None, store=HELD)["offer"],
               "(the later conversation, judged cold, would be withheld)")
-        out = proxy.prepare(body(later))
-        check(out["_tools_gate"]["offer"]
-              and out["_tools_gate"]["situation"] == "OFFERED_EARLIER_THIS_SESSION",
+        out, gate = prepare_gated(body(later))
+        check(gate["offer"]
+              and gate["situation"] == "OFFERED_EARLIER_THIS_SESSION",
               "a session the gate offered keeps the offer on a later turn",
-              (out.get("_tools_gate") or {}).get("situation", ""))
+              (gate or {}).get("situation", ""))
 
-        # A retrieval-off tier is not gated at all: no decision, no tools.
-        b = body(convo)
-        b["_features"] = '{"retrieval": false}'
-        out = proxy.prepare(b)
-        check(out.get("_tools_gate") is None and not our_tool_names(out),
-              "a tier without retrieval never reaches the gate")
+        # A client's side call is not gated at all. (The retrieval-off tier
+        # this once checked went with the `retrieval` flag, 2026-09-29.)
+        side = user("<command>ls</command>\n\nRespond with exactly one word: "
+                    "APPROVE, DENY, or ESCALATE")
+        out, gate = prepare_gated(body(side))
+        check(out["_route"]["class"] == "utility" and gate is None
+              and not our_tool_names(out),
+              "a side call never reaches the gate",
+              json.dumps(out["_route"])[:200])
     finally:
         domains.PACKAGE_STORE = prev
 

@@ -240,6 +240,38 @@ def pool_size(refresh: bool = False) -> int:
     return _POOL
 
 
+def known_pool() -> int | None:
+    """The pool this process has READ (pool_size's cache), or None when it
+    has never read one. Asks nothing: the dashboard's readers use it so a
+    view never makes the first read (docs/DASHBOARD.md, "A view never loads
+    a model")."""
+    return _POOL
+
+
+def refresh_direct(timeout: float = 3) -> tuple[int | None, str]:
+    """Re-read the pool from the main model's OWN server (DIRECT, config.yaml
+    startPort) and nothing else -- never llama-swap, whose /upstream/<model>
+    route would start a model that is off the card. Updates the same cache
+    pool_size() keeps. (pool, how). A failed read keeps the last good pool
+    (pool_size's rule) and says why."""
+    global _POOL, _SLOTS, _LINE
+    try:
+        with urllib.request.urlopen(f"{DIRECT}/props", timeout=timeout) as r:
+            d = json.load(r)
+    except Exception as e:                                       # noqa: BLE001
+        return _POOL, f"{DIRECT}/props: {type(e).__name__}"[:160]
+    n = ((d.get("default_generation_settings") or {}).get("n_ctx")
+         or d.get("n_ctx"))
+    if not n:
+        return _POOL, f"{DIRECT}/props carried no n_ctx"
+    _POOL = int(n)
+    if isinstance(d.get("total_slots"), int) and d["total_slots"] > 0:
+        _SLOTS = d["total_slots"]
+    if isinstance(d.get("kv_vram_cells"), int):
+        _LINE = d["kv_vram_cells"]
+    return _POOL, f"{DIRECT}/props"
+
+
 def lane_reserved() -> int:
     """The lane's cells taken out of the VRAM line: LANE_TOKENS while the
     lane is ranked above the primary (slots.lane_ranked(): YAMADORI_KV_RANK

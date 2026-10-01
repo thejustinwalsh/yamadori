@@ -4,7 +4,7 @@
 // it points at (src/routes.ts); the screen's usePoll then starts from the
 // snapshot already here, or joins the request still in flight, instead of
 // mounting empty and fetching again. Polls write back, so two screens that
-// read the same path (NEBARI and SENTEI both read /results) share it.
+// read the same path (JJAVA and the Skills page both read /jjava) share it.
 //
 // Only good snapshots are kept. A 401 or a missing key drops everything: a
 // cached number under a sign-in prompt is a number nobody is standing behind.

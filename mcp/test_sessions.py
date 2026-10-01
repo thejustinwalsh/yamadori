@@ -8,7 +8,9 @@ a hash of its account and first two messages (nebari.key_of). Every Octopus
 V0 run opens with the same Hermes system prompt and task from the same
 account, so run v0d's first request was filed as a continuation of v0b/v0c:
 x_yamadori.deep read kickoff done: true, epoch 2, episode 5,
-requests_since_run 4 -- and the kickoff plan never ran.
+requests_since_run 4 -- and the kickoff plan never ran. (Deep thinking and
+its kickoff went 2026-09-29; what a wrongly merged conversation would share
+today is its ledger, its concept seed and its slot pin.)
 
 THE RULE (operator, 2026-09-25; mcp/session_id.py): identity comes from
 prompt_cache_key, else X-Yamadori-Session, else OUR ID -- carried in the
@@ -24,7 +26,8 @@ template (test_ledger's harness: a fake upstream, a client that keeps what
 it was sent as content and tool calls, drops reasoning, and echoes the call
 ids it was given, like Hermes):
   1. v0d: a finished conversation, then the same opening -> a new id, a
-     fresh deep state (the kickoff fires), no ledger replay, its own slot;
+     concept seed of its own on its first user turn, no ledger replay, its
+     own slot;
   2. two interleaved conversations with one opening stay apart by id;
   3. a retried opening is a new conversation; the answer the client kept
      names it (answer record);
@@ -67,11 +70,10 @@ for _k, _v in (("YAMADORI_CORPUS_DB", "corpus.sqlite3"),
 os.environ.setdefault("YAMADORI_GPU_ROOM", "0")
 
 import test_ledger as T  # noqa: E402  (its own temp paths + fake upstream)
-import deep  # noqa: E402
+import concept_seed  # noqa: E402
 import nebari  # noqa: E402
 import proxy  # noqa: E402
 import session_id  # noqa: E402
-import shomen  # noqa: E402
 
 _tmp_root = os.path.abspath(tempfile.gettempdir())
 for _k in ("YAMADORI_CORPUS_DB", "YAMADORI_NEBARI_DB", "RINGS_DB",
@@ -129,69 +131,48 @@ SPEC = ("Build a space shooter with vanilla JavaScript and canvas. "
         "PLAYER: moves with arrow keys, fires with space. " * 120)
 
 
-def _plan_post(real):
-    def post(path, payload, timeout=3600):
-        if str(payload["messages"][0].get("content", "")).startswith(
-                "You are planning"):
-            T._helper.append(json.loads(json.dumps(payload)))
-            return {"choices": [{"message": {"content": T.PLAN},
-                                 "finish_reason": "stop"}],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
-        return real(path, payload, timeout)
-    return post
-
-
 def test_the_same_opening_after_a_finished_run_is_a_new_conversation():
-    """(1) Octopus v0d: run 1 kicks off, works, finishes; run 2 sends the
-    byte-identical opening. Run 2 is a NEW conversation."""
+    """(1) Octopus v0d: run 1 opens, works, finishes; run 2 sends the
+    byte-identical opening. Run 2 is a NEW conversation: at xhigh (the tier
+    whose `seed` flag is on) its first user turn draws a concept seed of its
+    own, where a merged conversation would have replayed run 1's."""
     T.slots.reset(n=4)
     T.compaction.reset()
-    T._helper.clear()
-    real = shomen._post
-    shomen._post = _plan_post(real)
-    try:
-        r1 = T.Unforced("xhigh", "octopus v0")
-        acct = r1.body()["_account"]
-        t1 = r1.turn([T.reply(" I will start with index.html.", calls=[T.call(
-            "write_file", {"path": "index.html", "content": "<canvas>"},
-            "v0c-w1")])], user=SPEC)
-        lin1 = _lineage(acct)
-        r1.tool_result("v0c-w1", "wrote index.html")
-        r1.turn([T.reply("", calls=[T.call(
-            "write_file", {"path": "js/game.js", "content": "loop()"},
-            "v0c-w2")])])
-        r1.tool_result("v0c-w2", "wrote js/game.js")
-        r1.turn([T.reply("Done: the game is in index.html and js/game.js.")])
-        d1 = t1["d"]["x_yamadori"]["deep"]
-        check(d1.get("kind") == "kickoff" and d1.get("fire"),
-              "run 1: the opening kicks off (the plan job)",
-              json.dumps(d1.get("signals", {}).get("kickoff")))
-        st1 = deep.load_state(acct, lin1)
-        check(int(st1.get("episode") or 0) >= 1 and st1.get("kickoffs"),
-              "run 1's deep state has moved on (an episode, a kickoff done)",
-              json.dumps({k: st1.get(k) for k in ("episode", "kickoffs")}))
+    r1 = T.Unforced("xhigh", "octopus v0")
+    acct = r1.body()["_account"]
+    t1 = r1.turn([T.reply(" I will start with index.html.", calls=[T.call(
+        "write_file", {"path": "index.html", "content": "<canvas>"},
+        "v0c-w1")])], user=SPEC)
+    lin1 = _lineage(acct)
+    r1.tool_result("v0c-w1", "wrote index.html")
+    r1.turn([T.reply("", calls=[T.call(
+        "write_file", {"path": "js/game.js", "content": "loop()"},
+        "v0c-w2")])])
+    r1.tool_result("v0c-w2", "wrote js/game.js")
+    r1.turn([T.reply("Done: the game is in index.html and js/game.js.")])
+    seed1 = (_ses(t1).get("seed") or {}).get("word")
+    u1 = [m for m in t1["gens"][0]["request"]["messages"]
+          if m.get("role") == "user"][0]["content"]
+    check(seed1 and u1.endswith(concept_seed.USER_TURN_LINE.format(
+              word=seed1)),
+          "run 1: the opening's first user turn carries its concept seed",
+          json.dumps({"seed": _ses(t1).get("seed"), "tail": u1[-160:]}))
 
-        r2 = T.Unforced("xhigh", "octopus v0")        # the same opening
-        n_helper = len(T._helper)
-        t2 = r2.turn([T.reply(" Starting with the page.", calls=[T.call(
-            "write_file", {"path": "index.html", "content": "<canvas>"},
-            "v0d-w1")])], user=SPEC)
-        lin2 = _lineage(acct)
-    finally:
-        shomen._post = real
+    r2 = T.Unforced("xhigh", "octopus v0")        # the same opening
+    t2 = r2.turn([T.reply(" Starting with the page.", calls=[T.call(
+        "write_file", {"path": "index.html", "content": "<canvas>"},
+        "v0d-w1")])], user=SPEC)
+    lin2 = _lineage(acct)
     x2 = t2["d"]["x_yamadori"]
-    d2 = x2.get("deep") or {}
-    ko = (d2.get("signals") or {}).get("kickoff") or {}
-    check(d2.get("kind") == "kickoff" and d2.get("fire")
-          and ko.get("done") is False and len(T._helper) > n_helper,
-          "run 2's opening kicks off again (v0d: kickoff done: true, no plan)",
-          json.dumps({"fire": d2.get("fire"), "kind": d2.get("kind"),
-                      "kickoff": ko}))
-    check(d2.get("epoch") == 0 and d2.get("episode") == 0
-          and (d2.get("last_run") or {}).get("requests_since_run") is None,
-          "run 2's deep state is fresh: epoch 0, episode 0, no run before "
-          "(v0d: epoch 2, episode 5, requests_since_run 4)",
-          json.dumps({k: d2.get(k) for k in ("epoch", "episode", "last_run")}))
+    seed2 = (_ses(t2).get("seed") or {}).get("word")
+    u2 = [m for m in t2["gens"][0]["request"]["messages"]
+          if m.get("role") == "user"][0]["content"]
+    check(seed2 and seed2 != seed1
+          and u2.endswith(concept_seed.USER_TURN_LINE.format(word=seed2))
+          and seed1 not in u2,
+          "run 2's opening draws a seed of its own (a merged conversation "
+          "would replay run 1's)",
+          json.dumps({"run1": seed1, "run2": seed2, "tail": u2[-160:]}))
     s1, s2 = _ses(t1), _ses(t2)
     check(lin2 and lin2 != lin1 and s2.get("source") == "minted"
           and s2.get("id") and s2.get("id") != s1.get("id"),
@@ -221,8 +202,8 @@ def test_the_same_opening_after_a_finished_run_is_a_new_conversation():
 
 
 def test_interleaved_conversations_with_one_opening_keep_apart():
-    """(2) A and B open identically and interleave: each keeps its own key,
-    slot and deep state by its id."""
+    """(2) A and B open identically and interleave: each keeps its own key
+    and slot by its id."""
     T.slots.reset(n=4)
     T.compaction.reset()
     a = T.Unforced("medium", "interleaved")
@@ -265,11 +246,6 @@ def test_interleaved_conversations_with_one_opening_keep_apart():
           and _slot(ta1) != _slot(tb1),
           "each keeps its own slot",
           json.dumps([_slot(t) for t in (ta1, ta2, ta3, tb1, tb2, tb3)]))
-    sa, sb = deep.load_state(acct, la), deep.load_state(acct, lb)
-    check(sa.get("req") == 3 and sb.get("req") == 3,
-          "each deep state counted its own three requests (one shared "
-          "state would count six)",
-          json.dumps({"A": sa.get("req"), "B": sb.get("req")}))
 
 
 def test_a_retried_opening_is_a_new_conversation():
@@ -468,7 +444,7 @@ def test_the_ids_round_trip_and_the_slot_extends():
     body = {"model": "yamadori", "reasoning_effort": "medium",
             "_account": T.ACCOUNT + "-stream", "_client_ip": "127.0.0.1",
             "tools": [T.WRITE], "messages": json.loads(json.dumps(msgs)),
-            "_features": json.dumps({"hints": True, "fanout": 1})}
+            "_features": json.dumps({"skills": True})}
     T._script[:] = [T.reply("On it.", reasoning="Look at it.", calls=[
         T.call("write_file", {"path": "a.txt", "content": "x"}, "up-S")])]
     n0, w0 = len(T._gens), len(T._warms)
@@ -545,18 +521,14 @@ def test_a_first_answer_without_a_call_keeps_its_conversation():
     T.compaction.reset()
     c = T.Unforced("xhigh", "text first")
     acct = c.body()["_account"]
-    # Deep thinking forced off: every new task is planned at xhigh
-    # (2026-09-27), and this test is about the answer's own text.
-    off = {"investigate": False}
     t1 = c.turn([T.reply("It is a canvas game.", reasoning="Look first.")],
-                user="What is this project?", features=off)
+                user="What is this project?")
     k1, sid = _key(acct), _ses(t1).get("id")
     check(c.msgs[-1]["content"] == "It is a canvas game."
           and _ses(t1).get("source") == "minted",
           "the first answer is the model's text", json.dumps(c.msgs[-1]))
     t2 = c.turn([T.reply("", calls=[T.call("write_file", {
-        "path": "a.txt", "content": "x"}, "tf1")])], user="Write a.txt.",
-                features=off)
+        "path": "a.txt", "content": "x"}, "tf1")])], user="Write a.txt.")
     check(_key(acct) == k1 and _ses(t2).get("id") == sid
           and _ses(t2).get("source") == "answer_record"
           and _slot(t2) == _slot(t1)
@@ -567,7 +539,7 @@ def test_a_first_answer_without_a_call_keeps_its_conversation():
     T._extends(t1, t2, "[answer record] the request after a text-only first "
                        "answer")
     c.tool_result("tf1", "wrote a.txt")
-    t3 = c.turn([T.reply("Done.")], features=off)
+    t3 = c.turn([T.reply("Done.")])
     check(_ses(t3).get("source") == "tool_call_id" and _key(acct) == k1,
           "and after the call: by the carrier", json.dumps(_ses(t3)))
     T._extends(t2, t3, "[answer record] the request after the call")

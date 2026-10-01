@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""The two tools that need the card, tested against the real one. OPT-IN.
+"""The tool that needs the card (summarize_text), tested against the real one. OPT-IN.
 
 WHY THIS IS A SEPARATE FILE
 
@@ -23,11 +23,13 @@ GPU was unavailable.
 
 BEFORE YOU RUN IT
 
-This stack holds ONE KV pool and ONE helper lane. `delegate_investigation`
-starts a second context on the same card. Running this while a benchmark or
-another agent is using the stack does not produce two results more slowly -- it
+This stack holds ONE KV pool. Running this while a benchmark or another
+agent is using the stack does not produce two results more slowly -- it
 produces two degraded ones and a 429, and the arm that happens to lose most
 looks like the arm with a bug. Check that the card is yours first.
+
+`delegate_investigation` and its live test were removed with the second
+brain (mcp/shomen.py) on 2026-09-29 (docs/REMOVED.md).
 
 WHAT IS ASSERTED, AND WHAT IS NOT
 
@@ -41,10 +43,6 @@ questions asked here are the ones with stable answers:
     did it keep what it promised   identifiers, paths, numbers and error
                                    strings survive verbatim, because that is
                                    what the tool's own description guarantees
-    did it cost what it claims     the investigation reports hops, tokens and
-                                   seconds, and the receipts exist
-    did it keep its searching out  the whole point of a second context is that
-      of this conversation         its tool traffic does not arrive here
 
 The fixture index and the repository under it are inherited from
 `test_tools.py`, so these run against three known files and never against
@@ -66,7 +64,6 @@ import test_tools as T  # noqa: E402
 
 import code_search as cs  # noqa: E402
 import model as _model  # noqa: E402
-import shomen  # noqa: E402
 
 check, indexed, as_json = T.check, T.indexed, T.as_json
 
@@ -219,84 +216,6 @@ def test_summarize_text_live_handles_a_trivial_input():
               str(d.get("retryable")))
 
 
-def test_delegate_investigation_live():
-    """A real second context, over the fixture index.
-
-    The question has a known answer in the fixture -- sizeKvPool is declared in
-    src/pool.ts -- so the investigation has something to find, and a finding
-    that cites nothing is a real signal rather than an artefact of an empty
-    index.
-    """
-    out = indexed("delegate_investigation",
-                  {"question": "Where is sizeKvPool defined and what does it "
-                               "divide?",
-                   "context": "The repository is a small TypeScript project."})
-
-    if not check(bool((out or "").strip()),
-                 "delegate_investigation returns something", repr(out)[:80]):
-        return
-    check(T.leaked_exception(out) == [],
-          "delegate_investigation leaks no raw exception", out[:200])
-
-    d = as_json(out)
-    if d is not None and d.get("ok") is False:
-        # HELPER_BUSY is the expected shape when something else holds the lane.
-        # It is a correct answer, and it means nothing below can be checked.
-        check(d.get("error") in ("HELPER_BUSY",),
-              "a refusal names a known situation", str(d.get("error")))
-        check(False, "THE LANE WAS BUSY -- the checks below did not run. "
-                     "Stop the other consumer and run again",
-              json.dumps(d)[:200])
-        return
-
-    # THE COST LINE IS THE PRODUCT. Context economy is the entire argument for
-    # this tool; an unreported saving is a claim rather than a result.
-    # The wording is "thought about deeply" on purpose: the standing rule is
-    # that the second brain is "thinking" / "deep thinking" in anything a
-    # user sees, never "separate context". This check used to pin the old,
-    # forbidden phrase and so failed against a correct rename.
-    check("[thought about deeply:" in out,
-          "the cost of the investigation is reported", out[-300:])
-    handle = ""
-    if "Trace handle " in out:
-        handle = out.split("Trace handle ")[-1].strip().rstrip("].")
-    check(bool(handle), "a trace handle is returned", out[-120:])
-
-    trace = shomen.get_trace(handle) if handle else None
-    if check(trace is not None, "the trace handle resolves to receipts", handle):
-        steps = trace.get("trace") or []
-        check(isinstance(steps, list), "the trace is a list of steps",
-              type(steps).__name__)
-        unknown = sorted({s.get("tool") for s in steps}
-                         - set(T.proxy.OUR_NAMES))
-        check(not unknown, "the investigator used only tools we offer",
-              ", ".join(str(u) for u in unknown))
-        check("delegate_investigation" not in {s.get("tool") for s in steps},
-              "the investigator did not delegate again -- nothing bounds "
-              "that depth")
-
-    # THE SEARCHING MUST NOT ARRIVE HERE. The saving is the whole point: a
-    # six-search investigation should cost the caller a few hundred tokens.
-    # If the raw tool output crossed back, this string would carry the fenced
-    # source of the files it read.
-    check(len(out) < 4000,
-          "the investigation's own traffic did not enter this conversation",
-          f"{len(out)} chars returned")
-    check("== TAPROOT" not in out and "CALL SITES:" not in out,
-          "no raw search result crossed back", out[:200])
-
-    # It really ran, rather than returning a canned line.
-    for field in ("tool call", "tokens spent there"):
-        check(field in out, f"the cost line reports {field}", out[-300:])
-    # ... and a MODEL was behind it: a run against a refusing port also
-    # printed a cost line (#15c). Tokens spent there must be more than none.
-    import re
-    m = re.search(r"([\d,]+) tokens spent there", out)
-    spent = int(m.group(1).replace(",", "")) if m else 0
-    check(spent > 0, "the second context really generated (tokens spent > 0)",
-          out[-300:])
-
-
 TOOLS_URL = os.environ.get("YAMADORI_TOOLS", "http://127.0.0.1:1235")
 
 
@@ -395,8 +314,7 @@ def main(argv: list[str]) -> int:
 
     for fn in (test_tools_api_door_live,
                test_summarize_text_live,
-               test_summarize_text_live_handles_a_trivial_input,
-               test_delegate_investigation_live):
+               test_summarize_text_live_handles_a_trivial_input):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(T._results)
         try:

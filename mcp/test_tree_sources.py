@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""The tokonoma's new sources, asserted: mcp/recent_turns.py (fan-out and
-recall from the proxy's own x_yamadori records) and mcp/tree_sources.py
+"""The tokonoma's new sources, asserted: mcp/recent_turns.py (recall from
+the proxy's own x_yamadori records) and mcp/tree_sources.py
 (index breadth for the roots, index freshness for the moss). No GPU, no
 network, no model; every index is a temp sqlite file.
 """
@@ -35,35 +35,15 @@ def near(a, b, tol=1e-6) -> bool:
     return a is not None and b is not None and abs(a - b) <= tol
 
 
-def fan(n=3, winner=2):
-    return {"n": n, "winner_index": winner, "selection": "code_check",
-            "candidates": [{"index": i, "role": "x"} for i in range(n)]}
-
-
-def test_fanout():
+def test_no_fanout():
+    """Fan-out was removed (2026-09-29): the summary carries no fork, and a
+    record that still has an x_yamadori.fanout field is read as any other."""
     rt.reset()
     now = 10_000.0
-    check(rt.summary(now)["fanout"] is None, "no request yet: no fan-out (inert)")
-    rt.note({"fanout": fan(), "skills": {"ids": []}}, now=now - 30)
-    f = rt.summary(now)["fanout"]
-    check(f and f["arity"] == 3 and f["chosen"] == 2 and f["culled"] == [0, 1]
-          and f["fade"] == 1.0, "arity, chosen and culled from x_yamadori.fanout", str(f))
-    f = rt.summary(now + rt.FANOUT_HOLD_S - 30 + rt.FANOUT_DECAY_S / 2)["fanout"]
-    check(f and near(f["fade"], 0.5, 1e-3), "after the hold it decays", str(f and f["fade"]))
-    check(rt.summary(now + 1000)["fanout"] is None, "and is gone after hold + decay")
-    rt.note({"fanout": None, "skills": {"ids": []}}, now=now)
-    check(rt.summary(now + 1)["fanout"]["arity"] == 3,
-          "a later request without fan-out does not cut the hold short")
-    rt.note({"fanout": {"n": 0, "error": "RuntimeError"}}, now=now + 2)
-    rt.note({"fanout": fan(1, 0)}, now=now + 3)
-    check(rt.summary(now + 4)["fanout"]["arity"] == 3,
-          "a failed or single-candidate fan-out is not a fork")
-    rt.reset()
-    rt.note({"fanout": fan(2, None)}, now=now)
-    check(rt.summary(now)["fanout"]["chosen"] == 0, "no winner index: the original (0) was delivered")
-    rt.reset()
-    rt.note({"fanout": fan(), "utility": True}, now=now)
-    check(rt.summary(now)["fanout"] is None, "a utility call's record is ignored")
+    rt.note({"fanout": {"n": 3, "winner_index": 2}, "skills": {"ids": ["a"]}}, now=now)
+    s = rt.summary(now)
+    check("fanout" not in s and "hold_s" not in s and s["turns"] == 1,
+          "no fan-out in the summary", str(s))
     rt.note("not a dict")
     check(True, "note() never raises")
 
@@ -142,7 +122,7 @@ def test_measure():
               "counts are cached: a new index is not read within CACHE_S")
         s3 = ts.snapshot(now + ts.CACHE_S + 1)
         check(s3["nebari"]["items"] == 11_100, "and is read after it", str(s3["nebari"]["items"]))
-        check("recent" in s3 and "fanout" in s3["recent"], "the recent turns ride along")
+        check("recent" in s3 and "foliage" in s3["recent"], "the recent turns ride along")
     finally:
         ts._code_index, ts._repo_dbs, ts._last_arm = real_code, real_repos, real_arm
     ts._cache.clear()
@@ -167,7 +147,7 @@ def test_vitals_carries_it():
 
 
 def main() -> int:
-    for fn in (test_fanout, test_foliage, test_formulas, test_measure, test_vitals_carries_it):
+    for fn in (test_no_fanout, test_foliage, test_formulas, test_measure, test_vitals_carries_it):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

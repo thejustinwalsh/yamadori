@@ -1,0 +1,463 @@
+{
+ "started": "2026-10-01T01:24:23",
+ "model": "mirai-s",
+ "template": "bonsai-decider/1",
+ "typed_readout": "typed/2",
+ "order": [
+  "legacy",
+  "typed"
+ ],
+ "target": {
+  "model": "mirai-s",
+  "mode": "base-url",
+  "base": "http://127.0.0.1:18096",
+  "slot": 0,
+  "model_path": "Qwen3.8-27B-S-mirai.gguf",
+  "build": "b5-b59ae80f4",
+  "total_slots": 1,
+  "n_ctx": 128000
+ },
+ "model_profile": {
+  "model": "mirai-s",
+  "record": "C:\\Users\\jwals\\llama-stack\\bench\\decider\\results\\models\\mirai-s.json",
+  "measured": [
+   "label_bias",
+   "labels",
+   "letter_prior",
+   "tie_band"
+  ],
+  "unmeasured": [
+   "readout",
+   "legacy_form",
+   "legacy_vs_typed",
+   "temperature",
+   "read_regime"
+  ],
+  "tie_band": {
+   "value": 0.000346,
+   "measured": true,
+   "source": "C:\\Users\\jwals\\llama-stack\\bench\\decider\\results\\models\\mirai-s.json"
+  },
+  "note": "unmeasured for mirai-s: readout, legacy_form, legacy_vs_typed, temperature, read_regime"
+ },
+ "files": {
+  "mcp/decider_bonsai.py": "e58395d70ee5471c",
+  "mcp/decide_turn.py": "d42fc1db9c321961",
+  "mcp/skill_match.py": "6f77d733e6d36058",
+  "mcp/skill_select.py": "705b31ee6a8d35c6"
+ },
+ "status": "complete",
+ "in_sample": "daily_eval and work_intent are ours; nothing is held out",
+ "runs": 1,
+ "intent": {
+  "arms": {
+   "legacy": {
+    "n": 99,
+    "accuracy": 0.8788,
+    "ece": 0.029833,
+    "p_yes": [
+     0.99,
+     0.2057,
+     0.797,
+     0.1596,
+     0.6199,
+     0.9974,
+     0.9976,
+     0.8206,
+     0.4814,
+     0.9983,
+     0.9984,
+     0.9992,
+     0.9985,
+     0.9965,
+     0.9952,
+     0.9883,
+     0.9778,
+     0.9987,
+     0.998,
+     0.9986,
+     0.999,
+     0.9843,
+     0.9366,
+     0.9987,
+     0.9985,
+     0.9926,
+     0.9837,
+     0.9856,
+     0.9962,
+     0.9957,
+     0.8945,
+     0.3718,
+     0.9908,
+     0.9989,
+     0.9974,
+     0.9929,
+     0.663,
+     0.9711,
+     0.9954,
+     0.9722,
+     0.5467,
+     0.9987,
+     0.9962,
+     0.9986,
+     0.5718,
+     0.9706,
+     0.7816,
+     0.0109,
+     0.005,
+     0.252,
+     0.019,
+     0.0171,
+     0.1474,
+     0.013,
+     0.2762,
+     0.0349,
+     0.0672,
+     0.0921,
+     0.8726,
+     0.7881,
+     0.0876,
+     0.0032,
+     0.0362,
+     0.0218,
+     0.0828,
+     0.3505,
+     0.1485,
+     0.0173,
+     0.0499,
+     0.0541,
+     0.1447,
+     0.0503,
+     0.557,
+     0.9396,
+     0.9849,
+     0.0543,
+     0.0098,
+     0.0162,
+     0.0431,
+     0.0164,
+     0.004,
+     0.002,
+     0.1305,
+     0.1376,
+     0.0756,
+     0.0117,
+     0.0023,
+     0.0129,
+     0.0473,
+     0.0328,
+     0.0871,
+     0.2517,
+     0.6836,
+     0.5971,
+     0.0161,
+     0.1525,
+     0.2129,
+     0.9858,
+     0.3195
+    ],
+    "seconds": 76.2
+   },
+   "typed": {
+    "n": 99,
+    "accuracy": 0.8788,
+    "ece": 0.029837,
+    "p_yes": [
+     0.990028,
+     0.20568,
+     0.797022,
+     0.159562,
+     0.61991,
+     0.997385,
+     0.99762,
+     0.820567,
+     0.481395,
+     0.998343,
+     0.998422,
+     0.99922,
+     0.998536,
+     0.996471,
+     0.995227,
+     0.988262,
+     0.977805,
+     0.998671,
+     0.998007,
+     0.998562,
+     0.999021,
+     0.984285,
+     0.936565,
+     0.99869,
+     0.998536,
+     0.992562,
+     0.983726,
+     0.985612,
+     0.996203,
+     0.995723,
+     0.894473,
+     0.371826,
+     0.990817,
+     0.998873,
+     0.997399,
+     0.992873,
+     0.663015,
+     0.971118,
+     0.99542,
+     0.97221,
+     0.546745,
+     0.998732,
+     0.996223,
+     0.998555,
+     0.571777,
+     0.97063,
+     0.781586,
+     0.010948,
+     0.005033,
+     0.251985,
+     0.018981,
+     0.017119,
+     0.147362,
+     0.013038,
+     0.276214,
+     0.034938,
+     0.067202,
+     0.092083,
+     0.872644,
+     0.788134,
+     0.087604,
+     0.003216,
+     0.036221,
+     0.021833,
+     0.082807,
+     0.350461,
+     0.148508,
+     0.017257,
+     0.04985,
+     0.054052,
+     0.144671,
+     0.050342,
+     0.557041,
+     0.939632,
+     0.984876,
+     0.054332,
+     0.009758,
+     0.016175,
+     0.043116,
+     0.016365,
+     0.003983,
+     0.001996,
+     0.1305,
+     0.137641,
+     0.07559,
+     0.01168,
+     0.002281,
+     0.012934,
+     0.047289,
+     0.032844,
+     0.087101,
+     0.25169,
+     0.683636,
+     0.597087,
+     0.01607,
+     0.15247,
+     0.2129,
+     0.985791,
+     0.319522
+    ],
+    "seconds": 77.7
+   }
+  },
+  "max_abs_diff": 5e-05,
+  "tie_band": 0.0034,
+  "argmax_agree": 99,
+  "seconds": 154.4
+ },
+ "daily_choose": {
+  "legacy": {
+   "passed": 502,
+   "total": 526,
+   "failed": [
+    "op-sentence-pagoda: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "op-sentence-octopus: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "op-v4-exact: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "op-pagoda-r3f-stack-exact: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "stack-math-noise: MUST inject math-noise-and-seeded-random",
+    "three-shadow-acne: MUST NOT inject threejs-llms-full-tsl-assignments-1",
+    "typegpu-three: MUST inject typegpu-three-tsl-integration-2",
+    "emscripten-embind: MUST inject emscripten-embind-base-class-bindings-1",
+    "bug-koota-throw: MUST inject koota-queries-and-systems",
+    "seq-koota-body-recall#1: MUST inject koota-queries-and-systems",
+    "seq-koota-body-recall#1: koota-queries-and-systems as a body (got nothing)",
+    "seq-koota-body-recall#2: MUST inject koota-queries-and-systems",
+    "seq-koota-body-recall#2: koota-queries-and-systems as a recall (got nothing)",
+    "seq-koota-body-recall#2: the recall of koota-queries-and-systems names 'updateEach'",
+    "seq-koota-fade#1: MUST inject koota-queries-and-systems",
+    "seq-koota-fade#1: koota-queries-and-systems as a body (got nothing)",
+    "seq-unrelated-after-stack#0: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "seq-phase-debug#3: MUST inject koota-queries-and-systems",
+    "pkg-useframe-stutter: MUST inject from area r3f",
+    "pkg-usethree-resize: MUST inject from area r3f",
+    "pkg-canvas-black: MUST inject from area r3f",
+    "pkg-useloader-refetch: MUST inject from area r3f",
+    "pkg-query-nothing: MUST inject from area koota",
+    "pkg-vec3f-array: MUST inject from area typegpu"
+   ],
+   "per_area": {
+    "pmndrs_math": {
+     "tp": 11,
+     "fp": 4,
+     "fn": 0
+    },
+    "threejs": {
+     "tp": 14,
+     "fp": 2,
+     "fn": 0
+    },
+    "react": {
+     "tp": 7,
+     "fp": 0,
+     "fn": 0
+    },
+    "koota": {
+     "tp": 20,
+     "fp": 3,
+     "fn": 1
+    },
+    "r3f": {
+     "tp": 5,
+     "fp": 1,
+     "fn": 9
+    },
+    "typegpu": {
+     "tp": 1,
+     "fp": 0,
+     "fn": 1
+    },
+    "wgsl": {
+     "tp": 1,
+     "fp": 0,
+     "fn": 0
+    },
+    "rust": {
+     "tp": 2,
+     "fp": 0,
+     "fn": 0
+    },
+    "emscripten": {
+     "tp": 1,
+     "fp": 1,
+     "fn": 0
+    },
+    "code": {
+     "tp": 0,
+     "fp": 2,
+     "fn": 0
+    },
+    "typescript": {
+     "tp": 0,
+     "fp": 1,
+     "fn": 0
+    }
+   },
+   "wall_ms": {
+    "n": 124,
+    "p50": 24.9,
+    "p90": 91.5
+   }
+  },
+  "typed": {
+   "passed": 502,
+   "total": 526,
+   "failed": [
+    "op-sentence-pagoda: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "op-sentence-octopus: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "op-v4-exact: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "op-pagoda-r3f-stack-exact: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "stack-math-noise: MUST inject math-noise-and-seeded-random",
+    "three-shadow-acne: MUST NOT inject threejs-llms-full-tsl-assignments-1",
+    "typegpu-three: MUST inject typegpu-three-tsl-integration-2",
+    "emscripten-embind: MUST inject emscripten-embind-base-class-bindings-1",
+    "bug-koota-throw: MUST inject koota-queries-and-systems",
+    "seq-koota-body-recall#1: MUST inject koota-queries-and-systems",
+    "seq-koota-body-recall#1: koota-queries-and-systems as a body (got nothing)",
+    "seq-koota-body-recall#2: MUST inject koota-queries-and-systems",
+    "seq-koota-body-recall#2: koota-queries-and-systems as a recall (got nothing)",
+    "seq-koota-body-recall#2: the recall of koota-queries-and-systems names 'updateEach'",
+    "seq-koota-fade#1: MUST inject koota-queries-and-systems",
+    "seq-koota-fade#1: koota-queries-and-systems as a body (got nothing)",
+    "seq-unrelated-after-stack#0: MUST inject from area r3f (pending re-ingestion of r3f-v10-setup-21)",
+    "seq-phase-debug#3: MUST inject koota-queries-and-systems",
+    "pkg-useframe-stutter: MUST inject from area r3f",
+    "pkg-usethree-resize: MUST inject from area r3f",
+    "pkg-canvas-black: MUST inject from area r3f",
+    "pkg-useloader-refetch: MUST inject from area r3f",
+    "pkg-query-nothing: MUST inject from area koota",
+    "pkg-vec3f-array: MUST inject from area typegpu"
+   ],
+   "per_area": {
+    "pmndrs_math": {
+     "tp": 11,
+     "fp": 4,
+     "fn": 0
+    },
+    "threejs": {
+     "tp": 14,
+     "fp": 2,
+     "fn": 0
+    },
+    "react": {
+     "tp": 7,
+     "fp": 0,
+     "fn": 0
+    },
+    "koota": {
+     "tp": 20,
+     "fp": 3,
+     "fn": 1
+    },
+    "r3f": {
+     "tp": 5,
+     "fp": 1,
+     "fn": 9
+    },
+    "typegpu": {
+     "tp": 1,
+     "fp": 0,
+     "fn": 1
+    },
+    "wgsl": {
+     "tp": 1,
+     "fp": 0,
+     "fn": 0
+    },
+    "rust": {
+     "tp": 2,
+     "fp": 0,
+     "fn": 0
+    },
+    "emscripten": {
+     "tp": 1,
+     "fp": 1,
+     "fn": 0
+    },
+    "code": {
+     "tp": 0,
+     "fp": 2,
+     "fn": 0
+    },
+    "typescript": {
+     "tp": 0,
+     "fp": 1,
+     "fn": 0
+    }
+   },
+   "wall_ms": {
+    "n": 124,
+    "p50": 25.1,
+    "p90": 90.8
+   }
+  },
+  "only_legacy_failed": [],
+  "only_typed_failed": [],
+  "seconds": 61.9
+ }
+}

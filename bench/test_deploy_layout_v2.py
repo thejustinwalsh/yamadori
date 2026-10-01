@@ -1,8 +1,15 @@
 #!/usr/bin/env python
-"""bench/deploy_layout_v2.py's edits, offline: pure functions of the files' text, applied to the CURRENT
-config.yaml, start-stack.bat, watchdog.ps1 and served fixture in memory. Nothing is written, nothing is
-restarted, no port is reached. Also bench/kv_rank.py's v2 arm (target_args) and engine_corruption's flag
-removal, which the fit runs through.
+"""bench/deploy_layout_v2.py's edits, offline: pure functions of the files' text, applied in memory to the
+config the deploy was written for (bench/fixtures/config.layout-v1.yaml, below) and to the CURRENT
+start-stack.bat, watchdog.ps1 and served fixture. Nothing is written, nothing is restarted, no port is
+reached. Also bench/kv_rank.py's v2 arm (target_args) and engine_corruption's flag removal, which the fit
+runs through.
+
+THE CONFIG IS A FIXTURE (2026-10-01): layout v2's deploy ran on 2026-09-29, and the live config.yaml has been
+layout v3 since 2026-10-01 (bench/deploy_layout_v3.py: bonsai -np 1, operator 2026-09-30), which edit_config
+rightly refuses ("-np 3 missing"). bench/deploy_layout_v3.py still imports this module's edits, so they stay
+tested -- against the last layout-v1 config, the input they were written for (config.yaml.bak-20260929-131409,
+machine paths replaced).
 
     python bench/test_deploy_layout_v2.py      -> "N/M checks passed"
 """
@@ -42,9 +49,12 @@ def _argv(block: str) -> list[str]:
     return " ".join(ln for ln in lines if ln and not ln.startswith("#")).split()
 
 
+CONFIG_FIXTURE = "bench/fixtures/config.layout-v1.yaml"
+
+
 def test_config() -> None:
     import yaml
-    old = _read("config.yaml")
+    old = _read(CONFIG_FIXTURE)
     new = d.edit_config(old, N)
     b_old, b_new = _bonsai(old), _bonsai(new)
     a_old, a_new = _argv(b_old), _argv(b_new)

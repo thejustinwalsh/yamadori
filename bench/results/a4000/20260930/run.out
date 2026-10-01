@@ -1,0 +1,11 @@
+[18:40:31] lane: {'held_by': 'tier models (Bonsai window)', 'resumed': False}
+{
+ "ctx": 141312,
+ "fit": {
+  "bytes_per_cell": 35840,
+  "fixed_mib": 10193,
+  "total_mib": 16376,
+  "margin_mib": 1331,
+  "max_ctx": 141312
+ }
+}

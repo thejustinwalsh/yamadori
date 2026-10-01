@@ -1,7 +1,8 @@
 // Pure helpers over mcp/power.py's payloads: the electricity panel on the
-// cockpit (/dash/api/vitals `power`) and the LiveBench electricity estimate.
-// Every figure is GPU draw only; the panel prints the basis beside it.
-import type { LbElectricity, PowerBasis, PowerDay, PowerLive, Range2 } from './types';
+// cockpit (/dash/api/vitals `power`). Every figure is GPU draw only; the
+// panel prints the basis beside it. (The LiveBench electricity estimate went
+// with the benchmark page, 2026-09-30.)
+import type { PowerBasis, PowerDay, PowerLive } from './types';
 
 /** A full live() payload, as opposed to an absent field (older server) or a bare error. */
 export function isPower(p: unknown): p is PowerLive {
@@ -57,19 +58,4 @@ export function basisLines(b: PowerBasis | undefined, flat: boolean): string[] {
     extra,
     flat ? `PRICE: ${b.rate} (${b.flat_rate_env})` : 'PRICE: DTE D1.11 TIME OF DAY 3–7 PM · BEFORE SURCHARGES AND TAXES · HOLIDAYS NOT MODELLED',
   ];
-}
-
-export const rangeText = (r: Range2 | null | undefined, f: (x: number) => string): string =>
-  !r ? '—' : r[0] === r[1] ? f(r[0]) : `${f(r[0])}–${f(r[1])}`;
-
-/** One LiveBench arm's estimate as table cells. */
-export function electricityCells(e: LbElectricity | null | undefined) {
-  if (!e) return null;
-  return {
-    perQuestionWh: `${e.wh_per_question.toFixed(1)} Wh`,
-    perQuestionCents: rangeText(e.cents_per_question, (x) => x.toFixed(2)) + '¢',
-    per100Kwh: `${e.kwh_per_100.toFixed(2)} kWh`,
-    per100Dollars: rangeText(e.dollars_per_100, (x) => `$${x.toFixed(2)}`),
-    seconds: `${Math.round(e.seconds_per_question)} s`,
-  };
 }

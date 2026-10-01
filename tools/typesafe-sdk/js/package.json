@@ -1,0 +1,9 @@
+{
+  "name": "typesafe-sdk-conformance",
+  "private": true,
+  "description": "TypeSafe's JavaScript SDK, pinned, as a test client of the Jev API (mcp/test_jev_sdk.py; tools/typesafe-sdk/install.py)",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@typesafe-ai/sdk": "0.6.0"
+  }
+}

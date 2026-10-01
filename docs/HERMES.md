@@ -150,7 +150,7 @@ plus the symbol table, *not* embeddings + reranking. `CODE_SEARCH_SEMANTIC=0`
 (keyword beat semantic 92/120 to 77/120, McNemar p=0.0041) and
 `RERANK_MAX_K=2` against `DEFAULT_TOP_K=5`, so the cross-encoder does not run
 at the default k. Either way the model never sees those models; they are
-implementation details behind the tool.
+implementation details behind the tool. (The reranker was removed 2026-10-01, docs/REMOVED.md.)
 
 ### Indexing
 

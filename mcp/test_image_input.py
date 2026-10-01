@@ -22,9 +22,8 @@ GATED HERE
      placeholder byte for byte and yama_describe_image says IMAGE_NOT_HELD;
   5. the synthetic-turn table rows are the harnesses' own string literals
      (the source lines are quoted below, read with `gh api` on 2026-09-26);
-  6. routing: a tool-media turn is agent_step, never a new task; deep never
-     reads it as a kickoff or the user speaking, and looks
-     past it from a real user turn;
+  6. routing: a tool-media turn is agent_step, as the tool result it
+     carries, and a turn with words beyond the prefix is the user speaking;
   7. the security contract: normalising the new forms opens no socket and
      no file; yama_describe_image still refuses URLs and paths;
   8. /v1/models: `modalities` beside `architecture`, text-only when vision
@@ -97,7 +96,6 @@ import jinja2  # noqa: E402
 import body_limit  # noqa: E402
 import budget  # noqa: E402
 import catalog  # noqa: E402
-import deep  # noqa: E402
 import image_input  # noqa: E402
 import route  # noqa: E402
 import tiers  # noqa: E402
@@ -561,43 +559,6 @@ def test_routing():
         r0 = route.classify(out, client_tools=[])
         check(r0["class"] == "agent_step",
               f"{name}: agent_step without a tool list too")
-        ko = deep.kickoff(msgs)
-        check(ko["new_task"] is False and "synthetic" in ko["why"],
-              f"{name}: never a kickoff", json.dumps(ko))
-    # Pi's bridge: before, "a user turn after a finished answer" -- a kickoff.
-    big = pi(p, True)
-    big[-1]["content"][0]["text"] = "Attached image(s) from tool result:"
-    check(deep.kickoff(big)["new_task"] is False,
-          "Pi's bridged turn (an assistant message with no calls before it) "
-          "is not a new task")
-
-    # OpenCode puts the turn after the WHOLE assistant message, which may end
-    # on text; a real user turn after it follows that answer.
-    oc = [TASK, ASK, {"role": "tool", "tool_call_id": "c1",
-                      "content": "Image read successfully"},
-          {"role": "assistant", "content": "The header overlaps the nav."},
-          {"role": "user", "content": [
-              {"type": "text", "text": "Attached media from tool result:"},
-              img_part(p)]}]
-    # No user words are a struggle signal since 2026-09-27 (the "still
-    # broken" phrase list, deep.STILL_BROKEN, was removed): neither the
-    # synthetic turn nor a real complaint after it signals.
-    still = oc + [{"role": "user", "content": "it still doesn't work"}]
-    kinds = [e["kind"] for e in deep.struggle_events(still)]
-    check(kinds == [] and deep.struggle_events(oc) == [],
-          "the synthetic turn and a user's 'still doesn't work' after it are "
-          "no struggle signal", json.dumps(kinds))
-    new = oc + [{"role": "user", "content": "Now build the settings page. "
-                                           + "Spec: " + "x " * 50}]
-    ko = deep.kickoff(new)
-    # Only the conversation's initial prompt is planned (operator,
-    # 2026-09-27): a new user turn here is a follow-up. What this checks is
-    # that deep looks past the synthetic turn to the ANSWER (a follow-up
-    # after a finished answer), not a user turn inside a tool loop.
-    check(ko["new_task"] is False and "finished answer" in ko["why"],
-          "a new request after OpenCode's turn follows the answer, not a "
-          "user turn (and only the initial prompt is planned)",
-          json.dumps(ko))
     fake = [TASK, ASK, {"role": "tool", "tool_call_id": "c1", "content": "ok"},
             {"role": "user", "content": [
                 {"type": "text", "text": "Attached media from tool result:"},

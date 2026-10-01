@@ -133,7 +133,8 @@ def account_traffic(account: str | None) -> str:
 
     FAILS CLOSED (pre-deploy review, 2026-09-24): when the registry cannot
     be read, the row is "test" -- an unknown source is never learned from
-    (mcp/deep_learn.py reads client rows only)."""
+    (the learners -- skill_learn, and deep_learn until it was removed
+    2026-09-29 -- read client rows only)."""
     if not account:
         return "client"
     try:

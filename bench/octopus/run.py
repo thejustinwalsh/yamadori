@@ -112,9 +112,9 @@ KEEPALIVE = "octo-keepalive"
 
 # Command-line fragments of the other GPU consumers this repo runs.
 BUSY = ("test_live_stack", "test_tools_live", "run_tests.py --live",
-        "test_laya_head.py --serve", "queue_runner.py", "bench\\domain\\run.py",
+        "queue_runner.py", "bench\\domain\\run.py",
         "bench/domain/run.py", "livecodebench.py", "recipe_oracle.py",
-        "context_economy.py", "octopus\\run.py --variant", "octopus/run.py --variant",
+        "octopus\\run.py --variant", "octopus/run.py --variant",
         "octopus\\run.py --task", "octopus/run.py --task",
         "voxel\\run.py", "voxel/run.py")
 
@@ -147,7 +147,31 @@ def busy_processes() -> list[str]:
     return out
 
 
+def bonsai_ready(swap: str | None = None) -> tuple[bool | None, str]:
+    """(ready?, why) from llama-swap's GET /running, which never loads
+    anything (mcp/gpu_room.py model_loaded's rule, inline: this runner does
+    not import mcp/). None: /running could not be read."""
+    swap = swap or SLOTS.split("/upstream/")[0]
+    try:
+        with urllib.request.urlopen(f"{swap}/running", timeout=10) as r:
+            rows = (json.load(r) or {}).get("running") or []
+    except Exception as e:                          # noqa: BLE001
+        return None, f"llama-swap /running: {type(e).__name__}"
+    for x in rows:
+        if isinstance(x, dict) and x.get("model") == "bonsai":
+            st = str(x.get("state") or "ready")
+            return st == "ready", f"bonsai is {st} (llama-swap /running)"
+    return False, "bonsai is not loaded (llama-swap /running)"
+
+
 def slots_idle() -> tuple[bool, list]:
+    """Every main-model slot idle. A READ NEVER LOADS A MODEL (2026-09-30):
+    /upstream/bonsai/slots only while /running lists bonsai ready; not loaded,
+    nothing is generating on it ([("not loaded", why)]); /running unreadable
+    is not idle."""
+    ready, why = bonsai_ready()
+    if not ready:
+        return ready is False, [("slots not read", why)]
     with urllib.request.urlopen(SLOTS, timeout=15) as r:
         s = json.load(r)
     state = [(x.get("id"), bool(x.get("is_processing"))) for x in s]

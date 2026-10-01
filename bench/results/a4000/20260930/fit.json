@@ -1,0 +1,59 @@
+{
+ "started": "2026-09-30T18:39:26-0400",
+ "points": [
+  {
+   "ctx": 16384,
+   "load_s": 4.5,
+   "warm": {
+    "side_tokens": 8192,
+    "burst_s": 17.6,
+    "side": {
+     "cache_n": 0,
+     "prompt_n": 8192,
+     "prompt_ms": 13737.464,
+     "prompt_per_token_ms": 1.6769365234375,
+     "prompt_per_second": 596.3254935554335,
+     "predicted_n": 64,
+     "predicted_ms": 3717.653,
+     "predicted_per_token_ms": 59.01036507936507,
+     "predicted_per_second": 16.946175449941133
+    }
+   },
+   "peak_used_mib": 10753
+  },
+  {
+   "ctx": 49152,
+   "load_s": 4.5,
+   "warm": {
+    "side_tokens": 16384,
+    "burst_s": 30.3,
+    "side": {
+     "cache_n": 0,
+     "prompt_n": 16384,
+     "prompt_ms": 26391.847,
+     "prompt_per_token_ms": 1.6108305053710938,
+     "prompt_per_second": 620.7977789504463,
+     "predicted_n": 64,
+     "predicted_ms": 3817.229,
+     "predicted_per_token_ms": 60.590936507936505,
+     "predicted_per_second": 16.504118563492
+    }
+   },
+   "peak_used_mib": 11873
+  }
+ ],
+ "evicted": {},
+ "fit": {
+  "bytes_per_cell": 35840,
+  "fixed_mib": 10193,
+  "total_mib": 16376,
+  "margin_mib": 1331,
+  "max_ctx": 141312
+ },
+ "ctx": 141312,
+ "lane": {
+  "held_by": "tier models (Bonsai window)",
+  "resumed": false
+ },
+ "finished": "2026-09-30T18:40:31-0400"
+}

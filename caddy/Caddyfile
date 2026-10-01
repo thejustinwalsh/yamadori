@@ -38,7 +38,7 @@ ai.thejustinwalsh.me {
 	# /search and tools_api.py needs no knowledge of the mount point.
 	handle_path /tools/* {
 		reverse_proxy 127.0.0.1:1235 {
-			# Index rebuilds and cold reranks can be slow.
+			# Index rebuilds and cold embedder loads can be slow.
 			transport http {
 				read_timeout 600s
 				write_timeout 600s

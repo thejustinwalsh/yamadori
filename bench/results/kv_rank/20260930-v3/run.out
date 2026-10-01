@@ -1,0 +1,22 @@
+[17:14:34] [line-0] attempt 1: unload bonsai: HTTP 200
+[17:14:42] [line-0] loaded in 5.6 s, build b10743-adfffbe41, card {'used': 12838, 'free': 3213, 'util': 0}
+[17:15:08] restore: {'lane_resumed': False, 'reload_s': 9.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14964, 'free': 1087, 'util': 0}}
+[17:15:08] [line] round 0: N=147456 -c 147456: min free 3143 MiB (margin 1000, display_active Disabled)
+[17:15:22] [line-1] attempt 1: unload bonsai: HTTP 200
+[17:15:30] [line-1] loaded in 4.6 s, build b10743-adfffbe41, card {'used': 14912, 'free': 1139, 'util': 0}
+[17:15:56] restore: {'lane_resumed': False, 'reload_s': 9.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14964, 'free': 1087, 'util': 0}}
+[17:15:56] [line] round 1: N=208128 -c 208128: min free 1069 MiB (margin 1000, display_active Disabled)
+[17:16:09] [line-2] attempt 1: unload bonsai: HTTP 200
+[17:16:17] [line-2] loaded in 4.5 s, build b10743-adfffbe41, card {'used': 14972, 'free': 1079, 'util': 0}
+[17:16:42] restore: {'lane_resumed': False, 'reload_s': 8.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14964, 'free': 1087, 'util': 100}}
+[17:16:42] [line] round 2: N=209920 -c 209920: min free 1009 MiB (margin 1000, display_active Disabled)
+[17:16:56] [lane3] attempt 1: unload bonsai: HTTP 200
+[17:17:04] [lane3] loaded in 4.6 s, build b10743-adfffbe41, card {'used': 14972, 'free': 1079, 'util': 0}
+[17:18:05] [lane3] 8192: tok/s kept 73.83 active 51.28 cleared 72.48; re-prefill 983.7 ms; material {'kept': False, 'active': True}
+[17:19:26] [lane3] 32768: tok/s kept 68.53 active 52.44 cleared 72.71; re-prefill 1005.5 ms; material {'kept': True, 'active': True}
+[17:21:17] [lane3] 65536: tok/s kept 71.33 active 51.03 cleared 72.95; re-prefill 1024.9 ms; material {'kept': True, 'active': True}
+[17:21:27] restore: {'lane_resumed': False, 'reload_s': 9.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14964, 'free': 1087, 'util': 0}}
+
+LAYOUT V3 LINE: N 209920 (-c 209920, main cap 206848, lane 3072)
+  python bench/deploy_layout_v3.py --line 209920 --preview
+[17:21:27] lane: {'held_by': 'tier models (Bonsai window)', 'resumed': False}

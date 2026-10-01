@@ -35,22 +35,30 @@ describe('kvSplit', () => {
 });
 
 describe('kvNames', () => {
-  const cap = kvSplit({ pool: 262144, main: 141824, helper: 65536, helpers: 1, reserve: 54784, gib: 11, layout: 'cap', cap_source: 'llama-server /props kv_vram_cells' })!;
-  const split = kvSplit({ pool: 147456, main: 73728, helper: 36864, helpers: 2, reserve: 0, gib: 6.19, layout: 'split' })!;
+  const child = { role: 'decider lane', tokens: 3072, serves: ['the decider', 'small side calls (titles)'] };
+  const cap = kvSplit({ pool: 262144, main: 141824, helper: 65536, helpers: 1, reserve: 54784, gib: 11, layout: 'cap', cap_source: 'llama-server /props kv_vram_cells', child })!;
+  const split = kvSplit({ pool: 147456, main: 73728, helper: 36864, helpers: 2, reserve: 0, gib: 6.19, layout: 'split', child })!;
 
-  it('cap layout: never calls the rest a reserve, and the second context stays deep thinking', () => {
+  it("cap layout: never calls the rest a reserve, and the child is named by the server's role (layout v2)", () => {
     const nm = kvNames(cap);
     expect(nm.main).toBe('MAIN · VRAM LINE');
     expect(nm.mainWhy).toContain('llama-server /props kv_vram_cells');
-    expect(nm.helper).toContain('DEEP THINKING');
+    expect(nm.helper).toBe('CHILD · DECIDER LANE');
+    expect(nm.helperWhy).toContain('the decider, small side calls (titles)');
+    expect(nm.helper).not.toContain('DEEP');
     expect(nm.reserve).toBe('SECOND CONVERSATION');
     expect(nm.tag).toBe('CAP LAYOUT');
   });
 
-  it('split layout: main, N deep-thinking contexts and the reserve', () => {
+  it('split layout: main, N helper contexts and the reserve', () => {
     const nm = kvNames(split);
-    expect(nm.helper).toBe('DEEP THINKING ×2');
+    expect(nm.helper).toBe('DECIDER LANE ×2');
     expect(nm.reserve).toBe('RESERVE');
     expect(nm.tag).toBe('3 CONTEXTS');
+  });
+
+  it('a server older than budget.child() gets the neutral "helper", never "deep thinking"', () => {
+    const old = kvSplit({ pool: 262144, main: 141824, helper: 65536, helpers: 1, reserve: 54784, gib: 11, layout: 'cap' })!;
+    expect(kvNames(old).helper).toBe('CHILD · HELPER');
   });
 });

@@ -76,11 +76,13 @@ DIFFERENCES FROM THE ORIGINAL (github.com/ClancyDennis/concept-seed, read
                message, no hedge.
   per turn     Original also tests a fresh seed per turn, and draft with one
                seed then revise with another. Here: one seed per fan-out
-               sample.
+               sample until fan-out was removed (2026-09-29); since then one
+               seed per conversation, on its first user turn
+               (user_turn_line).
 
 EVIDENCE. The source reports qualitative results and states plainly that it
 has no quantitative diversity metrics. So this is a promising mechanism, not
-an established result; see scripts/eval_fanout.py before it ships.
+an established result.
 """
 from __future__ import annotations
 
@@ -252,13 +254,13 @@ def last() -> dict | None:
 
 
 def seed_for(prompt: str | None = None, n: int = 1) -> list[dict]:
-    """n fresh seeds for n second-brain runs, drawn away from `prompt`, each
-    {word, token_id, u32, hex}. Empty -- never an exception -- when the matrix
-    is not extracted: a missing seed must not cost the request.
+    """n fresh seeds, drawn away from `prompt`, each {word, token_id, u32,
+    hex}. Empty -- never an exception -- when the matrix is not extracted: a
+    missing seed must not cost the request.
 
-    Operator requirement (2026-09-23): EVERY second-brain run -- fan-out's
-    candidate B, its tie-breaker C, and deep thinking -- carries one, in the
-    user turn, via phrase()."""
+    Operator requirement (2026-09-23): every second-brain run carried one,
+    in its user turn; since those runs were removed (2026-09-29) the
+    conversation's first user turn carries one (user_turn_line)."""
     try:
         if not available():
             return []
@@ -285,6 +287,30 @@ def phrase(concept: str, where: str = "fanout") -> str:
     """
     record(concept, where)
     return f"\n\nInspiration word: {concept}"
+
+
+# THE CONVERSATION'S SEED LINE (operator, 2026-09-29): the seed is drawn once
+# per conversation and appended to its FIRST user turn (proxy.prepare), since
+# the second-brain jobs that carried one were removed. The wording is the
+# research jobs' line (#52 in docs/SELF-IMPROVEMENT-LOG.md, remedy 7 of
+# docs/research/OVERTHINKING.md): in 4 of the 6 struggle runs of Octopus v0e
+# p2 the second brain read the bare word as a clue about the task ("an
+# anagram", "base64"), and main reads a task for clues the same way; the
+# line says where the word comes from, and its two prohibitions name the two
+# observed failures (read as a clue; written into the output, #13).
+# UNMEASURED on main.
+USER_TURN_LINE = ("\n\nFor variety, a word drawn at random from the "
+                  "vocabulary, independent of this task and of anything in "
+                  "it: {word}. It is not a clue, a code or an anagram of "
+                  "anything here; let it shape only how you approach the "
+                  "work, and leave it out of what you write.")
+
+
+def user_turn_line(word: str) -> str:
+    """The seed as the conversation's first user turn carries it. Records
+    use (the dashboard's last-seed panel)."""
+    record(word, "first_turn")
+    return USER_TURN_LINE.format(word=word)
 
 
 if __name__ == "__main__":

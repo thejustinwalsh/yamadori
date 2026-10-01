@@ -80,7 +80,7 @@ opt-out `run.py --tools browser` (loadout-1).
 | where the browser runs | the Octopus sidecar: `octo-playwright:1.63.0`, Chromium 153, sharing the terminal container's namespace | the harness-box sidecar: the same image and script, sharing the harness container's namespace | the same | the same |
 | looking at the page | `browser_take_screenshot`, then `vision_analyze(<the MEDIA: path>)` (below) | `playwright_browser_take_screenshot` | `agent-browser screenshot`, then `read` of the PNG (an image part) | `browser_take_screenshot` |
 | diagnostics | pinned `tsc` + `pyright` mounted in the terminal container (`/opt/yamadori-tools`); the project's own `tsc` through its build. (loadout-1 adds the skill `type-check`) | its own LSP: diagnostics in every `write` / `edit` result, and the `lsp` tool | `tsc` + `pyright` through `bash`, skill `type-check` | `tsc` + `pyright` through `exec_command`, skill `type-check` |
-| an installed package's API (2026-09-29) | none as a tool: Hermes' LSP is local-backend only and diagnostics-only; an LSP MCP server is a candidate awaiting approval ("The language-server MCP bridge", below) | the `lsp` tool: `hover` and `goToDefinition` on koota's `createWorld` answered in the box | skill `package-api`: a script that prints a package's exports and signatures from its own declarations with the image's TypeScript | – (not added) |
+| an installed package's API (2026-09-29) | none as a tool: Hermes' LSP is local-backend only and diagnostics-only; an LSP MCP server is a candidate awaiting approval ("The language-server MCP bridge", below) | the `lsp` tool: `hover` and `goToDefinition` on koota's `createWorld` answered in the box | skill `package-api`: a script that prints a package's exports and signatures from its own declarations with the image's TypeScript | the same skill and script from `$CODEX_HOME/skills`, through `exec_command` (2026-09-30; box check NOT RUN: Docker Desktop was down) |
 | verified (Docker, no model) | lean: `toolset_arms.py verify` **10/10, 2026-09-29** (first run); loadout-1: `toolset_arms.py verify --arm browser` 8/8 | `loadout_check.py opencode`: **12/12, 2026-09-29** (10 + the package hover and definition) | `loadout_check.py pi`: **19/19, 2026-09-29** (11 + screenshot, `read` as image, four package-api checks, skills listed, `prompt_cache_key`) | `loadout_check.py codex`: 9/9 |
 
 The two scripts check the same things:
@@ -498,6 +498,9 @@ Pi run.
   - The key stays out of the shell (`KEYVARS=0`).
 - **Types:** `tsc` and `pyright` through `exec_command`. The skill
   `type-check` is in `$CODEX_HOME/skills`.
+- **An installed package's API** (2026-09-30): the skill `package-api`
+  in `$CODEX_HOME/skills`, its script run through `exec_command` (see "The
+  language-server MCP bridge", Codex). Box check not run yet.
 - Update_plan was already on, and apply_patch already came from the catalog
   entry.
 
@@ -545,6 +548,30 @@ node_modules"** (hover, definition), not only diagnostics. Per harness:
   | `isaacphi/mcp-language-server` | BSD-3 | `definition`, `references`, `hover`, `diagnostics` | unmaintained since 2025-06 (above) | no |
   | `cclsp` 0.7.0 | MIT | – | reported clean code for TS2322 (above) | rejected |
 
+  **Approved 2026-09-30** (the operator, relayed by the coordinator: "Yes
+  to everything pending"): vet `@mizchi/lsmcp` 0.10.0 with `tools.include`
+  = `lsp_get_hover`, `lsp_get_definitions`, `lsp_find_references`,
+  `lsp_get_diagnostics`, `search_external_library_symbols`,
+  `resolve_symbol`; serena if it fails. **Not started**: the download
+  waits for the operator's own go-ahead (a relayed approval is not taken
+  as consent to download), and Docker Desktop was down. Read so far from
+  the registry, no download: 0.10.0 is MIT, `bin` `lsmcp` ->
+  `dist/lsmcp.js`, `engines.node` >= 22, 19 files / 906,387 bytes unpacked,
+  `dist.integrity` `sha512-hjqBxRy7W4q+UJtPp4W4geyeHXAjNEAtRB9jG+V2hPhCGTd/ot4HpguNoBgP1EFsTfvzNrp7/rxomXYdF1xWzg==`,
+  no install/postinstall/prepare script, no attestation, five
+  dependencies (`zod` ^3.25.56, `glob` ^10.4.5, `uuid` ^11.1.0,
+  `minimatch` ^9.0.5, `gitaware-glob` ^0.2.0), no repository field; no
+  language server bundled (it would spawn the image's
+  typescript-language-server 6.0.1). The vetting steps: a
+  `package-lock.json` by `npm install --package-lock-only
+  --ignore-scripts` behind the egress gate, `npm ci --ignore-scripts` into
+  the harness box image (a rebuild, a new `-tools2` tag and manifest row),
+  read `dist/` for network, `child_process` and file writes, then the box
+  test (TS2322 must come back from `lsp_get_diagnostics`; hover and
+  definition on koota's `createWorld`), then the Hermes arm
+  (`mcp_servers.lsp` beside playwright), `mcp/harness_kit_seed.py` and this
+  doc.
+
   The other bridges a search turned up (`Tritlo/lsp-mcp`, `ts-lsp-mcp`,
   `jgauffin/ts-language-mcp`, `lsp-mcp-rs`) are one-person projects not read
   further. Alternative with no download: the `package-api` script is plain
@@ -552,9 +579,16 @@ node_modules"** (hover, definition), not only diagnostics. Per harness:
   `terminal` could run it too (checked: the Octopus terminal image, Node
   22.23.3, with the tools volume, printed koota's `createWorld`) -- but the lean arm has no skills channel to
   teach it (§0), so it would reach loadout-1 only. Not done.
-- **Codex**: not changed here; its `exec_command` could run the same
-  script from `$CODEX_HOME/skills` if the skill were added to
-  `loadout_skills("codex")`.
+- **Codex** (operator-approved, 2026-09-30): `package-api` is in
+  `loadout_skills("codex")`; `write_home` rewrites the SKILL.md's
+  `~/.agents/skills/` to `~/.codex/skills/` (`harness_box.skill_text`), and
+  the script runs through `exec_command`. `loadout_check.py codex` now
+  carries the same package step as Pi (plus `skills_listed`, read from the
+  request's instructions and input). **The box run is NOT RUN**: on
+  2026-09-30 Docker Desktop was not running (no Docker process;
+  `wslinstaller` was), and it was left alone. Offline:
+  `test_harness_box.py` 61/61 (Codex's home now carries
+  `.codex/skills/package-api/SKILL.md` and `api.cjs`).
 
 ## 1. The matrix: which tool does what, per harness
 
@@ -955,7 +989,7 @@ to exact tool names. A request's `tools[].name` (or
 | `console_errors` | `mcp__playwright__browser_console_messages` (Hermes lean); `browser_console` (Hermes loadout-1; uncaught errors arrive through the sidecar's mirror, §0); `playwright_browser_console_messages` (OpenCode); `browser_console_messages` (Codex) |
 | `screenshot_look` | `mcp__playwright__browser_take_screenshot` then `vision_analyze(<MEDIA path>)` (Hermes lean); `browser_vision` (Hermes loadout-1); `agent-browser screenshot` then `read` (Pi); `playwright_browser_take_screenshot` (OpenCode); `browser_take_screenshot` (Codex) |
 | `type_check` | the `write` / `edit` results (OpenCode's lsp); a shell command (`tsc`, `pyright`: Hermes, Pi, Codex; skill `type-check`) |
-| `package_api` (2026-09-29) | `lsp` `hover` / `goToDefinition` (OpenCode); a shell command, `node ~/.agents/skills/package-api/api.cjs <module> [name]` (Pi, skill `package-api`); none (Hermes, Codex) |
+| `package_api` (2026-09-29) | `lsp` `hover` / `goToDefinition` (OpenCode); a shell command, `node ~/.agents/skills/package-api/api.cjs <module> [name]` (Pi, skill `package-api`) or `node ~/.codex/skills/package-api/api.cjs ...` through `exec_command` (Codex, 2026-09-30); none (Hermes) |
 | `view_image` | `vision_analyze` (Hermes); `read` on an image file (OpenCode, Pi); `view_image` (Codex); `yama_describe_image` (ours, on main) |
 | `plan` | `todo_list` (Hermes); `todowrite` (OpenCode); `update_plan` (Codex) |
 | `subagent` | `delegate_task` (Hermes); `task` (OpenCode); `spawn_agent` (Codex) |

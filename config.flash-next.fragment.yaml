@@ -25,12 +25,19 @@
       # 0004 (Strata's expert cache policy), if the gate chose the cache
       - "LLAMA_MOE_CACHE_PROFILE={{PROFILE}}"
       - "LLAMA_MOE_CACHE_POLICY={{CACHE_POLICY}}"
+      # 0012 (host-mapped KV): the attention cache in mapped host memory, read over PCIe by the sparse (QSA) path,
+      # so the card holds expert layers instead of the window's KV (the gate's kvmap arms; 0 = the KV on the card)
+      - "LLAMA_KV_HOST_MAPPED={{KV_HOST_MAPPED}}"
+      # 0020: one graph per MTP verify-batch size, so the CUDA graphs replay instead of warming up every step (the gate's
+      # gcache arm); 0 = llama.cpp's two arenas
+      - "LLAMA_GRAPH_CACHE={{GRAPH_CACHE}}"
     cmd: |
       ${server_upstream_moe}
       --port ${PORT}
       -m ${models}/flash-next/{{QUANT}}/Qwen3.8-Flash-Next-GSQ-RCO-{{QUANT}}-00001-of-00002.gguf
-      # vision is the main model's (operator, 2026-09-27): its own projector ({{MMPROJ_WHERE}})
-      --mmproj ${models}/flash-next/mmproj-Qwen3.8-Flash-Next-BF16.gguf {{MMPROJ_OFFLOAD}}
+      # vision: its own projector on this card only when the deploy says card; by default none, and images at max go to
+      # bonsai-vision on the A4000 (layout v2, the operator's "Vision can go to second card and swap in and out")
+      {{MMPROJ}}
       -dev CUDA0 -ngl 999
       # CPU threads for the RAM experts (the gate's thread arms; empty = llama.cpp's default)
       {{THREADS}}
@@ -45,12 +52,12 @@
       --prefetch-experts-slots {{PREFETCH_SLOTS}}
       # the n-gram table (shard 2, 28.8 GB) stays on disk, read by rows (ISTA's card)
       -lm mmap --lazy-mode on
-      # the model's native window, q8_0 K/V (Strata's kv-q4 bench: 8-bit ~fp16, q4 +8-12% perplexity); the
-      # slot count and KV layout are bonsai's at deploy time ({{NP}} slots; the gate's `nounified` arm decides
-      # the KV streams: {{KV_UNIFIED}})
-      -c 262144 --cache-type-k q8_0 --cache-type-v q8_0 -fa on
+      # {{NP}} slot(s) in one pool: the operator, 2026-09-30, "no jjava slowing down this highly tuned masterpiece,
+      # it stays locked in once it is swapped" -- -np 1, one conversation, the native window (-np 2 adds the jjava
+      # lane's cells, mcp/budget.py LANE_TOKENS); q8_0 K/V
+      -c {{CTX}} --cache-type-k q8_0 --cache-type-v q8_0 -fa on
       -np {{NP}} {{KV_UNIFIED}}
-      -b {{UB}} -ub {{UB}}
+      -b {{BATCH}} -ub {{UB}}
       --jinja
       # the GGUF's own template (= Strata's: Unsloth's fix of Qwen's); never Qwen's raw template file
       --reasoning-format deepseek

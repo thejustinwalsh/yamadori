@@ -4,6 +4,7 @@
 // /dash/<route> bookmarks here.
 import { useLocation, useRouter, matchRoute, type Parser } from 'wouter';
 import { navigate as go } from 'wouter/use-browser-location';
+import { useEffect } from 'react';
 
 /** The skill factory's views under /skills (a skill's own page is /skills/<id>). */
 export const SKILLS_VIEWS = ['library', 'create', 'selections', 'prompts'] as const;
@@ -11,10 +12,10 @@ export type SkillsView = (typeof SKILLS_VIEWS)[number];
 
 export type Route =
   | { name: 'tokonoma' }
-  | { name: 'nebari' }
   | { name: 'naedoko' }
   | { name: 'dataset'; id: string }
-  | { name: 'sentei' }
+  | { name: 'perf' }
+  | { name: 'jjava' }
   | { name: 'settings' }
   | { name: 'skills'; view: SkillsView }
   | { name: 'skill'; id: string }
@@ -26,10 +27,10 @@ export type Route =
 /** wouter patterns, in match order. */
 export const PATTERNS = {
   tokonoma: '/',
-  nebari: '/nebari',
   naedoko: '/data',
   dataset: '/data/:id',
-  sentei: '/results',
+  perf: '/performance',
+  jjava: '/jjava',
   settings: '/settings',
   skills: '/skills',
   skill: '/skills/:id',
@@ -38,8 +39,23 @@ export const PATTERNS = {
   phase0: '/phase0',
 } as const;
 
+/**
+ * Retired screens and where their bookmarks go (2026-09-30): the benchmark
+ * page (SENTEI) for PERFORMANCE, NEBARI for the Skills page, which carries
+ * its library-by-area and held-packages panels. The App replaces the URL
+ * (useLegacyRedirect); resolve() already draws the new screen.
+ */
+export const LEGACY: Record<string, string> = { '/results': '/performance', '/nebari': '/skills' };
+
+export function legacyTarget(pathname: string): string | null {
+  const p = pathname.replace(/\/+$/, '') || '/';
+  return LEGACY[p.toLowerCase()] ?? null;
+}
+
 export function resolve(parser: Parser, pathname: string): Route {
-  for (const name of ['tokonoma', 'nebari', 'naedoko', 'sentei', 'settings', 'harness', 'phase0'] as const) {
+  const moved = legacyTarget(pathname);
+  if (moved) return resolve(parser, moved);
+  for (const name of ['tokonoma', 'naedoko', 'perf', 'jjava', 'settings', 'harness', 'phase0'] as const) {
     if (matchRoute(parser, PATTERNS[name], pathname)[0]) return { name };
   }
   if (matchRoute(parser, PATTERNS.skills, pathname)[0]) return { name: 'skills', view: 'library' };
@@ -57,10 +73,10 @@ export function resolve(parser: Parser, pathname: string): Route {
 
 export const href = {
   tokonoma: '/',
-  nebari: '/nebari',
   naedoko: '/data',
   dataset: (id: string) => `/data/${encodeURIComponent(id)}`,
-  sentei: '/results',
+  perf: '/performance',
+  jjava: '/jjava',
   settings: '/settings',
   skills: '/skills',
   skillsView: (v: SkillsView) => (v === 'library' ? '/skills' : `/skills/${v}`),
@@ -73,6 +89,15 @@ export function useRoute(): Route {
   const router = useRouter();
   const [path] = useLocation();
   return resolve(router.parser, path);
+}
+
+/** An old bookmark of a retired screen: replace the URL with its new home. */
+export function useLegacyRedirect(): void {
+  const [path, setPath] = useLocation();
+  const to = legacyTarget(path);
+  useEffect(() => {
+    if (to) setPath(to, { replace: true });
+  }, [to, setPath]);
 }
 
 export function navigate(to: string) {

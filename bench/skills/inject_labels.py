@@ -33,8 +33,13 @@ STAGE 1, REPLAYED: every request point of a transcript (a user turn, or the
 last tool result of a step) goes through skill_select.decide in order with
 the conversation's skill state carried, OFFLINE (no embedder, no fallback:
 replay_selection's patches; no decider Turn, so the per-skill path runs and
-its candidates are captured at the point the injector would take them:
-skill_select._decide_legacy's `cands`, bodies and recalls). A point with at
+its candidates are captured at the point the injector takes them:
+skill_select._decide_injected's `cands`, bodies and recalls; the injector
+answered by the stub decider, pass_all). NOTE: the 2026-09-29 case set was
+built before the per-skill path was removed, when a skill offered was a
+skill given; with pass_all the composer's caps (3 skills, 6 items) can
+leave a later skill not given, so a REBUILD can differ in a few later
+points -- the labels are keyed to the built cases, not to a rebuild. A point with at
 least one candidate item is a CASE: its state exactly as the decider reads
 it (decide_turn.state_of, chars/3 as the count) and its candidate items
 (skill_inject.candidates: at most MAX_SKILLS skills, no doubt-bearing item,
@@ -202,50 +207,55 @@ def corpus_turns() -> list[dict]:
 # ------------------------------------------------------------- stage 1 -----
 def replay(messages: list[dict], tools: list[str], name: str):
     """Yield (index, kind, candidate rows) for every request point of a
-    transcript, stage 1 replayed in order with the skill state carried."""
+    transcript, stage 1 replayed in order with the skill state carried.
+    The injector runs under the STUB decider (mcp/decider_stub.py,
+    pass_all: jjava transparent, every candidate item within the caps goes
+    in), so the conversation's state moves as it would with everything
+    stage 1 offered accepted; its candidates are captured where the
+    injector takes them (skill_select._decide_injected's `cands`)."""
     import replay_selection as R          # isolates the stores (its import)
+    import decider_stub
     import route
     import skill_select as S
     captured: list = []
-    orig = S._decide_legacy
+    orig = S._decide_injected
 
     def capture(cands, *a, **kw):
         captured[:] = [c for c in cands if c.get("form") in ("body",
                                                              "recall")]
         return orig(cands, *a, **kw)
-    S._decide_legacy = capture
-    S._current_turn = lambda: None
+    S._decide_injected = capture
     pool = R.skills.armed()
     state = None
     try:
-        for i in range(2, len(messages) + 1):
-            last = messages[i - 1]
-            if last["role"] == "assistant" or (
-                    last["role"] == "tool" and i < len(messages)
-                    and messages[i]["role"] == "tool") or \
-                    last["role"] == "system":
-                continue
-            upto = messages[:i]
-            try:
-                rc = route.classify(upto, client_tools=tools,
-                                    util={"utility": False}, gate=None,
-                                    dbs={})["class"]
-            except Exception:                                    # noqa: BLE001
-                rc = None
-            if rc == "utility":
-                continue
-            captured[:] = []
-            try:
-                _t, rec, state = S.decide(upto, rc, pool, tools, state,
-                                          key=f"{name}:{i}")
-            except Exception as e:                               # noqa: BLE001
-                print(f"  {name}:{i} replay raised {type(e).__name__}: {e}",
-                      flush=True)
-                continue
-            kind = "user" if last["role"] == "user" else "step"
-            yield i, kind, list(captured)
+        with decider_stub.installed():
+            for i in range(2, len(messages) + 1):
+                last = messages[i - 1]
+                if last["role"] == "assistant" or (
+                        last["role"] == "tool" and i < len(messages)
+                        and messages[i]["role"] == "tool") or                         last["role"] == "system":
+                    continue
+                upto = messages[:i]
+                try:
+                    rc = route.classify(upto, client_tools=tools,
+                                        util={"utility": False}, gate=None,
+                                        dbs={})["class"]
+                except Exception:                                # noqa: BLE001
+                    rc = None
+                if rc == "utility":
+                    continue
+                captured[:] = []
+                try:
+                    _t, rec, state = S.decide(upto, rc, pool, tools, state,
+                                              key=f"{name}:{i}")
+                except Exception as e:                           # noqa: BLE001
+                    print(f"  {name}:{i} replay raised {type(e).__name__}:"
+                          f" {e}", flush=True)
+                    continue
+                kind = "user" if last["role"] == "user" else "step"
+                yield i, kind, list(captured)
     finally:
-        S._decide_legacy = orig
+        S._decide_injected = orig
 
 
 def _sha(text: str) -> str:
@@ -729,12 +739,40 @@ def agree() -> dict:
     """Pass A vs the blind pass B on hand items; H1 (K=1, K=episode) vs
     pass B on the items H1 settles."""
     b = labels("B")
+    c = labels("C")
+    h = labels("H1@write")
     return {"A_vs_B": _pair(labels("A"), b),
+            "A_vs_C": _pair(labels("A"), c),
+            "B_vs_C": _pair(b, c),
+            "C_vs_H1@write": _pair(c, h),
             "H1@1_vs_B": _pair(labels("H1@1"), b),
             "H1@write_vs_B": _pair(labels("H1@write"), b),
             "H1@episode_vs_B": _pair(labels("H1@episode"), b),
             "H1@1_vs_H1@episode": _pair(labels("H1@1"),
                                         labels("H1@episode"))}
+
+
+def export_kit(out: str, dest: str) -> dict:
+    """The Codex pass-C bundle: the labelling script and its README, the
+    cases, the rubric verbatim, and pass B's blind case ids -- one folder,
+    portable (no path of this machine inside it)."""
+    import shutil
+    os.makedirs(dest, exist_ok=True)
+    kit = os.path.join(HERE, "codex_label")
+    for fn in ("label_codex.py", "README.md"):
+        shutil.copyfile(os.path.join(kit, fn), os.path.join(dest, fn))
+    shutil.copyfile(os.path.join(out, "cases.jsonl"),
+                    os.path.join(dest, "cases.jsonl"))
+    with open(os.path.join(dest, "rubric.txt"), "w", encoding="utf-8") as f:
+        f.write(RUBRIC)
+    blind = sorted({k[0] for k in labels("B")})
+    with open(os.path.join(dest, "blind_cases.txt"), "w",
+              encoding="utf-8") as f:
+        f.write("\n".join(blind) + "\n")
+    cases = load_cases(out)
+    return {"dest": dest, "cases": len(cases),
+            "facts": sum(len(c["items"]) for c in cases),
+            "blind_cases": len(blind)}
 
 
 def stats() -> dict:
@@ -792,7 +830,13 @@ def main(argv=None) -> int:
     g = sub.add_parser("ingest")
     g.add_argument("--out", required=True)
     g.add_argument("--answers", required=True)
-    g.add_argument("--labeller", required=True, choices=("A", "B"))
+    g.add_argument("--labeller", required=True, choices=("A", "B", "C"))
+    k = sub.add_parser("export-kit", help="the Codex pass-C bundle "
+                       "(bench/skills/codex_label/README.md)")
+    k.add_argument("--out", required=True, help="the case directory "
+                   "(cases.jsonl)")
+    k.add_argument("--dest", required=True, help="the bundle folder to "
+                   "write (outside the repo)")
     h = sub.add_parser("hindsight")
     h.add_argument("--out", required=True)
     rc = sub.add_parser("recall")
@@ -811,6 +855,8 @@ def main(argv=None) -> int:
         rep = hindsight(a.out)
     elif a.cmd == "recall":
         rep = recall(a.out)
+    elif a.cmd == "export-kit":
+        rep = export_kit(a.out, a.dest)
     elif a.cmd == "agree":
         rep = agree()
     else:

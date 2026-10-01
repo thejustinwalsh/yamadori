@@ -1,0 +1,37 @@
+[18:25:00] [q4] attempt 1: unload bonsai: HTTP 200
+[18:25:08] [q4] loaded in 5.6 s, build b10743-adfffbe41, card {'used': 12662, 'free': 3389, 'util': 0}
+[18:26:16] restore: {'lane_resumed': False, 'reload_s': 11.4, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14964, 'free': 1087, 'util': 99}}
+[18:26:29] [q8] attempt 1: unload bonsai: HTTP 200
+[18:26:37] [q8] loaded in 4.5 s, build b10743-adfffbe41, card {'used': 14972, 'free': 1079, 'util': 0}
+[18:27:39] restore: {'lane_resumed': False, 'reload_s': 9.3, 'bonsai_state': 'ready', 'bonsai_cmd_is_config': True, 'proxy_health': 200, 'gpu': {'used': 14964, 'free': 1087, 'util': 100}}
+[18:27:39] lane: {'held_by': 'tier models (Bonsai window)', 'resumed': False}
+{
+ "fit_full_262k_q4": {
+  "min_free_mib": 3327,
+  "margin_mib": 1000,
+  "fits": true
+ },
+ "tps_8192": {
+  "q4": null,
+  "q8": null
+ },
+ "tps_65536": {
+  "q4": null,
+  "q8": null
+ },
+ "tps_131072": {
+  "q4": null,
+  "q8": null
+ },
+ "drift": {
+  "kl_mean": 0.01558,
+  "kl_max": 0.1737,
+  "n": 128,
+  "top1_agree": "125/128",
+  "how": "top-20 approximate KL(q8 || q4), 8 chunks x 16 cuts"
+ },
+ "needles": {
+  "q4": null,
+  "q8": null
+ }
+}

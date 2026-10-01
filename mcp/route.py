@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 """THE CODE-WORK ROUTER: one class per request, decided once, in prepare.
 
-WHY IT EXISTS (operator, 2026-09-24). The biggest proven win is repairing the
-code the agent writes, automatically. That only pays if the code pipelines --
-fan-out, the repair pass, skills later -- run on code work and nothing else:
-a client's tool-loop step or a random chat turn sent through them costs
-minutes of GPU and gains nothing. Each feature used to re-decide "is this
-code?" with its own words (`selection._CODE_TASK` for fan-out, the tier flag
-alone for repair). They now read ONE class from here.
+WHY IT EXISTS (operator, 2026-09-24). Features that apply to one kind of
+request read ONE class from here instead of each re-deciding "is this code?"
+with its own words. It was built for the code pipelines -- fan-out and the
+repair pass, REMOVED 2026-09-29 (docs/REMOVED.md) -- and today the skills
+and the agent step's thinking cap read it.
 
 THE CLASSES, in the order they are decided -- the first rule that fits wins:
 
@@ -33,29 +31,20 @@ THE CLASSES, in the order they are decided -- the first rule that fits wins:
 
 WHAT READS THE CLASS
 
-  fan-out           code_generation / code_edit only (selection.decide)
-  repair pass       code_generation / code_edit only (proxy.prepare)
-  library help      the definitions injection: library_question only
-                    (proxy._library_definitions)
-  deep thinking     NOT the class since Phase 0.6 (operator, 2026-09-24):
-                    four triggers on any class (mcp/deep.py); the class is
-                    recorded beside the trigger
-  tool-call check   NOT the request class: it is keyed on the RESPONSE. A
-                    generation that writes or patches a file through a client
-                    tool call IS code_edit work, whatever turn it happens on
-                    -- an agent writes most of its files on agent_step turns.
-                    See mcp/tool_code.py. A utility call has no client tools,
-                    so it can never reach it.
+  skills            skill_select (SKIP_CLASSES, the per-turn engine)
+  thinking cap      an agent_step thinks at most tiers.AGENT_STEP_THINKING
+                    (proxy.prepare); every other turn USER_TURN_THINKING
+  x_yamadori.route  recorded on every response
 
-A header that forces an augmentation (X-Yamadori-Features) still forces it:
-a benchmark arm that says "repair on" means it, whatever the class.
+A header that forces an augmentation (X-Yamadori-Features) still forces it,
+whatever the class.
 
 THE SIGNALS ARE DETERMINISTIC, AND EACH ONE IS JUSTIFIED
 
   ends on a tool result   STRUCTURE: the role of the last non-system message.
                           A client tool result means the model is mid-way
                           through the client's loop (selection.question_of
-                          uses the same fact to keep deep thinking out). A
+                          uses the same fact). A
                           harness's synthetic tool-media turn (OpenCode, Pi,
                           Cline; image_input.TOOL_MEDIA_TURNS) counts as
                           the tool result it carries.
@@ -76,8 +65,8 @@ THE SIGNALS ARE DETERMINISTIC, AND EACH ONE IS JUSTIFIED
                           its lines outside ERROR nodes in Python, TypeScript
                           or Rust). Hermes wraps every attachment in ``` and
                           a pasted game spec is prose: it does not parse.
-  a code request          selection._CODE_TASK's shape (a write verb, then a
-                          code noun within 80 characters), widened by the
+  a code request          a write verb, then a code noun within 80
+                          characters (fan-out's old word rule), widened by the
                           verbs the benchmark prompts actually use ("define a
                           struct", "expose ... to C").
   a question              a "?" or an interrogative / lookup lead ("where",
@@ -273,7 +262,7 @@ _NOUN = (r"function|method|class|component|hook|type|interface|struct|enum|"
          r"algorithm|shader|kernel|library|crate|package|api|endpoint|cli|"
          r"parser|macro|schema|binding|wrapper|handler|reducer|migration|"
          r"snippet|regex|lines")
-# _CODE_TASK's shape without its ``` alternative (a fence is decided by
+# Fan-out's old code-task shape (a write verb, then a code noun) without its ``` alternative (a fence is decided by
 # parsing, above), widened: "In Rust, define a struct", "Expose a Rust
 # histogram to C", "write in Python the remaining lines of the program".
 # The noun may not follow a hyphen: "make changes to non-test files" (the
@@ -560,7 +549,7 @@ def classify(messages: list[dict], *, client_tools: list[str] | None = None,
     readable = offered and situation in selection.READABLE_GATE
     held: dict = {}
     if question and offered and not readable:
-        # The same readability deep thinking uses (selection.decide): a held
+        # The readability selection's legacy path used: a held
         # source DEFINES a name the question uses ("the Trait type" -- koota).
         # The gate's own probe is narrower on purpose (it only offers).
         try:

@@ -1,0 +1,29 @@
+{
+ "started": "2026-09-30T18:27:59-0400",
+ "points": [
+  {
+   "ctx": 16384,
+   "load_s": 6.5,
+   "peak_used_mib": 16154
+  },
+  {
+   "ctx": 49152,
+   "load_s": 8.6,
+   "peak_used_mib": 16154
+  }
+ ],
+ "evicted": {},
+ "fit": {
+  "bytes_per_cell": 0,
+  "fixed_mib": 16154,
+  "total_mib": 16376,
+  "margin_mib": 1331,
+  "max_ctx": 0
+ },
+ "ctx": 0,
+ "lane": {
+  "held_by": "tier models (Bonsai window)",
+  "resumed": false
+ },
+ "finished": "2026-09-30T18:37:10-0400"
+}

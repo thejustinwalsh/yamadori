@@ -168,7 +168,9 @@ def per_model() -> None:
           sb["model"] == "bonsai" and set(sb["measured"]) == {
               "tie_band", "labels", "readout", "legacy_form"}
           and set(sb["unmeasured"]) == {"letter_prior", "label_bias",
-                                        "legacy_vs_typed"}, sb)
+                                        "legacy_vs_typed", "temperature",
+                                        "read_regime"},
+          sb)
     # a measured record for flash-next
     _write_record("flash-next", {
         "version": D.PROFILE_VERSION, "model": "flash-next",
@@ -287,6 +289,349 @@ class FakeEngine:
             return {"model_path": "C:/models/x/flash.gguf",
                     "build_info": "b1", "total_slots": 2}
         raise AssertionError(url)
+
+
+# ============================================= HARDENING (SGLang, 2026-09-30)
+def _served_template():
+    import jinja2
+    env = jinja2.Environment()
+    env.filters["tojson"] = lambda v, **k: json.dumps(v, ensure_ascii=False)
+    return env.from_string(open(os.path.join(
+        HERE, "fixtures", "bonsai_chat_template.jinja"),
+        encoding="utf-8").read())
+
+
+def served_continuation(tpl, msgs: list[dict], **kw) -> str:
+    """llama-server's rendering of a body that ends on an assistant message
+    (every engine tree: server-common.cpp prefill_assistant -> continue_
+    final_message AUTO; chat.cpp AUTO -> REASONING when the message has
+    reasoning and no content, else CONTENT; chat-auto-parser-generator.cpp:
+    messages[:-1], the generation prompt cut at the reasoning start, the
+    start, the reasoning, the END only for CONTENT, then the content). The
+    reasoning markers are found the way the server's differential analysis
+    finds them: from the template's own rendering of a past turn."""
+    head = tpl.render(messages=msgs[:-1], add_generation_prompt=False, **kw)
+    gen = tpl.render(messages=msgs[:-1], add_generation_prompt=True,
+                     **kw)[len(head):]
+    probe = tpl.render(messages=[{"role": "user", "content": "u"},
+                                 {"role": "assistant", "content": "CCC",
+                                  "reasoning_content": "RRR"}],
+                       add_generation_prompt=False)
+    i = probe.rindex("<think>")
+    start = probe[i:probe.index("RRR", i)]
+    end = probe[probe.index("RRR", i) + 3:probe.index("CCC", i)]
+    last = msgs[-1]
+    reasoning = last.get("reasoning_content") or ""
+    content = last.get("content") or ""
+    mode = "reasoning" if reasoning and not content else "content"
+    out = head + gen[:gen.find(D.THINK_START)] + start + reasoning
+    if mode == "content":
+        out += end + content
+    return out
+
+
+def hardening() -> None:
+    """THE SGLANG FINDINGS (docs/JJAVA.md 8): the think-block guard, the
+    case-variant diagnostics, the digit score labels, the temperature."""
+    _clear_records()
+    tpl = _served_template()
+
+    # --- [guard] every question form, through the served template
+    forms = [D.yes_no("Is it?"), D.choice("Which?", ["one", "two", "three"])]
+    for q in (D.q_noul("n", "Is it?"),
+              D.q_noul("nc", "Is it?", criteria={"true": "it is",
+                                                 "false": "it is not"}),
+              D.q_choice("c", "Which?", ["one", "two", "none"], none=2),
+              D.q_score("s", "How much?", ["none", "some", "all"]),
+              D.q_score("sd", "How much?", ["none", "some", "all"],
+                        label_kind="digits")):
+        forms += D.rendered_orders(q)
+    bodies = [D.body("state with a stray <think> in it", f, 3, 20, "bonsai")
+              for f in forms]
+    checks = [D.guard_body(b) for b in bodies]
+    rendered = [served_continuation(tpl, b["messages"], enable_thinking=False)
+                for b in bodies]
+    gs = [D.prompt_guard(r, after=D.question_text(f).splitlines()[-1])
+          for r, f in zip(rendered, forms)]
+    check("[guard] every question form (yes/no, choice, noul, criteria, "
+          "none-choice, score, digit score; both orders) passes guard_body "
+          "and renders with the think block CLOSED, ending on the answer "
+          "lead (served template, llama-server's continuation)",
+          all(c["ok"] for c in checks) and all(g["ok"] for g in gs)
+          and all(r.endswith("<|im_start|>assistant\n<think>\n\n</think>"
+                             "\n\nAnswer:") for r in rendered),
+          [g for g in gs if not g["ok"]][:2] or rendered[0][-80:])
+    # the guard DISCRIMINATES: a reasoning-only prefill (directive_prefill's
+    # shape) leaves the block open, and prompt_guard sees it
+    bad = bodies[0]["messages"][:-1] + [{"role": "assistant", "content": "",
+                                        "reasoning_content": "Answer:"}]
+    r_bad = served_continuation(tpl, bad, enable_thinking=False)
+    g_bad = D.prompt_guard(r_bad)
+    check("[guard] a reasoning-only prefill renders an OPEN think block and "
+          "prompt_guard refuses it", g_bad["open"] and not g_bad["ok"],
+          r_bad[-60:])
+    check("[guard] a state that quotes <think> does not trip the rendered "
+          "check (only the text after the question is read)",
+          "stray <think>" in rendered[0] and gs[0]["ok"])
+    # thinking on renders the template's thinking generation prompt
+    on = tpl.render(messages=bodies[0]["messages"][:-1],
+                    add_generation_prompt=True, enable_thinking=True)
+    check("[guard] with thinking ON the template's generation prompt ends "
+          "inside an open block (why thinking must be off)",
+          D.prompt_guard(on + "Answer:")["open"], on[-30:])
+
+    def refused(b, code):
+        try:
+            D.guard_body(b)
+            return False
+        except D.DeciderUnavailable as e:
+            return e.code == code and e.retryable is False
+
+    b0 = bodies[0]
+    variants = {
+        "THINKING_ON": [dict(b0, chat_template_kwargs={"enable_thinking":
+                                                       True}),
+                        dict(b0, chat_template_kwargs={}),
+                        dict(b0, enable_thinking=True),
+                        dict(b0, reasoning_effort="high")],
+        "THINK_BLOCK_OPEN": [
+            dict(b0, messages=b0["messages"][:-1] + [
+                {"role": "assistant", "content": "Answer:",
+                 "reasoning_content": "hmm"}]),
+            dict(b0, messages=b0["messages"][:-1] + [
+                {"role": "assistant", "content": "<think>Answer:"}])],
+        "NO_ANSWER_PREFILL": [
+            dict(b0, messages=b0["messages"][:-1]),
+            dict(b0, messages=b0["messages"][:-1] + [
+                {"role": "assistant", "content": ""}]),
+            dict(b0, messages=b0["messages"][:-1] + [
+                {"role": "assistant", "content": "Sure"}]),
+            dict(b0, messages=b0["messages"] + [
+                {"role": "assistant", "content": "Answer:"}])]}
+    check("[guard] refused, not retryable: thinking on (either switch, "
+          "reasoning_effort), reasoning in the prefill or an unclosed "
+          "<think> in it, no prefill / an empty one / one not ending on the "
+          "lead / two assistant messages at the end",
+          all(refused(b, code) for code, bs in variants.items()
+              for b in bs))
+    srv = FakeServer({32: 0.9, 33: 0.1})
+    try:
+        D.ask_one("s", D.as_choice(D.yes_no("x")), slot=3, post=srv,
+                  upstream=upstream, msgs=bad)
+        check("[guard] ask_one refuses a caller's open rendering", False)
+    except D.DeciderUnavailable as e:
+        check("[guard] ask_one refuses a caller's rendering that would leave "
+              "the block open BEFORE anything is sent",
+              e.code == "THINK_BLOCK_OPEN" and srv.bodies == [])
+
+    def up_tpl(prompt):
+        def f(path, payload=None, timeout=30):
+            if path == "/apply-template":
+                f.seen = payload
+                return {"prompt": prompt(payload)}
+            return upstream(path, payload, timeout)
+        return f
+    ok_up = up_tpl(lambda pl: served_continuation(
+        tpl, pl["messages"], enable_thinking=False))
+    tc = D.template_check(ok_up)
+    check("[guard] template_check (the window's live check): the body "
+          "jjava sends, thinking off, read back closed",
+          tc["checked"] and tc["ok"] and not tc["open"]
+          and ok_up.seen["chat_template_kwargs"] == {"enable_thinking":
+                                                     False}, tc)
+    tc2 = D.template_check(up_tpl(lambda pl: "x<think>\nAnswer:"))
+    tc3 = D.template_check(lambda *a, **k: (_ for _ in ()).throw(
+        OSError("down")))
+    check("[guard] template_check reports an open rendering, and an "
+          "unanswered check as unchecked with why",
+          tc2["checked"] and tc2["open"] and not tc2["ok"]
+          and tc3["checked"] is False and "down" in tc3["why"], [tc2, tc3])
+
+    # --- [variants] case-variant label mass (diagnostic only)
+    ids = {"yes": {"yes": 9405, " yes": 9542, "Yes": 9175, " Yes": 7179},
+           "no": {"no": 2083, " no": 874}}
+    top = [{"id": 9175, "token": "Yes", "logprob": math.log(0.4)},
+           {"id": 9405, "token": "yes", "logprob": math.log(0.3)},
+           {"id": 874, "token": " no", "logprob": math.log(0.2)},
+           {"id": 555, "token": " YES!", "logprob": math.log(0.05)},
+           {"id": 556, "token": "NO", "logprob": math.log(0.03)}]
+    cv = D.case_variants(top, ids)
+    check("[variants] raw yes/no: each read spelling's own mass (Yes 0.4 "
+          "beside yes 0.3), an unread spelling in another case (NO) counted "
+          "as that label's variant",
+          cv["available"] and abs(cv["by_spelling"]["Yes"] - 0.4) < 1e-6
+          and abs(cv["by_spelling"]["yes"] - 0.3) < 1e-6
+          and abs(cv["variant"]["no"] - 0.03) < 1e-6
+          and cv["variant"]["yes"] == 0.0, cv)
+    check("[variants] no token text from the server -> not available",
+          D.case_variants([{"id": 1, "logprob": -1.0}], ids)
+          == {"available": False})
+
+    class WordServer(FakeServer):
+        def __call__(self, body, timeout):
+            d = super().__call__(body, timeout)
+            text = {32: "A", 33: "B", 700: "Yes", 701: "a", 702: "no"}
+            for t in d["choices"][0]["logprobs"]["content"][0][
+                    "top_logprobs"]:
+                t["token"] = text.get(t["id"], "?")
+            return d
+    ws = WordServer({32: 0.5, 33: 0.2, 700: 0.15, 701: 0.03, 702: 0.02})
+    a = D.read("s", D.q_noul("w", "Is it?"), slot=3, post=ws,
+               upstream=upstream)
+    dg = a["diagnostics"]
+    check("[variants] a lettered noul: the mass on the WORDS yes/no "
+          "(every case) and on an unread letter case is reported per order "
+          "and as maxima; the answer's probabilities are the letters' alone",
+          abs(dg["word_mass_max"] - 0.17) < 1e-6
+          and abs(dg["variant_mass_max"] - 0.03) < 1e-6
+          and all(abs(o["word_mass"]["true"] - 0.15) < 1e-6
+                  and abs(o["word_mass"]["false"] - 0.02) < 1e-6
+                  for o in dg["orders"])
+          and abs(a["noul"] - 0.5) < 1e-6, dg)
+
+    # --- [digits] the score labels behind a switch
+    q3 = D.q_score("sd", "How much?", ["none", "some", "all"],
+                   label_kind="digits")
+    o3 = D.rendered_orders(q3)
+    check("[digits] each level printed with its OWN number in both orders; "
+          "meaning is the level; the instruction asks for a number",
+          [c["labels"] for c in o3] == [["0", "1", "2"], ["2", "1", "0"]]
+          and all(c["meaning"] == {"0": "0", "1": "1", "2": "2"} for c in o3)
+          and "2. all\n1. some\n0. none" in D.question_text(o3[1])
+          and D.question_text(o3[0]).endswith(
+              "Answer with the number of one level."),
+          [D.question_text(c) for c in o3])
+    lt = D.rendered_orders(D.q_score("s", "How much?", ["none", "some",
+                                                         "all"]))
+    check("[digits] the default is unchanged: lettered, the CHOICE line",
+          D.SCORE_LABELS == "letters"
+          and [c["labels"] for c in lt] == [["A", "B", "C"]] * 2
+          and "label_kind" not in lt[0]
+          and D.question_text(lt[0]).endswith(
+              "Answer with the letter of one option."))
+    big = D.rendered_orders(D.q_score("b", "?", [str(i) for i in range(11)],
+                                      label_kind="digits"))
+    check("[digits] more than 10 levels stay lettered (no single digit)",
+          big[0]["labels"][:2] == ["A", "B"])
+    check("[digits] typed() keeps label_kind; an unknown kind is refused",
+          D.typed(dict(q3))["label_kind"] == "digits")
+    try:
+        D.q_score("x", "?", ["a", "b"], label_kind="roman")
+        check("[digits] bad kind refused", False)
+    except D.DeciderUnavailable as e:
+        check("[digits] an unknown label kind is refused",
+              e.code == "BAD_LABEL_KIND")
+    IDS.update({"0": 15, " 0": 220, "1": 16, " 1": 221, "2": 17, " 2": 222})
+    ds = FakeServer({17: 0.6, 16: 0.3, 15: 0.1})
+    ad = D.read("s", q3, slot=3, post=ds, upstream=upstream)
+    check("[digits] read: probabilities keyed by level (the digit IS the "
+          "level, so both orders agree); readout typed/2+digits",
+          abs(ad["probabilities"]["2"] - 0.6) < 1e-6
+          and ad["diagnostics"]["disagreement"] == 0
+          and ad["diagnostics"]["readout"] == D.READOUT_VERSION + "+digits"
+          and ad["diagnostics"]["score_labels"] == "digits"
+          and "Answer with the number" in ds.bodies[0]["messages"][2][
+              "content"], ad)
+    saved = D.SCORE_LABELS
+    D.SCORE_LABELS = "digits"
+    try:
+        sw = D.rendered_orders(D.q_score("s", "?", ["a", "b"]))
+    finally:
+        D.SCORE_LABELS = saved
+    check("[digits] the switch (YAMADORI_JJAVA_SCORE_LABELS) turns it on for "
+          "every score", sw[0]["labels"] == ["0", "1"])
+
+    # --- [temperature]
+    t2 = D.temper({"A": 0.8, "B": 0.2, "C": 0.0}, 2.0)
+    check("[temperature] T over the label logits: p^(1/T) renormalised "
+          "(0.8/0.2 at T=2 -> 2/3), a zero stays zero, T=1 unchanged",
+          abs(t2["A"] - 2 / 3) < 1e-9 and t2["C"] == 0.0
+          and D.temper({"A": 0.8, "B": 0.2}, 1.0) == {"A": 0.8, "B": 0.2})
+    t0 = D.temperature_of("skill_item:x#1")
+    check("[temperature] none fitted -> T = 1, said so",
+          t0["value"] == 1.0 and t0["fitted"] is False, t0)
+    rec = {"version": D.PROFILE_VERSION, "model": "bonsai",
+           "temperature": {"script": "bench/decider/fit_temperature.py",
+                           "date": "2026-09-30", "sets": {
+                               "skill_item": {"value": 2.0, "n": 40,
+                                              "heldout_ok": True},
+                               "skill_inject": {"value": 0.5, "n": 40}}}}
+    _write_record("bonsai", rec)
+    st = D.profile("bonsai")
+    check("[temperature] a set not shown to hold out by run is rejected "
+          "with its reason (the whole field)",
+          "temperature" in st["rejected"]
+          and "heldout_ok" in st["rejected"]["temperature"]
+          and D.temperature_of("skill_item:x")["value"] == 1.0, st)
+    rec["temperature"]["sets"]["skill_inject"]["heldout_ok"] = True
+    _write_record("bonsai", rec)
+    tf = D.temperature_of("skill_item:x#1")
+    check("[temperature] a fitted set applies to its family (the name's "
+          "part before ':'), never to another model",
+          tf["value"] == 2.0 and tf["fitted"] and tf["set"] == "skill_item"
+          and D.temperature_of("skill_item:x", "flash-next")["value"] == 1.0
+          and D.temperature_of("phase")["value"] == 1.0, tf)
+    ts = FakeServer({32: 0.8, 33: 0.2})
+    at = D.read("s", D.q_noul("skill_item:x#1", "Is it?"), slot=3, post=ts,
+                upstream=upstream)
+    raws = [o["raw"] for o in at["diagnostics"]["orders"]]
+    want = D.readout_of(raws, 2.0)
+    check("[temperature] read() tempers each order's raw distribution; "
+          "readout_of rebuilds the answer from the logged raw; the raw is "
+          "the read as it was",
+          abs(at["noul"] - want["true"]) < 1e-6
+          and abs(raws[0]["true"] - 0.8) < 1e-6
+          and at["diagnostics"]["temperature"]["value"] == 2.0
+          and abs(at["noul"] - 0.5) < 1e-6, at["diagnostics"])
+    ts2 = FakeServer({32: 0.9, 33: 0.1})
+    saved_on = D.TEMPERATURE_ON
+    D.TEMPERATURE_ON = False
+    try:
+        a1 = D.read("s", D.q_choice("skill_item:y", "?", ["p", "q"]),
+                    slot=3, post=ts2, upstream=upstream)
+    finally:
+        D.TEMPERATURE_ON = saved_on
+    check("[temperature] switched off (YAMADORI_JJAVA_TEMPERATURE=0): read "
+          "at T = 1", a1["diagnostics"]["temperature"]["value"] == 1.0)
+    _clear_records()
+
+    # --- [regime] the read regime: the model's measured one
+    r0 = D.read_regime_of("bonsai")
+    s0 = FakeServer({32: 0.9, 33: 0.1})
+    a0 = D.read("s", D.q_noul("n", "?"), slot=3, post=s0, upstream=upstream)
+    check("[regime] none measured: cached (the path before), said so; a "
+          "read sends cache_prompt true",
+          r0["mode"] == "cached" and r0["measured"] is False
+          and all(b["cache_prompt"] is True for b in s0.bodies)
+          and a0["diagnostics"]["read_regime"] == "cached", r0)
+    _write_record("bonsai", {"version": D.PROFILE_VERSION, "model": "bonsai",
+                             "read_regime": {
+                                 "mode": "cold", "n": 300,
+                                 "script": "bench/decider/determinism.py",
+                                 "date": "2026-09-30"}})
+    check("[regime] a mode not shown to repeat exactly is rejected (stays "
+          "cached)", D.read_cache("bonsai") is True
+          and "read_regime" in D.profile("bonsai")["rejected"])
+    _write_record("bonsai", {"version": D.PROFILE_VERSION, "model": "bonsai",
+                             "read_regime": {
+                                 "mode": "cold", "n": 300,
+                                 "repeats_exactly": True,
+                                 "script": "bench/decider/determinism.py",
+                                 "date": "2026-09-30"}})
+    s1 = FakeServer({32: 0.9, 33: 0.1})
+    a1 = D.read("s", D.q_noul("n", "?"), slot=3, post=s1, upstream=upstream)
+    s2 = FakeServer({32: 0.9, 33: 0.1})
+    D.read("s", D.q_noul("n", "?"), slot=3, post=s2, upstream=upstream,
+           cache=True)
+    check("[regime] measured cold: every read is fully cold (cache_prompt "
+          "false), never for another model; an explicit cache= (a bench) "
+          "still wins",
+          D.read_regime_of("bonsai")["measured"]
+          and all(b["cache_prompt"] is False for b in s1.bodies)
+          and a1["diagnostics"]["read_regime"] == "cold"
+          and D.read_cache("flash-next") is True
+          and all(b["cache_prompt"] is True for b in s2.bodies))
+    _clear_records()
 
 
 def bench_target() -> None:
@@ -750,6 +1095,7 @@ def main() -> int:
     check("fit_tail keeps the newest that fit, in order",
           s == "b" * 40 + "\n\n" + "c" * 40 and info["dropped"] == 1)
     per_model()
+    hardening()
     bench_target()
     ok = sum(1 for _, o in CHECKS if o)
     print(f"{ok}/{len(CHECKS)} checks passed")

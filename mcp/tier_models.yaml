@@ -41,6 +41,19 @@ tiers:
 models:
   bonsai:
     # Its window is its own served /props (mcp/budget.py: the cap layout, YAMADORI_MAIN_CAP), as before.
+    # LOCKED, like flash-next (operator, 2026-09-30, "2. Yes"): jjava and side calls on bonsai-a4000, the main card
+    # -np 1 with no lane. Evidence, bench/kv_rank.py --layout v3 lane3 (bench/results/kv_rank/20260930-v3, n=3): a
+    # jjava burst on the lane cut main's decode ~30% at 8K/32K/64K (73.8 -> 51.3, 72.7 -> 52.4, 73.0 -> 51.0 tok/s).
+    # Compactions stay here, on the conversation's own slot (max_mode.decide, the one exception).
+    locked: true
+    helpers:
+      decider: bonsai-a4000
+      side_calls: bonsai-a4000
+    # THE OTHER CARD (operator, 2026-09-30: "a second message that came in out of order got the other card"): a
+    # conversation whose id is not the card's owner, inside the owner's 60 s hold, runs here for its life
+    # (mcp/slots.py THE OTHER CARD). flash-next and mirai-s have none: their newcomer is refused 503, never
+    # downgraded (max_mode.other_card; the switch YAMADORI_OTHER_CARD_DOWNGRADE).
+    other_card: bonsai-a4000
     # THE TUNE: professorpalmer/bonsai-ada-surgery @ 5158a8df (the operator's "Fresh bonsai tune incoming!!!",
     # 2026-09-27; our engine llama-bonsai2-ada comes from it). sudoingX/bonsai2-small-gpu @ 1d6c7ec is secondary
     # evidence only (coordinator's correction, 2026-09-29).
@@ -125,11 +138,25 @@ models:
   #     max_tokens = window - prompt                  (the turn is the whole room the window leaves)
   # No number is chosen: `null` means "the window decides".
   mirai-s:
+    # WHERE ITS JJAVA AND SIDE CALLS RUN: the lane step decides (bench/mirai_s_gate.py step `lane`: main decode with
+    # the lane KEPT / ACTIVE / CLEARED, n=3). "self" = the main card's lane until then; `bonsai-a4000` if the lane
+    # measures material (then -np 1 and `locked: true`, as flash-next).
+    locked: true
+    helpers:
+      decider: bonsai-a4000
+      side_calls: bonsai-a4000
     # Written by bench/deploy_tier_models.py from the gate's fit (the same -c it writes into config.yaml).
-    window: null
+    window:
+      ctx: 125952
+      slots: 1
+      main_cap: 125952
+      source: >-
+        derived: config.yaml `mirai-s` -c 125952 (bench/mirai_s_gate.py's fit) -np 1 --kv-unified,
+        written by tier models (bench/deploy_tier_models.py); -np 1 (the gate's lane step: the lane is material), no lane: the main cap
+        is the whole pool with the line = the whole pool (no tiered KV cache on this engine)
     # Written by the deploy: true when the llama-swap entry carries --mmproj; false sends images to bonsai-vision on
     # the A4000 (layout v2's rule for the main card: "the point is to get more context at speed in vram").
-    vision: null
+    vision: false
     profile:
       effort:
         value: xhigh
@@ -176,14 +203,25 @@ models:
         source: "operator 2026-09-29: no borrowed caps -- Bonsai's second-brain caps (derived on Bonsai) do not apply"
 
   flash-next:
+    # LOCKED (operator, 2026-09-30, verbatim: "Agree, no jjava slowing down this highly tuned masterpiece, it stays
+    # locked in once it is swapped, and we gotta get that speed!"). Evidence: in Flash-Next's lane step main decode
+    # fell to 1.45 tok/s while jjava read on slot 1 (n=1; each cleared-lane burst re-reads ~3k tokens at ~150 tok/s
+    # prompt speed, sharing the batch with main). So the card runs ONE conversation slot and nothing else: -np 1, no
+    # lane; jjava (the decider, the skills injector, the Jev API) and the client's side calls (titles, summaries) run
+    # on `bonsai-a4000`, REQUIRED for max; no warm, slot read, decider or side call touches the card while it holds
+    # it (max_mode.locked / touch_allowed).
+    locked: true
+    helpers:
+      decider: bonsai-a4000
+      side_calls: bonsai-a4000
     window:
       ctx: 262144
-      slots: 4
-      main_cap: 259072
+      slots: 1
+      main_cap: 262144
       source: >-
-        derived: config.yaml `flash-next` -c 262144 -np 4 --kv-unified (bench/deploy_flash_next.py, the gate's fit);
-        the main cap is layout v2's rule (the line less the decider lane, budget.LANE_TOKENS 3,072) with the line =
-        the whole pool, since this engine has no tiered KV cache
+        derived: config.yaml `flash-next` -c 262144 (bench/deploy_flash_next.py, the gate's fit) at -np 1 (locked:
+        one conversation, no lane) -- the whole pool is the conversation's, and the slot's window is capped at the
+        trained 262,144 (server-context.cpp), so the cap is 262,144
     vision: true
     profile:
       effort:
@@ -218,3 +256,27 @@ models:
         value: false
         class: operator
         source: "operator 2026-09-29: no borrowed caps (and 2026-09-28: max follows the card)"
+
+  # THE SECOND BONSAI ON THE A4000 (not a tier's model: a helper). REQUIRED for bonsai's tiers and for max (both
+  # LOCKED, operator 2026-09-30: their jjava and side calls run here), and the home of every tier's jjava and side
+  # calls whose lane step measures material. Never a compaction's (it stays on its conversation's card). The
+  # original trunk (as bonsai-vision), -np 2 (the proxy sends it no slot id: it picks its own, by similarity),
+  # gpu_room-managed (SIZES `bonsai-a4000`): it evicts bonsai-vision and imagegen for its room and keeps embeddings
+  # (its fit was measured with the reranker resident too; the reranker was removed 2026-10-01).
+  # config.bonsai-a4000.fragment.yaml; deployed by bench/deploy_tier_models.py.
+  bonsai-a4000:
+    # From its fit: bench/a4000_fit.py (bench/results/a4000/20260930, one fit) -c 141,312; bench/deploy_tier_models.py
+    # --a4000-fit writes it here (the same values). An internal job routed here is budgeted against it and refused,
+    # with its sizes, when it cannot fit (tiers.window_model_of, model.fit_window).
+    window:
+      ctx: 141312
+      slots: 2
+      main_cap: 138240
+      source: >-
+        measured: bench/a4000_fit.py (jjava + side calls as its load), written by tier models (bench/deploy_tier_models.py)
+    vision: false
+    profile:
+      job_caps:
+        value: true
+        class: operator
+        source: "tiers.JOB_THINKING / HELPER_THINKING: the same Bonsai as the default model"

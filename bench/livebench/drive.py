@@ -40,21 +40,28 @@ LB_ROOT = os.path.expanduser("~/livebench-run/LiveBench/livebench")
 #    within what the tier allows. The effort itself rides in the model config
 #    (patches/yamadori_local.yml api_kwargs) under the same display name.
 # Operator decision 2026-09-23 ~07:30: the augmentation toggles ARE the tiers.
+# 2026-09-29 (docs/REMOVED.md): deep thinking, fan-out, library definitions and
+# the check_code / repair pass were removed; the header now forces what is left
+# (skills, the concept seed, the MCP tools) and a tier ALLOWS skills only (off
+# at every tier). The arms that measured removed features are RETIRED: kept
+# here so their recorded answers still score (score.py reads ARMS by display
+# name), refused by main().
+ALL_OFF = {"skills": False, "seed": False, "mcp_tools": False, "effort": "medium"}
 ARMS = {
     "bonsai": {  # "bare @ medium": everything forced off, effort medium -- the effort-matched baseline
         "display": "yamadori-bonsai-arm",
-        "features": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1, "effort": "medium"},
+        "features": dict(ALL_OFF),
     },
     "yamadori": {  # product tier max (proxy sends effort xhigh upstream)
         "display": "yamadori-tier-max",
         "tier": "max", "effort_sent": "xhigh",
-        "allowed": {"investigate": True, "fanout": 3},
+        "allowed": {"skills": False},
     },
-    "yamadori-xhigh": {  # product tier xhigh: every augmentation at MEDIUM effort -- the all-on arm
+    "yamadori-xhigh": {  # product tier xhigh: what the tier adds at MEDIUM effort
         # matched to bonsai "bare @ medium" (operator, 2026-09-23 ~11:10; mcp/tiers.py "xhigh")
         "display": "yamadori-tier-xhigh",
         "tier": "xhigh", "effort_sent": "medium",
-        "allowed": {"investigate": True, "fanout": 3},
+        "allowed": {"skills": False},
     },
     "minimal": {  # product tier minimal, REDEFINED ~11:30 2026-09-23: thinking OFF
         # (enable_thinking=false, vendor instruct sampling 0.7/0.80/20/presence 1.5). No
@@ -62,7 +69,7 @@ ARMS = {
         # asserted until a gate answer shows what the new tier records.
         "display": "yamadori-tier-minimal",
         "tier": "minimal", "effort_sent": None,
-        "allowed": {"investigate": False, "fanout": 1},
+        "allowed": {"skills": False},
     },
     # check_code / repair (mcp/code_check.py), each paired against `bonsai` on
     # the same questions (--paired-with bonsai). The bonsai header plus the
@@ -72,16 +79,19 @@ ARMS = {
     # DROPS the unknown keys silently and runs these as plain bonsai;
     # check_arm below refuses such an answer.
     "bonsai+check": {  # bare model + the check_code tool + the repair pass
+        "retired": "the check_code tool and the repair pass were removed 2026-09-29",
         "display": "yamadori-bonsai-check-arm",
         "features": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1, "effort": "medium",
                      "check_code": True, "repair": True},
     },
     "bonsai+check-tool": {  # bare model + the check_code tool only
+        "retired": "the check_code tool was removed 2026-09-24/29",
         "display": "yamadori-bonsai-checktool-arm",
         "features": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1, "effort": "medium",
                      "check_code": True},
     },
     "bonsai+repair": {  # bare model + the repair pass only (no tool offered)
+        "retired": "the repair pass was removed 2026-09-29",
         "display": "yamadori-bonsai-repair-arm",
         "features": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1, "effort": "medium",
                      "repair": True},
@@ -89,6 +99,7 @@ ARMS = {
     # Retired 07:30: the header-forced full stack. Its answers were produced
     # before the fan-out winner fix (shortest candidate won) and are set aside.
     "yamadori_features_prefix": {
+        "retired": "set aside 2026-09-23; its features were removed 2026-09-29",
         "display": "yamadori-full-arm",
         "features": {"retrieval": True, "hints": True, "investigate": True, "fanout": 3, "effort": "medium"},
     },
@@ -147,11 +158,12 @@ def check_arm(row: dict, arm: str) -> str | None:
             return f"effort_sent {xy.get('effort_sent')!r} != {spec['effort_sent']!r}"
         if forced:
             return f"flags forced on a product arm (a header leaked?): {sorted(forced)}"
-        if bool(allowed.get("investigate")) != spec["allowed"]["investigate"] \
-                or int(allowed.get("fanout") or 1) != spec["allowed"]["fanout"]:
+        if any(bool(allowed.get(k)) != v for k, v in spec["allowed"].items()):
             return f"allowed {allowed} != {spec['allowed']}"
         return None
     want = spec["features"]
+    if spec.get("retired"):
+        return f"arm {arm} is retired ({spec['retired']})"
     # a proxy that predates a feature key DROPS it silently and runs plain
     # bonsai: prove the check_code tool / repair pass were actually on
     if want.get("check_code") and not (xy.get("check_code") or {}).get("offered"):
@@ -162,11 +174,12 @@ def check_arm(row: dict, arm: str) -> str | None:
     # is its alias for one release); a record may carry either.
     forced = {("skills" if k == "hints" else k) for k in forced}
     got_skills = sel.get("skills", sel.get("hints"))
-    if not {"skills", "investigate", "fanout"} <= forced:
-        return f"flags not forced by header: forced={sorted(forced)}"
-    if sel.get("fanout_n") != want["fanout"] or bool(sel.get("investigate")) != want["investigate"] \
-            or bool(got_skills) != want["hints"]:
-        return f"selection {sel.get('fanout_n')}/{sel.get('investigate')}/{got_skills} != arm {arm}"
+    if "skills" not in forced:
+        return f"skills not forced by header: forced={sorted(forced)}"
+    if bool(got_skills) != want["skills"]:
+        return f"selection skills={got_skills} != arm {arm}"
+    if not want.get("seed") and ((xy.get("session") or {}).get("seed")):
+        return "seed forced off but x_yamadori.session.seed names one"
     return None
 
 
@@ -188,6 +201,10 @@ def main() -> int:
     ap.add_argument("--backoff", type=float, default=90, help="seconds to wait after a chunk with a transport failure")
     ap.add_argument("--max-tokens", type=int, default=4096, help="LiveBench's default; the proxy adds thinking on top")
     a = ap.parse_args()
+    if ARMS[a.arm].get("retired"):
+        print(f"arm {a.arm} is retired: {ARMS[a.arm]['retired']} (docs/REMOVED.md)",
+              flush=True)
+        return 2
 
     spec = json.load(open(os.path.join(a.run_dir, f"order_{a.category}.json")))
     release, order = spec["release"], spec["order"]

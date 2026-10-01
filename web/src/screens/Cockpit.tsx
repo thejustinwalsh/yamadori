@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import type { ReactNode } from 'react';
 import { useShared } from '../api/data';
 import { kvNames, kvSplit } from '../api/kv';
-import { DEEP_PATH, MCP_PATH } from '../api/host';
+import { MCP_PATH } from '../api/host';
 import type { Endpoint, Listener, Tiers, Vitals } from '../api/types';
 import { useNow } from '../api/usePoll';
 import { Tokonoma } from '../bonsai/scene/Tokonoma';
@@ -19,7 +19,7 @@ import { TOKENS_PATH } from '../api/tokens';
 import { SavingsPanel, TokensPanel, useTokens } from '../ui/TokenPanels';
 import { SERIES_PATH } from '../api/powerSeries';
 import { KogoseiLive } from '../ui/KogoseiPanel';
-import { DeepPanel, McpPanel, ServingPanel } from '../ui/HostPanels';
+import { McpPanel, ServingPanel } from '../ui/HostPanels';
 import { PollState, StateView } from '../ui/StateView';
 import { SectionedTable, Table } from '../ui/Table';
 import { text } from '../ui/text';
@@ -30,14 +30,14 @@ const areas = stylex.create({
       // Top: the tree and its readouts. Then the money row (what the
       // GPUs drew, what they produced, what that would have cost), then the
       // machine (processes, the ladder, services + warnings).
-      default: '"tree" "side" "stat" "serve" "money" "tier" "mcp" "deep" "proc"',
+      default: '"tree" "side" "stat" "serve" "money" "tier" "mcp" "proc"',
       [MQ.tablet]:
-        '"tree tree tree tree tree tree" "side side side stat stat stat" "serve serve serve mcp mcp mcp" "money money money money money money" "deep deep deep deep deep deep" "proc proc proc proc proc proc" "tier tier tier tier tier tier"',
+        '"tree tree tree tree tree tree" "side side side stat stat stat" "serve serve serve mcp mcp mcp" "money money money money money money" "proc proc proc proc proc proc" "tier tier tier tier tier tier"',
       // Measured at 1600 px with live data: stat 914 / money 1,028 (tokens
       // over savings), proc 372 / tier 276. Tokens and savings stack
       // vertically; side by side they left two tall, mostly empty columns.
       [MQ.desktop]:
-        '"tree tree tree tree tree tree tree tree side side side side" "stat stat stat money money money money money money money money money" "serve serve serve serve mcp mcp mcp mcp deep deep deep deep" "proc proc proc proc proc proc proc proc tier tier tier tier"',
+        '"tree tree tree tree tree tree tree tree side side side side" "stat stat stat money money money money money money money money money" "serve serve serve serve serve serve mcp mcp mcp mcp mcp mcp" "proc proc proc proc proc proc proc proc tier tier tier tier"',
     },
   },
 });
@@ -118,8 +118,8 @@ export function Cockpit() {
           <SavingsPanel {...tok} fill />
         </Guard>
       </Cell>
-      {/* What serves the card (max mode), the MCP servers the proxy hosts,
-          and deep thinking's triggers: each its own source and boundary. */}
+      {/* What serves the card (max mode) and the MCP servers the proxy
+          hosts: each its own source and boundary. */}
       <Cell area="serve">
         <Guard what="SERVING · MAX MODE" source={`${V} · serving`} fill>
           <ServingPanel v={v} tiers={tiers.data} stale={vitals.stale} failure={vitals.failure} fill />
@@ -128,11 +128,6 @@ export function Cockpit() {
       <Cell area="mcp">
         <Guard what="MCP · HOSTED SERVERS" source={MCP_PATH} fill>
           <McpPanel fill />
-        </Guard>
-      </Cell>
-      <Cell area="deep">
-        <Guard what="DEEP THINKING · TRIGGERS" source={DEEP_PATH} fill>
-          <DeepPanel fill />
         </Guard>
       </Cell>
       <Cell area="proc">
@@ -179,7 +174,7 @@ export function KvPanel({ v, stale, failure, fill }: P) {
             label={
               kv.layout === 'cap'
                 ? `main ${n(kv.main)} (the VRAM line), child ${n(kv.helper)}, second conversation ${n(kv.reserve)}, of ${n(kv.pool)} tokens`
-                : `main ${n(kv.main)}, ${kv.helpers} deep thinking contexts of ${n(kv.helper)}, reserve ${n(kv.reserve)}, of ${n(kv.pool)} tokens`
+                : `main ${n(kv.main)}, ${kv.helpers} ${nm.helperRole} contexts of ${n(kv.helper)}, reserve ${n(kv.reserve)}, of ${n(kv.pool)} tokens`
             }
             parts={[
               { value: kv.main, tone: 'moss' as Tone | 'hatch' },
@@ -197,6 +192,9 @@ export function KvPanel({ v, stale, failure, fill }: P) {
             {kv.vramLine != null ? ` · served VRAM line ${n(kv.vramLine)} cells` : ''}
           </p>
           {kv.pool === 131072 && <Chip tone="rose">POOL EQUALS THE FALLBACK VALUE · UNCONFIRMED</Chip>}
+          {c && 'pool_read' in c && c.pool_read?.startsWith('cached') ? (
+            <p {...stylex.props(text.labelXs, s.why)}>{c.pool_read}</p>
+          ) : null}
         </>
       )}
     </Panel>
@@ -361,7 +359,7 @@ export function TiersPanel({ t, failure, fill }: { t: Tiers | null; failure: Ret
             if (!x) return null;
             // What RUNS at the tier, from the API's feature matrix (mcp/tiers.py
             // features, the one matrix README and AGENTS.md carry): a cell
-            // other than '–' is a chip, e.g. "LIBRARY HELP: DEFINITIONS".
+            // other than '–' is a chip, e.g. "IMAGES".
             const f = x.features ?? {};
             const flags = (t.feature_columns ?? [])
               .filter((c) => c !== 'thinking' && f[c] && f[c] !== '–')
@@ -379,7 +377,7 @@ export function TiersPanel({ t, failure, fill }: { t: Tiers | null; failure: Ret
                       <Chip tone="rose" title="mcp/max_mode.py: this tier is served by the max model">SERVED BY {x.model.toUpperCase()}</Chip>
                     ) : null}
                     {flags.map((f) => (
-                      <Chip key={String(f)} tone={f === 'deep thinking' ? 'cyan' : 'moss'}>{String(f).toUpperCase()}</Chip>
+                      <Chip key={String(f)} tone="moss">{String(f).toUpperCase()}</Chip>
                     ))}
                     {name === t.ceiling && <Chip tone="rose">CEILING</Chip>}
                   </div>

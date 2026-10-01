@@ -8,7 +8,7 @@ import { ErrorBoundary } from '../../ui/ErrorBoundary';
 import { Chip, Label } from '../../ui/primitives';
 import { StateView } from '../../ui/StateView';
 import { text } from '../../ui/text';
-import { kvSplit } from '../../api/kv';
+import { kvNames, kvSplit } from '../../api/kv';
 import { LiveBus, slotsOf } from '../live';
 import { CHANNELS, inertChannels, treeParams, treeState } from '../mapping';
 import { hex32 } from '../prng';
@@ -196,7 +196,7 @@ export function Tokonoma({ vitals, datasets, fill }: { vitals: Vitals | null; da
               MAIN LIMB ← KV MAIN {state.mainShare === null ? '—' : `${(state.mainShare * 100).toFixed(0)}%`}
             </span>
             <span {...stylex.props(text.labelXs, s.legendRow)}>
-              THINKING LIMB ← KV DEEP THINKING {state.thinkingShare === null ? '—' : `${(state.thinkingShare * 100).toFixed(0)}%${kv && kv.helpers > 1 ? ` ×${kv.helpers}` : ''}`}
+              CHILD LIMB ← KV {kv ? kvNames(kv).helper : 'CHILD'} {state.childShare === null ? '—' : `${(state.childShare * 100).toFixed(0)}%${kv && kv.helpers > 1 ? ` ×${kv.helpers}` : ''}`}
             </span>
             <span {...stylex.props(text.labelXs, s.legendRow)}>
               ARCS ← GPU0 UTIL {state.activity === null ? '—' : `${Math.round(state.activity * 100)}%`}
@@ -232,11 +232,6 @@ export function Tokonoma({ vitals, datasets, fill }: { vitals: Vitals | null; da
         </div>
       </details>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {inert.has('fanout') ? (
-          <Chip tone="muted">FAN-OUT · INERT</Chip>
-        ) : state.fanout ? (
-          <Chip tone="cyan">FAN-OUT · {state.fanout.arity} · #{state.fanout.chosen} DELIVERED</Chip>
-        ) : null}
         {state.foliage ? (
           // The recall path is labelled (skills, the one knowledge system).
           <Chip tone="moss">FOLIAGE · {state.foliage.path.toUpperCase()} · {Math.round(state.foliage.density * 100)}%</Chip>

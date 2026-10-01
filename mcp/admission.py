@@ -160,10 +160,9 @@ _helper_stats = {"granted": 0, "waited": 0, "timed_out": 0, "inflight": 0}
 
 class helper_lane:
     """Hold a helper lane (one of HELPER_LANES) for the life of one
-    second-brain job -- investigate, alternative, tiebreak or fixup, all run
-    by shomen.run -- or a fan-out's B and C together (fanout.run holds it
-    across both and passes it to the runner, `held`). In one request the jobs
-    run one after the other, never at once.
+    helper job. It was built for the second brain's jobs (deep thinking,
+    fan-out's candidates, the fix-up), removed 2026-09-29 (docs/REMOVED.md);
+    nothing in the proxy takes a lane now, so helper_active() reads 0.
 
     Synchronous, so it can be used from the tool loop. Returns False from
     __enter__ if the lane never came free, which the caller reports rather
@@ -280,7 +279,11 @@ def snapshot() -> dict:
     """For the vitals page: what the cap is and whether it is biting."""
     try:
         import budget
-        b = budget.budgets()
+        # The pool this process has READ, never a first read from here: the
+        # dashboard calls this, and a view never asks a model server
+        # (docs/DASHBOARD.md 2026-09-30).
+        pool = budget.known_pool()
+        b = budget.budgets(pool) if pool else {}
     except Exception:                                            # noqa: BLE001
         b = {}
     return {

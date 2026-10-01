@@ -204,12 +204,12 @@ const s = stylex.create({
 
 const TABS: { route: Route['name']; kanji: string; label: string; to: string; idx: string }[] = [
   { route: 'tokonoma', kanji: '床の間', label: 'TOKONOMA', to: href.tokonoma, idx: '01' },
-  { route: 'nebari', kanji: '根張り', label: 'NEBARI', to: href.nebari, idx: '02' },
-  { route: 'naedoko', kanji: '苗床', label: 'NAEDOKO', to: href.naedoko, idx: '03' },
-  { route: 'sentei', kanji: '剪定', label: 'SENTEI', to: href.sentei, idx: '04' },
-  { route: 'settings', kanji: '設定', label: 'SETTINGS', to: href.settings, idx: '05' },
-  { route: 'skills', kanji: '技', label: 'SKILLS', to: href.skills, idx: '06' },
-  { route: 'harness', kanji: '道具箱', label: 'DOGUBAKO', to: href.harness, idx: '07' },
+  { route: 'naedoko', kanji: '苗床', label: 'NAEDOKO', to: href.naedoko, idx: '02' },
+  { route: 'perf', kanji: '速度', label: 'SOKUDO', to: href.perf, idx: '03' },
+  { route: 'skills', kanji: '技', label: 'SKILLS', to: href.skills, idx: '04' },
+  { route: 'jjava', kanji: '判断', label: 'JJAVA', to: href.jjava, idx: '05' },
+  { route: 'harness', kanji: '道具箱', label: 'DOGUBAKO', to: href.harness, idx: '06' },
+  { route: 'settings', kanji: '設定', label: 'SETTINGS', to: href.settings, idx: '07' },
 ];
 
 /**

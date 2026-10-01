@@ -291,6 +291,15 @@ def main(argv: list[str]) -> int:
     arms = [ec.parse_arm(s) for s in a.arm]
     a.arg_overrides = {n: args for n, _, _, args in arms}
     recs, res = [], {}
+    lane_hold = ec.hold_lane("KV placement repro (bench/kv_placement.py)", 12 * 3600)
+    try:
+        return _arms(a, arms, prod_argv, prod_env, recs, res)
+    finally:
+        ec.release_lane(lane_hold)
+
+
+def _arms(a, arms, prod_argv, prod_env, recs, res) -> int:
+    """(the lane is held by the caller for every arm and released at its one exit)"""
     for name, binary, env, _args in arms:
         why = ec.wait_quiet(prod_argv, a.wait_quiet * 60)
         if why:
@@ -298,8 +307,6 @@ def main(argv: list[str]) -> int:
             continue
         try:
             sys.path.insert(0, os.path.join(ROOT, "mcp"))
-            import jobs                                              # noqa: E402
-            jobs.pause("gpu", by=ec.LANE_BY, why="KV placement repro (bench/kv_placement.py)", ttl_seconds=5400)
             st, txt = ec.http("POST", f"{ec.SWAP}/api/models/unload/{ec.PROD_ID}", timeout=120)
             ec.log(f"[{name}] unload {ec.PROD_ID}: HTTP {st}")
             t0 = time.time()

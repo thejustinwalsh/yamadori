@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Every copy of the tier feature matrix matches tiers.TIERS.
 
-The matrix -- what RUNS at each tier: thinking, library help, skills, the
-code check, fan-out, deep thinking, the addendum, images, the concept seed
-(operator, 2026-09-24) -- is derived in ONE place, `tiers.features`. Its
+The matrix -- what RUNS at each tier: thinking, skills, the MCP tools,
+images, the concept seed (operator, 2026-09-24; library help, the code
+check, fan-out, deep thinking and the addendum were removed 2026-09-29) --
+is derived in ONE place, `tiers.features`. Its
 copies are checked against it instead of trusted:
 
   README.md      "Effort tiers" (thinking on/off only: no effort mapping on
@@ -89,8 +90,9 @@ def test_the_dashboard_api() -> None:
 
 
 def test_the_web_source() -> None:
-    for rel in ("web/src/screens/sentei/Other.tsx",
-                "web/src/screens/Cockpit.tsx"):
+    # the benchmark page's tier ladder (screens/sentei/Other.tsx) went with
+    # the page, 2026-09-30: the cockpit's ladder is the one left
+    for rel in ("web/src/screens/Cockpit.tsx",):
         with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
             src = f.read()
         check("features" in src,

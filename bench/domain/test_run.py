@@ -55,14 +55,48 @@ def check(ok: bool, name: str, detail: str = "") -> bool:
 
 # ------------------------------------------------------------ the fake proxy
 class Fake:
-    mode = "honest"            # honest | lie_hints | http500 | length | lie_fanout
+    mode = "honest"            # honest | lie_hints | lie_seed | http500 | length
     fail_arms: set = set()     # arms that get `mode`; others are honest
     requests: list = []
     busy_left = 0
 
 
 def fake_x(feats: dict) -> dict:
-    """x_yamadori as the real proxy would build it for this header at tier max."""
+    """x_yamadori as the real proxy builds it for this header at tier max
+    (2026-09-29: skills are off at every tier unless forced; the concept seed
+    and the MCP tools are on at max unless forced off)."""
+    forced = sorted({"skills" for k in ("hints", "skills") if k in feats})
+    skills = feats.get("skills", feats.get("hints", False))
+    seed = feats.get("seed", True)
+    mcp = feats.get("mcp_tools", True)
+    return {
+        "tier": "max", "effort_sent": feats.get("effort"),
+        "skills": {"ids": ["s1"] if skills else [], "names": [], "chars": 0},
+        "selection": {"skills": skills, "utility": False,
+                      "because": {}, "signals": {
+                          "forced": forced, "allowed": {"skills": False}}},
+        "session": {"id": "abc123def456", "source": "header",
+                    "seed": ({"word": "lantern", "token_id": 1, "u32": 2}
+                             if seed else None)},
+        "mcp": {"switch": {"on": mcp, "source": "header" if "mcp_tools" in feats
+                           else "tier"},
+                "offered": ["yama_find_package"] if mcp else [],
+                "kept": False, "why": "", "calls": []},
+        "hops": 1,
+        "budget": {"max_tokens_sent": 4096 + feats.get("reasoning_cap", 32768),
+                   "reasoning_budget_tokens": feats.get("reasoning_cap", 32768)},
+    }
+
+
+# A6's header before 2026-09-29, when it also forced the removed features.
+LEGACY_A6 = {"retrieval": True, "hints": True, "investigate": True, "fanout": 3,
+             "check_code": True, "repair": True, "effort": "medium"}
+
+
+def legacy_x(feats: dict) -> dict:
+    """x_yamadori as the proxy built it BEFORE 2026-09-29 (retrieval, deep
+    thinking, fan-out, check_code, repair): the shape of the rows in old run
+    dirs, which analyse.py still reads."""
     # The proxy names the flag `skills` since 2026-09-26; an arm's header may
     # still say `hints` (the alias).
     forced = sorted(("skills" if k == "hints" else k)
@@ -141,16 +175,6 @@ class Handler(BaseHTTPRequestHandler):
         mode = Fake.mode if (not Fake.fail_arms or arm in Fake.fail_arms) else "honest"
         if mode == "http500":
             return self._send(500, {"error": "upstream exploded"})
-        if mode == "helper_busy" and Fake.busy_left > 0:
-            Fake.busy_left -= 1
-            x = fake_x(feats)
-            x["investigate"] = {"ran": False, "why": "the helper lane is busy "
-                                                     "with another request"}
-            return self._send(200, {"choices": [{"message": {
-                "role": "assistant", "content": "```ts\nexport const x = 1; // PASS\n```"},
-                "finish_reason": "stop"}], "usage": {"prompt_tokens": 1,
-                                                     "completion_tokens": 1},
-                "x_yamadori": x})
         if mode == "busy" and Fake.busy_left > 0:
             Fake.busy_left -= 1
             return self._send(429, {"error": {"code": "server_busy",
@@ -160,8 +184,8 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "lie_hints":
             x["skills"] = {"ids": ["smuggled"]}
             x["selection"]["skills"] = True
-        if mode == "lie_fanout":
-            x["fanout"] = {"n": 2, "asked": 3}
+        if mode == "lie_seed":
+            x["session"]["seed"] = {"word": "smuggled", "token_id": 1, "u32": 2}
         if mode == "length":
             finish = "length"
         prompt = body["messages"][0]["content"]
@@ -244,22 +268,19 @@ def test_every_arm_sends_its_header(url, tmp):
                          stub_grade, log=quiet, check_fn=stub_check)
     check(len(Fake.requests) == len(run.ARMS), "one request per arm",
           str(len(Fake.requests)))
+    off = {"skills": False, "seed": False, "mcp_tools": False}
     want = {
-        "A0": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1},
-        "A1": {"retrieval": True, "hints": False, "investigate": False, "fanout": 1},
-        "A2": {"retrieval": False, "hints": True, "investigate": False, "fanout": 1},
-        "A3": {"retrieval": False, "hints": False, "investigate": True, "fanout": 1},
-        "A4": {"retrieval": False, "hints": False, "investigate": False, "fanout": 3},
+        "A0": dict(off),
+        "A2": dict(off, skills=True),
         "A5": {},
-        "A6": {"retrieval": True, "hints": True, "investigate": True, "fanout": 3,
-               "check_code": True, "repair": True},
-        "C8": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1,
-               "reasoning_cap": 8192},
-        "C32": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1,
-                "reasoning_cap": 32768},
-        "C128": {"retrieval": False, "hints": False, "investigate": False,
-                 "fanout": 1, "reasoning_cap": 131072},
+        "A6": {"skills": True, "seed": True, "mcp_tools": True},
+        "C8": dict(off, reasoning_cap=8192),
+        "C32": dict(off, reasoning_cap=32768),
+        "C128": dict(off, reasoning_cap=131072),
     }
+    check(set(want) | set(run.SELF_CHECK) == set(run.ARMS),
+          "the arms: A0, A2, A5, A6, the C and S arms (A1, A3, A4 went with "
+          "retrieval, deep thinking and fan-out, 2026-09-29)", str(list(run.ARMS)))
     for s_arm, one_shot in run.SELF_CHECK.items():
         want[s_arm] = want[one_shot]          # the twin's header, unchanged
     for req, arm in zip(Fake.requests, run.ARMS):
@@ -298,36 +319,29 @@ def test_verify_catches_contradictions():
                                                   content="c")),
           "A0 with skills injected -> mismatch")
 
-    x = fake_x(run.features("A3", "medium"))
-    x["investigate"] = {"ran": False, "why": "the helper lane is busy"}
-    check(any("did not run" in m for m in run.verify("A3", "medium", x,
-                                                     finish="stop", content="c")),
-          "A3 whose investigation did not run -> mismatch")
+    x = fake_x(run.features("A0", "medium"))
+    x["session"]["seed"] = {"word": "lantern", "token_id": 1, "u32": 2}
+    check(any("seed forced off" in m for m in run.verify("A0", "medium", x,
+                                                         finish="stop", content="c")),
+          "A0 with a concept seed drawn -> mismatch")
 
-    x = fake_x(run.features("A3", "medium"))
-    x["tools_gate"] = {"offer": True}
-    check(any("tools_gate ran" in m for m in run.verify("A3", "medium", x,
-                                                        finish="stop", content="c")),
-          "A3 (retrieval off) with a tool gate decision -> mismatch")
+    x = fake_x(run.features("A0", "medium"))
+    x["mcp"]["offered"] = ["yama_find_package"]
+    check(any("mcp_tools forced off" in m for m in run.verify("A0", "medium", x,
+                                                              finish="stop", content="c")),
+          "A0 with MCP tools offered -> mismatch")
 
-    x = fake_x(run.features("A4", "medium"))
-    x["fanout"] = {"n": 2, "asked": 3}
-    check(any("delivered 2" in m for m in run.verify("A4", "medium", x,
-                                                     finish="stop", content="c")),
-          "A4 fan-out 3 delivering 2 -> mismatch")
-    # Sequential fan-out (2026-09-23): 3 is the MOST candidates, the original
-    # included; stopping at 2 on a clear grade is the arm working.
-    x["fanout"] = {"mode": "sequential", "n": 2, "asked": 3, "steps": 2}
-    check(run.verify("A4", "medium", x, finish="stop", content="c") == [],
-          "A4 sequential fan-out stopping at 2 of up to 3 -> no mismatch")
-    x["fanout"] = {"mode": "sequential", "n": 1, "asked": 3,
-                   "skipped": "helper busy"}
-    check(any("helper busy" in m for m in run.verify(
-              "A4", "medium", x, finish="stop", content="c")),
-          "A4 sequential fan-out skipped (helper busy) -> mismatch")
-    x["fanout"] = None
-    check(run.verify("A4", "medium", x, finish="stop", content="") == [],
-          "A4 with empty content: no fan-out expected (extract failure, not stack)")
+    x = fake_x(run.features("A6", "medium"))
+    x["mcp"]["switch"] = {"on": False, "source": "env"}
+    check(any("mcp_tools forced on" in m for m in run.verify("A6", "medium", x,
+                                                             finish="stop", content="c")),
+          "A6 whose MCP switch reads off -> mismatch")
+
+    x = fake_x(run.features("A6", "medium"))
+    x["session"]["seed"] = None
+    check(run.verify("A6", "medium", x, finish="stop", content="c") == [],
+          "A6 with no seed: clean (the proxy draws none when the embedding "
+          "matrix is not extracted, so a seed is never checked present)")
 
     x = fake_x(run.features("A5", "medium"))
     x["selection"]["signals"]["forced"] = ["hints"]
@@ -335,14 +349,14 @@ def test_verify_catches_contradictions():
                                                 content="c")),
           "A5 where selection saw a forced flag -> mismatch")
 
-    x = fake_x(run.features("A1", "medium"))
+    x = fake_x(run.features("A2", "medium"))
     x["tier"] = "high"
-    check(any("tier" in m for m in run.verify("A1", "medium", x, finish="stop",
+    check(any("tier" in m for m in run.verify("A2", "medium", x, finish="stop",
                                               content="c")),
           "a tier capped below max -> mismatch")
-    x = fake_x(run.features("A1", "medium"))
+    x = fake_x(run.features("A2", "medium"))
     x["effort_sent"] = "xhigh"
-    check(any("effort_sent" in m for m in run.verify("A1", "medium", x,
+    check(any("effort_sent" in m for m in run.verify("A2", "medium", x,
                                                      finish="stop", content="c")),
           "an effort other than the header's -> mismatch")
     x = fake_x(run.features("C8", "medium"))
@@ -357,16 +371,16 @@ def test_verify_catches_contradictions():
           and run.timeout_for("C128", 3600) >= 131072 / 12,
           "timeouts: never under 3600 s; C128 sized to reach its cap at 12 tok/s",
           str([run.timeout_for(a, 30) for a in ("A0", "C8", "C32", "C128")]))
-    check(run.verify("A1", "medium", None, finish="stop", content="c")
+    check(run.verify("A2", "medium", None, finish="stop", content="c")
           == ["no x_yamadori on the response"], "no x_yamadori -> mismatch")
 
 
 def test_stack_errors_are_not_failures(url, tmp):
     for mode, kind in (("lie_hints", "mismatch"), ("http500", "http"),
-                       ("length", "finish"), ("lie_fanout", "mismatch")):
+                       ("length", "finish"), ("lie_seed", "mismatch")):
         reset(mode)
         d = os.path.join(tmp, f"se_{mode}")
-        arms = ["A4"] if mode == "lie_fanout" else ["A0"]
+        arms = ["A0"]
         rows = run.run_pairs(tasks_fixture()[:1], arms, cfg_for(url, d),
                              stub_grade, log=quiet)
         r = rows[0]
@@ -412,16 +426,16 @@ def test_stack_errors_are_not_failures(url, tmp):
 def test_resume(url, tmp):
     d = os.path.join(tmp, "resume")
     ts = tasks_fixture()[:2]
-    reset("http500", fail_arms=["A1"])
-    rows1 = run.run_pairs(ts, ["A0", "A1"], cfg_for(url, d), stub_grade, log=quiet)
+    reset("http500", fail_arms=["A2"])
+    rows1 = run.run_pairs(ts, ["A0", "A2"], cfg_for(url, d), stub_grade, log=quiet)
     check(len(Fake.requests) == 4, "first pass: 4 requests", str(len(Fake.requests)))
     check(sum(r["outcome"] == "stack_error" for r in rows1) == 2,
-          "first pass: both A1 rows are stack_error")
+          "first pass: both A2 rows are stack_error")
     reset("honest")
-    rows2 = run.run_pairs(ts, ["A0", "A1"], cfg_for(url, d), stub_grade, log=quiet)
-    sent = [r["feats"].get("retrieval") for r in Fake.requests]
+    rows2 = run.run_pairs(ts, ["A0", "A2"], cfg_for(url, d), stub_grade, log=quiet)
+    sent = [r["feats"].get("skills") for r in Fake.requests]
     check(len(Fake.requests) == 2 and all(s is True for s in sent),
-          "rerun: only the 2 stack_error A1 pairs are requested again",
+          "rerun: only the 2 stack_error A2 pairs are requested again",
           json.dumps(sent))
     check(all(r["attempt"] == 2 for r in rows2),
           "rerun rows are attempt 2", str([r["attempt"] for r in rows2]))
@@ -430,10 +444,10 @@ def test_resume(url, tmp):
           str(len(allrows)))
     check(len(run.done_pairs(allrows)) == 4, "all 4 pairs now done")
     reset("honest")
-    run.run_pairs(ts, ["A0", "A1"], cfg_for(url, d), stub_grade, log=quiet)
+    run.run_pairs(ts, ["A0", "A2"], cfg_for(url, d), stub_grade, log=quiet)
     check(len(Fake.requests) == 0, "third pass: nothing left to request")
-    check(os.path.exists(os.path.join(d, "answers", "ts01__A1__1.json"))
-          and os.path.exists(os.path.join(d, "answers", "ts01__A1__2.json")),
+    check(os.path.exists(os.path.join(d, "answers", "ts01__A2__1.json"))
+          and os.path.exists(os.path.join(d, "answers", "ts01__A2__2.json")),
           "each attempt's answer kept in its own answers/ file")
 
     # done_pairs: a stack_error LAST row is never done, even after a pass
@@ -747,19 +761,15 @@ def test_verify_self_check_arms():
         check(run.expected(s_arm) == run.expected(one_shot),
               f"{s_arm} expects exactly what {one_shot} does")
     x = fake_x(run.features("S5", "medium"))
-    x["selection"]["signals"]["allowed"] = {"hints": True, "investigate": False,
-                                            "fanout": 3}
-    check(any("A5 must allow" in m for m in run.verify("S5", "medium", x,
-                                                       finish="stop", content="c")),
-          "S5 is held to A5's allow-everything check")
-    x = fake_x(run.features("S6", "medium"))
-    x["fanout"] = None
-    check(run.verify("S6", "medium", x, finish="tool_calls", content="") == [],
-          "S6: no fan-out expected on a tool-call round (the proxy fans out "
-          "only a finished answer)")
-    check(any("fanout" in m for m in run.verify("S6", "medium", x, finish="stop",
-                                                content="```ts\nx\n```")),
-          "S6: a final answer with no fan-out record is a mismatch")
+    x["selection"]["signals"]["forced"] = ["skills"]
+    check(any("forced" in m for m in run.verify("S5", "medium", x,
+                                                finish="stop", content="c")),
+          "S5 is held to A5's nothing-forced check")
+    x = fake_x(run.features("S0", "medium"))
+    x["session"]["seed"] = {"word": "lantern", "token_id": 1, "u32": 2}
+    check(any("seed forced off" in m for m in run.verify("S0", "medium", x,
+                                                         finish="tool_calls", content="")),
+          "S0 is held to A0's seed-off check on every round")
     d = run.CHECK_TOOL["function"]
     check(d["name"] == "check_solution"
           and d["parameters"]["required"] == ["code"]
@@ -918,24 +928,6 @@ def test_parallel_plan(url, tmp):
     check([t["id"] for t in run.sample_tasks(suite, 8, 20260923)]
           == [t["id"] for t in run.sample_tasks(list(reversed(suite)), 8, 20260923)][::-1],
           "the draw does not depend on row order")
-    # helper lane busy: waited out, not a row
-    reset("helper_busy")
-    Fake.busy_left = 2
-    cfg = dict(cfg_for(url, os.path.join(tmp, "helper")), sleep=lambda s: None)
-    rows = run.run_pairs([sc_task("hb1", "good")], ["A6"], cfg, stub_grade,
-                         log=quiet, check_fn=stub_check)
-    allrows, _ = run.load_rows(os.path.join(tmp, "helper", "rows.jsonl"))
-    r = rows[0]
-    check(len(allrows) == 1 and r["outcome"] == "pass" and r["helper_busy_retries"] == 2
-          and r["attempt"] == 3 and os.path.exists(os.path.join(
-              tmp, "helper", "answers", "hb1__A6__1.json")),
-          "a helper-lane-busy row is retried after a wait, not recorded; the "
-          "discarded attempts keep their answer files",
-          json.dumps({k: r.get(k) for k in ("outcome", "helper_busy_retries",
-                                            "attempt")}))
-    check(not run.helper_busy({"stack_error_kind": "mismatch",
-                               "mismatch": ["hints off but 1 emitted"]}),
-          "any other mismatch is still a stack_error row")
     # import scored rows from another run dir
     src = os.path.join(tmp, "imp_src")
     reset("honest")
@@ -1048,21 +1040,12 @@ def test_server_sampling_condition():
 def test_a6_forces_every_mechanism():
     x = fake_x(run.features("A6", "medium"))
     check(run.verify("A6", "medium", x, finish="tool_calls", content="") == [],
-          "A6 with check_code offered and repair enabled verifies clean")
+          "A6 with skills, the seed and the MCP tools on verifies clean")
     x2 = json.loads(json.dumps(x))
-    x2["repair"] = None
-    check(any("repair forced on" in m for m in run.verify("A6", "medium", x2,
+    x2["selection"]["skills"] = False
+    check(any("selection.skills" in m for m in run.verify("A6", "medium", x2,
                                                          finish="tool_calls", content="")),
-          "A6 whose repair pass is off: mismatch (stack_error, re-run)")
-    x3 = json.loads(json.dumps(x))
-    x3["check_code"] = {"offered": False}
-    check(any("check_code forced on" in m for m in run.verify("A6", "medium", x3,
-                                                             finish="tool_calls", content="")),
-          "A6 whose check_code was not offered: mismatch")
-    x4 = json.loads(json.dumps(x))
-    x4["selection"]["signals"]["forced"] += ["check_code", "repair"]
-    check(run.verify("A6", "medium", x4, finish="tool_calls", content="") == [],
-          "forced check_code/repair in signals do not disturb the forced check")
+          "A6 whose skills are off: mismatch (stack_error, re-run)")
     s = analyse.markdown({"run_id": "x", "conditions": {}, "rows": 0, "bad_lines": 0,
                           "tasks": {"uncontaminated": 0, "contaminated": 0},
                           "caveats": [], "headline_uncontaminated": {"label": "h", "tasks": 0, "families": {}, "comparisons": []},
@@ -1181,7 +1164,9 @@ def test_stop_file(url, tmp):
 
 
 def test_mechanism_evidence(url, tmp):
-    x6 = fake_x(run.features("A6", "medium"))
+    # analyse.mechanisms reads the rows of old run dirs too: the evidence of
+    # the removed mechanisms is checked on a record of that shape.
+    x6 = legacy_x(LEGACY_A6)
     x6["tools"] = [{"name": "find_definition_opt", "empty": False, "error": False,
                     "chars": 900},
                    {"name": "find_by_pattern", "empty": True, "error": False,
@@ -1222,6 +1207,9 @@ def test_mechanism_evidence(url, tmp):
           "a check_code call is counted as check_code, not as retrieval")
     x0 = fake_x(run.features("A0", "medium"))
     m0 = analyse.mechanisms({"arm": "A0", "x_yamadori": x0})
+    check(not m0["deep_thinking"]["ran"] and not m0["fanout"]["ran"]
+          and not m0["retrieval"]["ran"],
+          "a current record: the removed mechanisms read as not run")
     check(not any(m0[k]["allowed"] for k in analyse.MECHANISMS),
           "A0: no mechanism allowed",
           json.dumps({k: m0[k]["allowed"] for k in analyse.MECHANISMS}))
@@ -1236,15 +1224,15 @@ def test_mechanism_evidence(url, tmp):
     mh = analyse.mechanisms({"arm": "A2", "x_yamadori": xh})
     check(mh["hints"]["allowed"] and mh["hints"]["ran"] and not mh["hints"]["data"],
           "hints that found nothing above the floor: ran, no data -- recorded, not excluded")
-    h = analyse.mechanism_health([r6, {"arm": "A6", "x_yamadori": fake_x(
-        run.features("A6", "medium"))}])
+    h = analyse.mechanism_health([r6, {"arm": "A6", "x_yamadori": legacy_x(
+        LEGACY_A6)}])
     check(h["fanout"]["allowed"] == 2 and h["fanout"]["data"] == 1
           and h["retrieval"]["data_pct"] == 50.0,
           "mechanism health: allowed / ran / data per mechanism", json.dumps(h["fanout"]))
     reset("honest")
     rows = run.run_pairs([sc_task("m1", "good")], ["A6"],
                          cfg_for(url, os.path.join(tmp, "mech")), stub_grade, log=quiet)
-    check("mechanisms" in rows[0] and rows[0]["mechanisms"]["deep_thinking"]["ran"],
+    check("mechanisms" in rows[0] and rows[0]["mechanisms"]["hints"]["injected"] == 1,
           "every written row carries its mechanism evidence")
 
 

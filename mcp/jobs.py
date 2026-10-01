@@ -71,7 +71,53 @@ STALE_SECONDS = int(os.environ.get("YAMADORI_JOB_STALE", "1200"))
 #   gpu    serialised: one at a time, because they contend for one card
 #   cpu    parallel: extraction, parsing, scoring
 #   net    parallel: fetching sources
-LANES = {"gpu": 1, "cpu": 4, "net": 4}
+LANES = {"gpu": 1, "gpu_a4000": 1, "cpu": 4, "net": 4}
+
+# THE GPU LANE PER CARD (coordinator, 2026-09-30: "jobs bound for the A4000 (bonsai-a4000, imagegen, vision,
+# embeddings) run under their own lane scope. A 5060 Ti window's jobs.pause("gpu") then no longer blocks them, and
+# they never touch the 5060 Ti. Keep the default behaviour for anything unrouted."). Two SCOPES of the one gpu queue:
+#   gpu        the main card (the 5060 Ti) -- and anything unrouted, as before
+#   gpu_a4000  the A4000: the embedder's jobs always; a model stage's jobs while the main card's model is
+#              LOCKED (max_mode.internal_model sends them to bonsai-a4000), decided when the job is CLAIMED
+# A job is enqueued on lane "gpu" as always (or "gpu_a4000" to pin it); claim(scope) picks the next queued gpu job
+# whose scope (gpu_scope) is its own and records the scope on the row (`card`). One running job per scope, each
+# paused on its own (pause("gpu") = the main card's window; pause("gpu_a4000") = the A4000's). At run time a job
+# claimed for the A4000 cannot touch the main card (max_mode.check_scope in model.post and the decider's door).
+GPU_SCOPES = ("gpu", "gpu_a4000")
+# The embedder lives on the A4000 (config.yaml `retrieval`; gpu_room): these queues only embed.
+A4000_QUEUES = frozenset({"dataset.index", "package.index", "package.knn", "skill.match_index",
+                          "package.example_knn_index", "skill.learn"})
+# These generate through mcp/model.py (or read the decider): the A4000 while the main card is locked.
+MODEL_QUEUES = frozenset({"dataset.extract", "dataset.assist", "skill.screen_model", "skill.distil",
+                          "skill.decompose", "skill.review", "skill.classify", "skill.tests", "skill.validate",
+                          "skill.prove", "package.evaluate_decider"})
+
+
+def internal_off_main() -> bool:
+    """Do internal generations go to the A4000 now (the main card's model is LOCKED: max_mode.internal_model)?
+    False with the tier table off, or when it cannot be told (the default scope, as before)."""
+    try:
+        import max_mode
+        if not max_mode.ENABLED:
+            return False
+        return not max_mode.is_main(max_mode.internal_model(max_mode.MAIN))
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+def gpu_scope(queue: str, payload: dict | None = None, lane: str = "gpu",
+              off_main: bool | None = None) -> str:
+    """The scope a queued gpu job runs under: a row enqueued on `gpu_a4000` or a payload `card` pins it; an
+    embedding queue is the A4000's; a model queue is the A4000's while internal generation is off the main card;
+    anything else "gpu" (unrouted: as before)."""
+    p = payload if isinstance(payload, dict) else {}
+    if lane == "gpu_a4000" or p.get("card") == "gpu_a4000":
+        return "gpu_a4000"
+    if queue in A4000_QUEUES:
+        return "gpu_a4000"
+    if queue in MODEL_QUEUES and (internal_off_main() if off_main is None else off_main):
+        return "gpu_a4000"
+    return "gpu"
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +168,12 @@ def paused(lane: str) -> dict | None:
 
 
 def running(lane: str) -> int:
+    """Running jobs of `lane`; for a gpu SCOPE, the jobs running under it (the scope recorded at claim)."""
     con = _db()
     try:
+        if lane in GPU_SCOPES:
+            return con.execute("SELECT COUNT(*) FROM jobs WHERE state='running' AND lane IN ('gpu','gpu_a4000') "
+                               "AND COALESCE(card, lane)=?", (lane,)).fetchone()[0]
         return con.execute("SELECT COUNT(*) FROM jobs WHERE state='running' "
                            "AND lane=?", (lane,)).fetchone()[0]
     finally:
@@ -136,6 +186,16 @@ STATES = ("queued", "running", "done", "errored", "cancelled")
 def claimable(lane: str) -> int:
     """Queued jobs of `lane` that claim() could hand out now: a deferred job
     (defer()) waiting for its not_before is not one."""
+    if lane in GPU_SCOPES:
+        off = internal_off_main()
+        con = _db()
+        try:
+            rows = con.execute(
+                "SELECT queue, payload, lane FROM jobs WHERE state='queued' AND lane IN ('gpu','gpu_a4000') AND "
+                "(not_before IS NULL OR not_before <= ?)", (time.time(),)).fetchall()
+        finally:
+            con.close()
+        return sum(1 for q, p, ln in rows if gpu_scope(q, _loads(p), ln, off) == lane)
     con = _db()
     try:
         return con.execute(
@@ -144,6 +204,14 @@ def claimable(lane: str) -> int:
             (lane, time.time())).fetchone()[0]
     finally:
         con.close()
+
+
+def _loads(text) -> dict:
+    try:
+        v = json.loads(text or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return v if isinstance(v, dict) else {}
 
 
 def _db() -> sqlite3.Connection:
@@ -183,7 +251,8 @@ def _db() -> sqlite3.Connection:
 # Columns added after the first schema: CREATE TABLE IF NOT EXISTS does not
 # add them to a database created before (the way datasets adds `assist`).
 #   not_before  a DEFERRED job is not claimed before this time (defer()).
-_ADDED = (("not_before", "REAL"),)
+#   card        the gpu SCOPE a job was claimed under (gpu / gpu_a4000; GPU_SCOPES). NULL before the scopes.
+_ADDED = (("not_before", "REAL"), ("card", "TEXT"))
 
 
 def _ensure_columns(con: sqlite3.Connection) -> None:
@@ -232,6 +301,8 @@ def claim(lane: str, worker: str | None = None) -> dict | None:
     worker = worker or f"{socket.gethostname()}:{os.getpid()}"
     if paused(lane):
         return None
+    if lane in GPU_SCOPES:
+        return _claim_gpu(lane, worker)
     con = _db()
     try:
         con.execute("BEGIN IMMEDIATE")
@@ -272,6 +343,48 @@ def claim(lane: str, worker: str | None = None) -> dict | None:
             return None
         return {"id": jid, "queue": row[1], "payload": json.loads(row[2]),
                 "attempts": row[3] + 1, "dataset": row[4], "stage": row[5]}
+    except Exception:                                            # noqa: BLE001
+        try:
+            con.execute("ROLLBACK")
+        except Exception:                                        # noqa: BLE001
+            pass
+        raise
+    finally:
+        con.close()
+
+
+def _claim_gpu(scope: str, worker: str) -> dict | None:
+    """claim() for a gpu SCOPE (GPU_SCOPES): the next queued gpu job whose scope is `scope`, one running per scope,
+    under the same write lock and guards as claim(). Where internal generation goes is read BEFORE the lock (a
+    cached GET /running at most), never inside it."""
+    off = internal_off_main()
+    con = _db()
+    try:
+        con.execute("BEGIN IMMEDIATE")
+        running = con.execute(
+            "SELECT COUNT(*) FROM jobs WHERE state='running' AND lane IN ('gpu','gpu_a4000') "
+            "AND COALESCE(card, lane)=?", (scope,)).fetchone()[0]
+        if running >= LANES.get(scope, 1):
+            con.execute("COMMIT")
+            return None
+        rows = con.execute(
+            "SELECT id, queue, payload, attempts, dataset, stage, lane FROM jobs "
+            "WHERE state='queued' AND lane IN ('gpu','gpu_a4000') "
+            "AND (not_before IS NULL OR not_before <= ?) "
+            "ORDER BY priority DESC, created ASC LIMIT 500", (time.time(),)).fetchall()
+        row = next((r for r in rows if gpu_scope(r[1], _loads(r[2]), r[6], off) == scope), None)
+        if row is None:
+            con.execute("COMMIT")
+            return None
+        now = time.time()
+        changed = con.execute(
+            "UPDATE jobs SET state='running', started=?, heartbeat=?, worker=?, card=?, attempts=attempts+1 "
+            "WHERE id=? AND state='queued'", (now, now, worker, scope, row[0])).rowcount
+        con.execute("COMMIT")
+        if not changed:
+            return None
+        return {"id": row[0], "queue": row[1], "payload": _loads(row[2]), "attempts": row[3] + 1,
+                "dataset": row[4], "stage": row[5], "card": scope}
     except Exception:                                            # noqa: BLE001
         try:
             con.execute("ROLLBACK")

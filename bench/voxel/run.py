@@ -133,9 +133,10 @@ def task_prompt(task: str) -> tuple[str, str]:
 DEFAULT_MODEL = "yamadori"
 # Everything of ours forced off, as bench/domain's A0 (selection._forced): the
 # tier's thinking is kept, so `<tier>-off` is the effort-matched control of
-# `<tier>`. Fan-out 1 is "off".
-ALL_OFF = {"retrieval": False, "skills": False, "investigate": False, "fanout": 1,
-           "check_code": False, "repair": False}
+# `<tier>`. Retrieval, deep thinking, fan-out, check_code and repair were
+# removed 2026-09-29 (docs/REMOVED.md); skills, the concept seed and the MCP
+# host's tools are what is left to force off.
+ALL_OFF = {"skills": False, "seed": False, "mcp_tools": False}
 ARMS: dict[str, dict] = {
     "xhigh": {"effort": "xhigh", "features": None,
               "note": "our full stack at medium thinking (the planned arm)"},
@@ -640,11 +641,9 @@ def x_summary(x: dict | None) -> dict:
     whole record is in response.json)."""
     if not isinstance(x, dict):
         return {}
-    sel = x.get("selection") or {}
-    fan = x.get("fanout") if isinstance(x.get("fanout"), dict) else {}
-    deep = x.get("deep") if isinstance(x.get("deep"), dict) else {}
-    inv = x.get("investigate") if isinstance(x.get("investigate"), dict) else None
     skills = x.get("skills") if isinstance(x.get("skills"), dict) else {}
+    session = x.get("session") if isinstance(x.get("session"), dict) else {}
+    mcp = x.get("mcp") if isinstance(x.get("mcp"), dict) else {}
     route = x.get("route") if isinstance(x.get("route"), dict) else {}
     usage = x.get("usage") if isinstance(x.get("usage"), dict) else {}
     return {
@@ -652,20 +651,15 @@ def x_summary(x: dict | None) -> dict:
         "effort_sent": x.get("effort_sent"), "utility": x.get("utility"),
         "route": route.get("class"),
         "skills": skills.get("ids") or skills.get("names") or [],
-        "fanout_selected": sel.get("fanout"),
-        "fanout_n": fan.get("n") if fan else None,
-        "deep": {**{k: deep.get(k) for k in ("trigger", "fired", "ran") if k in deep},
-                 "think_calls": len(((deep.get("think_tool") or {}).get("calls")) or [])},
-        "investigate_ran": bool(inv),
-        "fold_back": [f.get("phrase") for f in x.get("fold_back") or [] if isinstance(f, dict)],
-        "repair": (x.get("repair") or {}).get("where") if isinstance(x.get("repair"), dict) else None,
+        "seed": (session.get("seed") or {}).get("word")
+        if isinstance(session.get("seed"), dict) else None,
+        "mcp_calls": len(mcp.get("calls") or []),
         "images": len(x.get("images") or []),
         "hops": x.get("hops"),
         "generations": usage.get("generations"),
         "budget": x.get("budget"),
         "cache": x.get("cache"),
-        "session_source": (x.get("session") or {}).get("source")
-        if isinstance(x.get("session"), dict) else None,
+        "session_source": session.get("source"),
         "energy": x.get("energy"),
     }
 

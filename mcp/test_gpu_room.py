@@ -10,9 +10,9 @@ image server loaded beside the vision copy. The operator's rule: if it fits
 with headroom, fine; if not, drop what must go and load what is needed.
 
 THE FAKE. One HTTP server plays llama-swap: `GET /running`,
-`POST /api/models/unload/<id>`, and the four endpoints that make it load an
+`POST /api/models/unload/<id>`, and the three endpoints that make it load an
 A4000 model (/v1/chat/completions for the vision copy, /sdapi/v1/txt2img,
-/v1/embeddings, /v1/rerank), with llama-swap's own group behaviour (vision is
+/v1/embeddings; /v1/rerank went with the reranker, 2026-10-01), with llama-swap's own group behaviour (vision is
 exclusive; the two image models swap) kept as the backstop. A simulated card
 holds what is loaded (sizes from gpu_room.SIZES), Laya as a fixed resident,
 and optionally a foreign consumer; nvidia-smi is replaced by a read of that
@@ -20,7 +20,7 @@ card. Every allocation updates the card's minimum free memory, and one past
 the card's total is recorded as an out-of-memory.
 
 The sequences run through the REAL callers -- model.chat (model.post, the one
-door), images.generate, code_search.embed / rerank -- so the test covers the
+door), images.generate, code_search.embed -- so the test covers the
 wiring, not only the module. The on-demand, exclusive A4000 chat model they
 load is a FIXTURE (FIXTURE below) since 2026-09-27: `bonsai-vision`, the model
 this suite was written around, is retired (the main model on the 5060 Ti has
@@ -66,8 +66,10 @@ DEAD = f"http://127.0.0.1:{_dead_port()}"
 # The simulated A4000 and the fake llama-swap in front of it
 # --------------------------------------------------------------------------
 TOTAL = 16376                      # the A4000's total, nvidia-smi (#16)
-LAYA = 2465                        # 7,565 - (2,100 + 3,000): see SIZES
-RETRIEVAL = {"embeddings", "reranker"}
+# A fixed resident the fake card was written around (Laya, retired):
+# 7,565 measured - (2,100 embeddings + 3,000, the removed reranker's estimate).
+LAYA = 2465
+RETRIEVAL = {"embeddings"}         # the reranker was removed 2026-10-01
 IMAGE = {"imagegen", "imagegen-turbo"}
 
 
@@ -199,11 +201,6 @@ class _Swap(BaseHTTPRequestHandler):
             CARD.serve(body.get("model"))
             return self._send(200, {"data": [{"embedding": [1.0, 0.5, 0.25]}
                                              for _ in body.get("input") or []]})
-        if self.path == "/v1/rerank":
-            CARD.serve(body.get("model"))
-            return self._send(200, {"results": [
-                {"index": i, "relevance_score": 1.0 / (i + 1)}
-                for i in range(len(body.get("documents") or []))]})
         if self.path == "/sdapi/v1/txt2img":
             CARD.serve(body.get("model"))
             return self._send(200, {"images": [
@@ -245,7 +242,7 @@ os.environ.update({
 })
 for k in ("YAMADORI_VISION", "YAMADORI_VISION_MODEL", "YAMADORI_IMAGEGEN_MODEL",
           "YAMADORI_IMAGEGEN_TURBO_MODEL", "YAMADORI_A4000_HEADROOM_MIB",
-          "YAMADORI_GPU_ROOM_WAIT", "EMBED_MODEL", "RERANK_MODEL"):
+          "YAMADORI_GPU_ROOM_WAIT", "EMBED_MODEL"):
     os.environ.pop(k, None)
 
 # Every other store the code under test can write (the jobs database
@@ -324,7 +321,6 @@ def draw() -> list:
 
 def search() -> None:
     cs.embed(["how is a tool call parsed"], is_query=True)
-    cs.rerank("how is a tool call parsed", ["a", "b"], 2)
 
 
 def _unloaded() -> list[str]:
@@ -354,6 +350,9 @@ def test_the_table_matches_the_config():
     main_sees = "--mmproj" in str(((cfg.get("models") or {}).get("bonsai")
                                    or {}).get("cmd"))
     pending = {"bonsai-vision"} - on if main_sees else set()
+    # TIER MODELS (2026-09-30): `bonsai-a4000`'s row exists before its entry; bench/deploy_tier_models.py writes the
+    # entry at its deploy.
+    pending |= {"bonsai-a4000"} - on
     check(set(gpu_room.SIZES) - {FIXTURE} == on | pending,
           "SIZES has a row for exactly the models config.yaml pins to the "
           "A4000's UUID (and, before the layout-v2 deploy, bonsai-vision's)",
@@ -414,16 +413,14 @@ def test_look_draw_search():
           f"the A4000 never goes below {H:,} MiB free (min "
           f"{CARD.min_free:,}); no allocation past the total", ev)
     look_d = sink[0]
-    check(look_d["model"] == FIXTURE and look_d["action"] == "evicted"
-          and [e["model"] for e in look_d["evicted"]] == ["reranker"],
-          "look: vision (9,449 est.) does not fit beside search, so the "
-          "coordinator unloads the reranker -- the bigger of two never-used "
-          "models -- and stops as soon as it fits", ev)
-    check(look_d["free_after_mib"] - look_d["need_mib"] >= H
-          and look_d["free_before_mib"] - look_d["need_mib"] < H,
-          "look: free before < need + headroom <= free after (the "
-          "measurement, re-read after each unload, decides)",
-          json.dumps(look_d))
+    # Since the reranker's removal (2026-10-01) vision (9,449 est.) fits
+    # beside the embedder alone; the eviction order is gated in
+    # test_draw_then_look.
+    check(look_d["model"] == FIXTURE and look_d["action"] == "fit"
+          and not look_d.get("evicted")
+          and look_d["free_before_mib"] - look_d["need_mib"] >= H,
+          "look: vision (9,449 est.) fits beside the embedder with the "
+          "headroom, so the coordinator unloads nothing", ev)
     check(FIXTURE in after_look and not (set(after_look) & RETRIEVAL),
           "the backstop still acts: loading vision (exclusive) took "
           "embeddings out too", json.dumps(after_look))
@@ -434,18 +431,21 @@ def test_look_draw_search():
           "draw: the image server's peak (6,389) does not fit beside vision, "
           "so vision leaves before the draw", json.dumps(draw_d))
     later = [d for d in sink if d["model"] in RETRIEVAL]
-    check([d["action"] for d in later] == ["fit", "fit"]
+    check([d["action"] for d in later] == ["fit"]
           and not any(d.get("evicted") for d in later),
-          "search: embeddings and the reranker load beside the idle image "
-          "server with room to spare, and unload nothing (search + image "
-          "generator fits)", json.dumps(later)[:600])
-    check(set(CARD.held) == {"imagegen-turbo", "embeddings", "reranker"},
+          "search: the embedder loads beside the idle image server with room "
+          "to spare, and unloads nothing (search + image generator fits)",
+          json.dumps(later)[:600])
+    check(set(CARD.held) == {"imagegen-turbo", "embeddings"},
           "afterwards: search and the idle image server are resident",
           json.dumps(CARD.held))
 
 
 def test_draw_then_look():
-    fresh()
+    # A 1,500 MiB foreign consumer: with the reranker gone (2026-10-01),
+    # vision needs ONE model unloaded only when something else holds the card,
+    # which is what makes the eviction order observable here.
+    fresh(foreign=1500)
     sink: list = []
     with gpu_room.recording(sink):
         draw()
@@ -457,9 +457,15 @@ def test_draw_then_look():
           "generator), nothing is unloaded", ev)
     look_d = sink[-1]
     check(look_d["model"] == FIXTURE
-          and [e["model"] for e in look_d["evicted"]] == ["reranker"],
+          and [e["model"] for e in look_d.get("evicted") or []] == ["embeddings"],
           "then look: the least recently used goes first -- the never-used "
-          "reranker, not the image server that just drew", ev)
+          "embedder, not the image server that just drew -- and it stops as "
+          "soon as vision fits", ev)
+    check(look_d.get("free_after_mib", 0) - look_d.get("need_mib", 0) >= H
+          and look_d.get("free_before_mib", 0) - look_d.get("need_mib", 0) < H,
+          "look: free before < need + headroom <= free after (the "
+          "measurement, re-read after each unload, decides)",
+          json.dumps(look_d))
     check(CARD.min_free >= H and not CARD.oom,
           f"draw -> look never goes below {H:,} MiB free (min "
           f"{CARD.min_free:,})", ev)
@@ -522,7 +528,7 @@ def test_concurrent_callers():
           ev)
 
     # A model in use is never unloaded under its request: the caller waits.
-    # A 1,500 MiB foreign consumer makes vision need BOTH search models gone.
+    # A 1,500 MiB foreign consumer makes vision need the embedder gone.
     fresh(foreign=1500)
     released: dict = {}
     started = threading.Event()
@@ -630,7 +636,7 @@ def test_nothing_evictable():
 
     # A model that cannot fit even on an empty card: nothing is unloaded to
     # find that out.
-    fresh(held={"embeddings", "reranker", "imagegen-turbo"})
+    fresh(held={"embeddings", "imagegen-turbo"})
     try:
         gpu_room.ensure_room("critic-disabled", upstream=URL)
         e2 = None
@@ -660,7 +666,7 @@ def test_nothing_evictable():
 
 
 def test_the_main_model_is_never_touched():
-    fresh(held={"embeddings", "reranker"})
+    fresh(held={"embeddings"})
     CARD.elsewhere += ["bonsai-agent", "bonsai-q4kv"]
     err = gpu_room.unload(URL, "bonsai")
     err2 = gpu_room.unload(URL, "bonsai-q4kv")
@@ -674,7 +680,7 @@ def test_the_main_model_is_never_touched():
         gpu_room.ensure_room("critic-disabled", upstream=URL)
     except gpu_room.NoRoom:
         pass
-    fresh(held={"embeddings", "reranker", "imagegen"}, foreign=3000)
+    fresh(held={"embeddings", "imagegen"}, foreign=3000)
     try:
         gpu_room.ensure_room(FIXTURE, upstream=URL)
     except gpu_room.NoRoom:
@@ -728,7 +734,7 @@ def test_no_llama_swap_means_uncoordinated_not_blocked():
           "recorded as `uncoordinated` with the reason", json.dumps(d))
     # /running answers but nvidia-smi does not: the load (vision is not
     # loaded) is refused; an already-loaded search model takes its lease.
-    fresh(held={"embeddings", "reranker"})
+    fresh(held={"embeddings"})
     saved = gpu_room.CARD_READER
     gpu_room.CARD_READER = lambda: None
     try:
@@ -917,8 +923,7 @@ def test_a_vision_turn_with_no_room_is_a_structured_error():
     catalog.INTERNAL[catalog_alias] = (FIXTURE, None)
     catalog.CATALOG[catalog_alias] = (FIXTURE, None)
     body = {"model": catalog_alias, "_client_ip": "127.0.0.1",
-            "_features": json.dumps({"hints": False, "retrieval": False,
-                                     "investigate": False, "fanout": 1}),
+            "_features": json.dumps({"skills": False}),
             "messages": [{"role": "user", "content": "Describe a cat."}]}
     try:
         proxy.complete(dict(body))
@@ -981,15 +986,14 @@ def test_the_proxy_records_decisions():
     state = {"_gpu_room": [], "_public_base": "http://example",
              "_account": ""}
     out = json.loads(proxy.run_our_tool(images.TOOL_NAME,
-                                        {"prompt": "a fox"}, None,
-                                        state=state))
+                                        {"prompt": "a fox"}, state=state))
     rec = state["_gpu_room"]
     check(out.get("ok") is True and rec and rec[0]["model"] in IMAGE
           and rec[0]["action"] == "evicted"
           and [e["model"] for e in rec[0]["evicted"]] == [FIXTURE],
           "a tool the proxy runs records its A4000 decision in the request's "
           "x_yamadori.gpu_room list", json.dumps({"out": out, "rec": rec})[:900])
-    x = proxy._x_yamadori({"_gpu_room": rec}, hops=0, fan=None, think=None)
+    x = proxy._x_yamadori({"_gpu_room": rec}, hops=0)
     check(x.get("gpu_room") == rec,
           "x_yamadori carries the request's gpu_room decisions",
           json.dumps(x.get("gpu_room"))[:300])

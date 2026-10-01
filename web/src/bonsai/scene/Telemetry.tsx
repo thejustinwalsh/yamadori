@@ -138,9 +138,11 @@ export function SlotsCard({ slots, lanes, context, since }: {
 }) {
   const kv = kvSplit(context);
   const busy = slots?.ok ? slots.slots.filter((x) => x.state !== 'idle').length : null;
+  // The helper lane went with the second brain's jobs (docs/REMOVED.md):
+  // only the main lanes are shown.
   const laneText =
     lanes && lanes.in_proxy
-      ? `MAIN ${lanes.main}/${lanes.main_lanes ?? '—'} · DEEP THINKING ${lanes.helper}/${lanes.helper_lanes ?? '—'}`
+      ? `MAIN ${lanes.main}/${lanes.main_lanes ?? '—'}`
       : busy === null
         ? undefined
         : `${busy} BUSY`;
@@ -159,7 +161,7 @@ export function SlotsCard({ slots, lanes, context, since }: {
           const rate = x.state === 'decode' ? x.tps : x.state === 'prefill' ? x.pps : 0;
           return (
             <div key={x.id} {...stylex.props(text.labelXs, s.slotRow)}>
-              <span {...stylex.props(s.dim)} title={x.role === 'child' ? 'the child slot: deep thinking, the decider, side calls' : x.role === 'conversation' ? `a conversation slot${x.pinned ? ', pinned' : ''}${x.primary ? ', the primary conversation (holds the VRAM line)' : ''}` : undefined}>
+              <span {...stylex.props(s.dim)} title={x.role === 'child' ? `the child slot: ${kv ? kvNames(kv).helperWhy : 'the decider lane'}` : x.role === 'conversation' ? `a conversation slot${x.pinned ? ', pinned' : ''}${x.primary ? ', the primary conversation (holds the VRAM line)' : ''}` : undefined}>
                 S{x.id}
                 {x.role === 'child' ? ' · CHILD' : x.primary ? ' · PRIMARY' : x.pinned ? ' · PINNED' : ''}
               </span>
@@ -299,7 +301,7 @@ export function KvCard({ context }: { context: ContextPool | null | undefined })
             ]}
           />
           <span {...stylex.props(text.labelXs, s.soft, text.num)}>
-            {kv.layout === 'cap' ? `MAIN ${n(kv.main)} · CHILD ${n(kv.helper)} · 2ND ${n(kv.reserve)}` : `MAIN ${n(kv.main)} · DEEP THINKING ${kv.helpers}×${n(kv.helper)}`}
+            {kv.layout === 'cap' ? `MAIN ${n(kv.main)} · CHILD ${n(kv.helper)} · 2ND ${n(kv.reserve)}` : `MAIN ${n(kv.main)} · ${nm.helperRole.toUpperCase()} ${kv.helpers}×${n(kv.helper)}`}
           </span>
         </>
       )}

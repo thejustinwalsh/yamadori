@@ -18,8 +18,8 @@ WHAT THIS GATES
      attachments or our media store, by id. No URL is ever fetched -- not a
      model-supplied one, not a client's image link -- and no model-supplied
      path is ever opened. Only the vision server is ever contacted.
-  4. yama_describe_image is offered wherever yama_generate_image is (every tier, and
-     deep thinking), and on every tier when the request carries an image,
+  4. yama_describe_image is offered wherever yama_generate_image is (every
+     tier), and on every tier when the request carries an image,
      even with no image server. YAMADORI_VISION=0 withholds it.
   5. x_yamadori.vision records each call (ok, image, source, format, bytes,
      seconds, tokens, or the error code) and x_yamadori.attachments what the
@@ -31,7 +31,7 @@ WHAT THIS GATES
 
 ISOLATION
 
-Temp stores for everything, set BEFORE import. The chat upstream, Laya and
+Temp stores for everything, set BEFORE import. The chat upstream and
 the model server point at a closed port except where a fake is started. The
 fakes are shut down at the end; nothing is left listening.
 """
@@ -632,8 +632,7 @@ def _names(out: dict) -> list[str]:
 
 def test_offered_everywhere_generate_image_is():
     import proxy
-    import shomen
-    txt = [{"role": "user", "content": "draw me a lighthouse at dusk"}]
+    txt =[{"role": "user", "content": "draw me a lighthouse at dusk"}]
     pic = [{"role": "user", "content": [{"type": "text", "text": "what is this?"},
                                         img_part(tiny_png(6))]}]
     for effort in ("minimal", "low", "medium", "high", "max"):
@@ -658,16 +657,6 @@ def test_offered_everywhere_generate_image_is():
                                   "reasoning_effort": "low"}))
         check("yama_describe_image" not in n and "yama_generate_image" in n,
               "YAMADORI_VISION=0 withholds it, attachment or not", str(n))
-    with use(YAMADORI_IMAGEGEN_URL=IMG_URL):
-        dt = [t["function"]["name"] for t in proxy.deep_thinking_tools()]
-        check("yama_describe_image" in dt and "yama_generate_image" in dt,
-              "deep thinking gets both", str(dt))
-    with use(YAMADORI_IMAGEGEN_URL=None):
-        _m, att = vision.extract(pic)
-        dt = [t["function"]["name"] for t in proxy.deep_thinking_tools(att)]
-        check("yama_describe_image" in dt,
-              "deep thinking gets it for an attached image with no image server",
-              str(dt))
     mine = {"type": "function", "function": {
         "name": "yama_describe_image", "description": "the client's own",
         "parameters": {"type": "object", "properties": {}}}}
@@ -677,18 +666,8 @@ def test_offered_everywhere_generate_image_is():
     got = [t for t in out["tools"] if t["function"]["name"] == "yama_describe_image"]
     check(len(got) == 1 and got[0]["function"]["description"] == "the client's own",
           "a client's own yama_describe_image wins")
-    check("yama_describe_image" in proxy.OUR_NAMES and "yama_describe_image" in proxy._STATEFUL,
-          "the proxy runs it as its own, and never serves it from the repeat cache")
-
-    s = shomen.SYSTEM
-    # The image paragraph used to end at the "WRITE IN PLAIN" style block,
-    # removed 2026-09-27 (docs/CONSTANTS-AUDIT.md): it now ends the prompt.
-    end = s.find("WRITE IN PLAIN")
-    para = s[s.index("yama_generate_image"):end if end >= 0 else len(s)]
-    check("yama_describe_image" in para and "draw it again" in para,
-          "deep thinking is told to look at its drawing and refine it", para[:200])
-    check(not re.search(r"\b(never|do not|don't|cannot)\b", para, re.I),
-          "that instruction is positive: no prohibition (AGENTS.md)", para)
+    check("yama_describe_image" in proxy.OUR_NAMES,
+          "the proxy runs it as its own")
 
     desc = vision.TOOL["function"]["description"]
     check(desc.startswith("Answers a question about what is IN an image"),
@@ -779,7 +758,7 @@ def test_placeholders():
     check(base64.b64encode(png).decode() not in s and "b64" not in s,
           "the summary carries no image data", s[:200])
     json.dumps(att)
-    check(True, "the register is JSON-safe (fan-out deep-copies payloads)")
+    check(True, "the register is JSON-safe (the turn deep-copies payloads)")
 
     plain = [{"role": "user", "content": "hello"},
              {"role": "user", "content": [{"type": "text", "text": "a list"}]}]
@@ -809,8 +788,11 @@ def test_budget_is_not_floored_by_an_image():
     # the main model SEES (YAMADORI_MAIN_VISION=1): the image goes to it and
     # costs the projector's cap (image_input.IMAGE_TOKENS), never its base64
     import image_input
-    ea = proxy.high_estimate({"messages": a["_seen_messages"]})
-    eb = proxy.high_estimate({"messages": b["_seen_messages"]})
+    # At `low` nothing of ours is injected, so the payload's messages are the
+    # messages as the main model reads them (`_seen_messages`, which fed deep
+    # thinking's question, went with it, 2026-09-29).
+    ea = proxy.high_estimate({"messages": a["messages"]})
+    eb = proxy.high_estimate({"messages": b["messages"]})
     w, h = image_input.image_size(big)
     want = image_input.image_tokens(w, h)
     check(tb > 10 * tiers.MIN_THINKING and ta - tb <= want + 500
@@ -818,13 +800,12 @@ def test_budget_is_not_floored_by_an_image():
           "a 600 KB attachment passed to the main model counts as the "
           "projector's cap in every estimate, not its 800 KB of base64",
           f"thinking text-only {ta}, with image {tb}; estimate {ea} -> {eb}")
-    seen = b["_seen_messages"][0]["content"]
+    seen = b["messages"][0]["content"]
     check(seen[1]["type"] == "image_url"
           and seen[1]["image_url"]["url"].startswith("data:image/png;base64,")
           and seen[2]["type"] == "text" and "shown to you above" in seen[2]["text"],
           "the main model's messages carry the image part and its label",
           json.dumps([p.get("type") for p in seen]))
-    check(a["_seen_messages"] is not None, "prepare exposes the messages it saw")
     with use(YAMADORI_MAIN_VISION="0"):
         c = proxy.prepare({"model": "yamadori", "messages": with_img,
                            "reasoning_effort": "low"})
@@ -832,7 +813,7 @@ def test_budget_is_not_floored_by_an_image():
     check(abs(ta - tc) < 500,
           "a main model WITHOUT a projector: the attachment costs only its "
           "placeholder", f"text-only {ta}, placeholder {tc}")
-    check(c["_seen_messages"][0]["content"][1]["type"] == "text",
+    check(c["messages"][0]["content"][1]["type"] == "text",
           "and its messages carry the placeholder")
 
 

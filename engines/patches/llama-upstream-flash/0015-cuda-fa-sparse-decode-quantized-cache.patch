@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Wed, 30 Sep 2026 02:48:16 -0400
+Subject: [PATCH] cuda: a quantized KV cache with a sparse mask decodes on the
+ sparse MMA kernel
+
+ggml_cuda_get_best_fattn_kernel sends a quantized K/V with one or two queries
+(Ada and newer; one on older cards) to the vector kernel, which reads every
+cell; only an f16 cache was checked for the sparse decode (the MMA kernel's
+index-list gather, a mask with an n_kv_max hint). So Flash-Next's QSA layers
+with the default q8_0 cache read the whole cache on every single-token decode
+step and every MTP draft step: a cost linear in the context, and with the cache
+in host-mapped memory a latency-bound walk over PCIe -- 4K decode 4.9 tok/s,
+~35K 0.9 tok/s without MTP, against 21-25 with the cache on the card (the
+Flash-Next gate's fit-kvmap-nomtp and probe-q8-cpu arms, 2026-09-30, n=1 each).
+
+A quantized cache now takes the same sparse-decode test the f16 one does and,
+when it holds, the MMA kernel -- which with the previous patch converts only
+the selected cells to f16. GGML_CUDA_FA_SPARSE_QUANT=0 restores the vector
+kernel.
+---
+ ggml/src/ggml-cuda/fattn.cu | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/ggml/src/ggml-cuda/fattn.cu b/ggml/src/ggml-cuda/fattn.cu
+index ad4d1df2..d1e7309f 100644
+--- a/ggml/src/ggml-cuda/fattn.cu
++++ b/ggml/src/ggml-cuda/fattn.cu
+@@ -538,6 +538,15 @@ static bool ggml_cuda_fattn_kv_type_supported(const ggml_type type) {
+     }
+ }
+ 
++// GGML_CUDA_FA_SPARSE_QUANT=0: a quantized cache's decode back on the vector kernel (every cell read)
++static bool ggml_cuda_fattn_sparse_quantized_enabled() {
++    static const bool on = [] {
++        const char * e = getenv("GGML_CUDA_FA_SPARSE_QUANT");
++        return !(e && e[0] == '0');
++    }();
++    return on;
++}
++
+ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const ggml_tensor * dst) {
+ #ifndef FLASH_ATTN_AVAILABLE
+     GGML_UNUSED(device); GGML_UNUSED(dst);
+@@ -647,6 +656,14 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
+                     return BEST_FATTN_KERNEL_VEC;
+                 }
+             } else {
++                // a quantized cache with a sparse (n_kv_max) mask takes the sparse gather too: the vector kernel reads
++                // every cell, the MMA kernel only the selected ones (converted to f16 at those cells alone)
++                const bool sparse_decode = ggml_cuda_fattn_sparse_quantized_enabled() && gqa_opt_applies && gqa_ratio > 4 &&
++                    ggml_cuda_flash_attn_ext_mma_f16_may_use_sparse(K->ne[0], V->ne[0], 1, 8) &&
++                    ggml_cuda_flash_attn_ext_mma_f16_shall_use_sparse(cc, dst, 1, 8);
++                if (sparse_decode) {
++                    return BEST_FATTN_KERNEL_MMA_F16;
++                }
+                 if (cc >= GGML_CUDA_CC_ADA_LOVELACE) {
+                     if (Q->ne[1] <= 2) {
+                         return BEST_FATTN_KERNEL_VEC;

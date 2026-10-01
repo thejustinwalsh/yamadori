@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "node build/gen-tokens.mjs && tsc --noEmit -p tsconfig.json && vite build",
+    "build:stage": "node build/gen-tokens.mjs && tsc --noEmit -p tsconfig.json && vite build --outDir dist-next --emptyOutDir",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

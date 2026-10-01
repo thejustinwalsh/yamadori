@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Tue, 29 Sep 2026 21:14:52 -0400
+Subject: [PATCH] cuda: top_k by radix select when CUB has no DeviceTopK
+
+ggml-cuda's GGML_OP_TOP_K without CUB's DeviceTopK (CCCL < 3.2: every
+CUDA 12.x toolkit, ours 12.8.93) sorted the WHOLE row with a CUB radix
+argsort and copied the first k out. qwen4exp's QSA indexer takes the top
+indexer_top_k + ratio - 1 (2,051) of EVERY KV cell per query per QSA layer
+(qwen4exp.cpp build_qsa_top_k), so each decoded token sorted the whole
+context 12 times: decode time grew with the context (ggml-org/llama.cpp
+#28734; ours: flash-cpu 38 ms/token at 4.4K -> ~115 ms at 142K,
+bench/flashnext_gate.py, n=3).
+
+The radix select already in top-k.cu (upstream, written for HIP) is
+O(ncols) per row: four histogram/select passes of 8 bits, then a gather.
+It now also serves CUDA builds without DeviceTopK for rows over 1,024.
+The selected SET is the same (ties at the k-th value resolved by an
+atomic order, as the sort's were not stable either, #28497); the order of
+the k indices is not sorted, which top_k does not promise.
+GGML_CUDA_TOPK_RADIX=0 restores the argsort path.
+---
+ ggml/src/ggml-cuda/top-k.cu | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/ggml/src/ggml-cuda/top-k.cu b/ggml/src/ggml-cuda/top-k.cu
+index c7a0c831788df8547ffd86c8a68e6d53aff61130..75a723d7c0f216fa8994f8bb37f5601ca2c44b4e 100644
+--- a/ggml/src/ggml-cuda/top-k.cu
++++ b/ggml/src/ggml-cuda/top-k.cu
+@@ -48,7 +48,10 @@ static int next_power_of_2(int x) {
+ 
+ #endif                            // CUB_TOP_K_AVAILABLE
+ 
+-#if !defined(GGML_CUDA_USE_CUB) && defined(GGML_USE_HIP)
++// the radix select (O(ncols) per row) also serves CUDA when CUB has no DeviceTopK (CCCL < 3.2, e.g. CUDA 12.8):
++// the fallback below sorted the WHOLE row to take k of it -- qwen4exp's indexer takes the top ~2K of every KV cell
++// per QSA layer per token, so decode time grew with the context (ggml-org/llama.cpp#28734)
++#if !defined(CUB_TOP_K_AVAILABLE)
+ 
+ static __device__ __forceinline__ uint32_t top_k_float_to_ordered(float value) {
+     const uint32_t bits = __float_as_uint(value);
+@@ -208,7 +211,7 @@ static void top_k_radix_cuda(
+             src, dst, states, ncols, k, blocks_per_row);
+ }
+ 
+-#endif // !defined(GGML_CUDA_USE_CUB) && defined(GGML_USE_HIP)
++#endif // !defined(CUB_TOP_K_AVAILABLE)
+ 
+ void ggml_cuda_op_top_k(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+     const ggml_tensor * src0   = dst->src[0];
+@@ -233,6 +236,12 @@ void ggml_cuda_op_top_k(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+         top_k_cub(pool, src0_d + i * ncols, dst_d + i * k, ncols, k, stream);
+     }
+ #elif defined(GGML_CUDA_USE_CUB)  // CUB_TOP_K_AVAILABLE
++    // GGML_CUDA_TOPK_RADIX=0 keeps the argsort path below for every size
++    static const bool radix = [] { const char * e = getenv("GGML_CUDA_TOPK_RADIX"); return !(e && e[0] == '0'); }();
++    if (radix && ncols > 1024) {
++        top_k_radix_cuda(pool, src0_d, dst_d, ncols, nrows, k, stream);
++        return;
++    }
+     // Fall back to argsort + copy
+     const int    ncols_pad      = next_power_of_2(ncols);
+     const size_t shared_mem     = ncols_pad * sizeof(int);

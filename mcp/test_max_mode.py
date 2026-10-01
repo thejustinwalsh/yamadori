@@ -13,7 +13,7 @@ WHAT IS GATED
   4. THE SWAP: a max request that arrives while main work is in flight marks the switch (new main work refused) and
      WAITS for that work (never cancelling it); the return to the main model happens on the next non-max request once
      no max request is in flight (IDLE_S unset), or after the operator's IDLE_S.
-  5. INHERITANCE: the model bound to a request's cancel token is what model.shape, shomen, the decider and vision
+  5. INHERITANCE: the model bound to a request's cancel token is what model.shape, the decider and vision
      use, on job threads too; nothing reaches /upstream/<main> while the max model holds the card (model.post,
      model.props, proxy._upstream_json, tiers.accepted_efforts, idle.stack_idle, the worker).
   6. THE DECIDER PER MODEL: label spellings and label priors are kept per model.
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import os
 import sys
 import threading
@@ -287,11 +288,9 @@ def test_inheritance_and_no_reload():
         seen: dict = {}
 
         def job():
-            with cancel.bound(tok):          # how job threads re-bind (proxy._in_thread, shomen)
+            with cancel.bound(tok):          # how job threads re-bind (proxy._in_thread)
                 seen["m"] = max_mode.current()
                 seen["shape"] = model.shape({"messages": [{"role": "user", "content": "x"}]}, "medium")["model"]
-                import shomen
-                seen["shomen"] = shomen._model()
                 import vision
                 seen["vision"] = vision._vision_model()
         th = threading.Thread(target=job)
@@ -299,8 +298,9 @@ def test_inheritance_and_no_reload():
         th.join(5)
         check(seen.get("m") == "flash-next" and seen.get("shape") == "flash-next",
               "a job thread re-binding the token inherits flash-next; the one door shapes for it", seen)
-        check(seen.get("shomen") == "flash-next" and seen.get("vision") == "flash-next",
-              "the second brain and yama_describe_image follow the conversation's model", seen)
+        check(seen.get("vision") == "flash-next",
+              "yama_describe_image follows the conversation's model (the second "
+              "brain that did too was removed 2026-09-29)", seen)
     finally:
         ctx.__exit__(None, None, None)
     # nothing touches bonsai while flash-next is loaded
@@ -518,10 +518,26 @@ def _table_file(mirai_vision=False) -> str:
     spec = yaml.safe_load(open(src, encoding="utf-8"))
     spec["models"]["mirai-s"]["window"] = {"ctx": 98304, "slots": 3, "main_cap": 95232, "source": "test"}
     spec["models"]["mirai-s"]["vision"] = mirai_vision
+    # the UNLOCKED path, kept under test: mirai-s as it stood before its lane step (the live table locks it since
+    # the 2026-10-01 gate: test_live_table_locks_every_main_model)
+    spec["models"]["mirai-s"]["locked"] = False
+    spec["models"]["mirai-s"]["helpers"] = {"decider": "self", "side_calls": "self"}
     p = os.path.join(_TMP, "tier_models.yaml")
     with open(p, "w", encoding="utf-8") as f:
         yaml.safe_dump(spec, f)
     return p
+
+
+def test_live_table_locks_every_main_model():
+    """The deployed table (bench/deploy_tier_models.py, 2026-10-01): mirai-s's gate measured its lane material
+    (bench/results/mirai_s/gate-20261001-merged: ACTIVE below CLEARED at 8K/32K/64K, ~14-16%), so all three main
+    models are locked at -np 1 and their jjava and side calls run on bonsai-a4000."""
+    import yaml
+    spec = yaml.safe_load(open(os.path.join(HERE, "tier_models.yaml"), encoding="utf-8"))["models"]
+    got = {m: (spec[m].get("locked"), (spec[m].get("helpers") or {}).get("decider"),
+               (spec[m].get("window") or {}).get("slots")) for m in ("bonsai", "mirai-s", "flash-next")}
+    check(all(v[0] is True and v[1] == "bonsai-a4000" for v in got.values()) and got["mirai-s"][2] == 1,
+          "the live table: bonsai, mirai-s and flash-next locked, jjava on bonsai-a4000; mirai-s one slot", got)
 
 
 def test_table_routing_and_ranks():
@@ -563,8 +579,8 @@ def test_table_capacity_and_preemption():
     check(max_mode.snapshot()["switching_to"] == "flash-next", "... and marks the switch")
     check(max_mode.decide("xhigh", False).refuse, "during the switch a new xhigh request is refused")
     u = max_mode.decide("medium", True)
-    check(not u.refuse and u.model == "flash-next", "a side call is served by the model taking the card, not refused",
-          u.record())
+    check(not u.refuse and u.model == "bonsai-a4000",
+          "a side call while flash-next (LOCKED) takes the card goes to bonsai-a4000, not refused", u.record())
     lease.release()
     out = max_mode.wait_ready("flash-next")
     check(out["swap"]["from"] == ["mirai-s"] and out["swap"]["to"] == "flash-next"
@@ -704,11 +720,11 @@ def test_table_windows_and_vision():
     budget._POOL = 262144
     budget._LINE = None
     wins = {t: catalog.tier_window(t) for t in ("medium", "xhigh", "max")}
-    check(wins["xhigh"] == 95232 and wins["max"] == 259072 and wins["medium"] == budget.budgets(model="bonsai")["main"],
+    check(wins["xhigh"] == 95232 and wins["max"] == 262144 and wins["medium"] == budget.budgets(model="bonsai")["main"],
           "the advertised window is per model: each tier's own", wins)
     card = catalog._chat_card(wins["medium"])
     tb = card["x_yamadori"]["reasoning_effort"].get("tokens_by_value") or {}
-    check(tb.get("xhigh") == 95232 and tb.get("max") == 259072 and "mirai" not in json.dumps(card),
+    check(tb.get("xhigh") == 95232 and tb.get("max") == 262144 and "mirai" not in json.dumps(card),
           "the card lists each effort's window, model names kept internal", tb)
     tok, ctx = bound("mirai-s")
     try:
@@ -794,6 +810,153 @@ def test_no_offline_swap():
     reload(None)
 
 
+def test_decider_per_table_model():
+    """JJAVA ON EVERY MODEL (operator 2026-09-29): a request mirai-s serves reads mirai-s's own decider profile
+    (bench/decider/measure_model.py writes results/models/mirai-s.json) and keeps its label priors under its name."""
+    reload(None, table=_table_file())
+    import decider_bonsai as D
+    import decide_turn
+    tok, ctx = bound("mirai-s")
+    try:
+        path = D.profile_path()
+        key = decide_turn._cf_key("x")
+        name = D.canonical_model()
+    finally:
+        ctx.__exit__(None, None, None)
+    check(name == "mirai-s" and path.replace("\\", "/").endswith("bench/decider/results/models/mirai-s.json")
+          and key == "mirai-s:x",
+          "a mirai-s request reads results/models/mirai-s.json and keys its label priors mirai-s:", (name, path, key))
+    reload(None)
+
+
+def test_locked_card_is_untouched():
+    """FLASH-NEXT IS LOCKED (operator, 2026-09-30: "no jjava slowing down this highly tuned masterpiece, it stays locked
+    in once it is swapped"): while it holds the card nothing but its own conversation touches it -- no decider, no
+    side call, no release or slot read, no warm (the predicate the proxy's warm uses) -- and jjava and side calls go
+    to bonsai-a4000. No network is reached anywhere below."""
+    reload(None, table=_table_file())
+    _LOADED.clear()
+    _LOADED.add("flash-next")
+    import decider_bonsai as D
+    import model
+    import vitals
+    check(max_mode.locked("flash-next") and max_mode.locked("bonsai") and not max_mode.locked("mirai-s"),
+          "the table: flash-next and bonsai locked (operator 2026-09-30); the fixture's mirai-s not (the unlocked path)")
+    tok, ctx = bound("flash-next")
+    try:
+        dm = max_mode.decider_model()
+        name = D.model_name()
+    finally:
+        ctx.__exit__(None, None, None)
+    check(dm == "bonsai-a4000" and name == "bonsai-a4000",
+          "a max request's jjava reads bonsai-a4000 (its profile and priors key there)", (dm, name))
+    tok, ctx = bound("mirai-s")
+    try:
+        check(max_mode.decider_model() == "mirai-s", "mirai-s's jjava stays on its own card's lane until measured")
+    finally:
+        ctx.__exit__(None, None, None)
+    d = max_mode.decide("medium", True)
+    check(d.model == "bonsai-a4000" and not d.refuse, "a side call while flash-next holds the card -> bonsai-a4000",
+          d.record())
+    lease = max_mode.Lease(max_mode.decide("max", False))
+    d2 = max_mode.decide("high", True)
+    check(d2.model == "bonsai-a4000" and not d2.refuse, "... and while a max request is in flight, never refused",
+          d2.record())
+    lease.release()
+    urls: list = []
+
+    def fake_up(path, payload=None, timeout=30):
+        raise AssertionError("not used")
+    with NoNetwork() as nn:
+        r = model.release_slot(0, model="flash-next")
+        check(r.get("skipped") and "locked" in r["skipped"] and not nn.urls,
+              "no release (and so no /slots read for one) touches the locked card", r)
+        ok_w, why_w = max_mode.touch_allowed("warm", "flash-next")
+        check(ok_w, "the conversation's own warm on the locked card IS allowed (coordinator 2026-09-30; "
+              "proxy._warm_now's check)", why_w)
+        ok_r, _ = max_mode.touch_allowed("slot_read", "flash-next")
+        ok_s, _ = max_mode.touch_allowed("side_call", "flash-next")
+        check(ok_r and not ok_s, "a /slots read is allowed; a side call (other work) is not")
+    # THE DASHBOARD READS A LOCKED CARD'S /slots (coordinator 2026-09-30) -- at the loaded model's own port from
+    # GET /running, never /upstream/<model>/ (which would load an unloaded one)
+    seen: list = []
+    saved_rows, saved_open2 = vitals.running_rows, urllib.request.urlopen
+
+    class _R:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.body
+
+    def slots_only(req, *a, **k):
+        url = req if isinstance(req, str) else req.full_url
+        seen.append(url)
+        if url.endswith(":5901/slots"):
+            return _R(b'[{"id": 0, "is_processing": false, "n_ctx": 262144}]')
+        raise AssertionError(f"unexpected read: {url}")
+    vitals.running_rows = lambda max_age=0: [{"model": "flash-next", "state": "ready",
+                                              "proxy": "http://127.0.0.1:5901"}]
+    urllib.request.urlopen = slots_only
+    try:
+        v = vitals.slots()
+    finally:
+        vitals.running_rows, urllib.request.urlopen = saved_rows, saved_open2
+    check(v.get("ok") and v.get("locked") and v.get("model") == "flash-next" and seen == [
+        "http://127.0.0.1:5901/slots"] and not any("/upstream/" in u for u in seen),
+          "the dashboard reads the locked card's /slots at its own port (flagged locked), never /upstream", (v, seen))
+    seen.clear()
+    vitals.running_rows = lambda max_age=0: []
+    urllib.request.urlopen = slots_only
+    try:
+        vitals.slots()
+    finally:
+        vitals.running_rows, urllib.request.urlopen = saved_rows, saved_open2
+    check(not any("/upstream/" in u for u in seen),
+          "with nothing loaded no read goes through /upstream (the direct port only)", seen)
+    with NoNetwork() as nn:
+        # the decider's own door goes to bonsai-a4000's server, never flash-next's
+        saved_open = urllib.request.urlopen
+
+        def spy(req, *a, **k):
+            urls.append(req if isinstance(req, str) else req.full_url)
+            raise OSError("spy")
+        urllib.request.urlopen = spy
+        try:
+            tok, ctx = bound("flash-next")
+            try:
+                try:
+                    D._upstream("/tokenize", {"content": "A"})
+                except OSError:
+                    pass
+            finally:
+                ctx.__exit__(None, None, None)
+        finally:
+            urllib.request.urlopen = saved_open
+    check(urls and all("/upstream/bonsai-a4000/" in u for u in urls),
+          "the decider's reads go to bonsai-a4000, never the locked card", urls)
+    released: list = []
+    saved_rel = model.release_slot
+    model.release_slot = lambda slot, **k: released.append(k.get("model")) or {"ok": True}
+    try:
+        tok, ctx = bound("flash-next")
+        try:
+            D.release(1, "decider turn")
+        finally:
+            ctx.__exit__(None, None, None)
+    finally:
+        model.release_slot = saved_rel
+    check(released == ["bonsai-a4000"], "the decider's lane release goes to bonsai-a4000", released)
+    _LOADED.clear()
+    reload(None)
+
+
 def test_legacy_is_inert():
     """THE RUNNING STACK TODAY (YAMADORI_MAX_MODEL=flash-next, no YAMADORI_TIER_MODELS): a proxy restarted with this
     working tree must behave exactly as the 2026-09-28 max mode -- no token profile (the client's max_tokens is its
@@ -857,13 +1020,340 @@ def test_legacy_is_inert():
     _LOADED.clear()
 
 
+def test_compaction_stays_on_its_card():
+    """COMPACTIONS STAY ON THE CARD OF THE CONVERSATION THEY SUMMARISE (operator, 2026-09-30, verbatim: "it compacts
+    on the same card it came from right? To get cache gains."): a compaction is not a side call for routing -- never
+    bonsai-a4000, even at max, even while the card is locked; the one exception to "locked". And Bonsai's own jjava
+    and side calls go to bonsai-a4000 ("2. Yes"), its main card -np 1."""
+    reload(None, table=_table_file())
+    _LOADED.clear()
+    import tier_models
+    t = tier_models.table()
+    rows = {m: t.helpers(m) for m in t.models}
+    check(all((h.get("decider") or "self") == (h.get("side_calls") or "self") for h in rows.values()),
+          "every row names ONE helper for jjava and side calls (slots._helper_server_grant relies on it)", rows)
+    check(rows["bonsai"].get("decider") == "bonsai-a4000" and rows["bonsai"].get("side_calls") == "bonsai-a4000",
+          "bonsai's jjava and side calls: bonsai-a4000", rows["bonsai"])
+    for card in ("bonsai", "flash-next"):
+        _LOADED.clear()
+        _LOADED.add(card)
+        d = max_mode.decide("medium", True, kind="compaction")
+        check(d.model == card and not d.refuse, f"a compaction while {card} holds the card stays on {card}",
+              d.record())
+        d = max_mode.decide("medium", True, kind="title")
+        check(d.model == "bonsai-a4000", f"... while a title side call on {card}'s watch goes to bonsai-a4000",
+              d.record())
+        ok, why = max_mode.touch_allowed("compaction", card)
+        check(ok, f"touch_allowed('compaction') on locked {card}: allowed (the one exception)", why)
+        ok_d, _ = max_mode.touch_allowed("decider", card)
+        check(not ok_d, f"... while jjava on locked {card} is not")
+    _LOADED.clear()
+    _LOADED.add("flash-next")
+    lease = max_mode.Lease(max_mode.decide("max", False))
+    d = max_mode.decide("max", True, kind="compaction")
+    check(d.model == "flash-next" and not d.refuse, "a max conversation's compaction, its request in flight: flash-next",
+          d.record())
+    lease.release()
+    _LOADED.clear()
+    reload(None)
+
+
+def test_internal_work_leaves_a_locked_card():
+    """INTERNAL GENERATION NEVER REACHES A LOCKED CARD (coordinator, 2026-09-30): every generation through the one
+    door (mcp/model.py post / chat / ask: summarize_text, the worker, the skill pipeline, skill_prove, the questions
+    bank, skill_select's fallback decider) goes to the table's helper, bonsai-a4000, whenever the card's model is
+    locked -- inside a conversation's request or not. An unlocked card keeps it; bonsai-vision is untouched. And
+    none of those callers reaches a model except through that door."""
+    import gpu_room
+    import model
+    reload(None, table=_table_file())
+    sent: list = []
+
+    class _R:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.body
+
+    def spy(req, *a, **k):
+        url = req if isinstance(req, str) else req.full_url
+        body = json.loads(req.data.decode()) if getattr(req, "data", None) else {}
+        sent.append((url, body.get("model")))
+        return _R(json.dumps({"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                              "usage": {"prompt_tokens": 3, "completion_tokens": 1}}).encode())
+    saved_open, saved_use = urllib.request.urlopen, gpu_room.use
+    import contextlib
+    gpu_room.use = lambda *a, **k: contextlib.nullcontext()
+    urllib.request.urlopen = spy
+    msgs = [{"role": "user", "content": "Summarize: a b c."}]
+    try:
+        for card in ("bonsai", "flash-next"):
+            _LOADED.clear()
+            _LOADED.add(card)
+            sent.clear()
+            model.ask(msgs)                                          # summarize_text, the worker, skill_select
+            model.chat(msgs, effort="medium", max_tokens=64)         # the questions bank
+            model.post(model.shape({"messages": msgs}, "medium", role="helper"))   # skill_pipeline / skill_prove
+            tok, ctx = bound(card)
+            try:
+                model.ask(msgs)                                      # inside a conversation's request
+            finally:
+                ctx.__exit__(None, None, None)
+            check(len(sent) == 4 and all(m == "bonsai-a4000" for _, m in sent)
+                  and not any("/upstream/" in u for u, _ in sent),
+                  f"{card} locked on the card: every internal generation goes to bonsai-a4000, none to the card",
+                  sent)
+        _LOADED.clear()
+        _LOADED.add("mirai-s")
+        sent.clear()
+        tok, ctx = bound("mirai-s")
+        try:
+            model.ask(msgs)
+        finally:
+            ctx.__exit__(None, None, None)
+        check([m for _, m in sent] == ["mirai-s"], "an UNLOCKED card (mirai-s) keeps its own internal work", sent)
+        _LOADED.clear()
+        _LOADED.add("bonsai")
+        check(max_mode.internal_model("bonsai-vision") == "bonsai-vision"
+              and max_mode.internal_model("bonsai-a4000") == "bonsai-a4000",
+              "bonsai-vision and the helper itself are not re-routed")
+    finally:
+        urllib.request.urlopen, gpu_room.use = saved_open, saved_use
+        _LOADED.clear()
+        reload(None)
+    here = os.path.dirname(os.path.abspath(__file__))
+    direct = []
+    for f in ("code_search.py", "worker.py", "skill_pipeline.py", "skill_prove.py", "skill_questions_bank.py",
+              "skill_select.py", "skill_deciders.py"):
+        src = open(os.path.join(here, f), encoding="utf-8").read()
+        if "chat/completions" in src or re.search(r"[\"'/]completion[\"'?]", src):
+            direct.append(f)
+    check(not direct, "none of those callers generates except through mcp/model.py (the one door)", direct)
+
+
+def test_helper_window_and_fit():
+    """A JOB ROUTED TO bonsai-a4000 IS BUDGETED AGAINST ITS OWN WINDOW (coordinator, 2026-09-30): the table's fitted
+    141,312 (main cap 138,240), not the main line; an oversize job is refused with its sizes BEFORE anything is sent
+    (model.WindowExceeded), never cut off mid-generation; and a job claimed for the A4000 never reaches the main card
+    (max_mode.check_scope)."""
+    import budget
+    import model
+    import tiers
+    reload(None, table=_table_file())
+    _LOADED.clear()
+    _LOADED.add("bonsai")
+    saved_open = urllib.request.urlopen
+    try:
+        w = budget.model_window("bonsai-a4000") or {}
+        check(w.get("ctx") == 141312 and w.get("main_cap") == 138240,
+              "the table carries bonsai-a4000's fitted window (bench/a4000_fit.py)", w)
+        check(tiers.window_model_of("bonsai-a4000") == "bonsai-a4000" and tiers.window_model_of("bonsai") is None
+              and tiers.window_model_of("yamadori") is None,
+              "only a helper server's own window replaces the request's (a main model's follows it as before)")
+        big = "word " * 60000                                         # ~100K tokens by the high estimate
+        shaped = model.shape({"messages": [{"role": "user", "content": big}]}, "medium", role="helper")
+        est = tiers.estimate_prompt_tokens(shaped)
+        check(shaped.get("model") == "bonsai-a4000" and shaped["max_tokens"] + est <= 138240,
+              "a locked card's job is shaped for bonsai-a4000: prompt + max_tokens within its 138,240 cap",
+              {"model": shaped.get("model"), "max_tokens": shaped.get("max_tokens"), "prompt_est": est})
+        sent: list = []
+        urllib.request.urlopen = lambda req, *a, **k: sent.append(req) or (_ for _ in ()).throw(OSError("x"))
+        huge = "word " * 90000                                        # ~150K tokens by the estimate: past 138,240
+        try:
+            model.post(model.shape({"messages": [{"role": "user", "content": huge}]}, "medium"))
+            check(False, "an oversize job is refused")
+        except model.WindowExceeded as e:
+            check(e.model == "bonsai-a4000" and e.window == 138240 and e.prompt > 138240 - e.floor and not sent
+                  and "retryable: no" in str(e),
+                  "an oversize job is refused before anything is sent, with its sizes (prompt, floor, window)",
+                  str(e)[:300])
+        send = {"model": "bonsai-a4000", "messages": [{"role": "user", "content": big}], "max_tokens": 200000,
+                "reasoning_budget_tokens": 190000}
+        rec = model.fit_window(send)
+        check(rec and send["max_tokens"] + tiers.estimate_prompt_tokens(send) <= 138240
+              and send["reasoning_budget_tokens"] <= send["max_tokens"] - tiers.A_MIN,
+              "a request that fits has max_tokens and its thinking cut to what the window leaves", rec)
+        check(model.fit_window({"model": "bonsai", "messages": [], "max_tokens": 10**6}) is None,
+              "the main card's own requests are untouched by the helper's window")
+        # the card scope
+        _LOADED.clear()
+        _LOADED.add("mirai-s")
+        max_mode.set_scope("gpu_a4000")
+        try:
+            try:
+                max_mode.check_scope("mirai-s")
+                check(False, "a job claimed for the A4000 cannot reach the main card")
+            except max_mode.ModelAtCapacity as e:
+                check("gpu_a4000" in str(e), "a job claimed for the A4000 whose route names a main model waits "
+                      "(ModelAtCapacity: the worker defers it)", str(e)[:200])
+            max_mode.check_scope("bonsai-a4000")
+            check(True, "... and reaches bonsai-a4000 freely")
+        finally:
+            max_mode.set_scope(None)
+        max_mode.check_scope("mirai-s")
+        check(True, "outside an A4000 job nothing changes")
+    finally:
+        urllib.request.urlopen = saved_open
+        _LOADED.clear()
+        reload(None)
+
+
+def test_gpu_lane_per_card():
+    """THE WORKER'S GPU LANE PER CARD (coordinator, 2026-09-30; mcp/jobs.py GPU_SCOPES): an embedding job is the
+    A4000's always; a model stage's job is the A4000's while the main card is locked, the main card's otherwise; a
+    5060 Ti window's jobs.pause("gpu") no longer holds the A4000's jobs (and pause("gpu_a4000") holds only them);
+    one running job per card; anything unrouted keeps lane gpu."""
+    import jobs
+    reload(None, table=_table_file())
+    try:
+        _LOADED.clear()
+        _LOADED.add("bonsai")
+        check(jobs.internal_off_main(), "bonsai locked on the card: internal generation is off the main card")
+        e = jobs.add("dataset.index", {}, lane="gpu")               # a legacy row: queued on lane gpu
+        m = jobs.add("skill.prove", {}, lane="gpu")
+        u = jobs.add("test.unrouted", {}, lane="gpu")
+        jobs.pause("gpu", by="test", why="a 5060 Ti window")
+        got = [jobs.claim("gpu_a4000", "t:a")]
+        check(got[0] and got[0]["id"] in (e, m) and got[0]["card"] == "gpu_a4000",
+              "the 5060 Ti's pause does not hold the A4000's jobs", got)
+        check(jobs.claim("gpu_a4000", "t:a2") is None, "one running job per card (the A4000's slot is taken)")
+        check(jobs.claim("gpu", "t:g") is None, "the paused main card hands out nothing")
+        jobs.finish(got[0]["id"], {})
+        second = jobs.claim("gpu_a4000", "t:a")
+        check(second and {got[0]["id"], second["id"]} == {e, m},
+              "the embedding job and the locked card's model job both run on the A4000", second)
+        jobs.resume("gpu")
+        g = jobs.claim("gpu", "t:g")
+        check(g and g["id"] == u and g["card"] == "gpu", "an unrouted job stays on the main card's lane", g)
+        jobs.finish(second["id"], {})
+        jobs.finish(g["id"], {})
+        # unlocked card: a model job is the main card's
+        _LOADED.clear()
+        _LOADED.add("mirai-s")
+        m2 = jobs.add("skill.review", {}, lane="gpu")
+        check(jobs.claim("gpu_a4000", "t:a") is None, "an unlocked card (mirai-s): a model job is not the A4000's")
+        g2 = jobs.claim("gpu", "t:g")
+        check(g2 and g2["id"] == m2, "... it runs on the main card's lane", g2)
+        jobs.finish(m2, {})
+        jobs.pause("gpu_a4000", by="test", why="an A4000 window")
+        e2 = jobs.add("package.knn", {}, lane="gpu_a4000")
+        check(jobs.claim("gpu_a4000", "t:a") is None and jobs.claimable("gpu_a4000") == 1,
+              "an A4000 window pauses only its own card's jobs", e2)
+        jobs.resume("gpu_a4000")
+        jobs.finish(jobs.claim("gpu_a4000", "t:a")["id"], {})
+    finally:
+        jobs.resume("gpu")
+        jobs.resume("gpu_a4000")
+        _LOADED.clear()
+        reload(None)
+
+
+def test_other_card_table():
+    """THE OTHER CARD in the table (operator, 2026-09-30): bonsai's other card is bonsai-a4000; flash-next and mirai-s
+    have none (their newcomer is refused, never downgraded) unless the one switch YAMADORI_OTHER_CARD_DOWNGRADE=1."""
+    reload(None, table=_table_file())
+    try:
+        oc, _ = max_mode.other_card("bonsai")
+        fn, why_fn = max_mode.other_card("flash-next")
+        ms, _ = max_mode.other_card("mirai-s")
+        check(oc == "bonsai-a4000" and fn is None and ms is None and "does not run" in why_fn,
+              "bonsai -> bonsai-a4000; flash-next and mirai-s: none", (oc, fn, ms, why_fn))
+        os.environ["YAMADORI_OTHER_CARD_DOWNGRADE"] = "1"
+        dn, why_dn = max_mode.other_card("flash-next")
+        check(dn == "bonsai-a4000" and "DOWNGRADED" in why_dn,
+              "the one switch YAMADORI_OTHER_CARD_DOWNGRADE=1 serves them on the default model's, and says so", why_dn)
+    finally:
+        os.environ.pop("YAMADORI_OTHER_CARD_DOWNGRADE", None)
+        reload(None)
+    check(max_mode.other_card("bonsai")[0] is None, "with the table off: no other card (the 503 as before)")
+
+
+def test_rerouted_turn_releases_its_lease():
+    """A CONVERSATION ROUTED TO THE OTHER CARD HOLDS NO MAIN-CARD LEASE (coordinator, 2026-09-30): server._serve_turn
+    took a lease for bonsai; once proxy._run_turn re-binds the turn to bonsai-a4000 (max_mode.set_current, after
+    slots.check_owner routed it), the lease is released -- so a max request's swap to flash-next is not held behind
+    it. A main -> main re-bind and a side call's own helper lease are untouched; the server's later release is a
+    no-op. The blocking path carries the lease on its token too (server._complete_on)."""
+    import server
+    reload(None, table=_table_file())
+    _LOADED.clear()
+    _LOADED.add("bonsai")
+    try:
+        lease = max_mode.Lease(max_mode.decide("medium", False))
+        check(lease.model == "bonsai" and max_mode._inflight.get("bonsai") == 1, "a bonsai turn holds its lease")
+        tok = cancel.Token()
+        tok.yamadori_lease = lease
+        with cancel.bound(tok):
+            max_mode.set_current("bonsai")                       # the decision's own model: nothing changes
+            held = not lease.released
+            max_mode.set_current("bonsai-a4000")                 # routed to the other card
+        check(held and lease.released and max_mode._inflight.get("bonsai") == 0
+              and (getattr(tok, "yamadori_rerouted", None) or {}).get("to") == "bonsai-a4000",
+              "routed to bonsai-a4000: the bonsai lease is released (nothing in flight on the main card)",
+              getattr(tok, "yamadori_rerouted", None))
+        mx = max_mode.decide("max", False)
+        check(mx.model == "flash-next" and not mx.refuse and max_mode._switching_to in (None, "flash-next"),
+              "a max request then finds no bonsai work in flight to wait behind", mx.record())
+        max_mode.release(lease)
+        check(max_mode._inflight.get("bonsai") == 0, "the server's later release is a no-op (never below zero)")
+        side = max_mode.Lease(max_mode.decide("medium", True))
+        tok2 = cancel.Token()
+        tok2.yamadori_lease = side
+        with cancel.bound(tok2):
+            max_mode.set_current(side.model)
+        check(side.model == "bonsai-a4000" and not side.released,
+              "a side call's own bonsai-a4000 lease is untouched")
+        side.release()
+        # the blocking path: the lease rides on the token proxy.complete runs under
+        seen = {}
+        saved = server.proxy.complete
+
+        def fake_complete(body):
+            seen["lease"] = getattr(cancel.current(), "yamadori_lease", None)
+            return {}
+        server.proxy.complete = fake_complete
+        try:
+            t = cancel.Token()
+            t.yamadori_lease = "L"
+            server._complete_on(t, {})
+        finally:
+            server.proxy.complete = saved
+        check(seen.get("lease") == "L", "the blocking path runs the turn under the token carrying its lease")
+    finally:
+        _LOADED.clear()
+        reload(None)
+
+
+def test_utility_kind():
+    """max_mode.utility_kind: None for a task turn, 'compaction' for a harness's summary request (the kind the
+    routing above reads; selection.utility_kind)."""
+    reload(None, table=_table_file())
+    task = {"messages": [{"role": "user", "content": "Write a function that adds two numbers."}]}
+    comp = {"messages": [{"role": "system", "content": "You are a helpful assistant."},
+                         {"role": "user", "content": "Summarize this conversation so far for a continuation."}]}
+    k0, k1 = max_mode.utility_kind(task), max_mode.utility_kind(comp)
+    check(k0 is None and max_mode.is_utility(task) is False, "a task turn has no utility kind", k0)
+    check(k1 == "compaction" and max_mode.is_utility(comp), "a summarise request is a compaction", k1)
+    reload(None)
+
+
 def main() -> int:
     for fn in (test_off_by_default, test_routing, test_capacity_refusal, test_swap_waits_never_cancels,
                test_inheritance_and_no_reload, test_worker_defers, test_decider_per_model,
                test_thinking_at_max_follows_the_card, test_server_admission,
                test_table_routing_and_ranks, test_table_capacity_and_preemption, test_table_profile_applied,
                test_table_windows_and_vision, test_table_server_records, test_no_offline_swap,
-               test_legacy_is_inert):
+               test_legacy_is_inert, test_decider_per_table_model, test_locked_card_is_untouched,
+               test_compaction_stays_on_its_card, test_utility_kind, test_internal_work_leaves_a_locked_card,
+               test_helper_window_and_fit, test_gpu_lane_per_card, test_other_card_table,
+               test_rerouted_turn_releases_its_lease, test_live_table_locks_every_main_model):
         try:
             fn()
         except Exception as e:                                       # noqa: BLE001

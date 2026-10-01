@@ -17,14 +17,15 @@ so effort is held fixed across arms (tiers shift effort otherwise -- harm 4 in
 SELECTION-BUILD). A flag named in the header is FORCED; a flag left out is the
 selection engine's call (mcp/selection.py `_forced`).
 
-  A0  everything forced off: the model as it ships
-  A1  retrieval only        A2  hints only
-  A3  deep thinking only (forced on with retrieval OFF; its tools come from
-      proxy.deep_thinking_tools(), not the request -- analyse.py reports how
-      often it actually searched, which is the evidence it had tools)
-  A4  fan-out only, N=3
-  A5  nothing forced: the selection engine decides (header carries only effort)
+  A0  everything forced off (skills, concept seed, MCP tools): the model
+      as it ships
+  A2  skills only
+  A5  nothing forced: the tier decides (header carries only effort)
   A6  everything forced on
+
+  Retrieval (A1), deep thinking (A3) and fan-out (A4), and check_code and
+  repair in A6, were removed from the proxy on 2026-09-29 (docs/REMOVED.md).
+  Their rows in old run dirs are kept as recorded; analyse.py still reads them.
 
 THE THINKING-CAP ARMS (let it cook)
 
@@ -43,7 +44,7 @@ THE SELF-CHECK ARMS (the model may compile its own answer)
                     `tools`: `check_solution {"code": string}`. This runner is
                     the client harness (as Hermes or Claude Code would be):
                     the proxy passes the client's tools through untouched
-                    (proxy.main_tools; ours are the second brain's) and
+                    (proxy.main_tools: the client's tools first) and
                     returns a call to it to the client (proxy.complete, the
                     `not ours` return). The runner then runs grade.public_check:
                     the grader's extract + compile stages against the real
@@ -96,10 +97,10 @@ SHARED CARD, STYLE, CORPUS
 A ROW THE STACK DID NOT RUN AS ASKED IS NOT A RESULT
 
 Every response's `x_yamadori` is checked against the arm (`verify`). A row
-whose record contradicts its arm -- tools gated when retrieval was off, hints
-emitted when forced off, deep thinking chosen but never run, fan-out asked for
-3 and delivered 2 -- is `stack_error`, as is HTTP != 200, finish != stop, an
-exception, or a grader that could not run (stage `error`). None of those is
+whose record contradicts its arm -- skills emitted when forced off, a concept
+seed drawn or MCP tools offered when forced off -- is `stack_error`, as is
+HTTP != 200, finish != stop, an exception, or a grader that could not run
+(stage `error`). None of those is
 ever scored as a model failure (PROTOCOL rule 3).
 
 RESUME
@@ -172,27 +173,26 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 MCP = os.path.join(ROOT, "mcp")
 RESULTS = os.path.join(HERE, "results")
 PROXY = os.environ.get("YAMADORI_PROXY", "http://127.0.0.1:1234")
-LAYA = os.environ.get("LAYA_URL", "http://127.0.0.1:1237")
 PY = sys.executable
 
 sys.path.insert(0, HERE)
 
 # ---------------------------------------------------------------- the arms --
-ALL_OFF = {"retrieval": False, "hints": False, "investigate": False, "fanout": 1}
-FANOUT_N = 3
+# Every augmentation the stack still has, forced off: skills, the concept
+# seed and the MCP host's tools. Retrieval, deep thinking, fan-out, check_code
+# and repair were removed 2026-09-29 (docs/REMOVED.md), and with them arms
+# A1 (retrieval only), A3 (deep thinking only) and A4 (fan-out only); their
+# rows in old run dirs stay as they were recorded (analyse.py reads them).
+ALL_OFF = {"skills": False, "seed": False, "mcp_tools": False}
 
 ARMS: dict[str, dict] = {
     "A0": dict(ALL_OFF),
-    "A1": dict(ALL_OFF, retrieval=True),
-    "A2": dict(ALL_OFF, hints=True),
-    "A3": dict(ALL_OFF, investigate=True),
-    "A4": dict(ALL_OFF, fanout=FANOUT_N),
+    "A2": dict(ALL_OFF, skills=True),
     "A5": {},                                   # nothing forced: selection decides
-    # Everything the stack has, forced on: check_code (the proxy's parse /
-    # format tool) and repair (its feedback pass on broken final code) were
-    # added 2026-09-23 and are forced here too (operator decision).
-    "A6": {"retrieval": True, "hints": True, "investigate": True,
-           "fanout": FANOUT_N, "check_code": True, "repair": True},
+    # Everything the stack has, forced on. Until 2026-09-29 this also forced
+    # retrieval, deep thinking, fan-out, check_code and repair; a run dir made
+    # before then keeps that definition in its manifest's arms_history.
+    "A6": {"skills": True, "seed": True, "mcp_tools": True},
     # The thinking-cap dimension: A0 with only the runaway breaker moved.
     "C8": dict(ALL_OFF, reasoning_cap=8192),
     "C32": dict(ALL_OFF, reasoning_cap=32768),
@@ -204,11 +204,9 @@ for _s, _a in SELF_CHECK.items():
     ARMS[_s] = dict(ARMS[_a])
 ARM_NOTES = {
     "A0": "everything off (the model as it ships)",
-    "A1": "retrieval only", "A2": "hints only",
-    "A3": "deep thinking only (retrieval off)",
-    "A4": f"fan-out only (N={FANOUT_N})",
-    "A5": "all allowed, fired by the selection engine",
-    "A6": "all forced on (incl. check_code and repair)",
+    "A2": "skills only",
+    "A5": "nothing forced: the tier's defaults",
+    "A6": "all forced on (skills, concept seed, MCP tools)",
     "C8": "A0, thinking cap 8192", "C32": "A0, thinking cap 32768 (reference)",
     "C128": "A0, thinking cap 131072 (effectively unlimited)",
     "S0": "A0 + check_solution (compile only; hidden tests never run)",
@@ -248,7 +246,8 @@ CHECK_TOOL = {"type": "function", "function": {
 # think alone can exceed 30 minutes on this card.
 MIN_TIMEOUT = 3600.0
 # Decode speed floor used to size a capped arm's timeout, tokens/s. Measured
-# 16-40 tok/s on the shared lanes (fanout.run docstring); 12 leaves room for
+# 16-40 tok/s on the shared lanes (fanout.run's docstring; fan-out was removed
+# 2026-09-29); 12 leaves room for
 # the dataset worker contending for the card.
 SLOW_TOK_S = 12.0
 
@@ -289,18 +288,15 @@ def _skills_flag(d: dict):
 def expected(arm: str) -> dict:
     """What `x_yamadori` must show for this arm. Keys absent = not constrained."""
     forced = ARMS[arm]
+    # skills is the one selection flag left (mcp/selection.py `decide`).
     exp: dict = {"forced": sorted(
-        ("skills" if k == "hints" else k)
-        for k in ("hints", "skills", "investigate", "fanout") if k in forced)}
-    # retrieval is not a selection flag: the tier's retrieval decides whether
-    # the tool gate is consulted at all (proxy.prepare).
-    exp["gate_consulted"] = bool(forced.get("retrieval", True))
+        {"skills" for k in ("hints", "skills") if k in forced})}
     if _skills_flag(forced) is not None:
         exp["skills"] = _skills_flag(forced)
-    if "investigate" in forced:
-        exp["investigate"] = forced["investigate"]
-    if "fanout" in forced:
-        exp["fanout_n"] = forced["fanout"]
+    # The concept seed and the MCP tools are the proxy's, not selection's.
+    for k in ("seed", "mcp_tools"):
+        if k in forced:
+            exp[k] = forced[k]
     if "reasoning_cap" in forced:
         exp["reasoning_cap"] = min(max(int(forced["reasoning_cap"]), 1024), 131072)
     return exp
@@ -323,89 +319,41 @@ def verify(arm: str, effort: str, x: dict | None, *, finish: str,
         if got != exp["reasoning_cap"]:
             bad.append(f"reasoning_budget_tokens {got}, arm sent cap "
                        f"{exp['reasoning_cap']} (header not honoured?)")
-    gate = x.get("tools_gate")
-    if exp["gate_consulted"] and not isinstance(gate, dict):
-        bad.append("retrieval on but no tools_gate decision recorded")
-    if not exp["gate_consulted"] and gate is not None:
-        bad.append(f"retrieval forced off but tools_gate ran: {json.dumps(gate)[:160]}")
+    # The concept seed (x_yamadori.session.seed: the conversation's, drawn on
+    # its first request) and the MCP tools (x_yamadori.mcp), when the arm
+    # forces them. A seed is never checked PRESENT: the proxy draws none when
+    # the token-embedding matrix is not extracted (concept_seed), which costs
+    # nothing and is not the arm failing.
+    seed = (x.get("session") or {}).get("seed") \
+        if isinstance(x.get("session"), dict) else None
+    if exp.get("seed") is False and seed:
+        bad.append(f"seed forced off but a concept seed was drawn: {seed.get('word')!r}"
+                   if isinstance(seed, dict) else "seed forced off but a concept seed was drawn")
+    mcp = x.get("mcp") if isinstance(x.get("mcp"), dict) else {}
+    if exp.get("mcp_tools") is False and mcp.get("offered"):
+        bad.append(f"mcp_tools forced off but offered {mcp.get('offered')}")
+    if exp.get("mcp_tools") is True and not (mcp.get("switch") or {}).get("on"):
+        bad.append(f"mcp_tools forced on but the switch reads "
+                   f"{json.dumps(mcp.get('switch'))[:80]}")
 
     sel = x.get("selection")
     if not isinstance(sel, dict):
         return bad + ["no selection record"]
     sig = sel.get("signals") or {}
-    got_forced = sorted(("skills" if k == "hints" else k)
-                        for k in (sig.get("forced") or [])
-                        if k in ("hints", "skills", "investigate", "fanout"))
+    got_forced = sorted({"skills" for k in (sig.get("forced") or [])
+                         if k in ("hints", "skills")})
     if got_forced != exp["forced"]:
         bad.append(f"selection saw forced={sig.get('forced')}, arm forces "
                    f"{exp['forced']} (header not applied?)")
-    if twin(arm) == "A5":
-        allowed = sig.get("allowed") or {}
-        if not (_skills_flag(allowed) and allowed.get("investigate")
-                and int(allowed.get("fanout") or 1) > 1):
-            bad.append(f"A5 must allow everything; selection saw allowed={allowed}")
     if "skills" in exp and bool(_skills_flag(sel)) != exp["skills"]:
         bad.append(f"selection.skills={_skills_flag(sel)}, arm forces "
                    f"{exp['skills']}")
-    if "investigate" in exp and bool(sel.get("investigate")) != \
-            exp["investigate"]:
-        bad.append(f"selection.investigate={sel.get('investigate')}, arm "
-                   f"forces {exp['investigate']}")
-    if "fanout_n" in exp and int(sel.get("fanout_n") or 0) != exp["fanout_n"]:
-        bad.append(f"selection.fanout_n={sel.get('fanout_n')}, arm forces "
-                   f"{exp['fanout_n']}")
-
-    # check_code and repair, when the arm forces them, must be in effect.
-    forced = ARMS[arm]
-    if forced.get("check_code") is True:
-        cc = x.get("check_code")
-        if not isinstance(cc, dict):
-            bad.append("check_code forced on but x_yamadori has no check_code record")
-        elif not cc.get("offered"):
-            bad.append("check_code forced on but not offered")
-    if forced.get("repair") is True:
-        rp = x.get("repair")
-        if not (isinstance(rp, dict) and rp.get("enabled")):
-            bad.append(f"repair forced on but x_yamadori.repair={json.dumps(rp)[:80]}")
 
     # What the selection chose must then have HAPPENED.
     emitted = ((x.get("skills") or {}).get("ids") or []) \
         if isinstance(x.get("skills"), dict) else []
     if not _skills_flag(sel) and emitted:
         bad.append(f"skills off but {len(emitted)} injected")
-    inv = x.get("investigate")
-    if sel.get("investigate"):
-        if not isinstance(inv, dict):
-            bad.append("deep thinking chosen, no investigate record")
-        elif not inv.get("ran"):
-            bad.append(f"deep thinking chosen but did not run: {inv.get('why')}")
-    elif inv is not None:
-        bad.append(f"deep thinking not chosen but an investigate record exists: "
-                   f"{json.dumps(inv)[:160]}")
-    n = int(sel.get("fanout_n") or 1)
-    fan = x.get("fanout")
-    if n > 1:
-        # _fan_out runs only on a finished text answer; with no content the
-        # answer is an extract failure, and the missing fan-out is not the arm's.
-        if finish == "stop" and content.strip():
-            if not isinstance(fan, dict):
-                bad.append(f"fan-out {n} chosen, no fanout record")
-            elif fan.get("mode") == "sequential":
-                # Sequential fan-out (mcp/fanout.py, 2026-09-23): n is the
-                # MOST candidates, the original included, and the procedure
-                # stops at 2 when the grade is clear. So 2..n candidates is
-                # the arm working; a skipped or failed one is not.
-                got = int(fan.get("n") or 0)
-                if fan.get("error") or fan.get("skipped") or not 2 <= got <= n:
-                    bad.append(f"fan-out asked up to {n}, got {got} candidates"
-                               + (f" ({fan.get('error') or fan.get('skipped')})"
-                                  if fan.get("error") or fan.get("skipped")
-                                  else ""))
-            elif fan.get("error") or int(fan.get("n") or 0) != n:
-                bad.append(f"fan-out asked {n}, delivered {fan.get('n')}"
-                           + (f" ({fan.get('error')})" if fan.get("error") else ""))
-    elif fan is not None:
-        bad.append(f"fan-out 1 chosen but a fanout record exists: {json.dumps(fan)[:160]}")
     return bad
 
 
@@ -641,7 +589,6 @@ def run_one(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
     with open(os.path.join(cfg["run_dir"], ans_rel), "w", encoding="utf-8") as f:
         json.dump({"task": task["id"], "arm": arm, "attempt": attempt,
                    "content": content, "reasoning_content": reasoning,
-                   "fanout": (d.get("_fanout") if isinstance(d, dict) else None),
                    "error": error}, f, ensure_ascii=False, indent=1)
     row["answer_file"] = ans_rel
 
@@ -865,8 +812,6 @@ def run_self_check(task: dict, arm: str, cfg: dict, grade_fn, attempt: int,
     with open(os.path.join(cfg["run_dir"], ans_rel), "w", encoding="utf-8") as f:
         json.dump({"task": task["id"], "arm": arm, "attempt": attempt,
                    "content": content, "reasoning_content": p["reasoning"],
-                   "fanout": (last_d.get("_fanout") if isinstance(last_d, dict)
-                              else None),
                    "rounds": rounds, "messages": messages, "error": error},
                   f, ensure_ascii=False, indent=1)
     row["answer_file"] = ans_rel
@@ -1096,16 +1041,6 @@ def attach_style(row: dict, task: dict, cfg: dict, style_fn) -> dict:
     return row
 
 
-HELPER_WAIT_S = float(os.environ.get("DOMAIN_HELPER_WAIT_S", 60))
-
-
-def helper_busy(row: dict) -> bool:
-    """A void row whose only fault is that the helper lane was taken."""
-    ms = row.get("mismatch") or []
-    return (row.get("stack_error_kind") == "mismatch" and bool(ms)
-            and all("helper lane is busy" in m for m in ms))
-
-
 def import_rows(src_dir: str, dst_dir: str, tasks: list[dict],
                 arms: list[str]) -> int:
     """Copy scored (pass/fail) last rows for these (task, arm) pairs from
@@ -1203,26 +1138,9 @@ def _run_todo(todo, cfg, grade_fn, log, check_fn, style_fn, attempts, last,
             row = regrade(prev, t, cfg, grade_fn, attempt)
         else:
             row = run_one(t, a, cfg, grade_fn, attempt, check_fn)
-            # Deep thinking needs the ONE helper lane. Busy is "not run", not
-            # a row: wait and ask again. Each discarded attempt keeps its
-            # answer file; the count and the time are on the final row.
-            waits, wasted = 0, 0.0
-            while (row["outcome"] == "stack_error" and helper_busy(row)
-                   and waits * HELPER_WAIT_S < BUSY_MAX_S):
-                wasted += float(row.get("seconds") or 0)
-                log(f"  {t['id']} {a}: helper lane busy (attempt {attempt}, "
-                    f"{row.get('seconds')}s generated and discarded); waiting "
-                    f"{HELPER_WAIT_S:.0f}s, then asking again")
-                cfg.get("sleep", time.sleep)(HELPER_WAIT_S)
-                waits += 1
-                attempt += 1
-                row = run_one(t, a, cfg, grade_fn, attempt, check_fn)
+            # (The helper-lane-busy retry went with deep thinking, 2026-09-29.)
             import analyse
             row = analyse.annotate([row])[0]
-            if waits:
-                row["helper_busy_retries"] = waits
-                row["helper_busy_wait_s"] = waits * HELPER_WAIT_S
-                row["helper_busy_wasted_s"] = round(wasted, 1)
         attach_style(row, t, cfg, style_fn)
         try:
             import analyse
@@ -1336,17 +1254,6 @@ def _check_listener_and_freshness() -> list[tuple[bool, str, str]]:
     return res
 
 
-def _check_laya() -> tuple[bool, str, str]:
-    try:
-        with urllib.request.urlopen(f"{LAYA}/heads", timeout=15) as r:
-            d = json.load(r)
-        ri = (d.get("tasks") or {}).get("route_in") or {}
-        return (bool(ri.get("loaded")), "laya_route_in",
-                f"route_in loaded={ri.get('loaded')} kind={ri.get('kind')}")
-    except Exception as e:                                       # noqa: BLE001
-        return False, "laya_route_in", f"{LAYA}/heads: {type(e).__name__}: {e}"
-
-
 def _check_skill_store() -> tuple[bool, str, str]:
     """The skills arm needs armed skills (the hints corpus was migrated into
     the skill store on 2026-09-26; mcp/skill_migrate.py)."""
@@ -1358,38 +1265,6 @@ def _check_skill_store() -> tuple[bool, str, str]:
                 f"{os.path.basename(os.path.abspath(skills.STORE))}")
     except Exception as e:                                       # noqa: BLE001
         return False, "skill_store", f"{type(e).__name__}: {e}"
-
-
-# The packages the graded tasks are pinned to (grade.py). Above this share of
-# zero vectors an index is an outage, not a fallback (PROTOCOL rule 2).
-PACKAGES = {"typegpu": "0.12.5", "three": "0.185.1"}
-MAX_ZERO_SHARE = 0.01
-
-
-def _check_package_vectors() -> tuple[bool, str, str]:
-    try:
-        if MCP not in sys.path:
-            sys.path.insert(0, MCP)
-        import deps
-        import domains
-        held = domains.held_sources()
-        bits, ok = [], True
-        for name, ver in PACKAGES.items():
-            db = next((d for v, d in held.get(name, []) if v == ver), None)
-            if not db:
-                ok = False
-                bits.append(f"{name}@{ver} not held (have {[v for v, _ in held.get(name, [])]})")
-                continue
-            h = deps.index_health(db, measure_bytes=False)
-            share = h["zero_vectors"] / h["chunks"] if h["chunks"] else 1.0
-            good = (h["ok"] and h["vectors"] in ("all", "partial")
-                    and h.get("norm_ok") and share <= MAX_ZERO_SHARE)
-            ok = ok and bool(good)
-            bits.append(f"{name}@{ver}: {h['chunks']} chunks, {h['zero_vectors']} "
-                        f"zero, norm_ok={h.get('norm_ok')}")
-        return ok, "package_vectors", "; ".join(bits)
-    except Exception as e:                                       # noqa: BLE001
-        return False, "package_vectors", f"{type(e).__name__}: {e}"
 
 
 _SHINGLE = 8
@@ -1516,9 +1391,7 @@ def preflight(key_file: str, log=print,
 
     for c in _check_listener_and_freshness():
         add(c)
-    add(_check_laya())
     add(_check_skill_store())
-    add(_check_package_vectors())
     add(_check_no_task_leak())
     add_cmd("run_tests", [PY, os.path.join("scripts", "run_tests.py")])
     add_cmd("live_stack", [PY, os.path.join("mcp", "test_live_stack.py"),
@@ -1672,8 +1545,8 @@ def main(argv: list[str] | None = None) -> int:
                          "(tiers.budget adds the thinking cap on top)")
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--timeout", type=float, default=7200.0,
-                    help="seconds per request, never below 3600; A6 is "
-                         "investigation + fan-out; C arms get cap/12 tok/s + 1800")
+                    help="seconds per request, never below 3600; "
+                         "C arms get cap/12 tok/s + 1800")
     ap.add_argument("--proxy", default=PROXY)
     ap.add_argument("--preflight-only", action="store_true")
     ap.add_argument("--override-preflight", default="",
@@ -1787,7 +1660,8 @@ def _run(args, key, arms, checks, failed, overridden, run_id) -> int:
             old_a = man.setdefault("arms", {}).setdefault(a, new)
             if a in arms and old_a != new:
                 # An arm redefined since the dir was made (A6 gained
-                # check_code + repair): the current definition wins, the old
+                # check_code + repair, then lost every removed feature on
+                # 2026-09-29): the current definition wins, the old
                 # one is kept, and each row's features_sent says which it ran.
                 man.setdefault("arms_history", []).append(
                     {"arm": a, "was": old_a, "replaced_at": time.time()})

@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """THE BONSAI TYPED DECIDER (mcp/decider_bonsai.py), measured on the labels
-the CLM yes/no run used (bench/clm/yesno.py), so the two line up.
+in bench/decider/decider_labels.py (first written for the CLM yes/no run,
+bench/clm/yesno.py; CLM and its recorded columns were removed 2026-09-29 --
+the way back is commit e360d37).
 
     python bench/decider/bonsai_decider.py [--only intent,phase,h4,packages,batching,load]
     python bench/decider/bonsai_decider.py --model flash-next         --base-url http://127.0.0.1:18095 --only batching,calib
@@ -18,25 +20,26 @@ next-token probabilities at the answer position; no threshold anywhere.
 
 WHAT IS MEASURED (everything IN-SAMPLE to our own labels):
 
-  intent    bench/skills/work_intent.jsonl (49 yes / 50 no), CLM's three
-            wordings (yesno.INTENT_Q), against route.work_intent.
-  phase     bench/skills/daily_eval.jsonl, the points yesno._daily_points
+  intent    bench/skills/work_intent.jsonl (49 yes / 50 no), three
+            wordings (decider_labels.INTENT_Q), against route.work_intent.
+  phase     bench/skills/daily_eval.jsonl, the points decider_labels._daily_points
             builds. The file carries NO phase labels: the only phase
             evidence is debugging (the 5 'bug-report' rows and
             seq-phase-debug#3), so debug RECALL on those 6, and for every
             phase AGREEMENT (not accuracy) with skill_classify.request_
-            signals. One 4-way choice plus CLM's four yes/no questions.
-            State: the whole transcript (yesno.transcript_pieces), uncut --
+            signals. One 4-way choice plus four yes/no questions.
+            State: the whole transcript (decider_labels.transcript_pieces), uncut --
             the largest point is ~8k tokens, which the main model reads.
   h4        pagoda-h4's Hermes export hermes.jsonl (the full 134-step tool
             stream; session.jsonl holds only the post-compaction tail),
-            yesno.h4_labels' mechanical labels, plus one of our own:
+            decider_labels.h4_labels' mechanical labels, plus one of our own:
             scratch_write -- a step that creates a file progress.is_project
             says is NOT the project's (root /workspace/pagoda): a write/patch
             path, or a shell redirection / tee target in a terminal command
             (not /dev/null). Three state variants: `step` (the step alone,
-            as CLM), `window2048` (the task and the newest steps within
-            2,048 tokens: CLM's own window, for the line-up) and `full`
+            as the CLM run asked it), `window2048` (the task and the newest
+            steps within 2,048 tokens: CLM's window, kept for the line-up
+            with earlier results) and `full`
             (the task and EVERY step so far: the slot is KEPT across steps
             for this replay only and released at the end of the pass --
             the one place this bench leaves decider cells between batches,
@@ -93,16 +96,14 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 OUT = os.path.join(HERE, "results", "bonsai.json")
-CLM_RESULTS = os.path.join(ROOT, "bench", "clm", "results", "yesno.json")
 SLOTS = "http://127.0.0.1:11434/upstream/bonsai/slots"
 H4_DIR = "C:/Users/jwals/octo/logs/pagoda-h4-pagoda-xhigh-1"
 CHECK_EVERY = 25
 sys.path.insert(0, os.path.join(ROOT, "mcp"))
-sys.path.insert(0, os.path.join(ROOT, "bench", "clm"))
 
 import decider_bonsai as D  # noqa: E402
-import yesno as Y  # noqa: E402  (CLM's bench: labels, states, scoring)
 sys.path.insert(0, HERE)
+import decider_labels as Y  # noqa: E402  (labels, states, scoring)
 import decider_target as DT  # noqa: E402
 
 # The engine this run reads (decider_target.Target); None = the one door.
@@ -112,7 +113,7 @@ STACK_PARTS = ("load", "load_small")
 
 # ---------------------------------------------------------- questions ------
 # Fixed before the run. The intent, phase and h4 wordings are CLM's
-# (yesno.INTENT_Q, PHASE_Q, SITU_Q); the scratch question is the brief's.
+# (decider_labels.INTENT_Q, PHASE_Q, SITU_Q); the scratch question is the brief's.
 SCRATCH_Q = ("Is the agent writing a throwaway file to test how something "
              "behaves?")
 PHASE_KEYS = ["plan", "implement", "debug", "verify"]
@@ -153,8 +154,18 @@ Busy = DT.Busy
 def preflight(mine: tuple = ()) -> dict:
     if TARGET is not None and TARGET.mode != "one door":
         return DT.preflight(TARGET, mine)
-    with urllib.request.urlopen(SLOTS, timeout=10) as r:
-        slots = json.loads(r.read())
+    # A READ NEVER LOADS A MODEL (2026-09-30): /upstream/bonsai/slots only
+    # while llama-swap's GET /running lists bonsai ready; otherwise nothing
+    # is generating on it and the read is skipped, with why.
+    import gpu_room
+    loaded, why = gpu_room.model_loaded(SLOTS.split("/upstream/")[0], "bonsai")
+    if loaded:
+        with urllib.request.urlopen(SLOTS, timeout=10) as r:
+            slots = json.loads(r.read())
+    elif loaded is None:
+        raise Busy(f"cannot tell whether the main model's slots are busy: {why}")
+    else:
+        slots = []
     busy = [s.get("id") for s in slots if s.get("is_processing")
             and s.get("id") not in mine]
     tl = subprocess.run(["tasklist", "/FI", "IMAGENAME eq hermes.exe"],
@@ -163,7 +174,8 @@ def preflight(mine: tuple = ()) -> dict:
     if busy or hermes:
         raise Busy(f"main model slots processing {busy}; hermes.exe "
                    f"running: {hermes}")
-    return {"slots_busy": busy, "hermes": hermes, "at": time.time()}
+    return {"slots_busy": busy, "slots_read": why, "hermes": hermes,
+            "at": time.time()}
 
 
 # ------------------------------------------------------------------ ask ----
@@ -253,14 +265,6 @@ def table(recs: list[dict], labels: list[bool]) -> dict:
             **Y.pdist(recs, labels)}
 
 
-def clm_results() -> dict:
-    try:
-        with open(CLM_RESULTS, encoding="utf-8") as f:
-            return json.load(f)
-    except OSError:
-        return {}
-
-
 # ============================================================ 1. intent ====
 def part_intent() -> dict:
     import route
@@ -287,7 +291,6 @@ def part_intent() -> dict:
             per[q].append(a)
             row["p_yes"][q] = a["probs"]["yes"]
         out["rows"].append(row)
-    clm = (clm_results().get("intent") or {}).get("wordings") or {}
     for q in Y.INTENT_Q:
         recs = recs_of(per[q])
         t = table(recs, labels)
@@ -303,7 +306,6 @@ def part_intent() -> dict:
         t["errors"] = [{"text": rows[i]["text"], "label": y,
                         "p_yes": a["p_true"]} for i, (y, a) in
                        enumerate(zip(labels, recs)) if a["yes"] != y]
-        t["clm_zero_shot"] = (clm.get(q) or {}).get("confusion")
         out["wordings"][q] = t
     return out
 
@@ -320,7 +322,7 @@ def part_phase() -> dict:
         "only (cat 'bug-report' x5 and seq-phase-debug#3). Debug RECALL on "
         "those 6; for every phase AGREEMENT with skill_classify."
         "request_signals, not accuracy."),
-        "state": "yesno.transcript_pieces joined, uncut", "points": []}
+        "state": "decider_labels.transcript_pieces joined, uncut", "points": []}
     for p in pts:
         sig = skill_classify.request_signals(p["msgs"], p["route"],
                                              p["tools"])
@@ -341,29 +343,23 @@ def part_phase() -> dict:
     P = res["points"]
     debug_ev = [r for r in P if r["cat"] == "bug-report"
                 or r["id"] == "seq-phase-debug#3"]
-    clm = clm_results().get("phase") or {}
     res["debug_evidence"] = {
         "n": len(debug_ev),
         "bonsai_yes_no_yes": sum(r["yes_no"]["debug"]["yes"]
                                  for r in debug_ev),
         "bonsai_choice_debug": sum(r["choice"] == "debug" for r in debug_ev),
         "rule_yes": sum("debug" in r["rule"] for r in debug_ev),
-        "clm_yes": (clm.get("debug_evidence") or {}).get("clm_yes"),
         "rows": [(r["id"], r["yes_no"]["debug"]["p_yes"], r["choice"],
                   "debug" in r["rule"]) for r in debug_ev]}
     res["agreement_yes_no"] = {}
     for ph in PHASE_KEYS:
         c = Y.confusion([(ph in r["rule"], r["yes_no"][ph]["yes"])
                          for r in P])
-        cl = (clm.get("agreement") or {}).get(ph) or {}
         res["agreement_yes_no"][ph] = {
             "rule_yes_bonsai_yes": c["tp"], "rule_yes_bonsai_no": c["fn"],
             "rule_no_bonsai_yes": c["fp"], "rule_no_bonsai_no": c["tn"],
             "agree": c["tp"] + c["tn"], "n": c["n"],
-            "bonsai_yes": c["tp"] + c["fp"],
-            "clm_agree": cl.get("agree"),
-            "clm_yes": (cl.get("rule_yes_clm_yes", 0)
-                        + cl.get("rule_no_clm_yes", 0)) if cl else None}
+            "bonsai_yes": c["tp"] + c["fp"]}
     one = [r for r in P if len(set(r["rule"]) & set(PHASE_KEYS)) == 1]
     res["choice"] = {
         "distribution": _hist(r["choice"] for r in P),
@@ -377,8 +373,7 @@ def part_phase() -> dict:
     res["phases_per_point"] = {
         "bonsai_yes_no": _hist(sum(v["yes"] for v in r["yes_no"].values())
                                for r in P),
-        "rule": _hist(len(set(r["rule"]) & set(PHASE_KEYS)) for r in P),
-        "clm": (clm.get("phases_per_point") or {}).get("clm")}
+        "rule": _hist(len(set(r["rule"]) & set(PHASE_KEYS)) for r in P)}
     # The only labels in this part: the 6 debugging points.
     res["debug_calibration_note"] = (
         "n=6 positives and no labelled negatives: no calibration is "
@@ -418,7 +413,6 @@ def scratch_targets(name: str, args: dict) -> tuple[list, list]:
 
 
 def part_h4(variants=("full", "step", "window2048")) -> dict:
-    import deep
     import skill_select
     steps = Y._h4_steps()
     with open(os.path.join(H4_DIR, "prompt.md"), encoding="utf-8") as f:
@@ -432,11 +426,6 @@ def part_h4(variants=("full", "step", "window2048")) -> dict:
                                                       s["args"])}}]})
         msgs.append({"role": "tool", "tool_call_id": f"call_{i}",
                      "content": s["result"]})
-    scan = deep.struggle_scan(msgs)
-    at_step = {}
-    for e in scan["events"]:
-        if e["kind"] in ("tool_error_repeat", "failing_command_rerun"):
-            at_step[(e["at"] - 2) // 2] = e["kind"]
     preflight()
     qkeys = ["repeat_failed", "reads_package", "scratch_write"]
     qs = [D.yes_no(Y.SITU_Q["repeat_failed"]),
@@ -455,7 +444,6 @@ def part_h4(variants=("full", "step", "window2048")) -> dict:
                      "labels": lab, "rule": {
                          "probed_packages": bool(
                              skill_select.probed_packages(call)),
-                         "deep_repeat": at_step.get(i),
                          "is_project_write": bool(sc_rule)},
                      "cur": cur, "pieces_upto": len(pieces), "bonsai": {}})
         prior.append({"name": s["name"], "args": json.dumps(
@@ -512,7 +500,6 @@ def part_h4(variants=("full", "step", "window2048")) -> dict:
                 for x in r["bonsai"]["full"].values())
             info["history_tokens_final"] = first[-1]["tokens"]
         out["variants"][var] = info
-    clm = (clm_results().get("h4") or {}).get("tables") or {}
     out["tables"] = {}
     variants = [v for v in variants
                 if all(v in r["bonsai"] for r in rows)]
@@ -532,21 +519,11 @@ def part_h4(variants=("full", "step", "window2048")) -> dict:
                     "confusion": Y.confusion(
                         [(y, r["rule"]["probed_packages"])
                          for y, r in zip(ys, rows)])}
-            elif key == "repeat_failed":
-                out["tables"][f"{lk}|rule:deep.struggle_scan"] = {
-                    "confusion": Y.confusion(
-                        [(y, bool(r["rule"]["deep_repeat"]))
-                         for y, r in zip(ys, rows)])}
-            else:
+            elif key == "scratch_write":
                 out["tables"][f"{lk}|rule:progress.is_project(write tools)"] \
                     = {"confusion": Y.confusion(
                         [(y, r["rule"]["is_project_write"])
                          for y, r in zip(ys, rows)])}
-            for var in ("step", "history"):
-                c = clm.get(f"{lk}|clm:{var}")
-                if c:
-                    out["tables"][f"{lk}|clm:{var}"] = {
-                        "confusion": c["confusion"]}
     out["positives"] = {lk: [(r["step"], r["tool"],
                               {v: r["bonsai"][v][key]["p_yes"]
                                for v in variants})

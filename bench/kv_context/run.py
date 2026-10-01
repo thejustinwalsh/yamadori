@@ -51,7 +51,7 @@ PHASES (each resumable: rows are keyed, a stack error is never "done")
             arms; shared rungs up to 151,552 (fits q8's pool), then q4-only
             rungs up to near its window. Thinking off, forced-off features.
   quality   LiveBench coding, the 21 questions of lb-20260923-minp0, bare
-            @ medium with check_code and repair forced off, via
+            @ medium with every augmentation forced off, via
             bench/livebench/run_arm.sh in WSL: a fresh q8 control arm, then
             the q4 arm. Needs arms `kv-q8` and `kv-q4` in drive.py ARMS (it
             says exactly what to add if they are missing, and skips).
@@ -105,8 +105,10 @@ FIT_MARGIN = 1.03             # calibration error allowance (bench/longctx)
 PROXY_GEN = 2048              # tiers.A_MIN: the answer room the proxy reserves
 SYNTH_SEED = 7
 ITEM_SEED = 1
-FEATURES = {"retrieval": False, "hints": False, "investigate": False,
-            "fanout": 1, "check_code": False, "repair": False}
+# Every augmentation forced off. Retrieval, deep thinking, fan-out, the code
+# check and repair were removed 2026-09-29 (docs/REMOVED.md); what is left
+# to force is skills and the concept seed.
+FEATURES = {"skills": False, "seed": False}
 SPEED_PROMPTS = {
     "code": ("Write a new TypeScript module that uses the APIs defined in the "
              "code above: one class with three methods and full type "
@@ -624,18 +626,17 @@ def phase_accuracy(px: Proxy, man: dict, run_dir: str, arm: str, pool: int, ladd
 # LiveBench -------------------------------------------------------------------
 LB_SOURCE_RUN = "lb-20260923-minp0"
 ARMS_SNIPPET = '''    # docs/CONTEXT-EXPANSION.md: the KV trial's paired arms. bonsai's header
-    # plus check_code/repair forced OFF, matching the cached lb-20260923-minp0
-    # bonsai answers (produced before check_code existed). Same header, two
-    # display names, so a q8 and a q4 answer never share an answer file.
+    # with every augmentation forced OFF, matching the cached lb-20260923-minp0
+    # bonsai answers (produced before check_code existed; check_code and
+    # repair were removed 2026-09-29). Same header, two display names, so a
+    # q8 and a q4 answer never share an answer file.
     "kv-q8": {
         "display": "yamadori-kv-q8-arm",
-        "features": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1,
-                     "effort": "medium", "check_code": False, "repair": False},
+        "features": {"skills": False, "seed": False, "effort": "medium"},
     },
     "kv-q4": {
         "display": "yamadori-kv-q4-arm",
-        "features": {"retrieval": False, "hints": False, "investigate": False, "fanout": 1,
-                     "effort": "medium", "check_code": False, "repair": False},
+        "features": {"skills": False, "seed": False, "effort": "medium"},
     },'''
 
 

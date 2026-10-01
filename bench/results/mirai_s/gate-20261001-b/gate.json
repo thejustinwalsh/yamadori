@@ -1,0 +1,114 @@
+{
+ "started": "2026-10-01T01:40:02-0400",
+ "arms": {
+  "base": {
+   "needles": {
+    "depths": [
+     1024,
+     32768,
+     113664
+    ],
+    "skipped_depths": [
+     131072
+    ],
+    "1024-0": {
+     "hit": true,
+     "answer": "A3031B5E"
+    },
+    "1024-1": {
+     "hit": true,
+     "answer": "35A14289"
+    },
+    "1024-2": {
+     "hit": true,
+     "answer": "8484FFC9"
+    },
+    "1024-3": {
+     "hit": true,
+     "answer": "223FA47A"
+    },
+    "1024-4": {
+     "hit": true,
+     "answer": "0E994CC6"
+    },
+    "hits_1024": 5,
+    "32768-0": {
+     "hit": true,
+     "answer": "3D0DCFD4"
+    },
+    "32768-1": {
+     "hit": true,
+     "answer": "111616E2"
+    },
+    "32768-2": {
+     "hit": true,
+     "answer": "86EF6128"
+    },
+    "32768-3": {
+     "hit": true,
+     "answer": "38BC167F"
+    },
+    "32768-4": {
+     "hit": true,
+     "answer": "77CFED4D"
+    },
+    "hits_32768": 5,
+    "113664-0": {
+     "hit": true,
+     "answer": "759F3BA8"
+    },
+    "113664-1": {
+     "hit": true,
+     "answer": "D6384550"
+    },
+    "113664-2": {
+     "hit": true,
+     "answer": "8090FDF8"
+    },
+    "113664-3": {
+     "hit": true,
+     "answer": "2768FF54"
+    },
+    "113664-4": {
+     "hit": true,
+     "answer": "C1E76FA5"
+    },
+    "hits_113664": 5,
+    "PASS": true,
+    "gpu_min_free": 2741,
+    "gpu_max_used": 13310,
+    "guard": null
+   }
+  }
+ },
+ "steps": [
+  "needles",
+  "corrupt",
+  "speed"
+ ],
+ "mmproj": false,
+ "lane_hold": {
+  "took": true,
+  "holder": "engine_corruption",
+  "ttl_seconds": 43200,
+  "lane": "gpu"
+ },
+ "restore": {
+  "lane_resumed": false,
+  "reload_s": 17.5,
+  "bonsai_state": "ready",
+  "bonsai_cmd_is_config": true,
+  "proxy_health": 200,
+  "gpu": {
+   "used": 14964,
+   "free": 1087,
+   "util": 0
+  }
+ },
+ "lane": {
+  "held_by": "engine_corruption",
+  "resumed": true,
+  "lane": "gpu"
+ },
+ "finished": "2026-10-01T02:04:29-0400"
+}

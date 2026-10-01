@@ -62,9 +62,14 @@ def ensure_seeded(db: str | None = None) -> dict:
 
 def window_source() -> tuple[int | None, int | None]:
     """The proxy's advertised window and output ceiling (/v1/models,
-    mcp/catalog.py), or (None, None) when the model server cannot say."""
+    mcp/catalog.py), or (None, None) when the model server cannot say.
+    A VIEW NEVER LOADS A MODEL (2026-09-30): only once this process has read
+    the pool (budget.known_pool); the dashboard never makes the first read."""
     try:
+        import budget
         import catalog
+        if budget.known_pool() is None:
+            return None, None
         w = catalog.context_window()
         return int(w), int(catalog.max_output(w))
     except Exception:                                            # noqa: BLE001

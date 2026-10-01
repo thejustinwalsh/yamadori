@@ -146,6 +146,18 @@ def at_capacity(holder: str, retry_after: int, why: str = "", model: str | None 
                "why": why})
 
 
+def conversation_at_capacity(retry_after: int, why: str = "") -> ApiError:
+    """ONE CONVERSATION ON THE MAIN CARD (mcp/slots.py; operator, 2026-09-29: "we should not have a second
+    conversation at all, it is too slow, we have a second gpu if we want a second conversation"). Another
+    conversation holds the card: 503 with Retry-After, as model_at_capacity."""
+    return ApiError(
+        503, f"The model is at capacity: another conversation is using it right now (one conversation at a time "
+             f"on this server). Retry in about {int(retry_after)} s; this conversation keeps its place in no queue, "
+             f"so retry then.", code="conversation_at_capacity",
+        headers={"Retry-After": str(int(retry_after))},
+        extra={"retryable": True, "why": why})
+
+
 # ------------------------------------------------------ context overflow ----
 
 def context_length_exceeded(n_prompt: int, limit: int,
@@ -262,6 +274,8 @@ def of_exception(e: BaseException, limit: int | None = None) -> ApiError:
     server.py and proxy.stream_body both use)."""
     if isinstance(e, ApiError):
         return e
+    if type(e).__name__ == "ConversationAtCapacity":     # mcp/slots.py ONE CONVERSATION
+        return conversation_at_capacity(int(getattr(e, "retry_after", 0) or 30), str(e))
     if type(e).__name__ == "ModelAtCapacity":            # mcp/max_mode.py, the one door's backstop
         import max_mode
         return at_capacity(getattr(e, "holder", None) or max_mode.MAX or "another model",

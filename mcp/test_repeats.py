@@ -13,9 +13,11 @@ So `Turn.cached_empty` never fired for exactly the callers the repeat
 breaker exists for, and an identical miss was re-run every time.
 
 The envelopes here are produced by the real producers (code_search's
-result builders and the proxy's own constants), not typed from memory
-(PROTOCOL rule 7). The proxy's package-fallback miss is exercised through
-the real code path in mcp/test_tools.py.
+result builders), not typed from memory (PROTOCOL rule 7). The proxy's own
+wordings (its no-repository and named-package misses, and its repeat notice)
+left the proxy on 2026-09-29 with the second brain's code tools; they stay
+here as literals copied from commit e360d37 because the corpus (corpus.py,
+`repeats._empty`) still reads result rows written in those words.
 """
 from __future__ import annotations
 
@@ -34,10 +36,14 @@ os.environ["YAMADORI_PKG_DIR"] = os.path.join(_TMP, "pkgs")
 os.environ["CODE_INDEX_DB"] = os.path.join(_TMP, "code.sqlite3")
 
 import code_search as cs  # noqa: E402
-import proxy  # noqa: E402
 import repeats  # noqa: E402
 
 _results: list[tuple[bool, str, str]] = []
+
+# proxy._EMPTY_AGAIN as of commit e360d37 (removed from the proxy 2026-09-29).
+_EMPTY_AGAIN = ("No results -- this exact search was already run this turn and "
+                "returned nothing, so it was not repeated. The index has not "
+                "changed since.")
 
 
 def check(ok: bool, name: str, detail: str = "") -> bool:
@@ -47,15 +53,15 @@ def check(ok: bool, name: str, detail: str = "") -> bool:
 
 def test_empty_recognises_every_no_result_shape():
     empty = {
-        "the proxy's no-repository miss": (
+        "the old proxy's no-repository miss": (
             "None matched in any library the remote code-intelligence "
             "service holds. It searches library source only; the user's own "
             "project is searched with your client's own file tools. The same "
             "arguments return the same miss.\n\n== three@0.185.1 ==\n..."),
-        "the proxy's named-package miss": (
+        "the old proxy's named-package miss": (
             "== searched typegpu@0.12.5, paths matching 'data': no match ==\n"
             "..."),
-        "the repeat notice itself": proxy._EMPTY_AGAIN,
+        "the old proxy's repeat notice": _EMPTY_AGAIN,
         "a structured clean miss": cs.ok_result("find_by_pattern", matches=0,
                                                 files_scanned=12),
         "NO_INDEX (cannot change with these arguments)":

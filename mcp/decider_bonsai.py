@@ -48,7 +48,8 @@ THE RENDERING (TEMPLATE_VERSION; the text is pinned by mcp/test_decider_bonsai.p
     assistant  ANSWER_LEAD, continued (a prefill)      "Answer:"
 
   so the prompt ends `<think>\\n\\n</think>\\n\\nAnswer:` and the next token is
-  the label (" yes", " A" ...). The question sits in its OWN user message on
+  the label (" yes", " A" ...). THE THINK-BLOCK GUARD (below; docs/JJAVA.md
+  8) refuses any body that could render otherwise before it is sent. The question sits in its OWN user message on
   purpose: this is a hybrid model, whose recurrent state cannot be rolled
   back token by token; llama-server keeps a context checkpoint at the start
   of the LAST user message (server-context.cpp "break at the last user
@@ -283,7 +284,8 @@ def question_text(q: dict) -> str:
         return YES_NO.format(question=q["question"])
     lines = "\n".join(OPTION_LINE.format(label=lab, description=d)
                       for lab, d in zip(q["labels"], q["options"]))
-    return CHOICE.format(question=q["question"], options=lines)
+    tpl = SCORE_DIGITS if q.get("label_kind") == "digits" else CHOICE
+    return tpl.format(question=q["question"], options=lines)
 
 
 def messages(state: str, q: dict) -> list[dict]:
@@ -309,14 +311,139 @@ def body(state: str, q: dict, slot: int | None, k: int,
     return b
 
 
+# ------------------------------------------------ THE THINK-BLOCK GUARD ----
+# SGLang's decision-model server (docs.sglang.io/docs/supported-models/
+# decision_models, "How answers are computed", read 2026-09-30; validated
+# there on Qwen3.8-27B, the base Bonsai 2's card names): it "turns thinking
+# off for every question", refuses a request that re-enables it, and
+# refuses a prompt that leaves a reasoning block open -- a label read inside
+# an open think block is a reasoning token, not an answer.
+#
+# HOW OUR SERVER RENDERS A QUESTION (every engine tree in engines/src, the
+# same code in each; checked 2026-09-30): a final assistant message is a
+# CONTINUATION (tools/server/server-common.cpp: prefill_assistant ->
+# continue_final_message AUTO, add_generation_prompt false; two assistant
+# messages at the end are refused). common/chat.cpp resolves AUTO to
+# REASONING when the message has reasoning_content and NO content, else to
+# CONTENT; common/chat-auto-parser-generator.cpp then renders messages[:-1],
+# the template's generation prompt cut at the reasoning start, the start,
+# the reasoning, and -- for CONTENT only -- the reasoning END, then the
+# content. So the block is CLOSED exactly when the prefill has content and
+# no reasoning: "<think>\n\n</think>\n\nAnswer:" on Bonsai
+# (mcp/test_decider_bonsai.py [guard], through the served template), and a
+# reasoning-only prefill (proxy.directive_prefill's shape) leaves it OPEN.
+# Thinking off matters too: the template's enable_thinking also decides its
+# system text (the reasoning-effort lines, bonsai_chat_template.jinja 46).
+#
+# guard_body() checks both on EVERY body before it is sent (no network);
+# prompt_guard() checks a RENDERED prompt (the served template offline; the
+# live /apply-template in a window: template_check()). A failure is a
+# DeciderUnavailable that is not retryable: it is this module's bug or a
+# caller's rendering, never a model's answer.
+THINK_MARKERS = (("<think>", "</think>"),)
+THINK_START, THINK_END = THINK_MARKERS[0]
+
+
+def _guard_fail(code: str, situation: str) -> DeciderUnavailable:
+    return DeciderUnavailable(
+        code, situation, False,
+        "the maintainer: jjava's body must carry enable_thinking false (the "
+        "body and chat_template_kwargs) and end on ONE assistant message "
+        "whose content is the ANSWER_LEAD prefill and which carries no "
+        "reasoning (docs/JJAVA.md 8)")
+
+
+def guard_body(b: dict) -> dict:
+    """Refuse a body whose rendered question could leave a think block open
+    or run with thinking on. Returns {ok: True, continuation: "content"}."""
+    kw = b.get("chat_template_kwargs") or {}
+    if kw.get("enable_thinking") is not False \
+            or b.get("enable_thinking") is not False:
+        raise _guard_fail("THINKING_ON", "enable_thinking is not false in "
+                          "both the body and chat_template_kwargs")
+    if b.get("reasoning_effort") not in (None, "none"):
+        raise _guard_fail("THINKING_ON", "reasoning_effort "
+                          f"{b.get('reasoning_effort')!r} re-enables thinking")
+    msgs = b.get("messages") or []
+    last = msgs[-1] if msgs else {}
+    content = last.get("content") if isinstance(last, dict) else None
+    if isinstance(last, dict) and last.get("role") == "assistant" and any(
+            last.get(k) for k in ("reasoning_content", "reasoning",
+                                  "thinking")):
+        raise _guard_fail("THINK_BLOCK_OPEN", "the prefill carries "
+                          "reasoning: the server continues inside the think "
+                          "block")
+    if not isinstance(last, dict) or last.get("role") != "assistant" \
+            or not isinstance(content, str) or not content.strip():
+        raise _guard_fail("NO_ANSWER_PREFILL", "the last message is not an "
+                          "assistant prefill with text: the server would "
+                          "render a generation prompt (thinking's own) or a "
+                          "reasoning continuation")
+    if not content.endswith(ANSWER_LEAD):
+        raise _guard_fail("NO_ANSWER_PREFILL", "the prefill does not end on "
+                          f"{ANSWER_LEAD!r}")
+    for s, e in THINK_MARKERS:
+        if content.rfind(s) > content.rfind(e):
+            raise _guard_fail("THINK_BLOCK_OPEN", "the prefill's text opens "
+                              f"a {s} block it does not close")
+    if len(msgs) >= 2 and isinstance(msgs[-2], dict) \
+            and msgs[-2].get("role") == "assistant":
+        raise _guard_fail("NO_ANSWER_PREFILL", "two assistant messages at "
+                          "the end (llama-server refuses it)")
+    return {"ok": True, "continuation": "content"}
+
+
+def prompt_guard(prompt: str, after: str | None = None) -> dict:
+    """A RENDERED prompt checked: {ok, open, ends_with_lead, why}. `after`:
+    only the text after its last occurrence is inspected (the question's
+    last line), so a think marker quoted inside the state does not count."""
+    p = prompt or ""
+    tail = p[p.rfind(after):] if after and after in p else p
+    open_ = any(tail.rfind(s) > tail.rfind(e) for s, e in THINK_MARKERS)
+    ends = p.endswith(ANSWER_LEAD)
+    why = ("a think block is open at the answer position" if open_ else
+           f"the prompt does not end on {ANSWER_LEAD!r}" if not ends else "")
+    return {"ok": not open_ and ends, "open": open_, "ends_with_lead": ends,
+            "why": why}
+
+
+def template_check(upstream=None) -> dict:
+    """LIVE, inside a GPU window only (the /upstream door starts a model that
+    is not loaded): the serving model's own rendering of jjava's canonical
+    question -- /apply-template with the body jjava sends -- through
+    prompt_guard. {model, checked, ok, open, ends_with_lead, why, tail}."""
+    q = as_choice(yes_no("Is the material empty?"))
+    b = body(NEUTRAL_STATE, q, None, 1, model_name())
+    guard_body(b)
+    payload = {"messages": b["messages"],
+               "chat_template_kwargs": b["chat_template_kwargs"],
+               "enable_thinking": False}
+    out = {"model": model_name(), "checked": False}
+    try:
+        d = (upstream or _upstream)("/apply-template", payload)
+    except Exception as e:                                       # noqa: BLE001
+        out["why"] = f"/apply-template: {type(e).__name__}: {e}"[:200]
+        return out
+    prompt = (d or {}).get("prompt") if isinstance(d, dict) else None
+    if not isinstance(prompt, str):
+        out["why"] = "/apply-template returned no prompt"
+        return out
+    g = prompt_guard(prompt, after=question_text(q).splitlines()[-1])
+    out.update(checked=True, **g, tail=prompt[-80:])
+    return out
+
+
 # ------------------------------------------------------------ the server ---
 def _upstream(path: str, payload: dict | None = None,
               timeout: float = 30) -> object:
     import model
     import max_mode
-    # MAX MODE (mcp/max_mode.py): the request's model; never one that is off the card
-    name = max_mode.current(model.MODEL)
+    # MAX MODE (mcp/max_mode.py): the model jjava reads for the request -- its own, or the table's helper
+    # (`bonsai-a4000` while a LOCKED model holds the card: max_mode.decider_model); never one that is off the card
+    name = max_mode.decider_model(model.MODEL)
     max_mode.guard(name)
+    # a worker job claimed for the A4000 (mcp/jobs.py, the gpu lane per card) never reads the main card
+    max_mode.check_scope(name)
     url = f"{model.UPSTREAM}/upstream/{name}{path}"
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, headers={
@@ -333,7 +460,7 @@ def spelling_ids(label: str, upstream=None) -> dict[str, int]:
     main model under max mode (its own /tokenize: the per-model label check)."""
     import max_mode
     upstream = upstream or _upstream
-    key = f"{max_mode.current()}:{label}" if max_mode.ENABLED else label
+    key = f"{max_mode.decider_model()}:{label}" if max_mode.ENABLED else label
     if key in _SPELL_IDS:
         return _SPELL_IDS[key]
     spell = LABEL_SPELLINGS.get(label, (label, " " + label))
@@ -386,6 +513,53 @@ def read_labels(top: list[dict], ids: dict[str, dict[str, int]]) -> dict:
             if by_id else None}
 
 
+def case_variants(top: list[dict], ids: dict[str, dict[str, int]],
+                  words=()) -> dict:
+    """DIAGNOSTIC, never acted on (SGLang's decision models, "How answers
+    are computed": their "label_mass counts only the lowercase yes and no
+    tokens", and the model puts mass on the capitalised ones too, so a
+    lower-case-only label mass reads low while the probabilities are
+    unaffected). Our readout already SUMS every single-token spelling of a
+    label (LABEL_SPELLINGS: yes / Yes / YES, with and without the space;
+    a letter as "A" / " A"); this says where the rest of the top K went:
+      by_spelling  each READ spelling's own mass (Yes vs yes, A vs " A")
+      variant      per label: mass on top-K tokens that spell it in another
+                   case or spacing but are not read ("a" beside "A")
+      word         per option WORD (a lettered noul's "yes" / "no"): mass on
+                   the word itself, every case and spacing -- the model
+                   answering the text instead of the letter
+    {available: False} when the server's top entries carry no token text."""
+    import math
+    if not any(isinstance(t, dict) and "token" in t for t in top or []):
+        return {"available": False}
+    read = {}
+    for lab, spell in ids.items():
+        for sp, tid in spell.items():
+            read[tid] = sp
+    labs = {str(lab).strip().casefold(): lab for lab in ids}
+    wds = {str(w).strip().casefold(): w for w in words or ()}
+    by_sp: dict = {}
+    var = {lab: 0.0 for lab in ids}
+    word = {w: 0.0 for w in words or ()}
+    for t in top:
+        if not isinstance(t, dict) or "id" not in t or "logprob" not in t:
+            continue
+        p = math.exp(float(t["logprob"]))
+        tid = int(t["id"])
+        if tid in read:
+            by_sp[read[tid]] = by_sp.get(read[tid], 0.0) + p
+            continue
+        key = str(t.get("token", "")).strip().casefold()
+        if key in labs:
+            var[labs[key]] += p
+        elif key in wds:
+            word[wds[key]] += p
+    r6 = lambda d: {k: round(v, 6) for k, v in d.items()}   # noqa: E731
+    return {"available": True, "by_spelling": r6(by_sp),
+            "variant": r6(var), "variant_mass": round(sum(var.values()), 6),
+            "word": r6(word), "word_mass": round(sum(word.values()), 6)}
+
+
 # ------------------------------------------------------------- decide ------
 def _post_default(b: dict, timeout: float) -> dict:
     import model
@@ -394,7 +568,7 @@ def _post_default(b: dict, timeout: float) -> dict:
 
 def ask_one(state: str, q: dict, *, slot: int | None, post=None,
             upstream=None, timeout: float = 120,
-            n_vocab: int | None = None, cache: bool = True,
+            n_vocab: int | None = None, cache: bool | None = None,
             msgs: list[dict] | None = None) -> dict:
     """One question, one forward pass (more only to read a label outside the
     top K). The slot is the caller's. `msgs`: a caller's own rendering (it
@@ -403,16 +577,20 @@ def ask_one(state: str, q: dict, *, slot: int | None, post=None,
     (_post_default, _upstream), so a bench can point them at one engine."""
     import model
     post, upstream = post or _post_default, upstream or _upstream
+    if cache is None:              # THE READ REGIME: the model's measured one
+        cache = read_cache()
     ids = {lab: spelling_ids(lab, upstream) for lab in q["labels"]}
     band = tie_band()
     k, reads, t0 = FIRST_K, [], time.time()
     cap = n_vocab or 10 ** 6
     while True:
         t1 = time.time()
+        import max_mode
+        b = body(state, q, slot, k, max_mode.decider_model(model.MODEL), cache,
+                 msgs)
+        guard_body(b)                      # THE THINK-BLOCK GUARD (above)
         try:
-            import max_mode
-            d = post(body(state, q, slot, k, max_mode.current(model.MODEL), cache, msgs),
-                     timeout)
+            d = post(b, timeout)
         except DeciderUnavailable:
             raise
         except urllib.error.HTTPError as e:
@@ -482,6 +660,13 @@ def ask_one(state: str, q: dict, *, slot: int | None, post=None,
             "exact": not r["missing"], "unread": r["missing"],
             "labels_unread": r["labels_unread"],
             "unread_bound": r["unread_bound"], "k": k, "reads": len(reads),
+            "case_variants": case_variants(
+                content[0].get("top_logprobs") or [], ids,
+                q.get("words") or ()),
+            # every HTTP read of this question (a K re-read included): what
+            # the Jev API's usage counts (mcp/jev_api.py USAGE)
+            "read_log": [{"k": x["k"], "prompt_n": x.get("prompt_n"),
+                          "cache_n": x.get("cache_n")} for x in reads],
             "prompt_tokens": usage.get("prompt_tokens")
             or ((first.get("prompt_n") or 0) + (first.get("cache_n") or 0)),
             "processed_tokens": first.get("prompt_n"),
@@ -491,8 +676,17 @@ def ask_one(state: str, q: dict, *, slot: int | None, post=None,
 
 
 def slot_cells(slot: int, upstream=None) -> int | None:
-    """What llama-server says the slot holds (n_prompt_tokens), or None."""
+    """What llama-server says the slot holds (n_prompt_tokens), or None.
+    Through the one door only while llama-swap's /running lists the model
+    ready (a read never loads a model, 2026-09-30)."""
     try:
+        if upstream is None:
+            import gpu_room
+            import max_mode
+            import model
+            if not gpu_room.model_loaded(model.UPSTREAM,
+                                         max_mode.decider_model(model.MODEL))[0]:
+                return None
         table = (upstream or _upstream)("/slots")
         row = next((s for s in table if isinstance(s, dict)
                     and s.get("id") == slot), None)
@@ -509,12 +703,16 @@ def release(slot: int | None, why: str = "decider batch") -> dict:
         return {"released": False, "skipped": "no slot was granted"}
     try:
         import slots
+        import max_mode
+        # the decider's own server (max_mode.decider_model: `bonsai-a4000` while a LOCKED model holds the card),
+        # never the conversation's
+        dm = max_mode.decider_model()
         if slots.release_enabled():
-            rec = slots.release_idle(slot, why)
+            rec = slots.release_idle(slot, why, model=dm)
             if rec is not None:
                 return dict(rec, via="slots.release_idle")
         import model
-        res = model.release_slot(slot)
+        res = model.release_slot(slot, model=dm)
         return {"slot": slot, "why": why, "via": "model.release_slot",
                 "released": bool(res.get("ok")) and not res.get("skipped"),
                 **{k: res.get(k) for k in ("cells_before", "ms", "method",
@@ -528,7 +726,7 @@ def release(slot: int | None, why: str = "decider batch") -> dict:
 
 def decide(state: str, questions: list[dict], *, keep_slot: bool = False,
            post=None, upstream=None, timeout: float = 120,
-           slot: int | None = None, cache: bool = True) -> dict:
+           slot: int | None = None, cache: bool | None = None) -> dict:
     """Every question over one state, in order, on one transient slot, then
     the slot released. Returns {template, slot, how, answers[], release,
     batch_ms}. `slot` given: the caller placed it (benchmarks) and it is not
@@ -711,7 +909,7 @@ def model_name() -> str:
     try:
         import model
         import max_mode
-        return str(max_mode.current(model.MODEL) or "")
+        return str(max_mode.decider_model(model.MODEL) or "")
     except Exception:                                            # noqa: BLE001
         return ""
 
@@ -738,6 +936,18 @@ def model_name() -> str:
 #                  prior) -- bonsai_decider.py `calib`.
 #   legacy_form    REPORTED: the evidence for decide_turn.FORM (legacy).
 #   legacy_vs_typed REPORTED: bench/decider/legacy_vs_typed.py's summary.
+#   temperature    USED: the per-question-set temperature over the label
+#                  probabilities (THE TEMPERATURE, below), fitted by
+#                  bench/decider/fit_temperature.py held out by run. None
+#                  fitted: T = 1 (the readout as it was); never borrowed
+#                  from another model (FALLBACK_MODEL's is not applied).
+#   read_regime    USED: whether a question is read with the prefix cached
+#                  or fully cold (cache_prompt false) -- the cheapest regime
+#                  that REPEATS EXACTLY on this model (bench/decider/
+#                  determinism.py; operator, 2026-09-30: "20s is not too
+#                  slow ... we would normally be paying 10s of minutes or
+#                  more without jjava"). None measured: cached, as before,
+#                  recorded as unmeasured; never borrowed.
 #
 # WHERE A PROFILE COMES FROM: BUILTIN_PROFILES (Bonsai's 2026-09-27 numbers,
 # each with its script and n, exactly the values this module used before),
@@ -759,7 +969,8 @@ PROFILES_DIR = os.environ.get("YAMADORI_DECIDER_MODELS_DIR") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bench",
     "decider", "results", "models")
 PROFILE_FIELDS = ("tie_band", "labels", "letter_prior", "label_bias",
-                  "readout", "legacy_form", "legacy_vs_typed")
+                  "readout", "legacy_form", "legacy_vs_typed", "temperature",
+                  "read_regime")
 BUILTIN_PROFILES: dict = {
     "bonsai": {
         "tie_band": {
@@ -814,7 +1025,53 @@ def _valid_field(field: str, v) -> str | None:
             return f"value {x!r} is not a probability difference in [0, 0.5)"
         if not isinstance(v.get("n"), int) or v["n"] < 1:
             return "no n"
+    if field == "temperature":
+        sets = v.get("sets")
+        if not isinstance(sets, dict) or not sets:
+            return "no `sets` {question set: {value, n, heldout_ok}}"
+        for name, row in sets.items():
+            x = row.get("value") if isinstance(row, dict) else None
+            if not isinstance(x, (int, float)) or isinstance(x, bool) \
+                    or not 0.0 < float(x) < float("inf"):
+                return f"set {name!r}: value {x!r} is not a positive number"
+            if not isinstance(row.get("n"), int) or row["n"] < 1:
+                return f"set {name!r}: no n"
+            if row.get("heldout_ok") is not True:
+                return (f"set {name!r}: not shown to hold out by run "
+                        "(heldout_ok)")
+    if field == "read_regime":
+        if v.get("mode") not in READ_MODES:
+            return f"mode {v.get('mode')!r} (one of {READ_MODES})"
+        if v.get("repeats_exactly") is not True:
+            return ("not shown to repeat exactly (repeats_exactly): only "
+                    "such a regime is chosen")
+        if not isinstance(v.get("n"), int) or v["n"] < 1:
+            return "no n"
     return None
+
+
+# THE READ REGIME (profile field `read_regime`, above).
+READ_MODES = ("cold", "cached")
+
+
+def read_regime_of(name: str | None = None) -> dict:
+    """{model, mode, measured, source}: the model's measured regime, else
+    `cached` (the path before 2026-09-30), recorded as unmeasured."""
+    p = profile(name)
+    rr = p["fields"].get("read_regime")
+    if rr is not None:
+        return {"model": p["model"], "mode": rr["mode"], "measured": True,
+                "source": rr.get("source"), "n": rr.get("n")}
+    return {"model": p["model"], "mode": "cached", "measured": False,
+            "source": f"unmeasured for {p['model'] or '(model unknown)'}: "
+                      "cached, the path before 2026-09-30 (bench/decider/"
+                      "determinism.py measures it)"}
+
+
+def read_cache(name: str | None = None) -> bool:
+    """cache_prompt for a jjava read on the serving model: False when its
+    measured regime is `cold`."""
+    return read_regime_of(name)["mode"] != "cold"
 
 
 def load_record(name: str | None = None) -> dict:
@@ -917,6 +1174,117 @@ def profile_status(name: str | None = None) -> dict:
     return out
 
 
+# ======================================================= THE TEMPERATURE ==
+# SGLang's decision models ("How answers are computed", read 2026-09-30):
+# a yes/no probability is exp(lp_yes / T) / (exp(lp_yes / T) + exp(lp_no /
+# T)) -- a temperature over the LABEL logits, the one calibration knob;
+# the vocabulary's normaliser cancels (every label shares it), and
+# label_mass = exp(lp_yes) + exp(lp_no) does not depend on T. Their values
+# are "not a calibrated probability that the decision is correct. Validate
+# any threshold on labeled data".
+#
+# HERE: T is per MODEL and per QUESTION SET (a set's full name, else its
+# family: the THRESHOLDS keys), from the model's profile field
+# `temperature` -- written only by bench/decider/fit_temperature.py, fitted
+# on labelled decisions and shown to hold out by run (`heldout_ok`); never
+# borrowed from another model. None fitted: T = 1, the readout exactly as
+# it was. APPLIED in read() to each order's label distribution as read
+# (p_i^(1/T), renormalised: the same thing as T over the label logits),
+# BEFORE the content-free prior and the exclusion, then the orders are
+# averaged as always. A single read's argmax never moves; the two orders'
+# average can, and every confidence and noul does -- so THRESHOLDS are
+# tuned AFTER a temperature is fitted, on tempered values (readout_of()
+# recomputes them from the per-order `raw` the decisions carry).
+# YAMADORI_JJAVA_TEMPERATURE=0 reads with T = 1 whatever is fitted.
+TEMPERATURE_ON = os.environ.get("YAMADORI_JJAVA_TEMPERATURE", "1") != "0"
+
+
+def temperature_of(question: str, name: str | None = None) -> dict:
+    """{value, fitted, set, source}: the question set's temperature on the
+    model `name` (default: the serving model)."""
+    key = canonical_model(name)
+    q = str(question or "")
+    fam = q.split(":", 1)[0]
+    if not TEMPERATURE_ON:
+        return {"value": 1.0, "fitted": False, "set": None,
+                "source": "off (YAMADORI_JJAVA_TEMPERATURE=0)"}
+    field = profile(key)["fields"].get("temperature") or {}
+    sets = field.get("sets") or {}
+    for s in (q, fam):
+        if s in sets:
+            return {"value": float(sets[s]["value"]), "fitted": True,
+                    "set": s, "source": field.get("source"),
+                    "n": sets[s].get("n")}
+    return {"value": 1.0, "fitted": False, "set": None,
+            "source": f"none fitted for {fam!r} on {key or '(model unknown)'}"
+                      ": T = 1"}
+
+
+def temper(p: dict, t: float) -> dict:
+    """A label distribution at temperature t: p_i^(1/t), renormalised (t = 1
+    returns it unchanged; a zero stays zero)."""
+    t = float(t)
+    if t == 1.0:
+        return dict(p)
+    import math
+    lg = {k: (math.log(v) / t if v > 0 else None) for k, v in p.items()}
+    m = max((x for x in lg.values() if x is not None), default=None)
+    if m is None:
+        return dict(p)
+    e = {k: (math.exp(x - m) if x is not None else 0.0)
+         for k, x in lg.items()}
+    z = sum(e.values()) or 1.0
+    return {k: v / z for k, v in e.items()}
+
+
+def readout_of(orders_raw: list[dict], t: float = 1.0,
+               allowed=None) -> dict:
+    """read()'s averaged distribution rebuilt from its per-order `raw`
+    distributions (diagnostics.orders[].raw, the decisions log's
+    orders[].raw) at temperature t, the excluded keys dropped: how a bench
+    re-scores logged decisions under a fitted T. (The content-free prior is
+    not re-applied: only the package veto's questions carry one.)"""
+    keys = list(orders_raw[0])
+    allowed = [k for k in keys if allowed is None or k in allowed]
+    per = []
+    for raw in orders_raw:
+        p = temper(raw, t)
+        z = sum(p.get(k, 0.0) for k in allowed)
+        per.append({k: ((p.get(k, 0.0) / z if z > 0 else 1.0 / len(allowed))
+                        if k in allowed else 0.0) for k in keys})
+    return {k: sum(o[k] for o in per) / len(per) for k in keys}
+
+
+# ====================================================== THE SCORE LABELS ==
+# SGLang labels a score's LEVELS 0-9 (single tokens) where options take
+# A-Z. Ours label every option, levels included, with positional letters
+# (typed/2). The digit labels are here BEHIND A SWITCH, default unchanged
+# ("letters") until the window measures them (bench/skills/inject_decide.py
+# variant `e`): YAMADORI_JJAVA_SCORE_LABELS=digits, or per question
+# q_score(..., label_kind="digits"). With digits a level is printed with its
+# OWN number in both orders ("2. <level 2>"), so the label carries the
+# level's meaning; the two orders still move each level's position. The
+# instruction line SCORE_DIGITS is our wording, UNMEASURED. More than 10
+# levels cannot take single digits: those stay lettered, and the answer
+# says so (diagnostics.score_labels).
+LABEL_KINDS = ("letters", "digits")
+SCORE_LABELS = os.environ.get("YAMADORI_JJAVA_SCORE_LABELS", "letters")
+DIGITS = tuple("0123456789")
+SCORE_DIGITS = ("QUESTION: {question}\n\nLEVELS:\n{options}\n\n"
+                "Answer with the number of one level.")
+
+
+def score_label_kind(q: dict) -> str:
+    """The label kind a typed score is printed with: "digits" | "letters"
+    (a choice or noul: always letters)."""
+    if q.get("type") != "score":
+        return "letters"
+    want = q.get("label_kind") or SCORE_LABELS
+    if want == "digits" and len(q["keys"]) <= len(DIGITS):
+        return "digits"
+    return "letters"
+
+
 def confidence(probs: dict) -> float:
     """Jev's confidence of a Choice or Score distribution: clamp((n x p_max -
     1) / (n - 1), 0, 1) over the n options it is spread over (see "THE TYPED
@@ -1000,14 +1368,22 @@ def q_choice(name: str, text: str, options, *, keys=None,
     return q
 
 
-def q_score(name: str, text: str, levels) -> dict:
+def q_score(name: str, text: str, levels, *,
+            label_kind: str | None = None) -> dict:
     """A level of a rubric: `levels` are the levels' descriptions, lowest
     first, numbered 0..k as Jev numbers them (the answer's `probabilities`
-    and `legend` are keyed "0", "1", ...)."""
+    and `legend` are keyed "0", "1", ...). `label_kind` "digits" prints each
+    level with its own number (THE SCORE LABELS); None: the switch."""
     opts = _options(levels, "score")
-    return {"type": "score", "name": str(name), "text": str(text).strip(),
-            "options": opts, "none": None,
-            "keys": [str(i) for i in range(len(opts))]}
+    if label_kind is not None and label_kind not in LABEL_KINDS:
+        raise _refuse("BAD_LABEL_KIND", f"label_kind {label_kind!r} (one of "
+                      f"{LABEL_KINDS})")
+    q = {"type": "score", "name": str(name), "text": str(text).strip(),
+         "options": opts, "none": None,
+         "keys": [str(i) for i in range(len(opts))]}
+    if label_kind:
+        q["label_kind"] = label_kind
+    return q
 
 
 def typed(q: dict) -> dict:
@@ -1032,7 +1408,8 @@ def typed(q: dict) -> dict:
         return q_choice(name, text, q.get("options") or crit,
                         keys=q.get("keys"), none=q.get("none"),
                         prior=q.get("prior"))
-    return q_score(name, text, q.get("levels") or q.get("options") or crit)
+    return q_score(name, text, q.get("levels") or q.get("options") or crit,
+                   label_kind=q.get("label_kind"))
 
 
 def two_orders(k: int, none: int | None = None) -> list[list[int]]:
@@ -1052,11 +1429,17 @@ def rendered_orders(q: dict) -> list[dict]:
     the question's key, and whose `order` is the permutation."""
     q = typed(q)
     out = []
+    digits = score_label_kind(q) == "digits"
     for order in two_orders(len(q["keys"]), q.get("none")):
         c = choice(q["text"], [q["options"][i] for i in order])
+        if digits:                  # each level printed with its own number
+            c["labels"] = [q["keys"][i] for i in order]
+            c["label_kind"] = "digits"
         c["meaning"] = {lab: q["keys"][i] for lab, i in zip(c["labels"],
                                                             order)}
         c["order"] = list(order)
+        if q["type"] == "noul":     # the option words (case_variants)
+            c["words"] = list(NOUL_TEXTS)
         out.append(c)
     return out
 
@@ -1077,7 +1460,7 @@ def answer_probs(a: dict) -> dict:
 
 
 def read(state: str, q: dict, *, slot: int | None, post=None,
-         upstream=None, timeout: float = 120, cache: bool = True,
+         upstream=None, timeout: float = 120, cache: bool | None = None,
          render=None, exclude=(), prior_for=None) -> dict:
     """ONE typed question over `state` on the caller's slot, in two orders.
 
@@ -1108,23 +1491,48 @@ def read(state: str, q: dict, *, slot: int | None, post=None,
             False, "the caller: exclude fewer options")
     use_prior = q.get("prior") == "content_free" and prior_for is not None
     per = []
+    if cache is None:              # THE READ REGIME: the model's measured one
+        cache = read_cache()
+    temp = temperature_of(q["name"])
     for c in rendered_orders(q):
         a = ask_one(state, c, slot=slot, post=post, upstream=upstream,
                     timeout=timeout, cache=cache,
                     msgs=render(c) if render else None)
-        p = meaning_probs(a, c)
-        prior = prior_for(c) if use_prior else None
+        raw = meaning_probs(a, c)
+        p = temper(raw, temp["value"])            # THE TEMPERATURE (T = 1:
+        prior = prior_for(c) if use_prior else None   # unchanged)
         if prior:
             p = contextual(p, prior)
         z = sum(p.get(k, 0.0) for k in allowed)
         p = {k: ((p.get(k, 0.0) / z if z > 0 else 1.0 / len(allowed))
                  if k in allowed else 0.0) for k in keys}
+        cv = a.get("case_variants") or {}
+        wm = cv.get("word") or {}
         per.append({"printed": [keys[i] for i in c["order"]], "probs": p,
+                    # the order's label distribution as read, before the
+                    # temperature, the prior and the exclusion (readout_of)
+                    "raw": {k: round(float(raw.get(k, 0.0)), 6)
+                            for k in keys},
                     "label_mass": a.get("label_mass"),
+                    # case_variants: where the rest of the top K went
+                    "variant_mass": cv.get("variant_mass"),
+                    "word_mass": ({"true" if w == NOUL_TEXTS[0] else
+                                   "false": v for w, v in wm.items()}
+                                  if q["type"] == "noul" and cv.get(
+                                      "available") else None),
+                    "by_spelling": cv.get("by_spelling"),
                     "exact": a.get("exact"),
                     "prompt_tokens": a.get("prompt_tokens"),
                     "processed_tokens": a.get("processed_tokens"),
                     "cached_tokens": a.get("cached_tokens"),
+                    # all of this order's HTTP reads (K re-reads included)
+                    "http_reads": a.get("reads"),
+                    "processed_all": (
+                        sum(int(x.get("prompt_n") or 0)
+                            for x in a.get("read_log") or [])
+                        if all(x.get("prompt_n") is not None
+                               for x in a.get("read_log") or [])
+                        else None),
                     "ms": a.get("total_ms")})
     avg = {k: sum(o["probs"][k] for o in per) / len(per) for k in keys}
     band = tie_band_of()
@@ -1144,10 +1552,26 @@ def read(state: str, q: dict, *, slot: int | None, post=None,
                                               per[-1]["probs"]), 6),
             "argmax_agree": len(set(tops)) == 1,
             "label_mass_min": None if lm is None else round(lm, 6),
+            # DIAGNOSTICS (case_variants), never acted on: the most any
+            # order put on unread case/spacing variants of its labels, and
+            # (a noul) on the option WORDS instead of the letters
+            "variant_mass_max": max((o["variant_mass"] for o in per
+                                     if o["variant_mass"] is not None),
+                                    default=None),
+            "word_mass_max": max((sum(o["word_mass"].values()) for o in per
+                                  if o["word_mass"] is not None),
+                                 default=None),
+            "temperature": temp,
+            "read_regime": "cached" if cache else "cold",
+            "score_labels": (score_label_kind(q) if q["type"] == "score"
+                             else None),
             "excluded": ex, "prior": q.get("prior") if use_prior else None,
             "model": band["model"],
             "tie_band": {k: band[k] for k in ("value", "measured")},
-            "readout": READOUT_VERSION, "template": TEMPLATE_VERSION,
+            "readout": READOUT_VERSION + (
+                "+digits" if q["type"] == "score"
+                and score_label_kind(q) == "digits" else ""),
+            "template": TEMPLATE_VERSION,
             "prompt_tokens": sum(o.get("prompt_tokens") or 0 for o in per),
             "processed_tokens": sum(o.get("processed_tokens") or 0
                                     for o in per),

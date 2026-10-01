@@ -261,15 +261,14 @@ def test_stage_transitions_enqueue_the_right_lane():
     check(ds["stage"] == "index",
           "extract is followed by index: review is not a gate, it is "
           "optional and after the fact", ds["stage"])
-    check(len(idx) == 1 and idx[0]["lane"] == "gpu",
+    check(len(idx) == 1 and idx[0]["lane"] == "gpu_a4000",   # the embedder: the A4000 (jobs.GPU_SCOPES)
           "index embeds into the hints cache, so it is a gpu job",
           json.dumps([(j["stage"], j["lane"]) for j in idx]))
 
     settle(ds["id"])
     ds = datasets.advance(ds["id"])
     check(ds["stage"] == "complete",
-          "a recipes dataset is complete after index; label and train are "
-          "skipped", ds["stage"])
+          "a recipes dataset is complete after index", ds["stage"])
     check(datasets.next_stage(ds) is None,
           "and there is nothing after complete")
     raised = False
@@ -281,19 +280,19 @@ def test_stage_transitions_enqueue_the_right_lane():
                   "repeated")
 
 
-def test_a_laya_set_gets_label_and_train_and_a_recipes_set_does_not():
-    ds = fresh(kind="laya", name="laya pairs")
-    for expected in ("extract", "index", "label", "train", "complete"):
-        settle(ds["id"])
-        ds = datasets.advance(ds["id"])
-        check(ds["stage"] == expected,
-              f"a laya set reaches {expected}", ds["stage"])
-    lanes = {j["stage"]: j["lane"] for j in jobs.listing(dataset=ds["id"])}
-    check(lanes.get("label") == "cpu",
-          "label is cpu: pair construction needs no model", str(lanes))
-    check(lanes.get("train") == "gpu",
-          "train is gpu: it refits the head", str(lanes))
-    check("review" not in lanes, "and review never became a job")
+def test_the_laya_kind_and_its_stages_are_gone():
+    """The `laya` kind's label and train stages were removed with Laya
+    (2026-09-29; the way back is commit e360d37)."""
+    raised = False
+    try:
+        fresh(kind="laya", name="laya pairs")
+    except ValueError:
+        raised = True
+    check(raised, "a `laya` dataset is refused as an unknown kind")
+    check("label" not in datasets.STAGES and "train" not in datasets.STAGES
+          and "label" not in datasets.ENQUEUE
+          and "train" not in datasets.ENQUEUE,
+          "no stage labels or trains", str(datasets.STAGES))
 
 
 def test_a_url_submission_enqueues_a_net_fetch_and_pasted_text_does_not():
@@ -574,8 +573,9 @@ def test_the_nav_carries_the_new_page_exactly_once():
     hrefs = [h for _, _, h in dash_shell.NAV]
     check("/dash/data" in hrefs, "at /dash/data", str(hrefs))
     check("/dash" in hrefs and "/dash/vitals" in hrefs
-          and "/dash/results" in hrefs,
-          "and the three existing pages are still in the nav", str(hrefs))
+          and "/dash/results" not in hrefs,
+          "and the other pages are still in the nav (the benchmark page, "
+          "retired 2026-09-30, is not)", str(hrefs))
     markup = dash_shell.nav("data")
     check('href="/dash/data"' in markup and 'aria-current="page"' in markup,
           "and the data page marks itself current")
@@ -615,7 +615,7 @@ def main() -> int:
                test_a_restricted_licence_is_surfaced_but_does_not_block,
                test_an_unknown_licence_cannot_advance_past_clarify,
                test_stage_transitions_enqueue_the_right_lane,
-               test_a_laya_set_gets_label_and_train_and_a_recipes_set_does_not,
+               test_the_laya_kind_and_its_stages_are_gone,
                test_a_url_submission_enqueues_a_net_fetch_and_pasted_text_does_not,
                test_an_errored_job_is_never_counted_as_done,
                test_counts_that_were_not_measured_are_absent_rather_than_zero,

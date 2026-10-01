@@ -30,10 +30,13 @@ STORES = {
     "YAMADORI_SKILLS_DIR": "skills",
     "YAMADORI_SKILL_TRIGGER_CACHE": "skill_triggers.npz",
     "YAMADORI_SKILL_LABELS": "router_labels.jsonl",
-    "YAMADORI_CORPUS_DB": "corpus.sqlite3",      # turns, deep_decisions
+    "YAMADORI_CORPUS_DB": "corpus.sqlite3",      # turns
     "YAMADORI_NEBARI_DB": "nebari.sqlite3",      # sessions, the ledger
     "RINGS_DB": "rings.sqlite3",                 # the work log
     "YAMADORI_TOKEN_LEDGER": "token_ledger.sqlite3",
+    # the dashboard's history (mcp/stats_store.py): generations, requests,
+    # releases, swaps, GPU minutes; written only where the token ledger is
+    "YAMADORI_STATS_DB": "stats.sqlite3",
     "YAMADORI_SLOTS_STATE": "slots_state.json",
     "CONCEPT_SEED_LAST": "concept_seed_last.json",
     "YAMADORI_POWER_LEDGER": "power_ledger.json",
@@ -63,7 +66,7 @@ STORES = {
     "YAMADORI_DECIDER_LABELS": "decider_labels.jsonl",
 }
 # NOT moved (read as fixtures; the guard refuses a write to them): the held
-# packages and index/packages/registry_history.json (deep.unseen reads it),
+# packages and index/packages/registry_history.json,
 # the package registry (packages.json, held.json, vocabulary.json:
 # YAMADORI_PKG_REGISTRY_DIR -- detection and the taxonomy read it; only an
 # onboarding's vocab stage writes it, and a suite that exercises that stage

@@ -1,10 +1,11 @@
 // The KV pool as the API reports it (mcp/budget.py budgets()). Two layouts:
 //
-//   split  the pool divided: one main context, N deep-thinking contexts of
+//   split  the pool divided: one main context, N helper contexts of
 //          `helper` tokens each, and whatever the shares leave (reserve).
 //   cap    THE CAP LAYOUT (operator, 2026-09-28): main is the tiered cache's
-//          VRAM line (every conversation's window), the child slot -- deep
-//          thinking, the decider, side calls -- has its own `helper` tokens
+//          VRAM line (every conversation's window), the child slot -- the
+//          decider lane since layout v2 (budget.child() names its role and
+//          what it serves) -- has its own `helper` tokens
 //          and swaps into VRAM while its conversation pauses, and the rest
 //          of the pool is a second concurrent conversation's room, which may
 //          spill to host RAM (budget.py docstring, slots RANKS).
@@ -17,7 +18,7 @@ export type KvLayout = 'cap' | 'split';
 export type KvSplit = {
   pool: number;
   main: number;
-  /** tokens per deep-thinking context (the child slot in the cap layout) */
+  /** tokens per helper context (the child slot in the cap layout) */
   helper: number;
   helpers: number;
   /** true when `helpers` came from the payload, false when derived from its own sums */
@@ -30,6 +31,10 @@ export type KvSplit = {
   capSource: string | null;
   /** /props kv_vram_cells as served (engine patch 0041); null when not reported */
   vramLine: number | null;
+  /** budget.child() role ("decider lane"); null on a server older than the field */
+  childRole: string | null;
+  /** what the child slot serves, as the server lists it; empty when not reported */
+  childServes: string[];
 };
 
 /** What each part of the split is called, and what it is for. */
@@ -38,6 +43,8 @@ export type KvNames = {
   mainWhy: string;
   helper: string;
   helperWhy: string;
+  /** the helper context's role in lower case, for prose ("decider lane") */
+  helperRole: string;
   reserve: string;
   reserveWhy: string;
   /** the panel's tag */
@@ -76,21 +83,26 @@ export function kvSplit(c: ContextPool | null | undefined): KvSplit | null {
     layout,
     capSource: typeof c.cap_source === 'string' && c.cap_source ? c.cap_source : null,
     vramLine: finite(c.vram_line) ? c.vram_line : null,
+    childRole: c.child && typeof c.child.role === 'string' && c.child.role ? c.child.role : null,
+    childServes: Array.isArray(c.child?.serves) ? c.child!.serves!.filter((x) => typeof x === 'string') : [],
   };
 }
 
 /**
- * The names of the parts. Deep thinking is what a user sees the second
- * context called (AGENTS.md "Naming"); in the cap layout that context is the
- * child slot, which the decider and side calls share.
+ * The names of the parts. The child slot's role is the server's own word
+ * (budget.child(): "decider lane" since layout v2); a server that predates
+ * the field gets the neutral "helper".
  */
 export function kvNames(kv: KvSplit): KvNames {
+  const role = kv.childRole ?? 'helper';
+  const serves = kv.childServes.length ? kv.childServes.join(', ') : null;
   if (kv.layout === 'cap') {
     return {
       main: 'MAIN · VRAM LINE',
       mainWhy: `every conversation's window${kv.capSource ? ` · ${kv.capSource}` : ''}`,
-      helper: 'CHILD · DEEP THINKING',
-      helperWhy: 'deep thinking, the decider and side calls; its own window, swapped into VRAM while its conversation pauses',
+      helper: `CHILD · ${role.toUpperCase()}`,
+      helperWhy: `${serves ?? role}; its own window, swapped into VRAM while its conversation pauses`,
+      helperRole: role,
       reserve: 'SECOND CONVERSATION',
       reserveWhy: 'the rest of the pool: room for a second concurrent conversation, in host RAM when it spills',
       tag: 'CAP LAYOUT',
@@ -99,8 +111,9 @@ export function kvNames(kv: KvSplit): KvNames {
   return {
     main: 'MAIN',
     mainWhy: 'the conversation',
-    helper: `DEEP THINKING ×${kv.helpers}`,
-    helperWhy: 'deep thinking, one helper at a time',
+    helper: `${role.toUpperCase()} ×${kv.helpers}`,
+    helperWhy: `${serves ?? role}, one at a time`,
+    helperRole: role,
     reserve: 'RESERVE',
     reserveWhy: 'whatever the shares leave unclaimed',
     tag: `${kv.helpers + 1} CONTEXTS`,

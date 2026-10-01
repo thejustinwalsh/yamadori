@@ -26,6 +26,9 @@ bails"). All are read in one window so a rewrite needs no second one:
      session's goal named first ("GOAL ... NOW: ..."), the turn after it
      -- the state rewrite of docs/JJAVA.md 4.2, read on a second Turn per
      case (one more state placement)
+  e  variant a with the levels labelled by their own digits 0-3 instead of
+     positional letters (decider_bonsai THE SCORE LABELS, SGLang's level
+     labels; behind the switch, default letters, until this measures it)
   stage 3 (all variants): skill_inject.INJECT_Q over the shortlist the
      variant's own untuned gate passes; with none passed, over the variant's
      two items of highest belief (labelled `forced`, so stage 3 has
@@ -53,7 +56,7 @@ RESULTS = os.path.join(HERE, "inject", "results")
 sys.path.insert(0, os.path.join(ROOT, "mcp"))
 
 RUN_VERSION = "inject-decide/1"
-VARIANTS = ("a", "b", "c", "d")
+VARIANTS = ("a", "b", "c", "d", "e")
 LEVELS_B = [
     "It is about a library, API or task that the material does not "
     "involve.",
@@ -85,6 +88,9 @@ def questions(variant: str, items: list[dict]) -> list[dict]:
         if variant in ("a", "d"):
             out.append(D.q_score(name, I.ITEM_Q.format(fact=it["fact"]),
                                  I.ITEM_LEVELS))
+        elif variant == "e":
+            out.append(D.q_score(name, I.ITEM_Q.format(fact=it["fact"]),
+                                 I.ITEM_LEVELS, label_kind="digits"))
         elif variant == "b":
             out.append(D.q_score(name, I.ITEM_Q.format(fact=it["fact"]),
                                  LEVELS_B))

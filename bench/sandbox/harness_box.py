@@ -364,13 +364,21 @@ def loadout_skills(harness: str) -> list[str]:
     it (it has no MCP client) and, having no language server, looks up an
     installed package's API with the `package-api` skill's script (the
     TypeScript compiler in the image reading the package's declarations:
-    docs/HARNESSES.md "Pi"). OpenCode has all three built in (lsp, MCP)."""
+    docs/HARNESSES.md "Pi"). Codex runs the same script through
+    exec_command (operator-approved, 2026-09-30). OpenCode has all three
+    built in (lsp, MCP)."""
     return {"pi": ["type-check", "page-check", "package-api"],
-            "codex": ["type-check"]}.get(harness, [])
+            "codex": ["type-check", "package-api"]}.get(harness, [])
 
 
 SKILL_HOMES = {"pi": ".agents/skills",           # Pi reads the Agent Skills location (docs/skills.md)
                "codex": ".codex/skills"}          # $CODEX_HOME/skills
+
+
+def skill_text(harness: str, text: str) -> str:
+    """A skill's SKILL.md names its own folder as Pi's (`~/.agents/skills/`);
+    each harness gets the path of its own skills folder."""
+    return text.replace("~/.agents/skills/", f"~/{SKILL_HOMES[harness]}/")
 
 
 def write_home(harness: str, home: str, port: int, src: str | None = None,
@@ -419,7 +427,9 @@ def write_home(harness: str, home: str, port: int, src: str | None = None,
             # the whole skill folder: SKILL.md and any script it runs
             for fn in sorted(os.listdir(os.path.join(SKILLS_DIR, name))):
                 with open(os.path.join(SKILLS_DIR, name, fn), encoding="utf-8") as f:
-                    put(f"{SKILL_HOMES[harness]}/{name}/{fn}", f.read())
+                    text = f.read()
+                put(f"{SKILL_HOMES[harness]}/{name}/{fn}",
+                    skill_text(harness, text) if fn == "SKILL.md" else text)
     for sub in (".cache", ".local/share", ".local/state"):
         os.makedirs(os.path.join(home, *sub.split("/")), exist_ok=True)
     return written

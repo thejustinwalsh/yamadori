@@ -129,7 +129,7 @@ RANK_PRIMARY, RANK_SECOND = 2, 1
 # LAYOUT V2: the lane's size and rank are the proxy's own constants (one source).
 LANE = budget.LANE_TOKENS
 RANK_LANE = slots.RANK_LANE
-LAYOUTS = ("v1", "v2")
+LAYOUTS = ("v1", "v2", "v3")
 RE_SPAN = re.compile(r"find_slot: stream\[\d+\], n = +(\d+), used = +(\d+), head = +\d+, size = +\d+, "
                      r"n_swa = +\d+, seq (\d+): cells = (\d+), span = (\d+)")
 RE_PROMOTE = re.compile(r"kv promote: seqs (\S+): (\d+) cells, span (\d+) -> (\d+).*?: (\d+) moved, "
@@ -148,6 +148,17 @@ def target_args(n: int, child: int = CHILD, debug: bool = False, layout: str = "
     # tiered cache (0028) and the moves (0040/0041) need ONE stream -- without it the whole pool was device
     # memory, oversubscribed into system memory (2026-09-29 first fit: 21-29 MiB free at N 147k and 119k,
     # decode 3.8 tok/s, prefill ~95 tok/s)
+    if layout == "v3":
+        # LAYOUT V3 (operator, 2026-09-29: "we should not have a second conversation at all, it is too slow"):
+        # ONE conversation (slot 0) + the jjava lane (slot 1). -c = N: every cell in VRAM, nothing spills to
+        # host RAM, so --kv-vram-cells = -c (the tiered cache has nothing to tier).
+        a = {"-np": "2", "--kv-unified": "", "-c": str(n), "--kv-vram-cells": str(n),
+             "--cache-type-k-draft": "q8_0", "--cache-type-v-draft": "q8_0",
+             "--spec-draft-window": "16384", "--spec-draft-n-max": "2", "--spec-draft-n-max-tail": "4",
+             "--mmproj": None}
+        if debug:
+            a["-lv"] = "5"
+        return a
     extra = LANE if layout == "v2" else child
     a = {"-np": "3", "--kv-unified": "", "-c": str(2 * n + extra), "--kv-vram-cells": str(n),
          "--cache-type-k-draft": "q8_0", "--cache-type-v-draft": "q8_0",
@@ -162,7 +173,12 @@ def target_args(n: int, child: int = CHILD, debug: bool = False, layout: str = "
 def main_cap(n: int, layout: str) -> int:
     """The main conversation's cap on this arm: the line (v1), the line less the lane (v2: the lane's
     cells are kept in VRAM at a rank above the primary's)."""
-    return n - LANE if layout == "v2" else n
+    return n - LANE if layout in ("v2", "v3") else n
+
+
+def c_of(n: int, layout: str, child: int = CHILD) -> int:
+    """-c for line N: v1 2N + the child, v2 2N + the lane, v3 N (one conversation + the lane, all in VRAM)."""
+    return n if layout == "v3" else 2 * n + (LANE if layout == "v2" else child)
 
 
 class Log:
@@ -207,11 +223,11 @@ def gen(base: str, slot: int, tokens: list[int], n: int, rank: int, ranks: list[
     return out
 
 
-def clear(base: str) -> None:
+def clear(base: str, n_slots: int = 3) -> None:
     """Empty every slot (slots.release_idle's shrink) with rank 0."""
-    for i in range(3):
+    for i in range(n_slots):
         ep.post(base, "/completion", {"prompt": f"x{i}", "n_predict": 1, "id_slot": i, "cache_prompt": True,
-                                      "kv_rank": 0, "kv_ranks": [0, 0, 0]})
+                                      "kv_rank": 0, "kv_ranks": [0] * n_slots})
 
 
 def med(rows: list[dict]) -> float | None:
@@ -231,6 +247,84 @@ def line_warm_v2(base: str, rec: dict, guard) -> None:
     rec["warm"] = [strip(gen(base, 0, toks[:8192], GEN, 2, [2, 0, RANK_LANE])),
                    strip(gen(base, 1, toks[8192:10240], GEN, 1, [2, 1, RANK_LANE])),
                    strip(gen(base, 2, toks[10240:10240 + LANE - 1], 1, RANK_LANE, [2, 1, RANK_LANE]))]
+
+
+def line_warm_v3(base: str, rec: dict, guard) -> None:
+    """A v3 fit round: a real prefill and decode on the ONE conversation slot (0), and the lane (slot 1) holding
+    LANE cells at its rank -- no image (no projector)."""
+    toks = ep.corpus_tokens(base)
+    rec["warm"] = [strip(gen(base, 0, toks[:8192], GEN, 2, [2, RANK_LANE])),
+                   {}, strip(gen(base, 1, toks[10240:10240 + LANE - 1], 1, RANK_LANE, [2, RANK_LANE]))]
+
+
+def lane3_fn(n: int, depths=(8192, 32768, 65536)):
+    """THE LANE, THREE ARMS (operator 2026-09-29: "We clear jjava lane too after it is done right, not slow down
+    slop"; the coordinator's measurement plan): per depth, main's decode tok/s on slot 0 (GEN tokens, n=REPS) with
+      IDLE-KEPT  the lane holding a decider state (LANE-1 tokens, filled AFTER the conversation, so above its cells)
+      ACTIVE     a decider burst on the lane DURING main's decode (BURST one-token reads over that state)
+      CLEARED    the lane released after its burst (the one-token prompt, slots.release_idle's shrink), and then the
+                 NEXT burst's re-prefill ms (the price of clearing)
+    MATERIAL (the plan): the ACTIVE or KEPT median below the CLEARED arm's minimum, reported with the %."""
+    BURST = 10                 # decide_turn per request: 5 questions x 2 orders (typed readout), one token each
+
+    def fn(base: str, rec: dict, guard) -> None:
+        toks = ep.corpus_tokens(base)
+        need = max(depths) + 3 * 4096 + LANE + GEN
+        if len(toks) < need:
+            toks = (toks * (need // len(toks) + 1))[:need]
+
+        def seg(k: int, off: int) -> list[int]:
+            return toks[off:off + k]
+        state = seg(LANE - 1, max(depths) + 4096)
+        ranks = [2, RANK_LANE]
+
+        def lane_clear():
+            ep.post(base, "/completion", {"prompt": "x", "n_predict": 1, "id_slot": 1, "cache_prompt": True,
+                                          "kv_rank": 0, "kv_ranks": [2, 0]})
+
+        def burst() -> float:
+            t0 = time.time()
+            for _ in range(BURST):
+                gen(base, 1, state, 1, RANK_LANE, ranks)
+            return round((time.time() - t0) * 1000, 1)
+        out: dict = {}
+        for d in depths:
+            convo = seg(d, 0)
+            row: dict = {"kept": [], "active": [], "cleared": [], "reprefill_ms": [], "burst_ms": []}
+            clear(base, 2)
+            gen(base, 0, convo, 1, 2, ranks)                 # the conversation's cells first
+            gen(base, 1, state, 1, RANK_LANE, ranks)         # then the lane's, above them
+            for _ in range(REPS):
+                row["kept"].append(strip(gen(base, 0, convo, GEN, 2, ranks)))
+            for _ in range(REPS):
+                bms: list = []
+                th = threading.Thread(target=lambda: bms.append(burst()))
+                th.start()
+                r = gen(base, 0, convo, GEN, 2, ranks)
+                th.join()
+                row["active"].append(strip(r))
+                row["burst_ms"].append(bms[0] if bms else None)
+            for _ in range(REPS):
+                burst()
+                lane_clear()
+                row["cleared"].append(strip(gen(base, 0, convo, GEN, 2, ranks)))
+                t0 = time.time()
+                gen(base, 1, state, 1, RANK_LANE, ranks)     # the next burst's first read: the state re-prefilled
+                row["reprefill_ms"].append(round((time.time() - t0) * 1000, 1))
+                lane_clear()
+            k, a_, c = med(row["kept"]), med(row["active"]), med(row["cleared"])
+            cmin = min((x["predicted_per_second"] for x in row["cleared"] if x.get("predicted_per_second")),
+                       default=None)
+            row["median_tps"] = {"kept": k, "active": a_, "cleared": c}
+            row["material"] = {arm: (v is not None and cmin is not None and v < cmin)
+                               for arm, v in (("kept", k), ("active", a_))}
+            row["pct_vs_cleared"] = {arm: (round(100 * (v - c) / c, 1) if v and c else None)
+                                     for arm, v in (("kept", k), ("active", a_))}
+            out[str(d)] = row
+            log(f"[lane3] {d}: tok/s kept {k} active {a_} cleared {c}; re-prefill "
+                f"{statistics.median(row['reprefill_ms'])} ms; material {row['material']}")
+        rec["lane3"] = out
+    return fn
 
 
 def line_warm(base: str, rec: dict, guard) -> None:
@@ -253,16 +347,16 @@ def find_line(s: dict, out: str, a) -> dict:
     margin, display = ep.margin_mib()
     n = a.start
     rounds = []
-    v2 = a.layout == "v2"
-    extra = LANE if v2 else a.child
+    v2 = a.layout in ("v2", "v3")
+    warm = line_warm_v3 if a.layout == "v3" else line_warm_v2 if v2 else line_warm
     for r in range(3):
         name = f"line-{r}"
         s["arms"][name] = (a.binary, {}, target_args(n, a.child, layout=a.layout))
-        rec, res = ep.in_window(name, s, line_warm_v2 if v2 else line_warm, out, a.attempts, a.wait_quiet)
+        rec, res = ep.in_window(name, s, warm, out, a.attempts, a.wait_quiet)
         free = rec.get("gpu_min_free")
-        rounds.append({"n": n, "c": 2 * n + extra, "min_free_mib": free, "error": rec.get("error"),
+        rounds.append({"n": n, "c": c_of(n, a.layout, a.child), "min_free_mib": free, "error": rec.get("error"),
                        "image": rec.get("warm_image"), "lane_warm": (rec.get("warm") or [])[2:]})
-        log(f"[line] round {r}: N={n} -c {2 * n + extra}: min free {free} MiB (margin {margin}, "
+        log(f"[line] round {r}: N={n} -c {c_of(n, a.layout, a.child)}: min free {free} MiB (margin {margin}, "
             f"display_active {display})")
         if rec.get("error") or free is None:
             break
@@ -279,7 +373,7 @@ def find_line(s: dict, out: str, a) -> dict:
     if v2:
         res.update(lane=LANE, rank_lane=RANK_LANE, mmproj="removed")
     if res["n"]:
-        res["c"] = 2 * res["n"] + extra
+        res["c"] = c_of(res["n"], a.layout, a.child)
         res["main_cap"] = main_cap(res["n"], a.layout)
         res["host_ram_gb"] = round((res["c"] - res["n"]) * ep.CELL_BYTES / 1e9, 2)
         res["free_ram_gb_at_fit"] = ep.host_free_gb()
@@ -505,6 +599,32 @@ def summary(out: str) -> str:
     return "\n".join(rows)
 
 
+def _main_v3(a) -> int:
+    """LAYOUT V3's run (main() holds the gpu lane around it): the fit at -np 2, then the lane's three arms."""
+    s = ep.setup()
+    s["port"], s["arms"] = a.port, {}
+    n = a.line
+    if not n and "line" not in a.skip:
+        os.makedirs(os.path.join(a.out, "line"), exist_ok=True)
+        n = (find_line(s, os.path.join(a.out, "line"), a) or {}).get("n") or 0
+        if n:
+            json.dump(json.load(open(os.path.join(a.out, "line", "line.json"), encoding="utf-8")),
+                      open(os.path.join(a.out, "line.json"), "w", encoding="utf-8"), indent=1)
+    if not n:
+        print("no line: pass --line N or run the fit")
+        return 1
+    if "lane3" not in a.skip:
+        mdir = os.path.join(a.out, "measure")
+        os.makedirs(mdir, exist_ok=True)
+        s["arms"]["lane3"] = (a.binary, {}, target_args(n, a.child, layout="v3"))
+        rec3, _ = ep.in_window("lane3", s, lane3_fn(n), mdir, a.attempts, a.wait_quiet)
+        json.dump({k: v for k, v in rec3.items() if not str(k).startswith("_")},
+                  open(os.path.join(mdir, "lane3.json"), "w", encoding="utf-8"), indent=1, default=str)
+    print(f"\nLAYOUT V3 LINE: N {n} (-c {n}, main cap {main_cap(n, 'v3')}, lane {LANE})\n"
+          f"  python bench/deploy_layout_v3.py --line {n} --preview")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--window", action="store_true", help="the operator grants the window (production unloaded)")
@@ -520,7 +640,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--skip", nargs="*", default=[],
                     choices=["line", "cap", "lane", "concurrent", "child", "corruption"])
     ap.add_argument("--layout", choices=LAYOUTS, default="v2",
-                    help="v2 (default): no --mmproj, -c 2N + the lane; v1: the 2026-09-28 child layout")
+                    help="v2 (default): no --mmproj, -c 2N + the lane; v1: the 2026-09-28 child layout; v3: ONE "
+                         "conversation + the lane (-np 2, -c N), the fit and the lane's three arms (lane3)")
     ap.add_argument("--summarise")
     a = ap.parse_args(argv)
     if a.summarise:
@@ -534,6 +655,16 @@ def main(argv: list[str]) -> int:
         return 2
     os.makedirs(a.out, exist_ok=True)
     ep.LANE_BY = LANE_BY
+    if a.layout == "v3":
+        # THE WHOLE RUN HOLDS THE WORKER'S GPU LANE (engine_corruption.hold_lane, 2026-09-29: restore() no longer
+        # resumes it between arms -- an idle-gated skill-prove job slipped onto the card mid-window twice), released
+        # at the final exit, the error path included. ep.in_window's own once-per-run hold sees it and adds none.
+        hold = ec.hold_lane("kv_rank --layout v3 (bench/kv_rank.py)", 6 * 3600)
+        ep._LANE_HOLD = hold
+        try:
+            return _main_v3(a)
+        finally:
+            ec.release_lane(hold)
     s = ep.setup()
     s["port"], s["arms"] = a.port, {}
     n = a.line

@@ -1051,7 +1051,7 @@ def test_index_rebuild_is_idle_gated():
         skill_match.index_state = real
     j = jobs.get(jid) if jid else {}
     check(j and (j.get("payload") or {}).get("idle") is True
-          and j.get("lane") == "gpu",
+          and j.get("lane") == "gpu_a4000",   # the embedder: the A4000's gpu scope (jobs.GPU_SCOPES)
           "[idle] the skill document index rebuild is idle-gated (operator "
           "decision 5)", j)
     if jid:

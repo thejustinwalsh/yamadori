@@ -51,9 +51,9 @@ WHAT THE MODEL READS. A result is FETCHED CONTENT: rendered from the
 server's JSON to plain text (render_*), screened by
 skill_screen.screen_fetched (the one screen: offending spans stripped and
 recorded; a text that cannot be cut clean is QUARANTINED), and framed as
-data (DATA_NOTE), like research_tools.read_web_page. A README the registry
+data (DATA_NOTE). A README the registry
 serves EMPTY is read from the package's GitHub repository instead
-(github_readme, 2026-09-29: through research_tools' pinned GET), screened
+(github_readme, 2026-09-29: through mcp/pinned_fetch.py's GET), screened
 the same way and labelled with where it came from; a README longer than
 main's tool-result cap is sent with its install / usage / API sections
 first (lead_first). An npm package's versions carry each listed version's
@@ -776,8 +776,8 @@ def render_versions(d: dict, args: dict) -> tuple[str, list[str]]:
 # For an npm package, yama_list_package_versions adds each listed version's
 # peerDependencies (and peerDependenciesMeta's optional flag) from the npm
 # ABBREVIATED packument -- GET <registry>/<name> with Accept
-# application/vnd.npm.install-v1+json (research_tools.NAMED_ACCEPT) -- read
-# through research_tools.fetch_named_file (the pinned GET, fixed headers,
+# application/vnd.npm.install-v1+json (pinned_fetch.NAMED_ACCEPT) -- read
+# through pinned_fetch.fetch_named_file (the pinned GET, fixed headers,
 # ip.is_global, its byte cap), under ONE deadline (FETCH_DEADLINE). When that
 # document cannot be used -- the byte cap cut it (a package with thousands of
 # prereleases), it is not JSON, the fetch failed -- each dist-tag's version
@@ -799,7 +799,7 @@ def npm_peers(name: str, tag_versions: list[str]) -> dict:
     """{source: abbreviated | version_documents | none, map {version:
     {peerDependencies, peerDependenciesMeta}}, why?, tried[]}."""
     import package_net
-    import research_tools as rt
+    import pinned_fetch as rt
     deadline = time.time() + rt.FETCH_DEADLINE
     base = f"{package_net.REGISTRY}/{name.replace('/', '%2F')}"
     tried: list = []
@@ -1028,10 +1028,10 @@ def _result_cap() -> int:
 # package's `<directory>/README.md` first, then the repository's root one.
 # raw is case-sensitive, so each place is tried as README.md, then
 # readme.md, the other common spelling. EVERY GET goes through
-# research_tools.fetch_named_file -- read_web_page's pinned fetch: GET only,
+# pinned_fetch.fetch_named_file -- the pinned fetch: GET only,
 # its fixed REQUEST_HEADERS, no cookie or Authorization, `ip.is_global` on
 # every hop, its byte cap -- under ONE deadline for the whole fallback
-# (research_tools.FETCH_DEADLINE, read_web_page's). Only a 404 moves on to
+# (pinned_fetch.FETCH_DEADLINE). Only a 404 moves on to
 # the next place; any other failure ends the fallback and is said.
 README_NAMES = ("README.md", "readme.md")
 
@@ -1041,7 +1041,7 @@ def _npm_repository(name: str, version: str | None, deadline: float,
     """The npm version document's `repository` (string or {url,
     directory}), or None."""
     import package_net
-    import research_tools as rt
+    import pinned_fetch as rt
     url = (f"{package_net.REGISTRY}/{name.replace('/', '%2F')}/"
            + urllib.parse.quote(version or "latest", safe=""))
     try:
@@ -1064,7 +1064,7 @@ def github_readme(name: str, eco: str, repository, version: str | None
     why, tried} with why in words for the model."""
     import package_net
     import package_resolve
-    import research_tools as rt
+    import pinned_fetch as rt
     deadline = time.time() + rt.FETCH_DEADLINE
     tried: list = []
     repo = None

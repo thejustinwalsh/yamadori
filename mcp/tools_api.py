@@ -87,7 +87,7 @@ DESCRIPTION = {
         "mcp": "POST /mcp here, or mcp/code_search.py over stdio, same tools",
     },
     "endpoints": {
-        "POST /search": "semantic search: embeddings + cross-encoder rerank. "
+        "POST /search": "semantic search: embeddings, cosine order. "
                         "Use when you CANNOT name what you want.",
         "POST /definition": "exact symbol definition lookup. Instant, no GPU. "
                             "Use when you KNOW the identifier.",
@@ -105,8 +105,8 @@ def openapi_spec() -> dict:
             "version": "1.0.0",
             "description": (
                 "Code search over a local index. Semantic search is backed by "
-                "Qwen3-Embedding plus a Qwen3-Reranker-4B cross-encoder; symbol "
-                "lookups are exact sqlite queries built with tree-sitter."
+                "Qwen3-Embedding (cosine order); symbol lookups are exact "
+                "sqlite queries built with tree-sitter."
             ),
         },
         "servers": [{"url": f"http://ai.thejustinwalsh.me:{PORT}"}],

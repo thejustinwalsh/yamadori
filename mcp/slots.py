@@ -177,6 +177,24 @@ _last_seen: dict[str, float] = {}
 _cleared: dict[int, dict] = {}
 _compacting = 0
 _key_account: dict[str, str] = {}
+# THE OTHER CARD (operator, 2026-09-30, verbatim: "If anything it would be ensuring that a second message that came
+# in out of order got the other card, like a 60s timeout before you can assign a new conversation to it makes sense,
+# if it doesn't match the current id"): a conversation whose id is not the main card's owner, arriving while the
+# owner is mid-request or within PRIMARY_HOLD_S of its latest activity, is ROUTED to the other card -- the tier
+# table's `other_card` for its model (bonsai-a4000) -- and keeps it for its life. One conversation there too: its
+# slot 0 (OTHER_CONV_SLOT); jjava and side calls on that server use slot 1 (OTHER_LANE_SLOT). The same hold rule
+# decides who may take it. `_other` is its one owner; `_displaced` the conversations a switch took a card from.
+# What a SWITCH does to the previous owner's cells (THE OTHER CARD, below): llama-server saves a slot's prompt to
+# its host-RAM prompt cache when a new prompt on that slot diverges from it (get_available_slot's save; the same
+# mechanism IDLE CLEAR's one-token prompt relies on, measured 2026-09-27: ~41k tokens restored in 516 ms) and loads
+# it back when that prompt returns. The save runs inside the newcomer's first prefill (its prompt_ms includes it);
+# the restore is the returning conversation's resumed_cold {how, prompt_ms}.
+SWITCH_SAVE = ("llama-server host-RAM prompt cache (--cache-ram): saved when this prompt diverges from it, restored "
+               "if it returns (its resumed_cold says how and in how many ms)")
+OTHER_CONV_SLOT = 0
+OTHER_LANE_SLOT = 1
+_other: dict = {"owner": None, "model": None, "busy": 0, "warming": 0, "last_end": 0.0}
+_displaced: dict[str, dict] = {}
 
 
 def count(refresh: bool = False) -> int:
@@ -227,6 +245,9 @@ def reset(n: int | None = None) -> None:
         _last_seen.clear()
         _cleared.clear()
         _key_account.clear()
+        _hold_for.clear()
+        _other.update(owner=None, model=None, busy=0, warming=0, last_end=0.0)
+        _displaced.clear()
         _compacting = 0
         if n is not None:
             _n, _n_source = int(n), "reset"
@@ -370,7 +391,7 @@ def _shared_segments(a: dict | None, b: dict | None) -> int:
 
 def remember(grant: dict | None, fp: dict | None) -> None:
     """A request finished on this slot with an answer: it now holds `fp`."""
-    if grant and grant.get("slot") is not None and fp:
+    if grant and grant.get("slot") is not None and fp and not grant.get("_server"):
         with _lock:
             _prompts[grant["slot"]] = fp
         _save()
@@ -543,6 +564,12 @@ def _affinity(prefix: dict, busy: set) -> dict:
 # ---------------------------------------------------------------------------
 KV_RANK = os.environ.get("YAMADORI_KV_RANK", "1").strip().lower() not in (
     "0", "", "off", "false", "no")
+# PRIMARY_HOLD_S: how long a conversation stays the card's owner after its last request ended (and, under the
+# three-slot layout, the primary). The evidence bounds it from BELOW: in the Octopus relay logs (v0b-v0f
+# V0-xhigh-1, a conversation's request t_end to its next t0) the 482 gaps with no compaction between them ran
+# median 0.48 s, p90 1.73, p99 17.1, max 38.2 s (a `terminal` step) -- one harness, one task family, no human
+# think time (the same sample as IDLE_CLEAR_S). A hold above the max keeps every measured in-task gap inside it.
+# 60 s is the value in force since 2026-09-28; the stretch from 38.2 to 60 s is not itself measured.
 PRIMARY_HOLD_S = float(os.environ.get("YAMADORI_PRIMARY_HOLD_S", "60"))
 RANK_PRIMARY, RANK_LIVE, RANK_NONE = 2, 1, 0
 
@@ -566,7 +593,17 @@ RANK_PRIMARY, RANK_LIVE, RANK_NONE = 2, 1, 0
 # ---------------------------------------------------------------------------
 RANK_LANE = RANK_PRIMARY + 1
 LANE_RANK = True
-LANE_KEEP = True
+# THE LANE IS CLEARED AFTER EACH BURST (operator, 2026-09-29, verbatim: "We clear jjava lane too after it is done
+# right, not slow down slop"), reversing layout v2's "kept" rule of the same day. Why: in the unified pool every main
+# decode step reads up to the HIGHEST used cell, and the lane's cells can sit above the conversation's top cell (the
+# top-cell cost, #59; Flash-Next 8.6 tok/s at 8K beside an idle 64K slot, 2026-09-29). Keeping them saved little:
+# the decider's state changes every turn anyway. Within one burst (one state, many questions) the cache is untouched:
+# the release comes when decide_turn's Turn closes (decider_bonsai.release -> release_idle, the erase or the
+# one-token prompt), and after a side call on the lane (proxy._post_events). Recorded in x_yamadori.slots.released
+# with why "lane burst ended" (a decider burst) or "side call ended", and its ms.
+LANE_KEEP = False
+# The callers' names for the end of a decider burst on the lane, recorded as one reason.
+LANE_BURST_WHY = frozenset({"decider turn", "decider batch", "jev call"})
 
 
 def lane_ranked() -> bool:
@@ -708,6 +745,305 @@ def _works_for(key: str | None) -> str | None:
     return k if k and k != HELPER else None
 
 
+# ---------------------------------------------------------------------------
+# ONE CONVERSATION ON THE MAIN CARD (operator, 2026-09-29, verbatim: "we should not have a second conversation at
+# all, it is too slow, we have a second gpu if we want a second conversation, that is how it has to play out, the
+# jjava engine should be the only other thing we need ready to go"). Evidence: Flash-Next decoded an 8K
+# conversation at 8.6 tok/s beside an idle 64K slot -- the unified pool's top-cell cost, as measured on Bonsai (#59).
+#
+# IN FORCE when the served layout has ONE conversation slot (-np 2: slot 0 the conversation, slot 1 the jjava lane;
+# conversation_slots() == [0]). With today's -np 3 nothing below applies, so the proxy can ship before the deploy.
+#
+# THE OWNER. The card belongs to one conversation: the one pinned to slot 0 while it has a request of this process
+# in flight there, or ended one less than PRIMARY_HOLD_S ago. A DIFFERENT conversation arriving then is refused --
+# ConversationAtCapacity, HTTP 503 `conversation_at_capacity` with Retry-After (the rest of the hold; while the
+# owner is mid-request api_errors' 30 s, the end being unknown) -- until the second Bonsai on the A4000
+# (`bonsai-a4000`, not deployed) takes it instead. After the hold the newcomer takes the card and the old owner's
+# pin goes (its next request is a new arrival like any other). The lane is never a conversation's.
+#
+# COMPACTIONS ARE NEVER REFUSED FOR BEING COMPACTIONS (coordinator, 2026-09-29: a refused or cut summary makes
+# Hermes discard it and compact again -- the h6 failure):
+#   the OWNER's compaction (its key: in place, or a flattened one mapped to it)  -> slot 0, its own cache;
+#   one sent up as is with no conversation identity  -> slot 0 once slot 0 has no request in flight, waiting for
+#       that like any request, at most COMPACTION_WAIT_S, then the Retry-After path;
+#   a DIFFERENT conversation's (keyed)  -> the second-conversation rule above.
+#   NEVER the lane (3,072 cells: budget.LANE_TOKENS).
+# ---------------------------------------------------------------------------
+_slot_free = threading.Condition(_lock)
+# The as-sent compaction's wait for slot 0: admission's own bound for a request waiting for room
+# (admission.WAIT_SECONDS, YAMADORI_ADMIT_WAIT, 20 s), not a number of this rule's own.
+COMPACTION_WAIT_S = float(os.environ.get("YAMADORI_ADMIT_WAIT", "20"))
+RETRY_AFTER_UNKNOWN = 30          # api_errors' existing 503 Retry-After (of_upstream), the end not known
+
+
+class ConversationAtCapacity(RuntimeError):
+    """Another conversation owns the main card (ONE CONVERSATION). Retryable: 503 conversation_at_capacity."""
+
+    def __init__(self, why: str, retry_after: int, owner: str | None = None):
+        super().__init__(why)
+        self.retryable = True
+        self.retry_after = int(retry_after)
+        self.owner = owner
+
+
+def one_conversation(n: int | None = None) -> bool:
+    """The served layout has exactly one conversation slot: -np 2 (the conversation + the lane) or -np 1 (a LOCKED
+    card, operator 2026-09-30: the conversation alone; jjava and side calls on bonsai-a4000)."""
+    n = count() if n is None else n
+    return ENABLED and n in (1, 2)
+
+
+def _helper_server_grant(transient: bool, key: str | None) -> dict | None:
+    """A request that runs on ANOTHER server than the main card (the tier table's helper, `bonsai-a4000`: jjava and
+    side calls of a locked tier) gets no slot from this registry, which counts the main card's slots: the helper
+    server picks its own (its -np 2, by prompt similarity). None when the request is for the main card.
+    The target: the request's own model when it is not a main one (a client side call the tier table routed to the
+    helper: server.py binds it, max_mode.set_current), else jjava's (max_mode.decider_model: a transient request
+    with no compaction prefix, made while a main model is bound, is a decider read). A compaction never reaches
+    here (it carries `prefix`, or is keyed to its conversation: proxy.prepare `_slot`). The table's rows name ONE
+    helper for both (helpers.decider == helpers.side_calls; mcp/test_max_mode.py checks it)."""
+    if not transient or key not in (None, HELPER):
+        return None
+    try:
+        import max_mode
+        if not max_mode.ENABLED:
+            return None
+        target = max_mode.current()
+        if not target or max_mode.is_main(target):
+            target = max_mode.decider_model()
+        if not target or max_mode.is_main(target):
+            return None
+    except Exception:                                                # noqa: BLE001
+        return None
+    # its LANE slot (OTHER_LANE_SLOT): slot 0 there is the other card's conversation (THE OTHER CARD)
+    return {"slot": OTHER_LANE_SLOT, "mode": "helper server", "evicted": None, "_server": target,
+            "how": f"{target}: its lane (slot {OTHER_LANE_SLOT}; slot {OTHER_CONV_SLOT} is the other card's "
+                   "conversation)"}
+
+
+# THE LIVE SUITE'S HOLD (X-Yamadori-Features {"primary_hold_s": N}; honoured by proxy.prepare for a TEST account
+# only, as IDLE CLEAR's `idle_clear_s`): the live suite opens a new conversation every few seconds, and inside the
+# 60 s hold each one was routed to the other card or told 503 -- deploy check 2026-10-01, 12 failures, the
+# conformance window read as bonsai-a4000's 138,240. The override shortens the hold only AGAINST an owner of the
+# SAME test account (its own conversations); a request in flight still holds the card, and a client's owner is held
+# for the full PRIMARY_HOLD_S whatever a test sends. key -> (hold seconds, account) for its current request.
+_hold_for: dict[str, tuple[float, str]] = {}
+
+
+def _hold_against(owner: str | None, key: str | None) -> float:
+    """The hold `owner` has against the newcomer `key`: PRIMARY_HOLD_S, or the newcomer's test override when both
+    conversations are the same (test) account's. Under _lock."""
+    h = _hold_for.get(key) if key else None
+    if h and owner and _key_account.get(owner) == h[1]:
+        return h[0]
+    return PRIMARY_HOLD_S
+
+
+def _owner_of_card(now: float, key: str | None = None) -> tuple[str | None, bool, float]:
+    """(the owner's key or None, it has a request in flight, seconds since its LATEST ACTIVITY -- its last request's
+    end or its latest arrival, so its queued follow-ups keep the card: operator 2026-09-30), as seen by the newcomer
+    `key` (_hold_against). Under _lock."""
+    k = next((k for k, s in _pins.items() if s == 0 and k != HELPER), None)
+    if k is None:
+        return None, False, 0.0
+    busy = _busy.get(0, 0) > _warming.get(0, 0)
+    since = now - max(_last_end.get(0, 0.0), _used.get(k, 0.0), _last_seen.get(k, 0.0))
+    if busy or since < _hold_against(k, key):
+        return k, busy, since
+    return None, False, since
+
+
+def _other_owner(now: float, key: str | None = None) -> tuple[str | None, bool, float]:
+    """The other card's (owner, busy, since latest activity), by the same hold rule. Under _lock."""
+    k = _other["owner"]
+    if k is None:
+        return None, False, 0.0
+    busy = _other["busy"] > 0
+    since = now - max(_other["last_end"], _last_seen.get(k, 0.0))
+    if busy or since < _hold_against(k, key):
+        return k, busy, since
+    return None, False, since
+
+
+def _rest_of_hold(busy: bool, since: float, hold: float | None = None) -> int:
+    hold = PRIMARY_HOLD_S if hold is None else hold
+    return RETRY_AFTER_UNKNOWN if busy else max(1, int(hold - since + 0.999))
+
+
+def other_card_for(model: str | None) -> tuple[str | None, str]:
+    """(the other card's model for a request served by `model`, why): the tier table's `other_card`
+    (max_mode.other_card). None when the table is off or its model cannot run there (flash-next, mirai-s) -- unless
+    the one switch YAMADORI_OTHER_CARD_DOWNGRADE=1 lets it run on the default model's other card."""
+    try:
+        import max_mode
+        return max_mode.other_card(model)
+    except Exception as e:                                           # noqa: BLE001
+        return None, f"no tier table ({type(e).__name__})"
+
+
+def _route(key: str, model: str | None, now: float) -> dict | None:
+    """ONE CONVERSATION PER CARD, with the OTHER card. None: serve on the main card (its owner, or it is free).
+    A dict: route to the other card. Raises ConversationAtCapacity when neither card may take it. Under _lock."""
+    if _other["owner"] == key:
+        om, _why = other_card_for(model)
+        if om and om == _other["model"]:
+            # it keeps that card for its life
+            return {"routed": "other_card", "model": om, "why": "this conversation's card (it keeps it for its life)"}
+        _other.update(owner=None, model=None)          # its tier's model cannot run there now: it is a newcomer again
+    owner, busy, since = _owner_of_card(now, key)
+    if owner is None or owner == key:
+        return None
+    hold = _hold_against(owner, key)
+    om, why_not = other_card_for(model)
+    if not om:
+        raise ConversationAtCapacity(
+            f"another conversation holds the main card ({'a request in flight' if busy else f'its latest activity was {since:.0f} s ago, the hold is {hold:.0f} s'}), "
+            f"and this request's model ({model}) does not run on the other card ({why_not}); one conversation per card "
+            "(operator, 2026-09-30)", _rest_of_hold(busy, since, hold), owner)
+    o, obusy, osince = _other_owner(now, key)
+    if o is not None and o != key:
+        raise ConversationAtCapacity(
+            f"both cards hold a conversation: the main card's ({'in flight' if busy else f'active {since:.0f} s ago'}) "
+            f"and {om}'s ({'in flight' if obusy else f'active {osince:.0f} s ago'}); one conversation per card "
+            "(operator, 2026-09-30)", min(_rest_of_hold(busy, since, hold),
+                                          _rest_of_hold(obusy, osince, _hold_against(o, key))), owner)
+    rec = {"routed": "other_card", "model": om, "owner": owner[:8], "owner_busy": busy,
+           "owner_idle_s": round(since, 1),
+           "why": (f"the main card's owner ({owner[:8]}) " + ("has a request in flight" if busy else
+                   f"was active {since:.0f} s ago, inside the {hold:.0f} s hold") +
+                   f": a new conversation id takes the other card ({om}), and keeps it")}
+    prev = _other["owner"]
+    if prev and prev != key:
+        rec["took_from"] = prev[:8]
+        _displaced[prev] = {"at": now, "card": om, "by": key[:8]}
+    _other.update(owner=key, model=om)
+    return rec
+
+
+def _refuse_second(key: str, now: float) -> None:
+    """Raise ConversationAtCapacity when another conversation owns the main card (acquire's backstop: check_owner
+    routed it first; this is the race where the card was taken between the two). Under _lock."""
+    owner, busy, since = _owner_of_card(now, key)
+    if owner is None or owner == key:
+        return None
+    hold = _hold_against(owner, key)
+    ra = _rest_of_hold(busy, since, hold)
+    raise ConversationAtCapacity(
+        f"another conversation holds the main card ({'a request in flight' if busy else f'its last request ended {since:.0f} s ago, the hold is {hold:.0f} s'}); "
+        f"one conversation per card (operator, 2026-09-29)", ra, owner)
+
+
+def check_owner(want: dict | None, model: str | None = None) -> dict | None:
+    """ONE CONVERSATION PER CARD, decided EARLY (proxy._run_turn right after prepare, before any generation), for
+    the request's conversation (`want` = prepare's `_slot`) served by `model`:
+      None     the main card (its owner; or the card is free -- a new id takes it after the hold: want["switch"])
+      a dict   the OTHER card ({routed, model, why, owner_idle_s, ...}; also want["routed"]): the proxy sends this
+               request, and every later one of the conversation, to that model
+      raises   ConversationAtCapacity (503 + Retry-After): neither card may take it -- the other card is held, or
+               its model cannot run there (flash-next, mirai-s; the one switch YAMADORI_OTHER_CARD_DOWNGRADE)
+    A no-op off one conversation, for a side call and for a compaction sent up as is (never refused for being one);
+    a compaction or a warm WITH its conversation's key goes to that conversation's own card. Its arrival is
+    activity: the hold counts from an owner's latest arrival, so its queued follow-ups keep the card, and when the
+    card frees the owner's request is served first (only the owner's requests are ever granted the main card
+    while its hold runs)."""
+    if not want or not one_conversation():
+        return None
+    key = want.get("key")
+    if not key or key == HELPER or want.get("transient"):
+        return None
+    account = want.get("account") or None
+    now = time.time()
+    with _lock:
+        if account:
+            _key_account[key] = account
+        # the live suite's hold override for this request (proxy.prepare sets it for a TEST account only)
+        if want.get("hold_s") is not None and account:
+            _hold_for[key] = (max(0.0, float(want["hold_s"])), account)
+        else:
+            _hold_for.pop(key, None)
+        r = _route(key, model, now)
+        if r is None:
+            owner = next((k for k, s in _pins.items() if s == 0 and k not in (HELPER, key)), None)
+            if owner is not None:
+                # after the hold a new id takes the main card: the switch (acquire makes it)
+                o_since = now - max(_last_end.get(0, 0.0), _used.get(owner, 0.0), _last_seen.get(owner, 0.0))
+                want["switch"] = {"from": owner[:8], "owner_idle_s": round(o_since, 1), "saved": SWITCH_SAVE}
+        _last_seen[key] = now
+    if r is not None:
+        want["routed"] = dict(r)
+    return r
+
+
+def _wait_slot0_free(deadline: float) -> bool:
+    """Wait (under _lock, releasing it while waiting) until slot 0 has no request in flight. True when free."""
+    import cancel
+    while _busy.get(0, 0) > 0:
+        left = deadline - time.time()
+        if left <= 0:
+            return False
+        cancel.check()
+        _slot_free.wait(min(left, 0.5))
+    return True
+
+
+def _acquire_one(key: str | None, transient: bool, prefix: dict | None, n: int) -> dict:
+    """acquire() under ONE CONVERSATION (-np 2). Conversations and compactions on slot 0; everything else keeps
+    the lane (the caller's own path)."""
+    now = time.time()
+    compaction = bool(prefix) and (transient or not key)
+    with _lock:
+        if compaction:
+            if not _wait_slot0_free(now + COMPACTION_WAIT_S):
+                raise ConversationAtCapacity(
+                    f"a compaction sent as is waited {COMPACTION_WAIT_S:.0f} s for the main card's conversation slot "
+                    "(a request in flight there)", RETRY_AFTER_UNKNOWN)
+            mode, how = "compaction", ("compaction sent as is: the one conversation slot (never the "
+                                                "lane)")
+            owner = next((k for k, s in _pins.items() if s == 0 and k != HELPER), None)
+            displaced = owner
+        else:
+            _refuse_second(key, now)
+            prev = next((k for k, s in _pins.items() if s == 0 and k not in (HELPER, key)), None)
+            switch = None
+            if prev is not None:
+                p_since = now - max(_last_end.get(0, 0.0), _used.get(prev, 0.0), _last_seen.get(prev, 0.0))
+                _pins.pop(prev, None)
+                _used.pop(prev, None)
+                # THE SWITCH (operator 2026-09-30): the previous owner's state goes to llama-server's host-RAM prompt
+                # cache (--cache-ram) when this prompt diverges from it, and comes back if it returns
+                _displaced[prev] = {"at": now, "card": "main", "by": key[:8]}
+                switch = {"from": prev[:8], "owner_idle_s": round(p_since, 1), "saved": SWITCH_SAVE}
+            back = _displaced.pop(key, None)
+            _pins[key] = 0
+            _used[key] = now
+            mode, displaced = "pinned", None
+            how = ("pinned: the one conversation slot" + (
+                f" (the card passed from {prev[:8]}, idle past the hold)" if prev else ""))
+        _cleared.pop(0, None)
+        _busy[0] = _busy.get(0, 0) + 1
+        _prompts.pop(0, None)
+        grant = {"slot": 0, "mode": mode, "how": how, "evicted": None, "one_conversation": True}
+        if mode == "pinned" and switch:
+            grant["switch"] = switch
+        if mode == "pinned" and back and back.get("card") == "main":
+            # it comes back after a switch: restored from the server's host-RAM prompt cache, or re-processed --
+            # cache_record says which, and in how many ms (resumed_how)
+            grant["resumed_cold"] = {"slot": 0, "cleared_at": round(back["at"], 1),
+                                     "idle_s": round(now - back["at"], 1), "cells_cleared": None,
+                                     "by": f"a switch: {back['by']} took the card after the hold"}
+        _grant_ranks(grant, key if mode == "pinned" else _works_for(None), now)
+    if compaction:
+        global _compacting
+        with _lock:
+            _compacting += 1
+        grant["compaction"] = True
+        if displaced:
+            grant["displaced"] = displaced[:8]
+            grant["_displaced_key"] = displaced
+    _save()
+    return grant
+
+
 def acquire(key: str | None, transient: bool = False,
             prefix: dict | None = None, warm: bool = False,
             prompt: dict | None = None,
@@ -733,6 +1069,16 @@ def acquire(key: str | None, transient: bool = False,
     if not ENABLED:
         return {"slot": None, "mode": "off", "how": "pinning disabled",
                 "evicted": None}
+    if key and key != HELPER and not transient and _other["owner"] == key:
+        # THE OTHER CARD: this conversation's slot there (its own server; nothing of this registry's main slots)
+        with _lock:
+            if warm:
+                _other["warming"] += 1
+            else:
+                _other["busy"] += 1
+            return {"slot": OTHER_CONV_SLOT, "mode": "warm" if warm else "other card", "evicted": None,
+                    "_server": _other["model"], "warm": bool(warm), "card": "other",
+                    "how": f"{_other['model']}: the other card's conversation slot ({OTHER_CONV_SLOT})"}
     if warm:
         # A warm goes to the conversation's own pinned slot or nowhere: it
         # exists to load THAT slot's next prefix.
@@ -748,7 +1094,14 @@ def acquire(key: str | None, transient: bool = False,
                      "conversation's slot", "evicted": None, "warm": True}
             _grant_ranks(grant, key, time.time())
         return grant
+    hs_grant = _helper_server_grant(transient, key) if not prefix else None
+    if hs_grant is not None:
+        return hs_grant
     n = count()
+    if one_conversation(n) and ((key and key != HELPER and not transient)
+                                or (prefix and (transient or not key))):
+        # ONE CONVERSATION (above): a conversation's turn or a compaction -> slot 0, or refused
+        return _acquire_one(key, transient, prefix, n)
     keep = _transient_slot(n)
     hs = helper_slot(n)
     now = time.time()
@@ -960,10 +1313,22 @@ def release(grant: dict | None) -> None:
         grant["compaction"] = False
     if not grant or grant.get("slot") is None:
         return
+    if grant.get("_server"):
+        # another server's slot (THE OTHER CARD, or a helper server's lane): nothing of this registry's
+        if grant.get("card") == "other" and not grant.get("_released"):
+            with _lock:
+                grant["_released"] = True
+                if grant.get("warm"):
+                    _other["warming"] = max(_other["warming"] - 1, 0)
+                else:
+                    _other["busy"] = max(_other["busy"] - 1, 0)
+                    _other["last_end"] = time.time()
+        return
     with _lock:
         s = grant["slot"]
         _busy[s] = max(_busy.get(s, 0) - 1, 0)
         _last_end[s] = time.time()
+        _slot_free.notify_all()           # ONE CONVERSATION: a compaction may be waiting for slot 0
         if grant.get("warm"):
             _warming[s] = max(_warming.get(s, 0) - 1, 0)
         if grant.get("mode") in ("helper", "transient", "compaction"):
@@ -1133,6 +1498,8 @@ def release_idle(slot: int | None, why: str, *, model: str | None = None,
     if log is None and ctx:
         log = ctx.get("log")
     rec = {"slot": slot, "why": why}
+    if why in LANE_BURST_WHY and slot == child_slot(_known_n()):
+        rec.update(why="lane burst ended", by=why)
     with _lock:
         if slot not in _dirty:
             return None
@@ -1256,7 +1623,7 @@ def clear_idle(grant: dict | None, *, on: bool | None = None,
     by the proxy for a TEST account only) replaces IDLE_CLEAR_S for this
     request and narrows the candidates to that `account`'s own
     conversations: a test never clears anyone else's slot early."""
-    if not grant or grant.get("warm") or not ENABLED or not _release_enabled:
+    if not grant or grant.get("warm") or grant.get("_server") or not ENABLED or not _release_enabled:
         return []
     ctx = _request_ctx()
     if on is None:
@@ -1351,6 +1718,13 @@ def _note(rec: dict, log: list | None) -> None:
     with _lock:
         _released_recent.append(dict(rec, at=round(time.time(), 1)))
         del _released_recent[:-32]
+    try:
+        # The dashboard's history (mcp/stats_store.py; the JJAVA page's
+        # lane releases). A queue put; never raises.
+        import stats_store
+        stats_store.release(rec)
+    except Exception:                                            # noqa: BLE001
+        pass
     if rec.get("released"):
         print(f"  slot release: slot {rec['slot']} ({rec['why']}) "
               f"cells_before={rec.get('cells_before')} "
@@ -1372,6 +1746,11 @@ def lane_kept_note(slot: int | None, why: str, log: list | None = None) -> dict 
         log = (ctx or {}).get("log")
     if isinstance(log, list):
         log.append(rec)
+    try:
+        import stats_store                  # the JJAVA page's lane record
+        stats_store.release(rec)
+    except Exception:                                            # noqa: BLE001
+        pass
     return rec
 
 

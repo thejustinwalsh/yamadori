@@ -47,7 +47,7 @@ attachment is never written to disk: the register lives for one request
 ("the conversation is the store", docs/IMAGEGEN.md); an entry keeps the full
 sha256 of the bytes so a later phase can key a stored DESCRIPTION by it.
 
-Light on purpose: route.py and deep.py import this module, so it imports
+Light on purpose: route.py and selection.py import this module, so it imports
 nothing of the proxy's at module level.
 """
 from __future__ import annotations

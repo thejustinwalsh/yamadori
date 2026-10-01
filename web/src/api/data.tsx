@@ -7,7 +7,6 @@ import { usePoll, type Poll } from './usePoll';
 export const PATHS = {
   vitals: '/dash/api/vitals',
   datasets: '/dash/api/datasets',
-  results: '/dash/api/results',
   tiers: '/dash/api/tiers',
   dataset: (id: string) => `/dash/api/datasets/${encodeURIComponent(id)}`,
 } as const;

@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Wed, 30 Sep 2026 01:38:24 -0400
+Subject: [PATCH] llama: moe expert cache stays on the batches ggml-cuda serves
+ with MMVQ
+
+The cache chain maps every uncached expert of a token to the layer's one zero
+slot, so a token's slot ids repeat. ggml-cuda's mul_mat_id computes each
+(token, id) on its own with MMVQ, which is exact with repeats; above MMVQ's
+batch limit it goes to MMQ, whose ids helper (mmid.cu mm_ids_helper) counts
+one compact row per (token, expert) and so assumes a token's ids are distinct.
+With repeats it leaves rows of the inverse map unwritten and the src1 scatter
+reads them as indices: "an illegal memory access" reported at mmq.cu:291
+under CUDA_LAUNCH_BLOCKING=1 on the first 16-token batch (the Flash-Next gate,
+2026-09-30, fault-blocking.log), and at the tail of a ~142K-token prompt in
+llama-server.
+
+The cache's batch limit (0004: up to GGML_OP_OFFLOAD_MIN_BATCH - 1) is now
+also at most MMVQ's mul_mat_id batch for the cached layers' expert types
+(mmvq.cu get_mmvq_mmid_max_batch: 8 on Ada/Blackwell, the Turing/Ampere
+table below that; the lower is used, so a cache on either card stays on
+MMVQ). Larger batches run the experts on the CPU as without the cache.
+LLAMA_MOE_CACHE_MAX_TOKENS overrides the limit.
+---
+ src/llama-moecache.cpp | 36 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index 5f657ed1..d0bc88ab 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -199,6 +199,25 @@ bool read_expert_profile(const char * path, int64_t n_layers, int64_t n_expert,
+     return true;
+ }
+ 
++// ggml-cuda's mul_mat_id takes MMVQ up to this batch for a quantized expert type (mmvq.cuh MMVQ_MAX_BATCH_SIZE;
++// mmvq.cu get_mmvq_mmid_max_batch, this base 4da63377): 8 for every type on Ada and Blackwell (the 5060 Ti, cc 12.0),
++// get_mmvq_mmid_max_batch_turing_plus on Turing and Ampere (the A4000, cc 8.6) -- the lower of the two, so a cache
++// on either card stays on MMVQ. A copy: if ggml-cuda's table changes, this one must follow (a type missing here
++// takes the batch maximum, as there). LLAMA_MOE_CACHE_MAX_TOKENS overrides it.
++static constexpr int64_t MMVQ_MAX_BATCH = 8;
++static int64_t mmvq_mmid_max_batch(ggml_type type) {
++    switch (type) {
++        case GGML_TYPE_IQ2_S:   return 7;
++        case GGML_TYPE_IQ3_S:   return 6;
++        case GGML_TYPE_IQ3_XXS: return 7;
++        case GGML_TYPE_MXFP4:   return 7;
++        case GGML_TYPE_NVFP4:   return 8;
++        case GGML_TYPE_Q2_K:    return 7;
++        case GGML_TYPE_Q3_K:    return 5;
++        default:                return MMVQ_MAX_BATCH;
++    }
++}
++
+ int env_int(const char * name, int def) {
+     const char * v = getenv(name);
+     return v && v[0] ? atoi(v) : def;
+@@ -397,6 +416,23 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+             mc->adapt_swaps   = std::max(0, env_int("LLAMA_MOE_CACHE_ADAPT_SWAPS", mc->adapt_swaps));
+             // ggml-cuda offloads MUL_MAT_ID to the GPU from this batch up (ggml-cuda.cu, same variable and default)
+             mc->max_tokens    = std::max(1, env_int("GGML_OP_OFFLOAD_MIN_BATCH", 32)) - 1;
++            // ... and no larger than the batch ggml-cuda's mul_mat_id serves with MMVQ. The cache chain maps every
++            // uncached expert of a token to the layer's one zero slot, so a token's slot ids REPEAT. MMVQ computes
++            // each (token, id) on its own and is exact with repeats; above its batch limit mul_mat_id goes to MMQ,
++            // whose ids helper (mmid.cu mm_ids_helper) counts one compact row per (token, expert) and so assumes a
++            // token's ids are distinct: with repeats it leaves rows of the inverse map unwritten and the src1
++            // scatter reads them as indices -- the illegal memory access at mmq.cu:291 (the Flash-Next gate's M0,
++            // 2026-09-30, fault-blocking.log). The limit is the smallest over the cached layers' expert types.
++            int64_t mmvq_max = MMVQ_MAX_BATCH;
++            for (const auto & g : groups) {
++                for (const auto & c : g.second) {
++                    for (const ggml_tensor * t : { c.l->ffn_up_exps, c.l->ffn_gate_exps, c.l->ffn_down_exps }) {
++                        mmvq_max = std::min<int64_t>(mmvq_max, mmvq_mmid_max_batch(t->type));
++                    }
++                }
++            }
++            mc->max_tokens    = std::min<int64_t>(mc->max_tokens, env_int("LLAMA_MOE_CACHE_MAX_TOKENS", (int) mmvq_max));
++            mc->max_tokens    = std::max<int64_t>(mc->max_tokens, 1);
+         }
+ 
+         // init state + tables (everything uncached -> the layer's dummy slot, n_slots)

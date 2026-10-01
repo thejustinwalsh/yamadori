@@ -4,10 +4,11 @@
 
     python mcp/test_tool_recall.py      -> "N/M checks passed"
 
-The recall LINES were retired the same day (operator, after pagoda-h5):
-each trigger below now fires the job itself (deep.decide kind "auto";
-mcp/test_ledger.py [auto] gates the proxy's side). "Names X" below means
-"fires X" (skill_select.server_tool_triggers' first candidate).
+The recall LINES were retired the same day (operator, after pagoda-h5).
+The jobs the triggers fired (deep thinking, the plan: mcp/deep.py) were
+removed 2026-09-29 (docs/REMOVED.md); the DETECTION,
+skill_select.server_tool_triggers, remains and is gated here. "Names X"
+below means "the first candidate names X".
 
 WHAT IS GATED
 
@@ -38,7 +39,7 @@ WHAT IS GATED
               about an area the conversation does not use, our own block
               handed back, a craft whose only evidence is its area's file.
   [proxy]     the user-turn tail selects on the CLIENT's messages, never the
-              ledger-restored ones; _server_tools / _plan_files.
+              ledger-restored ones.
 """
 from __future__ import annotations
 
@@ -57,7 +58,6 @@ sys.path.insert(0, HERE)
 os.environ.setdefault("YAMADORI_GPU_ROOM", "0")
 os.environ.setdefault("YAMADORI_SKILL_DECIDER", "stub")
 
-import deep  # noqa: E402
 import route  # noqa: E402
 import skill_classify as C  # noqa: E402
 import skill_prompts as P  # noqa: E402
@@ -71,7 +71,11 @@ S.ask_fallback = lambda s, u: (_ for _ in ()).throw(
     RuntimeError("offline suite: the fallback is not run"))
 
 _results: list[tuple[bool, str, str]] = []
-THINK, PLAN = deep.TOOL_NAME, deep.PLAN_TOOL_NAME
+# The tools' names, literal since mcp/deep.py was removed (2026-09-29), as
+# skill_select.server_tool_triggers names them.
+THINK, PLAN = "yama_think_deeply", "yama_plan"
+# deep.KICKOFF_PLAN_ARGS as it was: the inserted kickoff call's arguments.
+KICKOFF_PLAN_ARGS = {"task": "The task in the user's message above."}
 BOTH = {THINK, PLAN}
 
 
@@ -323,7 +327,7 @@ PLAN_TEXT = ("The plan for this task, written by a second model on the "
 def _with_plan(msgs):
     return msgs + [{"role": "assistant", "content": "", "tool_calls": [
         {"id": "kp", "type": "function", "function": {
-            "name": PLAN, "arguments": json.dumps(deep.KICKOFF_PLAN_ARGS)}}]},
+            "name": PLAN, "arguments": json.dumps(KICKOFF_PLAN_ARGS)}}]},
         {"role": "tool", "tool_call_id": "kp", "content": PLAN_TEXT}]
 
 
@@ -333,14 +337,6 @@ def test_plan():
                     "app/src/scene/App.tsx", "app/src/scene/Tree.tsx"],
           "[plan] plan_files_of reads the FILES section's heads (two files "
           "joined by &; a pinned version is no file)", files)
-    import proxy
-    check(proxy._plan_files({PLAN}, _with_plan(U("x"))) == files
-          and proxy._plan_files({THINK}, _with_plan(U("x"))) is None,
-          "[proxy] _plan_files reads the restored plan where main has "
-          "yama_plan, and nothing where it does not")
-    check(proxy._server_tools({THINK, PLAN, "yama_generate_image"})
-          == [THINK, PLAN] and proxy._server_tools(set()) == [],
-          "[proxy] _server_tools: ours on main, only the two")
     m = U("Build the app.")
     f, c, st = fires(m, None, plan=files)
     m = step(m, "write_file", {"path": "/w/app/package.json", "content":
@@ -554,9 +550,7 @@ def test_proxy_selects_on_the_clients_messages():
         "\n\n---\n" + P.CRAFT_HEADER + "\n\nroot.unwrap TypeGPU"))]
     skill_select.attach = spy
     try:
-        proxy._SKILL_CTX.value = {"lineage": "", "key": "k", "raw": raw,
-                                  "server_tools": [THINK, PLAN],
-                                  "plan_files": ["a/b.ts"]}
+        proxy._SKILL_CTX.value = {"lineage": "", "key": "k", "raw": raw}
         proxy._skills_tail(restored, {"skills": True}, {"class": "prose"},
                            [], "acct")
     finally:
@@ -566,10 +560,6 @@ def test_proxy_selects_on_the_clients_messages():
         seen["messages"]) and "TypeGPU" in json.dumps(seen["augmented"]),
           "[proxy] the tail matches on the client's messages and appends "
           "to the restored ones", json.dumps(seen.get("messages"))[:200])
-    check((seen.get("body") or {}).get("server_tools") == [THINK, PLAN]
-          and (seen.get("body") or {}).get("plan_files") == ["a/b.ts"],
-          "[proxy] the tail hands the server tools and the plan over",
-          seen.get("body"))
 
 
 def main() -> int:
@@ -594,4 +584,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # jjava is always in scope where skills serve (operator, 2026-09-29):
+    # offline, the STUBBED decider answers (mcp/decider_stub.py).
+    import decider_stub
+    with decider_stub.installed():
+        sys.exit(main())
