@@ -35,6 +35,8 @@ import math
 import os
 import re
 import sqlite3
+import threading
+import time
 import sys
 import traceback
 import urllib.error
@@ -707,16 +709,34 @@ def test_rounds_past_26():
 
 
 def test_busy_and_unavailable():
+    # THE QUEUE (operator 2026-10-01): a call whose wait would outlast the SDKs' 10 s timeout is refused at once
+    # with the estimate; one that fits waits its turn and is answered
     FAKE.reset()
-    J._LANE.acquire()
+    with J._q:
+        J._running = {"start": time.time(), "est_s": 30.0}
     try:
         st, h, d = post(_one_noul())
     finally:
-        J._LANE.release()
-    check(st == 429 and h.get("retry-after") == str(J.RETRY_AFTER_BUSY_S)
+        with J._q:
+            J._running = None
+    check(st == 429 and h.get("retry-after") == "30"
           and isinstance(d.get("detail"), str) and not FAKE.posts,
-          "a second concurrent call: 429 at once with Retry-After, nothing "
-          "read (never a hang)", (st, dict(h), d))
+          "a call behind ~30 s of lane work: 429 at once, Retry-After = the estimate (30), nothing read "
+          "(never a hang)", (st, dict(h), d))
+    FAKE.reset()
+    with J._q:
+        J._running = {"start": time.time(), "est_s": 0.4}
+
+    def _free():
+        with J._q:
+            J._running = None
+            J._q.notify_all()
+    threading.Timer(0.4, _free).start()
+    t0 = time.time()
+    st, h, d = post(_one_noul())
+    q = (d.get("x_yamadori") or {}).get("queue") or {}
+    check(st == 200 and q.get("admitted") and 0.2 <= q.get("waited_s", 0) <= 5 and time.time() - t0 < 10,
+          "a call behind a short one QUEUES, waits its turn and is answered (x_yamadori.queue)", (st, q))
     FAKE.reset()
     FAKE.fail_post = urllib.error.URLError("connection refused")
     st, h, d = post(_one_noul())

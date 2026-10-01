@@ -100,11 +100,14 @@ STATE AND CAPACITY
   does not fit the lane runs anyway, past the VRAM line (layout v2: "What
   does not fit is not refused ... past the line if need be"); recorded in
   x_yamadori.lane.
-  ONE Jev call at a time (the lane is one slot): a second concurrent call is
-  429 at once with Retry-After (Jev documents 429 for too many requests
-  [api], and its SDKs retry with backoff); never a hang. Retry-After 1 s:
-  the header's smallest unit -- a question's two reads take p50 496 ms,
-  p90 577 ms (decide_turn's latency table, bench/decider/bonsai_decider.py).
+  ONE Jev call at a time (the lane is one slot); the others QUEUE in arrival
+  order (THE QUEUE, below; operator 2026-10-01) while their estimated finish
+  stays inside the SDKs' 10 s request timeout, else 429 at once with
+  Retry-After = the estimated seconds of work ahead (Jev documents 429 for
+  too many requests [api], and its SDKs retry with backoff); never a hang.
+  The estimate starts from a question's two reads, p50 496 ms, p90 577 ms
+  (decide_turn's latency table, bench/decider/bonsai_decider.py), and then
+  follows this process's own calls. x_yamadori.queue records the wait.
 
 ERRORS (Jev's statuses [api]; the body is the shape the SDK reads [js-src])
   401 {"detail": "..."}                       missing / invalid key
@@ -160,6 +163,80 @@ RETRY_AFTER_BUSY_S = 1              # see the docstring (the header's unit)
 REQUEST_ID_HEADER = "x-typesafe-request-id"   # [js] APIError.requestId, [py] request_id
 
 _LANE = threading.Lock()            # ONE Jev call on the lane at a time
+
+# THE QUEUE (operator, 2026-10-01: "Can we queue jev calls, don't they only take a few seconds, like queue a set
+# number, and send retry estimate if busy?"). Calls wait in arrival order for the lane. The "set number" is DERIVED,
+# not chosen: a call is admitted only when its estimated finish -- the work ahead of it plus its own -- is inside
+# CLIENT_TIMEOUT_S, the TypeSafe SDKs' own request timeout (typesafe-sdk 0.7.2 `DEFAULT_TIMEOUT = 10.0`;
+# a call answered after it reaches a client that already gave up). Otherwise 429 with Retry-After = the estimated
+# seconds until the lane is free of the work ahead (ceil, at least 1). The estimate is seconds PER QUESTION: the
+# median of this process's last QUEUE_SAMPLES calls (each call's lane time / its questions), seeded with
+# decide_turn's measured p90 for a question's two reads, 577 ms (bench/decider/bonsai_decider.py; the docstring).
+CLIENT_TIMEOUT_S = 10.0
+PER_QUESTION_SEED_S = 0.577
+QUEUE_SAMPLES = 50                  # the rolling window's length (how many calls the median reads)
+_q = threading.Condition()
+_waiting: list[dict] = []           # tickets in arrival order: {"id", "est_s"}
+_running: dict | None = None        # {"start", "est_s"} of the call on the lane
+_per_q: list[float] = []
+
+
+def _per_question_s() -> float:
+    s = sorted(_per_q)
+    return s[len(s) // 2] if s else PER_QUESTION_SEED_S
+
+
+def _ahead_s(now: float) -> float:
+    """Estimated seconds of lane work ahead of a new arrival. Under _q."""
+    run = max(0.0, _running["est_s"] - (now - _running["start"])) if _running else 0.0
+    return run + sum(t["est_s"] for t in _waiting)
+
+
+def _enter_lane(n_questions: int, rec: dict) -> None:
+    """Wait for the lane in arrival order, or refuse (429 + the estimate) when the wait would outlast the client."""
+    global _running
+    est = max(1, n_questions) * _per_question_s()
+    with _q:
+        now = time.time()
+        ahead = _ahead_s(now)
+        if (_running or _waiting) and ahead + est > CLIENT_TIMEOUT_S:
+            ra = max(1, math.ceil(ahead))
+            rec["queue"] = {"admitted": False, "ahead_s": round(ahead, 2), "own_s": round(est, 2),
+                            "waiting": len(_waiting), "retry_after_s": ra}
+            raise JevError(429, f"The decider lane is busy: {len(_waiting) + 1} call(s) ahead, about {ahead:.1f} s "
+                                f"of work; waiting would outlast the client's {CLIENT_TIMEOUT_S:.0f} s timeout. "
+                                f"Retry in about {ra} s.",
+                           {"Retry-After": str(ra)}, code="lane_busy")
+        ticket = {"id": uuid.uuid4().hex, "est_s": est}
+        _waiting.append(ticket)
+        t0 = now
+        try:
+            while _waiting[0] is not ticket or _running is not None:
+                left = CLIENT_TIMEOUT_S - (time.time() - t0)
+                if left <= 0:
+                    raise JevError(429, "The decider lane stayed busy past the client's timeout. Retry shortly.",
+                                   {"Retry-After": str(max(1, math.ceil(_ahead_s(time.time()))))},
+                                   code="lane_busy")
+                _q.wait(min(left, 0.5))
+            _running = {"start": time.time(), "est_s": est}
+        finally:
+            if ticket in _waiting:
+                _waiting.remove(ticket)
+            _q.notify_all()
+        rec["queue"] = {"admitted": True, "waited_s": round(time.time() - t0, 2), "ahead_s": round(ahead, 2),
+                        "own_s": round(est, 2)}
+    _LANE.acquire()
+
+
+def _leave_lane(n_questions: int, ran_s: float | None) -> None:
+    global _running
+    _LANE.release()
+    with _q:
+        if ran_s is not None and n_questions > 0:
+            _per_q.append(ran_s / n_questions)
+            del _per_q[:-QUEUE_SAMPLES]
+        _running = None
+        _q.notify_all()
 
 
 class JevError(Exception):
@@ -764,14 +841,10 @@ def _systemone(body, rec: dict) -> tuple[int, dict]:
     state_text = as_text(state)
     rec["state_sha1"] = hashlib.sha1(state_text.encode("utf-8")).hexdigest()[:16]
     plans = [build(s) for s in specs]
-    if not _LANE.acquire(blocking=False):
-        raise JevError(429, "The decider lane is busy with another Jev call "
-                            "(one at a time: the lane is one slot). Retry "
-                            "shortly.",
-                       {"Retry-After": str(RETRY_AFTER_BUSY_S)},
-                       code="lane_busy")
+    _enter_lane(len(specs), rec)
     mm = _max_mode()
     lease = None
+    t_lane, ok = time.time(), False
     try:
         if mm.ENABLED:
             lease = mm.Lease(mm.Decision(model, None, True, why="a Jev call "
@@ -779,11 +852,13 @@ def _systemone(body, rec: dict) -> tuple[int, dict]:
         tok = cancel.Token()
         with cancel.bound(tok):
             mm.set_current(model)
-            return _run(state_text, specs, plans, model, res, rec)
+            out = _run(state_text, specs, plans, model, res, rec)
+            ok = True
+            return out
     finally:
         if lease is not None:
             lease.release()
-        _LANE.release()
+        _leave_lane(len(specs), time.time() - t_lane if ok else None)
 
 
 def _unavailable(e: Exception) -> JevError:
@@ -894,6 +969,7 @@ def _run(state_text: str, specs: list[dict], plans: list[dict], model: str,
                "answers": diags,
                "rounds": {"used": bool(rounds_used), "questions": rounds_used},
                "lane": lane, "limits": limits, "usage": u["x"],
+               "queue": rec.get("queue"),
                "parallel": False,
                "note": "questions were read one after another on one cached "
                        "state (Jev evaluates them in parallel)",
