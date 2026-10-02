@@ -113,6 +113,9 @@ def values_from_gate(gate: dict, over: dict) -> tuple[dict, list[str]]:
          "KV_HOST_MAPPED": "1" if over.get("kv_host_mapped") else "0",
          # 0020: LLAMA_GRAPH_CACHE (the gate's gcache arm); 0 = off
          "GRAPH_CACHE": str(over.get("graph_cache") or 0),
+         # 0023: a context checkpoint every N prompt tokens (the gate's ckpt arm); empty = the flag is not passed
+         # (an engine without 0023 does not know it)
+         "CHECKPOINT": (f"--checkpoint-every {int(over['checkpoint_every'])}" if over.get("checkpoint_every") else ""),
          # 2026-09-29: the quant (the file), CPU threads, MTP and where the projector runs; each from an option,
          # the defaults are the first deploy's (IQ2_XS, llama.cpp's threads, no MTP, projector on the card)
          "QUANT": over.get("quant") or "IQ2_XS",
@@ -432,6 +435,11 @@ def selftest() -> int:
     _, bg = fragment(read(FRAGMENT), vg, "C:/z/llama-upstream-flash-1/llama-server.exe")
     check("LLAMA_GRAPH_CACHE=0" in fq and "LLAMA_GRAPH_CACHE=8" in
           yaml.safe_load("models:\n" + bg)["models"]["flash-next"]["env"], "0020's switch fills the env line")
+    vc, _ = values_from_gate(gate, {"checkpoint_every": 16384})
+    _, bc = fragment(read(FRAGMENT), vc, "C:/z/llama-upstream-flash-1/llama-server.exe")
+    check("--checkpoint-every" not in cq and "0023" not in bq
+          and "--checkpoint-every 16384" in yaml.safe_load("models:\n" + bc)["models"]["flash-next"]["cmd"],
+          "0023's flag is passed only when asked for (and its comment goes with it)")
     check(model_files("Q2_0", True, True) == ["flash-next-q2_0-shard1", "flash-next-q2_0-shard2-ngram", "flash-next-mmproj",
                                         "flash-next-mtp-draft-q8_0"], "a quant and MTP choose the model files")
     macro2, block2 = fragment(read(FRAGMENT), dict(v, N_CPU_MOE=38), "C:/y/llama-server.exe")
@@ -517,6 +525,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--mtp", action="store_true", help="the MTP draft layer (the gate's mtp arm)")
     ap.add_argument("--graph-cache", type=int, default=0,
                     help="LLAMA_GRAPH_CACHE (0020): graph arenas kept per verify-batch size; 0 = off")
+    ap.add_argument("--checkpoint-every", type=int, default=0,
+                    help="--checkpoint-every N (0023): a context checkpoint every N prompt tokens; 0 = not passed. "
+                         "Strata's value is 16384")
     ap.add_argument("--kv-host-mapped", action="store_true",
                     help="the attention KV in mapped host memory (0012; the gate's kvmap arms)")
     ap.add_argument("--mmproj", choices=["none", "card"], default="none",
@@ -537,7 +548,8 @@ def main(argv: list[str]) -> int:
                                           "ub": a.ub, "np": a.np, "quant": a.quant, "threads": a.threads,
                                           "mtp": a.mtp, "mmproj": a.mmproj,
                                           "kv_host_mapped": a.kv_host_mapped, "cache_arm": a.cache_arm,
-                                          "pin_arm": a.pin, "batch": a.batch, "graph_cache": a.graph_cache})
+                                          "pin_arm": a.pin, "batch": a.batch, "graph_cache": a.graph_cache,
+                                          "checkpoint_every": a.checkpoint_every})
     if why:
         print(json.dumps({"verdict": "REFUSED: the gate does not allow a deploy", "why": why}, indent=1))
         return 2

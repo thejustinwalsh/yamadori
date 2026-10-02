@@ -1,0 +1,2032 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Fri, 2 Oct 2026 13:24:19 -0400
+Subject: [PATCH] cuda: a persistent VRAM page window for the host-mapped
+ attention K/V (LLAMA_KV_PAGE_WINDOW)
+
+With LLAMA_KV_HOST_MAPPED (0012/0021) the sparse (QSA) attention's K/V live
+in pinned host memory, and 0014 converts the ~2,051 cells each query
+selects to f16 from there on EVERY step of every QSA layer: all of them
+cross PCIe each time, though consecutive steps' selections are expected to
+overlap (Strata's premise; not measured here). This is Strata's VRAM page window (Niko1221/Strata,
+src/kernels/cuda/kv_stream.cu @ d551edf, MIT; --kv-resident), done in the
+conversion step, not in the attention kernel:
+
+- per K or V cache tensor in a host-mapped buffer: a page table (block ->
+  slot or -1), 4-cell pages (Strata qsa.hpp:115), a pool of n_slots pages
+  in VRAM holding the cache's own quantized rows (q8_0 or q4_0, so a hit is
+  the same bytes as the host row), and Strata's residency map (slot_block,
+  slot_stamp, slot_ref, miss lists);
+- before 0014's conversion, one resolve kernel (Strata resolve_kernel:
+  hits stamp the call's epoch and their CLOCK reference bit, a miss is
+  claimed once, a CLOCK sweep takes one victim per miss and never a slot
+  the call uses) and one copy kernel (Strata copy_kernel, 96 x 128) bring
+  the pages the index lists name, and page 0, into the pool; the conversion
+  kernel then reads each cell from its slot, or from the host when its page
+  is not resident (a call naming more pages than the window holds);
+- writers drop pages instead of writing through (Strata owns its writers,
+  llama.cpp's are ggml ops and host copies): a SET_ROWS node into a windowed
+  tensor invalidates the pages of the rows it names, any other op writing
+  into one resets it, and a host write through the buffer (set / memset /
+  copy / clear: a state restore, the prompt cache) resets every window of
+  the buffer. All capturable; the maps are allocated when the tensor is, so
+  a graph captured before the first attention call still invalidates;
+- Off by default. LLAMA_KV_PAGE_WINDOW=<cells> per K or V tensor (1 =
+  Strata's shipped 32,768, setup.py:1022); never below Strata's floor of
+  20,480 (layer.cpp:522: one call's pages, and the verify window's) unless
+  LLAMA_KV_PAGE_WINDOW_FLOOR says so (tests). A call whose lists could name
+  more pages than the window holds (n_lists x (n_kv_max / 4 + 2) + 1) does
+  not use it. The pool is allocated by the first call, outside a graph
+  capture. GGML_CUDA_KV_PAGE_STATS=1 logs the hit rate every 1,024 graphs.
+
+Tests: tests/test-kv-page-window-model.cpp (CPU: the resolve kernel's
+algorithm run phase by phase over 12,000 fuzzed calls, windows of 3 to
+5,000 slots; the kernel is changed for fewer than 1,024 slots, where
+Strata's sweep gives two threads one slot) and tests/test-kv-page-window.cpp
+(CUDA, one device: a llama-shaped host-mapped cache, q8_0 and q4_0, window
+on vs off bit for bit over cold, hot, evicting and 4-query steps, the host
+copy of resident pages poisoned, a write into resident pages, the same with
+invalidation switched off (it must fail), a host write, the window's size,
+a window too small for a call).
+
+Not run on a GPU when written: the CPU model passes; test-kv-page-window
+compiles and has not been run, nor has the window been measured.
+---
+ ggml/src/ggml-cuda/fattn-common.cuh |  20 +-
+ ggml/src/ggml-cuda/ggml-cuda.cu     |  34 ++
+ ggml/src/ggml-cuda/kv-window.cu     | 720 ++++++++++++++++++++++++++++
+ ggml/src/ggml-cuda/kv-window.cuh    |  71 +++
+ tests/CMakeLists.txt                |   4 +
+ tests/test-kv-page-window-model.cpp | 298 ++++++++++++
+ tests/test-kv-page-window.cpp       | 651 +++++++++++++++++++++++++
+ 7 files changed, 1795 insertions(+), 3 deletions(-)
+ create mode 100644 ggml/src/ggml-cuda/kv-window.cu
+ create mode 100644 ggml/src/ggml-cuda/kv-window.cuh
+ create mode 100644 tests/test-kv-page-window-model.cpp
+ create mode 100644 tests/test-kv-page-window.cpp
+
+diff --git a/ggml/src/ggml-cuda/fattn-common.cuh b/ggml/src/ggml-cuda/fattn-common.cuh
+index d2d9210b..7285ed97 100644
+--- a/ggml/src/ggml-cuda/fattn-common.cuh
++++ b/ggml/src/ggml-cuda/fattn-common.cuh
+@@ -2,6 +2,7 @@
+ 
+ #include "common.cuh"
+ #include "convert.cuh"
++#include "kv-window.cuh"
+ #include "vecdotq.cuh"
+ 
+ #include <cstdint>
+@@ -981,6 +982,9 @@ static __global__ void flash_attn_combine_results(
+ // is converted too; every other row is left unwritten and nothing reads it. One block per (list entry, head), plus
+ // one for row 0; lists past their count hold -1. GGML_CUDA_FA_SPARSE_ROWS=0 restores the whole conversion.
+ // 0018: q4_0 too (a q4_0 cache: the same selected-cell conversion, dequantized as convert.cu's dequantize_q4_0)
++// 0026: with page_table != nullptr (a window of the cache, kv-window.cuh; one stream) a cell is read from the window's
++// pool when its page is resident, else from the cache itself: the same bytes either way, so the f16 values are the
++// same. The pool slot holds GGML_CUDA_KV_PAGE_CELLS rows at the cache's own row stride nb1.
+ template <ggml_type type>
+ static __device__ __forceinline__ float fattn_sparse_rows_value(const char * row, const int j) {
+     if constexpr (type == GGML_TYPE_Q8_0) {
+@@ -999,7 +1003,8 @@ template <ggml_type type>
+ static __global__ void k_fattn_sparse_rows_to_f16(
+         const char * __restrict__ src, half * __restrict__ dst, const int32_t * __restrict__ indices,
+         const int32_t * __restrict__ counts, const int n_kv_max, const int ntiles_x, const int ne0, const int ne1,
+-        const int ne3, const size_t nb1, const size_t nb2, const size_t nb3) {
++        const int ne3, const size_t nb1, const size_t nb2, const size_t nb3,
++        const int32_t * __restrict__ page_table, const char * __restrict__ pool) {
+     const int l = blockIdx.y;
+     const int i = blockIdx.x;
+     if (i < n_kv_max && i >= counts[l]) {
+@@ -1013,6 +1018,12 @@ static __global__ void k_fattn_sparse_rows_to_f16(
+     const int h = blockIdx.z;
+     const int s = ne3 == 1 ? 0 : l / ntiles_x;
+     const char * row = src + cell*nb1 + h*nb2 + s*nb3;
++    if (page_table) {
++        const int slot = page_table[cell >> GGML_CUDA_KV_PAGE_SHIFT];
++        if (slot >= 0) {
++            row = pool + ((int64_t(slot) << GGML_CUDA_KV_PAGE_SHIFT) + (cell & (GGML_CUDA_KV_PAGE_CELLS - 1)))*nb1 + h*nb2;
++        }
++    }
+     half * out = dst + ((int64_t(s)*gridDim.z + h)*ne1 + cell)*ne0;
+     for (int j = threadIdx.x; j < ne0; j += blockDim.x) {
+         out[j] = __float2half(fattn_sparse_rows_value<type>(row, j));
+@@ -1210,17 +1221,20 @@ void launch_fattn(
+         if (sparse_rows_K) {
+             const dim3 grid(n_kv_max + 1, n_lists, K->ne[2]);
+             const auto kfn = K->type == GGML_TYPE_Q8_0 ? k_fattn_sparse_rows_to_f16<GGML_TYPE_Q8_0> : k_fattn_sparse_rows_to_f16<GGML_TYPE_Q4_0>;
++            // 0026: the pages of K the lists name made resident (nothing when the cache has no window)
++            const ggml_cuda_kv_window_view wK = ggml_cuda_kv_window_prepare(ctx, K, idx, counts, n_lists, n_kv_max, main_stream);
+             kfn<<<grid, 128, 0, main_stream>>>(
+                 (const char *) K->data, (half *) f16_extra.K, idx, counts, n_kv_max, ntiles_x,
+-                K->ne[0], K->ne[1], K->ne[3], K->nb[1], K->nb[2], K->nb[3]);
++                K->ne[0], K->ne[1], K->ne[3], K->nb[1], K->nb[2], K->nb[3], wK.page_table, wK.pool);
+             CUDA_CHECK(cudaGetLastError());
+         }
+         if (sparse_rows_V) {
+             const dim3 grid(n_kv_max + 1, n_lists, V->ne[2]);
+             const auto kfn = V->type == GGML_TYPE_Q8_0 ? k_fattn_sparse_rows_to_f16<GGML_TYPE_Q8_0> : k_fattn_sparse_rows_to_f16<GGML_TYPE_Q4_0>;
++            const ggml_cuda_kv_window_view wV = ggml_cuda_kv_window_prepare(ctx, V, idx, counts, n_lists, n_kv_max, main_stream);
+             kfn<<<grid, 128, 0, main_stream>>>(
+                 (const char *) V->data, (half *) f16_extra.V, idx, counts, n_kv_max, ntiles_x,
+-                V->ne[0], V->ne[1], V->ne[3], V->nb[1], V->nb[2], V->nb[3]);
++                V->ne[0], V->ne[1], V->ne[3], V->nb[1], V->nb[2], V->nb[3], wV.page_table, wV.pool);
+             CUDA_CHECK(cudaGetLastError());
+         }
+     }
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 53dc92b1..5dcdc1a7 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -29,6 +29,7 @@
+ #include "ggml-cuda/fwht.cuh"
+ #include "ggml-cuda/getrows.cuh"
+ #include "ggml-cuda/im2col.cuh"
++#include "ggml-cuda/kv-window.cuh"
+ #include "ggml-cuda/mmf.cuh"
+ #include "ggml-cuda/mmq.cuh"
+ #include "ggml-cuda/mmvf.cuh"
+@@ -742,6 +743,7 @@ struct ggml_backend_cuda_buffer_context {
+ 
+ static void ggml_backend_cuda_buffer_free_buffer(ggml_backend_buffer_t buffer) {
+     ggml_backend_cuda_buffer_context * ctx = (ggml_backend_cuda_buffer_context *)buffer->context;
++    ggml_cuda_kv_window_on_free_buffer(buffer);   // 0026
+     delete ctx;
+ }
+ 
+@@ -762,6 +764,9 @@ static enum ggml_status ggml_backend_cuda_buffer_init_tensor(ggml_backend_buffer
+         return GGML_STATUS_SUCCESS;
+     }
+ 
++    // 0026: a K/V cache tensor in host-mapped memory gets a page window (no-op unless LLAMA_KV_PAGE_WINDOW is set)
++    ggml_cuda_kv_window_on_init_tensor(buffer, tensor, ctx->device, ctx->host_ptr != nullptr);
++
+     if (ggml_is_quantized(tensor->type) && tensor->view_src == nullptr && ggml_backend_buffer_get_usage(buffer) != GGML_BACKEND_BUFFER_USAGE_COMPUTE) {
+         // initialize padding to 0 to avoid possible NaN values
+         const size_t original_size = ggml_nbytes(tensor);
+@@ -781,6 +786,7 @@ static void ggml_backend_cuda_buffer_memset_tensor(ggml_backend_buffer_t buffer,
+     ggml_cuda_set_device(ctx->device);
+     CUDA_CHECK(cudaMemsetAsync((char *) tensor->data + offset, value, size, cudaStreamPerThread));
+     CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++    ggml_cuda_kv_window_flush_buffer(buffer);   // 0026
+ }
+ 
+ static void ggml_backend_cuda_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+@@ -789,6 +795,7 @@ static void ggml_backend_cuda_buffer_set_tensor(ggml_backend_buffer_t buffer, gg
+     ggml_cuda_set_device(ctx->device);
+     CUDA_CHECK(cudaMemcpyAsync((char *) tensor->data + offset, data, size, cudaMemcpyHostToDevice, cudaStreamPerThread));
+     CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++    ggml_cuda_kv_window_flush_buffer(buffer);   // 0026
+ }
+ 
+ static void ggml_backend_cuda_buffer_get_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+@@ -807,6 +814,7 @@ static void ggml_backend_cuda_buffer_set_tensor_2d(ggml_backend_buffer_t buffer,
+     CUDA_CHECK(cudaMemcpy2DAsync(
+         (char *) tensor->data + offset, stride_tensor, data, stride_data, size, n_copies, cudaMemcpyHostToDevice, cudaStreamPerThread));
+     CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++    ggml_cuda_kv_window_flush_buffer(buffer);   // 0026
+ }
+ 
+ static void ggml_backend_cuda_buffer_get_tensor_2d(ggml_backend_buffer_t buffer, const struct ggml_tensor * tensor, void * data,
+@@ -821,6 +829,7 @@ static void ggml_backend_cuda_buffer_get_tensor_2d(ggml_backend_buffer_t buffer,
+ 
+ static bool ggml_backend_cuda_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * src, ggml_tensor * dst) {
+     if (ggml_backend_buffer_is_cuda(src->buffer)) {
++        ggml_cuda_kv_window_flush_buffer(buffer);   // 0026: bytes of dst's buffer are about to change
+         ggml_backend_cuda_buffer_context * src_ctx = (ggml_backend_cuda_buffer_context *)src->buffer->context;
+         ggml_backend_cuda_buffer_context * dst_ctx = (ggml_backend_cuda_buffer_context *)dst->buffer->context;
+         // compare the backing physical devices: distinct virtual devices may share one physical GPU,
+@@ -850,6 +859,7 @@ static void ggml_backend_cuda_buffer_clear(ggml_backend_buffer_t buffer, uint8_t
+     ggml_cuda_set_device(ctx->device);
+     CUDA_CHECK(cudaMemsetAsync(ctx->dev_ptr, value, buffer->size, cudaStreamPerThread));
+     CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++    ggml_cuda_kv_window_flush_buffer(buffer);   // 0026
+ }
+ 
+ static const ggml_backend_buffer_i ggml_backend_cuda_buffer_interface = {
+@@ -4492,9 +4502,15 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
+                     continue;
+                 }
+ 
++                // 0026: a node that writes into a windowed K/V cache tensor drops the pages it touches
++                ggml_cuda_kv_window_on_node(*cuda_ctx, node);
++
+                 int nodes_to_skip = ggml_cuda_try_fuse(cuda_ctx, cgraph, i);
+ 
+                 if (nodes_to_skip != 0) {
++                    for (int k = 1; k <= nodes_to_skip; ++k) {
++                        ggml_cuda_kv_window_on_node(*cuda_ctx, cgraph->nodes[i + k]);
++                    }
+ #ifdef GGML_CUDA_DEBUG
+                     const int last_fused = i + nodes_to_skip;
+                     GGML_LOG_INFO("nodes_fused: %d, first: %s (%s), last: %s (%s)\n",
+@@ -4687,6 +4703,8 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend,
+ 
+     ggml_cuda_graph_evaluate_and_capture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);
+ 
++    ggml_cuda_kv_window_tick();   // 0026: the hit-rate line (GGML_CUDA_KV_PAGE_STATS=1)
++
+     return GGML_STATUS_SUCCESS;
+ }
+ 
+@@ -5984,6 +6002,22 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
+     if (strcmp(name, "ggml_backend_cuda_host_mapped_buffer_type") == 0) {
+         return (void *)ggml_backend_cuda_host_mapped_buffer_type_of_dev;
+     }
++    // 0026: the K/V page window's test hooks (kv-window.cuh)
++    if (strcmp(name, "ggml_backend_cuda_kv_page_window_configure") == 0) {
++        return (void *)ggml_cuda_kv_window_configure;
++    }
++    if (strcmp(name, "ggml_backend_cuda_kv_page_window_set_use") == 0) {
++        return (void *)ggml_cuda_kv_window_set_use;
++    }
++    if (strcmp(name, "ggml_backend_cuda_kv_page_window_set_debug") == 0) {
++        return (void *)ggml_cuda_kv_window_set_debug;
++    }
++    if (strcmp(name, "ggml_backend_cuda_kv_page_window_query") == 0) {
++        return (void *)ggml_cuda_kv_window_query;
++    }
++    if (strcmp(name, "ggml_backend_cuda_kv_page_window_test_fill") == 0) {
++        return (void *)ggml_cuda_kv_window_test_fill;
++    }
+     if (strcmp(name, "ggml_backend_comm_init") == 0) {
+         return (void *)ggml_backend_cuda_comm_init;
+     }
+diff --git a/ggml/src/ggml-cuda/kv-window.cu b/ggml/src/ggml-cuda/kv-window.cu
+new file mode 100644
+index 00000000..641dfbf2
+--- /dev/null
++++ b/ggml/src/ggml-cuda/kv-window.cu
+@@ -0,0 +1,720 @@
++// The K/V page window (patch 0026). See kv-window.cuh for what it is.
++//
++// Ported from Strata: Niko1221/Strata, src/kernels/cuda/kv_stream.cu and include/strata/kernels/kv_stream.hpp, read
++// at d551edf ("docs: troubleshooting row for the IQ3_XXS long-prompt stop (fixed in 0.1.15)").
++//
++//   Copyright (c) 2026 Niko1221 and the Strata contributors
++//
++//   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
++//   documentation files (the "Software"), to deal in the Software without restriction, including without
++//   limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
++//   Software, and to permit persons to whom the Software is furnished to do so, subject to the following
++//   conditions:
++//
++//   The above copyright notice and this permission notice shall be included in all copies or substantial portions
++//   of the Software.
++//
++//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
++//   TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++//   THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
++//   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++//   DEALINGS IN THE SOFTWARE.
++//
++// Taken from Strata, per function below: the residency map (page_table block -> slot or -1, slot_block, slot_stamp,
++// slot_ref, ctl, miss_block, miss_slot: KvStreamMap, kv_stream.hpp:49), block_scan (kv_stream.cu:58), the resolve
++// kernel (:82: hits take this call's epoch and their CLOCK reference bit, a missing block is claimed once -1 -> -2,
++// one victim slot per miss by a CLOCK sweep that never takes a slot this call uses), the copy kernel (:161), the
++// reset kernel (:173) and the 4-cell page. Ours: what Strata did not need because it owns its K/V layout and its
++// writers -- here the cache is llama.cpp's, written by ggml ops and by host copies, so a write drops the pages it
++// touches (kvw_invalidate_rows_kernel, on_node, flush_buffer) instead of writing through; the pool holds the cache's
++// own quantized rows (q8_0 / q4_0) and the reader (fattn-common.cuh) converts from it, so a hit is bit-identical to a
++// read of the host row; the lists come from the sparse flash attention's index lists; and the cases Strata rules
++// out by a legal n_slots (a call that names more pages than the pool holds, fewer than 1,024 slots) are handled.
++
++#include "kv-window.cuh"
++
++#if defined(GGML_USE_HIP) || defined(GGML_USE_MUSA)
++
++void ggml_cuda_kv_window_on_init_tensor(ggml_backend_buffer_t, const ggml_tensor *, int, bool) {}
++void ggml_cuda_kv_window_on_free_buffer(ggml_backend_buffer_t) {}
++void ggml_cuda_kv_window_flush_buffer(ggml_backend_buffer_t) {}
++void ggml_cuda_kv_window_on_node(ggml_backend_cuda_context &, const ggml_tensor *) {}
++void ggml_cuda_kv_window_tick() {}
++ggml_cuda_kv_window_view ggml_cuda_kv_window_prepare(
++        ggml_backend_cuda_context &, const ggml_tensor *, const int32_t *, const int32_t *, int64_t, int64_t, cudaStream_t) {
++    return {};
++}
++void ggml_cuda_kv_window_configure(int64_t, int64_t) {}
++void ggml_cuda_kv_window_set_use(int) {}
++void ggml_cuda_kv_window_set_debug(int, int) {}
++int  ggml_cuda_kv_window_query(const ggml_tensor *, int64_t *, int32_t *, int32_t *) { return 0; }
++int  ggml_cuda_kv_window_test_fill(const ggml_tensor *, int64_t, const void *, int64_t) { return 0; }
++
++#else
++
++#include <algorithm>
++#include <atomic>
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++#include <map>
++#include <memory>
++#include <mutex>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace {
++
++constexpr int RT       = 1024;  // the resolve block (Strata kv_stream.cu:23)
++constexpr int CTL_INTS = 16;    // ctl: [0] epoch [1] hand [2] misses placed by the last call [3] overflow (sticky);
++                                // u64 at [4] pages copied, [6] lookups, [8] calls (Strata kv_stream.hpp:61)
++
++// The window's size. LLAMA_KV_PAGE_WINDOW=<cells per K or V tensor>; Strata's own numbers: it keeps N cells of each
++// QSA layer in VRAM with N = max(--kv-resident, 20480) (src/core/layer.cpp:508 `max(g_kv_resident,
++// qsa_kv_resident_min())`, :522 `qsa_kv_resident_min() { return 20480; }`, the floor: n_slots must hold the
++// distinct pages of one call, n_q x (cap / page_size + 2)) and its setup script passes 32768 (setup.py:1022).
++// LLAMA_KV_PAGE_WINDOW=1 means that 32768. LLAMA_KV_PAGE_WINDOW_FLOOR (tests only) replaces the 20480 floor.
++constexpr int64_t STRATA_FLOOR_CELLS   = 20480;
++constexpr int64_t STRATA_DEFAULT_CELLS = 32768;
++
++struct kvw_config {
++    int64_t cells         = 0;                  // 0: no windows
++    int64_t floor_cells   = STRATA_FLOOR_CELLS;
++    bool    poison        = false;              // tests: a pool starts as NaN scales, so a read before a copy is NaN
++    bool    no_invalidate = false;              // tests: writers do not drop pages (a mutation: the tests must fail)
++    bool    stats         = false;              // log the hit rate when a buffer is freed
++};
++
++std::mutex  g_cfg_mu;
++std::atomic<bool> g_no_invalidate{false};   // mirrors kvw_config::no_invalidate, read on every writer node
++kvw_config  g_cfg;
++bool        g_cfg_init = false;
++
++kvw_config cfg_get() {
++    std::lock_guard<std::mutex> lock(g_cfg_mu);
++    if (!g_cfg_init) {
++        g_cfg_init = true;
++        if (const char * e = getenv("LLAMA_KV_PAGE_WINDOW")) {
++            const long long v = atoll(e);
++            g_cfg.cells = v <= 0 ? 0 : v == 1 ? STRATA_DEFAULT_CELLS : v;
++        }
++        if (const char * e = getenv("LLAMA_KV_PAGE_WINDOW_FLOOR")) {
++            const long long v = atoll(e);
++            if (v >= GGML_CUDA_KV_PAGE_CELLS) {
++                g_cfg.floor_cells = v;
++            }
++        }
++        const char * e;
++        g_cfg.poison        = (e = getenv("GGML_CUDA_KV_PAGE_POISON"))        && e[0] == '1';
++        g_cfg.no_invalidate = (e = getenv("GGML_CUDA_KV_PAGE_NO_INVALIDATE")) && e[0] == '1';
++        g_cfg.stats         = (e = getenv("GGML_CUDA_KV_PAGE_STATS"))         && e[0] == '1';
++        g_no_invalidate.store(g_cfg.no_invalidate);
++    }
++    return g_cfg;
++}
++
++std::atomic<bool> g_use{true};         // reads on / off (tests toggle it between a windowed and a plain run)
++std::atomic<int>  g_n_windows{0};
++
++// the residency map: all device memory at fixed addresses (graphs bake them in), Strata's KvStreamMap
++struct kvw_dev {
++    int32_t * page_table;  // (n_blocks,) block -> slot, or -1 (-2 only inside a resolve: claimed)
++    int32_t * slot_block;  // (n_slots,)  slot -> block, or -1
++    int32_t * slot_stamp;  // (n_slots,)  the resolve epoch that last used the slot
++    int32_t * slot_ref;    // (n_slots,)  clock reference bit
++    int32_t * ctl;
++    int32_t * miss_block;  // (n_slots,)
++    int32_t * miss_slot;   // (n_slots,)
++    int64_t   n_blocks;
++    int64_t   n_slots;
++};
++
++struct kvw {
++    int                   device = 0;
++    ggml_backend_buffer_t buffer = nullptr;
++    const void *          key    = nullptr;   // the cache tensor's data pointer
++    std::string           name;
++    ggml_type             type   = GGML_TYPE_F16;
++    int64_t               row_bytes  = 0;     // one cell, all heads: the cache tensor's nb[1]
++    int64_t               n_cells    = 0;
++    int64_t               n_blocks   = 0;
++    int64_t               n_slots    = 0;
++    int64_t               page_bytes = 0;     // GGML_CUDA_KV_PAGE_CELLS rows
++    char *                arrays = nullptr;
++    kvw_dev               dev    = {};
++    char *                pool   = nullptr;   // n_slots pages; allocated by the first call that can use it
++    bool                  pool_failed = false;
++};
++
++std::mutex                                      g_mu;
++std::map<std::pair<int, const void *>, std::unique_ptr<kvw>> g_windows;
++
++kvw * find_window(int device, const void * key) {
++    std::lock_guard<std::mutex> lock(g_mu);
++    auto it = g_windows.find({device, key});
++    return it == g_windows.end() ? nullptr : it->second.get();
++}
++
++// the window of a cache tensor, whatever its device (tests)
++kvw * find_window_of(const ggml_tensor * root) {
++    std::lock_guard<std::mutex> lock(g_mu);
++    for (auto & kv : g_windows) {
++        if (kv.second->key == root->data && kv.second->buffer == root->buffer) {
++            return kv.second.get();
++        }
++    }
++    return nullptr;
++}
++
++// Block-wide exclusive prefix sum of one int per thread (RT threads); `total` is the sum over the block.
++// Strata kv_stream.cu:58, unchanged.
++__device__ int kvw_block_scan(int v, int * warp_sums, int & total) {
++    const int lane = threadIdx.x & 31, w = threadIdx.x >> 5;
++    int x = v;
++    for (int o = 1; o < 32; o <<= 1) {
++        const int y = __shfl_up_sync(0xffffffffu, x, o);
++        if (lane >= o) x += y;
++    }
++    if (lane == 31) warp_sums[w] = x;
++    __syncthreads();
++    if (w == 0) {
++        int t = warp_sums[lane];
++        for (int o = 1; o < 32; o <<= 1) {
++            const int y = __shfl_up_sync(0xffffffffu, t, o);
++            if (lane >= o) t += y;
++        }
++        warp_sums[lane] = t;
++    }
++    __syncthreads();
++    total = warp_sums[31];
++    const int excl = x - v + (w > 0 ? warp_sums[w - 1] : 0);
++    __syncthreads();
++    return excl;
++}
++
++// One page named by this call (Strata kv_stream.cu:98-104): a resident one takes this call's epoch and its clock
++// reference bit; a missing one is claimed exactly once (-1 -> -2) into the miss list.
++__device__ __forceinline__ void kvw_touch(const kvw_dev & m, const int b, const int epoch, const int n, int * s_nmiss) {
++    const int sl = m.page_table[b];
++    if (sl >= 0) {
++        m.slot_stamp[sl] = epoch;
++        m.slot_ref[sl]   = 1;
++    } else if (sl == -1 && atomicCAS(&m.page_table[b], -1, -2) == -1) {
++        const int k = atomicAdd(s_nmiss, 1);
++        if (k < n) {
++            m.miss_block[k] = b;
++        } else {
++            m.page_table[b] = -1;   // more pages than slots: not resident, read from the host
++        }
++    }
++}
++
++// Make every page the lists name resident. Strata kv_stream.cu:82 resolve_kernel, one block of RT threads:
++//   1. hits take this call's epoch and their clock reference bit; a missing page is claimed once (-1 -> -2) into a
++//      miss list;
++//   2. one victim slot per miss by a CLOCK sweep (second chance) that never takes a slot this call uses;
++//   3. the page table is re-pointed (old block -> -1, new block -> slot).
++// Differences from Strata's: the ids are the sparse attention's index lists (counts[l] valid entries, ascending) and
++// page 0 is always looked up (the sparse kernels' padded slots gather row 0); a call that names more pages than the
++// window holds does not write past the miss arrays: the pages that do not fit are left at -1, and the reader
++// (fattn-common.cuh) reads them from the host; and a window of fewer than RT slots works (Strata's sweep gives two
++// threads the same slot there; its n_slots is never below 5,120): only min(n, RT) threads take part in a sweep.
++__global__ void __launch_bounds__(RT) kvw_resolve_kernel(
++        kvw_dev m, const int32_t * __restrict__ ids, const int32_t * __restrict__ counts, int n_lists, int n_kv_max) {
++    __shared__ int s_nmiss, s_lookups, s_cut;
++    __shared__ int warp_sums[32];
++    const int epoch = (int) ((uint32_t) m.ctl[0] + 1u);
++    const int n     = (int) m.n_slots;
++    if (threadIdx.x == 0) { s_nmiss = 0; s_lookups = 0; }
++    __syncthreads();
++    // 1. hits take this epoch and their reference bit; a missing block is claimed exactly once (-1 -> -2)
++    int lookups = 0;
++    if (threadIdx.x == 0) {
++        kvw_touch(m, 0, epoch, n, &s_nmiss);
++        ++lookups;
++    }
++    for (int l = 0; l < n_lists; ++l) {
++        const int width = counts[l];
++        const int32_t * qi = ids + (long long) l * n_kv_max;
++        for (int i = threadIdx.x; i < width; i += RT) {
++            const int cell = qi[i];
++            if (cell < 0) continue;
++            const int b = cell >> GGML_CUDA_KV_PAGE_SHIFT;
++            if (i > 0 && (qi[i - 1] >> GGML_CUDA_KV_PAGE_SHIFT) == b) continue;   // ids are ascending: one lookup per block
++            kvw_touch(m, b, epoch, n, &s_nmiss);
++            ++lookups;
++        }
++    }
++    atomicAdd(&s_lookups, lookups);
++    __syncthreads();
++    // 2. one victim per miss: a clock sweep from the hand. A slot this call uses (stamp == epoch) is never taken;
++    //    a referenced one loses its bit as the hand passes it and is taken on the next pass.
++    const int total_miss = s_nmiss;
++    const int need       = total_miss < n ? total_miss : n;
++    const int span       = n < RT ? n : RT;
++    int hand = m.ctl[1], got = 0;
++    for (int scanned = 0; got < need && scanned < 3 * n; scanned += span) {
++        const bool act  = (int) threadIdx.x < span;
++        const int  j    = act ? (int) (((long long) hand + threadIdx.x) % n) : 0;
++        const bool mine = act && m.slot_stamp[j] == epoch;
++        const bool cand = act && !mine && (m.slot_block[j] < 0 || m.slot_ref[j] == 0);
++        int total = 0;
++        const int rank = kvw_block_scan(cand ? 1 : 0, warp_sums, total);
++        const int want = need - got;
++        if (threadIdx.x == 0) s_cut = span;
++        __syncthreads();
++        if (cand && rank == want - 1) s_cut = threadIdx.x + 1;   // the hand stops just past the last slot taken
++        __syncthreads();
++        const int cut = s_cut;
++        if (cand && rank < want) {
++            m.miss_slot[got + rank] = j;
++            m.slot_stamp[j] = epoch;   // taken: a sweep that wraps around must not take it twice
++        } else if (act && (int) threadIdx.x < cut && !mine) {
++            m.slot_ref[j] = 0;
++        }
++        got += total < want ? total : want;
++        hand = (int) (((long long) hand + cut) % n);
++        __syncthreads();
++    }
++    // 3. re-point the table; the copy kernel fills the slots
++    const int placed = got < need ? got : need;
++    for (int k = threadIdx.x; k < need; k += RT) {
++        const int b = m.miss_block[k];
++        if (k >= placed) { m.page_table[b] = -1; continue; }   // no victim: read from the host
++        const int sl  = m.miss_slot[k];
++        const int old = m.slot_block[sl];
++        if (old >= 0) m.page_table[old] = -1;
++        m.slot_block[sl] = b;
++        m.slot_stamp[sl] = epoch;
++        m.slot_ref[sl]   = 1;
++        m.page_table[b]  = sl;
++    }
++    if (threadIdx.x == 0) {
++        m.ctl[0] = epoch;
++        m.ctl[1] = hand;
++        m.ctl[2] = placed;
++        if (placed < total_miss) m.ctl[3] = 1;
++        unsigned long long * c = reinterpret_cast<unsigned long long *>(m.ctl + 4);
++        c[0] += (unsigned long long) placed;
++        c[1] += (unsigned long long) s_lookups;
++        c[2] += 1ull;
++    }
++}
++
++// One block per missed page (grid-stride): copy it from the host copy into its slot, 16 B per thread.
++// Strata kv_stream.cu:161 copy_kernel; one run per page (the cache's rows of a page are contiguous).
++__global__ void kvw_copy_kernel(kvw_dev m, const char * __restrict__ host, char * __restrict__ pool, int page_bytes) {
++    const int need = m.ctl[2];
++    for (int k = blockIdx.x; k < need; k += gridDim.x) {
++        const long long b = m.miss_block[k], sl = m.miss_slot[k];
++        const uint4 * src = reinterpret_cast<const uint4 *>(host + b * page_bytes);
++        uint4 *       dst = reinterpret_cast<uint4 *>(pool + sl * page_bytes);
++        for (int i = threadIdx.x; i < page_bytes / 16; i += blockDim.x) dst[i] = src[i];
++    }
++}
++
++// Every page evicted: page table all -1, slots free. Strata kv_stream.cu:173 reset_kernel; the counters ctl[4..]
++// are kept (they are what the hit rate is read from), the epoch and the clock hand restart.
++__global__ void kvw_reset_kernel(kvw_dev m) {
++    const long long i0 = (long long) blockIdx.x * blockDim.x + threadIdx.x, st = (long long) gridDim.x * blockDim.x;
++    for (long long i = i0; i < m.n_blocks; i += st) m.page_table[i] = -1;
++    for (long long i = i0; i < m.n_slots; i += st) {
++        m.slot_block[i] = -1;
++        m.slot_stamp[i] = -1;
++        m.slot_ref[i]   = 0;
++    }
++    if (i0 < 3) m.ctl[i0] = 0;   // epoch, hand, placed (ctl[3] is the sticky overflow flag)
++}
++
++// A write to rows of the cache: the pages those rows are in no longer match the host copy -- drop them. (Strata
++// writes through to the slot; its writers are its own kernels. Here the writers are ggml ops and host copies, so a
++// page that was written is simply evicted and re-copied by the next resolve that names it.)
++template <typename idx_t>
++__global__ void kvw_invalidate_rows_kernel(kvw_dev m, const idx_t * __restrict__ rows, int n_rows, long long n_cells) {
++    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_rows; i += gridDim.x * blockDim.x) {
++        const long long r = (long long) rows[i];
++        if (r < 0 || r >= n_cells) continue;
++        const int b  = (int) (r >> GGML_CUDA_KV_PAGE_SHIFT);
++        const int sl = m.page_table[b];
++        if (sl >= 0) {
++            m.page_table[b]  = -1;
++            m.slot_block[sl] = -1;
++            m.slot_ref[sl]   = 0;
++        }
++    }
++}
++
++size_t align16(size_t n) { return (n + 15) & ~(size_t) 15; }
++
++void reset_window(const kvw & w, cudaStream_t stream) {
++    kvw_reset_kernel<<<128, 256, 0, stream>>>(w.dev);
++    CUDA_CHECK(cudaGetLastError());
++}
++
++} // namespace
++
++// ---------------------------------------------------------------------------------------------------------------
++// configuration (tests)
++
++void ggml_cuda_kv_window_configure(int64_t cells, int64_t floor_cells) {
++    (void) cfg_get();
++    std::lock_guard<std::mutex> lock(g_cfg_mu);
++    g_cfg.cells = cells < 0 ? 0 : cells;
++    if (floor_cells >= GGML_CUDA_KV_PAGE_CELLS) {
++        g_cfg.floor_cells = floor_cells;
++    }
++}
++
++void ggml_cuda_kv_window_set_use(int use) {
++    g_use.store(use != 0);
++}
++
++void ggml_cuda_kv_window_set_debug(int poison, int no_invalidate) {
++    (void) cfg_get();
++    std::lock_guard<std::mutex> lock(g_cfg_mu);
++    g_cfg.poison        = poison != 0;
++    g_cfg.no_invalidate = no_invalidate != 0;
++    g_no_invalidate.store(g_cfg.no_invalidate);
++}
++
++// out[0] n_blocks, [1] n_slots, [2] page_bytes, [3] pool bytes (0: not allocated), [4] pages resident, [5] pages
++// copied, [6] lookups, [7] calls, [8] overflow seen, [9] epoch. page_table (n_blocks) and slot_block (n_slots) are
++// copied out if not null. Returns 0 when the tensor has no window.
++int ggml_cuda_kv_window_query(const ggml_tensor * root, int64_t * out, int32_t * page_table, int32_t * slot_block) {
++    if (!root || !root->buffer) {
++        return 0;
++    }
++    kvw * w = find_window_of(root);
++    if (!w) {
++        return 0;
++    }
++    ggml_cuda_set_device(w->device);
++    CUDA_CHECK(cudaDeviceSynchronize());
++    std::vector<int32_t> pt(w->n_blocks), sb(w->n_slots);
++    int32_t ctl[CTL_INTS] = {};
++    CUDA_CHECK(cudaMemcpy(pt.data(), w->dev.page_table, pt.size()*sizeof(int32_t), cudaMemcpyDeviceToHost));
++    CUDA_CHECK(cudaMemcpy(sb.data(), w->dev.slot_block, sb.size()*sizeof(int32_t), cudaMemcpyDeviceToHost));
++    CUDA_CHECK(cudaMemcpy(ctl, w->dev.ctl, sizeof(ctl), cudaMemcpyDeviceToHost));
++    int64_t resident = 0;
++    for (int32_t s : pt) {
++        resident += s >= 0;
++    }
++    const unsigned long long * u = reinterpret_cast<const unsigned long long *>(ctl + 4);
++    out[0] = w->n_blocks;
++    out[1] = w->n_slots;
++    out[2] = w->page_bytes;
++    out[3] = w->pool ? w->n_slots * w->page_bytes : 0;
++    out[4] = resident;
++    out[5] = (int64_t) u[0];
++    out[6] = (int64_t) u[1];
++    out[7] = (int64_t) u[2];
++    out[8] = ctl[3];
++    out[9] = ctl[0];
++    if (page_table) std::copy(pt.begin(), pt.end(), page_table);
++    if (slot_block) std::copy(sb.begin(), sb.end(), slot_block);
++    return 1;
++}
++
++int ggml_cuda_kv_window_test_fill(const ggml_tensor * root, int64_t byte_off, const void * data, int64_t bytes) {
++    kvw * w = root && root->buffer ? find_window_of(root) : nullptr;
++    if (!w) {
++        return 0;
++    }
++    ggml_cuda_set_device(w->device);
++    CUDA_CHECK(cudaDeviceSynchronize());
++    if (data) {
++        CUDA_CHECK(cudaMemcpyAsync((char *) root->data + byte_off, data, bytes, cudaMemcpyHostToDevice, cudaStreamPerThread));
++    } else {
++        CUDA_CHECK(cudaMemsetAsync((char *) root->data + byte_off, 0xFF, bytes, cudaStreamPerThread));
++    }
++    CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++    return 1;
++}
++
++// ---------------------------------------------------------------------------------------------------------------
++// the buffer's side
++
++void ggml_cuda_kv_window_on_init_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * t, int device, bool host_mapped) {
++    const kvw_config cfg = cfg_get();
++    if (cfg.cells <= 0 || !host_mapped || t->view_src != nullptr) {
++        return;
++    }
++    // the llama.cpp K/V cache layout: [n_embd_gqa, kv_size, 1] (one stream), quantized, one cell = one row
++    const int64_t bs = ggml_blck_size(t->type);
++    if ((t->type != GGML_TYPE_Q8_0 && t->type != GGML_TYPE_Q4_0) || t->ne[0] % bs != 0 || t->ne[2] != 1 || t->ne[3] != 1 ||
++            t->ne[1] % GGML_CUDA_KV_PAGE_CELLS != 0 || t->nb[1] != ggml_row_size(t->type, t->ne[0]) ||
++            t->nb[2] != t->nb[1]*t->ne[1]) {
++        return;
++    }
++    const int64_t row_bytes  = t->nb[1];
++    const int64_t page_bytes = row_bytes * GGML_CUDA_KV_PAGE_CELLS;
++    if (page_bytes % 16 != 0 || (uintptr_t) t->data % 16 != 0 || page_bytes > INT32_MAX) {
++        return;
++    }
++    auto w = std::make_unique<kvw>();
++    w->device     = device;
++    w->buffer     = buffer;
++    w->key        = t->data;
++    w->name       = t->name;
++    w->type       = t->type;
++    w->row_bytes  = row_bytes;
++    w->n_cells    = t->ne[1];
++    w->n_blocks   = w->n_cells / GGML_CUDA_KV_PAGE_CELLS;
++    w->page_bytes = page_bytes;
++    // the window: max(N, the floor) cells, rounded up to whole pages, never more than the cache holds
++    const int64_t cells = std::max(cfg.cells, cfg.floor_cells);
++    w->n_slots = std::min<int64_t>((cells + GGML_CUDA_KV_PAGE_CELLS - 1) / GGML_CUDA_KV_PAGE_CELLS, w->n_blocks);
++
++    const size_t n_blocks = (size_t) w->n_blocks, n_slots = (size_t) w->n_slots;
++    const size_t off_pt = 0;
++    const size_t off_sb = off_pt + align16(n_blocks*4);
++    const size_t off_st = off_sb + align16(n_slots*4);
++    const size_t off_sr = off_st + align16(n_slots*4);
++    const size_t off_mb = off_sr + align16(n_slots*4);
++    const size_t off_ms = off_mb + align16(n_slots*4);
++    const size_t off_ct = off_ms + align16(n_slots*4);
++    const size_t total  = off_ct + CTL_INTS*4;
++
++    ggml_cuda_set_device(device);
++    void * p = nullptr;
++    if (cudaMalloc(&p, total) != cudaSuccess) {
++        (void) cudaGetLastError();
++        GGML_LOG_WARN("%s: no memory for the K/V page window map of %s (%zu bytes); no window for it\n", __func__, t->name, total);
++        return;
++    }
++    w->arrays = (char *) p;
++    w->dev.page_table = (int32_t *) (w->arrays + off_pt);
++    w->dev.slot_block = (int32_t *) (w->arrays + off_sb);
++    w->dev.slot_stamp = (int32_t *) (w->arrays + off_st);
++    w->dev.slot_ref   = (int32_t *) (w->arrays + off_sr);
++    w->dev.miss_block = (int32_t *) (w->arrays + off_mb);
++    w->dev.miss_slot  = (int32_t *) (w->arrays + off_ms);
++    w->dev.ctl        = (int32_t *) (w->arrays + off_ct);
++    w->dev.n_blocks   = w->n_blocks;
++    w->dev.n_slots    = w->n_slots;
++    CUDA_CHECK(cudaMemsetAsync(w->arrays, 0, total, cudaStreamPerThread));
++    CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++    reset_window(*w, cudaStreamPerThread);
++    CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++
++    std::lock_guard<std::mutex> lock(g_mu);
++    const auto key = std::make_pair(device, (const void *) t->data);
++    g_windows[key] = std::move(w);
++    g_n_windows.fetch_add(1);
++}
++
++void ggml_cuda_kv_window_on_free_buffer(ggml_backend_buffer_t buffer) {
++    if (g_n_windows.load() == 0) {
++        return;
++    }
++    std::vector<std::unique_ptr<kvw>> dead;
++    {
++        std::lock_guard<std::mutex> lock(g_mu);
++        for (auto it = g_windows.begin(); it != g_windows.end();) {
++            if (it->second->buffer == buffer) {
++                dead.push_back(std::move(it->second));
++                it = g_windows.erase(it);
++                g_n_windows.fetch_sub(1);
++            } else {
++                ++it;
++            }
++        }
++    }
++    if (dead.empty()) {
++        return;
++    }
++    const kvw_config cfg = cfg_get();
++    unsigned long long copied = 0, lookups = 0, calls = 0;
++    size_t pool_bytes = 0;
++    bool overflow = false;
++    for (auto & w : dead) {
++        ggml_cuda_set_device(w->device);
++        CUDA_CHECK(cudaDeviceSynchronize());
++        if (cfg.stats) {
++            int32_t ctl[CTL_INTS] = {};
++            CUDA_CHECK(cudaMemcpy(ctl, w->dev.ctl, sizeof(ctl), cudaMemcpyDeviceToHost));
++            const unsigned long long * u = reinterpret_cast<const unsigned long long *>(ctl + 4);
++            copied += u[0]; lookups += u[1]; calls += u[2];
++            overflow = overflow || ctl[3] != 0;
++        }
++        if (w->pool) {
++            pool_bytes += (size_t) w->n_slots * w->page_bytes;
++            CUDA_CHECK(cudaFree(w->pool));
++        }
++        CUDA_CHECK(cudaFree(w->arrays));
++    }
++    if (cfg.stats) {
++        GGML_LOG_INFO("kv page window: %zu tensors, %llu resolves, %llu page lookups, %llu pages copied (hit rate %.1f%%), "
++                      "overflow %s, pool %.1f MiB\n", dead.size(), calls, lookups, copied,
++                      lookups ? 100.0 * (double) (lookups - std::min(lookups, copied)) / (double) lookups : 0.0,
++                      overflow ? "yes" : "no", pool_bytes / 1024.0 / 1024.0);
++    }
++}
++
++void ggml_cuda_kv_window_tick() {
++    static std::atomic<uint64_t> n{0};
++    static unsigned long long last_lookups = 0, last_copied = 0, last_calls = 0;
++    if (g_n_windows.load(std::memory_order_relaxed) == 0 || !cfg_get().stats || n.fetch_add(1) % 1024 != 1023) {
++        return;
++    }
++    unsigned long long lookups = 0, copied = 0, calls = 0;
++    int n_win = 0;
++    bool overflow = false;
++    {
++        std::lock_guard<std::mutex> lock(g_mu);
++        for (auto & kv : g_windows) {
++            const kvw & w = *kv.second;
++            int32_t ctl[CTL_INTS] = {};
++            ggml_cuda_set_device(w.device);
++            CUDA_CHECK(cudaMemcpyAsync(ctl, w.dev.ctl, sizeof(ctl), cudaMemcpyDeviceToHost, cudaStreamPerThread));
++            CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++            const unsigned long long * u = reinterpret_cast<const unsigned long long *>(ctl + 4);
++            copied += u[0]; lookups += u[1]; calls += u[2];
++            overflow = overflow || ctl[3] != 0;
++            n_win += w.pool != nullptr;
++        }
++    }
++    const unsigned long long dl = lookups - last_lookups, dc = copied - last_copied, dn = calls - last_calls;
++    last_lookups = lookups; last_copied = copied; last_calls = calls;
++    if (dn > 0) {
++        GGML_LOG_INFO("kv page window: %d windows in use, last %llu resolves: %llu page lookups, %llu copied over PCIe "
++                      "(hit rate %.1f%%)%s\n", n_win, dn, dl, dc, dl ? 100.0 * (double) (dl - std::min(dl, dc)) / (double) dl : 0.0,
++                      overflow ? ", a call has overflowed the window" : "");
++    }
++}
++
++void ggml_cuda_kv_window_flush_buffer(ggml_backend_buffer_t buffer) {
++    if (g_n_windows.load() == 0) {
++        return;
++    }
++    std::vector<kvw *> ws;
++    {
++        std::lock_guard<std::mutex> lock(g_mu);
++        for (auto & kv : g_windows) {
++            if (kv.second->buffer == buffer) {
++                ws.push_back(kv.second.get());
++            }
++        }
++    }
++    for (kvw * w : ws) {
++        ggml_cuda_set_device(w->device);
++        reset_window(*w, cudaStreamPerThread);
++    }
++    if (!ws.empty()) {
++        CUDA_CHECK(cudaStreamSynchronize(cudaStreamPerThread));
++    }
++}
++
++void ggml_cuda_kv_window_on_node(ggml_backend_cuda_context & ctx, const ggml_tensor * node) {
++    if (g_n_windows.load(std::memory_order_relaxed) == 0 || node->view_src == nullptr) {
++        return;
++    }
++    switch (node->op) {
++        case GGML_OP_NONE:
++        case GGML_OP_VIEW:
++        case GGML_OP_RESHAPE:
++        case GGML_OP_PERMUTE:
++        case GGML_OP_TRANSPOSE:
++            return;
++        default:
++            break;
++    }
++    const ggml_tensor * root = node->view_src;
++    kvw * w = find_window(ctx.device, root->data);
++    if (!w || w->buffer != root->buffer) {
++        return;
++    }
++    if (g_no_invalidate.load(std::memory_order_relaxed)) {
++        return;
++    }
++    cudaStream_t stream = ctx.stream();
++    if (node->op == GGML_OP_SET_ROWS) {
++        // the rows it names; the cache tensor's row is a cell (llama_kv_cache::cpy_k / cpy_v, one stream)
++        const ggml_tensor * rows = node->src[1];
++        if (rows && (rows->type == GGML_TYPE_I64 || rows->type == GGML_TYPE_I32) && rows->ne[1] == 1 && rows->ne[2] == 1 &&
++                rows->ne[3] == 1 && rows->nb[0] == ggml_type_size(rows->type) && node->ne[1] == w->n_cells &&
++                node->nb[1] == w->row_bytes && node->ne[2] == 1 && node->ne[3] == 1) {
++            const int n_rows = (int) rows->ne[0];
++            const int blocks = std::max(1, std::min((n_rows + 255) / 256, 64));
++            if (rows->type == GGML_TYPE_I64) {
++                kvw_invalidate_rows_kernel<int64_t><<<blocks, 256, 0, stream>>>(w->dev, (const int64_t *) rows->data, n_rows, w->n_cells);
++            } else {
++                kvw_invalidate_rows_kernel<int32_t><<<blocks, 256, 0, stream>>>(w->dev, (const int32_t *) rows->data, n_rows, w->n_cells);
++            }
++            CUDA_CHECK(cudaGetLastError());
++            return;
++        }
++    }
++    // any other op that writes into the cache (a K shift, a copy): every page goes
++    reset_window(*w, stream);
++}
++
++// ---------------------------------------------------------------------------------------------------------------
++// the flash attention's side
++
++ggml_cuda_kv_window_view ggml_cuda_kv_window_prepare(
++        ggml_backend_cuda_context & ctx, const ggml_tensor * K, const int32_t * idx, const int32_t * counts,
++        int64_t n_lists, int64_t n_kv_max, cudaStream_t stream) {
++    ggml_cuda_kv_window_view out;
++    if (g_n_windows.load(std::memory_order_relaxed) == 0 || !g_use.load(std::memory_order_relaxed)) {
++        return out;
++    }
++    const ggml_tensor * root = K->view_src ? K->view_src : K;
++    kvw * w = find_window(ctx.device, root->data);
++    if (!w || w->buffer != root->buffer) {
++        return out;
++    }
++    // K must be the cache tensor's own cells at its own stride: cell c, head h at data + c*nb[1] + h*nb[2], the heads
++    // inside the cell's row, one stream, no offset into the cache
++    if (K->type != w->type || K->data != root->data || K->ne[3] != 1 || K->nb[1] != w->row_bytes || K->ne[1] > w->n_cells ||
++            (K->ne[2] - 1)*(int64_t) K->nb[2] + (int64_t) ggml_row_size(K->type, K->ne[0]) > w->row_bytes) {
++        return out;
++    }
++    // the lists name at most n_lists x (n_kv_max / page + 2) pages if their cells are whole blocks (Strata's bound,
++    // kv_stream.hpp "n_q x (cap / page_size + 2)"), plus page 0; a window that cannot hold that is not used
++    if (n_lists * ((n_kv_max >> GGML_CUDA_KV_PAGE_SHIFT) + 2) + 1 > w->n_slots) {
++        return out;
++    }
++    if (!w->pool) {
++        if (w->pool_failed) {
++            return out;
++        }
++        // allocated outside of a graph capture only (the first calls of a graph run eagerly, ggml-cuda.cu)
++        cudaStreamCaptureStatus capturing = cudaStreamCaptureStatusNone;
++        CUDA_CHECK(cudaStreamIsCapturing(stream, &capturing));
++        if (capturing != cudaStreamCaptureStatusNone) {
++            return out;
++        }
++        ggml_cuda_set_device(w->device);
++        void * p = nullptr;
++        const size_t bytes = (size_t) w->n_slots * (size_t) w->page_bytes;
++        if (cudaMalloc(&p, bytes) != cudaSuccess) {
++            (void) cudaGetLastError();
++            w->pool_failed = true;
++            GGML_LOG_WARN("%s: no memory for the K/V page window pool of %s (%.1f MiB); no window for it\n", __func__,
++                          w->name.c_str(), bytes / 1024.0 / 1024.0);
++            return out;
++        }
++        w->pool = (char *) p;
++        if (cfg_get().poison) {
++            // 0xFF: the scale of a q8_0 / q4_0 block is a half NaN, so a read of a slot nothing copied into is NaN
++            CUDA_CHECK(cudaMemsetAsync(w->pool, 0xFF, bytes, stream));
++        }
++        GGML_LOG_INFO("kv page window: %s: %lld slots of %lld cells (%.1f MiB of VRAM), the cache holds %lld cells\n",
++                      w->name.c_str(), (long long) w->n_slots, (long long) GGML_CUDA_KV_PAGE_CELLS, bytes / 1024.0 / 1024.0,
++                      (long long) w->n_cells);
++    }
++
++    kvw_resolve_kernel<<<1, RT, 0, stream>>>(w->dev, idx, counts, (int) n_lists, (int) n_kv_max);
++    CUDA_CHECK(cudaGetLastError());
++    // 96 x 128: Strata's launch (kv_stream.cu:214); most calls miss a handful of pages, a cold one the whole selection
++    kvw_copy_kernel<<<96, 128, 0, stream>>>(w->dev, (const char *) root->data, w->pool, (int) w->page_bytes);
++    CUDA_CHECK(cudaGetLastError());
++
++    out.page_table = w->dev.page_table;
++    out.pool       = w->pool;
++    return out;
++}
++
++#endif // !HIP && !MUSA
+diff --git a/ggml/src/ggml-cuda/kv-window.cuh b/ggml/src/ggml-cuda/kv-window.cuh
+new file mode 100644
+index 00000000..76aa2be7
+--- /dev/null
++++ b/ggml/src/ggml-cuda/kv-window.cuh
+@@ -0,0 +1,71 @@
++#pragma once
++
++// The K/V page window (patch 0026): a persistent, VRAM-resident cache of recently used pages of an attention K/V
++// cache that lives in pinned host memory (LLAMA_KV_HOST_MAPPED, patch 0012). The sparse (QSA) flash attention reads
++// ~2,051 selected cells per query per layer (0014); with the cache host-mapped each of them crossed PCIe on every
++// step. A window keeps the pages the previous steps selected in VRAM, so a selected cell that is in the window is
++// read from VRAM and only the pages that are missing cross PCIe.
++//
++// Ported from Strata (Niko1221/Strata, MIT; LICENSE.strata beside the patch): src/kernels/cuda/kv_stream.cu and
++// include/strata/kernels/kv_stream.hpp, read at d551edf (resolve_kernel :82, copy_kernel :161, reset_kernel :173,
++// kv_stream_resolve :204, KvStreamMap hpp :49). See kv-window.cu for what was taken and what is ours.
++
++#include "common.cuh"
++
++// one page = 4 cells (Strata include/strata/kernels/qsa.hpp:115 `s.page_size = 4`: one indexer block)
++#define GGML_CUDA_KV_PAGE_SHIFT 2
++#define GGML_CUDA_KV_PAGE_CELLS (1 << GGML_CUDA_KV_PAGE_SHIFT)
++
++// what a reader needs: block -> slot (or -1), and the pool the slots index (a slot is GGML_CUDA_KV_PAGE_CELLS rows
++// of the cache's own row stride, in the cache's own quantized format). Both null: no window, read the host rows.
++struct ggml_cuda_kv_window_view {
++    const int32_t * page_table = nullptr;
++    const char    * pool       = nullptr;
++};
++
++// ---- ggml-cuda.cu hooks (all no-ops while no window exists, i.e. while LLAMA_KV_PAGE_WINDOW is unset) ----
++
++// a tensor was allocated in `buffer` (host-mapped or not): create its window if it is a K/V cache tensor
++void ggml_cuda_kv_window_on_init_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * tensor, int device, bool host_mapped);
++// the buffer is being freed: free its windows (logs their hit rate with GGML_CUDA_KV_PAGE_STATS=1)
++void ggml_cuda_kv_window_on_free_buffer(ggml_backend_buffer_t buffer);
++// bytes of the buffer were written from the host (set / memset / clear / copy into it): every page of its windows is
++// dropped. Same discipline as the write itself: the caller has synchronised with the compute streams.
++void ggml_cuda_kv_window_flush_buffer(ggml_backend_buffer_t buffer);
++// a graph node is about to run: a node that writes into a windowed cache tensor (SET_ROWS: the rows it names; any
++// other op whose result is a view of the cache: the whole window) invalidates the pages it touches. Capturable.
++void ggml_cuda_kv_window_on_node(ggml_backend_cuda_context & ctx, const ggml_tensor * node);
++
++// once per graph compute: with GGML_CUDA_KV_PAGE_STATS=1, every 1,024th call logs the windows' hit rate since the last
++// line (INFO), read without stalling the compute streams
++void ggml_cuda_kv_window_tick();
++
++// ---- the flash attention's side ----
++
++// Make every page that the lists name resident in the window of K (a view of a windowed cache tensor) and return
++// its page table and pool; both null when the tensor has no window or the call cannot use it (geometry, a call that
++// names more pages than the window holds, a pool that cannot be allocated while a graph is being captured).
++//   idx    int32 [n_lists][n_kv_max]  the cells of each list, ascending (flash_attn_mask_to_sparse_indices)
++//   counts int32 [n_lists]            how many entries of each list are valid
++// Always reads cell 0's page as well: the sparse kernels' padded slots gather row 0.
++ggml_cuda_kv_window_view ggml_cuda_kv_window_prepare(
++        ggml_backend_cuda_context & ctx, const ggml_tensor * K, const int32_t * idx, const int32_t * counts,
++        int64_t n_lists, int64_t n_kv_max, cudaStream_t stream);
++
++// ---- configuration and inspection (tests; the registry proc addresses ggml_backend_cuda_kv_page_window_*) ----
++
++// cells: the window per K or V tensor (as LLAMA_KV_PAGE_WINDOW; it applies to tensors allocated after the call),
++// floor_cells: the least window (the env default is Strata's 20,480). Not for production: set the environment.
++void ggml_cuda_kv_window_configure(int64_t cells, int64_t floor_cells);
++// reads on / off: a plain run and a windowed run over the same tensors
++void ggml_cuda_kv_window_set_use(int use);
++// tests: poison the pool (NaN scales) and / or stop writers dropping pages (a mutation the tests must catch)
++void ggml_cuda_kv_window_set_debug(int poison, int no_invalidate);
++// out[0] n_blocks, [1] n_slots, [2] page_bytes, [3] pool bytes (0: not yet allocated), [4] pages resident, [5] pages
++// copied, [6] lookups, [7] resolves, [8] overflow seen, [9] epoch; page_table (n_blocks) and slot_block (n_slots)
++// copied out when not null. Returns 0 when the tensor has no window.
++int ggml_cuda_kv_window_query(const ggml_tensor * root, int64_t * out, int32_t * page_table, int32_t * slot_block);
++// tests: write `bytes` bytes of the windowed cache tensor `root` at byte_off straight into its (host) memory --
++// `data`, or 0xFF when null -- WITHOUT telling the window (the hooks of set / memset are bypassed). Poisons the host
++// copy of pages that are resident, to show a hit never reads it. Returns 0 when the tensor has no window.
++int ggml_cuda_kv_window_test_fill(const ggml_tensor * root, int64_t byte_off, const void * data, int64_t bytes);
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 996e7f58..06ac431f 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -308,6 +308,10 @@ endif()
+ 
+ # TODO: make this test (and others) not link `libllama` as it is not needed [TAG_TESTS_LLAMA_LINK]
+ llama_build(test-backend-ops.cpp)
++# the K/V page window (patch 0026): needs a CUDA device with a host-mapped KV cache (LLAMA_KV_HOST_MAPPED); run by hand
++llama_build(test-kv-page-window.cpp)
++# ... and its resolve kernel's algorithm as a CPU model (no device needed)
++llama_build_and_test(test-kv-page-window-model.cpp)
+ 
+ llama_build_and_test(test-tiled-mulmat.cpp)
+ llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
+diff --git a/tests/test-kv-page-window-model.cpp b/tests/test-kv-page-window-model.cpp
+new file mode 100644
+index 00000000..fa00c547
+--- /dev/null
++++ b/tests/test-kv-page-window-model.cpp
+@@ -0,0 +1,298 @@
++// CPU-only model of the K/V page window's resolve kernel (patch 0026; ggml/src/ggml-cuda/kv-window.cu,
++// kvw_resolve_kernel, ported from Strata src/kernels/cuda/kv_stream.cu @ d551edf resolve_kernel).
++//
++// The kernel is one block of 1,024 threads whose phases are separated by __syncthreads(). This runs the same
++// phases with the 1,024 threads emulated one after another between the barriers (the kernel's cross-thread
++// accesses between two barriers are atomics, or each thread's own slot), line for line the kernel's logic, and
++// fuzzes it: random index lists, windows from 3 slots to 5,000 (the kernel's own sweep is changed for fewer than
++// 1,024 slots: only min(n, 1,024) threads sweep), a call after a call, writes that drop pages in between. After
++// every call it checks what the window promises:
++//   - the page table and the slots are a bijection; no more pages resident than slots;
++//   - every page the call named is resident afterwards, or the call overflowed (more distinct pages than slots)
++//     and the pages left out read -1 (the reader then reads the host copy);
++//   - a page the call hit keeps its slot (a slot this call uses is never taken);
++//   - the number of pages placed is min(misses, slots not used by the call);
++//   - the copy list names exactly the pages that were placed.
++// It cannot show the kernel is right (it is a transcription), only that the algorithm is.
++
++#include <algorithm>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <map>
++#include <random>
++#include <set>
++#include <string>
++#include <vector>
++
++namespace {
++
++constexpr int RT = 1024;
++constexpr int SHIFT = 2;
++
++struct map_t {
++    std::vector<int32_t> page_table, slot_block, slot_stamp, slot_ref, miss_block, miss_slot;
++    int32_t epoch = 0, hand = 0, placed = 0, overflow = 0;
++    int64_t n_blocks = 0, n_slots = 0;
++    void reset(int64_t nb, int64_t ns) {
++        n_blocks = nb; n_slots = ns;
++        page_table.assign(nb, -1); slot_block.assign(ns, -1); slot_stamp.assign(ns, -1); slot_ref.assign(ns, 0);
++        miss_block.assign(ns, 0); miss_slot.assign(ns, 0);
++        epoch = 0; hand = 0; placed = 0; overflow = 0;
++    }
++};
++
++struct call_result {
++    int total_miss = 0;
++    int placed = 0;
++};
++
++void touch(map_t & m, int b, int epoch, int n, int & s_nmiss) {
++    const int sl = m.page_table[b];
++    if (sl >= 0) {
++        m.slot_stamp[sl] = epoch;
++        m.slot_ref[sl]   = 1;
++    } else if (sl == -1) {   // atomicCAS(-1 -> -2) succeeds for the first thread only
++        m.page_table[b] = -2;
++        const int k = s_nmiss++;
++        if (k < n) {
++            m.miss_block[k] = b;
++        } else {
++            m.page_table[b] = -1;
++        }
++    }
++}
++
++// kvw_resolve_kernel, phase by phase
++call_result resolve(map_t & m, const std::vector<std::vector<int32_t>> & lists) {
++    int s_nmiss = 0;
++    const int epoch = (int) ((uint32_t) m.epoch + 1u);
++    const int n = (int) m.n_slots;
++    // phase 1
++    for (int tid = 0; tid < RT; ++tid) {
++        if (tid == 0) {
++            touch(m, 0, epoch, n, s_nmiss);
++        }
++        for (const auto & qi : lists) {
++            const int width = (int) qi.size();
++            for (int i = tid; i < width; i += RT) {
++                const int cell = qi[i];
++                if (cell < 0) continue;
++                const int b = cell >> SHIFT;
++                if (i > 0 && (qi[i - 1] >> SHIFT) == b) continue;
++                touch(m, b, epoch, n, s_nmiss);
++            }
++        }
++    }
++    // phase 2: the clock sweep
++    const int total_miss = s_nmiss;
++    const int need = total_miss < n ? total_miss : n;
++    const int span = n < RT ? n : RT;
++    int hand = m.hand, got = 0;
++    for (int scanned = 0; got < need && scanned < 3 * n; scanned += span) {
++        std::vector<char> act(RT), mine(RT), cand(RT);
++        std::vector<int> j(RT, 0);
++        for (int tid = 0; tid < RT; ++tid) {
++            act[tid]  = tid < span;
++            j[tid]    = act[tid] ? (int) (((long long) hand + tid) % n) : 0;
++            mine[tid] = act[tid] && m.slot_stamp[j[tid]] == epoch;
++            cand[tid] = act[tid] && !mine[tid] && (m.slot_block[j[tid]] < 0 || m.slot_ref[j[tid]] == 0);
++        }
++        // block_scan: exclusive prefix sum of cand
++        std::vector<int> rank(RT);
++        int total = 0;
++        for (int tid = 0; tid < RT; ++tid) {
++            rank[tid] = total;
++            total += cand[tid] ? 1 : 0;
++        }
++        const int want = need - got;
++        int s_cut = span;
++        for (int tid = 0; tid < RT; ++tid) {
++            if (cand[tid] && rank[tid] == want - 1) s_cut = tid + 1;
++        }
++        const int cut = s_cut;
++        for (int tid = 0; tid < RT; ++tid) {
++            if (cand[tid] && rank[tid] < want) {
++                m.miss_slot[got + rank[tid]] = j[tid];
++                m.slot_stamp[j[tid]] = epoch;
++            } else if (act[tid] && tid < cut && !mine[tid]) {
++                m.slot_ref[j[tid]] = 0;
++            }
++        }
++        got += total < want ? total : want;
++        hand = (int) (((long long) hand + cut) % n);
++    }
++    // phase 3
++    const int placed = got < need ? got : need;
++    for (int k = 0; k < need; ++k) {
++        const int b = m.miss_block[k];
++        if (k >= placed) { m.page_table[b] = -1; continue; }
++        const int sl  = m.miss_slot[k];
++        const int old = m.slot_block[sl];
++        if (old >= 0) m.page_table[old] = -1;
++        m.slot_block[sl] = b;
++        m.slot_stamp[sl] = epoch;
++        m.slot_ref[sl]   = 1;
++        m.page_table[b]  = sl;
++    }
++    m.epoch = epoch;
++    m.hand = hand;
++    m.placed = placed;
++    if (placed < total_miss) m.overflow = 1;
++    return { total_miss, placed };
++}
++
++// kvw_invalidate_rows_kernel
++void invalidate(map_t & m, const std::vector<int64_t> & rows) {
++    for (int64_t r : rows) {
++        if (r < 0 || r >= m.n_blocks * 4) continue;
++        const int b = (int) (r >> SHIFT);
++        const int sl = m.page_table[b];
++        if (sl >= 0) { m.page_table[b] = -1; m.slot_block[sl] = -1; m.slot_ref[sl] = 0; }
++    }
++}
++
++int g_fail = 0, g_calls = 0, g_overflows = 0, g_evictions = 0;
++
++#define EXPECT(cond, ...) do { if (!(cond)) { ++g_fail; printf("FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond); printf(__VA_ARGS__); printf("\n"); } } while (0)
++
++void check_map(const map_t & m, const char * ctx) {
++    int64_t resident = 0;
++    for (int64_t b = 0; b < m.n_blocks; ++b) {
++        const int s = m.page_table[b];
++        EXPECT(s != -2, "%s: block %lld left claimed", ctx, (long long) b);
++        if (s >= 0) {
++            EXPECT(s < m.n_slots && m.slot_block[s] == b, "%s: table %lld -> %d, slot says %d", ctx, (long long) b, s, s < m.n_slots ? m.slot_block[s] : -9);
++            ++resident;
++        }
++    }
++    int64_t held = 0;
++    for (int64_t s = 0; s < m.n_slots; ++s) {
++        const int b = m.slot_block[s];
++        if (b >= 0) {
++            EXPECT(b < m.n_blocks && m.page_table[b] == s, "%s: slot %lld holds %d, table says %d", ctx, (long long) s, b, m.page_table[b]);
++            ++held;
++        }
++    }
++    EXPECT(resident == held && resident <= m.n_slots, "%s: resident %lld held %lld slots %lld", ctx, (long long) resident, (long long) held, (long long) m.n_slots);
++}
++
++void fuzz(uint32_t seed, int n_calls) {
++    std::mt19937 gen(seed);
++    const int64_t n_blocks = 200 + gen() % 9000;
++    const int64_t n_slots = std::min<int64_t>(n_blocks, 3 + (gen() % 3 == 0 ? gen() % 40 : gen() % 5000));
++    map_t m;
++    m.reset(n_blocks, n_slots);
++    std::vector<std::vector<int32_t>> prev;
++    for (int call = 0; call < n_calls; ++call) {
++        ++g_calls;
++        // 1-4 lists, each of whole blocks (and now and then scattered cells), ascending
++        const int n_lists = 1 + gen() % 4;
++        std::vector<std::vector<int32_t>> lists;
++        for (int l = 0; l < n_lists; ++l) {
++            std::set<int32_t> cells;
++            const int n_blocks_sel = 1 + gen() % std::min<int64_t>(n_blocks, 600);
++            const bool scattered = gen() % 6 == 0;
++            // drift from the previous call's list
++            if (!prev.empty() && gen() % 3 != 0) {
++                for (int32_t c : prev[l % prev.size()]) {
++                    if (gen() % 100 < 85) cells.insert(c);
++                }
++            }
++            for (int i = 0; i < n_blocks_sel; ++i) {
++                const int32_t b = gen() % n_blocks;
++                if (scattered) {
++                    cells.insert(b*4 + gen() % 4);
++                } else {
++                    for (int c = 0; c < 4; ++c) cells.insert(b*4 + c);
++                }
++            }
++            lists.emplace_back(cells.begin(), cells.end());
++        }
++        // writes since the last call
++        if (gen() % 3 == 0) {
++            std::vector<int64_t> rows;
++            for (int i = 0, n = 1 + gen() % 8; i < n; ++i) rows.push_back((int64_t) (gen() % (n_blocks*4)));
++            invalidate(m, rows);
++            for (int64_t r : rows) {
++                EXPECT(m.page_table[r >> SHIFT] == -1, "invalidate left row %lld resident", (long long) r);
++            }
++            check_map(m, "after invalidate");
++        }
++        std::set<int32_t> named = { 0 };
++        for (const auto & l : lists) for (int32_t c : l) named.insert(c >> SHIFT);
++        std::map<int32_t, int32_t> hit_slot;
++        for (int32_t b : named) if (m.page_table[b] >= 0) hit_slot[b] = m.page_table[b];
++        const int64_t free_for_call = n_slots - (int64_t) hit_slot.size();
++        const call_result r = resolve(m, lists);
++        check_map(m, "after resolve");
++        const int64_t misses = (int64_t) named.size() - (int64_t) hit_slot.size();
++        // more misses than slots: pages left out are un-claimed and may be claimed again, so the count only bounds
++        EXPECT(r.total_miss >= std::min<int64_t>(misses, n_slots) && (misses > n_slots || r.total_miss == misses),
++               "total_miss %d, distinct misses %lld, slots %lld", r.total_miss, (long long) misses, (long long) n_slots);
++        EXPECT(r.placed == std::min<int64_t>(r.total_miss, std::min<int64_t>(n_slots, free_for_call)),
++               "placed %d, misses %d, slots %lld, free for the call %lld (n_slots %lld)", r.placed, r.total_miss,
++               (long long) n_slots, (long long) free_for_call, (long long) n_slots);
++        for (const auto & kv : hit_slot) {
++            EXPECT(m.page_table[kv.first] == kv.second, "hit page %d moved from slot %d to %d", kv.first, kv.second, m.page_table[kv.first]);
++        }
++        int resident_named = 0;
++        for (int32_t b : named) resident_named += m.page_table[b] >= 0;
++        if ((int64_t) named.size() <= n_slots) {
++            EXPECT(resident_named == (int) named.size(), "%d of %zu named pages resident (slots %lld)", resident_named, named.size(), (long long) n_slots);
++        } else {
++            ++g_overflows;
++            EXPECT(m.overflow == 1, "a call naming more pages than slots did not flag overflow");
++            EXPECT(resident_named == n_slots, "overflow: %d named pages resident of %lld slots", resident_named, (long long) n_slots);
++        }
++        // the copy list is exactly the pages placed
++        std::set<int32_t> copied;
++        for (int k = 0; k < r.placed; ++k) {
++            const int b = m.miss_block[k], s = m.miss_slot[k];
++            EXPECT(m.page_table[b] == s, "copy[%d]: page %d slot %d, table says %d", k, b, s, m.page_table[b]);
++            EXPECT(copied.insert(b).second, "page %d copied twice", b);
++        }
++        for (int32_t b : named) {
++            if (!hit_slot.count(b) && m.page_table[b] >= 0) {
++                EXPECT(copied.count(b), "page %d became resident without a copy", b);
++            }
++        }
++        g_evictions += r.placed;
++        prev = lists;
++    }
++}
++
++} // namespace
++
++int main() {
++    for (uint32_t seed = 1; seed <= 300; ++seed) {
++        fuzz(seed, 40);
++    }
++    // the shipped geometry: 8,192-page cache, 2,112-page window, decode steps of ~515 pages, verify windows of 4 lists
++    {
++        std::mt19937 gen(7);
++        map_t m;
++        m.reset(8192, 2112);
++        std::set<int32_t> cur;
++        while (cur.size() < 512) cur.insert(gen() % 8191);
++        for (int t = 0; t < 200; ++t) {
++            std::vector<std::vector<int32_t>> lists;
++            for (int l = 0; l < (t % 7 == 6 ? 4 : 1); ++l) {
++                std::set<int32_t> nxt;
++                for (int32_t b : cur) if (gen() % 100 < 90) nxt.insert(b);
++                while (nxt.size() < 512) nxt.insert(gen() % 8191);
++                cur = nxt;
++                std::vector<int32_t> cells;
++                for (int32_t b : cur) for (int c = 0; c < 4; ++c) cells.push_back(b*4 + c);
++                lists.push_back(cells);
++            }
++            const call_result r = resolve(m, lists);
++            check_map(m, "shipped geometry");
++            EXPECT(m.overflow == 0, "overflow at step %d", t);
++            (void) r;
++        }
++    }
++    printf("%d calls, %d overflowing, %d pages placed, %d failed\n", g_calls, g_overflows, g_evictions, g_fail);
++    printf(g_fail == 0 ? "all passed\n" : "FAIL\n");
++    return g_fail == 0 ? 0 : 1;
++}
+diff --git a/tests/test-kv-page-window.cpp b/tests/test-kv-page-window.cpp
+new file mode 100644
+index 00000000..44e60dce
+--- /dev/null
++++ b/tests/test-kv-page-window.cpp
+@@ -0,0 +1,651 @@
++// Tests for the K/V page window (patch 0026; ggml/src/ggml-cuda/kv-window.cu).
++//
++// The window is a cache: with it on, the sparse flash attention must return exactly what it returns with it off.
++// Everything here runs on one CUDA device, on a K/V cache in host-mapped memory laid out as llama.cpp lays it out
++// (llama_kv_cache: [n_embd_gqa, kv_size, 1] per layer, K and V, written by ggml_set_rows, read through a permuted
++// view), at Flash-Next's attention shape (head 256, 2 KV heads, 24 query heads, top-k 2,048 + a 3-cell tail).
++//
++//   a. no window configured: no window exists, the attention is the 0014 path
++//   b. window on vs off, bit for bit, for q8_0 and q4_0, over steps that miss (cold), hit (the same selection),
++//      evict (a window smaller than the cache, drifting selections), and verify windows of 4 queries
++//   c. poison: the host copy of every resident page is overwritten with NaN scales and the same selection must
++//      still give the same output (a hit is read from VRAM); a write into a resident page must show in the next
++//      step (a stale page is never read) -- and with the writers' invalidation switched off (the mutation) that
++//      same check must FAIL, which proves it can; a host write through the buffer drops every page
++//   d. the window never exceeds its configured size: pool bytes, pages resident, the page table and the slots stay
++//      consistent after every step; a window too small for a call is declined and the call is still exact
++//
++// Run it on one device only (CUDA_VISIBLE_DEVICES): bench/a4000_dev.py. Exit code 0 = every check passed.
++
++#include "ggml.h"
++#include "ggml-alloc.h"
++#include "ggml-backend.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <memory>
++#include <numeric>
++#include <random>
++#include <set>
++#include <string>
++#include <vector>
++
++namespace {
++
++constexpr int     HD       = 256;     // head size
++constexpr int     N_KV_H   = 2;       // KV heads
++constexpr int     N_HEAD   = 24;      // query heads (gqa 12)
++constexpr int     N_EMBD   = HD*N_KV_H;
++constexpr int     KV       = 32768;   // cells (the sparse kernels' thresholds: 1 query past 4,096, 4 past 16,384)
++constexpr int     BLOCKS   = KV/4;
++constexpr int     TOP_BLOCKS = 512;   // indexer_top_k 2048 / 4
++constexpr int     TAIL     = 3;       // + the incomplete tail: 2,051 cells a query
++constexpr int     N_KV_MAX = TOP_BLOCKS*4 + TAIL;
++
++int g_checks = 0;
++int g_failed = 0;
++
++void check(bool ok, const char * what, const std::string & detail = "") {
++    ++g_checks;
++    if (!ok) {
++        ++g_failed;
++    }
++    printf("  [%s] %s%s%s\n", ok ? " ok " : "FAIL", what, detail.empty() ? "" : " -- ", detail.c_str());
++    fflush(stdout);
++}
++
++struct window_api {
++    void (*configure)(int64_t, int64_t)                                           = nullptr;
++    void (*set_use)(int)                                                          = nullptr;
++    void (*set_debug)(int, int)                                                   = nullptr;
++    int  (*query)(const ggml_tensor *, int64_t *, int32_t *, int32_t *)           = nullptr;
++    int  (*fill)(const ggml_tensor *, int64_t, const void *, int64_t)             = nullptr;
++    ggml_backend_buffer_type_t (*mapped)(ggml_backend_dev_t)                      = nullptr;
++};
++
++struct window_info {
++    bool    has = false;
++    int64_t n_blocks = 0, n_slots = 0, page_bytes = 0, pool_bytes = 0, resident = 0, copied = 0, lookups = 0, resolves = 0,
++            overflow = 0, epoch = 0;
++    std::vector<int32_t> page_table, slot_block;
++};
++
++window_info query(const window_api & api, const ggml_tensor * t) {
++    window_info w;
++    int64_t out[16] = {};
++    // two calls: the sizes first, then the tables
++    if (!api.query(t, out, nullptr, nullptr)) {
++        return w;
++    }
++    w.has = true;
++    w.n_blocks = out[0]; w.n_slots = out[1]; w.page_bytes = out[2]; w.pool_bytes = out[3]; w.resident = out[4];
++    w.copied = out[5]; w.lookups = out[6]; w.resolves = out[7]; w.overflow = out[8]; w.epoch = out[9];
++    w.page_table.resize(w.n_blocks);
++    w.slot_block.resize(w.n_slots);
++    api.query(t, out, w.page_table.data(), w.slot_block.data());
++    return w;
++}
++
++// the residency map must be a bijection between resident blocks and the slots that hold them
++bool consistent(const window_info & w, int64_t window_cells_limit, std::string & why) {
++    int64_t resident = 0;
++    for (int64_t b = 0; b < w.n_blocks; ++b) {
++        const int32_t s = w.page_table[b];
++        if (s == -1) {
++            continue;
++        }
++        if (s < 0 || s >= w.n_slots) {
++            why = "page_table[" + std::to_string(b) + "] = " + std::to_string(s) + " is not a slot";
++            return false;
++        }
++        if (w.slot_block[s] != b) {
++            why = "slot " + std::to_string(s) + " holds " + std::to_string(w.slot_block[s]) + ", the table says " + std::to_string(b);
++            return false;
++        }
++        ++resident;
++    }
++    int64_t held = 0;
++    for (int64_t s = 0; s < w.n_slots; ++s) {
++        const int32_t b = w.slot_block[s];
++        if (b < 0) {
++            continue;
++        }
++        if (b >= w.n_blocks || w.page_table[b] != s) {
++            why = "slot " + std::to_string(s) + " says block " + std::to_string(b) + " but the table disagrees";
++            return false;
++        }
++        ++held;
++    }
++    if (resident != held || resident != w.resident) {
++        why = "resident " + std::to_string(resident) + " held " + std::to_string(held) + " reported " + std::to_string(w.resident);
++        return false;
++    }
++    if (resident > w.n_slots || w.n_slots * 4 > window_cells_limit + 3) {
++        why = "resident " + std::to_string(resident) + " of " + std::to_string(w.n_slots) + " slots; limit " + std::to_string(window_cells_limit) + " cells";
++        return false;
++    }
++    if (w.pool_bytes != 0 && w.pool_bytes != w.n_slots*w.page_bytes) {
++        why = "pool bytes " + std::to_string(w.pool_bytes) + " != slots x page";
++        return false;
++    }
++    return true;
++}
++
++// one selection per query: TOP_BLOCKS whole blocks and TAIL cells of one more block, ascending
++using selection = std::vector<int32_t>;
++
++selection make_selection(std::mt19937 & gen, const std::vector<int32_t> & blocks_in, int tail_block) {
++    selection s;
++    std::vector<int32_t> blocks = blocks_in;
++    std::sort(blocks.begin(), blocks.end());
++    for (int32_t b : blocks) {
++        for (int c = 0; c < 4; ++c) {
++            s.push_back(b*4 + c);
++        }
++    }
++    for (int c = 0; c < TAIL; ++c) {
++        s.push_back(tail_block*4 + c);
++    }
++    std::sort(s.begin(), s.end());
++    (void) gen;
++    return s;
++}
++
++std::vector<int32_t> random_blocks(std::mt19937 & gen, int n, const std::set<int32_t> & avoid = {}) {
++    std::set<int32_t> out;
++    std::uniform_int_distribution<int32_t> d(0, BLOCKS - 2);
++    while ((int) out.size() < n) {
++        const int32_t b = d(gen);
++        if (!avoid.count(b)) {
++            out.insert(b);
++        }
++    }
++    return std::vector<int32_t>(out.begin(), out.end());
++}
++
++// keep `keep` of the blocks, replace the rest
++std::vector<int32_t> drift(std::mt19937 & gen, const std::vector<int32_t> & prev, double keep) {
++    std::vector<int32_t> p = prev;
++    std::shuffle(p.begin(), p.end(), gen);
++    const int n_keep = (int) std::lround(keep*p.size());
++    std::set<int32_t> kept(p.begin(), p.begin() + n_keep);
++    std::set<int32_t> all = kept;
++    std::uniform_int_distribution<int32_t> d(0, BLOCKS - 2);
++    while ((int) all.size() < TOP_BLOCKS) {
++        all.insert(d(gen));
++    }
++    return std::vector<int32_t>(all.begin(), all.end());
++}
++
++struct fixture {
++    ggml_backend_dev_t dev = nullptr;
++    ggml_backend_t     backend = nullptr;
++    window_api         api;
++    ggml_type          type = GGML_TYPE_Q8_0;
++
++    ggml_context *        cache_ctx = nullptr;
++    ggml_backend_buffer_t cache_buf = nullptr;
++    ggml_tensor *         K = nullptr;
++    ggml_tensor *         V = nullptr;
++    std::vector<uint8_t>  mirror_K, mirror_V;   // the host's view of the cache bytes (refreshed from the device)
++    ggml_gallocr_t        galloc = nullptr;
++
++    int64_t row_bytes() const { return (int64_t) ggml_row_size(type, N_EMBD); }
++
++    bool setup(ggml_type t, int64_t window_cells, int64_t floor_cells, bool poison) {
++        type = t;
++        api.configure(window_cells, floor_cells);
++        api.set_debug(poison ? 1 : 0, 0);
++        api.set_use(1);
++        ggml_init_params ip = { ggml_tensor_overhead()*8 + 1024, nullptr, true };
++        cache_ctx = ggml_init(ip);
++        K = ggml_new_tensor_3d(cache_ctx, type, N_EMBD, KV, 1);
++        V = ggml_new_tensor_3d(cache_ctx, type, N_EMBD, KV, 1);
++        ggml_set_name(K, "cache_k_l0");
++        ggml_set_name(V, "cache_v_l0");
++        cache_buf = ggml_backend_alloc_ctx_tensors_from_buft(cache_ctx, api.mapped(dev));
++        if (!cache_buf) {
++            return false;
++        }
++        galloc = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend));
++        mirror_K.resize(ggml_nbytes(K));
++        mirror_V.resize(ggml_nbytes(V));
++        return true;
++    }
++
++    void teardown() {
++        if (galloc) ggml_gallocr_free(galloc);
++        if (cache_buf) ggml_backend_buffer_free(cache_buf);
++        if (cache_ctx) ggml_free(cache_ctx);
++        galloc = nullptr; cache_buf = nullptr; cache_ctx = nullptr;
++    }
++
++    // random quantized cells, through the buffer (a host write: it drops every page)
++    void fill_random(uint32_t seed) {
++        std::mt19937 gen(seed);
++        std::normal_distribution<float> d(0.0f, 1.0f);
++        std::vector<float> f((size_t) KV*N_EMBD);
++        for (ggml_tensor * t : { K, V }) {
++            for (auto & x : f) {
++                x = d(gen);
++            }
++            // cells differ in scale, so a wrong page is not hidden by similar values
++            for (int c = 0; c < KV; ++c) {
++                const float s = 0.25f + (float) ((c*7919u + seed) % 64u)/16.0f;
++                for (int j = 0; j < N_EMBD; ++j) {
++                    f[(size_t) c*N_EMBD + j] *= s;
++                }
++            }
++            std::vector<uint8_t> q(ggml_nbytes(t));
++            ggml_quantize_chunk(type, f.data(), q.data(), 0, KV, N_EMBD, nullptr);
++            ggml_backend_tensor_set(t, q.data(), 0, q.size());
++        }
++        refresh_mirrors();
++    }
++
++    void refresh_mirrors() {
++        ggml_backend_synchronize(backend);
++        ggml_backend_tensor_get(K, mirror_K.data(), 0, mirror_K.size());
++        ggml_backend_tensor_get(V, mirror_V.data(), 0, mirror_V.size());
++    }
++
++    // ggml_set_rows into K and V, as llama_kv_cache::cpy_k / cpy_v do (one stream: the tensor itself)
++    void write_cells(const std::vector<int64_t> & cells, uint32_t seed) {
++        ggml_init_params ip = { ggml_tensor_overhead()*16 + ggml_graph_overhead() + 4096, nullptr, true };
++        ggml_context * ctx = ggml_init(ip);
++        const int n = (int) cells.size();
++        ggml_tensor * kcur = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, N_EMBD, n);
++        ggml_tensor * vcur = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, N_EMBD, n);
++        ggml_tensor * idx  = ggml_new_tensor_1d(ctx, GGML_TYPE_I64, n);
++        ggml_tensor * wk = ggml_set_rows(ctx, K, kcur, idx);
++        ggml_tensor * wv = ggml_set_rows(ctx, V, vcur, idx);
++        ggml_cgraph * gf = ggml_new_graph(ctx);
++        ggml_build_forward_expand(gf, wk);
++        ggml_build_forward_expand(gf, wv);
++        ggml_gallocr_alloc_graph(galloc, gf);
++        std::mt19937 gen(seed);
++        std::normal_distribution<float> d(0.0f, 3.0f);
++        std::vector<float> fk((size_t) n*N_EMBD), fv((size_t) n*N_EMBD);
++        for (auto & x : fk) x = d(gen);
++        for (auto & x : fv) x = d(gen);
++        ggml_backend_tensor_set(kcur, fk.data(), 0, fk.size()*sizeof(float));
++        ggml_backend_tensor_set(vcur, fv.data(), 0, fv.size()*sizeof(float));
++        ggml_backend_tensor_set(idx, cells.data(), 0, cells.size()*sizeof(int64_t));
++        ggml_backend_graph_compute(backend, gf);
++        ggml_backend_synchronize(backend);
++        ggml_free(ctx);
++        refresh_mirrors();
++    }
++
++    // one decode (nq = 1) or verify (nq = 4) attention over the cache, for the selections given; the output as floats
++    std::vector<float> attend(const std::vector<float> & q_data, const std::vector<selection> & sel) {
++        const int nq = (int) sel.size();
++        ggml_init_params ip = { ggml_tensor_overhead()*16 + ggml_graph_overhead() + 4096, nullptr, true };
++        ggml_context * ctx = ggml_init(ip);
++
++        ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, HD, nq, N_HEAD, 1);
++        const int64_t rb = (int64_t) ggml_row_size(type, N_EMBD);
++        // llama_kv_cache::get_k: [head, kv head, cell, stream] over the cache tensor, then permuted by build_attn_mha
++        ggml_tensor * kv4 = ggml_view_4d(ctx, K, HD, N_KV_H, KV, 1, ggml_row_size(type, HD), (size_t) rb, (size_t) rb*KV, 0);
++        ggml_tensor * vv4 = ggml_view_4d(ctx, V, HD, N_KV_H, KV, 1, ggml_row_size(type, HD), (size_t) rb, (size_t) rb*KV, 0);
++        ggml_tensor * k = ggml_permute(ctx, kv4, 0, 2, 1, 3);
++        ggml_tensor * v = ggml_permute(ctx, vv4, 0, 2, 1, 3);
++        ggml_tensor * m = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, KV, nq, 1, 1);
++        ggml_tensor * out = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f/sqrtf((float) HD), 0.0f, 0.0f);
++        ggml_flash_attn_ext_set_n_kv_max(out, N_KV_MAX);
++        ggml_prec_set_acc(out, GGML_PREC_F32);
++        ggml_cgraph * gf = ggml_new_graph(ctx);
++        ggml_build_forward_expand(gf, out);
++        ggml_gallocr_alloc_graph(galloc, gf);
++
++        ggml_backend_tensor_set(q, q_data.data(), 0, q_data.size()*sizeof(float));
++        std::vector<float> mf((size_t) KV*nq, -INFINITY);
++        for (int i = 0; i < nq; ++i) {
++            for (int32_t c : sel[i]) {
++                mf[(size_t) i*KV + c] = 0.0f;
++            }
++        }
++        std::vector<ggml_fp16_t> mh(mf.size());
++        ggml_fp32_to_fp16_row(mf.data(), mh.data(), mh.size());
++        ggml_backend_tensor_set(m, mh.data(), 0, mh.size()*sizeof(ggml_fp16_t));
++
++        ggml_backend_graph_compute(backend, gf);
++        ggml_backend_synchronize(backend);
++        std::vector<float> res((size_t) ggml_nelements(out));
++        ggml_backend_tensor_get(out, res.data(), 0, res.size()*sizeof(float));
++        ggml_free(ctx);
++        return res;
++    }
++
++    std::vector<float> random_q(int nq, uint32_t seed) const {
++        std::mt19937 gen(seed);
++        std::normal_distribution<float> d(0.0f, 1.0f);
++        std::vector<float> q((size_t) HD*nq*N_HEAD);
++        for (auto & x : q) x = d(gen);
++        return q;
++    }
++
++    // the plain run: the window off, the same tensors
++    std::vector<float> attend_plain(const std::vector<float> & q, const std::vector<selection> & sel) {
++        api.set_use(0);
++        auto r = attend(q, sel);
++        api.set_use(1);
++        return r;
++    }
++
++    // overwrite (or poison, with data == nullptr) the host copy of whole pages, behind the window's back
++    void host_pages(const std::vector<int32_t> & blocks, bool poison) {
++        const int64_t pb = row_bytes()*4;
++        for (int32_t b : blocks) {
++            api.fill(K, b*pb, poison ? nullptr : mirror_K.data() + b*pb, pb);
++            api.fill(V, b*pb, poison ? nullptr : mirror_V.data() + b*pb, pb);
++        }
++    }
++};
++
++std::vector<int32_t> pages_of(const std::vector<selection> & sel) {
++    std::set<int32_t> p;
++    for (const auto & s : sel) {
++        for (int32_t c : s) {
++            p.insert(c/4);
++        }
++    }
++    p.insert(0);
++    return std::vector<int32_t>(p.begin(), p.end());
++}
++
++bool nan_free(const std::vector<float> & v) {
++    for (float x : v) {
++        if (!std::isfinite(x)) {
++            return false;
++        }
++    }
++    return true;
++}
++
++double max_abs_diff(const std::vector<float> & a, const std::vector<float> & b) {
++    double m = 0.0;
++    for (size_t i = 0; i < a.size(); ++i) {
++        const double d = std::fabs((double) a[i] - (double) b[i]);
++        if (!(d <= m)) {   // NaN counts
++            m = std::isnan(d) ? INFINITY : d;
++        }
++    }
++    return m;
++}
++
++bool bitwise(const std::vector<float> & a, const std::vector<float> & b) {
++    return a.size() == b.size() && memcmp(a.data(), b.data(), a.size()*sizeof(float)) == 0;
++}
++
++// the whole scenario for one cache type
++void scenario(ggml_backend_dev_t dev, ggml_backend_t backend, const window_api & api, ggml_type type) {
++    const char * tn = ggml_type_name(type);
++    printf("\n== %s ==\n", tn);
++
++    // ---- the large window: holds the 4-query verify window's pages; the cache holds 8,192 pages, the window 2,112
++    const int64_t WINDOW_CELLS = 2112*4;
++    fixture fx;
++    fx.dev = dev; fx.backend = backend; fx.api = api;
++    if (!fx.setup(type, WINDOW_CELLS, WINDOW_CELLS, /*poison*/ true)) {
++        check(false, "the cache allocates in host-mapped memory");
++        return;
++    }
++    fx.fill_random(1234);
++    std::string why;
++    window_info w0 = query(api, fx.K);
++    check(w0.has && query(api, fx.V).has, "K and V each have a window (created when the cache was allocated)");
++    check(w0.has && w0.n_slots == 2112 && w0.pool_bytes == 0, "the window is 2,112 pages and its pool is not allocated until used",
++          "slots " + std::to_string(w0.n_slots) + " pool " + std::to_string(w0.pool_bytes));
++
++    std::mt19937 gen(99);
++    const std::vector<float> q1 = fx.random_q(1, 7);
++
++    // ---- b: cold, then hot; the plain run twice first (is the kernel deterministic?)
++    std::vector<int32_t> blocks0 = random_blocks(gen, TOP_BLOCKS);
++    std::vector<selection> s0 = { make_selection(gen, blocks0, 7000) };
++    auto ref_a = fx.attend_plain(q1, s0);
++    auto ref_b = fx.attend_plain(q1, s0);
++    const bool deterministic = bitwise(ref_a, ref_b);
++    check(nan_free(ref_a), "the plain sparse attention output is finite");
++    printf("      (the plain run %s)\n", deterministic ? "is bit-reproducible" : "is NOT bit-reproducible: the window must match within the plain run's own noise");
++    const double noise = max_abs_diff(ref_a, ref_b);
++    auto same = [&](const std::vector<float> & ref, const std::vector<float> & got, double * diff) {
++        *diff = max_abs_diff(ref, got);
++        return nan_free(got) && (deterministic ? bitwise(ref, got) : *diff <= noise);
++    };
++    double diff = 0;
++
++    auto cold = fx.attend(q1, s0);
++    window_info w1 = query(api, fx.K);
++    check(w1.resolves >= 1, "the sparse path took the window (K resolved)", "resolves " + std::to_string(w1.resolves));
++    check(same(ref_a, cold, &diff), (std::string(tn) + ": a cold step (every page missing) equals the plain run").c_str(), "max |diff| " + std::to_string(diff));
++    check(w1.pool_bytes == w1.n_slots*w1.page_bytes && w1.resident == (int64_t) pages_of(s0).size(),
++          "the pool is allocated and exactly the selected pages (+ page 0) are resident",
++          "resident " + std::to_string(w1.resident) + " pages " + std::to_string(pages_of(s0).size()));
++    check(consistent(w1, WINDOW_CELLS, why), "the residency map is consistent after a cold step", why);
++
++    const int64_t copied_before = w1.copied;
++    auto hot = fx.attend(q1, s0);
++    window_info w2 = query(api, fx.K);
++    check(same(ref_a, hot, &diff), "a hot step (the same selection: every page a hit) equals the plain run", "max |diff| " + std::to_string(diff));
++    check(w2.copied == copied_before, "a hot step copies no page over PCIe", "copied " + std::to_string(w2.copied - copied_before));
++
++    // ---- c1: the host copy of the resident pages is poisoned; a hit must not read it
++    fx.host_pages(pages_of(s0), /*poison*/ true);
++    auto poisoned = fx.attend(q1, s0);
++    check(same(ref_a, poisoned, &diff), "with the host copy of every resident page poisoned, a hot step still equals the plain run",
++          "max |diff| " + std::to_string(diff));
++    auto plain_poisoned = fx.attend_plain(q1, s0);
++    check(!nan_free(plain_poisoned), "(the poison is real: the plain run over the poisoned host pages is not finite)");
++    fx.host_pages(pages_of(s0), /*poison*/ false);   // restored behind the window's back
++    check(bitwise(fx.attend_plain(q1, s0), ref_a) || !deterministic, "the host copy is restored");
++
++    // ---- c2: a write into resident pages shows in the next step
++    {
++        std::vector<int64_t> cells;
++        for (int i = 0; i < 6; ++i) {
++            cells.push_back(s0[0][i*300] );                     // cells inside resident pages
++        }
++        cells.push_back(7000*4 + 1);                            // a cell of the tail block (7000)
++        fx.write_cells(cells, 55);
++        auto ref_w = fx.attend_plain(q1, s0);
++        check(max_abs_diff(ref_a, ref_w) > 0.0, "(the write changes the attention output: the check can tell)");
++        auto win_w = fx.attend(q1, s0);
++        check(same(ref_w, win_w, &diff), "a write into resident pages: the next windowed step equals the plain run (no stale page)",
++              "max |diff| " + std::to_string(diff));
++        window_info w3 = query(api, fx.K);
++        check(consistent(w3, WINDOW_CELLS, why), "the residency map is consistent after the write", why);
++        ref_a = ref_w;
++    }
++
++    // ---- c2 mutation: writers stop dropping pages; the same check must now FAIL
++    {
++        api.set_debug(1, /*no_invalidate*/ 1);
++        std::vector<int64_t> cells = { (int64_t) s0[0][100], (int64_t) s0[0][900], (int64_t) s0[0][1500], 7000*4 + 2 };
++        fx.write_cells(cells, 77);
++        auto ref_w = fx.attend_plain(q1, s0);
++        auto win_w = fx.attend(q1, s0);
++        check(max_abs_diff(ref_w, win_w) > 0.0,
++              "MUTATION (writers do not invalidate): the windowed step no longer equals the plain run -- the stale-page check can fail",
++              "max |diff| " + std::to_string(max_abs_diff(ref_w, win_w)));
++        api.set_debug(1, 0);
++        // a host write through the buffer drops every page, stale ones included
++        fx.refresh_mirrors();
++        ggml_backend_tensor_set(fx.K, fx.mirror_K.data(), 0, fx.mirror_K.size());
++        ggml_backend_tensor_set(fx.V, fx.mirror_V.data(), 0, fx.mirror_V.size());
++        window_info wf = query(api, fx.K);
++        check(wf.resident == 0, "a host write through the buffer (set_tensor) drops every page", "resident " + std::to_string(wf.resident));
++        auto win_ok = fx.attend(q1, s0);
++        check(same(ref_w, win_ok, &diff), "after the flush the windowed step equals the plain run again", "max |diff| " + std::to_string(diff));
++        ref_a = ref_w;
++    }
++
++    // ---- b: 4-query verify windows (one list per query, or one list for the group)
++    {
++        std::vector<int32_t> b = random_blocks(gen, TOP_BLOCKS);
++        std::vector<selection> sel;
++        for (int i = 0; i < 4; ++i) {
++            b = drift(gen, b, 0.9);
++            sel.push_back(make_selection(gen, b, 7100 + i));
++        }
++        const std::vector<float> q4 = fx.random_q(4, 11);
++        auto ref4 = fx.attend_plain(q4, sel);
++        const int64_t r_before = query(api, fx.K).resolves;
++        auto win4 = fx.attend(q4, sel);
++        const window_info w4 = query(api, fx.K);
++        check(same(ref4, win4, &diff), "a 4-query verify window equals the plain run", "max |diff| " + std::to_string(diff));
++        check(w4.resolves > r_before, "(the verify window took the window too)", "resolves " + std::to_string(w4.resolves));
++        check(consistent(w4, WINDOW_CELLS, why), "the residency map is consistent after the verify window", why);
++    }
++
++    fx.teardown();
++
++    // ---- b/d: a window smaller than the cache, drifting selections: misses and evictions every step
++    {
++        const int64_t SMALL = 640*4;   // 640 pages; a decode step names ~515
++        fixture sm;
++        sm.dev = dev; sm.backend = backend; sm.api = api;
++        if (!sm.setup(type, SMALL, SMALL, true)) {
++            check(false, "the small cache allocates");
++            return;
++        }
++        sm.fill_random(4321);
++        std::vector<int32_t> b = random_blocks(gen, TOP_BLOCKS);
++        int64_t evicted_total = 0;
++        bool all_equal = true, all_consistent = true, all_resident = true;
++        double worst = 0;
++        std::string first_why;
++        const int steps = 40;
++        for (int t = 0; t < steps; ++t) {
++            b = drift(gen, b, t % 5 == 4 ? 0.0 : 0.85);   // every fifth step is a jump to new pages
++            std::vector<selection> sel = { make_selection(gen, b, 7200 + t % 50) };
++            const std::vector<float> q = sm.random_q(1, 100 + t);
++            auto ref = sm.attend_plain(q, sel);
++            const window_info before = query(api, sm.K);
++            auto win = sm.attend(q, sel);
++            const window_info after = query(api, sm.K);
++            double d = 0;
++            const bool eq = nan_free(win) && (bitwise(ref, win) || (!deterministic && (d = max_abs_diff(ref, win)) <= noise));
++            if (!eq) {
++                d = max_abs_diff(ref, win);
++                worst = std::max(worst, d);
++            }
++            all_equal = all_equal && eq;
++            std::string w2;
++            if (!consistent(after, SMALL, w2)) {
++                all_consistent = false;
++                if (first_why.empty()) first_why = "step " + std::to_string(t) + ": " + w2;
++            }
++            // every page the step named is resident afterwards (the call fits, so nothing overflows)
++            for (int32_t p : pages_of(sel)) {
++                if (after.page_table[p] < 0) {
++                    all_resident = false;
++                }
++            }
++            if (before.has) {
++                evicted_total += std::max<int64_t>(0, (after.copied - before.copied) - (after.n_slots - before.resident));
++            }
++        }
++        const window_info wl = query(api, sm.K);
++        check(all_equal, (std::string(tn) + ": 40 steps of drifting selections through a window of 640 pages (misses, hits, evictions) all equal the plain run").c_str(),
++              "worst |diff| " + std::to_string(worst));
++        check(all_consistent, "the residency map stays consistent and within the window after every step", first_why);
++        check(all_resident, "every page a step names is resident after it (no overflow)");
++        check(wl.copied > wl.n_slots, "pages were evicted and re-copied (copied more pages than the window holds)",
++              "copied " + std::to_string(wl.copied) + " slots " + std::to_string(wl.n_slots));
++        check(wl.overflow == 0, "no call overflowed the window");
++        check(wl.pool_bytes == 640*sm.row_bytes()*4, "d: the pool is exactly the configured window",
++              "pool bytes " + std::to_string(wl.pool_bytes) + " window " + std::to_string(640*sm.row_bytes()*4));
++        (void) evicted_total;
++        sm.teardown();
++    }
++
++    // ---- d: a window too small for one call is declined, and the call is still exact
++    {
++        const int64_t TINY = 256*4;
++        fixture tn_fx;
++        tn_fx.dev = dev; tn_fx.backend = backend; tn_fx.api = api;
++        if (!tn_fx.setup(type, TINY, TINY, true)) {
++            check(false, "the tiny cache allocates");
++            return;
++        }
++        tn_fx.fill_random(555);
++        std::vector<selection> sel = { make_selection(gen, random_blocks(gen, TOP_BLOCKS), 7300) };
++        const std::vector<float> q = tn_fx.random_q(1, 3);
++        auto ref = tn_fx.attend_plain(q, sel);
++        auto got = tn_fx.attend(q, sel);
++        const window_info wt = query(api, tn_fx.K);
++        check(wt.has && wt.resolves == 0 && wt.pool_bytes == 0, "d: a window smaller than one call needs (256 pages for ~515) is declined: nothing resolved, no pool allocated",
++              "resolves " + std::to_string(wt.resolves) + " pool " + std::to_string(wt.pool_bytes));
++        double d2 = 0;
++        check(nan_free(got) && (bitwise(ref, got) || (!deterministic && (d2 = max_abs_diff(ref, got)) <= noise)), "and the call equals the plain run");
++        tn_fx.teardown();
++    }
++}
++
++} // namespace
++
++int main(int argc, char ** argv) {
++    (void) argc; (void) argv;
++    // CUDA graphs would replay a capture of the plain run for the windowed one (same shapes, same addresses)
++    // GGML_CUDA_DISABLE_GRAPHS and the sparse-conversion poison are read once, at first use: set them before any CUDA work
++#ifdef _WIN32
++    _putenv_s("GGML_CUDA_DISABLE_GRAPHS", "1");
++    _putenv_s("GGML_CUDA_FA_SPARSE_ROWS_POISON", "1");
++#else
++    setenv("GGML_CUDA_DISABLE_GRAPHS", "1", 1);
++    setenv("GGML_CUDA_FA_SPARSE_ROWS_POISON", "1", 1);
++#endif
++    ggml_backend_load_all();
++    ggml_backend_dev_t dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++    if (!dev) {
++        printf("no GPU device\n");
++        return 2;
++    }
++    ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
++    window_api api;
++    api.configure = (void (*)(int64_t, int64_t)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_kv_page_window_configure");
++    api.set_use   = (void (*)(int)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_kv_page_window_set_use");
++    api.set_debug = (void (*)(int, int)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_kv_page_window_set_debug");
++    api.query     = (int (*)(const ggml_tensor *, int64_t *, int32_t *, int32_t *)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_kv_page_window_query");
++    api.fill      = (int (*)(const ggml_tensor *, int64_t, const void *, int64_t)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_kv_page_window_test_fill");
++    api.mapped    = (ggml_backend_buffer_type_t (*)(ggml_backend_dev_t)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_cuda_host_mapped_buffer_type");
++    if (!api.configure || !api.set_use || !api.set_debug || !api.query || !api.fill || !api.mapped) {
++        printf("the CUDA backend has no K/V page window (patch 0026) or no host-mapped buffer type (0012)\n");
++        return 2;
++    }
++    ggml_backend_t backend = ggml_backend_dev_init(dev, nullptr);
++    printf("device: %s\n", ggml_backend_dev_description(dev));
++
++    // ---- a: no window configured
++    {
++        printf("\n== no window configured ==\n");
++        fixture fx;
++        fx.dev = dev; fx.backend = backend; fx.api = api;
++        if (fx.setup(GGML_TYPE_Q8_0, 0, 20480, false)) {
++            fx.fill_random(5);
++            std::mt19937 gen(5);
++            std::vector<selection> sel = { make_selection(gen, random_blocks(gen, TOP_BLOCKS), 7000) };
++            const std::vector<float> q = fx.random_q(1, 1);
++            auto plain = fx.attend_plain(q, sel);
++            auto with_switch_on = fx.attend(q, sel);
++            check(!query(api, fx.K).has && !query(api, fx.V).has, "a: LLAMA_KV_PAGE_WINDOW unset: the cache tensors have no window");
++            check(nan_free(plain) && bitwise(plain, with_switch_on), "a: the sparse attention is the same run (the 0014 path)");
++            fx.teardown();
++        } else {
++            check(false, "the cache allocates");
++        }
++    }
++
++    scenario(dev, backend, api, GGML_TYPE_Q8_0);
++    scenario(dev, backend, api, GGML_TYPE_Q4_0);
++
++    ggml_backend_free(backend);
++    printf("\n%d checks, %d failed\n", g_checks, g_failed);
++    return g_failed == 0 ? 0 : 1;
++}

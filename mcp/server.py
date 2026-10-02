@@ -1155,6 +1155,21 @@ def main() -> None:
     # suite or other process is wrapped
     import stage_timing
     stage_timing.install()
+    # THE POOL IS READ ONCE THE MODEL SERVER ANSWERS (mcp/budget.py pool_size, "THE FALLBACK IS NOT THE LAST
+    # WORD"): asked on the main model's own port (never llama-swap's /upstream, which would load a model), every
+    # budget.RETRY_S, until one read succeeds. Off the request path.
+    import threading
+
+    def _read_pool_when_ready():
+        import budget
+        while not budget.read_ok():
+            pool, how = budget.refresh_direct(timeout=3)
+            if budget.read_ok():
+                slots.count(refresh=True)
+                print(f"  pool: {pool} cells, {budget._SLOTS} slot(s) ({how})", flush=True)
+                return
+            time.sleep(budget.RETRY_S)
+    threading.Thread(target=_read_pool_when_ready, daemon=True, name="yamadori-pool").start()
     print(f"  tier models: {'on' if max_mode.ENABLED else 'off'} ({max_mode.TABLE.source}); "
           f"{', '.join(f'{t}={m}' for t, m in max_mode.snapshot()['tiers'].items())}", flush=True)
     print(f"  slot release: on after second-brain runs and side calls "

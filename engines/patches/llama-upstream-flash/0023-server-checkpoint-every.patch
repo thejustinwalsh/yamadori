@@ -1,0 +1,182 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Fri, 2 Oct 2026 12:37:52 -0400
+Subject: [PATCH] server: --checkpoint-every N, context checkpoints inside a
+ long prompt
+
+With memory that cannot be rolled back (recurrent or hybrid: qwen4exp's
+Gated DeltaNet layers, Qwen3.8-27B's), a prompt that diverges from the
+slot's tokens at position p can only resume from a context checkpoint at
+or before p; with none, llama-server re-reads the prompt from 0 ("forcing
+full prompt re-processing due to lack of cache data"). Checkpoints were
+made only where a user message starts and near the prompt's end, at least
+--checkpoint-min-step (8,192) apart -- so never inside a long system +
+tools block. Seen live on Qwen3.8-Flash-Next, 2026-10-01: a new VS Copilot
+conversation (26K of system prompt and tools, then the user turn) on a slot
+that held the previous conversation reused 0 of 30,262 tokens.
+
+--checkpoint-every N (env LLAMA_ARG_CHECKPOINT_EVERY_NT, default 0 = off)
+also ends a prompt batch N tokens after the slot's last checkpoint and
+makes a checkpoint in front of the batch that starts there, whatever the
+message boundaries; a diverging prompt then resumes from the last one at
+or before the divergence. Strata does the same every 16,384 fresh prompt
+tokens (Niko1221/Strata @ d551edf, src/program/generate.cpp:283
+`prompt_cache_every = 16384`, used at :3241).
+
+The periodic checkpoints go through create_checkpoint like every other, so
+the draft context's state and the speculative state ride in them
+(update_dft, common_speculative_get_state), and --ctx-checkpoints still
+caps the list. A periodic checkpoint is exempt from --checkpoint-min-step
+when it is made (N is its spacing); once the list is full the existing
+thinning of other tasks' checkpoints closer than the min step applies to it
+too, so N below the min step is not kept on a full list.
+
+The "created context checkpoint" line now also says how long it took.
+---
+ common/arg.cpp                  | 12 +++++++++++
+ common/common.h                 |  1 +
+ tools/server/README.md          |  1 +
+ tools/server/server-context.cpp | 38 +++++++++++++++++++++++++++------
+ 4 files changed, 45 insertions(+), 7 deletions(-)
+
+diff --git a/common/arg.cpp b/common/arg.cpp
+index fbac221e6da02483a3c229be3a126c9982cfaa33..299c5139f2de44cae41f27aa88306f9a8e112d7b 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -1709,6 +1709,18 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+             params.checkpoint_min_step = value;
+         }
+     ).set_env("LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT").set_examples({LLAMA_EXAMPLE_SERVER}));
++    add_opt(common_arg(
++        {"--checkpoint-every"}, "N",
++        string_format("also create a context checkpoint every N tokens while a prompt is processed, so a later prompt that "
++            "diverges inside a long message resumes from the last one before the divergence instead of from 0 "
++            "(default: %d, 0 = only at message starts and near the prompt's end)", params.checkpoint_every),
++        [](common_params & params, int value) {
++            if (value < 0) {
++                throw std::invalid_argument("checkpoint-every must be non-negative");
++            }
++            params.checkpoint_every = value;
++        }
++    ).set_env("LLAMA_ARG_CHECKPOINT_EVERY_NT").set_examples({LLAMA_EXAMPLE_SERVER}));
+     add_opt(common_arg(
+         {"-cram", "--cache-ram"}, "N",
+         string_format("set the maximum cache size in MiB (default: %d, -1 - no limit, 0 - disable)"
+diff --git a/common/common.h b/common/common.h
+index f6d4f2d9dda0f932ff1bdc71cf15e6b741436260..c6d52c59d0f296aa0fcaf01b8e079681560f54d5 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -635,6 +635,7 @@ struct common_params {
+     int32_t n_ctx_checkpoints   = 32;    // max number of context checkpoints per slot
+     int32_t kv_unified_per_slot = 0;     // max context per parallel slot; 0 = unset
+     int32_t checkpoint_min_step = 8192;  // minimum spacing between context checkpoints
++    int32_t checkpoint_every    = 0;     // also checkpoint every N tokens inside a prompt (0 = message starts and the prompt's end only)
+     int32_t cache_ram_mib       = 8192;  // -1 = no limit, 0 - disable, 1 = 1 MiB, etc.
+ 
+     std::string public_path   = "";                                                                         // NOLINT
+diff --git a/tools/server/README.md b/tools/server/README.md
+index e665904ba2c15b4159f0e6e5d1efab09b3a284ca..0e68ce3a692306b5207d88e056c941d10f1e5756 100644
+--- a/tools/server/README.md
++++ b/tools/server/README.md
+@@ -164,6 +164,7 @@ For the full list of features, please refer to [server's changelog](https://gith
+ | `--kv-unified-per-slot N` | context limit per parallel slot (default: unset, behavior unchanged).<br/>when set without -c/--ctx-size, the shared KV pool is sized to n_parallel*N<br/>(env: LLAMA_ARG_KV_UNIFIED_PER_SLOT) |
+ | `-ctxcp, --ctx-checkpoints, --swa-checkpoints N` | max number of context checkpoints to create per slot (default: 32)[(more info)](https://github.com/ggml-org/llama.cpp/pull/15293)<br/>(env: LLAMA_ARG_CTX_CHECKPOINTS) |
+ | `-cms, --checkpoint-min-step N` | minimum spacing between context checkpoints in tokens (default: 8192, 0 = no minimum)<br/>(env: LLAMA_ARG_CHECKPOINT_MIN_SPACING_NT) |
++| `--checkpoint-every N` | also create a context checkpoint every N tokens while a prompt is processed, so a later prompt that diverges inside a long message resumes from the last one before the divergence instead of from 0 (default: 0, 0 = only at message starts and near the prompt's end)<br/>(env: LLAMA_ARG_CHECKPOINT_EVERY_NT) |
+ | `-cram, --cache-ram N` | set the maximum cache size in MiB (default: 8192, -1 - no limit, 0 - disable)[(more info)](https://github.com/ggml-org/llama.cpp/pull/16391)<br/>(env: LLAMA_ARG_CACHE_RAM) |
+ | `-kvu, --kv-unified, -no-kvu, --no-kv-unified` | use single unified KV buffer shared across all sequences (default: enabled if number of slots is auto)<br/>(env: LLAMA_ARG_KV_UNIFIED) |
+ | `--cache-idle-slots, --no-cache-idle-slots` | save idle slots to the prompt cache on new task, and clear them when using unified KV (default: enabled, requires cache-ram)<br/>(env: LLAMA_ARG_CACHE_IDLE_SLOTS) |
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 611e82a6afdf6f59a26b94c4cbea6ad3d76f8e4c..ee83904c17154974c2bd98df0aea7cf520eca374 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -1374,8 +1374,8 @@ private:
+         SRV_TRC("%s", "for more info see https://github.com/ggml-org/llama.cpp/pull/16391\n");
+ 
+         if (params_base.n_ctx_checkpoints > 0) {
+-            SRV_TRC("context checkpoints enabled, max = %d, min spacing = %d\n",
+-                    params_base.n_ctx_checkpoints, params_base.checkpoint_min_step);
++            SRV_TRC("context checkpoints enabled, max = %d, min spacing = %d, every = %d\n",
++                    params_base.n_ctx_checkpoints, params_base.checkpoint_min_step, params_base.checkpoint_every);
+         } else {
+             SRV_TRC("%s", "context checkpoints disabled\n");
+         }
+@@ -2371,15 +2371,17 @@ private:
+         //       this is not true for SWA models: https://github.com/ggml-org/llama.cpp/pull/24411#issuecomment-4677983225
+         cur.update_pos(slot.prompt.n_tokens() - n_tokens_cur, pos_min, pos_max);
+ 
++        const int64_t t_start = ggml_time_us();
++
+         cur.update_tgt(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+         cur.update_dft(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+         // stash the draft's speculative state with the checkpoint
+         common_speculative_get_state(spec.get(), slot.id, cur.data_spec);
+ 
+         SLT_TRC(slot,
+-                "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
++                "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB, %.1f ms)\n",
+                 (int) slot.prompt.checkpoints.size(), params_base.n_ctx_checkpoints, cur.pos_min,
+-                cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024);
++                cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024, (ggml_time_us() - t_start) / 1000.0);
+     }
+ 
+     // returns false to decline the task, it is offered again after the decode is done
+@@ -3531,6 +3533,22 @@ private:
+                     const auto & spans = slot.task->params.message_spans;
+                     const auto last_user_pos = spans.last_user_message_pos();
+ 
++                    // --checkpoint-every N: a checkpoint every N tokens INSIDE a prompt as well. The rules below make
++                    // one only where a user message starts or near the prompt's end, so a long system + tools block
++                    // has none: with memory that cannot be rolled back (recurrent / hybrid), a later prompt that
++                    // differs anywhere inside the block was re-read from 0. The batch is ended at the last
++                    // checkpoint's position + N, and the checkpoint is made in front of the batch that starts there.
++                    int64_t periodic_at    = -1;    // end the batch when the prompt reaches this many tokens
++                    bool    periodic_start = false; // this batch starts at such a position
++                    if (do_checkpoint && params_base.checkpoint_every > 0) {
++                        const int64_t last = slot.prompt.checkpoints.empty() ? 0 : slot.prompt.checkpoints.back().n_tokens;
++                        periodic_at    = last + params_base.checkpoint_every;
++                        periodic_start = slot.prompt.n_tokens() == periodic_at;
++                        if (periodic_start) {
++                            periodic_at += params_base.checkpoint_every;
++                        }
++                    }
++
+                     // add prompt tokens for processing in the current batch
+                     while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.size() < n_batch) {
+                         // get next token to process
+@@ -3567,6 +3585,11 @@ private:
+                             }
+                         }
+ 
++                        // --checkpoint-every: the next batch starts at the periodic position (never at the prompt's end)
++                        if (periodic_at > 0 && slot.prompt.n_tokens() == periodic_at && slot.prompt.n_tokens() < slot.task->n_tokens()) {
++                            break;
++                        }
++
+                         // process the last few tokens of the prompt separately in order to allow for a checkpoint to be created.
+                         // create checkpoints that many tokens before the end of the prompt:
+                         //  - 4 + n_ubatch
+@@ -3614,8 +3637,9 @@ private:
+                         slot.init_sampler();
+                     } else {
+                         // skip ordinary mid-prompt checkpoints, unless the batch starts a user
+-                        // message or we are near the end of the prompt
+-                        if (!is_user_start && !near_prompt_end) {
++                        // message, we are near the end of the prompt, or it starts at a
++                        // --checkpoint-every position
++                        if (!is_user_start && !near_prompt_end && !periodic_start) {
+                             do_checkpoint = false;
+                         }
+                     }
+@@ -3635,7 +3659,7 @@ private:
+                     // no need to create checkpoints that are too close together, unless it's the last user message
+                     do_checkpoint = do_checkpoint && (
+                             slot.prompt.checkpoints.empty() ||
+-                            is_last_user_message || near_prompt_end ||
++                            is_last_user_message || near_prompt_end || periodic_start ||
+                             n_tokens_start > slot.prompt.checkpoints.back().n_tokens + params_base.checkpoint_min_step);
+                     SLT_DBG(slot, "main/do_checkpoint = %s, pos_min = %d, pos_max = %d\n", do_checkpoint ? "yes" : "no", pos_min, pos_max);
+ 
+-- 
+2.45.2.windows.1
+

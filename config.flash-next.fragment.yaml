@@ -63,6 +63,9 @@
       --reasoning-format deepseek
       --no-context-shift
       --no-cache-idle-slots
+      # 0023: a context checkpoint every N prompt tokens, so a prompt that differs inside a long system + tools block
+      # resumes from the last one before the difference, not from 0 (Strata: 16,384; empty = not passed)
+      {{CHECKPOINT}}
       # the server's runaway breaker for direct callers; the proxy sends each request's budget (at max: the
       # card's -- no Bonsai cap, tiers.budget) and bonsai's message
       --reasoning-budget 262144

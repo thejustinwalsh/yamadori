@@ -1,0 +1,1662 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Fri, 2 Oct 2026 13:24:37 -0400
+Subject: [PATCH] moe cache: LLAMA_MOE_PCIE_FRAC, a share of a step's missed
+ experts computed on the GPU
+
+Strata code in this patch: Copyright (c) 2026 Niko1221 and the Strata contributors, MIT License
+(LICENSE added in Strata c0107c3, blob 6687a423dde6b7aff1b748c07f5ee93ff788089c; the full notice is
+engines/patches/llama-upstream-flash/LICENSE.strata). Every ported function names its Strata file and commit:
+the split rule and plan are src/core/expert_source.cpp @ d551edf :282-392 (`expert_pool_dispatch_multi`; the
+same rule at d9ab843 :1666 and :1683); the bandwidth probe and the share rule are src/program/generate.cpp @
+d9ab843 :950 and :1715-1735 (`probe_pcie_h2d_gbps`, the 20 / 4 GB/s rule; NOT in d551edf, which has only a fixed
+per-pack default).
+
+Off unless LLAMA_MOE_PCIE_FRAC is set; with it unset nothing in llama-moecache-pcie.* runs and the graph is the
+one 0003/0004/0007/0013 build (the cache chain's activation is one lambda now, the same nodes in the same order).
+
+LLAMA_MOE_PCIE_FRAC=<f> (0 < f <= 1) or "auto". Per layer and step, of the DISTINCT experts the router picked
+that the VRAM cache does not hold ("missed"), the last m = (missed * pcie_num) >> 8 in routing order (Strata's
+rule, pcie_num = round(f * 256), at most the pool's slots) are computed on the GPU, their weights copied over
+PCIe from the pinned host experts (0005), while the CPU computes the rest. "auto" probes the host->device
+bandwidth once at load (eight 64 MiB pinned copies timed around a stream synchronise) and applies Strata's rule,
+min(base, max(0.05, base * GB/s / 26)), none below 4 GB/s and base from 20 GB/s up; LLAMA_MOE_PCIE_BASE
+(default 0.55, Strata's value on their CPU kernels) is the base. The probe is a starting point for a sweep of
+explicit shares, not a result: the base was measured on Strata's CPU kernels, not on 0008's.
+
+How, with no new kernel and no new sched split (src/llama-moecache-pcie.{h,cpp}, src/llama-graph.cpp):
+- the GPU side is a POOL of expert slots per device and expert shape (up, gate, down, [.., slots + 1], the last
+  slot zero) and the same mul_mat_id + activation chain the cache already runs, over the pool's slot ids; a pool
+  slot holds one whole expert. One pool serves every layer: layers run one after another, and the CPU split's
+  input copy has synchronised the compute stream before a layer's plan runs, so a slot is never overwritten
+  while a previous layer's chain still reads it. VRAM: up to (n_expert_used * batch limit * f) + 1 slots of
+  1.38 MiB (Flash-Next, f = 0.29: 21 slots, ~29 MiB), logged at load; if it does not fit the feature turns itself off.
+- a PLAN node (a ggml custom op, on the CPU backend because its table input is host memory) runs first in the
+  layer's CPU split: it reads the routing ids and the cache's host table, writes the table the three CPU
+  mul_mat_id nodes skip by (the cache's, with the pool's experts added) and the pool's slot ids, and enqueues the
+  share's copies on a second CUDA stream (a second backend instance and an event: backend_copier), so they run
+  while the CPU computes.
+- a WAIT node after the CPU chain blocks on that event and passes the slot ids on; only the pool's GPU chain reads
+  them, so it cannot be launched before the copies have landed. The graph is built in the order CPU chain, wait,
+  cache chain, pool chain; the split count per layer is unchanged.
+- the pool is the reason this is not two MUL_MAT_ID nodes with one op-offloaded (docs/FLASH-NEXT.md 10.2's plan):
+  an offloaded node cannot skip ids, so the ids of the experts it does not own would still be computed (garbage
+  from slots nothing copied, times a zero weight is NaN) or copy a dummy expert on every layer where the share is
+  empty, and ggml's used-expert copy inside the scheduler is synchronous, so nothing would overlap.
+
+Tests (tests/test-moe-pcie-split.cpp, registered with ctest, --quick; a CPU backend run needs no GPU and hides
+every CUDA device itself): the share rule and the env parse; 5,000 random partitions against a brute force (every
+position served by exactly one of cache / pool / CPU, the share is the last m missed experts in routing order,
+the CPU table is the cache table plus the share, strided ids); a graph at the model's expert shape (iq2_s 2560 ->
+640 gate/up, q2_0 640 -> 2560 down, top-10, 1-7 tokens, duplicates across tokens, random residency, the share at
+0 / 8 / 74 / 141 / 256 of 256) compared two ways: with the unsplit mul_mat_id chain (the tolerance 1e-5 on the CPU
+backend, 2e-2 with --device, where the GPU's kernels run on q8_1 activations), and EXACTLY (1e-6) with the same
+cache chain over a cache that also holds the pool's experts, which runs the same kernels on the same rows in one
+chain; the pool is poisoned (0xFF, NaN) before every step and the copies land only when the wait node runs; and a
+control that drops the wait and must fail. CPU backend, 64 experts, 60 trials: 25,687 checks, 0 failed, every
+difference 0 (bit-exact, against both references), the pool took 371 experts over 37 steps. With --device NAME
+(the caller restricts CUDA_VISIBLE_DEVICES) the cache and pool live on that device, the experts in its pinned host
+buffer, the copies go through the real second stream and event, the control is made slow by queueing 512 MiB ahead
+of the share's copies, and the graph is scheduled over {device, CPU} as the engine does. NOT run on a GPU yet, and
+nothing is measured: whether the GPU's share is faster than the CPU's own experts at 0008's speed is the gate's
+question (docs/FLASH-NEXT.md 10.2).
+---
+ src/CMakeLists.txt            |   1 +
+ src/llama-graph.cpp           |  64 ++-
+ src/llama-moecache-pcie.cpp   | 297 ++++++++++++++
+ src/llama-moecache-pcie.h     | 167 ++++++++
+ src/llama-moecache.cpp        | 150 +++++++
+ src/llama-moecache.h          |   8 +
+ tests/CMakeLists.txt          |   2 +
+ tests/test-moe-pcie-split.cpp | 733 ++++++++++++++++++++++++++++++++++
+ 8 files changed, 1409 insertions(+), 13 deletions(-)
+ create mode 100644 src/llama-moecache-pcie.cpp
+ create mode 100644 src/llama-moecache-pcie.h
+ create mode 100644 tests/test-moe-pcie-split.cpp
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index d73ae9de9..0c3174180 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -37,6 +37,7 @@ set(LLAMA_CORE_SOURCES
+     llama-model-saver.cpp
+     llama-model.cpp
+     llama-moecache.cpp
++    llama-moecache-pcie.cpp
+     llama-quant.cpp
+     llama-sampler.cpp
+     llama-vocab.cpp
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index 106927d8d..9e6a275ca 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -1,6 +1,7 @@
+ #include "llama-graph.h"
+ 
+ #include "llama-moecache.h"
++#include "llama-moecache-pcie.h"
+ 
+ #include "llama-impl.h"
+ #include "llama-model.h"
+@@ -2193,6 +2194,16 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
+         cb(mc_slot_ids, "ffn_moe_cache_slots", il);
+     }
+ 
++    // 0024 (pcie_frac, llama-moecache-pcie.h): the plan node picks, per step, the share of the missed experts the GPU
++    // computes through the pool; the CPU nodes skip by ITS table (the cache's own host table plus the pool's experts).
++    moe_pcie::plan_nodes mp;
++    ggml_tensor * mc_skip_tbl = mcache ? mcache->host_table : nullptr;
++    if (mcache && mcache->pcie) {
++        mp = moe_pcie::build_plan(ctx0, *mcache->pcie, selected_experts, mcache->host_table);
++        cb(mp.plan, "ffn_moe_pcie_plan", il);
++        mc_skip_tbl = mp.cpu_tbl;
++    }
++
+     cur = ggml_reshape_3d(ctx0, cur, n_embd, 1, n_tokens);
+     ggml_tensor * mc_inp = cur;
+ 
+@@ -2231,7 +2242,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
+         cb(up, "ffn_moe_up", il);
+ 
+         if (mcache) {
+-            up->src[3] = mcache->host_table;
++            up->src[3] = mc_skip_tbl;
+             up->op_params[0] = mcache->n_slots;
+         }
+ 
+@@ -2249,7 +2260,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
+             cb(cur, "ffn_moe_gate", il);
+ 
+             if (mcache) {
+-                cur->src[3] = mcache->host_table;
++                cur->src[3] = mc_skip_tbl;
+                 cur->op_params[0] = mcache->n_slots;
+             }
+         } else {
+@@ -2359,18 +2370,24 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
+     cb(experts, "ffn_moe_down", il);
+ 
+     if (mcache) {
+-        experts->src[3] = mcache->host_table;
++        experts->src[3] = mc_skip_tbl;
+         experts->op_params[0] = mcache->n_slots;
+ 
+-        // device-side chain over the cached experts, mirroring the LLM_FFN_SILU
+-        // activation above (the only type_op the cache path is enabled for)
+-        ggml_tensor * up_g   = ggml_mul_mat_id(ctx0, mcache->up_c,   mc_inp, mc_slot_ids);
+-        ggml_tensor * gate_g = ggml_mul_mat_id(ctx0, mcache->gate_c, mc_inp, mc_slot_ids);
+-        cb(up_g,   "ffn_moe_cache_up",   il);
+-        cb(gate_g, "ffn_moe_cache_gate", il);
+-
+-        ggml_tensor * act_g = nullptr;
+-        {
++        // 0024: the graph's order is the CPU chain, then the wait for the pool's copies, then the GPU chains: the
++        // copies are enqueued by the plan node (before the CPU chain) and overlap it. The wait node's output is the
++        // pool's slot ids, which only the pool's GPU chain reads, so it cannot start before the copies have landed.
++        ggml_tensor * pcie_ids = nullptr;
++        if (mcache->pcie) {
++            ggml_build_forward_expand(gf, experts);
++            pcie_ids = moe_pcie::build_wait(ctx0, *mcache->pcie, mp, experts, mcache->host_table, n_expert_used, n_tokens);
++            cb(pcie_ids, "ffn_moe_pcie_wait", il);
++            ggml_build_forward_expand(gf, pcie_ids);
++        }
++
++        // the activation of the device-side chains, mirroring the LLM_FFN_SILU activation above (the only type_op the
++        // cache path is enabled for); one lambda for the cache's chain and the pool's
++        auto mc_act = [&](ggml_tensor * gate_g, ggml_tensor * up_g) -> ggml_tensor * {
++            ggml_tensor * act_g = nullptr;
+             const float limit = il >= 0 ? hparams.swiglu_clamp_exp[il] : 0.0f;
+             constexpr float eps = 1e-6f;
+             if (limit > eps) {
+@@ -2386,13 +2403,34 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
+             } else {
+                 act_g = ggml_swiglu_split(ctx0, gate_g, up_g);
+             }
+-        }
++            return act_g;
++        };
++
++        // device-side chain over the cached experts
++        ggml_tensor * up_g   = ggml_mul_mat_id(ctx0, mcache->up_c,   mc_inp, mc_slot_ids);
++        ggml_tensor * gate_g = ggml_mul_mat_id(ctx0, mcache->gate_c, mc_inp, mc_slot_ids);
++        cb(up_g,   "ffn_moe_cache_up",   il);
++        cb(gate_g, "ffn_moe_cache_gate", il);
++
++        ggml_tensor * act_g = mc_act(gate_g, up_g);
+ 
+         ggml_tensor * down_g = ggml_mul_mat_id(ctx0, mcache->down_c, act_g, mc_slot_ids);
+         cb(down_g, "ffn_moe_cache_down", il);
+ 
+         experts = ggml_add(ctx0, experts, down_g);
+         cb(experts, "ffn_moe_cache_merged", il);
++
++        if (pcie_ids) {
++            // 0024: the same chain over the pool's slots (the experts the PCIe path brought in this step)
++            ggml_tensor * pool_down = moe_pcie::build_chain(ctx0, *mcache->pcie, mc_inp, pcie_ids, mc_act,
++                    [&](ggml_tensor * t, const char * what) {
++                        char nm[64];
++                        snprintf(nm, sizeof(nm), "ffn_moe_pcie_%s", what);
++                        cb(t, nm, il);
++                    });
++            experts = ggml_add(ctx0, experts, pool_down);
++            cb(experts, "ffn_moe_pcie_merged", il);
++        }
+     }
+ 
+     if (down_exps_s) {
+diff --git a/src/llama-moecache-pcie.cpp b/src/llama-moecache-pcie.cpp
+new file mode 100644
+index 000000000..dc2c231c0
+--- /dev/null
++++ b/src/llama-moecache-pcie.cpp
+@@ -0,0 +1,297 @@
++#include "llama-moecache-pcie.h"
++
++#include <algorithm>
++#include <chrono>
++#include <cstdlib>
++#include <cstring>
++
++namespace moe_pcie {
++
++// ---- the share ----------------------------------------------------------------------------------------------------
++
++int32_t num_of_frac(double frac) {
++    // Strata generate.cpp @ d551edf :2397 (and :3565-3567): pcie_num = (int) (pcie_frac * 256.0 + 0.5), clamped 0..256
++    const int n = (int) (frac * 256.0 + 0.5);
++    return std::max(0, std::min(256, n));
++}
++
++double frac_of_bandwidth(double gbps, double base) {
++    // Strata generate.cpp @ d9ab843 :1723-1730: "from 20 GB/s up (x16 PCIe 4/5) the measured default stays";
++    // below ~4 GB/s a missed expert takes longer to cross than the CPU takes to compute it, so none go over the link
++    return gbps >= 20.0 ? base : gbps < 4.0 ? 0.0 : std::min(base, std::max(0.05, base * (gbps / 26.0)));
++}
++
++bool parse_frac(const char * value, double & frac, bool & automatic) {
++    frac = 0.0;
++    automatic = false;
++    if (!value) {
++        return false;
++    }
++    while (*value == ' ' || *value == '\t') {
++        ++value;
++    }
++    if (!*value || !strcmp(value, "0") || !strcmp(value, "off") || !strcmp(value, "OFF") || !strcmp(value, "no")) {
++        return false;
++    }
++    if (!strcmp(value, "auto")) {
++        automatic = true;
++        return true;
++    }
++    char * end = nullptr;
++    const double v = strtod(value, &end);
++    if (end == value || *end != '\0' || !(v > 0.0) || v > 1.0) {
++        return false;
++    }
++    frac = v;
++    return true;
++}
++
++double probe_h2d_gbps(ggml_backend_t backend, ggml_backend_buffer_type_t dev_buft) {
++    // Strata generate.cpp @ d9ab843 :950 (probe_pcie_h2d_gbps): a warm-up copy, then timed copies from pinned host memory.
++    // Strata times four 256 MiB copies between two CUDA events; ggml has no event timing, so this is wall time around
++    // a stream synchronise, over eight 64 MiB copies (less device memory at the moment the cache is being sized).
++    constexpr size_t   kBytes = 64ull << 20;
++    constexpr int      kIters = 8;
++    ggml_backend_dev_t dev = ggml_backend_get_device(backend);
++    ggml_backend_buffer_type_t host_buft = dev ? ggml_backend_dev_host_buffer_type(dev) : nullptr;
++    if (!host_buft || !dev_buft) {
++        return -1.0;
++    }
++    ggml_init_params ip = { /*.mem_size =*/ ggml_tensor_overhead() * 4, /*.mem_buffer =*/ nullptr, /*.no_alloc =*/ true };
++    // one context per buffer, so each tensor is in the buffer type it was meant for
++    ggml_context * ch = ggml_init(ip);
++    ggml_context * cd = ggml_init(ip);
++    if (!ch || !cd) {
++        if (ch) ggml_free(ch);
++        if (cd) ggml_free(cd);
++        return -1.0;
++    }
++    ggml_tensor * h = ggml_new_tensor_1d(ch, GGML_TYPE_I8, (int64_t) kBytes);
++    ggml_tensor * d = ggml_new_tensor_1d(cd, GGML_TYPE_I8, (int64_t) kBytes);
++    ggml_backend_buffer_t hb = ggml_backend_alloc_ctx_tensors_from_buft(ch, host_buft);
++    ggml_backend_buffer_t db = ggml_backend_alloc_ctx_tensors_from_buft(cd, dev_buft);
++    double gbps = -1.0;
++    if (hb && db) {
++        memset(h->data, 0, kBytes);                                  // fault the pages in before timing
++        ggml_backend_tensor_set_async(backend, d, h->data, 0, kBytes);   // warm-up: context up, copy engine primed
++        ggml_backend_synchronize(backend);
++        const auto t0 = std::chrono::steady_clock::now();
++        for (int i = 0; i < kIters; ++i) {
++            ggml_backend_tensor_set_async(backend, d, h->data, 0, kBytes);
++        }
++        ggml_backend_synchronize(backend);
++        const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
++        if (s > 1e-5) {
++            gbps = ((double) kIters * (double) kBytes / s) / 1e9;
++        }
++    }
++    ggml_backend_buffer_free(db);
++    ggml_backend_buffer_free(hb);
++    ggml_free(cd);
++    ggml_free(ch);
++    return gbps;
++}
++
++// ---- the partition ------------------------------------------------------------------------------------------------
++
++void partition_step(const int32_t * ids, int64_t n_used, int64_t n_tokens, size_t nb0, size_t nb1,
++                    const int32_t * table, int64_t n_expert, int32_t dummy,
++                    int32_t pcie_num, int32_t pool_slots,
++                    int32_t * cpu_tbl, int32_t * pool_ids, partition & out) {
++    // Strata expert_source.cpp @ d551edf :309-392 (expert_pool_dispatch_multi): "Distinct experts in routing order;
++    // resident ones and the last pcie_num/256 of the missed ones go to the GPU." Position i = t * n_used + j, as there.
++    const int64_t n = n_used * n_tokens;
++    out.n_missed = 0;
++    out.share.clear();
++
++    thread_local std::vector<int32_t> distinct;
++    thread_local std::vector<int32_t> slot_of;
++    distinct.clear();
++    slot_of.assign((size_t) n_expert, -1);
++    // the experts seen so far: slot_of doubles as the "seen" mark (-2 = seen, not shared)
++    for (int64_t t = 0; t < n_tokens; ++t) {
++        for (int64_t j = 0; j < n_used; ++j) {
++            const int32_t e = *(const int32_t *) ((const char *) ids + t * nb1 + j * nb0);
++            if (e < 0 || e >= n_expert || slot_of[(size_t) e] != -1) {
++                continue;
++            }
++            slot_of[(size_t) e] = -2;
++            distinct.push_back(e);
++            if (table[e] == dummy) {
++                out.n_missed++;
++            }
++        }
++    }
++
++    for (int64_t e = 0; e < n_expert; ++e) {
++        cpu_tbl[e] = table[e];
++    }
++
++    // m = (nmiss * pcie_num) >> 8, as Strata (expert_source.cpp :1666 at d9ab843), and no more than the pool holds
++    int32_t m = (int32_t) (((int64_t) out.n_missed * (int64_t) pcie_num) >> 8);
++    m = std::min(m, pool_slots);
++    int32_t miss_rank = 0;
++    for (const int32_t e : distinct) {
++        if (table[e] != dummy) {
++            continue;
++        }
++        if (miss_rank >= out.n_missed - m) {   // the last m missed ones, in routing order (:1683)
++            const int32_t slot = (int32_t) out.share.size();
++            out.share.emplace_back(e, slot);
++            slot_of[(size_t) e] = slot;
++            cpu_tbl[e] = dummy + 1;          // the CPU nodes skip it
++        }
++        ++miss_rank;
++    }
++
++    for (int64_t t = 0; t < n_tokens; ++t) {
++        for (int64_t j = 0; j < n_used; ++j) {
++            const int32_t e = *(const int32_t *) ((const char *) ids + t * nb1 + j * nb0);
++            const int32_t s = (e >= 0 && e < n_expert) ? slot_of[(size_t) e] : -1;
++            pool_ids[t * n_used + j] = s >= 0 ? s : pool_slots;
++        }
++    }
++    (void) n;
++}
++
++// ---- the copy engine ----------------------------------------------------------------------------------------------
++
++backend_copier::backend_copier(ggml_backend_dev_t dev) {
++    backend = ggml_backend_dev_init(dev, nullptr);
++    event   = ggml_backend_event_new(dev);
++}
++
++backend_copier::~backend_copier() {
++    if (event) {
++        ggml_backend_event_free(event);
++    }
++    if (backend) {
++        ggml_backend_free(backend);
++    }
++}
++
++void backend_copier::copy(ggml_tensor * dst, const void * src, size_t dst_offset, size_t size) {
++    ggml_backend_tensor_set_async(backend, dst, src, dst_offset, size);
++    enqueued = true;
++}
++
++bool backend_copier::mark() {
++    if (!enqueued) {
++        return false;
++    }
++    enqueued = false;
++    if (event) {
++        ggml_backend_event_record(event, backend);
++    }
++    pending = true;
++    return true;
++}
++
++void backend_copier::wait() {
++    if (!pending) {
++        return;
++    }
++    if (event) {
++        ggml_backend_event_synchronize(event);
++    } else {
++        ggml_backend_synchronize(backend);
++    }
++    pending = false;
++}
++
++// ---- the graph ----------------------------------------------------------------------------------------------------
++
++namespace {
++
++// The plan node: runs on the CPU backend (its table input is a host tensor), once per layer and step, in the thread
++// that executes the graph. Writes cpu_tbl and the pool's slot ids, then enqueues the share's copies.
++void plan_op(ggml_tensor * dst, int ith, int nth, void * ud) {
++    (void) nth;
++    if (ith != 0) {
++        return;
++    }
++    layer & L = *(layer *) ud;
++    const ggml_tensor * ids   = dst->src[0];
++    const ggml_tensor * table = dst->src[1];
++    const int64_t n_used   = ids->ne[0];
++    const int64_t n_tokens = ids->ne[1];
++    const int64_t n_expert = ggml_nelements(table);
++    GGML_ASSERT(ids->type == GGML_TYPE_I32 && table->type == GGML_TYPE_I32);
++    GGML_ASSERT(ggml_nelements(dst) == n_expert + n_used * n_tokens);
++
++    int32_t * out = (int32_t *) dst->data;
++    thread_local partition part;
++    partition_step((const int32_t *) ids->data, n_used, n_tokens, ids->nb[0], ids->nb[1],
++                   (const int32_t *) table->data, n_expert, L.dummy, L.pcie_num, L.shared->n_slots,
++                   out, out + n_expert, part);
++
++    pool & P = *L.shared;
++    for (const auto & es : part.share) {
++        const int64_t e = es.first;
++        const size_t  s = (size_t) es.second;
++        P.engine->copy(P.up,   (const char *) L.up_src->data   + (size_t) e * L.up_src->nb[2],   s * P.up->nb[2],   L.up_src->nb[2]);
++        P.engine->copy(P.gate, (const char *) L.gate_src->data + (size_t) e * L.gate_src->nb[2], s * P.gate->nb[2], L.gate_src->nb[2]);
++        P.engine->copy(P.down, (const char *) L.down_src->data + (size_t) e * L.down_src->nb[2], s * P.down->nb[2], L.down_src->nb[2]);
++    }
++    L.pending = P.engine->mark();
++
++    L.n_plans.fetch_add(1, std::memory_order_relaxed);
++    L.n_missed.fetch_add((uint64_t) part.n_missed, std::memory_order_relaxed);
++    L.n_share.fetch_add((uint64_t) part.share.size(), std::memory_order_relaxed);
++}
++
++// The wait node: after the CPU chain, before the GPU chain. Blocks (in this thread, the CPU's) until the stream the
++// copies were enqueued on has passed their event, then hands the slot ids on; the GPU chain reads them, so it cannot
++// be launched before the copies have landed.
++void wait_op(ggml_tensor * dst, int ith, int nth, void * ud) {
++    (void) nth;
++    if (ith != 0) {
++        return;
++    }
++    layer & L = *(layer *) ud;
++    if (L.pending) {
++        L.shared->engine->wait();
++        L.pending = false;
++    }
++    const ggml_tensor * src = dst->src[0];
++    GGML_ASSERT(ggml_nbytes(src) == ggml_nbytes(dst));
++    memcpy(dst->data, src->data, ggml_nbytes(dst));
++}
++
++} // namespace
++
++plan_nodes build_plan(ggml_context * ctx, layer & L, ggml_tensor * ids, ggml_tensor * host_table) {
++    GGML_ASSERT(ids->type == GGML_TYPE_I32 && host_table->type == GGML_TYPE_I32);
++    const int64_t n_used   = ids->ne[0];
++    const int64_t n_tokens = ids->ne[1];
++    const int64_t n_expert = ggml_nelements(host_table);
++
++    ggml_tensor * args[2] = { ids, host_table };
++    plan_nodes p;
++    p.plan = ggml_custom_4d(ctx, GGML_TYPE_I32, n_expert + n_used * n_tokens, 1, 1, 1, args, 2, plan_op, 1, &L);
++    p.cpu_tbl  = ggml_view_1d(ctx, p.plan, n_expert, 0);
++    p.ids_tail = ggml_view_1d(ctx, p.plan, n_used * n_tokens, (size_t) n_expert * sizeof(int32_t));
++    return p;
++}
++
++ggml_tensor * build_wait(ggml_context * ctx, layer & L, const plan_nodes & p, ggml_tensor * cpu_result,
++                         ggml_tensor * host_table, int64_t n_used, int64_t n_tokens) {
++    ggml_tensor * args[3] = { p.ids_tail, cpu_result, host_table };
++    return ggml_custom_4d(ctx, GGML_TYPE_I32, n_used, n_tokens, 1, 1, args, 3, wait_op, 1, &L);
++}
++
++ggml_tensor * build_chain(ggml_context * ctx, layer & L, ggml_tensor * x, ggml_tensor * slot_ids,
++                          const std::function<ggml_tensor *(ggml_tensor *, ggml_tensor *)> & act,
++                          const std::function<void(ggml_tensor *, const char *)> & name) {
++    pool & P = *L.shared;
++    ggml_tensor * up_g   = ggml_mul_mat_id(ctx, P.up,   x, slot_ids);
++    ggml_tensor * gate_g = ggml_mul_mat_id(ctx, P.gate, x, slot_ids);
++    name(up_g,   "up");
++    name(gate_g, "gate");
++    ggml_tensor * act_g  = act(gate_g, up_g);
++    ggml_tensor * down_g = ggml_mul_mat_id(ctx, P.down, act_g, slot_ids);
++    name(down_g, "down");
++    return down_g;
++}
++
++} // namespace moe_pcie
+diff --git a/src/llama-moecache-pcie.h b/src/llama-moecache-pcie.h
+new file mode 100644
+index 000000000..8ceb69e9d
+--- /dev/null
++++ b/src/llama-moecache-pcie.h
+@@ -0,0 +1,167 @@
++#pragma once
++
++// Yamadori 0024: `pcie_frac` for the MoE expert cache (llama-moecache.h) -- a share of one step's MISSED experts is
++// computed on the GPU, their weights read over PCIe, while the CPU computes the rest.
++//
++// Ported from Strata (github.com/Niko1221/Strata). Copyright (c) 2026 Niko1221 and the Strata contributors; MIT
++// License (the full notice: engines/patches/llama-upstream-flash/LICENSE.strata; the file is in Strata at c0107c3,
++// and the code below was read at d551edf and d9ab843, both named where it is used):
++//  - the split rule and the plan: src/core/expert_source.cpp @ d551edf :282-392 (`expert_pool_dispatch_multi`;
++//    at d9ab843 the same rule at :1666 and :1683): the distinct experts of a layer in routing order, the resident ones
++//    stay with the GPU cache, and of the MISSED ones the last m = (n_missed * pcie_num) >> 8 go to the GPU through the
++//    PCIe path; pcie_num = int(frac * 256 + 0.5). Duplicates of an expert (several tokens) go with it.
++//  - the share's source: src/program/generate.cpp @ d9ab843 :950 (`probe_pcie_h2d_gbps`: copies from pinned host
++//    memory between two events, after a warm-up) and :1715-1735 (the rule: from 20 GB/s up the base share stays,
++//    below 4 GB/s none, else min(base, max(0.05, base * gbps / 26))). Strata's base (0.55) and its 26 GB/s
++//    reference are THEIR measurements on THEIR CPU kernels; here the base is LLAMA_MOE_PCIE_BASE, and the probe is
++//    a starting point for a sweep of explicit shares, not a result for this CPU.
++//
++// What differs from Strata, and why (docs/FLASH-NEXT.md section 10.2):
++//  - Strata's plan is published to doorbell flags the GPU polls and its copy kernel reads the pinned arena through a
++//    device alias. Here the plan is one graph node (a custom op on the CPU backend) that writes the tables the other
++//    nodes read and enqueues the copies on a second CUDA stream; a second node waits for the copies' event. No new
++//    kernel: the GPU computes the share with the same mul_mat_id the cache chain uses, over a small POOL of slots
++//    that the plan fills each step (one pool shared by all layers of the same expert shape; the layers run one after
++//    another, and the CPU split's input copy has synchronised the compute stream before a plan runs, so a pool slot
++//    is never overwritten while a previous layer's chain still reads it).
++//  - a pool slot holds a whole expert (up, gate, down), the zero slot is the last one, exactly as the cache's.
++//
++// Off unless LLAMA_MOE_PCIE_FRAC is set (a number in (0, 1], or "auto" for the probe rule). With it off nothing in this
++// file runs and the graph is the one 0003/0004/0007/0013 build.
++
++#include "ggml.h"
++#include "ggml-backend.h"
++
++#include <atomic>
++#include <cstdint>
++#include <functional>
++#include <memory>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace moe_pcie {
++
++// ---- the share ----------------------------------------------------------------------------------------------------
++
++// Strata's numerator out of 256: int(frac * 256 + 0.5), clamped to 0..256
++int32_t num_of_frac(double frac);
++
++// Strata's probe rule (generate.cpp @ d9ab843 :1715-1735): the share from the measured host->device GB/s
++double frac_of_bandwidth(double gbps, double base);
++
++// LLAMA_MOE_PCIE_FRAC: unset, "", "0", "off" -> off (returns false); "auto" -> automatic = true; a number -> frac
++bool parse_frac(const char * value, double & frac, bool & automatic);
++
++// host->device bandwidth over `backend`'s stream, in GB/s, from the device's pinned host buffer into `dev_buft`
++// (Strata's probe, with ggml's copies; < 0 when it cannot run)
++double probe_h2d_gbps(ggml_backend_t backend, ggml_backend_buffer_type_t dev_buft);
++
++// ---- the partition (pure) -----------------------------------------------------------------------------------------
++
++struct partition {
++    int32_t n_missed = 0;                          // distinct missed experts of this layer and step
++    std::vector<std::pair<int32_t, int32_t>> share; // (expert, pool slot) for the experts the GPU pool computes
++};
++
++// One layer of one step. ids is [n_used, n_tokens] (byte strides nb0, nb1), table maps expert -> cache slot or
++// `dummy` when uncached. Writes cpu_tbl [n_expert]: the table the CPU mul_mat_id nodes skip by (a value != dummy is
++// skipped), i.e. table, with the pool's experts marked dummy + 1; and pool_ids [n_used * n_tokens]: the pool slot of
++// every position whose expert the pool computes, else pool_slots (the pool's zero slot).
++void partition_step(const int32_t * ids, int64_t n_used, int64_t n_tokens, size_t nb0, size_t nb1,
++                    const int32_t * table, int64_t n_expert, int32_t dummy,
++                    int32_t pcie_num, int32_t pool_slots,
++                    int32_t * cpu_tbl, int32_t * pool_ids, partition & out);
++
++// ---- the copy engine ----------------------------------------------------------------------------------------------
++
++// Enqueues copies into a device tensor and says when they have landed. The real one is a second backend instance on
++// the device (its own CUDA stream) and an event; the tests' is a fake whose copies land only when wait() is called.
++struct copier {
++    virtual ~copier() = default;
++    // dst[dst_offset, dst_offset + size) <- src; may return before the data lands
++    virtual void copy(ggml_tensor * dst, const void * src, size_t dst_offset, size_t size) = 0;
++    // a completion point after every copy enqueued so far; true when something is outstanding
++    virtual bool mark() = 0;
++    // blocks until the last mark()'s point has completed
++    virtual void wait() = 0;
++};
++
++struct backend_copier : copier {
++    ggml_backend_t       backend = nullptr;   // owned: a second instance on the same device
++    ggml_backend_event_t event   = nullptr;   // NULL where the device has none (copies are then synchronous)
++    bool                 pending = false;
++    bool                 enqueued = false;
++
++    explicit backend_copier(ggml_backend_dev_t dev);
++    ~backend_copier() override;
++    void copy(ggml_tensor * dst, const void * src, size_t dst_offset, size_t size) override;
++    bool mark() override;
++    void wait() override;
++};
++
++// ---- the pool and the per-layer state -----------------------------------------------------------------------------
++
++struct pool {
++    // [ne0, ne1, n_slots + 1], the last slot all zeros; the data lives in `buf`
++    ggml_tensor * up   = nullptr;
++    ggml_tensor * gate = nullptr;
++    ggml_tensor * down = nullptr;
++    int32_t       n_slots = 0;
++    ggml_context *        ctx = nullptr;
++    ggml_backend_buffer_t buf = nullptr;
++    std::unique_ptr<copier> engine;
++
++    pool() = default;
++    pool(const pool &) = delete;
++    pool & operator=(const pool &) = delete;
++    ~pool() {
++        engine.reset();                      // the stream first: nothing may still write into the buffer
++        if (buf) {
++            ggml_backend_buffer_free(buf);
++        }
++        if (ctx) {
++            ggml_free(ctx);
++        }
++    }
++};
++
++struct layer {
++    pool *               shared = nullptr;
++    const ggml_tensor *  up_src   = nullptr;   // the host experts, the authority
++    const ggml_tensor *  gate_src = nullptr;
++    const ggml_tensor *  down_src = nullptr;
++    int32_t              dummy    = 0;         // the cache's "uncached" table value (its slot count)
++    int32_t              pcie_num = 0;
++    bool                 pending  = false;     // copies enqueued by the last plan and not yet waited for
++
++    // counters, read by the cache's hit-rate line
++    std::atomic<uint64_t> n_plans{0};
++    std::atomic<uint64_t> n_missed{0};
++    std::atomic<uint64_t> n_share{0};
++};
++
++// ---- the graph ----------------------------------------------------------------------------------------------------
++
++struct plan_nodes {
++    ggml_tensor * plan    = nullptr;   // I32 [n_expert + n_used * n_tokens]: cpu_tbl, then the pool's slot ids
++    ggml_tensor * cpu_tbl = nullptr;   // view: the CPU mul_mat_id nodes' src[3] (op_params[0] stays the dummy)
++    ggml_tensor * ids_tail = nullptr;  // view: the pool's slot ids, valid once the copies have landed
++};
++
++// The plan node, to be built before the CPU mul_mat_id nodes. ids: the routing [n_used, n_tokens] I32 (the tensor the
++// CPU nodes read); host_table: the cache's host table (its data is read on the CPU).
++plan_nodes build_plan(ggml_context * ctx, layer & L, ggml_tensor * ids, ggml_tensor * host_table);
++
++// The wait node: blocks until the plan's copies have landed, ordered after `cpu_result` (the CPU chain's output),
++// and returns the pool's slot ids [n_used, n_tokens] I32 for the GPU chain. host_table pins it to the CPU backend.
++ggml_tensor * build_wait(ggml_context * ctx, layer & L, const plan_nodes & p, ggml_tensor * cpu_result,
++                         ggml_tensor * host_table, int64_t n_used, int64_t n_tokens);
++
++// The GPU chain over the pool: up and gate mul_mat_id, `act(gate, up)`, then down. x: [n_embd, 1, n_tokens].
++// name(tensor, "up" | "gate" | "down") lets the caller label the nodes.
++ggml_tensor * build_chain(ggml_context * ctx, layer & L, ggml_tensor * x, ggml_tensor * slot_ids,
++                          const std::function<ggml_tensor *(ggml_tensor * gate, ggml_tensor * up)> & act,
++                          const std::function<void(ggml_tensor *, const char *)> & name);
++
++} // namespace moe_pcie
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index 75b88bfe6..79518d9e5 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "llama-impl.h"
+ #include "llama-model.h"
++#include "llama-moecache-pcie.h"
+ 
+ #include "ggml.h"
+ #include "ggml-backend.h"
+@@ -14,6 +15,7 @@
+ #include <cstring>
+ #include <deque>
+ #include <map>
++#include <memory>
+ #include <mutex>
+ #include <string>
+ #include <thread>
+@@ -67,6 +69,12 @@ struct moe_cache {
+     std::vector<ggml_context *>         ctxs;
+     std::vector<ggml_backend_buffer_t>  bufs;
+ 
++    // 0024: pcie_frac -- the pools (one per expert shape and device), each layer's state, and the share
++    std::vector<std::unique_ptr<moe_pcie::pool>>  pcie_pools;
++    std::vector<std::unique_ptr<moe_pcie::layer>> pcie_layers;
++    std::map<int, moe_pcie::layer *>              pcie_by_il;
++    int32_t pcie_num = 0;
++
+     // async upload worker: slices are copied to the device off the decode
+     // thread; the new table mapping is only published at a later step() once
+     // the upload has completed, so a running graph never reads a torn slot
+@@ -435,6 +443,134 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+             mc->max_tokens    = std::max<int64_t>(mc->max_tokens, 1);
+         }
+ 
++        // 0024: pcie_frac (llama-moecache-pcie.h). Off unless LLAMA_MOE_PCIE_FRAC names a share or "auto".
++        {
++            const char * pv = getenv("LLAMA_MOE_PCIE_FRAC");
++            double frac = 0.0;
++            bool   automatic = false;
++            const bool wanted = moe_pcie::parse_frac(pv, frac, automatic);
++            if (pv && pv[0] && !wanted && strcmp(pv, "0") != 0 && strcmp(pv, "off") != 0 && strcmp(pv, "OFF") != 0 && strcmp(pv, "no") != 0) {
++                LLAMA_LOG_WARN("%s: LLAMA_MOE_PCIE_FRAC=%s is not a share in (0, 1] or \"auto\" - pcie_frac off\n", __func__, pv);
++            }
++            if (wanted && !all.empty()) {
++                bool ok = true;
++                double gbps = -1.0;
++                // Strata's base share for a x16 link (generate.cpp @ d9ab843: native packs 0.55): THEIR measurement, on
++                // THEIR CPU kernels; LLAMA_MOE_PCIE_BASE replaces it, and an explicit LLAMA_MOE_PCIE_FRAC skips the rule
++                const char * bv = getenv("LLAMA_MOE_PCIE_BASE");
++                const double base = bv && bv[0] ? atof(bv) : 0.55;
++                if (automatic) {
++                    auto & g0 = *groups.begin();
++                    ggml_backend_dev_t dev0 = ggml_backend_buft_get_device(g0.first);
++                    moe_pcie::backend_copier tmp(dev0);
++                    gbps = dev0 && tmp.backend ? moe_pcie::probe_h2d_gbps(tmp.backend, g0.first) : -1.0;
++                    if (gbps > 0.0) {
++                        frac = moe_pcie::frac_of_bandwidth(gbps, base);
++                        LLAMA_LOG_INFO("%s: pcie_frac: PCIe probe %.1f GB/s host->device -> share %.2f (base %.2f; Strata's rule)\n",
++                                __func__, gbps, frac, base);
++                    } else {
++                        LLAMA_LOG_WARN("%s: pcie_frac: the PCIe probe failed - off (set LLAMA_MOE_PCIE_FRAC to a share to skip it)\n", __func__);
++                        ok = false;
++                    }
++                }
++                const int32_t num = ok ? moe_pcie::num_of_frac(frac) : 0;
++                if (ok && num == 0) {
++                    LLAMA_LOG_INFO("%s: pcie_frac: the share rounds to 0/256 - off\n", __func__);
++                    ok = false;
++                }
++
++                // one pool per device and expert shape; a pool holds as many experts as the most a layer can send in a
++                // step: (distinct missed experts <= n_used * max_tokens) * share
++                std::map<std::string, moe_pcie::pool *> by_key;
++                std::map<std::string, int64_t>          max_distinct;
++                auto key_of = [](ggml_backend_buffer_type_t buft, const cand & c) {
++                    char k[256];
++                    const ggml_tensor * t[3] = { c.l->ffn_up_exps, c.l->ffn_gate_exps, c.l->ffn_down_exps };
++                    snprintf(k, sizeof(k), "%p:%d.%" PRId64 ".%" PRId64 ":%d.%" PRId64 ".%" PRId64 ":%d.%" PRId64 ".%" PRId64,
++                            (void *) buft, (int) t[0]->type, t[0]->ne[0], t[0]->ne[1], (int) t[1]->type, t[1]->ne[0],
++                            t[1]->ne[1], (int) t[2]->type, t[2]->ne[0], t[2]->ne[1]);
++                    return std::string(k);
++                };
++                for (auto & g : groups) {
++                    for (const auto & c : g.second) {
++                        const int64_t d = std::min<int64_t>(c.l->ffn_up_exps->ne[2], (int64_t) model.hparams.n_expert_used(c.il) * mc->max_tokens);
++                        int64_t & m = max_distinct[key_of(g.first, c)];
++                        m = std::max(m, d);
++                    }
++                }
++                size_t pool_bytes = 0;
++                for (auto & g : groups) {
++                    if (!ok) {
++                        break;
++                    }
++                    ggml_backend_dev_t dev = ggml_backend_buft_get_device(g.first);
++                    for (const auto & c : g.second) {
++                        const std::string key = key_of(g.first, c);
++                        if (by_key.find(key) != by_key.end()) {
++                            continue;
++                        }
++                        const int32_t slots = std::max<int32_t>(1, (int32_t) ((max_distinct[key] * (int64_t) num) >> 8));
++                        auto p = std::make_unique<moe_pcie::pool>();
++                        p->n_slots = slots;
++                        ggml_init_params ip = { /*.mem_size =*/ ggml_tensor_overhead() * 4, /*.mem_buffer =*/ nullptr, /*.no_alloc =*/ true };
++                        p->ctx = dev ? ggml_init(ip) : nullptr;
++                        if (!p->ctx) {
++                            ok = false;
++                            break;
++                        }
++                        const ggml_tensor * u  = c.l->ffn_up_exps;
++                        const ggml_tensor * ga = c.l->ffn_gate_exps;
++                        const ggml_tensor * d  = c.l->ffn_down_exps;
++                        p->up   = ggml_new_tensor_3d(p->ctx, u->type,  u->ne[0],  u->ne[1],  slots + 1);
++                        p->gate = ggml_new_tensor_3d(p->ctx, ga->type, ga->ne[0], ga->ne[1], slots + 1);
++                        p->down = ggml_new_tensor_3d(p->ctx, d->type,  d->ne[0],  d->ne[1],  slots + 1);
++                        ggml_set_name(p->up,   "moe_pcie_up");
++                        ggml_set_name(p->gate, "moe_pcie_gate");
++                        ggml_set_name(p->down, "moe_pcie_down");
++                        p->buf = ggml_backend_alloc_ctx_tensors_from_buft(p->ctx, g.first);
++                        if (!p->buf) {
++                            LLAMA_LOG_WARN("%s: pcie_frac: no room for a %d-slot pool on %s - off\n", __func__, slots, ggml_backend_buft_name(g.first));
++                            ok = false;
++                            break;
++                        }
++                        ggml_backend_buffer_clear(p->buf, 0);   // the last slot is the zero slot
++                        p->engine = std::make_unique<moe_pcie::backend_copier>(dev);
++                        pool_bytes += ggml_backend_buffer_get_size(p->buf);
++                        by_key[key] = p.get();
++                        mc->pcie_pools.push_back(std::move(p));
++                    }
++                    for (const auto & c : g.second) {
++                        if (!ok) {
++                            break;
++                        }
++                        auto L = std::make_unique<moe_pcie::layer>();
++                        L->shared   = by_key[key_of(g.first, c)];
++                        L->up_src   = c.l->ffn_up_exps;
++                        L->gate_src = c.l->ffn_gate_exps;
++                        L->down_src = c.l->ffn_down_exps;
++                        L->dummy    = slots_of[c.il];
++                        L->pcie_num = num;
++                        if (!L->up_src->buffer || strncmp(ggml_backend_buffer_name(L->up_src->buffer), "CUDA_Host", 9) != 0) {
++                            LLAMA_LOG_WARN("%s: pcie_frac: layer %d's experts are not in pinned host memory (%s): the copies are driver-staged\n",
++                                    __func__, c.il, L->up_src->buffer ? ggml_backend_buffer_name(L->up_src->buffer) : "none");
++                        }
++                        mc->pcie_by_il[c.il] = L.get();
++                        mc->pcie_layers.push_back(std::move(L));
++                    }
++                }
++                if (ok) {
++                    mc->pcie_num = num;
++                    LLAMA_LOG_INFO("%s: pcie_frac ON: share %.3f (%d/256) of a step's missed experts via PCIe (%s), %zu pool(s), %.1f MiB device memory, up to %d slots\n",
++                            __func__, frac, num, automatic ? "probe" : "LLAMA_MOE_PCIE_FRAC", mc->pcie_pools.size(),
++                            pool_bytes/1024.0/1024.0, mc->pcie_pools.empty() ? 0 : mc->pcie_pools.front()->n_slots);
++                } else {
++                    mc->pcie_by_il.clear();
++                    mc->pcie_layers.clear();
++                    mc->pcie_pools.clear();
++                }
++            }
++        }
++
+         // init state + tables (everything uncached -> the layer's dummy slot, n_slots)
+         size_t vram = 0;
+         size_t n_seeded = 0;
+@@ -470,6 +606,10 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+             ggml_backend_tensor_set(ls.pub.dev_table,  table.data(), 0, n_expert*sizeof(int32_t));
+             ggml_backend_tensor_set(ls.pub.host_table, table.data(), 0, n_expert*sizeof(int32_t));
+ 
++            {
++                auto pit = mc->pcie_by_il.find(ls.pub.il);   // 0024
++                ls.pub.pcie = pit != mc->pcie_by_il.end() ? pit->second : nullptr;
++            }
+             mc->by_up_src[ls.pub.up_src] = &ls - mc->layers.data();
+             vram += ggml_nbytes(ls.pub.up_c) + ggml_nbytes(ls.pub.gate_c) + ggml_nbytes(ls.pub.down_c);
+             LLAMA_LOG_DEBUG("moe-cache: init layer %d '%s' %zu bytes/expert\n",
+@@ -564,6 +704,16 @@ void llama_moe_cache_step() {
+         m_prev = m;
+         LLAMA_LOG_INFO("moe-cache: steps=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64 " hit-rate=%.1f%% last-64=%.1f%%\n",
+                 mc->n_steps, h, m, h + m ? 100.0*h/(h + m) : 0.0, dh + dm ? 100.0*dh/(dh + dm) : 0.0);
++        if (!mc->pcie_layers.empty()) {   // 0024: of the distinct experts a layer missed, the share the GPU pool took
++            uint64_t pm = 0, ps = 0, pp = 0;
++            for (auto & pl : mc->pcie_layers) {
++                pp += pl->n_plans.load(std::memory_order_relaxed);
++                pm += pl->n_missed.load(std::memory_order_relaxed);
++                ps += pl->n_share.load(std::memory_order_relaxed);
++            }
++            LLAMA_LOG_INFO("moe-cache: pcie: layer-steps=%" PRIu64 " distinct-missed=%" PRIu64 " via-pcie=%" PRIu64 " (%.1f%%)\n",
++                    pp, pm, ps, pm ? 100.0*ps/pm : 0.0);
++        }
+     }
+ 
+     // 0004: Strata's adaptive tier (generate.cpp:2418-2457), at deliberate moments only
+diff --git a/src/llama-moecache.h b/src/llama-moecache.h
+index 20c696f5a..8127f1287 100644
+--- a/src/llama-moecache.h
++++ b/src/llama-moecache.h
+@@ -48,16 +48,24 @@
+ //    (GGML_OP_OFFLOAD_MIN_BATCH, default 32, ggml-cuda.cu), above which the op runs on the GPU with the
+ //    experts copied in (and would ignore the skip table). #27861 served n_tokens == 1 only.
+ 
++//  - Yamadori 0024, LLAMA_MOE_PCIE_FRAC (off unless set; llama-moecache-pcie.h has the design and Strata's credit): a
++//    share of a step's MISSED experts is computed on the GPU, their weights copied over PCIe into a small pool of
++//    device slots, while the CPU computes the rest. `pcie` below is that layer's state, null when it is off.
++
+ #include <cstdint>
+ 
+ struct llama_model;
+ struct ggml_tensor;
++namespace moe_pcie { struct layer; }
+ 
+ struct llama_moe_cache_layer {
+     int il = -1;
+ 
+     int32_t n_slots = 0;
+ 
++    // 0024: null unless LLAMA_MOE_PCIE_FRAC is on
++    moe_pcie::layer * pcie = nullptr;
++
+     // host-resident source weights (the authoritative experts)
+     ggml_tensor * up_src   = nullptr;
+     ggml_tensor * gate_src = nullptr;
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 996e7f58f..c09cba198 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -310,6 +310,8 @@ endif()
+ llama_build(test-backend-ops.cpp)
+ 
+ llama_build_and_test(test-tiled-mulmat.cpp)
++# 0024: the pcie_frac split (the partition, the plan and wait nodes, the pool chain) against the unsplit mul_mat_id
++llama_build_and_test(test-moe-pcie-split.cpp ../src/llama-moecache-pcie.cpp ARGS --quick)
+ llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
+ llama_build_and_test(test-autorelease.cpp       LABEL "model")
+ llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
+diff --git a/tests/test-moe-pcie-split.cpp b/tests/test-moe-pcie-split.cpp
+new file mode 100644
+index 000000000..8ed23894f
+--- /dev/null
++++ b/tests/test-moe-pcie-split.cpp
+@@ -0,0 +1,733 @@
++// Yamadori 0024: pcie_frac -- the split of one layer's missed experts between the CPU and a GPU pool, against the unsplit
++// mul_mat_id (src/llama-moecache-pcie.h). The graph below is built with the same calls, in the same order, as
++// llm_graph_context::build_moe_ffn (src/llama-graph.cpp) does for a cached layer, and the plan / wait nodes and the
++// pool chain are the functions that file calls.
++//
++//   (a) off: the cache alone (the CPU skips the resident experts, the cache chain serves them) equals the unsplit chain
++//       -- this is the graph the engine builds without LLAMA_MOE_PCIE_FRAC;
++//   (b) on: CPU + cache chain + pool chain equal the unsplit chain, at the model's expert shape (iq2_s gate/up
++//       2560 -> 640, q2_0 down 640 -> 2560, top-10) on random routing with duplicates across tokens, random
++//       residency, 1..7 tokens, ids as a plain tensor and as a strided view;
++//   (c) every pool slot is poisoned (NaN) before each step and the copies land only when the wait node runs: a run in
++//       which the wait is dropped must FAIL (the test proves it can see a slot read before its copy completed), and
++//       the real runs must not read one.
++//
++//   test-moe-pcie-split [--quick] [--n-expert N] [--device NAME] [--trials N] [--seed S]
++//
++// With --device (a GPU device name, e.g. CUDA0) the cache and the pool live on that device, the weights in its pinned
++// host buffer, the copies go through a second backend instance and an event (moe_pcie::backend_copier), and the graph
++// is scheduled over {device, CPU} as the engine does; without it everything is on the CPU backend and the copies are a
++// fake that lands them only when wait() is called.
++
++#include "../src/llama-moecache-pcie.h"
++
++#include "ggml.h"
++#include "ggml-alloc.h"
++#include "ggml-backend.h"
++
++#include <algorithm>
++#include <cinttypes>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <map>
++#include <random>
++#include <string>
++#include <vector>
++
++static int n_failed = 0;
++static int n_checks = 0;
++
++#define CHECK(cond, ...)                                      \
++    do {                                                      \
++        ++n_checks;                                           \
++        if (!(cond)) {                                        \
++            ++n_failed;                                       \
++            printf("FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond); \
++            printf(__VA_ARGS__);                              \
++            printf("\n");                                     \
++        }                                                     \
++    } while (0)
++
++// ---- the pure parts ------------------------------------------------------------------------------------------------
++
++static void test_share_rule() {
++    // Strata's rule (generate.cpp @ d9ab843 :1723-1730)
++    CHECK(moe_pcie::num_of_frac(0.0) == 0, "0");
++    CHECK(moe_pcie::num_of_frac(1.0) == 256, "1");
++    CHECK(moe_pcie::num_of_frac(2.0) == 256, "clamped");
++    CHECK(moe_pcie::num_of_frac(0.29) == 74, "0.29 -> 74/256 got %d", moe_pcie::num_of_frac(0.29));
++    CHECK(moe_pcie::num_of_frac(0.55) == 141, "0.55 -> 141/256 got %d", moe_pcie::num_of_frac(0.55));
++    CHECK(moe_pcie::frac_of_bandwidth(26.0, 0.55) == 0.55, "x16: the base");
++    CHECK(moe_pcie::frac_of_bandwidth(20.0, 0.55) == 0.55, "20 GB/s: the base");
++    CHECK(moe_pcie::frac_of_bandwidth(3.9, 0.55) == 0.0, "an x1 link: none");
++    CHECK(std::fabs(moe_pcie::frac_of_bandwidth(14.1, 0.55) - 0.55 * 14.1 / 26.0) < 1e-12, "14.1 GB/s");
++    CHECK(moe_pcie::frac_of_bandwidth(4.0, 0.30) == 0.05, "the floor 0.05 (4 GB/s, base 0.3: 0.3 * 4/26 = 0.046)");
++    CHECK(std::fabs(moe_pcie::frac_of_bandwidth(4.0, 0.55) - 0.55 * 4.0 / 26.0) < 1e-12, "4 GB/s, base 0.55");
++
++    double f = -1;
++    bool a = true;
++    CHECK(!moe_pcie::parse_frac(nullptr, f, a) && f == 0 && !a, "unset is off");
++    CHECK(!moe_pcie::parse_frac("", f, a), "empty is off");
++    CHECK(!moe_pcie::parse_frac("0", f, a), "0 is off");
++    CHECK(!moe_pcie::parse_frac("off", f, a), "off is off");
++    CHECK(!moe_pcie::parse_frac("abc", f, a), "garbage is off");
++    CHECK(!moe_pcie::parse_frac("1.5", f, a), "above 1 is off");
++    CHECK(!moe_pcie::parse_frac("-0.2", f, a), "negative is off");
++    CHECK(moe_pcie::parse_frac("auto", f, a) && a, "auto");
++    CHECK(moe_pcie::parse_frac("0.3", f, a) && !a && f == 0.3, "0.3");
++    CHECK(moe_pcie::parse_frac("1", f, a) && f == 1.0, "1");
++}
++
++// brute force: what partition_step must give
++static void test_partition(std::mt19937 & rng, int trials) {
++    for (int trial = 0; trial < trials; ++trial) {
++        const int64_t n_expert = 8 + (int64_t) (rng() % 505);
++        const int64_t n_used   = 1 + (int64_t) (rng() % 10);
++        const int64_t n_tokens = 1 + (int64_t) (rng() % 7);
++        const int32_t slots    = 1 + (int32_t) (rng() % 40);      // the cache's slots (the dummy)
++        const int32_t pool     = 1 + (int32_t) (rng() % 24);
++        const int32_t num      = (int32_t) (rng() % 257);
++
++        std::vector<int32_t> table((size_t) n_expert, slots);
++        const int n_res = (int) (rng() % (slots + 1));
++        for (int i = 0; i < n_res; ++i) {
++            table[rng() % (uint64_t) n_expert] = i;             // may collide; any non-dummy value is "resident"
++        }
++        // routing with duplicates across tokens: draw from a small popular set half the time
++        std::vector<int32_t> ids((size_t) (n_used * n_tokens));
++        const size_t stride = (size_t) n_used + (rng() % 3);      // a strided view: nb1 > n_used * 4 sometimes
++        std::vector<int32_t> padded(stride * (size_t) n_tokens, -7);
++        for (int64_t t = 0; t < n_tokens; ++t) {
++            std::vector<int32_t> row;
++            while ((int64_t) row.size() < n_used) {
++                const int32_t e = (rng() % 2) ? (int32_t) (rng() % std::min<int64_t>(n_expert, 14)) : (int32_t) (rng() % (uint64_t) n_expert);
++                if (std::find(row.begin(), row.end(), e) == row.end()) {
++                    row.push_back(e);
++                }
++                if ((int64_t) row.size() < n_used && n_expert <= n_used) {
++                    break;
++                }
++            }
++            for (int64_t j = 0; j < n_used; ++j) {
++                const int32_t e = j < (int64_t) row.size() ? row[(size_t) j] : (int32_t) (rng() % (uint64_t) n_expert);
++                padded[(size_t) t * stride + (size_t) j] = e;
++                ids[(size_t) (t * n_used + j)] = e;
++            }
++        }
++
++        std::vector<int32_t> cpu_tbl((size_t) n_expert), pool_ids((size_t) (n_used * n_tokens));
++        moe_pcie::partition part;
++        moe_pcie::partition_step(padded.data(), n_used, n_tokens, sizeof(int32_t), stride * sizeof(int32_t),
++                table.data(), n_expert, slots, num, pool, cpu_tbl.data(), pool_ids.data(), part);
++
++        // brute force
++        std::vector<int32_t> distinct;
++        for (int32_t e : ids) {
++            if (std::find(distinct.begin(), distinct.end(), e) == distinct.end()) {
++                distinct.push_back(e);
++            }
++        }
++        std::vector<int32_t> missed;
++        for (int32_t e : distinct) {
++            if (table[(size_t) e] == slots) {
++                missed.push_back(e);
++            }
++        }
++        int32_t m = (int32_t) (((int64_t) missed.size() * num) >> 8);
++        m = std::min(m, pool);
++        CHECK(part.n_missed == (int32_t) missed.size(), "n_missed %d vs %zu", part.n_missed, missed.size());
++        CHECK((int32_t) part.share.size() == m, "share %zu vs %d", part.share.size(), m);
++        // the LAST m missed ones in routing order, slots 0.. in that order
++        bool order_ok = true;
++        for (int32_t i = 0; i < m; ++i) {
++            const int32_t e = missed[missed.size() - (size_t) m + (size_t) i];
++            if (part.share[(size_t) i].first != e || part.share[(size_t) i].second != i) {
++                order_ok = false;
++            }
++        }
++        CHECK(order_ok, "the share is not the last m missed experts in routing order");
++
++        // every position is served by exactly one of: the cache (resident), the pool, the CPU
++        bool serve_ok = true, tbl_ok = true;
++        for (int64_t i = 0; i < n_used * n_tokens; ++i) {
++            const int32_t e = ids[(size_t) i];
++            const bool resident = table[(size_t) e] != slots;
++            const bool pooled   = pool_ids[(size_t) i] != pool;
++            const bool cpu      = cpu_tbl[(size_t) e] == slots;     // not skipped by the CPU nodes
++            if ((int) resident + (int) pooled + (int) cpu != 1) {
++                serve_ok = false;
++            }
++            if (pooled) {
++                bool found = false;
++                for (const auto & es : part.share) {
++                    if (es.first == e && es.second == pool_ids[(size_t) i]) {
++                        found = true;
++                    }
++                }
++                if (!found) {
++                    serve_ok = false;
++                }
++            }
++        }
++        for (int64_t e = 0; e < n_expert; ++e) {
++            const bool shared = std::find_if(part.share.begin(), part.share.end(), [&](const auto & es) { return es.first == e; }) != part.share.end();
++            const int32_t want = shared ? slots + 1 : table[(size_t) e];
++            if (cpu_tbl[(size_t) e] != want) {
++                tbl_ok = false;
++            }
++        }
++        CHECK(serve_ok, "an entry is served by none or by several of cache/pool/CPU (trial %d)", trial);
++        CHECK(tbl_ok, "cpu_tbl differs from the cache table + the share (trial %d)", trial);
++    }
++}
++
++// ---- the graph -----------------------------------------------------------------------------------------------------
++
++// the copies land only when wait() runs; wait() can be told to drop them (the negative control)
++struct fake_copier : moe_pcie::copier {
++    struct job { ggml_tensor * dst; const void * src; size_t off, size; };
++    std::vector<job> queued;
++    bool drop_wait = false;
++    bool landed_early = false;
++    int  n_waits = 0;
++
++    void copy(ggml_tensor * dst, const void * src, size_t off, size_t size) override {
++        queued.push_back({ dst, src, off, size });
++    }
++    bool mark() override { return !queued.empty(); }
++    void wait() override {
++        ++n_waits;
++        if (drop_wait) {
++            queued.clear();
++            return;
++        }
++        for (const job & j : queued) {
++            // the slot must still be poison here: a copy that landed before the wait would have overwritten it
++            const uint8_t * p = (const uint8_t *) j.dst->data + j.off;
++            if (p[0] != 0xFF || p[j.size - 1] != 0xFF) {
++                landed_early = true;
++            }
++            ggml_backend_tensor_set(j.dst, j.src, j.off, j.size);
++        }
++        queued.clear();
++    }
++};
++
++// On a device: the real copy engine (a second backend instance and an event), made slow on demand -- eight 64 MiB copies
++// are queued on its stream ahead of the share's copies, so that a graph which does NOT wait for the event reads the
++// slots long before their data lands (the negative control) -- and able to drop its wait.
++struct delayed_copier : moe_pcie::backend_copier {
++    bool delay = false;
++    bool drop_wait = false;
++    bool delayed = false;
++    ggml_context * hctx = nullptr;
++    ggml_context * dctx = nullptr;
++    ggml_backend_buffer_t hb = nullptr, db = nullptr;
++    ggml_tensor * h = nullptr, * d = nullptr;
++    static constexpr size_t kBytes = 64ull << 20;
++
++    delayed_copier(ggml_backend_dev_t dev, ggml_backend_buffer_type_t dev_buft) : moe_pcie::backend_copier(dev) {
++        ggml_init_params ip = { ggml_tensor_overhead() * 4, nullptr, true };
++        hctx = ggml_init(ip);
++        dctx = ggml_init(ip);
++        h = ggml_new_tensor_1d(hctx, GGML_TYPE_I8, (int64_t) kBytes);
++        d = ggml_new_tensor_1d(dctx, GGML_TYPE_I8, (int64_t) kBytes);
++        ggml_backend_buffer_type_t hbt = ggml_backend_dev_host_buffer_type(dev);
++        hb = ggml_backend_alloc_ctx_tensors_from_buft(hctx, hbt ? hbt : ggml_backend_cpu_buffer_type());
++        db = ggml_backend_alloc_ctx_tensors_from_buft(dctx, dev_buft);
++        if (hb) {
++            memset(h->data, 0, kBytes);
++        }
++    }
++    ~delayed_copier() override {
++        ggml_backend_synchronize(backend);
++        if (db) ggml_backend_buffer_free(db);
++        if (hb) ggml_backend_buffer_free(hb);
++        ggml_free(dctx);
++        ggml_free(hctx);
++    }
++    void copy(ggml_tensor * dst, const void * src, size_t off, size_t size) override {
++        if (delay && !delayed && hb && db) {
++            delayed = true;
++            for (int i = 0; i < 8; ++i) {
++                ggml_backend_tensor_set_async(backend, d, h->data, 0, kBytes);
++            }
++        }
++        moe_pcie::backend_copier::copy(dst, src, off, size);
++    }
++    bool mark() override {
++        delayed = false;
++        return moe_pcie::backend_copier::mark();
++    }
++    void wait() override {
++        if (drop_wait) {
++            pending = false;
++            return;
++        }
++        moe_pcie::backend_copier::wait();
++    }
++};
++
++struct world {
++    int64_t n_embd = 2560, n_ff = 640, n_expert = 64, n_used = 10;
++    int32_t cache_slots = 24;
++    int32_t pool_slots  = 24;
++
++    ggml_backend_t cpu = nullptr;
++    ggml_backend_t dev = nullptr;                      // null: everything on the CPU
++    ggml_backend_dev_t dev_h = nullptr;
++    ggml_backend_buffer_type_t host_buft = nullptr, dev_buft = nullptr;
++
++    ggml_context * wctx = nullptr;                     // weights, cache, pool, tables
++    std::vector<ggml_backend_buffer_t> bufs;
++    ggml_tensor *W_up, *W_gate, *W_down;
++    struct cache_set {                                 // a device cache [.., slots + 1] (the last slot zero) and its tables
++        ggml_tensor * up = nullptr, * gate = nullptr, * down = nullptr;
++        ggml_tensor * host_table = nullptr, * dev_table = nullptr;   // I32 [1, n_expert]
++        int32_t slots = 0;
++        std::vector<int32_t> table;                    // expert -> slot or `slots`
++    };
++    cache_set cs;                                      // the engine's cache
++    cache_set big;                                     // a cache that holds the cache's experts AND the pool's: the exact reference
++    moe_pcie::pool pool;
++};
++
++static void quantize_into(ggml_tensor * t, std::mt19937 & rng, int64_t first, int64_t count) {
++    // experts [first, first+count) of t [ne0, ne1, n_expert], from random normal floats
++    const int64_t cols = t->ne[0], rows = t->ne[1];
++    std::vector<float> f((size_t) (rows * cols));
++    std::vector<uint8_t> q(ggml_row_size(t->type, cols) * (size_t) rows);
++    std::vector<float> im;
++    if (ggml_quantize_requires_imatrix(t->type)) {
++        im.assign((size_t) (rows * cols), 1.0f);
++    }
++    std::normal_distribution<float> nd(0.0f, 1.0f);
++    for (int64_t e = first; e < first + count; ++e) {
++        for (float & v : f) {
++            v = nd(rng);
++        }
++        ggml_quantize_chunk(t->type, f.data(), q.data(), 0, rows, cols, im.empty() ? nullptr : im.data());
++        ggml_backend_tensor_set(t, q.data(), (size_t) e * t->nb[2], q.size());
++    }
++}
++
++static bool make_world(world & w, std::mt19937 & rng, const char * device) {
++    w.cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
++    CHECK(w.cpu, "no CPU backend");
++    if (device) {
++        w.dev_h = ggml_backend_dev_by_name(device);
++        if (!w.dev_h) {
++            printf("device %s not found\n", device);
++            return false;
++        }
++        w.dev = ggml_backend_dev_init(w.dev_h, nullptr);
++        w.dev_buft  = ggml_backend_dev_buffer_type(w.dev_h);
++        w.host_buft = ggml_backend_dev_host_buffer_type(w.dev_h);
++        if (!w.host_buft) {
++            w.host_buft = ggml_backend_cpu_buffer_type();
++        }
++    } else {
++        w.dev_buft = w.host_buft = ggml_backend_cpu_buffer_type();
++    }
++
++    // host weights: the model's expert shapes
++    ggml_init_params ip = { ggml_tensor_overhead() * 64, nullptr, true };
++    ggml_context * hctx = ggml_init(ip);
++    w.wctx = hctx;
++    w.W_up   = ggml_new_tensor_3d(hctx, GGML_TYPE_IQ2_S, w.n_embd, w.n_ff, w.n_expert);
++    w.W_gate = ggml_new_tensor_3d(hctx, GGML_TYPE_IQ2_S, w.n_embd, w.n_ff, w.n_expert);
++    w.W_down = ggml_new_tensor_3d(hctx, GGML_TYPE_Q2_0,  w.n_ff, w.n_embd, w.n_expert);
++    ggml_set_name(w.W_up, "ffn_up_exps"); ggml_set_name(w.W_gate, "ffn_gate_exps"); ggml_set_name(w.W_down, "ffn_down_exps");
++    w.cs.slots  = w.cache_slots;
++    w.big.slots = w.cache_slots + w.pool_slots;
++    w.cs.host_table  = ggml_new_tensor_2d(hctx, GGML_TYPE_I32, 1, w.n_expert);
++    w.big.host_table = ggml_new_tensor_2d(hctx, GGML_TYPE_I32, 1, w.n_expert);
++    ggml_backend_buffer_t hb = ggml_backend_alloc_ctx_tensors_from_buft(hctx, w.host_buft);
++    CHECK(hb, "host buffer");
++    w.bufs.push_back(hb);
++    ggml_backend_buffer_set_usage(hb, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
++    quantize_into(w.W_up,   rng, 0, w.n_expert);
++    quantize_into(w.W_gate, rng, 0, w.n_expert);
++    quantize_into(w.W_down, rng, 0, w.n_expert);
++
++    // the device side: the cache, its table, the pool
++    ggml_context * dctx = ggml_init(ip);
++    for (world::cache_set * c : { &w.cs, &w.big }) {
++        c->up   = ggml_new_tensor_3d(dctx, GGML_TYPE_IQ2_S, w.n_embd, w.n_ff, c->slots + 1);
++        c->gate = ggml_new_tensor_3d(dctx, GGML_TYPE_IQ2_S, w.n_embd, w.n_ff, c->slots + 1);
++        c->down = ggml_new_tensor_3d(dctx, GGML_TYPE_Q2_0,  w.n_ff, w.n_embd, c->slots + 1);
++        c->dev_table = ggml_new_tensor_2d(dctx, GGML_TYPE_I32, 1, w.n_expert);
++    }
++    ggml_backend_buffer_t db = ggml_backend_alloc_ctx_tensors_from_buft(dctx, w.dev_buft);
++    CHECK(db, "device buffer");
++    w.bufs.push_back(db);
++    ggml_backend_buffer_clear(db, 0);
++
++    ggml_context * pctx = ggml_init(ip);
++    w.pool.ctx  = pctx;
++    w.pool.n_slots = w.pool_slots;
++    w.pool.up   = ggml_new_tensor_3d(pctx, GGML_TYPE_IQ2_S, w.n_embd, w.n_ff, w.pool_slots + 1);
++    w.pool.gate = ggml_new_tensor_3d(pctx, GGML_TYPE_IQ2_S, w.n_embd, w.n_ff, w.pool_slots + 1);
++    w.pool.down = ggml_new_tensor_3d(pctx, GGML_TYPE_Q2_0,  w.n_ff, w.n_embd, w.pool_slots + 1);
++    w.pool.buf  = ggml_backend_alloc_ctx_tensors_from_buft(pctx, w.dev_buft);
++    CHECK(w.pool.buf, "pool buffer");
++    if (w.dev) {
++        w.pool.engine = std::make_unique<delayed_copier>(w.dev_h, w.dev_buft);
++    } else {
++        w.pool.engine = std::make_unique<fake_copier>();
++    }
++    // keep the second context for freeing: the pool owns pctx; dctx is leaked on purpose (the process is short)
++    (void) dctx;
++    return true;
++}
++
++// poison every pool slot but the zero slot
++static void poison_pool(world & w) {
++    for (ggml_tensor * t : { w.pool.up, w.pool.gate, w.pool.down }) {
++        std::vector<uint8_t> ff((size_t) w.pool_slots * t->nb[2], 0xFF);
++        ggml_backend_tensor_set(t, ff.data(), 0, ff.size());
++        std::vector<uint8_t> zero(t->nb[2], 0);
++        ggml_backend_tensor_set(t, zero.data(), (size_t) w.pool_slots * t->nb[2], zero.size());
++    }
++}
++
++// a cache: `resident` experts in slots 0.., the rest uncached (the dummy slot = c.slots)
++static void fill_cache(world & w, world::cache_set & c, const std::vector<int32_t> & resident) {
++    c.table.assign((size_t) w.n_expert, c.slots);
++    for (ggml_tensor * t : { c.up, c.gate, c.down }) {
++        std::vector<uint8_t> z((size_t) (c.slots + 1) * t->nb[2], 0);
++        ggml_backend_tensor_set(t, z.data(), 0, z.size());
++    }
++    std::vector<uint8_t> buf;
++    for (size_t sl = 0; sl < resident.size(); ++sl) {
++        const int32_t e = resident[sl];
++        c.table[(size_t) e] = (int32_t) sl;
++        const std::pair<ggml_tensor *, ggml_tensor *> pairs[3] = { { w.W_up, c.up }, { w.W_gate, c.gate }, { w.W_down, c.down } };
++        for (const auto & pr : pairs) {
++            buf.resize(pr.first->nb[2]);
++            ggml_backend_tensor_get(pr.first, buf.data(), (size_t) e * pr.first->nb[2], pr.first->nb[2]);
++            ggml_backend_tensor_set(pr.second, buf.data(), sl * pr.second->nb[2], pr.second->nb[2]);
++        }
++    }
++    ggml_backend_tensor_set(c.host_table, c.table.data(), 0, c.table.size() * sizeof(int32_t));
++    ggml_backend_tensor_set(c.dev_table,  c.table.data(), 0, c.table.size() * sizeof(int32_t));
++}
++
++static int g_pcie_num = 0;   // the share (out of 256) the next step runs with
++
++enum class mode { reference, cache_only, pcie, enlarged };
++
++struct step_result {
++    std::vector<float> out;      // [n_embd, n_used, n_tokens]
++    bool ok = false;
++};
++
++// One layer, one step. `ids` is n_used x n_tokens, optionally read through a strided view.
++static step_result run_step(world & w, ggml_backend_sched_t sched, mode m, const std::vector<int32_t> & ids,
++                            int64_t n_tokens, bool strided, std::mt19937 & rng) {
++    const int64_t n_used = w.n_used;
++    ggml_init_params ip = { ggml_tensor_overhead() * 512 + ggml_graph_overhead_custom(2048, false) + (1u << 20), nullptr, true };
++    ggml_context * ctx = ggml_init(ip);
++    ggml_cgraph * gf = ggml_new_graph_custom(ctx, 2048, false);
++
++    ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, w.n_embd, 1, n_tokens);
++    ggml_set_name(x, "x"); ggml_set_input(x);
++    const int64_t pad = strided ? 3 : 0;
++    ggml_tensor * ids_full = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_used + pad, n_tokens);
++    ggml_set_name(ids_full, "ids"); ggml_set_input(ids_full);
++    ggml_tensor * sel = strided ? ggml_view_2d(ctx, ids_full, n_used, n_tokens, ids_full->nb[1], 0) : ids_full;
++
++    ggml_tensor * res = nullptr;
++    moe_pcie::layer L;
++    if (m == mode::reference) {
++        ggml_tensor * up   = ggml_mul_mat_id(ctx, w.W_up,   x, sel);
++        ggml_tensor * gate = ggml_mul_mat_id(ctx, w.W_gate, x, sel);
++        ggml_tensor * act  = ggml_swiglu_split(ctx, gate, up);
++        res = ggml_mul_mat_id(ctx, w.W_down, act, sel);
++    } else {
++        // `enlarged`: the cache chain over a cache that also holds the pool's experts -- the same kernels on the same rows
++        // as the split, in one chain, so the split must equal it exactly
++        const world::cache_set & c = (m == mode::enlarged) ? w.big : w.cs;
++        L.shared = &w.pool; L.up_src = w.W_up; L.gate_src = w.W_gate; L.down_src = w.W_down;
++        L.dummy = c.slots;
++        L.pcie_num = g_pcie_num;
++
++        moe_pcie::plan_nodes mp;
++        ggml_tensor * skip = c.host_table;
++        if (m == mode::pcie) {
++            mp = moe_pcie::build_plan(ctx, L, sel, c.host_table);
++            skip = mp.cpu_tbl;
++        }
++        // the cache's slot lookup, as llama-graph.cpp: the ids as one flat row
++        ggml_tensor * mc_ids = ggml_is_contiguous(sel) ? sel : ggml_cont(ctx, sel);
++        mc_ids = ggml_reshape_1d(ctx, mc_ids, n_used * n_tokens);
++        ggml_tensor * mc_slot_ids = ggml_get_rows(ctx, c.dev_table, mc_ids);
++        mc_slot_ids = ggml_reshape_2d(ctx, mc_slot_ids, n_used, n_tokens);
++
++        ggml_tensor * up   = ggml_mul_mat_id(ctx, w.W_up,   x, sel);
++        up->src[3] = skip; up->op_params[0] = c.slots;
++        ggml_tensor * gate = ggml_mul_mat_id(ctx, w.W_gate, x, sel);
++        gate->src[3] = skip; gate->op_params[0] = c.slots;
++        ggml_tensor * act  = ggml_swiglu_split(ctx, gate, up);
++        ggml_tensor * experts = ggml_mul_mat_id(ctx, w.W_down, act, sel);
++        experts->src[3] = skip; experts->op_params[0] = c.slots;
++
++        ggml_tensor * pcie_ids = nullptr;
++        if (m == mode::pcie) {
++            ggml_build_forward_expand(gf, experts);
++            pcie_ids = moe_pcie::build_wait(ctx, L, mp, experts, c.host_table, n_used, n_tokens);
++            ggml_build_forward_expand(gf, pcie_ids);
++        }
++        auto act_fn = [&](ggml_tensor * g, ggml_tensor * u) { return ggml_swiglu_split(ctx, g, u); };
++
++        ggml_tensor * up_g   = ggml_mul_mat_id(ctx, c.up,   x, mc_slot_ids);
++        ggml_tensor * gate_g = ggml_mul_mat_id(ctx, c.gate, x, mc_slot_ids);
++        ggml_tensor * act_g  = act_fn(gate_g, up_g);
++        ggml_tensor * down_g = ggml_mul_mat_id(ctx, c.down, act_g, mc_slot_ids);
++        experts = ggml_add(ctx, experts, down_g);
++        if (pcie_ids) {
++            ggml_tensor * pd = moe_pcie::build_chain(ctx, L, x, pcie_ids, act_fn, [](ggml_tensor *, const char *) {});
++            experts = ggml_add(ctx, experts, pd);
++        }
++        res = experts;
++    }
++    ggml_set_output(res);
++    ggml_build_forward_expand(gf, res);
++
++    step_result r;
++    ggml_backend_sched_reset(sched);
++    if (!ggml_backend_sched_alloc_graph(sched, gf)) {
++        printf("graph allocation failed\n");
++        ggml_free(ctx);
++        return r;
++    }
++    std::vector<float> xv((size_t) (w.n_embd * n_tokens));
++    std::normal_distribution<float> nd(0.0f, 1.0f);
++    for (float & v : xv) {
++        v = nd(rng);
++    }
++    ggml_backend_tensor_set(x, xv.data(), 0, xv.size() * sizeof(float));
++    std::vector<int32_t> padded((size_t) ((n_used + pad) * n_tokens), -1);
++    for (int64_t t = 0; t < n_tokens; ++t) {
++        for (int64_t j = 0; j < n_used; ++j) {
++            padded[(size_t) (t * (n_used + pad) + j)] = ids[(size_t) (t * n_used + j)];
++        }
++    }
++    ggml_backend_tensor_set(ids_full, padded.data(), 0, padded.size() * sizeof(int32_t));
++    const ggml_status st = ggml_backend_sched_graph_compute(sched, gf);
++    r.ok = st == GGML_STATUS_SUCCESS;
++    if (r.ok) {
++        r.out.resize((size_t) ggml_nelements(res));
++        ggml_backend_tensor_get(res, r.out.data(), 0, ggml_nbytes(res));
++    }
++    ggml_free(ctx);
++    return r;
++}
++
++static ggml_backend_sched_t make_sched(world & w) {
++    std::vector<ggml_backend_t> bs;
++    std::vector<ggml_backend_buffer_type_t> bt;
++    if (w.dev) {
++        bs.push_back(w.dev);
++        bt.push_back(w.dev_buft);
++    }
++    bs.push_back(w.cpu);
++    bt.push_back(ggml_backend_get_default_buffer_type(w.cpu));
++    return ggml_backend_sched_new(bs.data(), bt.data(), (int) bs.size(), 2048, false, false);
++}
++
++static void compare(const char * what, const step_result & a, const step_result & b, double rel_tol, double * worst) {
++    CHECK(a.ok && b.ok, "%s: a graph failed", what);
++    if (!a.ok || !b.ok) {
++        return;
++    }
++    double max_ref = 0, max_diff = 0;
++    bool nan = false;
++    for (size_t i = 0; i < a.out.size(); ++i) {
++        if (!std::isfinite(a.out[i]) || !std::isfinite(b.out[i])) {
++            nan = true;
++        }
++        max_ref  = std::max(max_ref, (double) std::fabs(a.out[i]));
++        max_diff = std::max(max_diff, (double) std::fabs(a.out[i] - b.out[i]));
++    }
++    *worst = std::max(*worst, max_ref > 0 ? max_diff / max_ref : max_diff);
++    CHECK(!nan, "%s: a non-finite value (a poisoned slot was read?)", what);
++    CHECK(max_ref > 0 && max_diff <= rel_tol * max_ref, "%s: max |diff| %.3g vs max |ref| %.3g", what, max_diff, max_ref);
++}
++
++static void test_graph(std::mt19937 & rng, const char * device, int64_t n_expert, int trials) {
++    world w;
++    w.n_expert = n_expert;
++    w.cache_slots = (int32_t) std::min<int64_t>(24, n_expert / 2);
++    w.pool_slots = 24;
++    printf("building the weights (%" PRId64 " experts, iq2_s 2560x640 gate/up, q2_0 640x2560 down) ...\n", n_expert);
++    if (!make_world(w, rng, device)) {
++        return;
++    }
++    ggml_backend_sched_t sched = make_sched(w);
++    fake_copier * fake = dynamic_cast<fake_copier *>(w.pool.engine.get());
++    delayed_copier * dcop = dynamic_cast<delayed_copier *>(w.pool.engine.get());
++    auto set_drop = [&](bool drop) {
++        if (fake) { fake->drop_wait = drop; }
++        if (dcop) { dcop->drop_wait = drop; dcop->delay = drop; }
++    };
++
++    // the device arm compares a CPU reference with a graph whose cached and pooled rows run on the GPU's kernels (MMVQ over
++    // q8_1 activations), so they differ by quantisation noise; the exact comparison is against the enlarged cache
++    const double tol_ref = device ? 2e-2 : 1e-5;
++    double worst_off = 0, worst_on = 0, worst_exact = 0;
++    int shared_total = 0, steps_with_share = 0, dropped_detected = 0, dropped_runs = 0;
++    for (int trial = 0; trial < trials; ++trial) {
++        const int64_t n_tokens = 1 + (int64_t) (rng() % 7);
++        const bool strided = (rng() % 2) == 1;
++
++        // residency: k random experts in slots 0..k-1
++        std::vector<int32_t> all((size_t) n_expert);
++        for (int32_t e = 0; e < (int32_t) n_expert; ++e) {
++            all[(size_t) e] = e;
++        }
++        std::shuffle(all.begin(), all.end(), rng);
++        const int k = (int) (rng() % (uint64_t) (w.cache_slots + 1));
++        std::vector<int32_t> resident(all.begin(), all.begin() + k);
++        fill_cache(w, w.cs, resident);
++
++        // routing: top-10 per token from a small popular set half the time, so tokens share experts
++        std::vector<int32_t> ids;
++        for (int64_t t = 0; t < n_tokens; ++t) {
++            std::vector<int32_t> row;
++            while ((int64_t) row.size() < w.n_used) {
++                const int32_t e = (rng() % 2) ? all[(size_t) (rng() % 16)] : (int32_t) (rng() % (uint64_t) n_expert);
++                if (std::find(row.begin(), row.end(), e) == row.end()) {
++                    row.push_back(e);
++                }
++            }
++            ids.insert(ids.end(), row.begin(), row.end());
++        }
++        // the share: Strata's 0.29 and 0.55, the extremes, and none
++        static const int nums[] = { 74, 141, 256, 8, 0 };
++        g_pcie_num = nums[trial % 5];
++
++        // what the pool takes this step (the same arithmetic as the op), and the enlarged cache that holds it
++        moe_pcie::partition part;
++        {
++            std::vector<int32_t> cpu_tbl((size_t) n_expert), pool_ids(ids.size());
++            moe_pcie::partition_step(ids.data(), w.n_used, n_tokens, sizeof(int32_t), (size_t) w.n_used * sizeof(int32_t),
++                    w.cs.table.data(), n_expert, w.cache_slots, g_pcie_num, w.pool_slots, cpu_tbl.data(), pool_ids.data(), part);
++            shared_total += (int) part.share.size();
++            steps_with_share += part.share.empty() ? 0 : 1;
++        }
++        std::vector<int32_t> resident_big = resident;
++        for (const auto & es : part.share) {
++            resident_big.push_back(es.first);
++        }
++        fill_cache(w, w.big, resident_big);
++
++        // the unsplit reference, on the CPU alone with the full weights
++        std::mt19937 rng_x(1234 + trial);
++        std::vector<ggml_backend_t> cpu_only = { w.cpu };
++        std::vector<ggml_backend_buffer_type_t> cpu_buft = { ggml_backend_get_default_buffer_type(w.cpu) };
++        ggml_backend_sched_t ref_sched = ggml_backend_sched_new(cpu_only.data(), cpu_buft.data(), 1, 2048, false, false);
++        step_result ref = run_step(w, ref_sched, mode::reference, ids, n_tokens, strided, rng_x);
++        ggml_backend_sched_free(ref_sched);
++
++        // (a) the engine's graph without pcie_frac
++        std::mt19937 rng_x2(1234 + trial);
++        step_result off = run_step(w, sched, mode::cache_only, ids, n_tokens, strided, rng_x2);
++        compare("cache only vs unsplit", ref, off, tol_ref, &worst_off);
++
++        // (b)+(c) with the pool: poisoned first, copies landing only at the wait
++        poison_pool(w);
++        set_drop(false);
++        if (fake) {
++            fake->landed_early = false;
++        }
++        std::mt19937 rng_x3(1234 + trial);
++        step_result on = run_step(w, sched, mode::pcie, ids, n_tokens, strided, rng_x3);
++        compare("pcie split vs unsplit", ref, on, tol_ref, &worst_on);
++        std::mt19937 rng_x5(1234 + trial);
++        step_result exact = run_step(w, sched, mode::enlarged, ids, n_tokens, strided, rng_x5);
++        compare("pcie split vs the enlarged cache (same kernels, same rows)", exact, on, 1e-6, &worst_exact);
++        if (fake) {
++            CHECK(!fake->landed_early, "a copy landed before the wait node ran (trial %d)", trial);
++            CHECK(fake->queued.empty(), "copies left queued (trial %d)", trial);
++        }
++
++        {
++            // the negative control: drop the wait -- when the pool took anything, the result must NOT match
++            if ((fake || dcop) && !part.share.empty()) {
++                poison_pool(w);
++                set_drop(true);
++                std::mt19937 rng_x4(1234 + trial);
++                step_result bad = run_step(w, sched, mode::pcie, ids, n_tokens, strided, rng_x4);
++                set_drop(false);
++                if (dcop) {
++                    ggml_backend_synchronize(dcop->backend);   // the late copies of the dropped run land before the next step
++                }
++                ++dropped_runs;
++                bool differs = !bad.ok;
++                if (bad.ok) {
++                    for (size_t i = 0; i < bad.out.size() && !differs; ++i) {
++                        if (!std::isfinite(bad.out[i]) || std::fabs(bad.out[i] - exact.out[i]) > 1e-3 * std::fabs(exact.out[i]) + 1e-6) {
++                            differs = true;
++                        }
++                    }
++                }
++                dropped_detected += differs ? 1 : 0;
++            }
++        }
++    }
++    printf("graph: %d trials, worst rel diff against the CPU reference: cache only %.3g, with pool %.3g; against the enlarged cache %.3g; "
++           "the pool took %d experts over %d steps\n", trials, worst_off, worst_on, worst_exact, shared_total, steps_with_share);
++    CHECK(steps_with_share > 0, "no step used the pool: the test did not exercise the split");
++    if (fake || dcop) {
++        CHECK(dropped_runs > 0 && dropped_detected == dropped_runs, "the dropped-wait control was detected in %d of %d runs", dropped_detected, dropped_runs);
++    }
++    ggml_backend_sched_free(sched);
++}
++
++int main(int argc, char ** argv) {
++    // Never wake a GPU by accident: the CUDA backend initialises every device it can see the first time ggml's backend
++    // registry is touched. Without --device the test hides them all; with --device the caller must have restricted
++    // CUDA_VISIBLE_DEVICES to the one card it means (bench/a4000_dev.py does for the A4000).
++    bool has_device = false;
++    for (int i = 1; i < argc; ++i) {
++        has_device |= !strcmp(argv[i], "--device");
++    }
++    if (!has_device) {
++#ifdef _WIN32
++        _putenv("CUDA_VISIBLE_DEVICES=-1");
++#else
++        setenv("CUDA_VISIBLE_DEVICES", "-1", 1);
++#endif
++    } else if (!getenv("CUDA_VISIBLE_DEVICES")) {
++        fprintf(stderr, "--device needs CUDA_VISIBLE_DEVICES set to the one GPU to use\n");
++        return 2;
++    }
++    ggml_backend_load_all();
++    int trials = 60;
++    int64_t n_expert = 64;
++    const char * device = nullptr;
++    uint32_t seed = 20261002;
++    bool quick = false;
++    for (int i = 1; i < argc; ++i) {
++        if (!strcmp(argv[i], "--quick")) { quick = true; }
++        else if (!strcmp(argv[i], "--n-expert") && i + 1 < argc) { n_expert = atoll(argv[++i]); }
++        else if (!strcmp(argv[i], "--device") && i + 1 < argc) { device = argv[++i]; }
++        else if (!strcmp(argv[i], "--trials") && i + 1 < argc) { trials = atoi(argv[++i]); }
++        else if (!strcmp(argv[i], "--seed") && i + 1 < argc) { seed = (uint32_t) atoll(argv[++i]); }
++    }
++    if (quick) {
++        trials = std::min(trials, 10);
++        n_expert = std::min<int64_t>(n_expert, 32);
++    }
++    std::mt19937 rng(seed);
++
++    test_share_rule();
++    test_partition(rng, quick ? 500 : 5000);
++    test_graph(rng, device, n_expert, trials);
++
++    printf("%d checks, %d failed\n", n_checks, n_failed);
++    return n_failed ? 1 : 0;
++}
+-- 
+2.45.2.windows.1
+

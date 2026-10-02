@@ -4452,6 +4452,13 @@ def _run_turn(body: dict, streamed: bool):
     # real HTTP 400 on both paths, since nothing has been sent yet) -- never
     # landed.
     payload["_context"] = check_client_prompt(payload)
+    # THE PRE-FLIGHT IS OVER: every refusal that must be a real HTTP status (validation, the one-conversation
+    # rule, the window check) has had its chance. From here the stream may send heartbeats (_TurnPump: THE WAIT IS
+    # HEARD) -- not before: a prompt past the window took 9.6 s to count (deploy check 2026-10-02) and a heartbeat
+    # at 5 s turned its 400 context_length_exceeded, which harnesses compact on, into a mid-stream error.
+    _tok = cancel.current()
+    if _tok is not None:
+        _tok.preflight_done = True
     # A client that names the vision copy itself (`yamadori-vision`) loads
     # it with this turn's generation, which cannot be wrapped from here: room
     # is made once, now, and no lock is held through the turn (the KNOWN GAP
@@ -5852,9 +5859,10 @@ if __name__ == "__main__":
 # stream sends a heartbeat -- the empty delta stream_body already sends for "heartbeat" events, which Responses
 # turns into `response.in_progress` and Messages into `ping`. HEARTBEAT (5 s) is the proxy's existing beat, under
 # the shortest client silence limit we know (Hermes' codex transport: 12 s without a parsed event). E1 KEEPS ITS
-# PROMISE FOR FAST FAILURES: a refusal in the first HEARTBEAT seconds (validation, the window check, 503 at
-# capacity -- all decided before any model work) is still a real HTTP status; one after the first heartbeat is the
-# committed stream's ONE error event, as after any first byte.
+# PROMISE: no heartbeat goes out until the turn's PRE-FLIGHT is over (_run_turn marks the request's token after
+# the window check), so validation, 503 at capacity and 400 context_length_exceeded are still real HTTP statuses
+# however long they take to decide; a failure after the first heartbeat is the committed stream's ONE error event,
+# as after any first byte.
 class _TurnPump:
     """`_run_turn`'s events, pulled on ONE thread of its own (every resume on the same thread, the request's
     cancellation bound to it, the caller's contextvars copied), with a ("heartbeat", None) from next() whenever the
@@ -5900,10 +5908,15 @@ class _TurnPump:
         if not self._pulling:
             self._pulling = True
             self._want.release()
-        try:
-            what, item = self._q.get(timeout=HEARTBEAT)
-        except self._empty:
-            return ("heartbeat", None)
+        while True:
+            try:
+                what, item = self._q.get(timeout=HEARTBEAT)
+                break
+            except self._empty:
+                # heartbeats only once the turn's pre-flight is over (_run_turn sets it after the window check):
+                # until then a refusal must still be a real HTTP status (E1), however long the check takes
+                if getattr(self._token, "preflight_done", False):
+                    return ("heartbeat", None)
         self._pulling = False
         if what == "event":
             return item

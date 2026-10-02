@@ -289,7 +289,9 @@ def describe() -> dict:
             prof[k] = {"value": (f"<{len(val)} chars>" if isinstance(val, str) and len(val) > 40 else val),
                        "class": v.get("class")}
         out["models"][m] = {"rank": t.rank(m), "tiers": t.tiers_of(m), "window": t.window(m),
-                            "vision": t.vision(m), "locked": t.locked(m), "helpers": t.helpers(m), "profile": prof}
+                            "vision": t.vision(m), "locked": t.locked(m), "helpers": t.helpers(m),
+                            # THE OTHER CARD (mcp/slots.py): where a second conversation of this model's tiers runs
+                            "other_card": t.row(m).get("other_card"), "profile": prof}
     return out
 
 

@@ -629,3 +629,217 @@ and n. "Ported" = in `engines/patches/llama-upstream-flash/`.
 | Layer split over several GPUs | Coder 5080+3090: prompt +18-20%, decode +0-7% | the `flash-a4000` arm: experts of m layers on the A4000 via `-ot` (static), measured in this window |
 | Bulk expert-arena reads on MSVC | load time (`5edb9d6`) | not applicable (llama.cpp mmap) |
 | Experimental speed projection (a refusal-direction ablation) | top-1 changes at 10% of positions | NOT TAKEN (a behaviour change, not a speed one) |
+
+## 10. Port plans for the unported Strata pieces, and the lost slot cache (2026-10-02; plans, nothing built)
+
+Strata paths are in `Niko1221/Strata` @ `d551edf` (the tree this section was read from); ours are in the vendored
+`engines/src/llama-upstream-flash`. Strata's numbers are theirs (n=1 each). Nothing here is measured by us yet: the
+order of the ports is decided by the profiles of step (b) (`bench/flashnext_gate.py` arms `probe-opt-np1`,
+`probe-sched-np1`, `prefill-*-np1`).
+
+### 10.1 M3: the VRAM page window for the attention K/V (`--kv-resident`)
+
+- **Strata**: `src/kernels/cuda/kv_stream.cu` (`resolve_kernel` :82, `copy_kernel` :161, `kv_stream_resolve` :204),
+  `include/strata/kernels/kv_stream.hpp` (`KvStreamMap`), `src/core/layer.cpp` (`kv_plan` :491, `qsa_kv_resolve` :691).
+  The K/V lives in host-mapped pinned memory; VRAM holds `n_slots = ceil(max(N, 20480)/4)` pages of 4 cells (one
+  indexer block); `page_table[block]` = slot or -1. After top-k, one kernel marks the selected blocks' pages (CLOCK
+  second chance, never a page stamped this step) and a copy kernel reads the missing pages from the host alias over
+  PCIe into their slots, on the compute stream. Readers address `page_table[cell/4]`; writers write the host copy and
+  the slot if resident. Claim: Q2_0 262K 50.9 -> 62.6 tok/s (1,589 -> 3,872 experts in VRAM), ~+6% at 128K.
+- **Ours today**: 0012/0021 put the QSA layers' K/V in host-mapped memory (`src/llama-kv-cache.cpp`,
+  `ggml-cuda.cu`'s mapped buffer type); 0014/0015/0018 make the sparse attention convert only the selected cells to
+  f16 (`ggml/src/ggml-cuda/fattn.cu`, `flash_attn_mask_to_sparse_indices` and the conversion before the MMA kernel).
+  With the K/V mapped, that conversion reads its ~2,051 cells per query per QSA layer over PCIe EVERY step.
+- **Port**: make that converted-cell buffer persistent. Per mapped K/V tensor, a page pool on the card (pages of
+  `r` = 4 cells, K and V), a device page table, and a resolve + copy pair in front of the sparse kernel; the gather
+  then indexes through the page table. 0019's block list (512 blocks + the tail) is the natural page key, so M3
+  builds on M2b. Writers: `set_rows` / `cpy` into a mapped tensor invalidate the pages at and above the lowest block
+  written (the tail block and MTP's rejected drafts live there). State in `ggml_backend_cuda_context`, keyed by the
+  tensor's data pointer; size from `LLAMA_KV_RESIDENT=N` cells (Strata's floor is 20,480).
+- **Tests**: `test-backend-ops` FLASH_ATTN_EXT sparse cases with the window on must equal the window off bit for bit
+  (it is a cache), with the non-resident host cells poisoned after the copy; the gate's kernels, exact, needles.
+- **When**: only if E2 shows the mapped K/V (0021 at ~118 slots) decoding slower than the K/V on the card at the
+  same context. If 0021 alone already wins, M3 is the remaining PCIe read per step, sized by the profile.
+
+### 10.2 `pcie_frac`: a share of a step's missed experts computed on the GPU
+
+- **Strata**: `src/program/generate.cpp` (`probe_pcie_h2d_gbps` :848: 4 x 256 MiB pinned copies between two events;
+  the rule :1320-1335: `bw >= 20 ? base : bw < 4 ? 0 : min(base, max(0.05, base*bw/26))`, base 0.55),
+  `src/core/expert_source.cpp` (`expert_pool_dispatch_multi` :282, the split :309-392), `src/core/verify.cpp`
+  (`fetch_dma` :1143, `publish_plan` :1155; 16 staging blobs). The last `m = misses * frac` missed experts of a
+  layer go to staging slots (a copy kernel from the pinned arena's device alias, or `cudaMemcpyAsync` on a copy
+  stream) and the GPU computes them while the CPU pool computes the rest; the graph waits on doorbell flags and
+  merges by destination row. Their 5060 Ti x8 probe: 14.1 GB/s -> 0.29.
+- **Ours today**: a miss is computed on the CPU (0003's chain: the cached slots by MMVQ on the card, the uncached
+  ids by the CPU `mul_mat_id`, one scheduler split per layer each way). ggml already has the upload half:
+  `ggml-backend.cpp` copies only the USED experts of an op-offloaded `MUL_MAT_ID` to the card (`copy_experts`,
+  around line 1985), which is what prefill uses.
+- **Port**: split the miss branch in `src/llama-moecache.cpp`'s graph into two `MUL_MAT_ID` nodes over the same
+  host weights -- one kept on the CPU, one offloaded -- with the missed ids partitioned by a small CPU node (the
+  last `m` in routing order to the GPU, the rest to the CPU), so the existing used-expert copy uploads exactly those
+  (1.38 MiB an expert-layer). `LLAMA_MOE_PCIE_FRAC`, default from a one-off H2D probe at load (Strata's rule).
+  No new kernel.
+- **Open, for the profile to answer first**: whether the CPU's miss computation overlaps GPU work at all today
+  (0017: a verify step is 41-47 ms waiting on the GPU + 23-27 ms of CPU, added, not overlapped). If they are serial,
+  the larger gain is running the two branches concurrently, and `pcie_frac` is the way to balance them.
+- **Tests**: `test-backend-ops` MUL_MAT_ID with a partitioned id set against the single node (exact); the gate's KL
+  (batch 4), needles, corrupt, speed.
+
+- **BUILT (2026-10-02, offline; patch 0024, `LLAMA_MOE_PCIE_FRAC`, default off, NOT pinned, NOT measured on a GPU)**.
+  Strata's rule and plan are ported (`expert_source.cpp` @ d551edf :282-392: the last m = (missed * pcie_num) >> 8 of
+  the layer's distinct missed experts in routing order; `generate.cpp`'s probe and rule are at d9ab843 :950 and
+  :1715-1735 -- the plan's `generate.cpp:848` / `:1320-1335` are not in d551edf, which has only a fixed per-pack
+  default, 0.55 native / 0.2 Q2_0). It is NOT built as two MUL_MAT_ID nodes with one op-offloaded, for three reasons found
+  in the source: an offloaded node cannot skip ids, so the experts it does not own are either computed from slots
+  nothing copied (a NaN, times a zero weight, is NaN) or one dummy expert is copied on every layer where the share is
+  empty (fewer than 4 misses at a 0.29 share: 49% of layer-steps at 36% misses of 10); ggml's used-expert copy is
+  synchronous inside the scheduler, so nothing would overlap; and the scheduler allocates the node's full 512-expert tensor as its input. Built
+  instead: a small POOL of expert slots on the device (one per expert shape, shared by all layers: 21 slots x 1.38 MiB =
+  ~29 MiB at a 0.29 share and a 7-token batch limit), a PLAN node (a ggml custom op on the CPU backend, first in the layer's
+  CPU split) that picks the share, writes the table the CPU `mul_mat_id` nodes skip by and the pool's slot ids, and
+  enqueues the share's copies from the pinned experts on a second CUDA stream; a WAIT node after the CPU chain that blocks
+  on the copies' event; and the same `mul_mat_id` + activation chain the cache uses, over the pool, after it. No new
+  kernel, no new scheduler split. `LLAMA_MOE_PCIE_FRAC=<f>` or `auto` (the probe, Strata's rule, `LLAMA_MOE_PCIE_BASE`
+  default 0.55 -- THEIR measurement on THEIR CPU kernels, so `auto` is a place to start a sweep of explicit shares, not a
+  result). **Tested** (`tests/test-moe-pcie-split.cpp`, ctest `--quick`; CPU backend, no GPU): the rule and the env
+  parse; 5,000 random partitions against a brute force; the model's shape (iq2_s 2560 x 640 gate/up, q2_0 down, top-10,
+  1-7 tokens, duplicates across tokens, random residency, shares 0 / 8 / 74 / 141 / 256 of 256) with CPU + cache chain +
+  pool chain equal to the unsplit chain, bit-exact (60 trials, 25,507 checks, the pool took 371 experts over 37 steps),
+  the pool poisoned before every step and the copies landing only at the wait node, and a control that drops the wait
+  and must fail (it does). With `--device NAME` the same on a GPU through the real second stream and event, scheduled over
+  {GPU, CPU}: **not run**. **Not measured, and to be measured first**: (1) the arithmetic says little is on the table.
+  Section 8 puts the CPU at 0.042-0.048 ms per expert after 0008 and a 1.38 MiB expert over a 14 GB/s link at ~0.1 ms, so
+  the balance point is about 0.3 only if the copy and the CPU overlap; at a 64% hit rate a layer misses 3.6 of 10 and
+  Strata's floor rule gives m = 0 for fewer than 4 (49% of layer-steps), 0.54 expert per layer-step on average at 0.29,
+  and each shared expert costs 3 copy submissions plus the pool chain's 5 GPU nodes. (inferred, not measured) (2) The
+  copies overlap the CPU chain; the GPU's own chains do not (they still follow it: the CPU split's input copy
+  synchronises the compute stream, so a GPU chain launched before it is waited for). Running the CPU and GPU branches
+  concurrently -- the plan's "larger gain" -- needs the CPU chain's inputs copied to the host in an earlier split, so that
+  the GPU chains can be launched between that copy and the CPU compute; not built. (3) the gate: graph dump with the switch
+  unset against cand0022 (`GGML_SCHED_DEBUG=2`: byte-identical, the claim for "off"), KL, needles, corrupt, then speed n=3
+  at a sweep of explicit shares.
+
+### 10.3 The stager: queued refills and the stream-issuer thread
+
+- **Strata**: `src/prefill/prefill.cpp` (`struct Stager` :122-239: a ring of 16 pinned buffers and 2-4 memcpy
+  workers for UNPINNED blobs; the issuer thread :945-1003 calls `cudaMemcpyAsync` on the copy stream, throttled by
+  ring occupancy, with `copied[]` / `used[]` events), `src/core/expert_cache.cpp` (`fill_slot_queued` :268,
+  `sync_queued` :285), `generate.cpp` (`adapt` / `apply_pending` :3302-3370: a swap marks the victim uncached first,
+  copies on `adapt_stream`, and publishes the new residency only once its event has completed). Claims: refills
+  162 -> 96 ms a prompt; IQ3_S 32K 1,143 -> 1,213 tok/s.
+- **Ours today**: 0004's adaptive swaps run in `llama_moe_cache_step` (`src/llama-moecache.cpp` :528) with
+  `ggml_backend_tensor_set` -- a synchronous copy on the compute stream, up to 96 swaps every 4 steps. 0002 already
+  creates a second backend instance on the card for uploads that overlap compute (`sched->prefetch_backend`,
+  `ggml_backend_tensor_set_async` + events).
+- **Port (D-4 only)**: swaps issued through a second backend instance with an event; the slot table changes at the
+  next step whose event has completed (victim -> the dummy slot at once, so the CPU serves it meanwhile). The
+  issuer thread and the pageable-blob stager are NOT ported: our experts are pinned (0005), so `cudaMemcpyAsync`
+  returns at once and there is nothing for a thread to hide.
+- **Tests**: the cache's unit test of the table (a swap never leaves a slot whose rows are half-written visible:
+  poison the slot before the copy, the gate's kernels + needles); speed n=3.
+- **When**: if the decode profile shows copies or waits attributable to swaps (0017's `copy` is 4-5 ms of ~84).
+
+- **BUILT (2026-10-02, offline; patch 0025, `LLAMA_MOE_CACHE_QUEUED_REFILL=1`, default off, NOT pinned, NOT measured on a GPU)**.
+  The plan's premise is not what the source does: 0004's swaps never ran on the compute stream in `llama_moe_cache_step`.
+  Since 0003 (#27861) the slices are copied by a worker thread (`ggml_backend_tensor_set`, one copy and one stream
+  synchronise per matrix) and published at a later step; what ran on the decode thread every adaptive step was the table
+  writes, one synchronous device copy per evicted expert and per newcomer, up to 2 x 96. Built: no worker thread; a
+  step's evictions go to the host mirrors, each changed layer's tables are written once, whole (one device copy a layer);
+  the newcomers' three matrices are enqueued on a second backend instance's stream and closed into a batch with an event;
+  later steps poll the events WITHOUT blocking (`cudaEventQuery`, offered as the registry proc address
+  `ggml_backend_event_query` so no ggml header changes and no CUDA object rebuilds) and publish only the jobs of a batch that
+  has landed, in order; the LRU policy does not queue an expert whose copy is in flight. Strata's issuer thread and
+  pageable-blob stager are not ported (our experts are pinned, 0005; with pageable ones the new path is not used and the
+  upload thread stays, with a warning). `LLAMA_MOE_REFILL_POISON=1` (tests, both paths) fills a slot with 0xFF before its
+  copy. **Tested** (`tests/test-moe-refill.cpp`, ctest; no GPU): the real `queue` / `enqueue_job` / `publish` /
+  `flush_tables` over the cache's bookkeeping, random swaps, a fake engine whose copies land only when told to; after every
+  operation every published expert sits in a slot holding exactly its bytes (846 checks, 0 failed; 1,221 refills over 400
+  steps, 399 steps found a batch in flight, steps to land avg 3.58 max 13), and a harness that publishes at push time is
+  caught in 40 of 40 steps. With `--device NAME`: the real stream and event, made slow with 512 MiB of copies queued ahead,
+  and the event query itself: **not run**. **Not measured**: whether any of this moves the decode (the table writes it
+  removes are ~48-100 small synchronous copies per adaptive step against ~85 ms a verify step, inferred); the engine-side
+  gate is the n=3 speed step plus the cache's new "refills:" line (steps to land). 0017's `copy` 4-5 ms is the scheduler's
+  input copies, not the refills.
+
+### 10.4 Prompt side, for a 30K agent prompt
+
+- **What the prompt costs today** (cand0022, warm, n=3): 231-318 tok/s with op offload, 95-101 without. With op
+  offload every 512-token ubatch uploads the experts it uses, per layer: up to 33.1 GiB a ubatch if all 512 x 48 are
+  used (66.2 MiB a slot row x 512). At Strata's 14.1 GB/s for this card on x8 that alone would cap prefill near 200
+  tok/s -- we measure more, so either fewer experts are used per ubatch or the link is faster; the prefill profile
+  (sched `copy` / `other`, the op table) and an H2D probe say which. The four candidates, in the order the profile
+  will rank:
+  1. **Larger prompt ubatch** (`-ub 1024`: half the uploads per token; 1,898 MiB more compute buffer = 29 cache
+     rows; the `cache-all-ub1k` arm exists). 0021 frees ~3.2 GB that can pay for it.
+  2. **0002's streaming ring** (`--prefetch-experts-slots`, Strata's `prefill.cpp` :70-86, :889-1003: the next
+     layer's experts upload on a copy stream while the current layer's attention runs). Built, never measured in
+     the combined arm: `prefill-ring-np1` (2 staging slots, 62 cache slots).
+  3. **CPU and GPU experts together in prefill** (10.2's split applied to prompt batches: ~100 tok/s of CPU
+     experts are idle while the GPU's uploads are the limit).
+  4. **D-1, QSA prompt attention on tensor cores** (`src/kernels/cuda/qsa_prompt_attn.cu`: `prompt_attn_i8_kernel`
+     :358, int8 codes straight into `mma.sync` with the scales applied in FP32, one block per (query, KV head), a
+     whole chunk per launch; select: `qsa_select.cu` `block_scores_tc_kernel` :189, C-1's active-block grid, C-2's
+     chunked indexer appends). Claim: attention 5,216 -> 1,318 ms of a 32K prompt, +18.8%. Ours: the sparse MMA
+     kernel of `fattn.cu` after 0014's f16 conversion. Worth porting only if the op table puts FLASH_ATTN_EXT,
+     TOP_K and the indexer above the expert uploads.
+
+### 10.5 "Reused 0 of 30,262 tokens" two hours later (diagnosis; `logs/proxy.log`, `index/corpus.sqlite3`)
+
+- **What the records say** (2026-10-01): 19:29 `first prompt 30262 reused 0` on flash-next, slot 0, no swap since
+  17:2x. It was a NEW VS Copilot conversation (corpus: `n_messages` 2, `first_turn` true, 73 tools), not the 16:52
+  one continued; the requests after it in the same conversation reused 30,833 of 30,884 and 30,992 of 31,066. So
+  the slot was not emptied by idleness, a release or the prompt cache: the new prompt diverged from the slot's
+  tokens EARLY, and the server could not keep the common prefix.
+- **Why a common prefix is lost on this model**: Flash-Next's memory is hybrid (DeltaNet recurrences), which cannot
+  be truncated. On a divergence at position p, llama-server needs a context checkpoint at or before p
+  (`tools/server/server-context.cpp` :3300-3400), else "forcing full prompt re-processing due to lack of cache
+  data". Checkpoints are only made at a user message's start, near the prompt's end, and at least 8,192 tokens
+  apart (:3596-3646) -- never inside a 26K system + tools block. Two candidates, which the records cannot tell
+  apart (the corpus keeps 1,200 characters of the system text; both conversations' heads hash alike): (i) the
+  prompts differ INSIDE the system + tools block (VS Copilot's own environment text, the tool list -- 73 tools,
+  110 at 20:25 --, anything of ours rendered there), where no checkpoint can exist; (ii) they differ only from the
+  first user turn on (it opens with `<current_datetime>`), and the user-start checkpoint that should cover that
+  was not there -- the 16:52 conversation's first read was cancelled at 10,240 tokens and resumed, which is the
+  one unusual thing about how its slot was built. The prompts were 26,500 and 30,262 tokens, both two messages.
+- **Not involved** (read from the code): `--cache-ram` (only used when f_keep < 0.5, and a failed load logs "failed
+  to load prompt from cache"), the proxy's releases (logged "kept": locked), the MTP draft (its state rides in the
+  same checkpoints: `load_dft`, `common_speculative_set_state`).
+- **To confirm on the live server** (a config change, the coordinator's): on the flash-next entry add
+  `--log-file <logs>/flash-next.server.log -lv 4` and env `LLAMA_SERVER_SLOTS_DEBUG=1`,
+  `LLAMA_SERVER_SLOTS_N_DIFF=16`; open two VS Copilot conversations a few minutes apart. The lines that decide it:
+  `old: ... | ...` / `new: ... | ...` (the tokens at the mismatch), `restored context checkpoint (pos_min = ..)` or
+  `forcing full prompt re-processing`, `erased invalidated context checkpoint`, and for the cache-ram path
+  `updating prompt cache` / ` - saving prompt with length` / `failed to load prompt from cache`.
+- **The engine-side fix if confirmed** (a patch, not built): periodic checkpoints inside a long prompt -- one every
+  `checkpoint_min_step` tokens whatever the message boundaries (Strata does the same: `--prompt-cache-every`
+  16,384 and a pinned root at the system prompt's end, `generate.cpp` :3241, :3906-3921) -- so a changed system
+  block re-reads from the last 8K boundary before the change, not from 0. Its cost is host RAM per checkpoint (the
+  size is in the `created context checkpoint` line; unmeasured here).
+- **0023, built 2026-10-02** (operator: "We should build this"; `0023-server-checkpoint-every.patch`, on 0022,
+  independent of 0019-0021; candidate `llama-upstream-flash-cand0023`): `--checkpoint-every N` (env
+  `LLAMA_ARG_CHECKPOINT_EVERY_NT`, default 0 = today's behaviour) ends a prompt batch N tokens after the slot's last
+  checkpoint and makes one in front of the batch that starts there. N = 16,384 is Strata's
+  (`src/program/generate.cpp:283` `prompt_cache_every = 16384`). The MTP draft's state rides in it like in every
+  checkpoint (`create_checkpoint`: `update_dft`, `common_speculative_get_state`). The server's two existing knobs:
+  `--checkpoint-min-step` (8,192) does not apply to a periodic checkpoint when it is made, and applies to it like
+  to any other once the list is full (other requests' checkpoints closer than the min step to an earlier one are
+  dropped first, then the oldest) -- so N >= 8,192 is kept, a smaller N is not on a full list; `--ctx-checkpoints`
+  (32) caps the list as before.
+- **What a checkpoint costs on this model** (the server's own `created context checkpoint ... size` lines,
+  `cache-all-np1.server.log`, 24 checkpoints at 3.9K-140K tokens): 112.6 MiB + 2.02 KiB per token of position --
+  120.3 MiB at 3,916, 390.2 MiB at 140,483, so 630.6 MiB at 262,144 (extrapolated). The periodic set alone: 1
+  checkpoint (145 MiB) for a 30K prompt, 7 (1.7 GiB) for 130K, 15 (5.4 GiB) for a full 262K window. The list's cap
+  is unchanged: 32 x the size at the slot's length (20 GiB at 262K, already true today). Host RAM is the constraint:
+  with flash-next loaded the box had ~1.4 GB of commit left (2026-10-01, 109.0 of 110.5 GB; the pagefile grows on
+  demand). The time to make one is in 0023's log line; measured with the live check.
+- **The check** (`bench/flashnext_gate.py` step `ckpt`, arms `ckpt-np1` and `ckpt-off-np1`): A (~30K tokens), B =
+  A's first ~20K + other text, C = A's first ~8K + other text, greedy, 48 tokens. With the flag B must reuse exactly
+  floor(lcp/N) x N tokens and C 0; without it B reuses 0. B's text must equal a cold run of B, judged only if two
+  cold runs equal each other (this card's own variation, window E1); the first token's top-5 probabilities are
+  recorded for each. **Not yet run** (the card).
+- **Bonsai and Mirai S**: the same limit. Their engines carry the same server code (the vendored
+  `llama-bonsai2-ada` and `llama-mirai-s` trees: the patch applies to both with offsets, no rejects), their memory
+  is recurrent too (Qwen3.8-27B's Gated DeltaNet), and `logs/proxy.log` has it on bonsai: `first prompt 30164
+  reused 0`. Not ported.
+- **Also seen there**: the 16:52 request's swap-in took 180 s and the client hung up; its prefill was cancelled at
+  10,240 tokens, and the retry reused exactly those 10,240.

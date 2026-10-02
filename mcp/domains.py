@@ -169,6 +169,30 @@ EXTENSION_DOMAINS = {
 # contrast"). The design-sense phrases have NO measured positive in this
 # repo's real input (n=0): they are kept so a design question phrased that
 # way still matches, not because one was observed.
+#
+# `ui-component` NEEDS A UI CONTEXT AROUND ITS NOUNS (2026-10-02, GitHub issue
+# #4). `@types/react` was mapped to `ui-component` on 2026-10-01, which made
+# the bare words of this list matter to the gate: "input" is in every one of
+# the 342 LiveCodeBench prompts ("The input is given from Standard Input"),
+# so all 342 matched React's held domain and were offered the tools. With
+# "input" gone, 5 of 342 still matched on "component" (graph puzzles'
+# "connected component": rows 149 and 320 of test6+test5 in file order) and
+# "button" (puzzles about a button that is pressed: rows 192, 257, 321). Same rule as `vertex` and
+# `whitespace` above: a word whose first sense in programming text is not the
+# domain's keeps only the phrases that carry the domain's sense -- `input`
+# needs "field/box/element/validation..." or a kind before it ("text input",
+# `<input`), `component` a UI kind ("react 19 component", "tabs component",
+# "the component unmounts"), `button` a UI word beside it ("submit button",
+# "button looks", "<button"), `modal` a UI verb or noun beside it. MEASURED
+# 2026-10-02 (word match / the gate's offer, the real package store, before ->
+# after): the 342 LiveCodeBench prompts 342 -> 0 / 342 offered -> 0; bench/
+# domain tasks.jsonl (100) 15 -> 0 word matches, 3 -> 5 withheld (2 Rust/TS
+# tasks that matched on "input" only); type challenges (183) 11 -> 0; the 26
+# three.js questions 0 -> 0, all 26 still offered; the react tasks (40, which
+# name react, so the gate offers them either way) 34 -> 37 carry the domain.
+# 24 hand-written prose UI questions with no import (test_domains.py) match
+# 20 -> 24; 12 puzzle / graph / shader sentences match 10 -> 0. The prose
+# fixtures were written beside the list, so their 24/24 is in-sample.
 WORD_DOMAINS = {
     "visual-design": r"\b(colou?r|palette|typograph\w*|font|spacing|"
                      r"(?<!in )(?<!by )contrast|dark mode|"
@@ -176,8 +200,30 @@ WORD_DOMAINS = {
                      r"hierarchy|"
                      r"(?:more|less|generous|enough|extra|negative) white ?space|"
                      r"white ?space (?:between|around))\b",
-    "ui-component": r"\b(button|modal|dropdown|form field|tooltip|navbar|"
-                    r"component|input)\b",
+    "ui-component": (
+        r"(?:\b(?:dropdown|tooltip|navbar|form field|checkbox|popover|sidebar|"
+        r"toast|onclick|onchange|re-?renders?|"
+        r"(?:open|close|show|hide) (?:the|a|my) modal|"
+        r"modal (?:dialogs?|windows?|overlays?|components?|backdrops?|"
+        r"doesn'?t|does not|won'?t|opens|closes)|"
+        r"(?:react|vue|svelte|angular)(?: \d+)? components?|"
+        r"(?:ui|functional|class|child|parent|presentational|server|client|"
+        r"custom|reusable|stateless|stateful|accessible|tabs?|accordion|"
+        r"pagination|form|table|list|card|menu|select|dialog|header|footer|"
+        r"layout|page|view|slider) components?|"
+        r"components? (?:library|props|state|tree|lifecycle|styling)|"
+        r"(?:the|this|my|a|that) components? (?:renders?|mounts?|unmounts?|"
+        r"is mounted|using)|"
+        r"buttons? (?:component|element|label|variant|styles?|styling|hover|"
+        r"focus|state|handler|looks?|feels?|flickers|jumps|overflows)|"
+        r"(?:ui|icon|submit|toggle|radio|primary|secondary|disabled|rounded|"
+        r"hover) buttons?|"
+        r"(?:style|restyle|align|centre|center|disable|resize|round|animate|"
+        r"colou?r)\w* (?:the|this|my|a|that|each) (?:\w+ )?buttons?|"
+        r"input (?:fields?|box(?:es)?|elements?|components?|controls?|"
+        r"validation|placeholder|focus|handlers?)|"
+        r"(?:text|search|email|password|form|checkbox|file|otp) inputs?)\b|"
+        r"<(?:button|input|select|textarea|dialog)\b)"),
     "motion": r"\b(animat\w*|transition|easing|keyframe|spring)\b",
     "accessibility": r"\b(a11y|accessib\w*|screen reader|aria|wcag|focus ring)\b",
     "brand": r"\b(brand|voice|tone of voice|identity)\b",

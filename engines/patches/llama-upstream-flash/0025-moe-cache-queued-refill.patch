@@ -1,0 +1,1380 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Fri, 2 Oct 2026 13:24:37 -0400
+Subject: [PATCH] moe cache: LLAMA_MOE_CACHE_QUEUED_REFILL, refills on a second
+ CUDA stream, published when their event has completed
+
+Strata code in this patch: Copyright (c) 2026 Niko1221 and the Strata contributors, MIT License
+(LICENSE added in Strata c0107c3; the full notice is engines/patches/llama-upstream-flash/LICENSE.strata).
+Ported from src/program/generate.cpp @ d551edf :3302-3370 (`adapt` / `apply_pending`: a swap marks its victim
+uncached first, copies the newcomer on the adapt stream, and publishes the new residency only once the copy's
+event has completed) and src/core/expert_cache.cpp @ d551edf :268 and :285 (`fill_slot_queued`,
+`sync_queued`). NOT ported: Strata's issuer thread and its pageable-blob stager (src/prefill/prefill.cpp @
+d551edf :122-239, :945-1003), which hide the cost of copying unpinned blobs; our experts are pinned (0005), so
+cudaMemcpyAsync returns at once and there is nothing for a thread to hide. With pageable experts the new path
+is not used.
+
+Off unless LLAMA_MOE_CACHE_QUEUED_REFILL=1; off, the code path is the one 0003/0004 have (the upload thread and
+the per-entry table writes). It also falls back, with a warning, when the cached layers are not all on one
+device, when the experts are not in pinned host memory (LLAMA_PIN_EXPERTS=1), or when the device cannot query an
+event without blocking.
+
+What the cache did, read from src/llama-moecache.cpp: the copies were already off the decode thread (a worker
+thread, ggml_backend_tensor_set per matrix: a copy and a stream synchronise each) and published only at a later
+step(); what ran on the decode thread, every adaptive step, was the table writes -- one synchronous device copy
+per evicted expert and another per newcomer, up to 2 x 96. (docs/FLASH-NEXT.md 10.3 said the copies ran on the
+compute stream in step(); they did not.)
+
+Now (src/llama-moecache-refill.{h,cpp}, src/llama-moecache.cpp):
+- no worker thread. A step's evictions are written to the layers' host mirrors, then each changed layer's device and
+  host table is written ONCE, whole (so no graph can see an evicted slot), then the newcomers' copies (the three
+  matrices of each expert) are enqueued on a second backend instance's stream (backend_engine) and closed into a
+  batch with an event;
+- the next steps poll the batches' events WITHOUT blocking (cudaEventQuery), and only the jobs of a batch whose event
+  has completed are published: slot_expert / expert_slot updated and the table written (queue::poll, publish,
+  flush_tables). A batch that has not landed stays; publication is in order. The adaptive tier still starts no
+  swap while one is in flight; the LRU policy does not queue an expert whose copy is already in flight
+  (queue::contains) -- a copy now lands a few steps later than a thread's did;
+- ggml-cuda offers the non-blocking query as the registry's proc address "ggml_backend_event_query"
+  (ggml-cuda.cu), like ggml's other optional backend features, so no public ggml header changes (a change to
+  ggml-backend.h or -impl.h rebuilds every CUDA object);
+- LLAMA_MOE_REFILL_POISON=1 (tests; both paths): a slot is filled with 0xFF before its refill is enqueued, so a
+  slot read before its copy landed shows up as NaN; the hit-rate line gains "refills: batches, experts,
+  in-flight, steps to land avg/max".
+
+Tests (tests/test-moe-refill.cpp, registered with ctest): the harness runs the same functions step() calls (queue
+push/poll, enqueue_job with the poison, publish, flush_tables) over a layer bookkeeping with the cache's member
+names, with random swaps, and after every operation checks that every expert the device table points at sits in a
+slot holding exactly that expert's bytes (all three matrices) -- a slot is never published before its copy has
+landed. With a fake engine whose copies land only when the test lands them, at random: 400 steps, 3 layers, 1,221
+refills, 399 of 400 steps found a batch still in flight, steps to land avg 3.58 max 13: 846 checks, 0 failed; a
+harness that publishes at push time (the control) is caught in 40 of 40 steps; the queue alone publishes only the
+landed prefix, oldest first. With --device NAME (the caller restricts CUDA_VISIBLE_DEVICES): the real engine, eight
+64 MiB copies queued ahead of every batch so that it lands late, the same invariant, polls must find batches not yet
+landed, and the event query must say "not yet" behind 512 MiB of copies and "done" after. NOT run on a GPU yet and
+nothing is measured: whether it speeds the decode is the gate's question (docs/FLASH-NEXT.md 10.3).
+---
+ ggml/src/ggml-cuda/ggml-cuda.cu |  20 ++
+ src/CMakeLists.txt              |   1 +
+ src/llama-moecache-refill.cpp   | 105 ++++++
+ src/llama-moecache-refill.h     | 232 ++++++++++++
+ src/llama-moecache.cpp          | 147 +++++++-
+ tests/CMakeLists.txt            |   2 +
+ tests/test-moe-refill.cpp       | 609 ++++++++++++++++++++++++++++++++
+ 7 files changed, 1107 insertions(+), 9 deletions(-)
+ create mode 100644 src/llama-moecache-refill.cpp
+ create mode 100644 src/llama-moecache-refill.h
+ create mode 100644 tests/test-moe-refill.cpp
+
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 53dc92b1f..cf0345726 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -5862,6 +5862,23 @@ static void ggml_backend_cuda_device_event_synchronize(ggml_backend_dev_t dev, g
+     CUDA_CHECK(cudaEventSynchronize((cudaEvent_t)event->context));
+ }
+ 
++// Yamadori 0025: has the event completed? cudaEventQuery never blocks; cudaErrorNotReady is the answer "not yet", not a
++// failure, and is cleared so that it is not reported as the error of whatever CUDA call comes next. Offered through the
++// registry's get_proc_address ("ggml_backend_event_query"), as ggml's other optional backend features are, so that no
++// public ggml header changes.
++static bool ggml_backend_cuda_event_query(ggml_backend_event_t event) {
++    const cudaError_t err = cudaEventQuery((cudaEvent_t)event->context);
++    if (err == cudaSuccess) {
++        return true;
++    }
++    if (err == cudaErrorNotReady) {
++        (void) cudaGetLastError();
++        return false;
++    }
++    CUDA_CHECK(err);
++    return true;
++}
++
+ static const ggml_backend_device_i ggml_backend_cuda_device_interface = {
+     /* .get_name                = */ ggml_backend_cuda_device_get_name,
+     /* .get_description         = */ ggml_backend_cuda_device_get_description,
+@@ -6002,6 +6019,9 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
+     if (strcmp(name, "ggml_backend_get_features") == 0) {
+         return (void *)ggml_backend_cuda_get_features;
+     }
++    if (strcmp(name, "ggml_backend_event_query") == 0) {
++        return (void *)ggml_backend_cuda_event_query;   // Yamadori 0025
++    }
+     return nullptr;
+ }
+ 
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 0c3174180..7cf8be484 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -38,6 +38,7 @@ set(LLAMA_CORE_SOURCES
+     llama-model.cpp
+     llama-moecache.cpp
+     llama-moecache-pcie.cpp
++    llama-moecache-refill.cpp
+     llama-quant.cpp
+     llama-sampler.cpp
+     llama-vocab.cpp
+diff --git a/src/llama-moecache-refill.cpp b/src/llama-moecache-refill.cpp
+new file mode 100644
+index 000000000..8aaa9a452
+--- /dev/null
++++ b/src/llama-moecache-refill.cpp
+@@ -0,0 +1,105 @@
++#include "llama-moecache-refill.h"
++
++#include <algorithm>
++
++namespace moe_refill {
++
++event_query_fn event_query_of(ggml_backend_dev_t dev) {
++    if (!dev) {
++        return nullptr;
++    }
++    ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
++    return reg ? (event_query_fn) ggml_backend_reg_get_proc_address(reg, "ggml_backend_event_query") : nullptr;
++}
++
++backend_engine::backend_engine(ggml_backend_dev_t dev, size_t max_batches) {
++    query = event_query_of(dev);
++    if (!dev || !query) {
++        return;
++    }
++    backend = ggml_backend_dev_init(dev, nullptr);
++    if (!backend) {
++        return;
++    }
++    for (size_t i = 0; i < max_batches; ++i) {
++        ggml_backend_event_t ev = ggml_backend_event_new(dev);
++        if (!ev) {
++            break;
++        }
++        events.push_back(ev);
++        free_events.push_back(i);
++    }
++}
++
++backend_engine::~backend_engine() {
++    if (backend) {
++        ggml_backend_synchronize(backend);
++    }
++    for (ggml_backend_event_t ev : events) {
++        ggml_backend_event_free(ev);
++    }
++    if (backend) {
++        ggml_backend_free(backend);
++    }
++}
++
++void backend_engine::copy(ggml_tensor * dst, const void * src, size_t dst_offset, size_t size) {
++    ggml_backend_tensor_set_async(backend, dst, src, dst_offset, size);
++    enqueued = true;
++}
++
++int64_t backend_engine::submit() {
++    if (!enqueued) {
++        return 0;
++    }
++    enqueued = false;
++    if (free_events.empty()) {
++        // the caller checks can_submit() first; if it did not, wait for the oldest batch rather than lose one
++        wait(outstanding.front().ticket);
++    }
++    const size_t ev = free_events.back();
++    free_events.pop_back();
++    ggml_backend_event_record(events[ev], backend);
++    slot s;
++    s.ticket = next_ticket++;
++    s.event  = ev;
++    outstanding.push_back(s);
++    return s.ticket;
++}
++
++bool backend_engine::done(int64_t ticket) {
++    if (ticket <= completed_through) {
++        return true;
++    }
++    for (const slot & s : outstanding) {
++        if (s.ticket != ticket) {
++            continue;
++        }
++        if (!query(events[s.event])) {
++            return false;
++        }
++        // one stream: everything submitted before this batch has landed too, and their events are free again
++        completed_through = std::max(completed_through, ticket);
++        while (!outstanding.empty() && outstanding.front().ticket <= completed_through) {
++            free_events.push_back(outstanding.front().event);
++            outstanding.pop_front();
++        }
++        return true;
++    }
++    return true;   // already reaped
++}
++
++void backend_engine::wait(int64_t ticket) {
++    if (ticket <= completed_through) {
++        return;
++    }
++    for (const slot & s : outstanding) {
++        if (s.ticket == ticket) {
++            ggml_backend_event_synchronize(events[s.event]);
++            break;
++        }
++    }
++    done(ticket);
++}
++
++} // namespace moe_refill
+diff --git a/src/llama-moecache-refill.h b/src/llama-moecache-refill.h
+new file mode 100644
+index 000000000..65114331d
+--- /dev/null
++++ b/src/llama-moecache-refill.h
+@@ -0,0 +1,232 @@
++#pragma once
++
++// Yamadori 0025: queued refills for the MoE expert cache (llama-moecache.h). The cache's refills (the adaptive tier's
++// swaps and the LRU's inserts) are copies of whole experts from the pinned host weights into device slots. Here they
++// are enqueued on a second CUDA stream, and a slot's table entry is published only after the event that follows its copy
++// has completed -- a refill never blocks the decode, and a slot is never read before its data is there.
++//
++// Ported from Strata (github.com/Niko1221/Strata). Copyright (c) 2026 Niko1221 and the Strata contributors; MIT
++// License (the full notice: engines/patches/llama-upstream-flash/LICENSE.strata; the file is in Strata at c0107c3, the
++// code below was read at d551edf):
++//  - src/program/generate.cpp @ d551edf :3302-3370 (`adapt` / `apply_pending`): a swap marks its victim uncached FIRST
++//    (the CPU computes it meanwhile), copies the newcomer on the adapt stream, and publishes the new residency only
++//    once the copy's event has completed;
++//  - src/core/expert_cache.cpp @ d551edf :268 and :285 (`fill_slot_queued`, `sync_queued`): the copies are queued, the
++//    caller synchronises on them once.
++// NOT ported: Strata's issuer thread and its pageable-blob stager (src/prefill/prefill.cpp @ d551edf :122-239,
++// :945-1003). Those hide the cost of copying UNPINNED blobs; the experts here are pinned (0005), so cudaMemcpyAsync
++// returns at once and there is nothing for a thread to hide. With pageable experts the queued path is not used.
++//
++// What the cache did before (0003/0004): a worker thread copied each slice with ggml_backend_tensor_set (a copy and a
++// stream synchronise per matrix) and the decode thread wrote the table entries one at a time, each a synchronous
++// device copy (up to 2 x 96 of them per adaptive step). The copies were already off the decode thread; the table writes
++// were not. Here the copies need no thread, and the table of a layer is written once per step, whole.
++//
++// Off unless LLAMA_MOE_CACHE_QUEUED_REFILL=1. LLAMA_MOE_REFILL_POISON=1 (tests only, either path) fills a slot with
++// 0xFF bytes (NaN in every float and quantized scale) before its copy is enqueued, so a read of a slot that was
++// published too early shows up as NaN in the output.
++
++#include "ggml.h"
++#include "ggml-backend.h"
++
++#include <algorithm>
++#include <cstdint>
++#include <cstdio>
++#include <deque>
++#include <functional>
++#include <memory>
++#include <vector>
++
++namespace moe_refill {
++
++struct job {
++    size_t  layer  = 0;
++    int32_t expert = -1;
++    int32_t slot   = -1;
++};
++
++// ---- the copy engine ----------------------------------------------------------------------------------------------
++
++// Enqueues copies, closes them into numbered batches, and says without blocking whether a batch has landed.
++struct engine {
++    virtual ~engine() = default;
++    // dst[dst_offset, dst_offset + size) <- src; may return before the data lands
++    virtual void copy(ggml_tensor * dst, const void * src, size_t dst_offset, size_t size) = 0;
++    // closes the copies enqueued since the last submit into a batch; its ticket (> 0), or 0 when nothing was enqueued
++    virtual int64_t submit() = 0;
++    // has every copy of the batch landed (never blocks)
++    virtual bool done(int64_t ticket) = 0;
++    // blocks until the batch has landed
++    virtual void wait(int64_t ticket) = 0;
++    // can another batch be submitted now
++    virtual bool can_submit() const = 0;
++};
++
++// The device's non-blocking event query, or null: ggml has none in its public API, so a backend offers it through its
++// registry's get_proc_address as "ggml_backend_event_query" (ggml-cuda does, 0025), true when the event has completed.
++typedef bool (*event_query_fn)(ggml_backend_event_t);
++event_query_fn event_query_of(ggml_backend_dev_t dev);
++
++// A second backend instance on the device (its own CUDA stream) and a pool of events. Needs a device whose events can
++// be queried without blocking (event_query_of); ok() says so.
++class backend_engine : public engine {
++public:
++    explicit backend_engine(ggml_backend_dev_t dev, size_t max_batches = 32);
++    ~backend_engine() override;
++    bool ok() const { return backend != nullptr && !events.empty(); }
++
++    void    copy(ggml_tensor * dst, const void * src, size_t dst_offset, size_t size) override;
++    int64_t submit() override;
++    bool    done(int64_t ticket) override;
++    void    wait(int64_t ticket) override;
++    bool    can_submit() const override { return !free_events.empty(); }
++
++    ggml_backend_t backend = nullptr;   // owned
++    event_query_fn query = nullptr;
++
++private:
++    struct slot { int64_t ticket = 0; size_t event = 0; };
++    std::vector<ggml_backend_event_t> events;
++    std::vector<size_t>               free_events;
++    std::deque<slot>                  outstanding;   // submitted batches not yet seen complete, oldest first
++    bool                              enqueued = false;
++    int64_t                           next_ticket = 1;
++    int64_t                           completed_through = 0;   // every ticket <= this has landed (one stream: in order)
++};
++
++// ---- the queue ----------------------------------------------------------------------------------------------------
++
++class queue {
++public:
++    explicit queue(engine * eng) : eng(eng) {}
++
++    bool can_push() const { return eng->can_submit(); }
++
++    // Enqueues every job's copies (copy_job does the engine calls) as one batch. The jobs are returned by poll() once the
++    // batch has landed, and not before. `step` is a caller's counter, for the latency statistics.
++    void push(const std::vector<job> & jobs, const std::function<void(const job &, engine &)> & copy_job, uint64_t step) {
++        if (jobs.empty()) {
++            return;
++        }
++        for (const job & j : jobs) {
++            copy_job(j, *eng);
++        }
++        batch b;
++        b.ticket = eng->submit();
++        b.jobs   = jobs;
++        b.step   = step;
++        n_jobs_in_flight += jobs.size();
++        n_batches++;
++        n_jobs_total += jobs.size();
++        inflight.push_back(std::move(b));
++    }
++
++    // The jobs of every batch that has landed, oldest first. Never blocks; a batch that has not landed stays.
++    std::vector<job> poll(uint64_t step) {
++        std::vector<job> out;
++        while (!inflight.empty()) {
++            batch & b = inflight.front();
++            if (b.ticket != 0 && !eng->done(b.ticket)) {
++                break;
++            }
++            out.insert(out.end(), b.jobs.begin(), b.jobs.end());
++            n_jobs_in_flight -= b.jobs.size();
++            lat_sum += step - b.step;
++            lat_max = std::max<uint64_t>(lat_max, step - b.step);
++            lat_n++;
++            inflight.pop_front();
++        }
++        return out;
++    }
++
++    // Blocks until everything has landed (tests, shutdown).
++    std::vector<job> drain(uint64_t step) {
++        for (batch & b : inflight) {
++            if (b.ticket != 0) {
++                eng->wait(b.ticket);
++            }
++        }
++        return poll(step);
++    }
++
++    // is this expert already being copied (a batch not yet published has it): a second copy of it must not be started
++    bool contains(size_t layer, int32_t expert) const {
++        for (const batch & b : inflight) {
++            for (const job & j : b.jobs) {
++                if (j.layer == layer && j.expert == expert) {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++
++    size_t jobs_in_flight() const { return n_jobs_in_flight; }
++    size_t batches_in_flight() const { return inflight.size(); }
++
++    // statistics
++    uint64_t n_batches = 0, n_jobs_total = 0;
++    uint64_t lat_sum = 0, lat_max = 0, lat_n = 0;   // steps from push to poll
++
++private:
++    struct batch { int64_t ticket = 0; std::vector<job> jobs; uint64_t step = 0; };
++    engine *           eng;
++    std::deque<batch>  inflight;
++    size_t             n_jobs_in_flight = 0;
++};
++
++// ---- what the cache does with a layer (templates: llama-moecache.cpp's layer_state and the test's have the same names)
++
++// A layer's bookkeeping, by member name:
++//   .pub.{up_src, gate_src, down_src, up_c, gate_c, down_c, dev_table, host_table, n_slots}
++//   .expert_slot (expert -> slot or -1), .table_dirty (bool)
++
++// the copies of one refill: the three matrices of an expert into a slot
++template <class L>
++void enqueue_job(const L & ls, const job & j, engine & eng, bool poison) {
++    const struct { ggml_tensor * dst; const ggml_tensor * src; } m[3] = {
++        { ls.pub.up_c,   ls.pub.up_src   },
++        { ls.pub.gate_c, ls.pub.gate_src },
++        { ls.pub.down_c, ls.pub.down_src },
++    };
++    for (const auto & p : m) {
++        const size_t sz = p.src->nb[2];
++        if ((size_t) j.slot * p.dst->nb[2] + sz > ggml_nbytes(p.dst) || (size_t) j.expert * sz + sz > ggml_nbytes(p.src)) {
++            fprintf(stderr, "moe-cache: bad refill %s <- %s expert=%d slot=%d sz=%zu\n", p.dst->name, p.src->name, j.expert, j.slot, sz);
++            continue;
++        }
++        if (poison) {
++            ggml_backend_tensor_memset(p.dst, 0xFF, (size_t) j.slot * p.dst->nb[2], sz);
++        }
++        eng.copy(p.dst, (const char *) p.src->data + (size_t) j.expert * sz, (size_t) j.slot * p.dst->nb[2], sz);
++    }
++}
++
++// the copy has landed: the expert is resident in the slot (the host mirror; the tables follow at the next flush)
++template <class L>
++void publish(L & ls, const job & j, uint64_t clock_value) {
++    ls.slot_expert[j.slot]    = j.expert;
++    ls.expert_slot[j.expert]  = j.slot;
++    ls.slot_last_use[j.slot]  = clock_value;
++    ls.slot_in_flight[j.slot] = false;
++    ls.table_dirty = true;
++}
++
++// the layer's tables from its host mirror, both written once, whole: expert -> slot, or n_slots (the dummy) when uncached.
++// The device table is read by the next graph's get_rows, the host table by the CPU mul_mat_id (to skip cached experts).
++template <class L>
++bool flush_tables(L & ls) {
++    if (!ls.table_dirty) {
++        return false;
++    }
++    std::vector<int32_t> table(ls.expert_slot.size());
++    for (size_t e = 0; e < table.size(); ++e) {
++        table[e] = ls.expert_slot[e] >= 0 ? ls.expert_slot[e] : ls.pub.n_slots;
++    }
++    ggml_backend_tensor_set(ls.pub.dev_table,  table.data(), 0, table.size() * sizeof(int32_t));
++    ggml_backend_tensor_set(ls.pub.host_table, table.data(), 0, table.size() * sizeof(int32_t));
++    ls.table_dirty = false;
++    return true;
++}
++
++} // namespace moe_refill
+diff --git a/src/llama-moecache.cpp b/src/llama-moecache.cpp
+index 79518d9e5..738922679 100644
+--- a/src/llama-moecache.cpp
++++ b/src/llama-moecache.cpp
+@@ -3,6 +3,7 @@
+ #include "llama-impl.h"
+ #include "llama-model.h"
+ #include "llama-moecache-pcie.h"
++#include "llama-moecache-refill.h"
+ 
+ #include "ggml.h"
+ #include "ggml-backend.h"
+@@ -34,6 +35,8 @@ struct layer_state {
+ 
+     std::vector<bool>     slot_in_flight; // slot has an upload pending
+ 
++    bool                  table_dirty = false; // 0025: the tables are rewritten whole, once per step, when this is set
++
+     std::vector<float>    usage;          // 0004 (Strata's adaptive tier): decayed routed count per expert
+ 
+     uint64_t n_hit  = 0;
+@@ -75,6 +78,13 @@ struct moe_cache {
+     std::map<int, moe_pcie::layer *>              pcie_by_il;
+     int32_t pcie_num = 0;
+ 
++    // 0025: queued refills (llama-moecache-refill.h): no worker thread, the copies on a second stream, the tables published
++    // when the event after a batch of copies has completed
++    bool queued = false;
++    bool poison = false;   // LLAMA_MOE_REFILL_POISON: a slot is filled with 0xFF before its refill (tests only)
++    std::unique_ptr<moe_refill::backend_engine> refill_engine;
++    std::unique_ptr<moe_refill::queue>          refill;
++
+     // async upload worker: slices are copied to the device off the decode
+     // thread; the new table mapping is only published at a later step() once
+     // the upload has completed, so a running graph never reads a torn slot
+@@ -148,6 +158,8 @@ void moe_obs_cb(const char * name, const struct ggml_tensor * ids, void * ud) {
+     }
+ }
+ 
++bool g_refill_poison = false;   // 0025: LLAMA_MOE_REFILL_POISON, read once at init
++
+ void upload_slice(ggml_tensor * dst_c, const ggml_tensor * src, int32_t expert, int32_t slot) {
+     const size_t sz = src->nb[2];
+     if ((size_t) slot*dst_c->nb[2] + sz > ggml_nbytes(dst_c) || (size_t) expert*sz + sz > ggml_nbytes(src)) {
+@@ -155,6 +167,9 @@ void upload_slice(ggml_tensor * dst_c, const ggml_tensor * src, int32_t expert,
+                 dst_c->name, src->name, expert, slot, sz, dst_c->nb[2], ggml_nbytes(dst_c), ggml_nbytes(src));
+         return;
+     }
++    if (g_refill_poison && slot >= 0) {
++        ggml_backend_tensor_memset(dst_c, 0xFF, (size_t) slot*dst_c->nb[2], sz);
++    }
+     ggml_backend_tensor_set(dst_c, (const char *) src->data + (size_t) expert*sz, (size_t) slot*dst_c->nb[2], sz);
+ }
+ 
+@@ -616,6 +631,44 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+                     ls.pub.il, ls.pub.up_src->name, ls.pub.up_src->nb[2]);
+         }
+ 
++        // 0025: queued refills, when asked for and when they can work: every cached layer on one device whose events can be
++        // queried without blocking, and the experts in pinned host memory (pageable ones are copied by the driver in
++        // pieces before cudaMemcpyAsync returns, which would put the copy back on the decode thread)
++        {
++            g_refill_poison = env_int("LLAMA_MOE_REFILL_POISON", 0) != 0;
++            mc->poison = g_refill_poison;
++            if (env_int("LLAMA_MOE_CACHE_QUEUED_REFILL", 0) != 0) {
++                ggml_backend_dev_t dev = nullptr;
++                bool same_dev = true, pinned = true;
++                for (auto & ls : mc->layers) {
++                    ggml_backend_dev_t d = ggml_backend_buft_get_device(ggml_backend_buffer_get_type(ls.pub.up_c->buffer));
++                    if (!dev) {
++                        dev = d;
++                    }
++                    same_dev = same_dev && d == dev;
++                    for (const ggml_tensor * t : { ls.pub.up_src, ls.pub.gate_src, ls.pub.down_src }) {
++                        pinned = pinned && t->buffer && strncmp(ggml_backend_buffer_name(t->buffer), "CUDA_Host", 9) == 0;
++                    }
++                }
++                if (!same_dev || !dev) {
++                    LLAMA_LOG_WARN("%s: LLAMA_MOE_CACHE_QUEUED_REFILL: the cached layers are not all on one device - the upload thread stays\n", __func__);
++                } else if (!pinned) {
++                    LLAMA_LOG_WARN("%s: LLAMA_MOE_CACHE_QUEUED_REFILL: the experts are not in pinned host memory (LLAMA_PIN_EXPERTS=1) - the upload thread stays\n", __func__);
++                } else {
++                    mc->refill_engine = std::make_unique<moe_refill::backend_engine>(dev);
++                    if (!mc->refill_engine->ok()) {
++                        LLAMA_LOG_WARN("%s: LLAMA_MOE_CACHE_QUEUED_REFILL: %s cannot query an event without blocking - the upload thread stays\n",
++                                __func__, ggml_backend_dev_name(dev));
++                        mc->refill_engine.reset();
++                    } else {
++                        mc->refill = std::make_unique<moe_refill::queue>(mc->refill_engine.get());
++                        mc->queued = true;
++                    }
++                }
++            }
++        }
++
++        if (!mc->queued) {
+         mc->worker = std::thread([mc]() {
+             for (;;) {
+                 upload_job j;
+@@ -639,15 +692,17 @@ void llama_moe_cache_init(const llama_model & model, int32_t n_slots, int32_t ma
+                 }
+             }
+         });
++        }
+ 
+         ggml_set_moe_obs_callback(moe_obs_cb, mc);
+         g_cache = mc;
+         g_init_done = true;
+ 
+         LLAMA_LOG_INFO("%s: MoE expert cache enabled: %zu layers, %d slots/layer requested, %zu seeded from a profile, "
+-                "policy %s, batches up to %" PRId64 " tokens, %.1f MiB device memory\n",
++                "policy %s, batches up to %" PRId64 " tokens, %.1f MiB device memory, refills %s\n",
+                 __func__, mc->layers.size(), n_slots, n_seeded,
+-                mc->policy_strata ? "strata (adaptive tier)" : "lru", mc->max_tokens, vram/1024.0/1024.0);
++                mc->policy_strata ? "strata (adaptive tier)" : "lru", mc->max_tokens, vram/1024.0/1024.0,
++                mc->queued ? "queued (second stream, published when the event has completed)" : "by an upload thread");
+         if (mc->policy_strata) {
+             LLAMA_LOG_INFO("%s: adaptive tier: every %d steps, up to %d swaps\n", __func__, mc->adapt_every, mc->adapt_swaps);
+         }
+@@ -665,14 +720,41 @@ const llama_moe_cache_layer * llama_moe_cache_lookup(const ggml_tensor * up_exps
+     return &g_cache->layers[it->second].pub;
+ }
+ 
++// 0025: the evictions of this step are in the layers' host mirrors: write the tables (so no graph can see an evicted
++// slot), then enqueue the copies of the newcomers as one batch on the second stream.
++static void queued_commit(moe_cache * mc, std::vector<moe_refill::job> & jobs, uint64_t step) {
++    for (auto & ls : mc->layers) {
++        moe_refill::flush_tables(ls);
++    }
++    mc->refill->push(jobs, [mc](const moe_refill::job & j, moe_refill::engine & e) {
++        moe_refill::enqueue_job(mc->layers[j.layer], j, e, mc->poison);
++    }, step);
++    jobs.clear();
++}
++
+ void llama_moe_cache_step() {
+     moe_cache * mc = g_cache;
+     if (!mc) {
+         return;
+     }
+ 
++    const uint64_t this_step = mc->n_steps + 1;
++
+     // 1) publish completed uploads (sync point: no graph is executing)
+-    {
++    if (mc->queued) {
++        // 0025: only the batches whose event has completed, and never blocking on one that has not; the tables of the
++        // layers that changed are written once, whole
++        std::lock_guard<std::mutex> lk(mc->mtx);
++        for (const auto & j : mc->refill->poll(this_step)) {
++            moe_refill::publish(mc->layers[j.layer], j, ++mc->clock);
++            if (mc->in_flight > 0) {
++                mc->in_flight--;
++            }
++        }
++        for (auto & ls : mc->layers) {
++            moe_refill::flush_tables(ls);
++        }
++    } else {
+         std::lock_guard<std::mutex> wlk(mc->wmtx);
+         std::lock_guard<std::mutex> lk(mc->mtx);
+         for (const auto & j : mc->done) {
+@@ -714,6 +796,11 @@ void llama_moe_cache_step() {
+             LLAMA_LOG_INFO("moe-cache: pcie: layer-steps=%" PRIu64 " distinct-missed=%" PRIu64 " via-pcie=%" PRIu64 " (%.1f%%)\n",
+                     pp, pm, ps, pm ? 100.0*ps/pm : 0.0);
+         }
++        if (mc->queued) {   // 0025: steps from a refill batch's enqueue to its publication
++            LLAMA_LOG_INFO("moe-cache: refills: batches=%" PRIu64 " experts=%" PRIu64 " in-flight=%zu, steps to land avg %.2f max %" PRIu64 "\n",
++                    mc->refill->n_batches, mc->refill->n_jobs_total, mc->refill->jobs_in_flight(),
++                    mc->refill->lat_n ? (double) mc->refill->lat_sum / (double) mc->refill->lat_n : 0.0, mc->refill->lat_max);
++        }
+     }
+ 
+     // 0004: Strata's adaptive tier (generate.cpp:2418-2457), at deliberate moments only
+@@ -724,6 +811,9 @@ void llama_moe_cache_step() {
+         if (mc->n_steps % (uint64_t) mc->adapt_every != 0 || mc->in_flight > 0) {
+             return; // not this step, or the previous swaps are still in flight
+         }
++        if (mc->queued && !mc->refill->can_push()) {
++            return; // every event of the second stream is still in use
++        }
+         struct swap { float gain; size_t li; int32_t in, out; };
+         std::vector<swap> swaps;
+         std::vector<std::pair<float, int32_t>> cand, vict;
+@@ -759,21 +849,37 @@ void llama_moe_cache_step() {
+         if ((int32_t) swaps.size() > mc->adapt_swaps) {
+             swaps.resize((size_t) mc->adapt_swaps);
+         }
+-        {
+-            std::lock_guard<std::mutex> wlk(mc->wmtx);
++        if (mc->queued) {
++            std::vector<moe_refill::job> jobs;
+             for (const swap & s : swaps) {
+                 auto & ls = mc->layers[s.li];
+                 const int32_t slot = ls.expert_slot[s.out];
+                 // evicted now: the CPU computes it meanwhile; the newcomer is resident once its copy has landed
+                 ls.expert_slot[s.out] = -1;
+                 ls.slot_expert[slot]  = -1;
+-                set_table_entry(ls.pub, s.out, ls.pub.n_slots);
++                ls.table_dirty = true;
+                 ls.slot_in_flight[slot] = true;
+-                mc->todo.push_back({s.li, s.in, slot});
++                jobs.push_back({s.li, s.in, slot});
+                 mc->in_flight++;
+             }
++            queued_commit(mc, jobs, this_step);
++        } else {
++            {
++                std::lock_guard<std::mutex> wlk(mc->wmtx);
++                for (const swap & s : swaps) {
++                    auto & ls = mc->layers[s.li];
++                    const int32_t slot = ls.expert_slot[s.out];
++                    // evicted now: the CPU computes it meanwhile; the newcomer is resident once its copy has landed
++                    ls.expert_slot[s.out] = -1;
++                    ls.slot_expert[slot]  = -1;
++                    set_table_entry(ls.pub, s.out, ls.pub.n_slots);
++                    ls.slot_in_flight[slot] = true;
++                    mc->todo.push_back({s.li, s.in, slot});
++                    mc->in_flight++;
++                }
++            }
++            mc->wcv.notify_one();
+         }
+-        mc->wcv.notify_one();
+         for (auto & ls : mc->layers) {
+             for (float & v : ls.usage) {
+                 v *= 0.7f;
+@@ -784,6 +890,13 @@ void llama_moe_cache_step() {
+ 
+     // 2) schedule new uploads: evict at a sync point (clear the victim's table
+     //    entry now), then hand the slice copies to the worker
++    std::vector<moe_refill::job> queued_jobs;   // 0025
++    if (mc->queued && !mc->refill->can_push()) {
++        for (auto & ls : mc->layers) {
++            ls.pending.clear();   // every event of the second stream is in use: the misses are observed again next step
++        }
++        return;
++    }
+     for (size_t li = 0; li < mc->layers.size(); ++li) {
+         auto & ls = mc->layers[li];
+         if (ls.pending.empty()) {
+@@ -796,6 +909,9 @@ void llama_moe_cache_step() {
+             if (ls.expert_slot[id] >= 0) {
+                 continue;
+             }
++            if (mc->queued && mc->refill->contains(li, id)) {
++                continue;   // 0025: its copy is on the second stream already (it lands a few steps later than a thread's would)
++            }
+ 
+             // victim: an empty non-in-flight slot if any, else the LRU non-in-flight slot
+             int32_t slot = -1;
+@@ -815,16 +931,29 @@ void llama_moe_cache_step() {
+             if (victim >= 0) {
+                 ls.expert_slot[victim] = -1;
+                 ls.slot_expert[slot]   = -1;
+-                set_table_entry(ls.pub, victim, ls.pub.n_slots);
++                if (mc->queued) {
++                    ls.table_dirty = true;
++                } else {
++                    set_table_entry(ls.pub, victim, ls.pub.n_slots);
++                }
+             }
+             ls.slot_in_flight[slot] = true;
+ 
++            if (mc->queued) {
++                queued_jobs.push_back({li, id, slot});
++                mc->in_flight++;
++                continue;
++            }
+             std::lock_guard<std::mutex> wlk(mc->wmtx);
+             mc->todo.push_back({li, id, slot});
+             mc->in_flight++;
+         }
+         ls.pending.clear();
+     }
++    if (mc->queued) {
++        queued_commit(mc, queued_jobs, this_step);
++        return;
++    }
+     mc->wcv.notify_one();
+ 
+ }
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index c09cba198..4fdeebee8 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -312,6 +312,8 @@ llama_build(test-backend-ops.cpp)
+ llama_build_and_test(test-tiled-mulmat.cpp)
+ # 0024: the pcie_frac split (the partition, the plan and wait nodes, the pool chain) against the unsplit mul_mat_id
+ llama_build_and_test(test-moe-pcie-split.cpp ../src/llama-moecache-pcie.cpp ARGS --quick)
++# 0025: the queued refills (the queue, the publication, the poisoned-slot invariant)
++llama_build_and_test(test-moe-refill.cpp ../src/llama-moecache-refill.cpp)
+ llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
+ llama_build_and_test(test-autorelease.cpp       LABEL "model")
+ llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
+diff --git a/tests/test-moe-refill.cpp b/tests/test-moe-refill.cpp
+new file mode 100644
+index 000000000..3efe567f5
+--- /dev/null
++++ b/tests/test-moe-refill.cpp
+@@ -0,0 +1,609 @@
++// Yamadori 0025: queued refills for the MoE expert cache (src/llama-moecache-refill.h): the cache's refills are enqueued on a
++// second stream and a slot's table entry is published only after the event after its copy has completed.
++//
++// The harness below drives the same functions llama_moe_cache_step() calls -- moe_refill::queue::push / poll,
++// enqueue_job (which poisons the destination slot with 0xFF first), publish, flush_tables -- over a layer bookkeeping
++// with the same member names as the cache's layer_state, with random swaps. The invariant, checked after every
++// operation: every expert the device table points at sits in a slot that holds exactly that expert's bytes (all three
++// matrices), i.e. no slot is ever read before its copy has landed. A slot that was published early holds the poison.
++//
++//   - fake engine (no GPU): the copies land only when the test lands them, at random, so batches complete late and out of
++//     step with the pushes; the check must hold throughout, and a harness that publishes at push time (the negative
++//     control) must be CAUGHT;
++//   - --device NAME (a GPU; the caller restricts CUDA_VISIBLE_DEVICES to the one card): the real engine -- a second
++//     backend instance and events queried without blocking -- with eight 64 MiB copies queued ahead of every batch so that
++//     it completes late; the same invariant, plus: polls that find a batch not yet landed must happen, and ggml's
++//     event query must say "not yet" for an event that has not completed and "done" after it has.
++//
++//   test-moe-refill [--steps N] [--seed S] [--expert-bytes B] [--device NAME]
++
++#include "../src/llama-moecache-refill.h"
++
++#include "ggml.h"
++#include "ggml-alloc.h"
++#include "ggml-backend.h"
++
++#include <algorithm>
++#include <cinttypes>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <random>
++#include <string>
++#include <vector>
++
++static int n_failed = 0;
++static int n_checks = 0;
++
++#define CHECK(cond, ...)                                      \
++    do {                                                      \
++        ++n_checks;                                           \
++        if (!(cond)) {                                        \
++            ++n_failed;                                       \
++            printf("FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond); \
++            printf(__VA_ARGS__);                              \
++            printf("\n");                                     \
++        }                                                     \
++    } while (0)
++
++// ---- a fake engine: copies land when the test says so -------------------------------------------------------------
++
++struct fake_engine : moe_refill::engine {
++    struct rec { ggml_tensor * dst; const void * src; size_t off, size; };
++    struct bat { int64_t ticket; std::vector<rec> copies; bool landed = false; };
++    std::vector<rec> open;
++    std::vector<bat> batches;
++    int64_t next = 1;
++    size_t  max_unlanded = 5;
++
++    void copy(ggml_tensor * dst, const void * src, size_t off, size_t size) override { open.push_back({ dst, src, off, size }); }
++    int64_t submit() override {
++        if (open.empty()) {
++            return 0;
++        }
++        batches.push_back({ next++, open, false });
++        open.clear();
++        return batches.back().ticket;
++    }
++    bool done(int64_t t) override {
++        for (const bat & b : batches) {
++            if (b.ticket == t) {
++                return b.landed;
++            }
++        }
++        return true;
++    }
++    void wait(int64_t t) override {
++        for (bat & b : batches) {
++            if (b.ticket <= t) {
++                land(b);
++            }
++        }
++    }
++    bool can_submit() const override {
++        size_t n = 0;
++        for (const bat & b : batches) {
++            n += b.landed ? 0 : 1;
++        }
++        return n < max_unlanded;
++    }
++    void land(bat & b) {
++        if (b.landed) {
++            return;
++        }
++        for (const rec & r : b.copies) {
++            ggml_backend_tensor_set(r.dst, r.src, r.off, r.size);
++        }
++        b.landed = true;
++    }
++    void land_oldest() {
++        for (bat & b : batches) {
++            if (!b.landed) {
++                land(b);
++                return;
++            }
++        }
++    }
++    void land_all() {
++        for (bat & b : batches) {
++            land(b);
++        }
++    }
++};
++
++// ---- the real engine, made slow ------------------------------------------------------------------------------------
++
++struct slow_engine : moe_refill::backend_engine {
++    ggml_context * hctx = nullptr, * dctx = nullptr;
++    ggml_backend_buffer_t hb = nullptr, db = nullptr;
++    ggml_tensor * h = nullptr, * d = nullptr;
++    bool slowed = false;
++    static constexpr size_t kBytes = 64ull << 20;
++
++    slow_engine(ggml_backend_dev_t dev, ggml_backend_buffer_type_t dev_buft) : moe_refill::backend_engine(dev) {
++        ggml_init_params ip = { ggml_tensor_overhead() * 4, nullptr, true };
++        hctx = ggml_init(ip);
++        dctx = ggml_init(ip);
++        h = ggml_new_tensor_1d(hctx, GGML_TYPE_I8, (int64_t) kBytes);
++        d = ggml_new_tensor_1d(dctx, GGML_TYPE_I8, (int64_t) kBytes);
++        ggml_backend_buffer_type_t hbt = ggml_backend_dev_host_buffer_type(dev);
++        hb = ggml_backend_alloc_ctx_tensors_from_buft(hctx, hbt ? hbt : ggml_backend_cpu_buffer_type());
++        db = ggml_backend_alloc_ctx_tensors_from_buft(dctx, dev_buft);
++        if (hb) {
++            memset(h->data, 0, kBytes);
++        }
++    }
++    ~slow_engine() override {
++        if (backend) {
++            ggml_backend_synchronize(backend);
++        }
++        if (db) ggml_backend_buffer_free(db);
++        if (hb) ggml_backend_buffer_free(hb);
++        ggml_free(dctx);
++        ggml_free(hctx);
++    }
++    void copy(ggml_tensor * dst, const void * src, size_t off, size_t size) override {
++        if (!slowed && hb && db) {
++            slowed = true;
++            for (int i = 0; i < 8; ++i) {
++                ggml_backend_tensor_set_async(backend, d, h->data, 0, kBytes);   // ~40 ms of PCIe ahead of the real copies
++            }
++        }
++        moe_refill::backend_engine::copy(dst, src, off, size);
++    }
++    int64_t submit() override {
++        slowed = false;
++        return moe_refill::backend_engine::submit();
++    }
++};
++
++// ---- the layer bookkeeping, with the cache's member names -----------------------------------------------------------
++
++struct pub_t {
++    ggml_tensor * up_src = nullptr, * gate_src = nullptr, * down_src = nullptr;
++    ggml_tensor * up_c = nullptr, * gate_c = nullptr, * down_c = nullptr;
++    ggml_tensor * dev_table = nullptr, * host_table = nullptr;
++    int32_t n_slots = 0;
++};
++
++struct tlayer {
++    pub_t pub;
++    std::vector<int32_t>  slot_expert, expert_slot;
++    std::vector<uint64_t> slot_last_use;
++    std::vector<bool>     slot_in_flight;
++    bool table_dirty = false;
++};
++
++struct harness {
++    int64_t n_expert = 48;
++    int32_t n_slots = 10;
++    size_t  expert_bytes = 4096;
++    int     n_layers = 3;
++
++    ggml_backend_t cpu = nullptr;
++    ggml_backend_dev_t dev = nullptr;
++    ggml_backend_buffer_type_t host_buft = nullptr, dev_buft = nullptr;
++    std::vector<ggml_context *> ctxs;
++    std::vector<ggml_backend_buffer_t> bufs;
++    std::vector<tlayer> layers;
++    uint64_t clock = 0;
++};
++
++static uint8_t pattern(int layer, int matrix, int32_t expert, size_t i) {
++    return (uint8_t) ((layer * 131 + matrix * 71 + expert * 37 + (int) i * 11 + 5) & 0x7F);   // 0x00-0x7F: never the poison 0xFF
++}
++
++static ggml_tensor * mk3(harness & h, ggml_context * ctx, int64_t n) {
++    return ggml_new_tensor_3d(ctx, GGML_TYPE_I8, (int64_t) h.expert_bytes, 1, n);
++}
++
++static void build(harness & h, const char * device) {
++    h.cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
++    if (device) {
++        h.dev = ggml_backend_dev_by_name(device);
++        if (!h.dev) {
++            printf("device %s not found\n", device);
++            exit(2);
++        }
++        h.dev_buft  = ggml_backend_dev_buffer_type(h.dev);
++        h.host_buft = ggml_backend_dev_host_buffer_type(h.dev);
++        if (!h.host_buft) {
++            h.host_buft = ggml_backend_cpu_buffer_type();
++        }
++    } else {
++        h.host_buft = h.dev_buft = ggml_backend_cpu_buffer_type();
++    }
++    h.layers.resize((size_t) h.n_layers);
++    for (int l = 0; l < h.n_layers; ++l) {
++        tlayer & L = h.layers[(size_t) l];
++        ggml_init_params ip = { ggml_tensor_overhead() * 32, nullptr, true };
++        ggml_context * hc = ggml_init(ip);
++        ggml_context * dc = ggml_init(ip);
++        h.ctxs.push_back(hc);
++        h.ctxs.push_back(dc);
++        L.pub.up_src   = mk3(h, hc, h.n_expert);
++        L.pub.gate_src = mk3(h, hc, h.n_expert);
++        L.pub.down_src = mk3(h, hc, h.n_expert);
++        L.pub.host_table = ggml_new_tensor_2d(hc, GGML_TYPE_I32, 1, h.n_expert);
++        L.pub.up_c   = mk3(h, dc, h.n_slots + 1);
++        L.pub.gate_c = mk3(h, dc, h.n_slots + 1);
++        L.pub.down_c = mk3(h, dc, h.n_slots + 1);
++        L.pub.dev_table = ggml_new_tensor_2d(dc, GGML_TYPE_I32, 1, h.n_expert);
++        L.pub.n_slots = h.n_slots;
++        ggml_backend_buffer_t hb = ggml_backend_alloc_ctx_tensors_from_buft(hc, h.host_buft);
++        ggml_backend_buffer_t db = ggml_backend_alloc_ctx_tensors_from_buft(dc, h.dev_buft);
++        h.bufs.push_back(hb);
++        h.bufs.push_back(db);
++        ggml_backend_buffer_clear(db, 0);
++        int m = 0;
++        for (ggml_tensor * t : { L.pub.up_src, L.pub.gate_src, L.pub.down_src }) {
++            std::vector<uint8_t> bytes(ggml_nbytes(t));
++            for (int32_t e = 0; e < h.n_expert; ++e) {
++                for (size_t i = 0; i < h.expert_bytes; ++i) {
++                    bytes[(size_t) e * h.expert_bytes + i] = pattern(l, m, e, i);
++                }
++            }
++            ggml_backend_tensor_set(t, bytes.data(), 0, bytes.size());
++            ++m;
++        }
++        L.slot_expert.assign((size_t) h.n_slots, -1);
++        L.expert_slot.assign((size_t) h.n_expert, -1);
++        L.slot_last_use.assign((size_t) h.n_slots, 0);
++        L.slot_in_flight.assign((size_t) h.n_slots, false);
++        L.table_dirty = true;
++        moe_refill::flush_tables(L);   // everything uncached: the dummy slot
++    }
++}
++
++// the invariant: every expert the device table points at is in its slot, complete
++static void check(harness & h, const char * when, bool report = true) {
++    for (int l = 0; l < h.n_layers; ++l) {
++        tlayer & L = h.layers[(size_t) l];
++        std::vector<int32_t> dev((size_t) h.n_expert), host((size_t) h.n_expert);
++        ggml_backend_tensor_get(L.pub.dev_table,  dev.data(),  0, dev.size() * sizeof(int32_t));
++        ggml_backend_tensor_get(L.pub.host_table, host.data(), 0, host.size() * sizeof(int32_t));
++        for (int32_t e = 0; e < h.n_expert; ++e) {
++            if (dev[(size_t) e] != host[(size_t) e]) {
++                if (report) CHECK(false, "%s: layer %d expert %d: the device table says %d, the host table %d", when, l, e, dev[(size_t) e], host[(size_t) e]);
++                else ++n_failed;
++                return;
++            }
++            const int32_t s = dev[(size_t) e];
++            if (s == h.n_slots) {
++                continue;
++            }
++            const std::pair<ggml_tensor *, int> ms[3] = { { L.pub.up_c, 0 }, { L.pub.gate_c, 1 }, { L.pub.down_c, 2 } };
++            for (const auto & p : ms) {
++                std::vector<uint8_t> got(h.expert_bytes);
++                ggml_backend_tensor_get(p.first, got.data(), (size_t) s * h.expert_bytes, h.expert_bytes);
++                for (size_t i = 0; i < h.expert_bytes; ++i) {
++                    if (got[i] != pattern(l, p.second, e, i)) {
++                        if (report) {
++                            CHECK(false, "%s: layer %d expert %d is published in slot %d but its matrix %d byte %zu is 0x%02X, not 0x%02X",
++                                  when, l, e, s, p.second, i, got[i], pattern(l, p.second, e, i));
++                        } else {
++                            ++n_failed;
++                        }
++                        return;
++                    }
++                }
++            }
++            if (L.slot_expert[(size_t) s] != e || L.slot_in_flight[(size_t) s]) {
++                if (report) CHECK(false, "%s: layer %d expert %d is published in slot %d but the mirror says expert %d, in flight %d",
++                                  when, l, e, s, L.slot_expert[(size_t) s], (int) L.slot_in_flight[(size_t) s]);
++                else ++n_failed;
++                return;
++            }
++        }
++    }
++    ++n_checks;
++}
++
++// one step of the cache's queued path, with random swaps in place of the policy
++struct driver {
++    harness & h;
++    moe_refill::queue q;
++    std::mt19937 & rng;
++    uint64_t step = 0;
++    size_t in_flight = 0;
++    bool eager = false;      // the negative control: publish at push time
++    bool poison = true;
++    uint64_t polls_not_ready = 0, published = 0, pushed = 0;
++
++    driver(harness & h, moe_refill::engine * e, std::mt19937 & r) : h(h), q(e), rng(r) {}
++
++    void publish_landed() {
++        for (const auto & j : q.poll(step)) {
++            moe_refill::publish(h.layers[j.layer], j, ++h.clock);
++            ++published;
++            if (in_flight > 0) in_flight--;
++        }
++        for (auto & L : h.layers) {
++            moe_refill::flush_tables(L);
++        }
++    }
++
++    void swaps(int n) {
++        std::vector<moe_refill::job> jobs;
++        for (int k = 0; k < n; ++k) {
++            const size_t li = rng() % h.layers.size();
++            tlayer & L = h.layers[li];
++            // a victim slot that is not in flight; the expert it holds (if any) is evicted now
++            std::vector<int32_t> free_slots;
++            for (int32_t s = 0; s < h.n_slots; ++s) {
++                if (!L.slot_in_flight[(size_t) s]) {
++                    free_slots.push_back(s);
++                }
++            }
++            if (free_slots.empty()) {
++                continue;
++            }
++            const int32_t slot = free_slots[rng() % free_slots.size()];
++            // a newcomer that is neither resident nor in flight
++            int32_t e = -1;
++            for (int tries = 0; tries < 20 && e < 0; ++tries) {
++                const int32_t c = (int32_t) (rng() % (uint64_t) h.n_expert);
++                bool busy = L.expert_slot[(size_t) c] >= 0;
++                for (const auto & j : jobs) {
++                    busy = busy || (j.layer == li && j.expert == c);
++                }
++                for (int32_t s = 0; s < h.n_slots; ++s) {
++                    busy = busy || (L.slot_in_flight[(size_t) s] && L.slot_expert[(size_t) s] == c);
++                }
++                if (!busy) {
++                    e = c;
++                }
++            }
++            if (e < 0) {
++                continue;
++            }
++            const int32_t victim = L.slot_expert[(size_t) slot];
++            if (victim >= 0) {
++                L.expert_slot[(size_t) victim] = -1;
++                L.slot_expert[(size_t) slot] = -1;
++            }
++            L.table_dirty = true;
++            L.slot_in_flight[(size_t) slot] = true;
++            jobs.push_back({ li, e, slot });
++            ++in_flight;
++        }
++        // commit: the tables first (no graph can see an evicted slot), then the copies
++        for (auto & L : h.layers) {
++            moe_refill::flush_tables(L);
++        }
++        pushed += jobs.size();
++        std::vector<moe_refill::job> published_now = jobs;
++        q.push(jobs, [&](const moe_refill::job & j, moe_refill::engine & en) {
++            moe_refill::enqueue_job(h.layers[j.layer], j, en, poison);
++        }, step);
++        if (eager) {
++            // the broken harness: believe the copy has landed
++            for (const auto & j : published_now) {
++                moe_refill::publish(h.layers[j.layer], j, ++h.clock);
++            }
++            for (auto & L : h.layers) {
++                moe_refill::flush_tables(L);
++            }
++        }
++    }
++};
++
++static void run_fake(std::mt19937 & rng, int steps, size_t expert_bytes) {
++    harness h;
++    h.expert_bytes = expert_bytes;
++    build(h, nullptr);
++    fake_engine eng;
++    driver d(h, &eng, rng);
++    uint64_t not_ready = 0;
++    for (int s = 0; s < steps; ++s) {
++        d.step = (uint64_t) s + 1;
++        // the steps that find a batch not yet landed are the point
++        if (d.q.batches_in_flight() > 0) {
++            ++not_ready;
++        }
++        d.publish_landed();
++        check(h, "after publish");
++        if (d.q.can_push()) {
++            d.swaps(1 + (int) (rng() % 6));
++        }
++        check(h, "after push (copies still in flight)");
++        // the copies land late, in order, a few steps behind
++        const uint32_t r = (uint32_t) (rng() % 10);
++        if (r < 5) {
++            eng.land_oldest();
++        } else if (r == 5) {
++            eng.land_all();
++        }
++    }
++    // everything lands and is published
++    eng.land_all();
++    d.step = (uint64_t) steps + 1;
++    d.publish_landed();
++    check(h, "after the last publish");
++    CHECK(d.q.jobs_in_flight() == 0, "jobs left in flight: %zu", d.q.jobs_in_flight());
++    CHECK(d.in_flight == 0, "the cache's in-flight count is %zu", d.in_flight);
++    CHECK(d.published == d.pushed, "published %" PRIu64 " of %" PRIu64 " pushed", d.published, d.pushed);
++    CHECK(not_ready > (uint64_t) steps / 4, "only %" PRIu64 " of %d steps found a batch still in flight: the test did not exercise the wait", not_ready, steps);
++    printf("fake engine: %d steps, %" PRIu64 " refills, %" PRIu64 " steps with a batch still in flight; steps to land avg %.2f max %" PRIu64 "\n",
++           steps, d.pushed, not_ready, d.q.lat_n ? (double) d.q.lat_sum / (double) d.q.lat_n : 0.0, d.q.lat_max);
++
++    // every resident expert is where the table says (the final state is also complete)
++    for (int l = 0; l < h.n_layers; ++l) {
++        for (int32_t e = 0; e < h.n_expert; ++e) {
++            const int32_t s = h.layers[(size_t) l].expert_slot[(size_t) e];
++            if (s >= 0) {
++                CHECK(h.layers[(size_t) l].slot_expert[(size_t) s] == e, "mirror");
++            }
++        }
++    }
++}
++
++// the harness that publishes at push time must be caught
++static void run_negative(std::mt19937 & rng, size_t expert_bytes) {
++    harness h;
++    h.expert_bytes = expert_bytes;
++    build(h, nullptr);
++    fake_engine eng;
++    driver d(h, &eng, rng);
++    d.eager = true;
++    int caught = 0;
++    const int before_failed = n_failed, before_checks = n_checks;
++    for (int s = 0; s < 40; ++s) {
++        d.step = (uint64_t) s + 1;
++        d.publish_landed();
++        d.swaps(3);
++        const int f0 = n_failed;
++        check(h, "negative control", false);   // counts a failure instead of reporting it
++        if (n_failed > f0) {
++            ++caught;
++            n_failed = f0;                      // the failure is the expected result
++        }
++        eng.land_oldest();
++    }
++    n_failed = before_failed;
++    n_checks = before_checks;
++    CHECK(caught > 0, "a harness that publishes before the copy has landed was never caught");
++    printf("negative control (publish at push time): caught in %d of 40 steps\n", caught);
++}
++
++// ---- the real engine --------------------------------------------------------------------------------------------------
++
++static void run_device(std::mt19937 & rng, int steps, size_t expert_bytes, const char * device) {
++    harness h;
++    h.expert_bytes = expert_bytes;
++    build(h, device);
++    ggml_backend_dev_t dev = ggml_backend_dev_by_name(device);
++    moe_refill::event_query_fn query = moe_refill::event_query_of(dev);
++    CHECK(query, "the device has no non-blocking event query");
++    if (!query) {
++        return;
++    }
++    slow_engine eng(dev, h.dev_buft);
++    CHECK(eng.ok(), "the engine is not usable on %s", device);
++    if (!eng.ok()) {
++        return;
++    }
++    driver d(h, &eng, rng);
++    uint64_t not_ready = 0;
++    for (int s = 0; s < steps; ++s) {
++        d.step = (uint64_t) s + 1;
++        const size_t before = d.q.batches_in_flight();
++        d.publish_landed();
++        if (before > 0 && d.q.batches_in_flight() > 0) {
++            ++not_ready;   // a poll found a batch that had not landed, and did not wait for it
++        }
++        check(h, "after publish");
++        if (d.q.can_push()) {
++            d.swaps(1 + (int) (rng() % 6));
++        }
++        check(h, "after push (copies still in flight)");
++    }
++    // drain: wait for everything, then publish
++    d.step = (uint64_t) steps + 1;
++    for (const auto & j : d.q.drain(d.step)) {
++        moe_refill::publish(h.layers[j.layer], j, ++h.clock);
++        ++d.published;
++        if (d.in_flight > 0) d.in_flight--;
++    }
++    for (auto & L : h.layers) {
++        moe_refill::flush_tables(L);
++    }
++    check(h, "after the drain");
++    CHECK(d.published == d.pushed, "published %" PRIu64 " of %" PRIu64 " pushed", d.published, d.pushed);
++    CHECK(not_ready > 0, "no poll ever found a batch still in flight: the engine was not slow enough to test the non-blocking path");
++    printf("%s: %d steps, %" PRIu64 " refills, %" PRIu64 " polls found a batch not landed yet; steps to land avg %.2f max %" PRIu64 "\n",
++           device, steps, d.pushed, not_ready, d.q.lat_n ? (double) d.q.lat_sum / (double) d.q.lat_n : 0.0, d.q.lat_max);
++
++    // the event query itself: not yet for an event behind 512 MiB of copies, done after it has completed
++    {
++        ggml_backend_event_t ev = ggml_backend_event_new(dev);
++        for (int i = 0; i < 8; ++i) {
++            ggml_backend_tensor_set_async(eng.backend, eng.d, eng.h->data, 0, slow_engine::kBytes);
++        }
++        ggml_backend_event_record(ev, eng.backend);
++        const bool early = query(ev);
++        ggml_backend_event_synchronize(ev);
++        const bool late = query(ev);
++        CHECK(!early, "an event behind 512 MiB of copies already reported complete");
++        CHECK(late, "a completed event reported not complete");
++        ggml_backend_event_free(ev);
++    }
++}
++
++// the queue alone, in order, with a fake that completes out of order
++static void test_queue_order() {
++    ggml_backend_t cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
++    CHECK(cpu, "cpu");
++    fake_engine eng;
++    moe_refill::queue q(&eng);
++    // no copies enqueued -> ticket 0 -> lands at once (a batch of nothing is not a batch: push ignores it)
++    q.push({}, [](const moe_refill::job &, moe_refill::engine &) {}, 1);
++    CHECK(q.batches_in_flight() == 0, "an empty push made a batch");
++    ggml_init_params ip = { ggml_tensor_overhead() * 4, nullptr, true };
++    ggml_context * ctx = ggml_init(ip);
++    ggml_tensor * t = ggml_new_tensor_1d(ctx, GGML_TYPE_I8, 64);
++    ggml_backend_buffer_t b = ggml_backend_alloc_ctx_tensors_from_buft(ctx, ggml_backend_cpu_buffer_type());
++    uint8_t src[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
++    for (int i = 0; i < 3; ++i) {
++        q.push({ { 0, i, i } }, [&](const moe_refill::job & j, moe_refill::engine & e) { e.copy(t, src, (size_t) j.slot * 8, 8); }, (uint64_t) i + 1);
++    }
++    CHECK(q.batches_in_flight() == 3 && q.jobs_in_flight() == 3, "three batches in flight");
++    CHECK(q.contains(0, 1) && q.contains(0, 2) && !q.contains(0, 9) && !q.contains(1, 1), "contains: an expert whose copy is queued");
++    CHECK(q.poll(4).empty(), "poll returned a job whose batch has not landed");
++    eng.batches[1].landed = true;                 // the middle one lands first
++    CHECK(q.poll(4).empty(), "poll skipped over the oldest unlanded batch (the publication order would change)");
++    eng.land_oldest();                            // the oldest
++    const auto got = q.poll(5);
++    CHECK(got.size() == 2 && got[0].expert == 0 && got[1].expert == 1, "poll: the landed prefix, oldest first (%zu)", got.size());
++    CHECK(!q.contains(0, 0) && !q.contains(0, 1) && q.contains(0, 2), "contains: a published expert is no longer in flight");
++    CHECK(q.batches_in_flight() == 1, "one batch left");
++    eng.land_all();
++    CHECK(q.poll(6).size() == 1, "the last one");
++    ggml_backend_buffer_free(b);
++    ggml_free(ctx);
++}
++
++int main(int argc, char ** argv) {
++    // Never wake a GPU by accident (see test-moe-pcie-split.cpp): without --device every CUDA device is hidden
++    bool has_device = false;
++    for (int i = 1; i < argc; ++i) {
++        has_device |= !strcmp(argv[i], "--device");
++    }
++    if (!has_device) {
++#ifdef _WIN32
++        _putenv("CUDA_VISIBLE_DEVICES=-1");
++#else
++        setenv("CUDA_VISIBLE_DEVICES", "-1", 1);
++#endif
++    } else if (!getenv("CUDA_VISIBLE_DEVICES")) {
++        fprintf(stderr, "--device needs CUDA_VISIBLE_DEVICES set to the one GPU to use\n");
++        return 2;
++    }
++    ggml_backend_load_all();
++
++    int steps = 400;
++    uint32_t seed = 20261002;
++    size_t expert_bytes = 4096;
++    const char * device = nullptr;
++    for (int i = 1; i < argc; ++i) {
++        if (!strcmp(argv[i], "--steps") && i + 1 < argc) { steps = atoi(argv[++i]); }
++        else if (!strcmp(argv[i], "--seed") && i + 1 < argc) { seed = (uint32_t) atoll(argv[++i]); }
++        else if (!strcmp(argv[i], "--expert-bytes") && i + 1 < argc) { expert_bytes = (size_t) atoll(argv[++i]); }
++        else if (!strcmp(argv[i], "--device") && i + 1 < argc) { device = argv[++i]; }
++    }
++    std::mt19937 rng(seed);
++
++    test_queue_order();
++    run_fake(rng, steps, expert_bytes);
++    run_negative(rng, expert_bytes);
++    if (device) {
++        run_device(rng, std::min(steps, 200), expert_bytes, device);
++    } else {
++        // the CPU device has no event query: ggml says so, and the cache then keeps its upload thread
++        ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++        CHECK(cpu && !moe_refill::event_query_of(cpu), "the CPU device claims a non-blocking event query");
++    }
++
++    printf("%d checks, %d failed\n", n_checks, n_failed);
++    return n_failed ? 1 : 0;
++}
+-- 
+2.45.2.windows.1
+

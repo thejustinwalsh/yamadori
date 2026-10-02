@@ -545,6 +545,69 @@ def test_the_word_stems_now_match_their_words():
     check("gpu" in got, "'vertex shader' is GPU", json.dumps(sorted(got)))
 
 
+# GitHub issue #4 (2026-10-02): `@types/react` gave `ui-component` to the gate,
+# and the bare words "input", "component" and "button" then matched
+# LiveCodeBench puzzles. UI questions with no import line, and puzzle / graph /
+# shader sentences that carry the same words. (The positives were written
+# beside the word list: in-sample.)
+UI_PROSE = [
+    "The modal doesn't close when I press Escape, how do I fix it?",
+    "Make this button feel nicer when it is hovered",
+    "My dropdown menu is cut off by its parent container",
+    "How do I add a tooltip to an icon?",
+    "The navbar collapses wrongly on mobile",
+    "How should I validate a text input as the user types?",
+    "The input field loses focus after every keystroke",
+    "Write a reusable card component with a header and a footer",
+    "Why does this component re-render on every keystroke?",
+    "Add a submit button that is disabled while the form is saving",
+    "my <button onClick={save}> never fires",
+    "How do I align a checkbox with its label?",
+    "Build a sidebar with collapsible sections",
+    "Create a form field with an inline error message",
+    "The parent component passes props down but the child component never "
+    "updates",
+    "A popover that closes when you click outside of it",
+    "My disabled button still shows a hover state",
+    "Write a search input with a debounce",
+    "I need an accessible accordion component",
+    "Open the modal dialog from the settings page",
+    "Style the primary button so it has rounded corners",
+    "Show a toast when the save succeeds",
+    "The button looks blurry on retina screens",
+    "Center the modal window vertically",
+]
+NOT_UI_PROSE = [
+    "Takahashi will press the button six times, each press gives a candy",
+    "Count the number of connected components in the graph",
+    "The input is given from Standard Input in the following format",
+    "Multiply the 3-component vector component-wise",
+    "Find the modal value of the array, the most frequent element",
+    "Find the number of strongly connected components",
+    "The first component of each pair is the key",
+    "Each test case has an input string S of length N",
+    "Return the index of the button that took the longest time to push",
+    "Print the number of input lines that are palindromes",
+    "A calculator displays a string, and you press a button b",
+    "Components of the vector are summed; find the maximum component",
+]
+
+
+def test_ui_component_needs_a_ui_context():
+    missed = [s for s in UI_PROSE
+              if "ui-component" not in domains.detect(user(s))]
+    check(not missed, f"all {len(UI_PROSE)} prose UI questions with no import "
+          "are ui-component", "; ".join(missed[:3]))
+    wrong = [s for s in NOT_UI_PROSE
+             if "ui-component" in domains.detect(user(s))]
+    check(not wrong, f"none of {len(NOT_UI_PROSE)} puzzle / graph / shader "
+          "sentences with the same words is ui-component", "; ".join(wrong[:3]))
+    got = domains.detect(user(LCB_PROMPT))
+    check("ui-component" not in got and "algorithms" in got,
+          "the LiveCodeBench template and a graph question: algorithms, not UI",
+          json.dumps(sorted(got)))
+
+
 def test_the_gate_does_not_read_the_servers_own_index():
     import code_search as cs
     prev = cs.INDEX_DB
@@ -718,6 +781,7 @@ def main() -> int:
                test_a_puzzle_is_withheld_with_a_structured_reason,
                test_boilerplate_cannot_withhold_but_can_offer,
                test_the_word_stems_now_match_their_words,
+               test_ui_component_needs_a_ui_context,
                test_the_gate_does_not_read_the_servers_own_index,
                test_prepare_withholds_offers_and_keeps,
                test_a_long_transcript_decides_quickly,

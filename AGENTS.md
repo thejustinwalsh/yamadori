@@ -32,7 +32,7 @@ selection's legacy path, the library-definitions injection and LIBRARY
 USE. `docs/REMOVED.md` lists what went and why; the way back is commit
 `e360d37`. Text below that still names them is history.
 
-## Layout v3: one conversation + the jjava lane (operator, 2026-09-29; BUILT OFFLINE, not deployed)
+## Layout v3: one conversation + the jjava lane (operator, 2026-09-29; built offline 2026-09-29, deployed 2026-10-01/02)
 
 The operator, verbatim: "we should be doing that for all models, we should not have a second conversation at all,
 it is too slow, we have a second gpu if we want a second conversation, that is how it has to play out, the jjava
@@ -68,10 +68,16 @@ what the code does (or does after the deploy, where it says so). Details: docs/E
   `-np 2` (one fit), safe at `-np 1` (derived: the unified pool is `-c` cells either way; `/props` checked after
   the restart); KV stays q8_0 (operator, 2026-09-30, "Kv8": q4_0 at 262K measured by `bench/kv_q4.py`, n=1, NOT
   deployed). ORDER: `bench/deploy_tier_models.py` first (it brings `bonsai-a4000` up), then
-  `bench/deploy_layout_v3.py` (default `--np 1`, refused until the tier deploy ran). Mirai S runs `-np 2` (slot 0
-  the conversation, slot 1 the jjava lane: `budget.LANE_TOKENS` = 3,072 = STATE_TOKENS 2,048 + the decider's
-  measured non-state maximum, 999 cells over 200 turns, rounded up to 256-cell blocks; rank `slots.RANK_LANE` = 3)
-  until its own lane step (`bench/mirai_s_gate.py` step `lane`) decides by the same rule.
+  `bench/deploy_layout_v3.py` (default `--np 1`, refused until the tier deploy ran). Mirai S is LOCKED at `-np 1` too
+  (its gate's lane step, `bench/mirai_s_gate.py`, `bench/results/mirai_s/gate-20261001-merged/gate.json`, 2026-10-01,
+  n=3 per arm): main decode with the lane ACTIVE was 29.3 / 26.8 / 23.8 tok/s at 8K / 32K / 64K against 33.7 / 31.2 /
+  28.2 KEPT and 34.7 / 31.4 / 28.3 CLEARED -- 13-15% below KEPT, 15-16% below CLEARED -- and the gate's rule (ACTIVE
+  below CLEARED's minimum at every size) called the lane material: `-np 1`, no lane, `-c 125952` (the fit's MTP window,
+  45,568 B/cell and 9,482 MiB fixed from two 8K-warmed launches, less 2,048 cells to keep the 1,000 MiB margin at the
+  deepest measured prompt, 126,740 tokens, 951 MiB free), and its jjava and side calls on `bonsai-a4000`
+  (`mcp/tier_models.yaml` `locked`, `helpers`). (The lane's size for a model that runs one stays in `budget.LANE_TOKENS`
+  = 3,072 = STATE_TOKENS 2,048 + the decider's measured non-state maximum, 999 cells over 200 turns, rounded up to
+  256-cell blocks; rank `slots.RANK_LANE` = 3. No main-card model runs a lane now.)
 - **One conversation per card; a second one gets THE OTHER CARD** (`mcp/slots.py` ONE CONVERSATION / THE OTHER
   CARD; in force when the served `/props` says 1 or 2 slots). The operator, 2026-09-30, verbatim: "If anything it
   would be ensuring that a second message that came in out of order got the other card, like a 60s timeout before
@@ -93,7 +99,7 @@ what the code does (or does after the deploy, where it says so). Details: docs/E
   owner's request is served first (only the owner is granted the main card inside its hold). The same-account
   immediate takeover of earlier the same day was REMOVED (replaced by this rule). `mcp/test_one_conversation.py`
   (`test_other_card_routing`, `test_owner_first_race`); live: `mcp/test_live_stack.py` `slots`.
-  **`--cache-ram` (PROPOSED, not deployed; derived)**: bonsai `16384` MiB = two full-context entries (36,992
+  **`--cache-ram` (set in config.yaml and deployed 2026-10-01/02: bonsai 16384, bonsai-a4000 5120; derived)**: bonsai `16384` MiB = two full-context entries (36,992
   B/cell, `bench/results/kv_rank/20260929-v2/line.json`, x 209,920 cells = 7.23 GiB + ~150 MiB recurrent state,
   docs/ENGINES.md = ~7,560 MiB each); bonsai-a4000 `5120` MiB = one entry (35,840 B/cell, `bench/a4000_fit.py`, x
   138,240 = 4.61 GiB + ~150 MiB = ~4,870 MiB); flash-next `8192` (its default, stated). The worst case on the 64 GB
@@ -114,8 +120,8 @@ what the code does (or does after the deploy, where it says so). Details: docs/E
   cache is untouched. Measured per model by the lane's three arms (KEPT / ACTIVE / CLEARED, main decode tok/s at
   8K/32K/64K, n=3, and the next burst's re-prefill ms: `bench/kv_rank.py --layout v3`, `mirai_s_gate.py` step
   `lane`). If the lane materially slows main, jjava moves to `bonsai-a4000` (the row's `helpers`) and the main
-  card runs `-np 1` -- measured and decided for Bonsai (above); the lane remains only where a model's own step
-  has not yet decided (Mirai S).
+  card runs `-np 1` -- measured and decided for Bonsai and Mirai S (above), locked for Flash-Next by the operator;
+  no main-card model runs a lane now, and the lane's code remains for one that does.
 - **Vision off the main card** (layout v2, deployed): `bonsai` runs without `--mmproj`; `bonsai-vision` (the 27B +
   mmproj on the A4000, on demand, ttl 300, `ondemand` group) sees for it (`vision._vision_model`); a tier model
   whose table row says `vision: false` does the same.
@@ -888,6 +894,31 @@ empty or error calls is a tool defect to fix, not a budget spent.
   thinking's first heartbeat), so a failure before it is a real HTTP error;
   after it, ONE `data: {"error": ...}` event and `[DONE]` -- never assistant
   content. A client that hangs up during the wait cancels the token.
+- **The proxy's three reliability fixes of 2026-10-02** (commit 6d8007f; from the operator's live session of
+  2026-10-01 16:53-20:25 ET, VS Copilot agents at max; offline only -- test_stream 112, test_ledger 144,
+  test_responses_api 102, test_messages_api 88, test_one_conversation 55, test_slots 123 -- **not yet run live**).
+  THE WAIT IS HEARD (`proxy._TurnPump`): the stream said nothing until the turn's first event, and a max request's
+  first event waits for the Flash-Next load (131-272 s measured) and then its prompt (a cold 30K prompt: 135-321
+  s); the client hung up at exactly 180.0 s with no byte received (17:28, again 20:25) and each hang-up cancelled
+  the load or prefill it waited on. The turn now runs on a thread of its own (it advances only when the stream
+  pulls, so the ledger's ordering holds) and whenever it has produced nothing for `HEARTBEAT` (5 s, the proxy's
+  existing beat, under the shortest client silence limit known: Hermes' codex transport, 12 s) the stream sends
+  a heartbeat -- the empty delta, `response.in_progress` on Responses, `ping` on Messages. This amends "nothing
+  until the turn's first event" above: E1 keeps its promise for fast failures -- a refusal inside the first
+  `HEARTBEAT` seconds (validation, the window check, 503 at capacity: all decided before any model work) is
+  still a real HTTP status; one after the first heartbeat is the committed stream's one error event.
+  AN UNANSWERED ATTEMPT HOLDS NOTHING (`mcp/slots.py`): the first request's client hung up 180 s into the load,
+  its retries arrived as NEW conversation ids (a retried opening mints another) and were refused 503
+  `conversation_at_capacity` for 60 s, held off by the cancelled attempt's own pin ("its latest activity was 4 s
+  ago"). A conversation becomes the card's owner when a generation of it FINISHES (`slots.remember`); a pin made
+  by an attempt that ended with none -- cancelled, refused, failed -- is dropped at release with its activity
+  stamps (the grant says `unanswered`; the slot's end is not stamped), so the retry finds the card free. A conversation answered before
+  (or restored from a persisted pin) keeps its pin whatever happens to a later request. `budget.pool_size` NEVER
+  CACHES ITS FALLBACK: a proxy that started before the model server answered kept the 131,072 fallback and no
+  slot count for its whole life (the deploy check of 2026-10-01: `/v1/models` said 131072 and requests were
+  ranked for 3 slots while bonsai served 209,920 cells on 1 slot, so ONE CONVERSATION was off). The fallback is
+  returned uncached, and the next call asks again, at most once per `budget.RETRY_S` (5 s, the heartbeat) while
+  the server is away, so a starting server is noticed within one beat.
 - **Usage** (U1/U2). `usage` is the FINAL main generation's (the last hop,
   or a fold-back continuation): `prompt_tokens` its prompt -- the context the
   conversation occupies, which Hermes compacts on; it was the SUM over hops --
@@ -1042,8 +1073,15 @@ live run, no TypeSafe SDK run yet**. The rules:
   `budget.LANE_TOKENS` 3,072 cells), one after another on the cached state
   (Jev: in parallel; `x_yamadori.parallel` false); a state larger than the
   lane runs past the VRAM line, recorded in `x_yamadori.lane`. ONE Jev call
-  at a time: a second is 429 at once, Retry-After 1 (never a hang). A call
-  holds a `max_mode.Lease` on its model while it runs.
+  runs at a time and the others QUEUE in arrival order (THE QUEUE, `mcp/jev_api.py`; operator, 2026-10-01: "Can we
+  queue jev calls, don't they only take a few seconds, like queue a set number, and send retry estimate if busy?"): a
+  call is admitted while its estimated finish (the lane work ahead plus its own) is inside `CLIENT_TIMEOUT_S` = 10 s,
+  the TypeSafe SDKs' own request timeout (typesafe-sdk 0.7.2 `DEFAULT_TIMEOUT`; derived, not chosen), else 429 at
+  once with Retry-After = the estimated seconds of work ahead (ceil, at least 1) -- never a hang. The estimate is
+  the median seconds per question of this process's last 50 calls, seeded with decide_turn's measured p90 for a
+  question's two reads, 577 ms (`bench/decider/bonsai_decider.py`); `x_yamadori.queue` records the wait. Offline
+  only (`mcp/test_jev_api.py` 191 checks, `mcp/test_jev_sdk.py` 106 with both SDKs, 2026-10-02); not run live. A
+  call holds a `max_mode.Lease` on its model while it runs.
 - **Usage**, counted from the reads (decider_bonsai's per-read timings):
   `input_tokens` = the first read's cached prefix + every read's processed
   tokens; `output_tokens` = the reads (one token each).

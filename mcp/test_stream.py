@@ -1420,11 +1420,13 @@ def test_the_wait_is_heard():
     (empty deltas) until its first event; a refusal inside the first HEARTBEAT seconds is still RAISED before any
     byte (E1); one after a heartbeat is the committed stream's one error event and [DONE]."""
     import api_errors
+    import cancel
     import time
     saved_turn, saved_beat = proxy._run_turn, proxy.HEARTBEAT
     proxy.HEARTBEAT = 0.1
 
     def slow_turn(body, streamed):
+        cancel.current().preflight_done = True      # as _run_turn does after the window check
         time.sleep(0.45)                     # the model load / a cold prefill
         yield ("content", "hi")
         return {"choices": [{"finish_reason": "stop"}], "x_yamadori": {}}
@@ -1433,7 +1435,13 @@ def test_the_wait_is_heard():
         raise api_errors.ApiError(503, "at capacity", code="conversation_at_capacity")
         yield                                # pragma: no cover
 
+    def slow_refusal(body, streamed):
+        time.sleep(0.35)                     # a long window count, BEFORE the pre-flight is over
+        raise api_errors.ApiError(400, "too long", code="context_length_exceeded")
+        yield                                # pragma: no cover
+
     def late_failure(body, streamed):
+        cancel.current().preflight_done = True
         time.sleep(0.35)
         raise RuntimeError("the model server went away")
         yield                                # pragma: no cover
@@ -1466,6 +1474,14 @@ def test_the_wait_is_heard():
             check(False, "a refusal inside the first HEARTBEAT is raised before any byte (E1)", str(got)[:200])
         except api_errors.ApiError as e:
             check(e.status == 503, "a refusal inside the first HEARTBEAT is raised before any byte (E1)", str(e))
+        proxy._run_turn = slow_refusal
+        try:
+            got = list(proxy.stream_body({"messages": []}))
+            check(False, "a refusal during a SLOW pre-flight (several HEARTBEATs) is still raised before any byte",
+                  str(got)[:200])
+        except api_errors.ApiError as e:
+            check(e.status == 400 and e.code == "context_length_exceeded",
+                  "a refusal during a SLOW pre-flight (several HEARTBEATs) is still raised before any byte", str(e))
         proxy._run_turn = late_failure
         chunks = list(proxy.stream_body({"messages": []}))
         text = b"".join(chunks).decode("utf-8", "replace")

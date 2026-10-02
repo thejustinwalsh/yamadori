@@ -415,6 +415,34 @@ def arms(n_cpu_moe: int = 42, cache_slots: int = 0, all_slots: dict | None = Non
                                     args={**table["cache-all"]["args"], **np1, "--moe-expert-cache": s_kv},
                                     checks=["probe"])
     table["cache-all-np1-kv"] = dict(table["kvcache-fit-np1"], checks=["kl", "needles", "corrupt", "speed"], kl_batch=4)
+    # E2, both: 0021's host-mapped sparse K/V at the larger cache AND 0019's block top-k
+    table["cache-all-np1-kv-blk"] = dict(table["cache-all-np1-kv"],
+                                         env={**table["cache-all-np1-kv"]["env"], "LLAMA_QSA_BLOCK_TOPK": "1"})
+    # THE PROFILES (the coordinator, 2026-10-01). Decode: 0010's per-op GPU time on the deployed arm (CUDA graphs off
+    # for it; they do not replay under MTP anyway, window D). Prefill (step `prefill`): the plain rate, 0017's
+    # scheduler split, 0010's per-op table, and the two prompt-side switches already built -- no op offload (the
+    # CPU computes the prompt's experts) and 0002's streaming ring (two staging slots of one expert tensor each,
+    # 2 x 256.25 MiB = 512.5 MiB = 8 cache rows of 66.2 MiB fewer: 70 - 8 = 62; FLASHNEXT_CACHE_SLOTS_RING)
+    table["probe-opt-np1"] = dict(table["cache-all-np1"], env={**table["cache-all-np1"]["env"], **opt},
+                                  checks=["probe"])
+    # 0023 (--checkpoint-every; step `ckpt`): Strata's 16,384 (generate.cpp:283 prompt_cache_every), and the same
+    # arm without the flag (today's behaviour)
+    table["ckpt-np1"] = dict(table["cache-all-np1"],
+                             args={**table["cache-all-np1"]["args"], "--checkpoint-every": "16384"}, checks=["ckpt"])
+    table["ckpt-off-np1"] = dict(table["cache-all-np1"], checks=["ckpt"])
+    table["prefill-np1"] = dict(table["cache-all-np1"], checks=["prefill"])
+    table["prefill-sched-np1"] = dict(table["cache-all-np1"],
+                                      env={**table["cache-all-np1"]["env"], "GGML_SCHED_TIMING": "1"},
+                                      checks=["prefill"])
+    table["prefill-opt-np1"] = dict(table["cache-all-np1"], env={**table["cache-all-np1"]["env"], **opt},
+                                    checks=["prefill"])
+    table["prefill-nooffload-np1"] = dict(table["cache-all-np1"],
+                                          args={**table["cache-all-np1"]["args"], "--no-op-offload": ""},
+                                          checks=["prefill"])
+    table["prefill-ring-np1"] = dict(table["cache-all-np1"],
+                                     args={**table["cache-all-np1"]["args"], "--prefetch-experts-slots": "2",
+                                           "--moe-expert-cache": os.environ.get("FLASHNEXT_CACHE_SLOTS_RING", "62")},
+                                     checks=["prefill"])
     # M2b on the E2 base (the graph cache on, K/V on the card)
     table["cache-all-np1-blk-gc"] = dict(table["cache-all-np1-blk"],
                                          env={**table["cache-all-np1-blk"]["env"], "LLAMA_GRAPH_CACHE": "8"})
@@ -573,8 +601,9 @@ class Launched:
         return {"gpu_min_free": self.guard.min_free, "gpu_max_used": self.guard.max_used, "guard": self.guard.tripped}
 
 
-def completion(base: str, prompt: str, n: int, slot: int = 0, ignore_eos: bool = False) -> dict:
-    body = {"prompt": prompt, "id_slot": slot, "n_predict": n, "cache_prompt": True, "temperature": 0.0,
+def completion(base: str, prompt: str, n: int, slot: int = 0, ignore_eos: bool = False, fresh: bool = False) -> dict:
+    # fresh: nothing of the slot's cache is reused (the prefill step: every prompt is processed whole)
+    body = {"prompt": prompt, "id_slot": slot, "n_predict": n, "cache_prompt": not fresh, "temperature": 0.0,
             "top_k": 1, "seed": 0}
     if ignore_eos:
         # the speed step measures decoding, not where the model would stop: a raw slice of source code sometimes
@@ -910,6 +939,189 @@ def step_jjava(name: str, arm: dict, port: int, out: str) -> dict:
 CACHE_RE = re.compile(r"moe-cache: steps=(\d+) hits=(\d+) misses=(\d+)")
 
 
+SCHED_RE = re.compile(r"sched timing (\S+) over (\d+) graphs: wall ([0-9.]+) ms = wait ([0-9.]+) \(([0-9.]+) waits\) "
+                      r"\+ cpu ([0-9.]+) \+ launch ([0-9.]+) \+ copy ([0-9.]+) \+ other ([0-9.]+) ms per graph; "
+                      r"([0-9.]+) splits per graph")
+
+
+def timing_tables(lines: list[str]) -> dict:
+    """Every 0010 op-timing table and 0017 sched-timing line in a stretch of a server log, summed: the op tables as
+    total ms per op (a table is ms per graph over its graphs; only its top 30 rows are printed), the sched lines per
+    scheduler (the target model and the MTP draft have their own) as total ms by part. Both print every 100 graphs,
+    so the last <100 graphs of a stretch are not in it: `graphs` says how many are."""
+    ops: dict[str, float] = {}
+    op_graphs, op_ms = 0, 0.0
+    for i, ln in enumerate(lines):
+        m = OPT_RE.search(ln)
+        if not m:
+            continue
+        g = int(m.group(1))
+        op_graphs += g
+        op_ms += float(m.group(2)) * g
+        for row in lines[i + 1: i + 31]:
+            mm = OPT_ROW.match(row.split(" I ", 1)[-1] if " I " in row else row)
+            if not mm:
+                break
+            ops[mm.group(4).strip()] = ops.get(mm.group(4).strip(), 0.0) + float(mm.group(1)) * g
+    sched: dict[str, dict] = {}
+    for ln in lines:
+        m = SCHED_RE.search(ln)
+        if not m:
+            continue
+        g = int(m.group(2))
+        s = sched.setdefault(m.group(1), {"graphs": 0, "wall": 0.0, "wait": 0.0, "waits": 0.0, "cpu": 0.0,
+                                          "launch": 0.0, "copy": 0.0, "other": 0.0, "splits": 0.0})
+        s["graphs"] += g
+        for k, j in (("wall", 3), ("wait", 4), ("waits", 5), ("cpu", 6), ("launch", 7), ("copy", 8), ("other", 9),
+                     ("splits", 10)):
+            s[k] += float(m.group(j)) * g
+    out: dict = {}
+    if op_graphs:
+        top = sorted(ops.items(), key=lambda kv: -kv[1])[:20]
+        out["op_timing"] = {"graphs": op_graphs, "ms": round(op_ms, 1),
+                            "top": [{"op": k, "ms": round(v, 1), "pct": round(100 * v / op_ms, 1)} for k, v in top]}
+    if sched:
+        out["sched_timing"] = {k: {kk: (round(vv, 1) if kk != "graphs" else vv) for kk, vv in v.items()}
+                               for k, v in sched.items()}
+    return out
+
+
+def step_prefill(name: str, arm: dict, port: int, out: str) -> dict:
+    """Where a prompt token's time goes (the coordinator, 2026-10-01: the operator's 26-30K prompts ran at 94-120
+    tok/s cold). Per context (FLASHNEXT_PREFILL_CONTEXTS, K tokens, default "8 32"): a fresh server, one ~1K warm-up
+    request, then FLASHNEXT_PREFILL_N (3) prompts of that size, each with its own first line and cache_prompt off (no
+    reuse), one token decoded; the server's own prompt tok/s per run, and the arm's diagnostics over that stretch of
+    the log (timing_tables). A server per context: the diagnostics print every 100 graphs, so one server's stretch
+    holds one context only; a sched-timing arm runs enough prompts for at least 110 target graphs (512 a ubatch)."""
+    rec: dict = {"env": {k: v for k, v in arm["env"].items() if k.startswith("GGML_")}}
+    logp = os.path.join(out, f"{name}.server.log")
+    text = corpus()
+    n = int(os.environ.get("FLASHNEXT_PREFILL_N") or 3)
+    ub = int(arm["args"].get("-ub") or 512)
+    for k in [int(x) for x in (os.environ.get("FLASHNEXT_PREFILL_CONTEXTS") or "8 32").split()]:
+        runs_n = n
+        if arm["env"].get("GGML_SCHED_TIMING"):
+            runs_n = max(n, -(-110 // max(1, k * 1024 // ub)))
+        row: dict = {"runs": []}
+        srv = None
+        try:
+            srv = Launched(name, arm, port, out)
+            row["load_s"] = srv.load_s
+            w = completion(srv.base, "Warm-up.\n" + text[: 1024 * 4], 1, slot=0, fresh=True)
+            row["warmup"] = {"prompt_n": w["prompt_n"], "prompt_tps": w["prompt_tps"]}
+            mark = os.path.getsize(logp)
+            for i in range(runs_n):
+                head = f"Run {name}-{k}k-{i}-{time.time_ns()}: read the following source.\n"
+                r = completion(srv.base, head + text[: k * 1024 * 4], 1, slot=0, fresh=True)
+                row["runs"].append({"prompt_n": r["prompt_n"], "prompt_tps": r["prompt_tps"]})
+            with open(logp, encoding="utf-8", errors="replace") as f:
+                f.seek(mark)
+                row.update(timing_tables(f.read().splitlines()))
+        except Exception as e:                                               # noqa: BLE001
+            row["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            if srv is not None:
+                row.update(srv.stop())
+        rec[f"{k}k"] = row
+    return rec
+
+
+CKPT_RE = re.compile(r"created context checkpoint (\d+) of (\d+) \(pos_min = (-?\d+), pos_max = (-?\d+), "
+                     r"n_tokens = (\d+), size = ([0-9.]+) MiB(?:, ([0-9.]+) ms)?\)")
+
+
+def _raw_completion(base: str, prompt: str, n: int, fresh: bool = False) -> dict:
+    """One greedy /completion with the first tokens' probabilities: what the checkpoint check compares."""
+    body = {"prompt": prompt, "id_slot": 0, "n_predict": n, "cache_prompt": not fresh, "temperature": 0.0,
+            "top_k": 1, "seed": 0, "n_probs": 5}
+    st, txt = ec.http("POST", base + "/completion", body, timeout=7200)
+    if st != 200:
+        raise RuntimeError(f"/completion: HTTP {st}: {txt[:300]}")
+    r = json.loads(txt)
+    t = r.get("timings") or {}
+    probs = r.get("completion_probabilities") or []
+    first = probs[0] if probs else {}
+    top = first.get("top_logprobs") or first.get("top_probs") or []
+    return {"content": r.get("content") or "", "prompt_n": t.get("prompt_n"), "cache_n": t.get("cache_n"),
+            "prompt_ms": round(t.get("prompt_ms") or 0), "prompt_tps": t.get("prompt_per_second"),
+            "predicted_n": t.get("predicted_n"),
+            "first_top": [{"token": x.get("token"), "logprob": x.get("logprob"), "prob": x.get("prob")} for x in top]}
+
+
+def _tokens(base: str, text: str) -> list[int]:
+    st, txt = ec.http("POST", base + "/tokenize", {"content": text}, timeout=600)
+    if st != 200:
+        raise RuntimeError(f"/tokenize: HTTP {st}")
+    return json.loads(txt)["tokens"]
+
+
+def _lcp(a: list[int], b: list[int]) -> int:
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def step_ckpt(name: str, arm: dict, port: int, out: str) -> dict:
+    """0023's check (the coordinator, 2026-10-02): prompt A (~30K tokens), then B that shares A's first ~20K and
+    differs after, then C that differs inside the first 16K -- all greedy, 48 tokens. With --checkpoint-every N in
+    the arm, B must reuse exactly the last periodic checkpoint at or before the first differing token
+    (floor(lcp / N) * N tokens) and C must reuse 0 when its lcp is below N (no worse than today); without the flag B
+    reuses 0 (today). Then a fresh server reads B cold, twice (the second with cache_prompt off): the resumed B's
+    text must equal the cold one's -- judged only if the two cold runs equal each other (this card's own run-to-run
+    variation, window E1). The first token's top-5 probabilities of each run are kept beside the texts, and the
+    log's checkpoint lines (size, ms) for the budget."""
+    every = int(arm["args"].get("--checkpoint-every") or 0)
+    rec: dict = {"checkpoint_every": every}
+    logp = os.path.join(out, f"{name}.server.log")
+    text = corpus()
+    a = text[: 30 * 1024 * 4]
+    b = text[: 20 * 1024 * 4] + text[1_000_000: 1_000_000 + 10 * 1024 * 4]
+    c = text[: 8 * 1024 * 4] + text[2_000_000: 2_000_000 + 22 * 1024 * 4]
+    srv = None
+    try:
+        srv = Launched(name, arm, port, out)
+        mark = os.path.getsize(logp)
+        ta, tb, tc = _tokens(srv.base, a), _tokens(srv.base, b), _tokens(srv.base, c)
+        rec["tokens"] = {"A": len(ta), "B": len(tb), "C": len(tc), "lcp_AB": _lcp(ta, tb), "lcp_BC": _lcp(tb, tc)}
+        rec["A"] = _raw_completion(srv.base, a, 48)
+        rec["B"] = _raw_completion(srv.base, b, 48)
+        rec["C"] = _raw_completion(srv.base, c, 48)
+        with open(logp, encoding="utf-8", errors="replace") as f:
+            f.seek(mark)
+            tail = f.read().splitlines()
+        cps = [CKPT_RE.search(ln) for ln in tail]
+        rec["checkpoints"] = [{"n_tokens": int(m.group(5)), "mib": float(m.group(6)),
+                               "ms": float(m.group(7)) if m.group(7) else None} for m in cps if m]
+        rec["restored"] = [ln.split(" | ", 2)[-1].strip() for ln in tail if "restored context checkpoint" in ln]
+        rec["full_reprocess"] = sum("forcing full prompt re-processing" in ln for ln in tail)
+        rec.update(srv.stop())
+        srv = None
+        srv = Launched(name, arm, port, out)
+        rec["B_cold"] = _raw_completion(srv.base, b, 48)
+        rec["B_cold2"] = _raw_completion(srv.base, b, 48, fresh=True)
+    except Exception as e:                                               # noqa: BLE001
+        rec["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        if srv is not None:
+            srv.stop()
+    if "error" not in rec:
+        lcp_ab, lcp_bc = rec["tokens"]["lcp_AB"], rec["tokens"]["lcp_BC"]
+        want_b = (lcp_ab // every) * every if every else 0
+        # after B the slot holds B and its answer; C shares lcp_BC tokens with it
+        want_c = (lcp_bc // every) * every if every else 0
+        cold_same = rec["B_cold"]["content"] == rec["B_cold2"]["content"]
+        rec["expect"] = {"B_cache_n": want_b, "C_cache_n": want_c}
+        rec["reuse_PASS"] = (rec["A"]["cache_n"] in (0, None) and (rec["B"]["cache_n"] or 0) == want_b
+                             and (rec["C"]["cache_n"] or 0) == want_c)
+        rec["cold_runs_equal"] = cold_same
+        rec["resumed_equals_cold"] = rec["B"]["content"] == rec["B_cold"]["content"]
+        rec["PASS"] = bool(rec["reuse_PASS"] and (rec["resumed_equals_cold"] or not cold_same))
+    return rec
+
+
 def cache_counts(logp: str) -> list[tuple[int, int, int]]:
     """0016's moe-cache lines in a server log (-lv 4): (steps, hits, misses), running totals."""
     try:
@@ -1205,6 +1417,16 @@ def main(argv: list[str]) -> int:
                 pass
             elif "probe" in a.steps and "probe" in arm["checks"]:
                 r["probe"] = step_probe(n, arm, a.port, a.out)
+                save()
+            if "ckpt" in a.steps and "ckpt" in arm["checks"] and reuse("ckpt"):
+                pass
+            elif "ckpt" in a.steps and "ckpt" in arm["checks"]:
+                r["ckpt"] = step_ckpt(n, arm, a.port, a.out)
+                save()
+            if "prefill" in a.steps and "prefill" in arm["checks"] and reuse("prefill"):
+                pass
+            elif "prefill" in a.steps and "prefill" in arm["checks"]:
+                r["prefill"] = step_prefill(n, arm, a.port, a.out)
                 save()
             if "lane" in a.steps and "lane" in arm["checks"] and reuse("lane"):
                 pass

@@ -28,7 +28,10 @@ WHAT IS CHECKED, per SDK:
      the docs' values (the fake reads each example's probabilities).
   3. a 422 raises the SDK's validation error, and its message names the
      field (questions.q.criteria).
-  4. a 429 carries retry-after 1000 ms (retries off), and with the default
+  4. a 429 (a busy lane, held with ~1 s of work ahead: THE QUEUE refuses a
+     call only when the wait would outlast the SDK's timeout, and sends the
+     estimate as Retry-After) carries retry-after 1000 ms (retries off), and
+     with the default
      policy is retried and succeeds; a 529 is retried and succeeds (offline:
      the harness makes the first attempt fail; the server's log shows both).
   5. request_id is the x-typesafe-request-id header's value, and (offline)
@@ -256,6 +259,15 @@ def offline() -> None:
     # Test-only: the 529 path's Retry-After (max_mode.RETRY_AFTER_UNKNOWN,
     # 30 s) set to 1 s, so a retried 529 takes a second, not half a minute.
     max_mode.RETRY_AFTER_UNKNOWN = 1
+    # Test-only, and for THE QUEUE (jev_api.py; operator 2026-10-01): a busy
+    # lane is a 429 only when the work ahead plus the call's own would outlast
+    # CLIENT_TIMEOUT_S (the SDKs' 10 s), and its Retry-After is the estimated
+    # seconds ahead (ceil) -- never the old fixed 1 s, so 10 s or more with the
+    # shipped constant. The busy scenarios below hold the lane with ~1 s of
+    # work ahead, and this timeout is set under that, so the refusal and its
+    # Retry-After of 1 s are what the SDKs meet (an idle lane admits at once
+    # whatever this is: the sequential drivers never wait).
+    J.CLIENT_TIMEOUT_S = 0.2
 
     class Scenarios:
         """An ASGI wrapper over server.app: the header x-jev-test picks what
@@ -276,7 +288,13 @@ def offline() -> None:
             if sc.startswith("example:"):
                 T.FAKE.reset(T.weights_for(EX[int(sc.split(":")[1])]))
             elif sc == "busy_always" or (sc.startswith("busy_once:") and n == 1):
-                hold = J._LANE.acquire(blocking=False)
+                # The lane is held the way a call in flight holds it (THE
+                # QUEUE's `_running`), 1 s of estimated work ahead -- not by
+                # taking `_LANE` itself, which a queued call would block on
+                # until the hold ended instead of being refused.
+                hold = {"start": time.time(), "est_s": 1.0}
+                with J._q:
+                    J._running = hold
             elif sc.startswith("overload_once:") and n == 1:
                 T.FAKE.fail_post = urllib.error.URLError("connection refused")
             rec = {"scenario": sc, "attempt": n, "t": time.time(), "status": None}
@@ -290,7 +308,10 @@ def offline() -> None:
                 await self.app(scope, receive, send2)
             finally:
                 if hold:
-                    J._LANE.release()
+                    with J._q:
+                        if J._running is hold:
+                            J._running = None
+                        J._q.notify_all()
 
     import uvicorn
     import server

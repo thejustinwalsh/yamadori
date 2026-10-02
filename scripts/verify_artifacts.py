@@ -194,6 +194,27 @@ def norm(path: str) -> str:
     return os.path.normcase(os.path.normpath(path))
 
 
+# A SPLIT GGUF (llama.cpp's gguf-split): `<stem>-00001-of-00002.gguf` ... The
+# server is given ONE shard (config.yaml's `-m` names the first) and loads the
+# others itself from the same directory, so config.yaml never names them. They
+# are loaded all the same: in service, and checked like any file it names.
+_SHARD = re.compile(r"^(?P<stem>.+)-(?P<n>\d{5})-of-(?P<m>\d{5})\.gguf$", re.I)
+
+
+def other_shards(path: str) -> list[str]:
+    """The other shards of the split GGUF `path` is one of, as the loader names
+    them (same directory, same stem, `-NNNNN-of-MMMMM.gguf`); [] when `path`
+    is not a shard name. Names only: whether the files exist is the caller's."""
+    d, base = os.path.split(path)
+    m = _SHARD.match(base)
+    if not m:
+        return []
+    total = int(m["m"])
+    width = len(m["m"])
+    return [os.path.join(d, f"{m['stem']}-{i:0{width}d}-of-{m['m']}.gguf")
+            for i in range(1, total + 1) if i != int(m["n"])]
+
+
 def resolve(path: str, macros: dict) -> str:
     return os.path.normpath(_expand(path, macros))
 
@@ -505,7 +526,12 @@ def verify(config_path: str = DEFAULT_CONFIG, manifest_path: str = MANIFEST,
         if a.get("path"):
             by_path[norm(resolve(str(a["path"]), macros))] = a
 
-    # 1. every file config.yaml passes to a model server
+    # 1. every file config.yaml passes to a model server, and the other shards
+    # of a split GGUF it names (the loader finds those itself: other_shards)
+    refs = list(refs)
+    for entry, flag, p in list(refs):
+        refs += [(entry, "shard of " + os.path.basename(p), sib)
+                 for sib in other_shards(os.path.normpath(p))]
     referenced: dict[str, list[str]] = {}
     for entry, flag, p in refs:
         referenced.setdefault(norm(os.path.normpath(p)), []).append(entry)

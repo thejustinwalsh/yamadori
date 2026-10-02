@@ -151,7 +151,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 import urllib.request
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
@@ -195,12 +194,12 @@ _LINE: int | None = None
 # llama-server's slot count, from the same /props answer (`total_slots`), for
 # mcp/slots.py. None until pool_size() has asked, or when it could not.
 _SLOTS: int | None = None
-# pool_size()'s answer while the pool has never been read (its docstring), and how often an unread pool is
-# asked for again: RETRY_S is the proxy's own HEARTBEAT interval (5 s), so a starting model server is noticed
-# within one beat and an absent one costs one refused connection per beat.
+# pool_size()'s answer while the pool has never been read (its docstring). RETRY_S: how often the proxy's startup
+# thread asks again until a real read succeeds -- the proxy's own HEARTBEAT interval (5 s), so a model server that
+# comes up is noticed within one beat.
 FALLBACK_POOL = 131072
 RETRY_S = 5.0
-_LAST_TRY = 0.0
+_READ = False
 
 
 def pool_size(refresh: bool = False) -> int:
@@ -218,12 +217,9 @@ def pool_size(refresh: bool = False) -> int:
     ambiguity in the UI (it notes that a pool of exactly 131072 may be this
     fallback rather than a measurement).
     """
-    global _POOL, _SLOTS, _LINE, _LAST_TRY
+    global _POOL, _SLOTS, _LINE, _READ
     if _POOL is not None and not refresh:
         return _POOL
-    if _POOL is None and not refresh and time.time() - _LAST_TRY < RETRY_S:
-        return FALLBACK_POOL
-    _LAST_TRY = time.time()
     for url in (f"{DIRECT}/props", f"{UPSTREAM}/props"):
         try:
             with urllib.request.urlopen(url, timeout=10) as r:
@@ -232,6 +228,7 @@ def pool_size(refresh: bool = False) -> int:
                  or d.get("n_ctx"))
             if n:
                 _POOL = int(n)
+                _READ = True
                 if isinstance(d.get("total_slots"), int) and d["total_slots"] > 0:
                     _SLOTS = d["total_slots"]
                 if isinstance(d.get("kv_vram_cells"), int):
@@ -244,15 +241,23 @@ def pool_size(refresh: bool = False) -> int:
     # (2026-09-28): the model server did not answer, the fallback replaced
     # the real 262,144 pool, and every request of the proxy would have been
     # budgeted against 131,072 until the next good read. The fallback is
-    # only for a process that has never read the pool -- and it is NEVER CACHED
-    # (2026-10-02): a proxy that started before the model server answered kept
-    # 131,072 and no slot count for its whole life (deploy check 2026-10-01:
-    # /v1/models said 131072 and requests were ranked for 3 slots while bonsai
-    # served 209,920 cells on 1 slot, so ONE CONVERSATION was off). The next
-    # call asks again, at most once per RETRY_S while the server is away.
+    # only for a process that has never read the pool. THE FALLBACK IS NOT THE
+    # LAST WORD (2026-10-02): a proxy that started before the model server
+    # answered kept 131,072 and no slot count for its whole life (deploy check
+    # 2026-10-01: /v1/models said 131072 and requests were ranked for 3 slots
+    # while bonsai served 209,920 cells on 1 slot, so ONE CONVERSATION was
+    # off). read_ok() says whether a real read has happened; the proxy's
+    # startup thread (server.py _read_pool_when_ready) keeps asking the main
+    # model's own port every RETRY_S until one has -- off the request path, so
+    # no request ever waits on a dead port.
     if _POOL is None:
-        return FALLBACK_POOL
+        _POOL = FALLBACK_POOL
     return _POOL
+
+
+def read_ok() -> bool:
+    """Has this process READ the pool from a model server (not the fallback)?"""
+    return _READ
 
 
 def known_pool() -> int | None:
@@ -269,7 +274,7 @@ def refresh_direct(timeout: float = 3) -> tuple[int | None, str]:
     route would start a model that is off the card. Updates the same cache
     pool_size() keeps. (pool, how). A failed read keeps the last good pool
     (pool_size's rule) and says why."""
-    global _POOL, _SLOTS, _LINE
+    global _POOL, _SLOTS, _LINE, _READ
     try:
         with urllib.request.urlopen(f"{DIRECT}/props", timeout=timeout) as r:
             d = json.load(r)
@@ -280,6 +285,7 @@ def refresh_direct(timeout: float = 3) -> tuple[int | None, str]:
     if not n:
         return _POOL, f"{DIRECT}/props carried no n_ctx"
     _POOL = int(n)
+    _READ = True
     if isinstance(d.get("total_slots"), int) and d["total_slots"] > 0:
         _SLOTS = d["total_slots"]
     if isinstance(d.get("kv_vram_cells"), int):

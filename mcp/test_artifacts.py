@@ -445,8 +445,71 @@ def test_download() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_split_gguf_shards() -> None:
+    """config.yaml names the first shard of a split GGUF (`-m <stem>-00001-of-
+    00002.gguf`); llama.cpp loads the others itself. A manifest entry for a
+    later shard is in service, not "loads no such file" (the warning
+    flash-next-iq2xs-shard2-ngram drew, 2026-10-02) -- and, being loaded, it is
+    checked like any file config.yaml names."""
+    print("verify: split GGUF shards")
+    got = [os.path.normpath(x) for x in va.other_shards("/m/x-00001-of-00003.gguf")]
+    check(got == [os.path.normpath("/m/x-00002-of-00003.gguf"),
+                  os.path.normpath("/m/x-00003-of-00003.gguf")],
+          "other_shards names the rest of a split, same directory and stem", str(got))
+    check(va.other_shards("/m/x.gguf") == [] and va.other_shards("/m/x-1-of-2.gguf") == [],
+          "a plain GGUF, or a name not in the -NNNNN-of-NNNNN form, has no shards")
+    fx = Fixture()
+    try:
+        s1, s2 = b"shard one bytes" * 20, b"shard two bytes" * 30
+        fx.write("big-00001-of-00002.gguf", s1)
+        fx.write("big-00002-of-00002.gguf", s2)
+        fx.write_config("--llm ${models}/big-00001-of-00002.gguf\n")
+        prov = {"status": "hash_only"}
+
+        def arts(second: dict | None) -> list[dict]:
+            a = fx.artifacts() + [{"id": "big-1", "role": "r", "status": "in_service",
+                                   "path": "${models}/big-00001-of-00002.gguf",
+                                   "size": len(s1), "sha256": sha(s1), "provenance": prov}]
+            return a + ([second] if second else [])
+        shard2 = {"id": "big-2", "role": "r", "status": "in_service",
+                  "path": "${models}/big-00002-of-00002.gguf", "size": len(s2),
+                  "sha256": sha(s2), "provenance": prov}
+        fx.write_manifest(arts(shard2))
+        check(fx.verify() == [], "a later shard of a split GGUF config.yaml names is "
+              "in service: no warning", str(fx.verify()))
+
+        fx.write("big-00002-of-00002.gguf", b"X" * len(s2))
+        p = errors(fx.verify())
+        check(len(p) == 1 and p[0].artifact == "big-2" and "sha256" in p[0].message,
+              "and it is hashed: the wrong bytes in shard 2 are an error", str(p))
+        os.remove(os.path.join(fx.models, "big-00002-of-00002.gguf"))
+        p = errors(fx.verify())
+        check(len(p) == 1 and p[0].artifact == "big-2" and "does not exist" in p[0].message,
+              "and a missing shard 2 is an error", str(p))
+        fx.write("big-00002-of-00002.gguf", s2)
+
+        fx.write_manifest(arts(None))
+        p = errors(fx.verify())
+        check(len(p) == 1 and "no manifest entry" in p[0].message
+              and p[0].artifact.endswith("big-00002-of-00002.gguf"),
+              "a shard the loader will read that no manifest entry records is an error",
+              str(p))
+
+        # a shard entry whose first shard config.yaml does NOT name is still a ghost
+        fx.write_config()
+        fx.write_manifest(arts(shard2))
+        p = fx.verify()
+        check(sorted(x.artifact for x in p) == ["big-1", "big-2"]
+              and all(x.severity == "warn" for x in p),
+              "shards of a split config.yaml no longer names are both still warned about",
+              str(p))
+    finally:
+        fx.close()
+
+
 def main() -> int:
-    for t in (test_config_parse, test_verify_files, test_hash_cache, test_schema,
+    for t in (test_config_parse, test_verify_files, test_split_gguf_shards, test_hash_cache,
+              test_schema,
               test_code_loaded, test_runtimes, test_real_manifest, test_download):
         try:
             t()
