@@ -1249,6 +1249,11 @@ engines:
         # upstream bug at 4da63377, ours to fix: mul_mat_id's MMQ padded src1 by ne11 (1 when broadcast) columns, not
         # the tile it picks; a fresh server's first 1,024-token prompt (a 508-token ubatch) read off the VMM pool's
         # end. Independent of 0019-0021 (applies on 0018). test-backend-ops MUL_MAT_ID 932/932 on the 5060 Ti
+      - file: 0023-server-checkpoint-every.patch
+        sha256: 03f195f66bf32732021385dabe05b6686a3b0e3e192b68d4fe03d7e1b51624a3
+        # ours: --checkpoint-every N, a context checkpoint every N prompt tokens (off by default; the deploy passes
+        # Strata's 16,384). Live check on the 5060 Ti, 2026-10-02 (bench/flashnext_gate.py step ckpt): a prompt
+        # sharing 22,344 tokens with the slot reused 16,384 (0 without the flag), its text equal to a cold run's
       # 0019-qwen4exp-qsa-block-topk.patch (sha256 00ff8f19ae0e151312f27fb4cfb88c17052316243f86e9356f6c075893f61562)
       # sits in engines/patches/llama-upstream-flash/ but is NOT in the series yet: the shipped build is 0001-0018, and
       # the vendored source follows the series. It joins the list when a build with it is gated (M2b: needles owed)
@@ -1263,13 +1268,13 @@ engines:
       repo: https://github.com/ggml-org/llama.cpp
       commit: 4da6337767f973e2b4d0797e5b323d77d8565e4a
       upstream_tree: a88a734cc4dc51d8687b4e27c32163108b2311f5
-      patches: 19
-      patches_digest: 2d148a592a900b465838613c123524e3caae352c892661d7b0760f81290854b4
-      patched_tree: 1ea4055de184c555635c0dcdaea8ce72ca41ebad
+      patches: 20
+      patches_digest: a27838068fcab1af9eaf6facf770c1f56144e64609e055d41e7f817ba91f1809
+      patched_tree: eb5dc814042efe5902e4da0c04139752241c32c7
       base_tree: a5da89fe0834db2912af39df1bc5129332c47329
-      tree: b2f624090d2491033f54b3709e418bb4af755e50
+      tree: 848be84a8dd4bc4a13d4d48fef0fccf531e73dd9
       files: 3414
-      bytes: 52773930
+      bytes: 52777000
       excluded_files: 237
       excluded_bytes: 120705095
       executable_files: 123
@@ -1321,7 +1326,28 @@ engines:
       ctest_regex: ^(test-reasoning-budget|test-chat)$
     output: bin/llama-server.exe
     shipped:
-      # Built 2026-10-01 by scripts/build_engine.py (--out llama-upstream-flash-cand0022): 0001-0018 and 0022 applied
+      # Built 2026-10-02 by scripts/build_engine.py (--out llama-upstream-flash-cand0023): 0001-0018, 0022 and 0023
+      # applied in order, every flag in the CMakeCache, /arch:AVX2, no UI, CUDA DLLs hash-checked, engine tests 2/2.
+      # 0023's live check ran on it (docs/FLASH-NEXT.md 10.5).
+      path: C:/Users/jwals/engines/llama-upstream-flash-cand0023/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-upstream-flash-cand0023/src/build
+      built: 2026-10-02T13:01:48-04:00
+      built_with_patches: [0001-reasoning-budget-nudge.patch, 0002-ggml-prefetch-experts-slots-pr28414.patch, 0003-llama-moe-expert-cache-pr27861.patch, 0004-moe-cache-strata-profile-and-adaptive-tier.patch, 0005-pinned-experts-and-large-page-host-buffer.patch, 0006-qwen4exp-mtp-pr28243.patch, 0007-moe-cache-multi-token-slot-lookup.patch, 0008-ggml-cpu-avx2-q2_0-dot.patch, 0009-ggml-cpu-mmid-multi-token-rows-strata.patch, 0010-cuda-op-timing-diagnostic.patch, 0011-cuda-top-k-radix-select-without-cub-topk.patch, 0012-kv-host-mapped-attention-cache.patch, 0013-moe-cache-mmvq-batch-limit.patch, 0014-cuda-fa-sparse-convert-selected-cells.patch, 0015-cuda-fa-sparse-decode-quantized-cache.patch, 0016-moe-cache-hit-rate-at-info.patch, 0017-ggml-sched-timing-diagnostic.patch, 0018-cuda-fa-sparse-rows-q4_0.patch, 0022-cuda-mul-mat-id-mmq-src1-padding.patch, 0023-server-checkpoint-every.patch]
+      files:
+        llama-server.exe:      {sha256: 48e50e13b515172780fc9b11da54ed7c6920bac3b6f19de5f27abbb9fd36ec77, size: 10240}
+        llama-server-impl.dll: {sha256: cb150243ebcf410d3afb03aecc16a553a869bf4015d93039ef671ab7b1880f4c, size: 3271680}
+        llama-common.dll:      {sha256: e9d478c9624c3632012b8588039dffae444fe84281e5619c84c8543d8cdf2a2c, size: 8262144}
+        mtmd.dll:              {sha256: b49e3db6a79fd5e3205f42044c374788358686cbe537ba8cbcfaf7f70346b05e, size: 2362880}
+        llama.dll:             {sha256: f3f1ce605ecc40c654f88c1928c411270b270a5d8ee9c1d41f8b792698f05bd2, size: 2667520}
+        ggml.dll:              {sha256: dae2906b9f39e9e3231cb15ee1c6a48a472b6b56dd23877ff8728bedcf068403, size: 52736}
+        ggml-base.dll:         {sha256: cee7e3c3d467c0e3005af55db05011704e5d62ed0088d044678c5ed8ac093e0a, size: 666624}
+        ggml-cpu.dll:          {sha256: 934e432a09b63a832aeb035e41c38899a640ed76f51e35e9b2bd4af0a91de167, size: 1124352}
+        ggml-cuda.dll:         {sha256: f2fe28fadc9f6e060d78b4f023f074c32361b2af6e42208a14b3e6def7d31af9, size: 92725248}
+        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+    previous:
+      # REPLACED 2026-10-02 by llama-upstream-flash-cand0023 (+ 0023). Built 2026-10-01 by scripts/build_engine.py (--out llama-upstream-flash-cand0022): 0001-0018 and 0022 applied
       # in order, every flag in the CMakeCache, /arch:AVX2, no UI, CUDA DLLs hash-checked, engine tests 2/2. 0022 fixes
       # the deployed a9be47e4's first-request crash (docs/FLASH-NEXT.md section 8, "The 1,024-token crash"):
       # a fresh server's 1,024-token first prompt faulted 5/5 on a9be47e4 and passes here.
@@ -1339,29 +1365,6 @@ engines:
         ggml-base.dll:         {sha256: 5e8ac33dc4e3a0db4e4f750d9a2a8c5bf671f58dce098c0e13bfe3e59da3b947, size: 666624}
         ggml-cpu.dll:          {sha256: 8d9c3407a9182909dab15721e537ac795b160c74988b97c9d0cff4a96d1820b7, size: 1124352}
         ggml-cuda.dll:         {sha256: b8124ca4dcbc2d1d3baaaad84b8094cd9627843861410ba0677a001bfedc7e45, size: 92753408}
-        cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
-        cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
-        cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
-    previous:
-      # REPLACED 2026-10-01 by llama-upstream-flash-cand0022 (0001-0018 + 0022). Built 2026-09-30 by scripts/build_engine.py into C:/Users/jwals/engines/llama-upstream-flash-a9be47e4:
-      # 0001-0018 applied in order, every flag in the CMakeCache, /arch:AVX2, no UI, CUDA DLLs hash-checked, engine
-      # tests 2/2; test-backend-ops on both cards (MUL_MAT, MUL_MAT_ID per type, the poisoned sparse FA 37/37). The
-      # Flash-Next gate's window-D arms ran it; cache-all-np1 (70 slots, -np 1) is the deploy candidate
-      # (docs/FLASH-NEXT.md section 8). NOT IN config.yaml until the coordinator's combined deploy.
-      path: C:/Users/jwals/engines/llama-upstream-flash-a9be47e4/src/build/bin/llama-server.exe
-      build_tree: C:/Users/jwals/engines/llama-upstream-flash-a9be47e4/src/build
-      built: 2026-09-30T18:12:22-04:00
-      built_with_patches: [0001-reasoning-budget-nudge.patch, 0002-ggml-prefetch-experts-slots-pr28414.patch, 0003-llama-moe-expert-cache-pr27861.patch, 0004-moe-cache-strata-profile-and-adaptive-tier.patch, 0005-pinned-experts-and-large-page-host-buffer.patch, 0006-qwen4exp-mtp-pr28243.patch, 0007-moe-cache-multi-token-slot-lookup.patch, 0008-ggml-cpu-avx2-q2_0-dot.patch, 0009-ggml-cpu-mmid-multi-token-rows-strata.patch, 0010-cuda-op-timing-diagnostic.patch, 0011-cuda-top-k-radix-select-without-cub-topk.patch, 0012-kv-host-mapped-attention-cache.patch, 0013-moe-cache-mmvq-batch-limit.patch, 0014-cuda-fa-sparse-convert-selected-cells.patch, 0015-cuda-fa-sparse-decode-quantized-cache.patch, 0016-moe-cache-hit-rate-at-info.patch, 0017-ggml-sched-timing-diagnostic.patch, 0018-cuda-fa-sparse-rows-q4_0.patch]
-      files:
-        llama-server.exe:      {sha256: b98e49d5143334a265e3e9fa821e4933ea1dfc49e1888b120f8a02b19c047be0, size: 10240}
-        llama-server-impl.dll: {sha256: 3f6abb62bcac5d0202501665a5b35cf413aae609301424cd5a2757e766c79e7b, size: 3271680}
-        llama-common.dll:      {sha256: ad633b2ed75345f74f0e5e1fbc6386c137a80a1ce8efbf5feb6761189481de62, size: 8261120}
-        mtmd.dll:              {sha256: ef59dd5b2145e77ec600e6c934b51bd5e28861829e9a0fe60ddb74d8740aa832, size: 2362880}
-        llama.dll:             {sha256: ba38388c8d8d2273e7e41722119c6274f3becfeb39879f93c5194fd2f2ae3737, size: 2667520}
-        ggml.dll:              {sha256: 46bc18c3a728c90e1a7938fc1088a632d12e6394a360cbf00cbde5bfc3306cfa, size: 52736}
-        ggml-base.dll:         {sha256: cfaaf447ecd2936b9895c626df6db628cfd156c31c0e1dc44429d60da9164aa4, size: 666624}
-        ggml-cpu.dll:          {sha256: 6dbd690c48f36ed3f93b242cd91aad2a70b4e07677aff25e24a994f9d7d22766, size: 1124352}
-        ggml-cuda.dll:         {sha256: cd24bb50f3c2fb3d06c777cb8c56418d8423f1969198055b5607b0361351494f, size: 92718592}
         cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
         cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
         cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}

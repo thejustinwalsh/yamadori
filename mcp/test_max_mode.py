@@ -679,15 +679,16 @@ def test_table_profile_applied():
         w = budget.budgets()
     finally:
         ctx.__exit__(None, None, None)
-    check(mu["reasoning_effort"] == "xhigh" and mu["reasoning_budget_tokens"] > 20480
-          and mu["_sampling"]["profile"]["effort"]["class"] == "vendor",
-          "mirai-s: the card's effort (xhigh, labelled vendor) and no Bonsai cap (the room)",
+    check(mu["reasoning_effort"] == "xhigh" and mu["_sampling"]["profile"]["effort"]["class"] == "vendor",
+          "mirai-s: the card's effort (xhigh, labelled vendor)",
           (mu["reasoning_effort"], mu["reasoning_budget_tokens"]))
     est = tiers.estimate_prompt_tokens(body)
-    check(mu["reasoning_budget_tokens"] == 95232 - est - 2048 and mu["max_tokens"] == 95232 - est
-          and mu["_sampling"]["profile"]["thinking_cap"]["class"] == "derived",
-          "mirai-s: NO CHOSEN CAP (operator 2026-09-29) -- thinking = its window - prompt - answer, the turn = the "
-          "window - prompt; the record labels it derived", (mu["reasoning_budget_tokens"], mu["max_tokens"], est))
+    # THE THINKING BUDGET, LIKE THE OTHER MODELS (operator 2026-10-02: "use what we use scales for the tokens we
+    # allow"; "Qwen overthinks so don't let it go forever"): bonsai's 20,480 x mirai-s's window 125,952 / 209,920
+    check(mu["reasoning_budget_tokens"] == 20480 * 125952 // 209920 == 12288 and mu["max_tokens"] == 95232 - est
+          and mu["_sampling"]["profile"]["thinking_cap"]["class"] == "operator",
+          "mirai-s: thinking capped at bonsai's cap scaled by its window (12,288, the operator's rule); the turn is "
+          "still the window - prompt", (mu["reasoning_budget_tokens"], mu["max_tokens"], est))
     check(forced["reasoning_effort"] == "low" and forced["_sampling"]["profile"]["effort"]["from"] == "header",
           "a benchmark's header effort still wins (how the paired effort set varies one thing)")
     check(w["main"] == 95232 and w["pool"] == 98304 and w.get("model_window"),

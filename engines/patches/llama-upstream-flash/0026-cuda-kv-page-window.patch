@@ -66,7 +66,7 @@ compiles and has not been run, nor has the window been measured.
  create mode 100644 tests/test-kv-page-window.cpp
 
 diff --git a/ggml/src/ggml-cuda/fattn-common.cuh b/ggml/src/ggml-cuda/fattn-common.cuh
-index d2d9210b..7285ed97 100644
+index d2d9210bcb6b077f9fbba2c64669f360fea5ba32..7285ed97daf7ce6d2719e935a8c0e47e6a6fc2bf 100644
 --- a/ggml/src/ggml-cuda/fattn-common.cuh
 +++ b/ggml/src/ggml-cuda/fattn-common.cuh
 @@ -2,6 +2,7 @@
@@ -134,7 +134,7 @@ index d2d9210b..7285ed97 100644
          }
      }
 diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
-index 53dc92b1..5dcdc1a7 100644
+index cf0345726ba9ef7306117160f8f62ba8d1389e0b..73cc00c50086c156a41eea48181a986075b6f671 100644
 --- a/ggml/src/ggml-cuda/ggml-cuda.cu
 +++ b/ggml/src/ggml-cuda/ggml-cuda.cu
 @@ -29,6 +29,7 @@
@@ -228,7 +228,7 @@ index 53dc92b1..5dcdc1a7 100644
      return GGML_STATUS_SUCCESS;
  }
  
-@@ -5984,6 +6002,22 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
+@@ -6001,6 +6019,22 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
      if (strcmp(name, "ggml_backend_cuda_host_mapped_buffer_type") == 0) {
          return (void *)ggml_backend_cuda_host_mapped_buffer_type_of_dev;
      }
@@ -253,7 +253,7 @@ index 53dc92b1..5dcdc1a7 100644
      }
 diff --git a/ggml/src/ggml-cuda/kv-window.cu b/ggml/src/ggml-cuda/kv-window.cu
 new file mode 100644
-index 00000000..641dfbf2
+index 0000000000000000000000000000000000000000..641dfbf27b34b488c418bbd209d53a239d397678
 --- /dev/null
 +++ b/ggml/src/ggml-cuda/kv-window.cu
 @@ -0,0 +1,720 @@
@@ -979,7 +979,7 @@ index 00000000..641dfbf2
 +#endif // !HIP && !MUSA
 diff --git a/ggml/src/ggml-cuda/kv-window.cuh b/ggml/src/ggml-cuda/kv-window.cuh
 new file mode 100644
-index 00000000..76aa2be7
+index 0000000000000000000000000000000000000000..76aa2be756280f43cae66b9b20e4397599267867
 --- /dev/null
 +++ b/ggml/src/ggml-cuda/kv-window.cuh
 @@ -0,0 +1,71 @@
@@ -1055,7 +1055,7 @@ index 00000000..76aa2be7
 +// copy of pages that are resident, to show a hit never reads it. Returns 0 when the tensor has no window.
 +int ggml_cuda_kv_window_test_fill(const ggml_tensor * root, int64_t byte_off, const void * data, int64_t bytes);
 diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
-index 996e7f58..06ac431f 100644
+index 4fdeebee897fdfcaec1446e9c1dc644ab3464554..3571bf137f08c7ee58acf7238c3d18e97f44c880 100644
 --- a/tests/CMakeLists.txt
 +++ b/tests/CMakeLists.txt
 @@ -308,6 +308,10 @@ endif()
@@ -1068,10 +1068,10 @@ index 996e7f58..06ac431f 100644
 +llama_build_and_test(test-kv-page-window-model.cpp)
  
  llama_build_and_test(test-tiled-mulmat.cpp)
- llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
+ # 0024: the pcie_frac split (the partition, the plan and wait nodes, the pool chain) against the unsplit mul_mat_id
 diff --git a/tests/test-kv-page-window-model.cpp b/tests/test-kv-page-window-model.cpp
 new file mode 100644
-index 00000000..fa00c547
+index 0000000000000000000000000000000000000000..fa00c547d1557081196c65b2d1517162f8109c47
 --- /dev/null
 +++ b/tests/test-kv-page-window-model.cpp
 @@ -0,0 +1,298 @@
@@ -1375,7 +1375,7 @@ index 00000000..fa00c547
 +}
 diff --git a/tests/test-kv-page-window.cpp b/tests/test-kv-page-window.cpp
 new file mode 100644
-index 00000000..44e60dce
+index 0000000000000000000000000000000000000000..44e60dce4029346b34071b37c4b3ac2f2371a3d1
 --- /dev/null
 +++ b/tests/test-kv-page-window.cpp
 @@ -0,0 +1,651 @@
@@ -2030,3 +2030,6 @@ index 00000000..44e60dce
 +    printf("\n%d checks, %d failed\n", g_checks, g_failed);
 +    return g_failed == 0 ? 0 : 1;
 +}
+-- 
+2.45.2.windows.1
+

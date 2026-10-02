@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Justin Walsh <contact.me@thejustinwalsh.com>
-Date: Fri, 2 Oct 2026 13:24:37 -0400
+Date: Fri, 2 Oct 2026 15:18:46 -0400
 Subject: [PATCH] moe cache: LLAMA_MOE_CACHE_QUEUED_REFILL, refills on a second
  CUDA stream, published when their event has completed
 
@@ -49,19 +49,25 @@ slot holding exactly that expert's bytes (all three matrices) -- a slot is never
 landed. With a fake engine whose copies land only when the test lands them, at random: 400 steps, 3 layers, 1,221
 refills, 399 of 400 steps found a batch still in flight, steps to land avg 3.58 max 13: 846 checks, 0 failed; a
 harness that publishes at push time (the control) is caught in 40 of 40 steps; the queue alone publishes only the
-landed prefix, oldest first. With --device NAME (the caller restricts CUDA_VISIBLE_DEVICES): the real engine, eight
-64 MiB copies queued ahead of every batch so that it lands late, the same invariant, polls must find batches not yet
-landed, and the event query must say "not yet" behind 512 MiB of copies and "done" after. NOT run on a GPU yet and
-nothing is measured: whether it speeds the decode is the gate's question (docs/FLASH-NEXT.md 10.3).
+landed prefix, oldest first. With --device NAME (an RTX A4000: 1,411 checks, 0 failed): the real engine -- a second backend instance and events queried
+without blocking -- the same invariant over 200 steps and 759 refills, the event query itself ("not yet" behind 2 GiB of
+copies, "done" after), and a HELD batch: a 4 GiB host-to-device backlog is queued ahead of the batch and nothing else
+touches the device, the first poll returns at once (0.00 ms) with nothing and nothing is published, then polling takes
+8.8 million polls over 647 ms to see it land, and only then is it published and checked. (Between steps every batch has
+landed by the next one on this card: any call that synchronises with the device, such as the invariant check's reads,
+also waits for the second stream's backlog -- so the held case is its own test.) Also run in the engine (llama-server,
+a tiny generated olmoe, Q4_0 experts, `--moe-expert-cache 1`, LLAMA_MOE_CACHE_QUEUED_REFILL=1 with the poison on):
+127 batches, 254 refills, every batch landed by the next step, next-token logprobs identical to the thread's run. NOT
+measured for speed: whether it moves the decode is the gate's question (docs/FLASH-NEXT.md 10.3).
 ---
- ggml/src/ggml-cuda/ggml-cuda.cu |  20 ++
+ ggml/src/ggml-cuda/ggml-cuda.cu |  20 +
  src/CMakeLists.txt              |   1 +
- src/llama-moecache-refill.cpp   | 105 ++++++
- src/llama-moecache-refill.h     | 232 ++++++++++++
- src/llama-moecache.cpp          | 147 +++++++-
+ src/llama-moecache-refill.cpp   | 105 +++++
+ src/llama-moecache-refill.h     | 232 +++++++++++
+ src/llama-moecache.cpp          | 147 ++++++-
  tests/CMakeLists.txt            |   2 +
- tests/test-moe-refill.cpp       | 609 ++++++++++++++++++++++++++++++++
- 7 files changed, 1107 insertions(+), 9 deletions(-)
+ tests/test-moe-refill.cpp       | 674 ++++++++++++++++++++++++++++++++
+ 7 files changed, 1172 insertions(+), 9 deletions(-)
  create mode 100644 src/llama-moecache-refill.cpp
  create mode 100644 src/llama-moecache-refill.h
  create mode 100644 tests/test-moe-refill.cpp
@@ -762,10 +768,10 @@ index c09cba198..4fdeebee8 100644
  llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
 diff --git a/tests/test-moe-refill.cpp b/tests/test-moe-refill.cpp
 new file mode 100644
-index 000000000..3efe567f5
+index 000000000..9f090971f
 --- /dev/null
 +++ b/tests/test-moe-refill.cpp
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,674 @@
 +// Yamadori 0025: queued refills for the MoE expert cache (src/llama-moecache-refill.h): the cache's refills are enqueued on a
 +// second stream and a slot's table entry is published only after the event after its copy has completed.
 +//
@@ -886,6 +892,7 @@ index 000000000..3efe567f5
 +    ggml_backend_buffer_t hb = nullptr, db = nullptr;
 +    ggml_tensor * h = nullptr, * d = nullptr;
 +    bool slowed = false;
++    int  backlog = 8;     // 64 MiB host-to-device copies queued ahead of each batch
 +    static constexpr size_t kBytes = 64ull << 20;
 +
 +    slow_engine(ggml_backend_dev_t dev, ggml_backend_buffer_type_t dev_buft) : moe_refill::backend_engine(dev) {
@@ -913,8 +920,8 @@ index 000000000..3efe567f5
 +    void copy(ggml_tensor * dst, const void * src, size_t off, size_t size) override {
 +        if (!slowed && hb && db) {
 +            slowed = true;
-+            for (int i = 0; i < 8; ++i) {
-+                ggml_backend_tensor_set_async(backend, d, h->data, 0, kBytes);   // ~40 ms of PCIe ahead of the real copies
++            for (int i = 0; i < backlog; ++i) {
++                ggml_backend_tensor_set_async(backend, d, h->data, 0, kBytes);   // ~5 ms each of PCIe ahead of the real copies
 +            }
 +        }
 +        moe_refill::backend_engine::copy(dst, src, off, size);
@@ -1278,24 +1285,86 @@ index 000000000..3efe567f5
 +    }
 +    check(h, "after the drain");
 +    CHECK(d.published == d.pushed, "published %" PRIu64 " of %" PRIu64 " pushed", d.published, d.pushed);
-+    CHECK(not_ready > 0, "no poll ever found a batch still in flight: the engine was not slow enough to test the non-blocking path");
 +    printf("%s: %d steps, %" PRIu64 " refills, %" PRIu64 " polls found a batch not landed yet; steps to land avg %.2f max %" PRIu64 "\n",
 +           device, steps, d.pushed, not_ready, d.q.lat_n ? (double) d.q.lat_sum / (double) d.q.lat_n : 0.0, d.q.lat_max);
 +
 +    // the event query itself: not yet for an event behind 512 MiB of copies, done after it has completed
 +    {
 +        ggml_backend_event_t ev = ggml_backend_event_new(dev);
-+        for (int i = 0; i < 8; ++i) {
++        for (int i = 0; i < 32; ++i) {
 +            ggml_backend_tensor_set_async(eng.backend, eng.d, eng.h->data, 0, slow_engine::kBytes);
 +        }
 +        ggml_backend_event_record(ev, eng.backend);
 +        const bool early = query(ev);
 +        ggml_backend_event_synchronize(ev);
 +        const bool late = query(ev);
-+        CHECK(!early, "an event behind 512 MiB of copies already reported complete");
++        CHECK(!early, "an event behind 2 GiB of copies already reported complete");
 +        CHECK(late, "a completed event reported not complete");
 +        ggml_backend_event_free(ev);
 +    }
++}
++
++// The non-blocking path, for real: a batch that is certainly still in flight when it is polled. On a WDDM card any call that
++// synchronises with the device (the invariant check's reads, a table write) also waits for the second stream's backlog, so
++// between steps every batch has landed by the next one. Here nothing but the queue touches the device between the push and
++// the polls: a 4 GiB host-to-device backlog (~0.3 s) is queued ahead of the batch, the batch is polled at once -- poll() must
++// return nothing and not block, and none of its experts may be published -- then polled until it lands, which takes many
++// polls, and only then published, flushed and checked.
++static void run_device_held(std::mt19937 & rng, size_t expert_bytes, const char * device) {
++    harness h;
++    h.expert_bytes = expert_bytes;
++    build(h, device);
++    ggml_backend_dev_t dev = ggml_backend_dev_by_name(device);
++    slow_engine eng(dev, h.dev_buft);
++    CHECK(eng.ok(), "the engine is not usable on %s", device);
++    if (!eng.ok()) {
++        return;
++    }
++    eng.backlog = 64;
++    driver d(h, &eng, rng);
++    d.step = 1;
++    d.swaps(6);                                    // flushes the tables (a device sync), then enqueues the batch and returns
++    const uint64_t pushed = d.pushed;
++    CHECK(pushed > 0, "nothing was pushed");
++    const int64_t t0 = ggml_time_us();
++    const auto early = d.q.poll(2);
++    const int64_t poll_us = ggml_time_us() - t0;
++    CHECK(early.empty(), "poll returned %zu jobs of a batch that cannot have landed yet", early.size());
++    CHECK(d.q.batches_in_flight() == 1 && d.q.jobs_in_flight() == pushed, "the batch is not in flight after a poll");
++    CHECK(d.q.can_push() , "no free event after one batch");
++    // the host mirror must not have published anything (reading it touches no device)
++    for (auto & L : h.layers) {
++        for (size_t s = 0; s < L.slot_expert.size(); ++s) {
++            if (L.slot_in_flight[s]) {
++                CHECK(L.slot_expert[s] == -1, "a slot whose copy is in flight is already mapped to expert %d", L.slot_expert[s]);
++            }
++        }
++        for (int32_t e = 0; e < h.n_expert; ++e) {
++            CHECK(L.expert_slot[(size_t) e] < 0, "expert %d is published before its copy has landed", e);
++        }
++    }
++    uint64_t empty_polls = 1;
++    std::vector<moe_refill::job> landed;
++    const int64_t t1 = ggml_time_us();
++    for (uint64_t it = 0; it < 50000000ull && landed.empty(); ++it) {
++        landed = d.q.poll(3);
++        empty_polls += landed.empty() ? 1 : 0;
++    }
++    const double wait_ms = (double) (ggml_time_us() - t1) / 1000.0;
++    CHECK(landed.size() == pushed, "the batch landed with %zu of %" PRIu64 " jobs", landed.size(), pushed);
++    CHECK(empty_polls > 100, "only %" PRIu64 " polls found the batch in flight: it was not held", empty_polls);
++    CHECK(poll_us < 20000, "the first poll took %.1f ms: it blocked", (double) poll_us / 1000.0);
++    for (const auto & j : landed) {
++        moe_refill::publish(h.layers[j.layer], j, ++h.clock);
++        ++d.published;
++    }
++    for (auto & L : h.layers) {
++        moe_refill::flush_tables(L);
++    }
++    check(h, "after the held batch landed");
++    CHECK(d.q.batches_in_flight() == 0 && d.q.jobs_in_flight() == 0, "the queue is not empty");
++    printf("%s held batch: %" PRIu64 " experts, the first poll took %.2f ms and found nothing, %" PRIu64 " polls over %.1f ms until it landed\n",
++           device, pushed, (double) poll_us / 1000.0, empty_polls, wait_ms);
 +}
 +
 +// the queue alone, in order, with a fake that completes out of order
@@ -1332,6 +1401,7 @@ index 000000000..3efe567f5
 +}
 +
 +int main(int argc, char ** argv) {
++    setvbuf(stdout, nullptr, _IONBF, 0);
 +    // Never wake a GPU by accident (see test-moe-pcie-split.cpp): without --device every CUDA device is hidden
 +    bool has_device = false;
 +    for (int i = 1; i < argc; ++i) {
@@ -1366,6 +1436,7 @@ index 000000000..3efe567f5
 +    run_negative(rng, expert_bytes);
 +    if (device) {
 +        run_device(rng, std::min(steps, 200), expert_bytes, device);
++        run_device_held(rng, expert_bytes, device);
 +    } else {
 +        // the CPU device has no event query: ggml says so, and the cache then keeps its upload thread
 +        ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);

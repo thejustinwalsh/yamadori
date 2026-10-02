@@ -708,8 +708,16 @@ order of the ports is decided by the profiles of step (b) (`bench/flashnext_gate
   same kernels on the same rows in one chain; on a GPU the CPU reference differs by q8_1 noise, this one cannot) -- bit-exact on the
   CPU backend (60 trials, 25,687 checks, the pool took 371 experts over 37 steps),
   the pool poisoned before every step and the copies landing only at the wait node, and a control that drops the wait
-  and must fail (it does). With `--device NAME` the same on a GPU through the real second stream and event, scheduled over
-  {GPU, CPU}: **not run**. **Not measured, and to be measured first**: (1) the arithmetic says little is on the table.
+  and must fail (it does). With `--device NAME` on the A4000 (the real second stream and event, scheduled over {GPU, CPU}; 60 trials, 25,567 checks, 0
+  failed, exact against the enlarged cache, 1.6% from the CPU reference = kernel noise): the first device run failed with NaN, and
+  the cause was the test, not the engine -- a graph whose inputs are all CPU graph inputs ran entirely on the CPU, copying the
+  device pool to the host at the start of the split, before the plan had enqueued its copies; the engine's router and next-layer
+  work are on the GPU, which is what places the chains there, and the test now anchors them the same way. In the engine (a tiny
+  generated olmoe with Q4_0 experts, `--moe-expert-cache 1`): plan and wait nodes on the CPU, every miss through the pool,
+  next-token logprobs within 3.5e-3 of the GPU cache path; switch unset: the GGML_SCHED_DEBUG graph (94 splits, 1,360 nodes) is
+  identical to the 0001-0022 and int0028 builds. One more thing the device runs showed: on this card (WDDM) the compute stream
+  waits for work queued on a second stream (a step took ~0.9 s behind 600 x 256 MiB of device-to-device copies on the second
+  stream), so the second stream's copies may not overlap compute at all -- the first thing a speed gate should look at. **Not measured, and to be measured first**: (1) the arithmetic says little is on the table.
   Section 8 puts the CPU at 0.042-0.048 ms per expert after 0008 and a 1.38 MiB expert over a 14 GB/s link at ~0.1 ms, so
   the balance point is about 0.3 only if the copy and the CPU overlap; at a 64% hit rate a layer misses 3.6 of 10 and
   Strata's floor rule gives m = 0 for fewer than 4 (49% of layer-steps), 0.54 expert per layer-step on average at 0.29,
@@ -758,7 +766,7 @@ order of the ports is decided by the profiles of step (b) (`bench/flashnext_gate
   operation every published expert sits in a slot holding exactly its bytes (846 checks, 0 failed; 1,221 refills over 400
   steps, 399 steps found a batch in flight, steps to land avg 3.58 max 13), and a harness that publishes at push time is
   caught in 40 of 40 steps. With `--device NAME`: the real stream and event, made slow with 512 MiB of copies queued ahead,
-  and the event query itself: **not run**. **Not measured**: whether any of this moves the decode (the table writes it
+  and the event query itself: run on the A4000, 1,411 checks, 0 failed, including a held batch (a 4 GiB backlog ahead of it: the first poll returns at once with nothing, 8.8 million polls over 647 ms until it lands, then published and checked); between steps every batch has landed by the next on that card, since any device-synchronising call also waits for the second stream. **Not measured**: whether any of this moves the decode (the table writes it
   removes are ~48-100 small synchronous copies per adaptive step against ~85 ms a verify step, inferred); the engine-side
   gate is the n=3 speed step plus the cache's new "refills:" line (steps to land). 0017's `copy` 4-5 ms is the scheduler's
   input copies, not the refills.
@@ -845,3 +853,59 @@ order of the ports is decided by the profiles of step (b) (`bench/flashnext_gate
   reused 0`. Not ported.
 - **Also seen there**: the 16:52 request's swap-in took 180 s and the client hung up; its prefill was cancelled at
   10,240 tokens, and the retry reused exactly those 10,240.
+
+## 11. Stability of a multi-turn session (2026-10-02; operator: "Stable multi-turn flash-next from a harness is my main concern right now")
+
+### 11.1 Where the host memory goes (`C:/Users/jwals/octo/fn-crash/mem_probe.py`, cand0022, the deployed entry, n=1 each)
+
+The limit the box hits is COMMIT (RAM + pagefile), and with the experts pinned, physical RAM too. bonsai-a4000 and
+embeddings were loaded on the A4000 throughout (12.2 + 2.5 GB of private bytes); nothing else on the 5060 Ti.
+
+| | before the load | loaded, pinned (deployed) | + a 33K prompt | loaded, `LLAMA_PIN_EXPERTS=0` | + a 33K prompt |
+|---|---|---|---|---|---|
+| system commit in use / limit, GB | 36.7 / 114.7 | 91.5 / 114.7 | 92.3 / 114.7 | 54.9 / 114.7 | 55.8 / 114.7 |
+| free physical RAM, GB | 47.0 | 0.8 | 0.8 | 43.1 | 12.2 |
+| flash-next private bytes / working set, GB | - | 54.8 / 47.2 | 55.8 / 52.8 | 18.4 / 10.6 | 19.4 / 41.6 |
+| bonsai-a4000 working set, GB (private 12.2) | 6.1 | 0.14 | 0.05 | 0.05 | 0.05 |
+| load to /health, s | - | 88.3 | - | 9.5 - 12.6 | - |
+| the first 33K prompt, tok/s; decode, tok/s | - | - | 106.8; 27.7 | - | 157.4; 28.0 |
+
+What the 54.8 GB is (the server's own lines at `-lv 4`):
+- **36.4 GB: the pinned expert arena** -- `CPU model buffer size = 33,812.50 MiB` (the RAM experts, pinned by 0005 /
+  `LLAMA_PIN_EXPERTS=1`) + `CUDA_Host model buffer size = 2,550.00 MiB` (the MTP draft's). Pinned memory is committed
+  AND locked in RAM. Unpinned, the same experts are the mmapped file (`CPU_Mapped model buffer size = 37,034 MiB`):
+  no commit, and the OS may evict and re-read them.
+- **~15.1 GB: the card's allocations, charged to the process's commit** (WDDM): with the pin off the process still
+  has 18.4 GB of private bytes at 15,104 MiB of VRAM and no large host buffer of its own. Commit tracks VRAM about
+  one for one, for every llama-server on either card.
+- **~3 GB**: host compute buffers (402 + 281 + 281 MiB), the CUDA runtime, the heap.
+- **+1.0 GB after a 33K prompt**: two checkpoints (177 + 178 MiB) and the prompt's buffers. `--cache-ram` (8,192 MiB)
+  is not touched until a different conversation takes the slot.
+- The mmapped n-gram table (27.5 GB) and model file are not commit.
+
+Pinning costs 36.4 GB of commit, all the free RAM (0.8 GB left: the other servers' working sets are paged out to
+~50 MB), and 76-79 s of load. Without it the load is 9.5-12.6 s and the first 33K prompt ran faster (157 vs 107
+tok/s) with the same decode (28.0 vs 27.7), n=1. Not yet measured unpinned: warm prefill and decode n=3, and the
+expert cache's refills from pageable memory. **The first thing to try for stability is `LLAMA_PIN_EXPERTS=0`** (one
+env line in the entry; `bench/deploy_flash_next.py` without `--pin`).
+
+### 11.2 Ways a multi-turn agent session can fail or stall (from the code; "test" = what the soak should show)
+
+| # | situation | what the server / stack does | test |
+|---|---|---|---|
+| 1 | Swap-in under memory pressure | The load commits 54.8 GB and pins 36.4 GB. If commit is short when the process starts -- the previous model's process still exiting, imagegen (10.6 GB) or bonsai-vision loaded -- it dies at start (seen: exit 0xC0000142 right after another flash server was killed) or loads by paging (149-272 s loads seen; 9.5-88 s alone). llama-swap answers the waiting request with an error, or the client gives up first (16:52: the client hung up at 180 s). | Swap in with imagegen-turbo and bonsai-vision loaded; record commit before/after and the load time. Repeat with the pin off. |
+| 2 | llama-swap's health wait | `healthCheckTimeout: 900` s in config.yaml and the proxy's `max_mode.LOAD_TIMEOUT_S` = 900 s: neither cuts a 150-270 s load. The CLIENT's own timeout does; the proxy's heartbeats (253641c) must keep it alive through the swap and the prefill. | A cold swap-in from the harness: bytes on the wire every few seconds until the first token. |
+| 3 | A cold 26-30K prompt | 135-321 s before the first token (94-120 tok/s cold; ~230 warm). With the pin on the first prompt after a load is the slowest (the experts page in while RAM is exhausted). | Time to first token on the first request after a swap, pinned vs not. |
+| 4 | A new conversation, or a changed system/tools block, on the slot | Hybrid memory cannot be truncated: without a checkpoint at or before the first differing token the prompt is re-read from 0 (10.5). 0023 (`--checkpoint-every 16384`) resumes from the last 16K boundary. A difference inside the first 16,384 tokens still costs everything. | Second conversation with the same system + tools: reuse >= 16,384; a changed tool list: reuse floor(lcp/16384) x 16384. |
+| 5 | The re-rendered previous turn differs from what was generated | Falls back to the checkpoint at the previous prompt's end and re-reads the turn (the mirai-s 891-vs-276 case). Not covered by 0023. On flash-next a turn can be thousands of tokens of reasoning. | Every agent step: `cache_n` == previous prompt + previous completion (minus a few tokens). LLAMA_SERVER_SLOTS_DEBUG=1 + _N_DIFF=16 names the differing tokens. |
+| 6 | Cancelled generation, then a new request | The cancel is taken between decode calls: up to one batch (2,048 tokens of prefill, ~9-20 s) later; the slot keeps what was processed (seen: a read cancelled at 10,240, the retry reused 10,240). With `-np 1` the new request waits for that. A cancel during an MTP verify window leaves the slot at the last accepted token. If the new prompt diverges before the slot's end, rows 4/5 apply. | Abort mid-prefill and mid-generation, then retry the same request and a different one: no hang, reuse as rows 4-5 predict, the answer intact. |
+| 7 | A crash of the server mid-request | llama-swap returns 200 with an EMPTY body ("recovered from upstream disconnection during streaming", 2026-10-01); the proxy logged `finish=stop, 0 chars` -- an outage delivered as an empty answer, which a harness takes as the turn's end. The next request reloads (150-270 s) with an empty slot. | Kill the flash-next process mid-generation: the client must get an error (5xx / an SSE error event), not an empty 200. |
+| 8 | A compaction | It stays on the card (operator, 2026-09-30). Mapped onto the stored prompt it extends the slot. Sent as is (no match) it is a different prompt: f_keep < 0.5, so the server first SAVES the whole slot to `--cache-ram` (the full state: 12.45 KiB a token of K/V + 450 MiB of recurrent state + the draft's; ~0.9 GiB at 30K, ~2.4 GiB at 140K, derived from the buffer sizes; copied off the card), then reads the transcript from 0. The continuation is a third prompt: another save, another read. | A harness compaction at ~100K: time, `cache_n`, commit before/after, and that the continuation reuses the summary turn. |
+| 9 | `--cache-ram` 8,192 MiB (the default; not set in the entry) | Up to 8 GiB more commit, filled only when conversations alternate on the slot. On a box with 22 GB of commit left after the pinned load it fits; with imagegen or vision loaded it may not. An entry larger than the limit is skipped (logged), the oldest is evicted at the limit. | Two alternating conversations: commit growth, and whether the returning one is restored (`found better prompt`) or re-read. Consider an explicit `--cache-ram`. |
+| 10 | 32 checkpoints | Each is 112.6 MiB + 2.02 KiB a token (145 MiB at 16K, 178 at 33K, 390 at 140K). Every request adds up to two near its end, exempt from the 8,192 spacing; the list is thinned only when full. Worst case 32 x the size at the slot's length: 5.6 GiB at 33K, 12.2 GiB at 140K, 19.7 GiB at 262K -- host commit. An allocation that fails is an uncaught bad_alloc: the server dies. | 40+ agent steps at ~100K: the count, the bytes (the `created context checkpoint` lines), commit. Consider `--ctx-checkpoints 16`. |
+| 11 | A context near 262,144 | The proxy refuses a prompt that leaves less than its floor (400 context_length_exceeded -> the harness compacts). The server has `--no-context-shift`: a generation that reaches the window ends with `length`. MTP drafts up to 3 tokens ahead: the verify batch needs room past the last token. | Fill to within 4K of the window, then generate: a clean `length`, no fault. |
+| 12 | The MTP draft on a divergence or restore | The draft context's state and the speculative state are saved in every checkpoint and prompt-cache entry and restored with it (`load_dft`, `common_speculative_set_state`); a restore whose size does not match logs "failed to restore state" and the slot is cleared (a full re-read, not a fault). | After rows 4, 6 and 9: draft acceptance stays in its usual range (0.6-0.9), not ~0. |
+| 13 | A runaway turn | At max the proxy sends the whole window as the budget (`max_tokens` 261K, reasoning budget 259K, the nudge at 0.6 of it = 155K tokens). A model that keeps thinking gets the nudge after ~1.5 h and the hard stop after ~2.6 h at 28 tok/s; heartbeats keep the client connected, so it looks like a stall. | The longest reasoning in the soak; decide a per-turn ceiling for flash-next (an operator number). |
+| 14 | A second conversation / a side call while flash-next holds the card | No `other_card` for flash-next: a second conversation gets 503 `conversation_at_capacity` with Retry-After (the owner's 60 s hold). Side calls and jjava go to bonsai-a4000 -- whose working set was paged out to ~50 MB by the pinned load, so its first answer pages back in. | The side call's latency right after a flash-next load, pinned vs not; the second conversation's 503 and its retry. |
+| 15 | An idle gap | `ttl: 0`: never unloaded; the slot keeps its cells. The watchdog polls `/health` (served by the HTTP thread during a decode). Nothing expires -- the "reused 0 after 2 h" was row 4. | A 30-minute gap, then the next step: `cache_n` as in row 5. |
+| 16 | The 1,024-token class of fault (0022) | Fixed for the MMQ src1 padding. Other first-use faults would show the same way: a 200 with 0 bytes (row 7) and an Xid 13 in the system log. | The soak's server log: no "CUDA error"; the system log: no nvlddmkm 13/153. |

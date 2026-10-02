@@ -1292,7 +1292,7 @@ header `From: Justin Walsh`, the original authors credited in each body:
 | 0020 | `LLAMA_GRAPH_CACHE=N`: one graph per verify-batch size, so CUDA graphs replay under MTP (not in the series yet) | ours |
 | 0021 | `LLAMA_KV_HOST_MAPPED=1` maps only the sparse (QSA) layers; the MTP draft's dense layer stays on the card (not in the series yet) | ours |
 | 0022 | `mul_mat_id`'s MMQ pads src1 for the tile width it picks, not by ne11: fixes a fresh server's illegal memory access on a 508-token ubatch (upstream bug at the base; applies on 0018, independent of 0019-0021) | ours |
-| 0023 | `--checkpoint-every N`: llama-server also makes a context checkpoint every N prompt tokens, so a prompt that differs inside a long system + tools block resumes from the last one before the difference instead of from 0 (off by default; Strata's N is 16,384; not in the series until its live check) | ours |
+| 0023 | `--checkpoint-every N`: llama-server also makes a context checkpoint every N prompt tokens, so a prompt that differs inside a long system + tools block resumes from the last one before the difference instead of from 0 (off by default; the deploy passes Strata's 16,384; in the series since 2026-10-02, live check in docs/FLASH-NEXT.md 10.5) | ours |
 
 Operator, 2026-09-29: "I approve strata engine source patches"; "Port kernels we
 are not re-writing everything from scratch". Strata's MIT notice:

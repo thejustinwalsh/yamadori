@@ -611,7 +611,34 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
         out["_image_arg"] = stop
         yield "done", out
         return
-    yield "done", assemble(finish or "stop")
+    if finish is None:
+        # THE STREAM ENDED WITH NO FINISH CHUNK: the model server died behind llama-swap, which answers 200 and
+        # closes the body (2026-10-01: flash-next faulted on its first request and the client got an EMPTY answer,
+        # finish "stop", which a harness reads as the turn ending; llama-swap logged "recovered from upstream
+        # disconnection during streaming"). A generation that ended always carries a finish_reason; one that did
+        # not end is a failure, never an answer.
+        took = time.time() - t0
+        if not (content or reasoning or calls):
+            if retries > 0:
+                print(f"  upstream ended the stream with nothing and no finish after {took:.1f}s (the model "
+                      f"server exited?); retrying once", flush=True)
+                yield from _post_events_raw(
+                    path, dict(payload, _image_guard=guard) if guard
+                    else payload, timeout, retries - 1)
+                return
+            raise streaming.UpstreamError(
+                "the model server ended the stream without generating anything (it exited or was restarted); "
+                "retry the request", status=503)
+        print(f"  upstream ended the stream after {took:.1f}s with {len(''.join(content))} chars in hand and no "
+              f"finish: reported as a dropped connection", flush=True)
+        out = assemble("incomplete",
+                       f"[the connection to the model dropped after "
+                       f"{took:.0f}s; what follows is the part that "
+                       f"arrived]\n\n")
+        out["_transport"]["dropped_after"] = round(took)
+        yield "done", out
+        return
+    yield "done", assemble(finish)
 
 
 # OUR TOOLS ON MAIN (operator, 2026-09-24; AGENTS.md "The surface").
@@ -5913,9 +5940,12 @@ class _TurnPump:
                 what, item = self._q.get(timeout=HEARTBEAT)
                 break
             except self._empty:
-                # heartbeats only once the turn's pre-flight is over (_run_turn sets it after the window check):
-                # until then a refusal must still be a real HTTP status (E1), however long the check takes
-                if getattr(self._token, "preflight_done", False):
+                # heartbeats once the turn's pre-flight is over (_run_turn sets it after the window check): until
+                # then a refusal must still be a real HTTP status (E1), however long the check takes -- EXCEPT
+                # while the request waits for the card or loads its model (max_mode.wait_ready's `card_wait`:
+                # minutes, and it comes BEFORE the pre-flight). A refusal after such a wait is then the committed
+                # stream's one error event: only a request that both swaps a model in and fails its pre-flight.
+                if getattr(self._token, "preflight_done", False) or getattr(self._token, "card_wait", False):
                     return ("heartbeat", None)
         self._pulling = False
         if what == "event":

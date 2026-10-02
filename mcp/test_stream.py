@@ -1414,6 +1414,64 @@ def test_a_stream_that_never_starts_gives_its_lane_back():
         restore()
 
 
+def test_a_stream_that_ends_without_a_finish_is_a_failure():
+    """A DEAD MODEL SERVER IS NOT AN EMPTY ANSWER (proxy._post_events_raw; 2026-10-01: flash-next faulted, llama-swap
+    answered 200 with an empty body and the client got finish "stop" with no content). A stream that ends with no
+    finish chunk and nothing in hand is retried once, then raised as an upstream failure (503); one that ended with
+    text in hand is reported as a dropped connection, never as a finished answer."""
+    import streaming
+    import urllib.request as _ur
+    calls = []
+
+    class _Body:
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def __iter__(self):
+            return iter(self._lines)
+    saved = _ur.urlopen
+    try:
+        def empty(req, timeout=None):
+            calls.append(1)
+            return _Body([])
+        _ur.urlopen = empty
+        try:
+            got = list(proxy._post_events_raw("/v1/chat/completions", {"model": "m", "messages": []}))
+            check(False, "an empty 200 stream: retried once, then an upstream failure (503)", str(got)[:200])
+        except streaming.UpstreamError as e:
+            check(len(calls) == 2 and getattr(e, "upstream_status", None) == 503,
+                  "an empty 200 stream: retried once, then an upstream failure (503)",
+                  f"calls={len(calls)} status={getattr(e, 'upstream_status', None)}")
+
+        def partial(req, timeout=None):
+            return _Body([b'data: {"choices":[{"delta":{"content":"half an ans"}}]}\n'])
+        _ur.urlopen = partial
+        evs = list(proxy._post_events_raw("/v1/chat/completions", {"model": "m", "messages": []}))
+        done = [v for k, v in evs if k == "done"]
+        check(len(done) == 1 and done[0]["choices"][0]["finish_reason"] == "incomplete"
+              and done[0]["_transport"].get("dropped_after") is not None,
+              "text in hand and no finish chunk: reported as a dropped connection (finish 'incomplete'), "
+              "never 'stop'", str(done)[:300])
+
+        def good(req, timeout=None):
+            return _Body([b'data: {"choices":[{"delta":{"content":"ok"}}]}\n',
+                          b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n', b"data: [DONE]\n"])
+        _ur.urlopen = good
+        evs = list(proxy._post_events_raw("/v1/chat/completions", {"model": "m", "messages": []}))
+        done = [v for k, v in evs if k == "done"]
+        check(len(done) == 1 and done[0]["choices"][0]["finish_reason"] == "stop"
+              and done[0]["choices"][0]["message"]["content"] == "ok",
+              "a stream with its finish chunk is delivered as before")
+    finally:
+        _ur.urlopen = saved
+
+
 def test_the_wait_is_heard():
     """THE WAIT IS HEARD (proxy._TurnPump; the operator's live session, 2026-10-01 ET: VS Copilot hung up at 180 s
     with no byte while Flash-Next loaded). A turn that produces nothing for HEARTBEAT seconds sends heartbeats
@@ -1439,6 +1497,14 @@ def test_the_wait_is_heard():
         time.sleep(0.35)                     # a long window count, BEFORE the pre-flight is over
         raise api_errors.ApiError(400, "too long", code="context_length_exceeded")
         yield                                # pragma: no cover
+
+    def slow_swap(body, streamed):
+        cancel.current().card_wait = True    # as max_mode.wait_ready does while the model loads
+        time.sleep(0.45)
+        cancel.current().card_wait = False
+        cancel.current().preflight_done = True
+        yield ("content", "hi")
+        return {"choices": [{"finish_reason": "stop"}], "x_yamadori": {}}
 
     def late_failure(body, streamed):
         cancel.current().preflight_done = True
@@ -1474,6 +1540,12 @@ def test_the_wait_is_heard():
             check(False, "a refusal inside the first HEARTBEAT is raised before any byte (E1)", str(got)[:200])
         except api_errors.ApiError as e:
             check(e.status == 503, "a refusal inside the first HEARTBEAT is raised before any byte (E1)", str(e))
+        proxy._run_turn = slow_swap
+        ds = deltas(list(proxy.stream_body({"messages": []})))
+        nb = sum(1 for d in ds if (d.get("choices") or [{}])[0].get("delta") == {}
+                 and not (d.get("choices") or [{}])[0].get("finish_reason"))
+        check(nb >= 2, "a model swap BEFORE the pre-flight (card_wait) is heard: heartbeats during the load",
+              str(nb))
         proxy._run_turn = slow_refusal
         try:
             got = list(proxy.stream_body({"messages": []}))
@@ -1516,7 +1588,8 @@ def main() -> int:
                test_a_retry_takes_the_lanes_its_abandoned_twins_hold,
                test_a_retry_after_a_while_replaces_its_twin_at_once,
                test_a_stream_that_never_starts_gives_its_lane_back,
-               test_the_wait_is_heard):
+               test_the_wait_is_heard,
+               test_a_stream_that_ends_without_a_finish_is_a_failure):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

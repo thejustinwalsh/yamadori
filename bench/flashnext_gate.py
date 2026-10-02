@@ -430,6 +430,50 @@ def arms(n_cpu_moe: int = 42, cache_slots: int = 0, all_slots: dict | None = Non
     table["ckpt-np1"] = dict(table["cache-all-np1"],
                              args={**table["cache-all-np1"]["args"], "--checkpoint-every": "16384"}, checks=["ckpt"])
     table["ckpt-off-np1"] = dict(table["cache-all-np1"], checks=["ckpt"])
+    # the same per-op table with 0021's host-mapped sparse K/V (118 slots): the attention ops' time against
+    # probe-opt-np1's is the per-step PCIe read of the selected cells -- what 0026's page window has to remove
+    table["probe-opt-np1-kv"] = dict(table["kvcache-fit-np1"], env={**table["kvcache-fit-np1"]["env"], **opt},
+                                     checks=["probe"])
+    # THE PORTS (item 5, 2026-10-02; the integration build int0028 = 0001-0028, every port off unless its switch is
+    # set; FLASHNEXT_FLASH_BIN points the arms at it). int-off: the build with nothing switched on, against
+    # cache-all-np1's numbers on the shipped build.
+    full = ["kl", "needles", "corrupt", "speed"]
+    table["int-off-np1"] = dict(table["cache-all-np1"], checks=full, kl_batch=4)
+    # 0025: refills on a second stream, published when their event completes
+    table["refill-np1"] = dict(table["cache-all-np1"],
+                               env={**table["cache-all-np1"]["env"], "LLAMA_MOE_CACHE_QUEUED_REFILL": "1"},
+                               checks=full, kl_batch=4)
+    # 0026 on 0021: the page window (1 = Strata's 32,768 cells per K or V tensor; the patch states 427 MB of VRAM
+    # at q8_0 = 7 rows of 66.2 MiB: 118 - 7 = 111; FLASHNEXT_CACHE_SLOTS_KVPAGE, the fit probe decides)
+    kvp = {**table["kvcache-fit-np1"]["env"], "LLAMA_KV_PAGE_WINDOW": "1", "GGML_CUDA_KV_PAGE_STATS": "1"}
+    s_kvp = os.environ.get("FLASHNEXT_CACHE_SLOTS_KVPAGE", "111")
+    table["kvpage-fit-np1"] = dict(table["kvcache-fit-np1"], env=kvp,
+                                   args={**table["kvcache-fit-np1"]["args"], "--moe-expert-cache": s_kvp},
+                                   checks=["probe"])
+    table["cache-all-np1-kvpage"] = dict(table["kvpage-fit-np1"], checks=full, kl_batch=4)
+    # 0027 / 0028, the prompt side: prefill rate, and needles + corrupt (a 128K prompt read by the new kernel)
+    for tag, env in (("qsa1", {"GGML_CUDA_QSA_PROMPT_ATTN": "1"}), ("qsa2", {"GGML_CUDA_QSA_PROMPT_ATTN": "2"}),
+                     ("ple", {"LLAMA_PLE_PREFETCH": "1"})):
+        table[f"prefill-{tag}-np1"] = dict(table["cache-all-np1"], env={**table["cache-all-np1"]["env"], **env},
+                                          checks=["prefill"])
+        table[f"{tag}-np1"] = dict(table["cache-all-np1"], env={**table["cache-all-np1"]["env"], **env},
+                                   checks=["needles", "corrupt"])
+    table["prefill-int-off-np1"] = dict(table["cache-all-np1"], checks=["prefill"])
+    # the experts NOT pinned (LLAMA_PIN_EXPERTS=0: 36.4 GB less commit and locked RAM, docs/FLASH-NEXT.md 11.1), with
+    # 0023's periodic checkpoints as deployed: needles and corrupt prove the output does not depend on the pin
+    table["cache-all-np1-nopin"] = dict(table["cache-all-np1"],
+                                        env={**table["cache-all-np1"]["env"], "LLAMA_PIN_EXPERTS": "0"},
+                                        args={**table["cache-all-np1"]["args"], "--checkpoint-every": "16384"},
+                                        checks=["needles", "corrupt", "speed"])
+    # the prompt with 0021's mapped K/V, and with a 1,024-token ubatch (half the expert uploads per token; 1,898 MiB
+    # more compute buffer = 29 cache rows of 66.2 MiB: 70 - 29 = 41 with the K/V on the card, 118 - 29 = 89 mapped)
+    table["prefill-kv-np1"] = dict(table["kvcache-fit-np1"], checks=["prefill"])
+    table["prefill-ub1k-np1"] = dict(table["cache-all-np1"],
+                                     args={**table["cache-all-np1"]["args"], "-ub": "1024", "--moe-expert-cache":
+                                           os.environ.get("FLASHNEXT_CACHE_SLOTS_UB1K_NP1", "41")}, checks=["prefill"])
+    table["prefill-kv-ub1k-np1"] = dict(table["kvcache-fit-np1"],
+                                        args={**table["kvcache-fit-np1"]["args"], "-ub": "1024", "--moe-expert-cache":
+                                              os.environ.get("FLASHNEXT_CACHE_SLOTS_KV_UB1K", "89")}, checks=["prefill"])
     table["prefill-np1"] = dict(table["cache-all-np1"], checks=["prefill"])
     table["prefill-sched-np1"] = dict(table["cache-all-np1"],
                                       env={**table["cache-all-np1"]["env"], "GGML_SCHED_TIMING": "1"},
@@ -565,6 +609,27 @@ def step_kernels(out: str) -> dict:
     return rec
 
 
+def commit_free_mib() -> int | None:
+    """The host's commit headroom (Windows: the commit limit less what is committed), MiB. With flash-next loaded the
+    box had ~1.4 GB of it (2026-10-01); a server's host buffers, checkpoints and prompt cache all come out of it."""
+    try:
+        import ctypes
+
+        class MS(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        m = MS()
+        m.dwLength = ctypes.sizeof(MS)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+            return None
+        return int(m.ullAvailPageFile // (1024 * 1024))
+    except Exception:                                                    # noqa: BLE001
+        return None
+
+
 class Launched:
     """One arm's llama-server, with the guard; waits for /health."""
 
@@ -589,8 +654,10 @@ class Launched:
                 break
             time.sleep(2)
         self.load_s = round(time.time() - t0, 1)
+        self.commit_loaded = commit_free_mib()
 
     def stop(self) -> dict:
+        commit_end = commit_free_mib()
         self.guard.stop()
         self.proc.terminate()
         try:
@@ -598,7 +665,8 @@ class Launched:
         except subprocess.TimeoutExpired:
             self.proc.kill()
         self.logf.close()
-        return {"gpu_min_free": self.guard.min_free, "gpu_max_used": self.guard.max_used, "guard": self.guard.tripped}
+        return {"gpu_min_free": self.guard.min_free, "gpu_max_used": self.guard.max_used, "guard": self.guard.tripped,
+                "commit_free_mib": {"loaded": self.commit_loaded, "end": commit_end}}
 
 
 def completion(base: str, prompt: str, n: int, slot: int = 0, ignore_eos: bool = False, fresh: bool = False) -> dict:

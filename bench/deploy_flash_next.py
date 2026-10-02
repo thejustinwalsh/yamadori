@@ -287,6 +287,9 @@ def edit_config(text: str, macro: str, block: str) -> str:
 
 def edit_bat(text: str) -> str:
     bat, nl = _lf(text)
+    block = f"REM {MARK}\n" + "".join(f'set "{k}={v}"\n' for k, v in ENVS.items())
+    if block in bat:
+        return text                              # a redeploy: the lines are there, wherever another deploy left them
     bat = re.sub(rf"REM {re.escape(MARK)}\n(set \"YAMADORI_MAX_MODEL=[^\"]*\"\n)", "", bat)
     anchor = 'start "" /B "%PY%" "%CD%\\mcp\\tools_api.py"'
     if bat.count(anchor) != 1:
@@ -299,8 +302,10 @@ def edit_watchdog(text: str) -> str:
     """The same variable for a watchdog restart of the proxy, the tools API and the worker, as a hashtable `EnvMax`
     applied after `Env` (deploy_kv_rank.py uses `Env2`; the two never share a literal)."""
     ps, nl = _lf(text)
-    ps = re.sub(r"\n +# " + re.escape(MARK) + r"\n +EnvMax = @\{[^}]*\}", "", ps)
     pairs = "; ".join(f"{k} = '{v}'" for k, v in ENVS.items())
+    if ps.count(f"EnvMax = @{{ {pairs} }}") == 3 and "$svc.EnvMax" in ps:
+        return text                              # a redeploy: all three are there, wherever another deploy left them
+    ps = re.sub(r"\n +# " + re.escape(MARK) + r"\n +EnvMax = @\{[^}]*\}", "", ps)
     for match in ("Match = 'mcp[\\\\/]server\\.py'", "Match = 'tools_api\\.py'", "Match = 'mcp[\\\\/]worker\\.py'"):
         if ps.count(match) != 1:
             raise ValueError(f"watchdog.ps1: {match} not found once")

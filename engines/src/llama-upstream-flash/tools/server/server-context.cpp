@@ -1374,8 +1374,8 @@ private:
         SRV_TRC("%s", "for more info see https://github.com/ggml-org/llama.cpp/pull/16391\n");
 
         if (params_base.n_ctx_checkpoints > 0) {
-            SRV_TRC("context checkpoints enabled, max = %d, min spacing = %d\n",
-                    params_base.n_ctx_checkpoints, params_base.checkpoint_min_step);
+            SRV_TRC("context checkpoints enabled, max = %d, min spacing = %d, every = %d\n",
+                    params_base.n_ctx_checkpoints, params_base.checkpoint_min_step, params_base.checkpoint_every);
         } else {
             SRV_TRC("%s", "context checkpoints disabled\n");
         }
@@ -2371,15 +2371,17 @@ private:
         //       this is not true for SWA models: https://github.com/ggml-org/llama.cpp/pull/24411#issuecomment-4677983225
         cur.update_pos(slot.prompt.n_tokens() - n_tokens_cur, pos_min, pos_max);
 
+        const int64_t t_start = ggml_time_us();
+
         cur.update_tgt(ctx_tgt, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
         cur.update_dft(ctx_dft, slot.id, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
         // stash the draft's speculative state with the checkpoint
         common_speculative_get_state(spec.get(), slot.id, cur.data_spec);
 
         SLT_TRC(slot,
-                "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
+                "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB, %.1f ms)\n",
                 (int) slot.prompt.checkpoints.size(), params_base.n_ctx_checkpoints, cur.pos_min,
-                cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024);
+                cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024, (ggml_time_us() - t_start) / 1000.0);
     }
 
     // returns false to decline the task, it is offered again after the decode is done
@@ -3531,6 +3533,22 @@ private:
                     const auto & spans = slot.task->params.message_spans;
                     const auto last_user_pos = spans.last_user_message_pos();
 
+                    // --checkpoint-every N: a checkpoint every N tokens INSIDE a prompt as well. The rules below make
+                    // one only where a user message starts or near the prompt's end, so a long system + tools block
+                    // has none: with memory that cannot be rolled back (recurrent / hybrid), a later prompt that
+                    // differs anywhere inside the block was re-read from 0. The batch is ended at the last
+                    // checkpoint's position + N, and the checkpoint is made in front of the batch that starts there.
+                    int64_t periodic_at    = -1;    // end the batch when the prompt reaches this many tokens
+                    bool    periodic_start = false; // this batch starts at such a position
+                    if (do_checkpoint && params_base.checkpoint_every > 0) {
+                        const int64_t last = slot.prompt.checkpoints.empty() ? 0 : slot.prompt.checkpoints.back().n_tokens;
+                        periodic_at    = last + params_base.checkpoint_every;
+                        periodic_start = slot.prompt.n_tokens() == periodic_at;
+                        if (periodic_start) {
+                            periodic_at += params_base.checkpoint_every;
+                        }
+                    }
+
                     // add prompt tokens for processing in the current batch
                     while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.size() < n_batch) {
                         // get next token to process
@@ -3565,6 +3583,11 @@ private:
                             if (pos == last_user_pos || checkpoints.empty() || pos > checkpoints.back().n_tokens + params_base.checkpoint_min_step) {
                                 break;
                             }
+                        }
+
+                        // --checkpoint-every: the next batch starts at the periodic position (never at the prompt's end)
+                        if (periodic_at > 0 && slot.prompt.n_tokens() == periodic_at && slot.prompt.n_tokens() < slot.task->n_tokens()) {
+                            break;
                         }
 
                         // process the last few tokens of the prompt separately in order to allow for a checkpoint to be created.
@@ -3614,8 +3637,9 @@ private:
                         slot.init_sampler();
                     } else {
                         // skip ordinary mid-prompt checkpoints, unless the batch starts a user
-                        // message or we are near the end of the prompt
-                        if (!is_user_start && !near_prompt_end) {
+                        // message, we are near the end of the prompt, or it starts at a
+                        // --checkpoint-every position
+                        if (!is_user_start && !near_prompt_end && !periodic_start) {
                             do_checkpoint = false;
                         }
                     }
@@ -3635,7 +3659,7 @@ private:
                     // no need to create checkpoints that are too close together, unless it's the last user message
                     do_checkpoint = do_checkpoint && (
                             slot.prompt.checkpoints.empty() ||
-                            is_last_user_message || near_prompt_end ||
+                            is_last_user_message || near_prompt_end || periodic_start ||
                             n_tokens_start > slot.prompt.checkpoints.back().n_tokens + params_base.checkpoint_min_step);
                     SLT_DBG(slot, "main/do_checkpoint = %s, pos_min = %d, pos_max = %d\n", do_checkpoint ? "yes" : "no", pos_min, pos_max);
 

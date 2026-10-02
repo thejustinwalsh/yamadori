@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Justin Walsh <contact.me@thejustinwalsh.com>
-Date: Fri, 2 Oct 2026 13:24:37 -0400
+Date: Fri, 2 Oct 2026 15:18:46 -0400
 Subject: [PATCH] moe cache: LLAMA_MOE_PCIE_FRAC, a share of a step's missed
  experts computed on the GPU
 
@@ -54,12 +54,22 @@ backend, 2e-2 with --device, where the GPU's kernels run on q8_1 activations), a
 cache chain over a cache that also holds the pool's experts, which runs the same kernels on the same rows in one
 chain; the pool is poisoned (0xFF, NaN) before every step and the copies land only when the wait node runs; and a
 control that drops the wait and must fail. CPU backend, 64 experts, 60 trials: 25,687 checks, 0 failed, every
-difference 0 (bit-exact, against both references), the pool took 371 experts over 37 steps. With --device NAME
-(the caller restricts CUDA_VISIBLE_DEVICES) the cache and pool live on that device, the experts in its pinned host
-buffer, the copies go through the real second stream and event, the control is made slow by queueing 512 MiB ahead
-of the share's copies, and the graph is scheduled over {device, CPU} as the engine does. NOT run on a GPU yet, and
-nothing is measured: whether the GPU's share is faster than the CPU's own experts at 0008's speed is the gate's
-question (docs/FLASH-NEXT.md 10.2).
+difference 0 (bit-exact, against both references), the pool took 371 experts over 37 steps. With --device NAME (the caller restricts CUDA_VISIBLE_DEVICES; run on an RTX A4000, 60 trials, 64 experts: 25,567 checks, 0
+failed, exact against the enlarged cache, within 1.6% of the CPU reference, the pool took the same 371 experts) the cache
+and pool live on that device, the experts in its pinned host buffer, the copies go through the real second stream and
+event, and the graph is scheduled over {device, CPU} as the engine does. The graph's inputs go through GPU nodes first
+(x scaled, the ids as a strided view of a contiguous copy, the MoE output scaled): in the engine the router and the
+next layer's work are on the GPU and that is what places the cache and pool chains there, whereas a graph of CPU inputs
+and device weights ran entirely on the CPU, with the device pool copied to the host at the start of the split -- before
+the plan had enqueued its copies -- which read the poison (the first device run's NaN was that harness, not the engine).
+The control holds the copies back (a backlog on the second stream cannot make them late: on this card the compute
+stream waited for it too) and drops the wait; it is detected in every run. Also checked in the engine (llama-server,
+a tiny generated olmoe with Q4_0 experts, `--n-cpu-moe 99 --moe-expert-cache 1`, LLAMA_MOE_PCIE_FRAC=1.0 and 0.5,
+poison on): the plan and wait nodes are placed on the CPU, every missed expert goes through the pool, and the next-token
+logprobs agree with the GPU cache path to 3.5e-3, the same distance the cache path has from a full-GPU run. With the
+switch unset the graph (GGML_SCHED_DEBUG=2: 94 splits, 1,360 nodes, the cache chain included) is identical to the one
+the 0001-0022 build and the int0028 build print. Nothing is measured for speed: whether the GPU's share is faster than
+the CPU's own experts at 0008's speed is the gate's question (docs/FLASH-NEXT.md 10.2).
 ---
  src/CMakeLists.txt            |   1 +
  src/llama-graph.cpp           |  64 ++-
@@ -68,8 +78,8 @@ question (docs/FLASH-NEXT.md 10.2).
  src/llama-moecache.cpp        | 150 +++++++
  src/llama-moecache.h          |   8 +
  tests/CMakeLists.txt          |   2 +
- tests/test-moe-pcie-split.cpp | 733 ++++++++++++++++++++++++++++++++++
- 8 files changed, 1409 insertions(+), 13 deletions(-)
+ tests/test-moe-pcie-split.cpp | 725 ++++++++++++++++++++++++++++++++++
+ 8 files changed, 1401 insertions(+), 13 deletions(-)
  create mode 100644 src/llama-moecache-pcie.cpp
  create mode 100644 src/llama-moecache-pcie.h
  create mode 100644 tests/test-moe-pcie-split.cpp
@@ -920,10 +930,10 @@ index 996e7f58f..c09cba198 100644
  llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
 diff --git a/tests/test-moe-pcie-split.cpp b/tests/test-moe-pcie-split.cpp
 new file mode 100644
-index 000000000..8ed23894f
+index 000000000..9718b8410
 --- /dev/null
 +++ b/tests/test-moe-pcie-split.cpp
-@@ -0,0 +1,733 @@
+@@ -0,0 +1,725 @@
 +// Yamadori 0024: pcie_frac -- the split of one layer's missed experts between the CPU and a GPU pool, against the unsplit
 +// mul_mat_id (src/llama-moecache-pcie.h). The graph below is built with the same calls, in the same order, as
 +// llm_graph_context::build_moe_ffn (src/llama-graph.cpp) does for a cached layer, and the plan / wait nodes and the
@@ -1141,51 +1151,21 @@ index 000000000..8ed23894f
 +    }
 +};
 +
-+// On a device: the real copy engine (a second backend instance and an event), made slow on demand -- eight 64 MiB copies
-+// are queued on its stream ahead of the share's copies, so that a graph which does NOT wait for the event reads the
-+// slots long before their data lands (the negative control) -- and able to drop its wait.
++// On a device: the real copy engine (a second backend instance and an event), able to drop its wait and to HOLD its copies
++// (never enqueue them) -- the negative control: a graph that does not wait for the copies, whose copies have not landed,
++// reads the poisoned slots. The control cannot be made by queueing a backlog on the stream ahead of the real copies: on
++// this card (WDDM) the compute stream's own work waited for it too (a step took ~0.9 s behind 600 x 256 MiB of
++// device-to-device copies on the second stream, whatever the kind of copy), so nothing would have raced.
 +struct delayed_copier : moe_pcie::backend_copier {
-+    bool delay = false;
++    bool delay = false;        // hold the copies
 +    bool drop_wait = false;
-+    bool delayed = false;
-+    ggml_context * hctx = nullptr;
-+    ggml_context * dctx = nullptr;
-+    ggml_backend_buffer_t hb = nullptr, db = nullptr;
-+    ggml_tensor * h = nullptr, * d = nullptr;
-+    static constexpr size_t kBytes = 64ull << 20;
 +
-+    delayed_copier(ggml_backend_dev_t dev, ggml_backend_buffer_type_t dev_buft) : moe_pcie::backend_copier(dev) {
-+        ggml_init_params ip = { ggml_tensor_overhead() * 4, nullptr, true };
-+        hctx = ggml_init(ip);
-+        dctx = ggml_init(ip);
-+        h = ggml_new_tensor_1d(hctx, GGML_TYPE_I8, (int64_t) kBytes);
-+        d = ggml_new_tensor_1d(dctx, GGML_TYPE_I8, (int64_t) kBytes);
-+        ggml_backend_buffer_type_t hbt = ggml_backend_dev_host_buffer_type(dev);
-+        hb = ggml_backend_alloc_ctx_tensors_from_buft(hctx, hbt ? hbt : ggml_backend_cpu_buffer_type());
-+        db = ggml_backend_alloc_ctx_tensors_from_buft(dctx, dev_buft);
-+        if (hb) {
-+            memset(h->data, 0, kBytes);
-+        }
-+    }
-+    ~delayed_copier() override {
-+        ggml_backend_synchronize(backend);
-+        if (db) ggml_backend_buffer_free(db);
-+        if (hb) ggml_backend_buffer_free(hb);
-+        ggml_free(dctx);
-+        ggml_free(hctx);
-+    }
++    delayed_copier(ggml_backend_dev_t dev, ggml_backend_buffer_type_t) : moe_pcie::backend_copier(dev) {}
 +    void copy(ggml_tensor * dst, const void * src, size_t off, size_t size) override {
-+        if (delay && !delayed && hb && db) {
-+            delayed = true;
-+            for (int i = 0; i < 8; ++i) {
-+                ggml_backend_tensor_set_async(backend, d, h->data, 0, kBytes);
-+            }
++        if (delay) {
++            return;
 +        }
 +        moe_pcie::backend_copier::copy(dst, src, off, size);
-+    }
-+    bool mark() override {
-+        delayed = false;
-+        return moe_pcie::backend_copier::mark();
 +    }
 +    void wait() override {
 +        if (drop_wait) {
@@ -1352,18 +1332,31 @@ index 000000000..8ed23894f
 +
 +// One layer, one step. `ids` is n_used x n_tokens, optionally read through a strided view.
 +static step_result run_step(world & w, ggml_backend_sched_t sched, mode m, const std::vector<int32_t> & ids,
-+                            int64_t n_tokens, bool strided, std::mt19937 & rng) {
++                            int64_t n_tokens, bool strided, std::mt19937 & rng, ggml_backend_t anchor = nullptr) {
 +    const int64_t n_used = w.n_used;
 +    ggml_init_params ip = { ggml_tensor_overhead() * 512 + ggml_graph_overhead_custom(2048, false) + (1u << 20), nullptr, true };
 +    ggml_context * ctx = ggml_init(ip);
 +    ggml_cgraph * gf = ggml_new_graph_custom(ctx, 2048, false);
 +
-+    ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, w.n_embd, 1, n_tokens);
-+    ggml_set_name(x, "x"); ggml_set_input(x);
++    ggml_tensor * x_in = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, w.n_embd, 1, n_tokens);
++    ggml_set_name(x_in, "x"); ggml_set_input(x_in);
++    ggml_tensor * x = x_in;
 +    const int64_t pad = strided ? 3 : 0;
 +    ggml_tensor * ids_full = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_used + pad, n_tokens);
 +    ggml_set_name(ids_full, "ids"); ggml_set_input(ids_full);
-+    ggml_tensor * sel = strided ? ggml_view_2d(ctx, ids_full, n_used, n_tokens, ids_full->nb[1], 0) : ids_full;
++    // In the engine the hidden state and the router's ids are produced on the GPU, and that is what pulls the cache chain
++    // and the pool chain onto it: nodes whose weights are in a plain device buffer are placed by their neighbours. A
++    // graph whose only inputs are graph inputs (which the scheduler puts on the CPU) runs entirely on the CPU, with the
++    // device tensors copied to it at the start of each split -- the pool before its copies have landed. So with a device
++    // the inputs go through a GPU node first, as the router's top-k does (the ids as a view, strided, like the top-k's).
++    std::vector<ggml_tensor *> gpu_nodes;
++    ggml_tensor * ids_src = ids_full;
++    if (anchor) {
++        x = ggml_scale(ctx, x_in, 1.0f);
++        ids_src = ggml_cont(ctx, ids_full);
++        gpu_nodes = { x, ids_src };
++    }
++    ggml_tensor * sel = (strided || anchor) ? ggml_view_2d(ctx, ids_src, n_used, n_tokens, ids_src->nb[1], 0) : ids_src;
 +
 +    ggml_tensor * res = nullptr;
 +    moe_pcie::layer L;
@@ -1419,11 +1412,19 @@ index 000000000..8ed23894f
 +        }
 +        res = experts;
 +    }
++    if (anchor) {
++        // and the next layer's GPU work consumes the MoE output, which is what pulls the chains' last nodes (the add) back
++        res = ggml_scale(ctx, res, 1.0f);
++        gpu_nodes.push_back(res);
++    }
 +    ggml_set_output(res);
 +    ggml_build_forward_expand(gf, res);
 +
 +    step_result r;
 +    ggml_backend_sched_reset(sched);
++    for (ggml_tensor * t : gpu_nodes) {
++        ggml_backend_sched_set_tensor_backend(sched, t, anchor);
++    }
 +    if (!ggml_backend_sched_alloc_graph(sched, gf)) {
 +        printf("graph allocation failed\n");
 +        ggml_free(ctx);
@@ -1434,7 +1435,7 @@ index 000000000..8ed23894f
 +    for (float & v : xv) {
 +        v = nd(rng);
 +    }
-+    ggml_backend_tensor_set(x, xv.data(), 0, xv.size() * sizeof(float));
++    ggml_backend_tensor_set(x_in, xv.data(), 0, xv.size() * sizeof(float));
 +    std::vector<int32_t> padded((size_t) ((n_used + pad) * n_tokens), -1);
 +    for (int64_t t = 0; t < n_tokens; ++t) {
 +        for (int64_t j = 0; j < n_used; ++j) {
@@ -1560,7 +1561,7 @@ index 000000000..8ed23894f
 +
 +        // (a) the engine's graph without pcie_frac
 +        std::mt19937 rng_x2(1234 + trial);
-+        step_result off = run_step(w, sched, mode::cache_only, ids, n_tokens, strided, rng_x2);
++        step_result off = run_step(w, sched, mode::cache_only, ids, n_tokens, strided, rng_x2, w.dev);
 +        compare("cache only vs unsplit", ref, off, tol_ref, &worst_off);
 +
 +        // (b)+(c) with the pool: poisoned first, copies landing only at the wait
@@ -1570,10 +1571,10 @@ index 000000000..8ed23894f
 +            fake->landed_early = false;
 +        }
 +        std::mt19937 rng_x3(1234 + trial);
-+        step_result on = run_step(w, sched, mode::pcie, ids, n_tokens, strided, rng_x3);
++        step_result on = run_step(w, sched, mode::pcie, ids, n_tokens, strided, rng_x3, w.dev);
 +        compare("pcie split vs unsplit", ref, on, tol_ref, &worst_on);
 +        std::mt19937 rng_x5(1234 + trial);
-+        step_result exact = run_step(w, sched, mode::enlarged, ids, n_tokens, strided, rng_x5);
++        step_result exact = run_step(w, sched, mode::enlarged, ids, n_tokens, strided, rng_x5, w.dev);
 +        compare("pcie split vs the enlarged cache (same kernels, same rows)", exact, on, 1e-6, &worst_exact);
 +        if (fake) {
 +            CHECK(!fake->landed_early, "a copy landed before the wait node ran (trial %d)", trial);
@@ -1586,10 +1587,10 @@ index 000000000..8ed23894f
 +                poison_pool(w);
 +                set_drop(true);
 +                std::mt19937 rng_x4(1234 + trial);
-+                step_result bad = run_step(w, sched, mode::pcie, ids, n_tokens, strided, rng_x4);
++                step_result bad = run_step(w, sched, mode::pcie, ids, n_tokens, strided, rng_x4, w.dev);
 +                set_drop(false);
 +                if (dcop) {
-+                    ggml_backend_synchronize(dcop->backend);   // the late copies of the dropped run land before the next step
++                    ggml_backend_synchronize(dcop->backend);
 +                }
 +                ++dropped_runs;
 +                bool differs = !bad.ok;
@@ -1614,6 +1615,7 @@ index 000000000..8ed23894f
 +}
 +
 +int main(int argc, char ** argv) {
++    setvbuf(stdout, nullptr, _IONBF, 0);
 +    // Never wake a GPU by accident: the CUDA backend initialises every device it can see the first time ggml's backend
 +    // registry is touched. Without --device the test hides them all; with --device the caller must have restricted
 +    // CUDA_VISIBLE_DEVICES to the one card it means (bench/a4000_dev.py does for the A4000).

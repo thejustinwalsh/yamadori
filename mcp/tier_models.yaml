@@ -166,16 +166,19 @@ models:
           balances accuracy and speed; low: optimizes for speed and cost" -- the card's default, NOT a measurement on
           Mirai S. bench/tier_effort.py (uncapped, n named) replaces it.
       user_turn_thinking:
-        value: null
-        class: derived
+        value: 12288
+        class: operator
         source: >-
-          memory only (operator 2026-09-29): thinking = window.main_cap - prompt - answer (tiers.budget), the window
-          derived from this model's -c; no chosen cap until bench/tier_effort.py's curve says where the score stops
-          improving. (The card allows up to 262,144 of reasoning; Mirai's card asks for at least 4,000.)
+          operator, 2026-10-02, verbatim: "We should have a thinking budget just like the other models, use what we use scales for the tokens we allow." and "Qwen overthinks so don't let it go forever." (a max turn could think for the whole window: ~1.5 h to the nudge, ~2.6 h to the hard stop at 28 tok/s).
+          DERIVED: bonsai's cap 20,480 x this model's window / bonsai's window = 20,480 x 125,952 /
+          209,920 = 12,288 (floor). bench/tier_effort.py's curve replaces it when measured.
       agent_step_thinking:
-        value: null
-        class: derived
-        source: "memory only, the same derivation (operator 2026-09-29)"
+        value: 3686
+        class: operator
+        source: >-
+          operator, 2026-10-02, verbatim: "We should have a thinking budget just like the other models, use what we use scales for the tokens we allow." and "Qwen overthinks so don't let it go forever." (a max turn could think for the whole window: ~1.5 h to the nudge, ~2.6 h to the hard stop at 28 tok/s).
+          DERIVED: bonsai's cap 6,144 x this model's window / bonsai's window = 6,144 x 125,952 /
+          209,920 = 3,686 (floor). bench/tier_effort.py's curve replaces it when measured.
       answer_tokens:
         value: 2048
         class: derived
@@ -231,15 +234,19 @@ models:
           Qwen/Qwen3.8-Flash-Next@de4b8e4d README: xhigh is the default effort (docs/FLASH-NEXT.md section 3; the
           llama-swap filter's default too). NOT a measurement; bench/tier_effort.py (uncapped) replaces it.
       user_turn_thinking:
-        value: null
-        class: derived
+        value: 25575
+        class: operator
         source: >-
-          memory only (operator 2026-09-29): thinking = 259,072 (window.main_cap) - prompt - answer (tiers.budget).
-          (The card allows reasoning up to 262,144, answer 131,072.)
+          operator, 2026-10-02, verbatim: "We should have a thinking budget just like the other models, use what we use scales for the tokens we allow." and "Qwen overthinks so don't let it go forever." (a max turn could think for the whole window: ~1.5 h to the nudge, ~2.6 h to the hard stop at 28 tok/s).
+          DERIVED: bonsai's cap 20,480 x this model's window / bonsai's window = 20,480 x 262,144 /
+          209,920 = 25,575 (floor). bench/tier_effort.py's curve replaces it when measured.
       agent_step_thinking:
-        value: null
-        class: derived
-        source: "memory only, the same derivation (operator 2026-09-29)"
+        value: 7672
+        class: operator
+        source: >-
+          operator, 2026-10-02, verbatim: "We should have a thinking budget just like the other models, use what we use scales for the tokens we allow." and "Qwen overthinks so don't let it go forever." (a max turn could think for the whole window: ~1.5 h to the nudge, ~2.6 h to the hard stop at 28 tok/s).
+          DERIVED: bonsai's cap 6,144 x this model's window / bonsai's window = 6,144 x 262,144 /
+          209,920 = 7,672 (floor). bench/tier_effort.py's curve replaces it when measured.
       answer_tokens:
         value: 2048
         class: derived

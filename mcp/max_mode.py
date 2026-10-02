@@ -632,8 +632,19 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
     if not ENABLED or not is_main(model):
         return out
     t0 = time.time()
+    # THE WAIT FOR THE CARD IS HEARD (proxy._TurnPump): while this request waits for another model's work to end
+    # or loads its own model (131-272 s for flash-next), the stream may send heartbeats -- this is the wait the
+    # operator's harness hung up on at 180 s (2026-10-01). The flag is on the request's cancel token; it is set
+    # only when there is something to wait for, and cleared when the card is ready.
+    tok = cancel.current()
+
+    def _card_wait(on: bool) -> None:
+        if tok is not None:
+            tok.card_wait = on
     with _lock:
         out["other_inflight_at_start"] = sum(n for m, n in _inflight.items() if m != model)
+        if out["other_inflight_at_start"]:
+            _card_wait(True)
         while any(n > 0 for m, n in _inflight.items() if m != model):
             cancel.check()
             sw = _switching_to
@@ -649,7 +660,11 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
     on = [m for m in MODELS if loaded(m)]
     if FULL and model not in on:
         t1 = time.time()
-        ok, how = _load(model)
+        _card_wait(True)
+        try:
+            ok, how = _load(model)
+        finally:
+            _card_wait(False)
         after = _fresh_running()
         left = sorted(m for m in MODELS if m != model and m in after)
         out["swap"] = {"from": sorted(on), "to": model, "load_s": round(time.time() - t1, 1), "ok": ok,
@@ -662,6 +677,7 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
             pass
         print(f"  tier model swap: {sorted(on) or 'nothing'} -> {model} in {out['swap']['load_s']} s ({how})"
               + (f"; STILL LOADED: {left}" if left else ""), flush=True)
+    _card_wait(False)
     return out
 
 
