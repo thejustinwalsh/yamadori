@@ -5909,6 +5909,7 @@ class _TurnPump:
         self._want = threading.Semaphore(0)
         self._pulling = False
         self._closed = False
+        self._committed = False        # a heartbeat has been sent: the 200 is out
         ctx = contextvars.copy_context()
         self._th = threading.Thread(target=lambda: ctx.run(self._run), daemon=True, name="yamadori-turn")
         self._th.start()
@@ -5945,7 +5946,12 @@ class _TurnPump:
                 # while the request waits for the card or loads its model (max_mode.wait_ready's `card_wait`:
                 # minutes, and it comes BEFORE the pre-flight). A refusal after such a wait is then the committed
                 # stream's one error event: only a request that both swaps a model in and fails its pre-flight.
-                if getattr(self._token, "preflight_done", False) or getattr(self._token, "card_wait", False):
+                # ONCE A HEARTBEAT HAS GONE OUT THE STREAM IS COMMITTED, and nothing is gained by holding the
+                # next one: the soak (2026-10-02) saw a 20 s silence between the swap's last heartbeat and the end
+                # of the pre-flight (the decider primes on the model it just swapped in).
+                if (self._committed or getattr(self._token, "preflight_done", False)
+                        or getattr(self._token, "card_wait", False)):
+                    self._committed = True
                     return ("heartbeat", None)
         self._pulling = False
         if what == "event":

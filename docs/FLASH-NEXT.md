@@ -889,6 +889,30 @@ tok/s) with the same decode (28.0 vs 27.7), n=1. Not yet measured unpinned: warm
 expert cache's refills from pageable memory. **The first thing to try for stability is `LLAMA_PIN_EXPERTS=0`** (one
 env line in the entry; `bench/deploy_flash_next.py` without `--pin`).
 
+**Pinned against unpinned, measured (2026-10-02; `C:/Users/jwals/octo/fn-crash/pin_compare.py`, cand0023, the deployed
+entry + `--checkpoint-every 16384`, n=3 each; bonsai-a4000 and embeddings loaded):**
+
+| | pinned (deployed) | `LLAMA_PIN_EXPERTS=0` |
+|---|---|---|
+| load to /health, s | 87.5 (file cache warm: 42.9 GB standby) / 76.3 / 79.2 (25-28 GB standby) | 9.1 / 7.6 / 7.6 (warm, 44 GB standby); 12.6 right after a pinned server exited (9 GB standby) |
+| warm prefill, ~8.8K fresh prompt, tok/s | 106.2 / 157.7 / 151.4 | 149.0 / 150.8 / 164.1 |
+| warm prefill, ~35K fresh prompt, tok/s | 131.2 / 155.5 / 154.1 | 153.6 / 155.1 / 157.0 |
+| decode ~4K, tok/s (hit rate) | 29.2 / 29.1 / 31.0 (65.5%) | 28.2 / 30.6 / 29.2 (67.5%) |
+| decode ~35K | 35.2 / 35.8 / 32.6 (63.7%) | 39.0 / 33.1 / 37.4 (69.4%) |
+| decode ~140K | not run here (window D, another procedure: 22.3 / 38.0 / 28.7) | 16.8 / 26.9 / 23.9 (62.6%) |
+| 600 streamed tokens at ~35K: tok/s; gap between tokens p50 / p95 / p99 / max, ms | 40.8; 0 / 96.5 / 108.4 / 122.1 | 35.4; 0 / 94.2 / 107.0 / 118.8 |
+| gaps over 500 ms | 0 | 0 |
+| commit in use / limit, GB; free RAM, GB (loaded) | 91.6 / 114.7; 1.8 | 57.0 / 114.7; 41.5 |
+| the same at the end of the run | 99.0; 0.8 (after ~35K) | 65.1; 2.4 (after ~140K: the mapped experts fill RAM as evictable file cache) |
+
+Unpinned output: needles 5/5 at 32,768, the corrupt check 35 generations with no symptom and every tool call well
+formed (`cache-all-np1-nopin`, gate.json). The expert cache's refill count is not in this build's log line (0025
+adds it); its hit rate and the token gaps are the evidence that refills from pageable memory do not stall. With
+imagegen-turbo registered but idle (its models load on the first picture) the unpinned load was 12.6 s to 55.4 GB of
+commit, 43.4 GB of RAM free; sd-server's own 10.6 GB (measured 2026-10-01 after a picture) comes on top:
+~66 GB unpinned against ~103 GB pinned, of 114.7. bonsai-vision was not loaded (it does not fit beside
+bonsai-a4000 on the A4000).
+
 ### 11.2 Ways a multi-turn agent session can fail or stall (from the code; "test" = what the soak should show)
 
 | # | situation | what the server / stack does | test |

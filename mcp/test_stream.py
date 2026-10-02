@@ -1502,6 +1502,7 @@ def test_the_wait_is_heard():
         cancel.current().card_wait = True    # as max_mode.wait_ready does while the model loads
         time.sleep(0.45)
         cancel.current().card_wait = False
+        time.sleep(0.35)                     # the pre-flight AFTER the swap (the decider primes): still heard
         cancel.current().preflight_done = True
         yield ("content", "hi")
         return {"choices": [{"finish_reason": "stop"}], "x_yamadori": {}}
@@ -1544,8 +1545,8 @@ def test_the_wait_is_heard():
         ds = deltas(list(proxy.stream_body({"messages": []})))
         nb = sum(1 for d in ds if (d.get("choices") or [{}])[0].get("delta") == {}
                  and not (d.get("choices") or [{}])[0].get("finish_reason"))
-        check(nb >= 2, "a model swap BEFORE the pre-flight (card_wait) is heard: heartbeats during the load",
-              str(nb))
+        check(nb >= 6, "a model swap BEFORE the pre-flight (card_wait) is heard, and so is the pre-flight after it "
+              "(the stream is committed): heartbeats throughout", str(nb))
         proxy._run_turn = slow_refusal
         try:
             got = list(proxy.stream_body({"messages": []}))
