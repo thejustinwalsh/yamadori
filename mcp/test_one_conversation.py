@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 import threading
 import time
 
@@ -412,10 +413,44 @@ def test_unanswered_attempt_holds_nothing():
         slots.other_card_for = saved
 
 
+def test_a_restart_is_not_activity():
+    """A RESTORED PIN DOES NOT HOLD THE CARD (2026-10-02): persist() stamps a restored pin's slot for IDLE CLEAR's
+    clock; ONE CONVERSATION must not read that stamp as a request's end. A new conversation right after a restart
+    takes the main card; the restored conversation's own real activity still holds it."""
+    import tempfile
+    saved = slots.other_card_for
+    slots.other_card_for = _other_card()
+    saved_path = slots._state_path
+    try:
+        fresh(1)
+        d = tempfile.mkdtemp(prefix="yamadori_oc_restart_")
+        path = os.path.join(d, "slots_state.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"pins": {"old": 0}, "used": {"old": time.time() - 3600}, "prompts": {}}, f)
+        slots.persist(path)
+        w = {"key": "newcomer", "account": "op"}
+        r = slots.check_owner(w, "bonsai")
+        check(r is None and (w.get("switch") or {}).get("from") == "old",
+              "right after a restart a new conversation takes the main card (the restore stamp is not activity)", (r, w))
+        fresh(1)
+        slots._restore_stamp.clear()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"pins": {"old": 0}, "used": {"old": time.time() - 3600}, "prompts": {}}, f)
+        slots.persist(path)
+        done(slots.acquire("old"))                       # the restored conversation really is active now
+        r = slots.check_owner({"key": "newcomer2", "account": "op"}, "bonsai")
+        check(r and r["model"] == "bonsai-a4000",
+              "the restored conversation's own real request still holds the card (the newcomer is routed)", r)
+    finally:
+        slots.other_card_for = saved
+        slots._state_path = saved_path
+
+
 def main() -> int:
     for fn in (test_off_at_three_slots, test_owner_and_refusal, test_compactions_and_side_calls, test_check_owner,
                test_lane_cleared, test_np1_locked_card, test_other_card_routing,
-               test_owner_first_race, test_suite_hold_override, test_unanswered_attempt_holds_nothing):
+               test_owner_first_race, test_suite_hold_override, test_unanswered_attempt_holds_nothing,
+               test_a_restart_is_not_activity):
         try:
             fn()
         except Exception as e:                                       # noqa: BLE001

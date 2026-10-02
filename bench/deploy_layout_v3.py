@@ -109,7 +109,11 @@ def lane_of() -> int:
 
 
 def envs_for(n: int) -> dict:
-    return {"YAMADORI_MAIN_CAP": str(n - lane_of()), "YAMADORI_LANE_TOKENS": str(lane_of())}
+    # YAMADORI_SLOTS (2026-10-02): the served slot count, DECLARED -- a live /props read loses the race when a tier
+    # swap takes the main model off the card seconds after a restart (mcp/slots.py reads it; mcp/budget.py takes
+    # an unread pool from YAMADORI_MAIN_CAP + the lane)
+    return {"YAMADORI_MAIN_CAP": str(n - lane_of()), "YAMADORI_LANE_TOKENS": str(lane_of()),
+            "YAMADORI_SLOTS": str(NP)}
 
 
 def tier_deployed(cfg: str, bat: str) -> list[str]:

@@ -247,6 +247,7 @@ def reset(n: int | None = None) -> None:
         _key_account.clear()
         _hold_for.clear()
         _answered.clear()
+        _restore_stamp.clear()
         _other.update(owner=None, model=None, busy=0, warming=0, last_end=0.0)
         _displaced.clear()
         _compacting = 0
@@ -472,6 +473,11 @@ def _adopt(prompt: dict, busy: set) -> dict | None:
 # ---------------------------------------------------------------------------
 _state_path: str | None = None
 _save_lock = threading.Lock()
+# slot -> the _last_end value persist() stamped for a restored pin. It starts IDLE CLEAR's clock; it is NOT a
+# request's end, so ONE CONVERSATION's hold ignores it (2026-10-02: after every restart the restored pin "was
+# active" at the restart and every new conversation in the next 60 s went to the other card -- the conformance
+# check read bonsai-a4000's 138,240 window, and the slots check found both cards held).
+_restore_stamp: dict[int, float] = {}
 
 
 def persist(path: str) -> dict:
@@ -497,7 +503,8 @@ def persist(path: str) -> dict:
         # IDLE CLEAR measures idleness from here for a restored pin: its
         # conversation's last request ended before the restart, unknown when.
         for k, s in _pins.items():
-            _last_end.setdefault(s, time.time())
+            if s not in _last_end:
+                _last_end[s] = _restore_stamp[s] = time.time()
         restored.update(pins=len(_pins), prompts=len(_prompts))
     return restored
 
@@ -864,7 +871,10 @@ def _owner_of_card(now: float, key: str | None = None) -> tuple[str | None, bool
     if k is None:
         return None, False, 0.0
     busy = _busy.get(0, 0) > _warming.get(0, 0)
-    since = now - max(_last_end.get(0, 0.0), _used.get(k, 0.0), _last_seen.get(k, 0.0))
+    ended = _last_end.get(0, 0.0)
+    if _restore_stamp.get(0) == ended:
+        ended = 0.0                       # a restart's stamp on a restored pin, not a request's end
+    since = now - max(ended, _used.get(k, 0.0), _last_seen.get(k, 0.0))
     if busy or since < _hold_against(k, key):
         return k, busy, since
     return None, False, since

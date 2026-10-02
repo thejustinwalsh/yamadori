@@ -250,8 +250,11 @@ def pool_size(refresh: bool = False) -> int:
     # startup thread (server.py _read_pool_when_ready) keeps asking the main
     # model's own port every RETRY_S until one has -- off the request path, so
     # no request ever waits on a dead port.
+    # THE DECLARED CAP FIRST: a deploy writes YAMADORI_MAIN_CAP (and the lane) from the served -c, so an unread
+    # pool is that declared line, not 131,072 -- the live read lost the race on 2026-10-02 when the first
+    # request swapped mirai-s onto the card ~2 s after bonsai came up, and DIRECT is bonsai's port alone.
     if _POOL is None:
-        _POOL = FALLBACK_POOL
+        _POOL = (MAIN_CAP + LANE_TOKENS) if MAIN_CAP > 0 else FALLBACK_POOL
     return _POOL
 
 

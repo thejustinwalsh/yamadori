@@ -704,7 +704,9 @@ order of the ports is decided by the profiles of step (b) (`bench/flashnext_gate
   result). **Tested** (`tests/test-moe-pcie-split.cpp`, ctest `--quick`; CPU backend, no GPU): the rule and the env
   parse; 5,000 random partitions against a brute force; the model's shape (iq2_s 2560 x 640 gate/up, q2_0 down, top-10,
   1-7 tokens, duplicates across tokens, random residency, shares 0 / 8 / 74 / 141 / 256 of 256) with CPU + cache chain +
-  pool chain equal to the unsplit chain, bit-exact (60 trials, 25,507 checks, the pool took 371 experts over 37 steps),
+  pool chain equal to the unsplit chain and, EXACTLY, to the cache chain over a cache that also holds the pool's experts (the
+  same kernels on the same rows in one chain; on a GPU the CPU reference differs by q8_1 noise, this one cannot) -- bit-exact on the
+  CPU backend (60 trials, 25,687 checks, the pool took 371 experts over 37 steps),
   the pool poisoned before every step and the copies landing only at the wait node, and a control that drops the wait
   and must fail (it does). With `--device NAME` the same on a GPU through the real second stream and event, scheduled over
   {GPU, CPU}: **not run**. **Not measured, and to be measured first**: (1) the arithmetic says little is on the table.

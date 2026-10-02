@@ -90,10 +90,10 @@ $Services = @(
     @{ Name = 'proxy';      Url = 'http://127.0.0.1:1234/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\server.py"); Log = "$root\logs\proxy.log"
        Match = 'mcp[\\/]server\.py'
+       # layout v3 (bench/deploy_layout_v3.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1' }
        # max mode (bench/deploy_flash_next.py)
        EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
-       # layout v3 (bench/deploy_layout_v3.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0' }
        # tier models (bench/deploy_tier_models.py)
        EnvTier = @{ YAMADORI_TIER_MODELS = 'mcp\tier_models.yaml' }
        # start-stack.bat's `set` lines never reach a watchdog restart, which
@@ -110,10 +110,10 @@ $Services = @(
     @{ Name = 'tools-api';  Url = 'http://127.0.0.1:1235/health';  Kind = 'process'
        Exe = $py; Args = @("$root\mcp\tools_api.py"); Log = "$root\logs\tools-api.log"
        Match = 'tools_api\.py'
+       # layout v3 (bench/deploy_layout_v3.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1' }
        # max mode (bench/deploy_flash_next.py)
        EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
-       # layout v3 (bench/deploy_layout_v3.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0' }
        # tier models (bench/deploy_tier_models.py)
        EnvTier = @{ YAMADORI_TIER_MODELS = 'mcp\tier_models.yaml' } }
     # laya retired 2026-09-24 (docs/E1.md): E1 heads replace it
@@ -129,10 +129,10 @@ $Services = @(
     @{ Name = 'worker';     Url = $null;                             Kind = 'process'
        Exe = $py; Args = @("$root\mcp\worker.py"); Log = "$root\logs\worker.log"
        Match = 'mcp[\\/]worker\.py'
+       # layout v3 (bench/deploy_layout_v3.py)
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1' }
        # max mode (bench/deploy_flash_next.py)
        EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
-       # layout v3 (bench/deploy_layout_v3.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0' }
        # tier models (bench/deploy_tier_models.py)
        EnvTier = @{ YAMADORI_TIER_MODELS = 'mcp\tier_models.yaml' } }
 )
