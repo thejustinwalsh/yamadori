@@ -151,6 +151,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.request
 
 UPSTREAM = os.environ.get("LLAMA_STACK_URL", "http://127.0.0.1:11434")
@@ -194,6 +195,12 @@ _LINE: int | None = None
 # llama-server's slot count, from the same /props answer (`total_slots`), for
 # mcp/slots.py. None until pool_size() has asked, or when it could not.
 _SLOTS: int | None = None
+# pool_size()'s answer while the pool has never been read (its docstring), and how often an unread pool is
+# asked for again: RETRY_S is the proxy's own HEARTBEAT interval (5 s), so a starting model server is noticed
+# within one beat and an absent one costs one refused connection per beat.
+FALLBACK_POOL = 131072
+RETRY_S = 5.0
+_LAST_TRY = 0.0
 
 
 def pool_size(refresh: bool = False) -> int:
@@ -211,9 +218,12 @@ def pool_size(refresh: bool = False) -> int:
     ambiguity in the UI (it notes that a pool of exactly 131072 may be this
     fallback rather than a measurement).
     """
-    global _POOL, _SLOTS, _LINE
+    global _POOL, _SLOTS, _LINE, _LAST_TRY
     if _POOL is not None and not refresh:
         return _POOL
+    if _POOL is None and not refresh and time.time() - _LAST_TRY < RETRY_S:
+        return FALLBACK_POOL
+    _LAST_TRY = time.time()
     for url in (f"{DIRECT}/props", f"{UPSTREAM}/props"):
         try:
             with urllib.request.urlopen(url, timeout=10) as r:
@@ -234,9 +244,14 @@ def pool_size(refresh: bool = False) -> int:
     # (2026-09-28): the model server did not answer, the fallback replaced
     # the real 262,144 pool, and every request of the proxy would have been
     # budgeted against 131,072 until the next good read. The fallback is
-    # only for a process that has never read the pool.
+    # only for a process that has never read the pool -- and it is NEVER CACHED
+    # (2026-10-02): a proxy that started before the model server answered kept
+    # 131,072 and no slot count for its whole life (deploy check 2026-10-01:
+    # /v1/models said 131072 and requests were ranked for 3 slots while bonsai
+    # served 209,920 cells on 1 slot, so ONE CONVERSATION was off). The next
+    # call asks again, at most once per RETRY_S while the server is away.
     if _POOL is None:
-        _POOL = 131072
+        return FALLBACK_POOL
     return _POOL
 
 

@@ -246,6 +246,7 @@ def reset(n: int | None = None) -> None:
         _cleared.clear()
         _key_account.clear()
         _hold_for.clear()
+        _answered.clear()
         _other.update(owner=None, model=None, busy=0, warming=0, last_end=0.0)
         _displaced.clear()
         _compacting = 0
@@ -389,8 +390,23 @@ def _shared_segments(a: dict | None, b: dict | None) -> int:
     return n
 
 
+# AN UNANSWERED ATTEMPT HOLDS NOTHING (2026-10-02; the operator's live session of 2026-10-01 17:28-17:35 ET, VS
+# Copilot at max): the first request's client hung up 180 s into the Flash-Next load, before any byte; its retries
+# arrived as NEW conversation ids (a retried opening mints another: session_identity) and were refused 503
+# conversation_at_capacity for the next 60 s -- held off by the cancelled attempt's own pin ("its latest activity
+# was 4 s ago"). A conversation becomes the card's owner when a generation of it FINISHES (remember(), below); a
+# pin made by an attempt that ended with none -- cancelled, refused, failed -- is dropped at release, with its
+# activity stamps, so the card is free for the retry. A conversation answered before keeps its pin whatever
+# happens to a later request.
+_answered: set[str] = set()
+
+
 def remember(grant: dict | None, fp: dict | None) -> None:
     """A request finished on this slot with an answer: it now holds `fp`."""
+    if grant and grant.get("_key"):
+        with _lock:
+            grant["_answered"] = True
+            _answered.add(grant["_key"])
     if grant and grant.get("slot") is not None and fp and not grant.get("_server"):
         with _lock:
             _prompts[grant["slot"]] = fp
@@ -474,6 +490,7 @@ def persist(path: str) -> dict:
             if isinstance(s, int) and k not in _pins:
                 _pins[k] = s
                 _used[k] = float((st.get("used") or {}).get(k) or 0.0)
+                _answered.add(k)      # a persisted pin is a conversation that was served (AN UNANSWERED ATTEMPT)
         for s, fp in (st.get("prompts") or {}).items():
             if str(s).isdigit() and isinstance(fp, dict) and fp.get("hashes"):
                 _prompts.setdefault(int(s), fp)
@@ -1023,6 +1040,8 @@ def _acquire_one(key: str | None, transient: bool, prefix: dict | None, n: int) 
         _busy[0] = _busy.get(0, 0) + 1
         _prompts.pop(0, None)
         grant = {"slot": 0, "mode": mode, "how": how, "evicted": None, "one_conversation": True}
+        if mode == "pinned":
+            grant["_key"] = key           # AN UNANSWERED ATTEMPT HOLDS NOTHING (remember / release)
         if mode == "pinned" and switch:
             grant["switch"] = switch
         if mode == "pinned" and back and back.get("card") == "main":
@@ -1327,7 +1346,18 @@ def release(grant: dict | None) -> None:
     with _lock:
         s = grant["slot"]
         _busy[s] = max(_busy.get(s, 0) - 1, 0)
-        _last_end[s] = time.time()
+        k_own = grant.get("_key")
+        if (k_own and grant.get("one_conversation") and not grant.get("warm") and not grant.get("_answered")
+                and k_own not in _answered and _pins.get(k_own) == s and not _busy.get(s, 0)):
+            # AN UNANSWERED ATTEMPT HOLDS NOTHING: this conversation has never been answered and this request
+            # ended without a generation -- its pin and its activity go, and the slot's end is not stamped, so a
+            # retry (a new id) finds the card free
+            _pins.pop(k_own, None)
+            _used.pop(k_own, None)
+            _last_seen.pop(k_own, None)
+            grant["unanswered"] = True
+        else:
+            _last_end[s] = time.time()
         _slot_free.notify_all()           # ONE CONVERSATION: a compaction may be waiting for slot 0
         if grant.get("warm"):
             _warming[s] = max(_warming.get(s, 0) - 1, 0)

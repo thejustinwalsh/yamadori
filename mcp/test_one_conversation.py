@@ -43,14 +43,21 @@ def fresh(n: int) -> None:
     slots._n = n
 
 
+def done(grant) -> None:
+    """A request that was SERVED: its generation finished (slots.remember), then the slot is released. A bare
+    slots.release() is a request that ended with no generation (AN UNANSWERED ATTEMPT HOLDS NOTHING)."""
+    slots.remember(grant, None)
+    slots.release(grant)
+
+
 def test_off_at_three_slots():
     fresh(3)
     a = slots.acquire("convA")
     b = slots.acquire("convB")
     check(not slots.one_conversation() and {a["slot"], b["slot"]} == {0, 1},
           "-np 3: two conversations on two slots, nothing refused (the rule is off)", (a, b))
-    slots.release(a)
-    slots.release(b)
+    done(a)
+    done(b)
 
 
 def test_owner_and_refusal():
@@ -67,7 +74,7 @@ def test_owner_and_refusal():
               and err.headers.get("Retry-After") == "30",
               "a second conversation while the owner is in flight: 503 conversation_at_capacity, Retry-After 30",
               (e.retry_after, err.status, err.code))
-    slots.release(a)
+    done(a)
     try:
         slots.acquire("convB")
         check(False, "within the hold: refused")
@@ -76,30 +83,30 @@ def test_owner_and_refusal():
               e.retry_after)
     a2 = slots.acquire("convA")
     check(a2["slot"] == 0, "the owner itself is never refused")
-    slots.release(a2)
+    done(a2)
     slots._last_end[0] = time.time() - slots.PRIMARY_HOLD_S - 1
     slots._used["convA"] = time.time() - slots.PRIMARY_HOLD_S - 1      # the hold counts from its latest activity
     b = slots.acquire("convB")
     check(b["slot"] == 0 and "convA" not in slots._pins and slots._pins.get("convB") == 0,
           "after the hold the newcomer takes the card; the old owner's pin goes", (b, dict(slots._pins)))
-    slots.release(b)
+    done(b)
 
 
 def test_compactions_and_side_calls():
     fresh(2)
     a = slots.acquire("convA")
-    slots.release(a)
+    done(a)
     own = slots.acquire("convA", prefix={"x": 1})
     check(own["slot"] == 0 and own["mode"] == "pinned", "the owner's compaction (its key) -> slot 0, its own cache",
           own)
-    slots.release(own)
+    done(own)
     side = slots.acquire(None, transient=True)
     check(side["slot"] == 1, "a side call -> the lane (slot 1)", side)
-    slots.release(side)
+    done(side)
     c = slots.acquire(None, transient=True, prefix={"x": 1})
     check(c["slot"] == 0 and c["mode"] == "compaction", "a compaction sent as is on an idle card -> slot 0, never "
           "the lane", c)
-    slots.release(c)
+    done(c)
     # it waits for a request in flight on slot 0
     a = slots.acquire("convA")
     got: dict = {}
@@ -111,10 +118,10 @@ def test_compactions_and_side_calls():
     th.start()
     time.sleep(0.4)
     check(th.is_alive(), "a compaction sent as is waits while the owner's request is in flight (never refused)")
-    slots.release(a)
+    done(a)
     th.join(5)
     check((got.get("g") or {}).get("slot") == 0, "and takes slot 0 when it frees", got)
-    slots.release(got.get("g"))
+    done(got.get("g"))
     # bounded
     a = slots.acquire("convA")
     saved = slots.COMPACTION_WAIT_S
@@ -127,7 +134,7 @@ def test_compactions_and_side_calls():
         check(e.retry_after == 30, "the wait is bounded: then the Retry-After path", e.retry_after)
     finally:
         slots.COMPACTION_WAIT_S = saved
-        slots.release(a)
+        done(a)
 
 
 def test_check_owner():
@@ -141,7 +148,7 @@ def test_check_owner():
     slots.check_owner({"key": None, "transient": True, "prefix": True})
     slots.check_owner({"key": "convA", "transient": False})
     check(True, "check_owner lets the owner, a side call and an as-sent compaction through")
-    slots.release(a)
+    done(a)
 
 
 def test_lane_cleared():
@@ -155,7 +162,7 @@ def test_lane_cleared():
     try:
         check(slots.lane_kept() is False, "the lane is not kept between bursts (operator 2026-09-29)")
         g = slots.acquire(None, transient=True)
-        slots.release(g)
+        done(g)
         log: list = []
         rec = slots.release_idle(g["slot"], "decider turn", log=log)
         check(sent == [1] and rec and rec.get("released") and rec.get("why") == "lane burst ended"
@@ -182,10 +189,10 @@ def test_np1_locked_card():
             check(False, "-np 1: a second conversation is refused")
         except slots.ConversationAtCapacity:
             check(True, "-np 1: a second conversation is refused")
-        slots.release(a)
+        done(a)
         c = slots.acquire(None, transient=True, prefix={"x": 1})
         check(c["slot"] == 0 and c["mode"] == "compaction", "-np 1: a compaction sent as is -> slot 0", c)
-        slots.release(c)
+        done(c)
         max_mode.ENABLED = True
         max_mode.is_main = lambda m: m in ("bonsai", "flash-next", "mirai-s")
         max_mode.decider_model = lambda default=None: "bonsai-a4000"
@@ -194,17 +201,17 @@ def test_np1_locked_card():
         check(j["slot"] == slots.OTHER_LANE_SLOT and j.get("_server") == "bonsai-a4000"
               and j["mode"] == "helper server",
               "a jjava read while bonsai is bound: bonsai-a4000's own slots, none of this card's", j)
-        slots.release(j)
+        done(j)
         max_mode.current = lambda default=None: "bonsai-a4000"
         sc = slots.acquire(None, transient=True)
         check(sc["slot"] == slots.OTHER_LANE_SLOT and sc["mode"] == "helper server",
               "a side call the table routed to bonsai-a4000: none of this card's slots", sc)
-        slots.release(sc)
+        done(sc)
         max_mode.current = lambda default=None: "bonsai"
         c2 = slots.acquire(None, transient=True, prefix={"x": 1})
         check(c2["slot"] == 0 and c2["mode"] == "compaction",
               "a compaction while jjava is on the helper: still slot 0 of its own card (never the helper)", c2)
-        slots.release(c2)
+        done(c2)
         busy = {s: c for s, c in slots._busy.items() if c}
         check(not busy, "every grant released (a helper-server grant holds nothing here)", busy)
     finally:
@@ -256,8 +263,8 @@ def test_other_card_routing():
                 check(False, f"-np {n}: both cards held -> refused")
             except slots.ConversationAtCapacity as e:
                 check("both cards" in str(e), f"-np {n}: both cards held -> 503 conversation_at_capacity", str(e))
-            slots.release(a)
-            slots.release(b)
+            done(a)
+            done(b)
             # B keeps its card for its life: even once the main card is free
             slots._last_end[0] = time.time() - slots.PRIMARY_HOLD_S - 1
             slots._last_seen["convA"] = time.time() - slots.PRIMARY_HOLD_S - 1
@@ -273,7 +280,7 @@ def test_other_card_routing():
             check(e["slot"] == 0 and (e.get("switch") or {}).get("from") == "convA"[:8]
                   and "--cache-ram" in e["switch"]["saved"] and "convA" not in slots._pins,
                   f"-np {n}: the switch: A's pin goes, its state to the server's host-RAM prompt cache", e)
-            slots.release(e)
+            done(e)
             # A comes back after E's hold: takes the card back, and records how its prompt came back
             slots._last_end[0] = time.time() - slots.PRIMARY_HOLD_S - 1
             slots._last_seen["convE"] = time.time() - slots.PRIMARY_HOLD_S - 1
@@ -286,7 +293,7 @@ def test_other_card_routing():
             rc = rec.get("resumed_cold") or {}
             check(rc.get("how") == "restored" and rc.get("prompt_ms") == 516 and "switch" in (rc.get("by") or ""),
                   f"-np {n}: its return records how its prompt came back and the ms (restored, 516 ms)", rc)
-            slots.release(a2)
+            done(a2)
     finally:
         slots.other_card_for = saved
 
@@ -314,8 +321,8 @@ def test_owner_first_race():
               (follow, f2))
         check(r_other and r_other["model"] == "bonsai-a4000",
               "... and the other id goes to the other card", r_other)
-        slots.release(first)
-        slots.release(f2)
+        done(first)
+        done(f2)
         # a tier with no other card: told to retry after the rest of the hold, counted from the owner's latest activity
         try:
             slots.check_owner({"key": "late", "account": "c"}, "mirai-s")
@@ -341,18 +348,18 @@ def test_suite_hold_override():
         w = {"key": "t2", "account": "test", "hold_s": 0}
         r = slots.check_owner(w, "bonsai")
         check(r and r["model"] == "bonsai-a4000", "the override never takes a card with a request in flight", r)
-        slots.release(a)
+        done(a)
         slots._other.update(owner=None, model=None)
         w = {"key": "t3", "account": "test", "hold_s": 0}
         check(slots.check_owner(w, "bonsai") is None and (w.get("switch") or {}).get("from") == "t1",
               "hold 0 against its own account's finished owner: the newcomer takes the main card", w)
         t3 = slots.acquire("t3")
         check(t3["slot"] == 0, "... and acquire grants it slot 0 (the backstop agrees)", t3)
-        slots.release(t3)
+        done(t3)
         # a client's owner: its full hold, whatever the test sends
         fresh(1)
         slots.check_owner({"key": "client", "account": "operator"}, "bonsai")
-        slots.release(slots.acquire("client"))
+        done(slots.acquire("client"))
         w = {"key": "t4", "account": "test", "hold_s": 0}
         r = slots.check_owner(w, "bonsai")
         check(r and r["model"] == "bonsai-a4000" and "60 s hold" in r["why"],
@@ -368,10 +375,47 @@ def test_suite_hold_override():
         slots.other_card_for = saved
 
 
+def test_unanswered_attempt_holds_nothing():
+    """AN UNANSWERED ATTEMPT HOLDS NOTHING (the operator's live session, 2026-10-01 17:28 ET): a new conversation's
+    first request ends without a generation (its client hung up during the Flash-Next load); its retry arrives as a
+    NEW id seconds later and must get the card -- not 503 behind the cancelled attempt's own pin. A conversation
+    that WAS answered keeps its hold when a later request of it is cancelled."""
+    saved = slots.other_card_for
+    slots.other_card_for = _other_card()
+    try:
+        fresh(1)
+        slots.check_owner({"key": "try1", "account": "op"}, "flash-next")
+        g = slots.acquire("try1")
+        slots.release(g)                                  # cancelled: no remember()
+        check(g.get("unanswered") and "try1" not in slots._pins,
+              "an attempt that ended with no generation: its pin is dropped at release", (g, dict(slots._pins)))
+        w = {"key": "try2", "account": "op"}
+        try:
+            r = slots.check_owner(w, "flash-next")
+            g2 = slots.acquire("try2")
+            check(r is None and g2["slot"] == 0, "the retry (a new id, seconds later, max tier) gets the main card")
+        except slots.ConversationAtCapacity as e:
+            check(False, "the retry (a new id, seconds later, max tier) gets the main card", str(e))
+            return
+        done(g2)
+        # an ANSWERED conversation keeps the card when a later request of it is cancelled
+        g3 = slots.acquire("try2")
+        slots.release(g3)
+        check("try2" in slots._pins and not g3.get("unanswered"),
+              "an answered conversation keeps its pin when a later request ends with no generation")
+        try:
+            slots.check_owner({"key": "other", "account": "x"}, "flash-next")
+            check(False, "and still holds the card against a different conversation (503 inside the hold)")
+        except slots.ConversationAtCapacity:
+            check(True, "and still holds the card against a different conversation (503 inside the hold)")
+    finally:
+        slots.other_card_for = saved
+
+
 def main() -> int:
     for fn in (test_off_at_three_slots, test_owner_and_refusal, test_compactions_and_side_calls, test_check_owner,
                test_lane_cleared, test_np1_locked_card, test_other_card_routing,
-               test_owner_first_race, test_suite_hold_override):
+               test_owner_first_race, test_suite_hold_override, test_unanswered_attempt_holds_nothing):
         try:
             fn()
         except Exception as e:                                       # noqa: BLE001

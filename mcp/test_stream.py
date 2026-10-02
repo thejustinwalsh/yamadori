@@ -1414,6 +1414,68 @@ def test_a_stream_that_never_starts_gives_its_lane_back():
         restore()
 
 
+def test_the_wait_is_heard():
+    """THE WAIT IS HEARD (proxy._TurnPump; the operator's live session, 2026-10-01 ET: VS Copilot hung up at 180 s
+    with no byte while Flash-Next loaded). A turn that produces nothing for HEARTBEAT seconds sends heartbeats
+    (empty deltas) until its first event; a refusal inside the first HEARTBEAT seconds is still RAISED before any
+    byte (E1); one after a heartbeat is the committed stream's one error event and [DONE]."""
+    import api_errors
+    import time
+    saved_turn, saved_beat = proxy._run_turn, proxy.HEARTBEAT
+    proxy.HEARTBEAT = 0.1
+
+    def slow_turn(body, streamed):
+        time.sleep(0.45)                     # the model load / a cold prefill
+        yield ("content", "hi")
+        return {"choices": [{"finish_reason": "stop"}], "x_yamadori": {}}
+
+    def fast_refusal(body, streamed):
+        raise api_errors.ApiError(503, "at capacity", code="conversation_at_capacity")
+        yield                                # pragma: no cover
+
+    def late_failure(body, streamed):
+        time.sleep(0.35)
+        raise RuntimeError("the model server went away")
+        yield                                # pragma: no cover
+
+    def deltas(chunks):
+        out = []
+        for c in chunks:
+            t = c.decode("utf-8", "replace").strip()
+            if t.startswith("data: ") and t != "data: [DONE]":
+                out.append(json.loads(t[6:]))
+        return out
+    try:
+        proxy._run_turn = slow_turn
+        chunks = list(proxy.stream_body({"messages": []}))
+        ds = deltas(chunks)
+        first_content = next((i for i, d in enumerate(ds)
+                              if ((d.get("choices") or [{}])[0].get("delta") or {}).get("content")), None)
+        beats = [d for d in ds[:first_content or 0]
+                 if (d.get("choices") or [{}])[0].get("delta") == {} and not (d.get("choices") or [{}])[0].get("finish_reason")]
+        check(first_content is not None and len(beats) >= 2 and len(beats) == first_content,
+              "a turn silent for several HEARTBEATs: heartbeats (empty deltas) go out until its first event",
+              json.dumps({"before_content": first_content, "beats": len(beats)}))
+        check(ds and (ds[-1].get("choices") or [{}])[0].get("finish_reason") == "stop"
+              and chunks[-1].strip() == b"data: [DONE]" and "".join(
+                  ((d.get("choices") or [{}])[0].get("delta") or {}).get("content") or "" for d in ds) == "hi",
+              "then the turn's own events, the finish chunk and [DONE]: the content is unchanged")
+        proxy._run_turn = fast_refusal
+        try:
+            got = list(proxy.stream_body({"messages": []}))
+            check(False, "a refusal inside the first HEARTBEAT is raised before any byte (E1)", str(got)[:200])
+        except api_errors.ApiError as e:
+            check(e.status == 503, "a refusal inside the first HEARTBEAT is raised before any byte (E1)", str(e))
+        proxy._run_turn = late_failure
+        chunks = list(proxy.stream_body({"messages": []}))
+        text = b"".join(chunks).decode("utf-8", "replace")
+        check(chunks and chunks[-1].strip() == b"data: [DONE]" and text.count('"error"') == 1
+              and '"content"' not in text,
+              "a failure after a heartbeat: ONE error event then [DONE], never assistant content", text[-300:])
+    finally:
+        proxy._run_turn, proxy.HEARTBEAT = saved_turn, saved_beat
+
+
 def main() -> int:
     for fn in (test_fake_upstream_is_alive,
                test_an_answer_without_tools_is_generated_once,
@@ -1437,7 +1499,8 @@ def main() -> int:
                test_a_long_client_tool_call_keeps_the_stream_alive,
                test_a_retry_takes_the_lanes_its_abandoned_twins_hold,
                test_a_retry_after_a_while_replaces_its_twin_at_once,
-               test_a_stream_that_never_starts_gives_its_lane_back):
+               test_a_stream_that_never_starts_gives_its_lane_back,
+               test_the_wait_is_heard):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

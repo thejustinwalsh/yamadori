@@ -5844,6 +5844,89 @@ if __name__ == "__main__":
     main()
 
 
+# THE WAIT IS HEARD (2026-10-02). The stream said nothing until the turn's first event -- and the first event of
+# a max request waits for the Flash-Next load (131-272 s measured) and then its prompt (a cold 30K prompt: 135-321
+# s). The operator's live session, 2026-10-01 ET, VS Copilot agents: the client hung up at exactly 180.0 s with no
+# byte received (17:28), again at 20:25, and each hang-up cancelled the load or the prefill it was waiting for.
+# So the turn runs on its own thread (_TurnPump) and whenever it has produced nothing for HEARTBEAT seconds the
+# stream sends a heartbeat -- the empty delta stream_body already sends for "heartbeat" events, which Responses
+# turns into `response.in_progress` and Messages into `ping`. HEARTBEAT (5 s) is the proxy's existing beat, under
+# the shortest client silence limit we know (Hermes' codex transport: 12 s without a parsed event). E1 KEEPS ITS
+# PROMISE FOR FAST FAILURES: a refusal in the first HEARTBEAT seconds (validation, the window check, 503 at
+# capacity -- all decided before any model work) is still a real HTTP status; one after the first heartbeat is the
+# committed stream's ONE error event, as after any first byte.
+class _TurnPump:
+    """`_run_turn`'s events, pulled on ONE thread of its own (every resume on the same thread, the request's
+    cancellation bound to it, the caller's contextvars copied), with a ("heartbeat", None) from next() whenever the
+    turn has produced nothing for HEARTBEAT seconds. next() raises what the turn raised (StopIteration with the
+    turn's value at its end)."""
+
+    def __init__(self, gen, token: "cancel.Token"):
+        import contextvars
+        import queue
+        self._gen, self._token = gen, token
+        self._q: "queue.Queue" = queue.Queue()
+        self._empty = queue.Empty
+        self._done = False
+        # THE TURN ADVANCES ONLY WHEN THE STREAM PULLS, as it did when the stream called next(gen) itself: one
+        # permit per pull (mcp/test_ledger.py [race]: a turn that ran ahead of its consumer finished its warm
+        # before the client had the calls). A heartbeat leaves the pull outstanding and takes no new permit.
+        self._want = threading.Semaphore(0)
+        self._pulling = False
+        self._closed = False
+        ctx = contextvars.copy_context()
+        self._th = threading.Thread(target=lambda: ctx.run(self._run), daemon=True, name="yamadori-turn")
+        self._th.start()
+
+    def _run(self) -> None:
+        try:
+            with cancel.bound(self._token):
+                while True:
+                    self._want.acquire()
+                    if self._closed:
+                        return
+                    try:
+                        ev = next(self._gen)
+                    except StopIteration as stop:
+                        self._q.put(("stop", stop.value))
+                        return
+                    self._q.put(("event", ev))
+        except BaseException as e:                                   # noqa: BLE001
+            self._q.put(("error", e))
+
+    def next(self):
+        if self._done:
+            raise StopIteration(None)
+        if not self._pulling:
+            self._pulling = True
+            self._want.release()
+        try:
+            what, item = self._q.get(timeout=HEARTBEAT)
+        except self._empty:
+            return ("heartbeat", None)
+        self._pulling = False
+        if what == "event":
+            return item
+        self._done = True
+        if what == "stop":
+            raise StopIteration(item)
+        raise item
+
+    def close(self) -> None:
+        """The stream ended. If the turn is still running its token was cancelled by the caller: wait for its
+        thread to unwind (the cancel shuts its upstream sockets), then close the generator from here."""
+        self._closed = True
+        self._want.release()
+        if self._th.is_alive():
+            self._th.join(30)
+        if not self._th.is_alive():
+            try:
+                with cancel.bound(self._token):
+                    self._gen.close()
+            except Exception:                                        # noqa: BLE001
+                pass
+
+
 def stream_body(body: dict, public_name: str = "yamadori",
                 token: "cancel.Token | None" = None):
     """The streamed path: the one turn implementation (`_run_turn`), its
@@ -5917,11 +6000,11 @@ def stream_body(body: dict, public_name: str = "yamadori",
     gen = _run_turn(body, streamed=True)
     finished = False
     started = False
+    pump = _TurnPump(gen, token)
     try:
         while True:
             try:
-                with cancel.bound(token):
-                    kind, item = next(gen)
+                kind, item = pump.next()
             except StopIteration as stop:
                 d = stop.value or {}
                 break
@@ -5967,8 +6050,7 @@ def stream_body(body: dict, public_name: str = "yamadori",
         if not finished:
             # Closed before the turn ended (GeneratorExit): stop its work.
             token.cancel("the stream was closed before the turn ended")
-            with cancel.bound(token):
-                gen.close()
+        pump.close()
     if not started and lead:
         yield lead
     fin = d["choices"][0].get("finish_reason") or "stop"
