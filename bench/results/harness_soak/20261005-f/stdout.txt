@@ -1,0 +1,54 @@
+harness soak against http://127.0.0.1:1234: scenarios d,e; records in bench/results/harness_soak/20261005-f
+
+=== d idle_gap
+  waiting 62 s for an earlier run's hold on the card to pass before A starts
+  [idle_gap/A #1 step] HTTP 200 ttft 120.34s total 125.77s silence 5.17s hb 23 prompt 24613 reused 0 processed 24613 model flash-next SWAP 12.6s
+  [idle_gap/A #2 step] HTTP 200 ttft 4.4s total 9.47s silence 4.4s hb 0 prompt 24723 reused 24690 processed 33 model flash-next
+  idle for 1340 s
+  [idle_gap/A #3 step] HTTP 200 ttft 7.33s total 15.05s silence 5.26s hb 1 prompt 25004 reused 24872 processed 132 model flash-next
+  -> PASS  after 1340 s idle: processed 132/25004 (0.5%), ttft 7.33 s
+     ok   served after 1340 s idle
+     ok   cache reused -- reused 24872, processed 132/25004 (0.5%), prompt_ms 5209, resumed_cold null
+     ok   same model as before the gap -- flash-next vs flash-next
+     ok   no silence over 10 s -- 5.26 s (to_first_event)
+
+=== e abort_and_retry
+  waiting 62 s for A's hold on the card to pass before E starts
+  [abort_and_retry/E #1 aborted] HTTP 200 total 8.01s silence 5.23s hb 1 (aborted by the client)
+  [abort_and_retry/E #2 step] HTTP 200 ttft 56.9s total 60.57s silence 5.46s hb 11 prompt 24611 reused 8192 processed 16419 model flash-next
+  -> PASS  retry ttft 56.9 s (HTTP 200)
+     ok   the retry is not refused 503 -- HTTP 200 
+     ok   the retry is served (200, finished)
+     ok   the retry has no silence over 10 s -- 5.46 s (to_first_event), 11 heartbeats before the first token
+     ok   the retry is served by the max tier's model -- served by flash-next (expected flash-next)
+
+====================================================================================================
+HARNESS SOAK  base http://127.0.0.1:1234  tier max  api chat  steps 12  system-tokens 26000  client-timeout 180s  (28.0 min)
+====================================================================================================
+  PASS    d idle_gap                           after 1340 s idle: processed 132/25004 (0.5%), ttft 7.33 s
+  PASS    e abort_and_retry                    retry ttft 56.9 s (HTTP 200)
+
+PER-STEP TABLE (every agent step; proc% = processed/prompt; tail~ = estimated new tokens)
+       scn  ses  step  http  ttft_s  hb  silence  prompt  reused  processed  proc%  tail~  calls  tok/s      finish
+  idle_gap    A     1   200   120.3  23      5.2   24613       0      24613  100.0      -      2   14.3  tool_calls
+  idle_gap    A     2   200     4.4   0      4.4   24723   24690         33    0.1    125      4   30.1  tool_calls
+  idle_gap    A     3   200     7.3   1      5.3   25004   24872        132    0.5    270      2   24.2  tool_calls
+abort_and_    E     2   200    56.9  11      5.5   24611    8192      16419   66.7      -      2   31.5  tool_calls
+
+WORST SILENCE: 5.46 s in abort_and_retry/E #2 (to_first_event; client timeout 180 s)
+503 RESPONSES: 0   waits: hold 62.0s, idle 1340.0s, hold 62.0s
+SWAPS: idle_gap/A#1 12.6s
+MEMORY (this machine): min commit available 63793 MiB of 114717, min physical available 7375 MiB
+
+--- e abort_and_retry: PASS
+    ok   the retry is not refused 503
+         HTTP 200 
+    ok   the retry is served (200, finished)
+    ok   the retry has no silence over 10 s
+         5.46 s (to_first_event), 11 heartbeats before the first token
+    ok   the retry is served by the max tier's model
+         served by flash-next (expected flash-next)
+    note attempt 1: client hung up after 8 s (aborted=True, HTTP 200, 1 events, first event 5.23)
+    note retry: first event 5.46 s, first token 56.9 s, prompt 24611, reused 8192, processed 16419, session b49ec6e40024 (minted)
+
+RESULT: 2 passed, 0 failed, 0 skipped, 0 not run

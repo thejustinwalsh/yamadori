@@ -1,0 +1,94 @@
+{
+ "base": "http://127.0.0.1:1234",
+ "tier": "max",
+ "out": "bench/results/harness_soak/20261005-f",
+ "scenarios": [
+  {
+   "key": "d",
+   "name": "idle_gap",
+   "status": "PASS",
+   "headline": "after 1340 s idle: processed 132/25004 (0.5%), ttft 7.33 s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [],
+   "checks": [
+    {
+     "ok": true,
+     "text": "served after 1340 s idle",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "cache reused",
+     "detail": "reused 24872, processed 132/25004 (0.5%), prompt_ms 5209, resumed_cold null"
+    },
+    {
+     "ok": true,
+     "text": "same model as before the gap",
+     "detail": "flash-next vs flash-next"
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s",
+     "detail": "5.26 s (to_first_event)"
+    }
+   ]
+  },
+  {
+   "key": "e",
+   "name": "abort_and_retry",
+   "status": "PASS",
+   "headline": "retry ttft 56.9 s (HTTP 200)",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "attempt 1: client hung up after 8 s (aborted=True, HTTP 200, 1 events, first event 5.23)",
+    "retry: first event 5.46 s, first token 56.9 s, prompt 24611, reused 8192, processed 16419, session b49ec6e40024 (minted)"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "the retry is not refused 503",
+     "detail": "HTTP 200 "
+    },
+    {
+     "ok": true,
+     "text": "the retry is served (200, finished)",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "the retry has no silence over 10 s",
+     "detail": "5.46 s (to_first_event), 11 heartbeats before the first token"
+    },
+    {
+     "ok": true,
+     "text": "the retry is served by the max tier's model",
+     "detail": "served by flash-next (expected flash-next)"
+    }
+   ]
+  }
+ ],
+ "n_503": 0,
+ "waits": [
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "an earlier run",
+   "for": "A"
+  },
+  {
+   "why": "idle",
+   "s": 1340.0,
+   "for": "A"
+  },
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "A",
+   "for": "E"
+  }
+ ]
+}
