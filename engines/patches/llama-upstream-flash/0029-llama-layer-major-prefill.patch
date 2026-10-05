@@ -1,0 +1,2381 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Fri, 2 Oct 2026 19:28:53 -0400
+Subject: [PATCH] llama: LLAMA_LAYER_MAJOR=1, a prompt batch runs layer by
+ layer so the host-resident experts of a layer are uploaded once per batch
+
+With the experts in host memory (--n-cpu-moe 48) every offloaded MUL_MAT_ID of every 512-token ubatch uploads the experts
+the ubatch routes to (ggml_backend_sched_compute_splits, the used-experts copy): at 512 tokens x 10 of 512 experts that is
+nearly all of the 35.45 GB of routed experts per ubatch (33.02 GiB, 48 layers, gguf sizes), and it is the ~75% of a
+ubatch's 3,124 ms that no timed node accounts for (the engine profile of 2026-10-02). This runs the batch the other way:
+layer 0 for every ubatch of the batch, then layer 1 for every ubatch, ... , so a layer's experts cross PCIe once per
+batch (-b: 2,048 tokens = 4 ubatches today, `-b 8192` = 16) instead of once per ubatch. Strata does the same order with
+one 8,192-token batch per layer (src/prefill/prefill.cpp:752-856 @ d551edf); here the ubatch stays 512, so the compute
+buffer does not grow (3.7 MiB a token at -c 262144 would).
+
+Off unless LLAMA_LAYER_MAJOR is set (default: nothing changes: GGML_SCHED_DEBUG=2 of llama-bench on the A4000, a
+generated qwen4exp, is identical to the int0028 build's, 454 splits, 18,560 split/node lines). qwen4exp only; a batch
+of one ubatch, more than one sequence is fine, embeddings/pooling/backend samplers/layer-input taps and an MTP-type
+context take the old path. 1 = where it gains (a GPU, experts in host memory, op offload, no --prefetch-experts-slots),
+2 = wherever it can run (the CPU test). LLAMA_LAYER_MAJOR_SLOTS (default 6 expert slots), _MIN_UBATCHES (2), _DEBUG=1
+(one line per batch: ms, bytes uploaded, hits, host time per layer graph).
+
+What changed
+- llama-context.cpp decode(): a batch of >= 2 ubatches goes through decode_layer_major(). Every ubatch is applied to the
+  memory ONCE, in order; llama_memory_context_i::lm_record() keeps what its graph reads (the K/V and indexer cell range,
+  the recurrent head, rs_z and every s_copy id, which also consumes the rollback index of a sequence once);
+  lm_seek(i) puts it back for later layers, so layer L of ubatch i is built over exactly the cells and state the
+  ubatch-by-ubatch path built it over. Per layer: the graph of that layer for ubatch 0..N-1 (never reused: ~0.04 ms to
+  build, ~0.04 to split and allocate, A4000, tiny model), then the next. finish_ubatch() (logits, embeddings, h_nextn
+  for the MTP draft) is the old code, called after the last layer of each ubatch.
+- llm_graph_params lm_il0/lm_il1/lm_h_in/lm_h_out/lm_tok_off, qwen4exp::graph builds a layer range: past layer 0 it starts
+  from rows of a persistent device buffer (2 x 40 KiB a token at hc 4 x n_embd 2560, ping-pong by layer parity), short
+  of the last layer it copies the residual into the other one. Inputs a range does not read are not created
+  (build_inp_mem_hybrid(attn, rs)).
+- ggml-backend.cpp: weight-stationary expert slots (ggml-backend-lm.h). A split whose MUL_MAT_ID reads a host weight
+  finds it whole in a slot or uploads it whole (second stream of the device, an event to the compute stream); the driver
+  names the next layer's weights right after the first graph of a layer, so their upload overlaps its compute. A slot of
+  the current layer is never reused. Counters for the used-experts copy and the whole-weight copy are always kept.
+- tests/test-layer-major.cpp, tests/split_gate_up.py: a generated qwen4exp (Gated DeltaNet + QSA layers, hyper
+  connections, PLE, MoE), the same batches in two contexts.
+
+Tested (a generated 8-layer qwen4exp, 16-64 experts, not the real model; n = the runs listed)
+- CPU, bit-exact logits and byte-identical serialized sequence state (K/V, indexer cells, recurrent state) after a
+  prompt batch with an output on every token, a server-style batch (output on the last token only), a rollback of K
+  positions with n_rs_seq snapshots and a batch after it, and generated tokens; ubatch 20-128, 1-4 sequences, top-k
+  24-131072, f16 and q8_0 K/V, MTP hidden states (llama_set_embeddings_nextn), a batch cancelled in the middle: 48
+  runs (6 seeds x 8 configurations).
+- A4000 (CUDA0, experts in host memory, f32 and Q4_0, fused and separate gate/up, 3-6 slots): bit-exact too, 19 runs.
+  The 6 full ubatches of a 401-token batch copied 288.0 MiB of experts ubatch by ubatch; layer-major uploaded 48.0 MiB
+  (24 uploads, 21 of them prefetched, 141 hits): one ubatch's worth, as N = 6 predicts.
+- A control that must fail does (the ubatches of every layer past the first taken back to front), and a batch cancelled
+  at the Nth abort-callback call is rolled back and decodes again to the reference.
+
+NOT measured: anything on the real model or the 5060 Ti. The gain is an estimate (docs/FLASH-NEXT.md section 12).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ ggml/include/ggml-backend-lm.h  |  45 +++
+ ggml/src/ggml-backend.cpp       | 319 +++++++++++++++
+ src/llama-context.cpp           | 491 ++++++++++++++++++++---
+ src/llama-context.h             |  54 +++
+ src/llama-graph.cpp             |  40 +-
+ src/llama-graph.h               |  15 +-
+ src/llama-kv-cache.cpp          |  16 +
+ src/llama-kv-cache.h            |   8 +
+ src/llama-memory-hybrid-idx.cpp |  22 ++
+ src/llama-memory-hybrid-idx.h   |   5 +
+ src/llama-memory-hybrid.cpp     |  17 +
+ src/llama-memory-hybrid.h       |   6 +
+ src/llama-memory-recurrent.cpp  |  41 ++
+ src/llama-memory-recurrent.h    |  19 +
+ src/llama-memory.h              |  10 +
+ src/models/qwen4exp.cpp         |  70 +++-
+ tests/CMakeLists.txt            |   2 +
+ tests/split_gate_up.py          |  66 ++++
+ tests/test-layer-major.cpp      | 670 ++++++++++++++++++++++++++++++++
+ 19 files changed, 1832 insertions(+), 84 deletions(-)
+ create mode 100644 ggml/include/ggml-backend-lm.h
+ create mode 100644 tests/split_gate_up.py
+ create mode 100644 tests/test-layer-major.cpp
+
+diff --git a/ggml/include/ggml-backend-lm.h b/ggml/include/ggml-backend-lm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..890ab167a58417f0aa535ff730fb851e699fbce6
+--- /dev/null
++++ b/ggml/include/ggml-backend-lm.h
+@@ -0,0 +1,45 @@
++#pragma once
++
++// 0029: layer-major prefill (LLAMA_LAYER_MAJOR): weight-stationary expert slots in the backend scheduler.
++//
++// An offloaded MUL_MAT_ID (a MoE layer whose experts live in host memory) normally copies the experts its ubatch uses
++// to the device in front of every graph: with 512-token ubatches that is nearly every expert of the layer, once per
++// ubatch. Layer-major prefill runs the graph of ONE layer for each ubatch of a chunk in a row; with the slots on, the
++// scheduler uploads that layer's expert tensors whole into a slot on first use and every later graph finds them there.
++// The caller marks layers (an epoch) and names the next layer's weights so that their upload overlaps this layer's
++// compute. The slots are device memory: n_slots x slot_bytes.
++
++#include "ggml.h"
++#include "ggml-backend.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++    struct ggml_backend_sched_upload_stats {
++        uint64_t resident_bytes;      // uploaded into slots (demand + prefetch)
++        uint64_t resident_uploads;
++        uint64_t resident_hits;       // splits that found their weight in a slot
++        uint64_t resident_fallbacks;  // splits that could not use a slot and took the used-experts copy
++        uint64_t resident_prefetched; // uploads queued by ggml_backend_sched_resident_prefetch
++        uint64_t sparse_bytes;        // bytes of the used-experts copy path (always counted)
++        uint64_t sparse_copies;
++        uint64_t full_bytes;          // bytes of host weights copied WHOLE and synchronously (always counted)
++        uint64_t full_copies;
++    };
++
++    // n_slots < 3 or slot_bytes == 0: off (the slots are freed). Slots are allocated on the first split that uses them.
++    GGML_API void ggml_backend_sched_resident_set(ggml_backend_sched_t sched, int n_slots, size_t slot_bytes);
++    GGML_API bool ggml_backend_sched_resident_is_on(ggml_backend_sched_t sched);
++
++    // a new layer begins: the slots stamped with an earlier epoch may be reused
++    GGML_API void ggml_backend_sched_resident_epoch(ggml_backend_sched_t sched);
++
++    // queue the uploads of the next layer's host weights now (async, on the upload stream)
++    GGML_API void ggml_backend_sched_resident_prefetch(ggml_backend_sched_t sched, struct ggml_tensor * const * weights, int n);
++
++    GGML_API void ggml_backend_sched_upload_stats(ggml_backend_sched_t sched, struct ggml_backend_sched_upload_stats * stats);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index 90787b899dec098fae6d080b00432e737efa014a..b82ee2d34597b26de46e99debd836b2e6307a2f8 100644
+--- a/ggml/src/ggml-backend.cpp
++++ b/ggml/src/ggml-backend.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include "ggml-backend.h"
+ #include "ggml-backend-impl.h"
++#include "ggml-backend-lm.h"
+ #include "ggml-alloc.h"
+ #include "ggml-impl.h"
+ 
+@@ -830,6 +831,11 @@ static bool ggml_is_view_op(enum ggml_op op) {
+ #define GGML_SCHED_MAX_PREFETCH_SLOTS 4
+ #endif
+ 
++// 0029: slots of the weight-stationary expert store of layer-major prefill (see ggml_backend_sched_resident_set)
++#ifndef GGML_SCHED_MAX_RESIDENT_SLOTS
++#define GGML_SCHED_MAX_RESIDENT_SLOTS 16
++#endif
++
+ struct ggml_backend_sched_split {
+     int backend_id;
+     int i_start;
+@@ -902,6 +908,43 @@ struct ggml_backend_sched {
+     bool prefetch_used[GGML_SCHED_MAX_PREFETCH_SLOTS];
+     int prefetch_cur;
+ 
++    // 0029: weight-stationary expert slots (layer-major prefill, LLAMA_LAYER_MAJOR). The offloaded MUL_MAT_ID weights
++    // of one layer are uploaded WHOLE into a slot once and every later graph that reads the same host tensor finds it
++    // there: the graphs of one layer run for each ubatch of a chunk, one after another, and the 512-token ubatch no
++    // longer pays the upload of the layer's experts alone. The uploads run on a second stream of the device
++    // (res.backend) and the consuming split waits on the slot's ready event, as with --prefetch-experts-slots; the
++    // caller names the next layer's weights (ggml_backend_sched_resident_prefetch) so that their upload overlaps this
++    // layer's compute. Slots of the current epoch (a layer) are never reused until the epoch moves on.
++    struct {
++        bool                on;
++        int                 n_slots;
++        size_t              slot_bytes;
++        ggml_backend_t      backend;
++        ggml_backend_dev_t  dev;
++        struct ggml_context * ctx;
++        struct {
++            ggml_backend_buffer_t     buf;
++            struct ggml_tensor *      t;      // descriptor of the slot for the upload (type i8, slot_bytes)
++            ggml_backend_event_t      ready;  // the upload has landed (recorded on res.backend)
++            ggml_backend_event_t      free;   // the last split that read the slot has been launched (recorded on its backend)
++            const struct ggml_tensor * key;   // the host weight the slot holds
++            size_t                    nbytes;
++            uint64_t                  epoch;  // the last epoch that asked for it
++            bool                      used;   // `free` has been recorded at least once
++        } slot[GGML_SCHED_MAX_RESIDENT_SLOTS];
++        uint64_t epoch;
++        // counters (ggml_backend_sched_upload_stats)
++        uint64_t up_bytes, up_n, hits, fallbacks, prefetched;
++    } res;
++
++    // 0029: bytes of the used-experts copy path (the one every offloaded MUL_MAT_ID takes without the slots)
++    uint64_t stat_sparse_bytes;
++    uint64_t stat_sparse_n;
++    // ... and of the whole-tensor copy of a host weight (a MUL_MAT_ID that does not start its split: its ids are
++    // computed inside the split, so the used experts cannot be read before it runs)
++    uint64_t stat_full_bytes;
++    uint64_t stat_full_n;
++
+     char * context_buffer;
+     size_t context_buffer_size;
+ 
+@@ -1804,6 +1847,228 @@ static bool ggml_backend_sched_prefetch_init(ggml_backend_sched_t sched, ggml_ba
+     return true;
+ }
+ 
++// ---- 0029: weight-stationary expert slots (layer-major prefill) ----
++static void ggml_backend_sched_resident_release(ggml_backend_sched_t sched) {
++    if (sched->res.backend) {
++        ggml_backend_synchronize(sched->res.backend);
++    }
++    for (int i = 0; i < GGML_SCHED_MAX_RESIDENT_SLOTS; i++) {
++        if (sched->res.slot[i].buf)   { ggml_backend_buffer_free(sched->res.slot[i].buf); }
++        if (sched->res.slot[i].ready) { ggml_backend_event_free(sched->res.slot[i].ready); }
++        if (sched->res.slot[i].free)  { ggml_backend_event_free(sched->res.slot[i].free); }
++        memset(&sched->res.slot[i], 0, sizeof(sched->res.slot[i]));
++    }
++    if (sched->res.ctx) {
++        ggml_free(sched->res.ctx);
++        sched->res.ctx = NULL;
++    }
++    if (sched->res.backend) {
++        ggml_backend_free(sched->res.backend);
++        sched->res.backend = NULL;
++    }
++    sched->res.dev = NULL;
++}
++
++static bool ggml_backend_sched_resident_init(ggml_backend_sched_t sched, ggml_backend_t backend) {
++    if (sched->res.backend != NULL) {
++        return true;
++    }
++
++    ggml_backend_dev_t dev = backend->device;
++    ggml_backend_dev_props props;
++    ggml_backend_dev_get_props(dev, &props);
++    if (!props.caps.async || !props.caps.events || sched->res.n_slots <= 0 || sched->res.slot_bytes == 0) {
++        sched->res.on = false;
++        return false;
++    }
++
++    sched->res.backend = ggml_backend_dev_init(dev, NULL);
++    sched->res.dev     = dev;
++    if (sched->res.backend == NULL) {
++        sched->res.on = false;
++        return false;
++    }
++
++    struct ggml_init_params ip = {
++        /* .mem_size   = */ (size_t) GGML_SCHED_MAX_RESIDENT_SLOTS * ggml_tensor_overhead() + 1024,
++        /* .mem_buffer = */ NULL,
++        /* .no_alloc   = */ true,
++    };
++    sched->res.ctx = ggml_init(ip);
++
++    ggml_backend_buffer_type_t buft = ggml_backend_get_default_buffer_type(backend);
++    bool ok = sched->res.ctx != NULL;
++    for (int i = 0; ok && i < sched->res.n_slots; i++) {
++        auto & s = sched->res.slot[i];
++        s.buf = ggml_backend_buft_alloc_buffer(buft, sched->res.slot_bytes);
++        if (s.buf == NULL) {
++            // fewer slots than asked: a layer needs three (gate, up, down); fewer than that cannot hold one
++            if (i >= 3) {
++                sched->res.n_slots = i;
++                break;
++            }
++            ok = false;
++            break;
++        }
++        // an expert tensor is read to the end by MMQ tiles: no uninitialised bytes after the data
++        ggml_backend_buffer_clear(s.buf, 0);
++        s.ready = ggml_backend_event_new(dev);
++        s.free  = ggml_backend_event_new(dev);
++        s.t     = ggml_new_tensor_1d(sched->res.ctx, GGML_TYPE_I8, (int64_t) sched->res.slot_bytes);
++        s.t->buffer = s.buf;
++        s.t->data   = ggml_backend_buffer_get_base(s.buf);
++        ok = s.ready != NULL && s.free != NULL;
++    }
++    if (!ok) {
++        ggml_backend_sched_resident_release(sched);
++        sched->res.on = false;
++        return false;
++    }
++    return true;
++}
++
++// the slot holding `key`, else -1
++static int ggml_backend_sched_resident_find(ggml_backend_sched_t sched, const struct ggml_tensor * key) {
++    for (int i = 0; i < sched->res.n_slots; i++) {
++        if (sched->res.slot[i].key == key) {
++            return i;
++        }
++    }
++    return -1;
++}
++
++// a slot nobody asked for in this epoch or the next (an upload for the next layer is stamped epoch + 1), oldest
++// first; -1 when every slot is taken
++static int ggml_backend_sched_resident_victim(ggml_backend_sched_t sched) {
++    int best = -1;
++    for (int i = 0; i < sched->res.n_slots; i++) {
++        const auto & s = sched->res.slot[i];
++        if (s.key == NULL) {
++            return i;
++        }
++        if (s.epoch < sched->res.epoch && (best < 0 || s.epoch < sched->res.slot[best].epoch)) {
++            best = i;
++        }
++    }
++    return best;
++}
++
++// queue the upload of `weight` into slot i on the upload stream: after the last split that read the slot, and the
++// slot's ready event is recorded behind the copy
++static void ggml_backend_sched_resident_upload(ggml_backend_sched_t sched, int i, const struct ggml_tensor * weight, uint64_t epoch) {
++    auto & s = sched->res.slot[i];
++    if (s.used) {
++        ggml_backend_event_wait(sched->res.backend, s.free);
++    }
++    const size_t nbytes = ggml_nbytes(weight);
++    GGML_ASSERT(nbytes <= sched->res.slot_bytes);
++    ggml_backend_tensor_set_async(sched->res.backend, s.t, weight->data, 0, nbytes);
++    ggml_backend_event_record(s.ready, sched->res.backend);
++    s.key    = weight;
++    s.nbytes = nbytes;
++    s.epoch  = epoch;
++    sched->res.up_bytes += nbytes;
++    sched->res.up_n++;
++
++    static const bool dbg = getenv("GGML_SCHED_RESIDENT_DEBUG") != NULL;
++    if (dbg) {
++        GGML_LOG_INFO("%s: upload %s (%.1f MiB) -> slot %d, epoch %llu (now %llu)\n", "ggml_backend_sched_resident", weight->name,
++                nbytes/1024.0/1024.0, i, (unsigned long long) epoch, (unsigned long long) sched->res.epoch);
++    }
++}
++
++// the slot a split's weight is read from: the one that holds it (a hit), else the upload is queued now (a demand
++// upload: the first graph of a layer when nothing prefetched it); -1 when it cannot be resident (too big for a slot,
++// or no free slot): the caller falls back to the used-experts copy
++static int ggml_backend_sched_resident_acquire(ggml_backend_sched_t sched, ggml_backend_t backend, const struct ggml_tensor * weight) {
++    if (!sched->res.on || !ggml_backend_sched_resident_init(sched, backend)) {
++        return -1;
++    }
++    if (ggml_nbytes(weight) > sched->res.slot_bytes) {
++        sched->res.fallbacks++;
++        return -1;
++    }
++    int i = ggml_backend_sched_resident_find(sched, weight);
++    if (i >= 0) {
++        sched->res.hits++;
++        if (sched->res.slot[i].epoch < sched->res.epoch) {
++            sched->res.slot[i].epoch = sched->res.epoch;
++        }
++        return i;
++    }
++    i = ggml_backend_sched_resident_victim(sched);
++    if (i < 0) {
++        sched->res.fallbacks++;
++        return -1;
++    }
++    ggml_backend_sched_resident_upload(sched, i, weight, sched->res.epoch);
++    return i;
++}
++
++void ggml_backend_sched_resident_set(ggml_backend_sched_t sched, int n_slots, size_t slot_bytes) {
++    if (sched == NULL) { return; }
++    if (n_slots > GGML_SCHED_MAX_RESIDENT_SLOTS) { n_slots = GGML_SCHED_MAX_RESIDENT_SLOTS; }
++    if (n_slots < 3 || slot_bytes == 0) {
++        // off: the slots go back to the device
++        ggml_backend_sched_resident_release(sched);
++        sched->res.on = false;
++        sched->res.n_slots = 0;
++        sched->res.slot_bytes = 0;
++        return;
++    }
++    if (sched->res.on && sched->res.n_slots == n_slots && sched->res.slot_bytes >= slot_bytes) {
++        return;
++    }
++    ggml_backend_sched_resident_release(sched);
++    sched->res.on         = true;
++    sched->res.n_slots    = n_slots;
++    sched->res.slot_bytes = slot_bytes;
++}
++
++bool ggml_backend_sched_resident_is_on(ggml_backend_sched_t sched) {
++    return sched != NULL && sched->res.on;
++}
++
++// a new layer: the slots stamped with the epochs before it may be reused
++void ggml_backend_sched_resident_epoch(ggml_backend_sched_t sched) {
++    if (sched == NULL) { return; }
++    sched->res.epoch++;
++}
++
++// the weights of the NEXT layer (epoch + 1): their uploads are queued behind what the slots' last readers did, on the
++// upload stream, so they overlap the compute of this layer. Only the weights no slot holds yet, only into slots that
++// belong to an earlier epoch; whatever does not fit is left for the demand path.
++void ggml_backend_sched_resident_prefetch(ggml_backend_sched_t sched, struct ggml_tensor * const * weights, int n) {
++    if (sched == NULL || !sched->res.on || sched->res.backend == NULL) { return; }
++    for (int k = 0; k < n; k++) {
++        const struct ggml_tensor * w = weights[k];
++        if (w == NULL || w->buffer == NULL || !ggml_backend_buffer_is_host(w->buffer) ||
++            ggml_nbytes(w) > sched->res.slot_bytes ||
++            ggml_backend_sched_resident_find(sched, w) >= 0) {
++            continue;
++        }
++        const int i = ggml_backend_sched_resident_victim(sched);
++        if (i < 0) {
++            return;
++        }
++        ggml_backend_sched_resident_upload(sched, i, w, sched->res.epoch + 1);
++        sched->res.prefetched++;
++    }
++}
++
++void ggml_backend_sched_upload_stats(ggml_backend_sched_t sched, struct ggml_backend_sched_upload_stats * st) {
++    if (sched == NULL || st == NULL) { return; }
++    st->resident_bytes = sched->res.up_bytes;
++    st->resident_uploads = sched->res.up_n;
++    st->resident_hits = sched->res.hits;
++    st->resident_fallbacks = sched->res.fallbacks;
++    st->resident_prefetched = sched->res.prefetched;
++    st->sparse_bytes = sched->stat_sparse_bytes;
++    st->sparse_copies = sched->stat_sparse_n;
++    st->full_bytes = sched->stat_full_bytes;
++    st->full_copies = sched->stat_full_n;
++}
++
+ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t sched) {
+     GGML_ASSERT(sched);
+     struct ggml_backend_sched_split * splits = sched->splits;
+@@ -1894,6 +2159,11 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+         ggml_backend_buffer_t prefetch_saved_buffer = NULL;
+         void * prefetch_saved_data = NULL;
+         int lookahead_input_id = -1;
++        // 0029: the resident slot this split's weight is read from, with what to put back after the launch
++        int res_slot = -1;
++        ggml_tensor * res_input_cpy = NULL;
++        ggml_backend_buffer_t res_saved_buffer = NULL;
++        void * res_saved_data = NULL;
+         if (lookahead[split_id].slot != -1) {
+             split_prefetch_slot   = lookahead[split_id].slot;
+             prefetch_input_cpy    = lookahead[split_id].input_cpy;
+@@ -1940,6 +2210,34 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+                     ggml_backend_synchronize(split_backend);
+                 }
+ 
++                // 0029: layer-major prefill keeps the experts of a layer WHOLE in a slot across the graphs that read them
++                // (any MUL_MAT_ID of the split that reads it, not only the first node: the used-experts copy below
++                // needs the ids before the split runs, so it only takes a split that STARTS with the MUL_MAT_ID, and a
++                // MUL_MAT_ID in the middle of a split gets its weight copied whole, every time)
++                if (sched->res.on && !sched->callback_eval && split->graph.n_nodes > 0 && res_slot == -1 &&
++                    ggml_backend_buffer_get_usage(input->buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS &&
++                    ggml_backend_buffer_is_host(input->buffer)) {
++                    ggml_tensor * rnode = NULL;
++                    for (int n = 0; n < split->graph.n_nodes; n++) {
++                        if (split->graph.nodes[n]->op == GGML_OP_MUL_MAT_ID && split->graph.nodes[n]->src[0] == input_cpy) {
++                            rnode = split->graph.nodes[n];
++                            break;
++                        }
++                    }
++                    if (rnode != NULL && rnode->src[2]->ne[0]*rnode->src[2]->ne[1] >= 2*input->ne[2]) {
++                        const int rs = ggml_backend_sched_resident_acquire(sched, split_backend, input);
++                        if (rs >= 0) {
++                            res_slot         = rs;
++                            res_input_cpy    = input_cpy;
++                            res_saved_buffer = input_cpy->buffer;
++                            res_saved_data   = input_cpy->data;
++                            input_cpy->buffer = sched->res.slot[rs].buf;
++                            input_cpy->data   = ggml_backend_buffer_get_base(sched->res.slot[rs].buf);
++                            continue;
++                        }
++                    }
++                }
++
+                 // mindcontrol-port: full-tensor prefetch for MoE expert weights during prefill.
+                 // Only when NOT already handled by a lookahead fire for this split, and never in
+                 // callback_eval mode (decode). With large batches virtually every expert is used,
+@@ -2043,6 +2341,8 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+                             // copy a bit extra at the to ensure there are no NaNs in the padding of the last expert
+                             // this is necessary for MMQ in the CUDA backend
+                             expert_size_copy + padding_end);
++                        sched->stat_sparse_bytes += expert_size_copy + padding_end;
++                        sched->stat_sparse_n++;
+                     };
+ 
+                     int id = 0;
+@@ -2079,11 +2379,21 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+                             ggml_backend_synchronize(split_backend);
+                         }
+                         ggml_backend_tensor_copy(input, input_cpy);
++                        if (ggml_backend_buffer_get_usage(input->buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS &&
++                            ggml_backend_buffer_is_host(input->buffer)) {
++                            sched->stat_full_bytes += ggml_nbytes(input);
++                            sched->stat_full_n++;
++                        }
+                     }
+                 }
+             }
+         }
+ 
++        if (res_slot != -1) {
++            // 0029: the slot's upload runs on its own stream: the compute stream waits for it right before the launch
++            ggml_backend_event_wait(split_backend, sched->res.slot[res_slot].ready);
++        }
++
+         if (!sched->callback_eval) {
+             // Cross-stream sync for a lookahead/inline-prefetched weight: wait until the
+             // H2D on the prefetch backend has completed before launching compute (mode 1).
+@@ -2096,6 +2406,14 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+                 }
+             }
+             enum ggml_status ec = ggml_backend_graph_compute_async(split_backend, &split->graph);
++            if (res_slot != -1) {
++                // the kernels have captured the slot address at launch: put the staging copy back, and let the upload
++                // stream know when the slot may be written again
++                ggml_backend_event_record(sched->res.slot[res_slot].free, split_backend);
++                sched->res.slot[res_slot].used = true;
++                res_input_cpy->buffer = res_saved_buffer;
++                res_input_cpy->data   = res_saved_data;
++            }
+             if (split_prefetch_slot != -1) {
+                 // the kernels have captured the slot address at launch, safe to restore
+                 ggml_backend_event_record(sched->prefetch_free[split_prefetch_slot], split_backend);
+@@ -2269,6 +2587,7 @@ void ggml_backend_sched_free(ggml_backend_sched_t sched) {
+             ggml_backend_event_free(sched->events[b][c]);
+         }
+     }
++    ggml_backend_sched_resident_release(sched);
+     for (int i = 0; i < sched->prefetch_n_slots; i++) {
+         if (sched->prefetch_slots[i]) { ggml_backend_buffer_free(sched->prefetch_slots[i]); }
+         if (sched->prefetch_ready[i]) { ggml_backend_event_free(sched->prefetch_ready[i]); }
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index c976e66ba017c6d4c1aac49ec1f6bf82fdf4daec..be3c1d49a4c41ff6a465ce1c5a9953d1f39a5193 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1,6 +1,7 @@
+ #include "llama-context.h"
+ 
+ #include "llama-moecache.h"
++#include "ggml-backend-lm.h"
+ 
+ #include "ggml.h"
+ #include "llama-arch.h"
+@@ -290,6 +291,25 @@ llama_context::llama_context(
+         }
+     }
+ 
++    {
++        // 0029: layer-major prefill, qwen4exp only
++        const char * e = getenv("LLAMA_LAYER_MAJOR");
++        lm.mode = e ? atoi(e) : 0;
++        if (model.arch != LLM_ARCH_QWEN4EXP || params.ctx_type != LLAMA_CONTEXT_TYPE_DEFAULT) {
++            lm.mode = 0;
++        }
++        e = getenv("LLAMA_LAYER_MAJOR_DEBUG");
++        lm.debug = e && atoi(e) != 0;
++        if (lm.mode > 0) {
++            e = getenv("LLAMA_LAYER_MAJOR_SLOTS");
++            lm.n_slots = e ? std::max(3, atoi(e)) : 6;
++            e = getenv("LLAMA_LAYER_MAJOR_MIN_UBATCHES");
++            lm.min_ubatches = e ? (uint32_t) std::max(2, atoi(e)) : 2;
++            LLAMA_LOG_INFO("%s: layer-major prefill on (mode %d, %d expert slots, from %u ubatches)\n",
++                    __func__, lm.mode, lm.n_slots, lm.min_ubatches);
++        }
++    }
++
+     // ref: https://github.com/ggml-org/llama.cpp/pull/17046#discussion_r2503085732
+     cparams.n_ctx = GGML_PAD(cparams.n_ctx, 256);
+ 
+@@ -1474,6 +1494,331 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+     return res;
+ }
+ 
++// ---- 0029: layer-major prefill --------------------------------------------------------------------------------
++
++bool llama_context::layer_major_ok(llama_memory_context_i * mctx, bool has_samplers) {
++    if (lm.mode <= 0 || mctx == nullptr) {
++        return false;
++    }
++
++    if (has_samplers || cparams.embeddings || cparams.pooling_type != LLAMA_POOLING_TYPE_NONE) {
++        return false;
++    }
++
++    for (const bool b : cparams.embeddings_layer_inp) {
++        if (b) {
++            return false;
++        }
++    }
++
++    if (!mctx->lm_supported() || mctx->lm_count() < lm.min_ubatches) {
++        return false;
++    }
++
++    const auto & hparams = model.hparams;
++
++    if (!lm.scanned) {
++        lm.scanned    = true;
++        lm.slot_bytes = 0;
++        for (uint32_t il = 0; il < hparams.n_layer(); ++il) {
++            const auto & layer = model.layers[il];
++            for (const ggml_tensor * t : { layer.ffn_gate_exps, layer.ffn_up_exps, layer.ffn_down_exps, layer.ffn_gate_up_exps }) {
++                if (t && t->buffer && ggml_backend_buffer_is_host(t->buffer)) {
++                    lm.slot_bytes   = std::max(lm.slot_bytes, ggml_nbytes(t));
++                    lm.host_experts = true;
++                }
++            }
++        }
++    }
++
++    bool gpu = false;
++    for (ggml_backend_t b : backend_ptrs) {
++        const auto type = ggml_backend_dev_type(ggml_backend_get_device(b));
++        gpu = gpu || type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU;
++    }
++
++    // mode 1 is for the case it gains: a device that the host-resident experts are uploaded to, by the scheduler
++    // (--no-op-offload computes them on the CPU: nothing to amortise) and not by --prefetch-experts-slots (0002 takes
++    // the weights of the splits it fires for before the slots below can: the two are alternatives)
++    if (lm.mode == 1 && !(gpu && lm.host_experts && cparams.op_offload && cparams.prefetch_experts_slots == 0)) {
++        return false;
++    }
++
++    // the hidden-state buffers: the wide residual of every token of a batch, on the device of layer 0
++    const uint32_t hc_dim = hparams.dsv4_hc_mult * hparams.n_embd;
++    if (lm.h[0] == nullptr || lm.h_tokens < cparams.n_batch) {
++        lm.h[0] = lm.h[1] = nullptr;
++        lm.buf.reset();
++        lm.ctx.reset();
++
++        ggml_init_params ip = {
++            /*.mem_size   =*/ 2*ggml_tensor_overhead() + 1024,
++            /*.mem_buffer =*/ nullptr,
++            /*.no_alloc   =*/ true,
++        };
++        lm.ctx.reset(ggml_init(ip));
++        if (lm.ctx) {
++            for (int k = 0; k < 2; ++k) {
++                lm.h[k] = ggml_new_tensor_2d(lm.ctx.get(), GGML_TYPE_F32, hc_dim, cparams.n_batch);
++                ggml_format_name(lm.h[k], "lm_hidden_%d", k);
++            }
++            lm.buf.reset(ggml_backend_alloc_ctx_tensors_from_buft(lm.ctx.get(), ggml_backend_dev_buffer_type(model.dev_layer(0))));
++        }
++        if (!lm.buf) {
++            LLAMA_LOG_WARN("%s: layer-major prefill: no room for the hidden-state buffers (2 x %.1f MiB), off\n",
++                    __func__, 2.0*hc_dim*cparams.n_batch*sizeof(float)/1024.0/1024.0);
++            lm.h[0] = lm.h[1] = nullptr;
++            lm.ctx.reset();
++            lm.mode = 0;
++            return false;
++        }
++        lm.h_tokens = cparams.n_batch;
++
++        LLAMA_LOG_INFO("%s: layer-major prefill: hidden-state buffers 2 x %.1f MiB (%u tokens), expert slots %d x %.1f MiB\n",
++                __func__, (double) ggml_backend_buffer_get_size(lm.buf.get())/2.0/1024.0/1024.0, lm.h_tokens,
++                gpu && lm.host_experts && cparams.op_offload && cparams.prefetch_experts_slots == 0 ? lm.n_slots : 0, lm.slot_bytes/1024.0/1024.0);
++    }
++
++    // the experts' slots (a no-op when already set; the scheduler may have been rebuilt)
++    if (gpu && lm.host_experts && cparams.op_offload && cparams.prefetch_experts_slots == 0) {
++        ggml_backend_sched_resident_set(sched.get(), lm.n_slots, lm.slot_bytes);
++    } else {
++        ggml_backend_sched_resident_set(sched.get(), 0, 0);
++    }
++
++    return true;
++}
++
++llm_graph_result * llama_context::process_ubatch_range(
++        const llama_ubatch & ubatch, llama_memory_context_i * mctx,
++        uint32_t il0, uint32_t il1, uint32_t tok_off, ggml_status & ret) {
++    const uint32_t n_layer = model.hparams.n_layer();
++
++    if (!lm.res) {
++        lm.res.reset(new llm_graph_result(gf_res_reserve->get_max_nodes()));
++    }
++
++    auto * res = lm.res.get();
++
++    auto gparams = graph_params(res, ubatch, mctx, ctx_type_to_graph_type(cparams.ctx_type));
++    gparams.lm_il0     = il0;
++    gparams.lm_il1     = il1;
++    gparams.lm_h_in    = il0 > 0       ? lm.h[il0 & 1] : nullptr;   // layer l reads buffer l % 2 and writes (l + 1) % 2
++    gparams.lm_h_out   = il1 < n_layer ? lm.h[il1 & 1] : nullptr;
++    gparams.lm_tok_off = tok_off;
++
++    // not a graph the normal path may reuse, and the scheduler is about to be laid out for another one
++    gf_res_prev_active = nullptr;
++
++    res->reset();
++
++    ggml_backend_sched_reset(sched.get());
++    ggml_backend_sched_set_eval_callback(sched.get(), cparams.cb_eval, cparams.cb_eval_user_data);
++
++    const int64_t t0 = ggml_time_us();
++
++    ggml_cgraph * gf = model.build_graph(gparams);
++    if (!gf) {
++        LLAMA_LOG_ERROR("%s: failed to initialize graph\n", __func__);
++        ret = GGML_STATUS_FAILED;
++        return nullptr;
++    }
++
++    const int64_t t1 = ggml_time_us();
++
++    if (!ggml_backend_sched_alloc_graph(sched.get(), gf)) {
++        LLAMA_LOG_ERROR("%s: failed to allocate graph\n", __func__);
++        ret = GGML_STATUS_ALLOC_FAILED;
++        return nullptr;
++    }
++
++    const int64_t t2 = ggml_time_us();
++
++    res->set_inputs(&ubatch);
++
++    const int64_t t3 = ggml_time_us();
++
++    const auto status = graph_compute(res->get_gf(), ubatch.n_tokens > 1);
++
++    lm.t_build   += t1 - t0;
++    lm.t_alloc   += t2 - t1;
++    lm.t_inputs  += t3 - t2;
++    lm.t_compute += ggml_time_us() - t3;
++    lm.n_graphs++;
++    if (status != GGML_STATUS_SUCCESS) {
++        LLAMA_LOG_ERROR("%s: failed to compute graph, compute status: %d\n", __func__, status);
++        ret = status;
++        return nullptr;
++    }
++
++    ret = GGML_STATUS_SUCCESS;
++
++    return res;
++}
++
++int llama_context::decode_layer_major(
++        llama_memory_context_i * mctx,
++        const std::function<void(const llm_graph_result *, const llama_ubatch &)> & finish) {
++    const auto & hparams = model.hparams;
++
++    const uint32_t n_ub    = mctx->lm_count();
++    const uint32_t n_layer = hparams.n_layer();
++
++    const uint32_t n_tokens_all  = balloc->get_n_tokens();
++    const uint32_t n_outputs_all = balloc->get_n_outputs();
++
++    const int64_t t_start_us = ggml_time_us();
++
++    const int64_t tb0 = lm.t_build, ta0 = lm.t_alloc, ti0 = lm.t_inputs, tc0 = lm.t_compute;
++    const uint64_t ng0 = lm.n_graphs;
++
++    struct ggml_backend_sched_upload_stats st0 = {};
++    ggml_backend_sched_upload_stats(sched.get(), &st0);
++
++    // the positions of the ubatches [0, upto] leave the memory again: a batch that fails is not half there
++    auto rollback = [&](uint32_t upto) {
++        llama_pos pos_min[LLAMA_MAX_SEQ];
++        for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
++            pos_min[s] = std::numeric_limits<llama_pos>::max();
++        }
++
++        for (uint32_t j = 0; j <= upto; ++j) {
++            mctx->lm_seek(j);
++            const llama_ubatch & ub = mctx->get_ubatch();
++            for (uint32_t i = 0; i < ub.n_tokens; ++i) {
++                const auto & seq_id = ub.seq_id[i][0];
++                pos_min[seq_id] = std::min(pos_min[seq_id], ub.pos[i]);
++            }
++        }
++
++        for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
++            if (pos_min[s] == std::numeric_limits<llama_pos>::max()) {
++                continue;
++            }
++
++            LLAMA_LOG_WARN("%s: removing memory module entries for seq_id = %d, pos = [%d, +inf)\n", __func__, s, pos_min[s]);
++
++            memory->seq_rm(s, pos_min[s], -1);
++        }
++    };
++
++    auto code_of = [](ggml_status status) {
++        switch (status) {
++            case GGML_STATUS_ABORTED:      return  2;
++            case GGML_STATUS_ALLOC_FAILED: return -2;
++            default:                       return -3;
++        }
++    };
++
++    // 1. every ubatch is applied to the memory ONCE, in order, and what its graphs read from the memory is kept
++    std::vector<uint32_t> tok_off(n_ub);
++    std::vector<int32_t>  n_out(n_ub);
++
++    uint32_t off = 0;
++    for (uint32_t j = 0; j < n_ub; ++j) {
++        if (!mctx->apply()) {
++            LLAMA_LOG_ERROR("%s: failed to apply memory context\n", __func__);
++            if (j > 0) {
++                rollback(j - 1);
++            }
++            return -3;
++        }
++
++        mctx->lm_record();
++
++        const llama_ubatch & ub = mctx->get_ubatch();
++
++        int32_t n_outputs_new = 0;
++        if (n_outputs_all == n_tokens_all) {
++            n_outputs_new = ub.n_tokens;
++        } else {
++            for (uint32_t i = 0; i < ub.n_tokens; i++) {
++                n_outputs_new += (int32_t) (ub.output[i] != 0);
++            }
++        }
++
++        tok_off[j] = off;
++        n_out[j]   = n_outputs_new;
++        off       += ub.n_tokens;
++
++        if (j + 1 < n_ub) {
++            mctx->next();
++        }
++    }
++
++    GGML_ASSERT(off == n_tokens_all && off <= lm.h_tokens);
++
++    // 2. layer by layer: the layer's graph for every ubatch in turn, then the next layer
++    const bool lm_break = [] { const char * e = getenv("LLAMA_LAYER_MAJOR_BREAK"); return e && atoi(e) != 0; }();
++
++    for (uint32_t il = 0; il < n_layer; ++il) {
++        ggml_backend_sched_resident_epoch(sched.get());
++
++        const bool last = il + 1 == n_layer;
++
++        for (uint32_t jj = 0; jj < n_ub; ++jj) {
++            // LLAMA_LAYER_MAJOR_BREAK=1 (tests only: a control that the comparison can fail): layers past the first
++            // take the ubatches back to front
++            const uint32_t j = lm_break && il > 0 ? n_ub - 1 - jj : jj;
++
++            mctx->lm_seek(j);
++
++            const llama_ubatch & ubatch = mctx->get_ubatch();
++
++            // needs to happen before the graph is built (only the last layer's graph reads it)
++            n_outputs = n_out[j];
++
++            ggml_status status;
++
++            const auto * res = process_ubatch_range(ubatch, mctx, il, il + 1, tok_off[j], status);
++
++            if (!res) {
++                rollback(n_ub - 1);
++                return code_of(status);
++            }
++
++            if (last) {
++                finish(res, ubatch);
++            }
++
++            // the first graph of the layer is on its way: the upload of the next layer's experts overlaps the rest
++            if (jj == 0 && !last && ggml_backend_sched_resident_is_on(sched.get())) {
++                const auto & next = model.layers[il + 1];
++                ggml_tensor * w[4] = { next.ffn_gate_exps, next.ffn_up_exps, next.ffn_down_exps, next.ffn_gate_up_exps };
++                ggml_backend_sched_resident_prefetch(sched.get(), w, 4);
++            }
++        }
++    }
++
++    lm.n_chunks++;
++    lm.n_tokens += n_tokens_all;
++
++    if (lm.debug) {
++        struct ggml_backend_sched_upload_stats st1 = {};
++        ggml_backend_sched_upload_stats(sched.get(), &st1);
++
++        LLAMA_LOG_INFO("%s: %u ubatches, %u tokens through %u layers in %.1f ms; slots: %.1f MiB uploaded (%llu uploads, "
++                "%llu prefetched, %llu hits, %llu fallbacks), used-experts copies: %.1f MiB (%llu), whole-weight copies: %.1f MiB (%llu)\n",
++                __func__, n_ub, n_tokens_all, n_layer, (ggml_time_us() - t_start_us)/1000.0,
++                (st1.resident_bytes - st0.resident_bytes)/1024.0/1024.0,
++                (unsigned long long) (st1.resident_uploads    - st0.resident_uploads),
++                (unsigned long long) (st1.resident_prefetched - st0.resident_prefetched),
++                (unsigned long long) (st1.resident_hits       - st0.resident_hits),
++                (unsigned long long) (st1.resident_fallbacks  - st0.resident_fallbacks),
++                (st1.sparse_bytes - st0.sparse_bytes)/1024.0/1024.0,
++                (unsigned long long) (st1.sparse_copies - st0.sparse_copies),
++                (st1.full_bytes - st0.full_bytes)/1024.0/1024.0,
++                (unsigned long long) (st1.full_copies - st0.full_copies));
++
++        const double ng = std::max<double>(1.0, (double) (lm.n_graphs - ng0));
++        LLAMA_LOG_INFO("%s: %llu layer graphs; host time per graph: build %.3f ms, split + allocate %.3f ms, inputs %.3f ms, compute call %.3f ms\n",
++                __func__, (unsigned long long) (lm.n_graphs - ng0),
++                (lm.t_build - tb0)/ng/1000.0, (lm.t_alloc - ta0)/ng/1000.0, (lm.t_inputs - ti0)/ng/1000.0, (lm.t_compute - tc0)/ng/1000.0);
++    }
++
++    return 0;
++}
++
+ int llama_context::encode(const llama_batch_ext & batch_inp) {
+     if (batch_inp.tokens.empty()) {
+         LLAMA_LOG_ERROR("%s: n_tokens == 0\n", __func__);
+@@ -1870,65 +2215,8 @@ int llama_context::decode(const llama_batch_ext & batch_inp) {
+     int64_t n_outputs_prev = 0;
+     int64_t n_tokens_prev  = 0;
+ 
+-    do {
+-        const auto & ubatch = mctx->get_ubatch();
+-
+-        // count the outputs in this ubatch
+-        {
+-            int32_t n_outputs_new = 0;
+-
+-            if (n_outputs_all == n_tokens_all) {
+-                n_outputs_new = ubatch.n_tokens;
+-            } else {
+-                for (uint32_t i = 0; i < ubatch.n_tokens; i++) {
+-                    n_outputs_new += (int32_t) (ubatch.output[i] != 0);
+-                }
+-            }
+-
+-            // needs to happen before the graph is built
+-            n_outputs = n_outputs_new;
+-        }
+-
+-        ggml_status status;
+-
+-        const auto * res = process_ubatch(ubatch, ctx_type_to_graph_type(cparams.ctx_type), mctx.get(), status);
+-
+-        if (!res) {
+-            // the last ubatch failed or was aborted -> remove all positions of that ubatch from the memory module
+-            llama_pos pos_min[LLAMA_MAX_SEQ];
+-            for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
+-                pos_min[s] = std::numeric_limits<llama_pos>::max();
+-            }
+-
+-            for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
+-                const auto & seq_id = ubatch.seq_id[i][0];
+-
+-                pos_min[seq_id] = std::min(pos_min[seq_id], ubatch.pos[i]);
+-            }
+-
+-            for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
+-                if (pos_min[s] == std::numeric_limits<llama_pos>::max()) {
+-                    continue;
+-                }
+-
+-                LLAMA_LOG_WARN("%s: removing memory module entries for seq_id = %d, pos = [%d, +inf)\n", __func__, s, pos_min[s]);
+-
+-                memory->seq_rm(s, pos_min[s], -1);
+-            }
+-
+-            switch (status) {
+-                case GGML_STATUS_ABORTED:      return  2;
+-                case GGML_STATUS_ALLOC_FAILED: return -2;
+-                case GGML_STATUS_FAILED:       return -3;
+-                case GGML_STATUS_SUCCESS:      GGML_ABORT("should not happen");
+-            }
+-        }
+-
+-        // plot the computation graph in dot format (for debugging purposes)
+-        //if (n_past%100 == 0) {
+-        //    ggml_graph_dump_dot(gf, NULL, "llama.dot");
+-        //}
+-
++    // what is done with a ubatch's result once its graph has run (every layer of it, with layer-major prefill)
++    auto finish_ubatch = [&](const llm_graph_result * res, const llama_ubatch & ubatch) {
+         auto * t_logits  = res->get_logits();
+         auto * t_embd    = cparams.embeddings       ? res->get_embd()     : nullptr;
+         auto * t_h_nextn = cparams.embeddings_nextn ? res->get_h_nextn()  : nullptr;
+@@ -2045,8 +2333,93 @@ int llama_context::decode(const llama_batch_ext & batch_inp) {
+ 
+         n_outputs_prev += n_outputs;
+         n_tokens_prev  += ubatch.n_tokens;
++    };
++
++    // 0029: LLAMA_LAYER_MAJOR: a batch of several ubatches runs layer by layer
++    const bool lm_run = layer_major_ok(mctx.get(), has_samplers);
++
++    struct ggml_backend_sched_upload_stats lm_st0 = {};
++    const int64_t lm_t0 = lm.debug && !lm_run ? ggml_time_us() : 0;
++    if (lm.debug && !lm_run) {
++        ggml_backend_sched_upload_stats(sched.get(), &lm_st0);
++    }
++
++    if (lm_run) {
++        const int ret_lm = decode_layer_major(mctx.get(), finish_ubatch);
++        if (ret_lm != 0) {
++            return ret_lm;
++        }
++    } else do {
++        const auto & ubatch = mctx->get_ubatch();
++
++        // count the outputs in this ubatch
++        {
++            int32_t n_outputs_new = 0;
++
++            if (n_outputs_all == n_tokens_all) {
++                n_outputs_new = ubatch.n_tokens;
++            } else {
++                for (uint32_t i = 0; i < ubatch.n_tokens; i++) {
++                    n_outputs_new += (int32_t) (ubatch.output[i] != 0);
++                }
++            }
++
++            // needs to happen before the graph is built
++            n_outputs = n_outputs_new;
++        }
++
++        ggml_status status;
++
++        const auto * res = process_ubatch(ubatch, ctx_type_to_graph_type(cparams.ctx_type), mctx.get(), status);
++
++        if (!res) {
++            // the last ubatch failed or was aborted -> remove all positions of that ubatch from the memory module
++            llama_pos pos_min[LLAMA_MAX_SEQ];
++            for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
++                pos_min[s] = std::numeric_limits<llama_pos>::max();
++            }
++
++            for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
++                const auto & seq_id = ubatch.seq_id[i][0];
++
++                pos_min[seq_id] = std::min(pos_min[seq_id], ubatch.pos[i]);
++            }
++
++            for (int s = 0; s < LLAMA_MAX_SEQ; ++s) {
++                if (pos_min[s] == std::numeric_limits<llama_pos>::max()) {
++                    continue;
++                }
++
++                LLAMA_LOG_WARN("%s: removing memory module entries for seq_id = %d, pos = [%d, +inf)\n", __func__, s, pos_min[s]);
++
++                memory->seq_rm(s, pos_min[s], -1);
++            }
++
++            switch (status) {
++                case GGML_STATUS_ABORTED:      return  2;
++                case GGML_STATUS_ALLOC_FAILED: return -2;
++                case GGML_STATUS_FAILED:       return -3;
++                case GGML_STATUS_SUCCESS:      GGML_ABORT("should not happen");
++            }
++        }
++
++        // plot the computation graph in dot format (for debugging purposes)
++        //if (n_past%100 == 0) {
++        //    ggml_graph_dump_dot(gf, NULL, "llama.dot");
++        //}
++
++        finish_ubatch(res, ubatch);
+     } while (mctx->next());
+ 
++    if (lm.debug && !lm_run) {
++        struct ggml_backend_sched_upload_stats st1 = {};
++        ggml_backend_sched_upload_stats(sched.get(), &st1);
++        LLAMA_LOG_INFO("%s: ubatch by ubatch: %u tokens in %.1f ms; used-experts copies: %.1f MiB (%llu), whole-weight copies: %.1f MiB (%llu)\n",
++                "decode_normal", n_tokens_all, (ggml_time_us() - lm_t0)/1000.0,
++                (st1.sparse_bytes - lm_st0.sparse_bytes)/1024.0/1024.0, (unsigned long long) (st1.sparse_copies - lm_st0.sparse_copies),
++                (st1.full_bytes - lm_st0.full_bytes)/1024.0/1024.0, (unsigned long long) (st1.full_copies - lm_st0.full_copies));
++    }
++
+     // set to total number of outputs in the batch, for use in llama_get_logits_ith
+     n_outputs = n_outputs_all;
+ 
+diff --git a/src/llama-context.h b/src/llama-context.h
+index 35a7071eda8198a4cf50bc65c1beecc5e5fadfac..9d286d4ac10ba7233207faf98eec3c601f8dced7 100644
+--- a/src/llama-context.h
++++ b/src/llama-context.h
+@@ -11,6 +11,8 @@
+ #include "ggml-cpp.h"
+ #include "ggml-opt.h"
+ 
++#include <functional>
++
+ #include <array>
+ #include <map>
+ #include <vector>
+@@ -271,6 +273,30 @@ private:
+ 
+     llm_graph_cb graph_get_cb() const;
+ 
++    //
++    // 0029: layer-major prefill (LLAMA_LAYER_MAJOR). decode() runs a batch ubatch by ubatch, each ubatch through every
++    // layer, so a layer's experts that live in host memory are uploaded once per ubatch. With the switch on, a batch of
++    // two or more ubatches (qwen4exp) runs layer by layer instead: layer 0 for every ubatch, then layer 1 for every
++    // ubatch, ... , so the layer's experts are uploaded once per BATCH (the scheduler keeps them in a slot while the
++    // layer's graphs run) and the next layer's upload overlaps this layer's compute. What crosses layers is the wide
++    // residual of every token, in two ping-pong buffers on the device (40 KiB a token at hc 4, n_embd 2560).
++    //
++
++    // true when this batch runs layer-major; allocates the hidden buffers and the expert slots first (a batch is never
++    // half applied)
++    bool layer_major_ok(llama_memory_context_i * mctx, bool has_samplers);
++
++    // the batch's ubatches through the layers; finish() takes each ubatch's result when its last layer has run.
++    // Returns what decode() returns (0 = done).
++    int decode_layer_major(
++            llama_memory_context_i * mctx,
++            const std::function<void(const llm_graph_result *, const llama_ubatch &)> & finish);
++
++    // the graph of the layers [il0, il1) for one ubatch, built, allocated, fed and computed; never reused
++    llm_graph_result * process_ubatch_range(
++            const llama_ubatch & ubatch, llama_memory_context_i * mctx,
++            uint32_t il0, uint32_t il1, uint32_t tok_off, ggml_status & ret);
++
+     // disable auto fused ops (Flash Attention, Gated Delta Net) whose op lands on a device
+     // that differs from the layer it belongs to (usually due to missing backend support)
+     void resolve_fused_ops(const llama_memory_context_i * mctx, uint32_t n_seqs);
+@@ -391,6 +417,34 @@ private:
+     // env: LLAMA_GRAPH_REUSE_DISABLE
+     bool graph_reuse_disable = false;
+ 
++    // 0029: layer-major prefill. env LLAMA_LAYER_MAJOR: 0 off (default), 1 on where it can gain (a GPU backend and
++    // expert tensors in host memory), 2 on wherever it can run (the CPU test); LLAMA_LAYER_MAJOR_SLOTS (default 6, the
++    // gate/up/down of this layer and of the next); LLAMA_LAYER_MAJOR_MIN_UBATCHES (default 2); LLAMA_LAYER_MAJOR_DEBUG
++    struct layer_major_state {
++        int       mode         = 0;
++        int       n_slots      = 6;
++        uint32_t  min_ubatches = 2;
++        bool      debug        = false;
++
++        ggml_context_ptr        ctx;
++        ggml_backend_buffer_ptr buf;
++        ggml_tensor *           h[2]     = {nullptr, nullptr};   // F32 [n_embd*hc, n_batch]
++        uint32_t                h_tokens = 0;
++        size_t                  slot_bytes = 0;                  // the largest expert tensor in host memory, 0 = none
++        bool                    host_experts = false;
++        bool                    scanned      = false;            // slot_bytes / host_experts are known
++
++        std::unique_ptr<llm_graph_result> res;
++
++        // totals, for the debug line
++        uint64_t n_chunks = 0;
++        uint64_t n_tokens = 0;
++
++        // host time spent per graph (us), summed over a chunk: build, scheduler split + allocation, inputs, compute call
++        int64_t  t_build = 0, t_alloc = 0, t_inputs = 0, t_compute = 0;
++        uint64_t n_graphs = 0;
++    } lm;
++
+     // perf
+     mutable int64_t t_start_us  = 0;
+     mutable int64_t t_load_us   = 0;
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index 106927d8d39b1f16490622dfd4ec9e36ba807a94..53229a84fe310a169fb674b13b06d490e7ec7301 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -1089,17 +1089,20 @@ void llm_graph_input_attn_cross::set_input(const llama_ubatch * ubatch) {
+ }
+ 
+ void llm_graph_input_mem_hybrid::set_input(const llama_ubatch * ubatch) {
+-    mctx->get_attn()->set_input_k_idxs(inp_attn->self_k_idxs, ubatch);
+-    mctx->get_attn()->set_input_v_idxs(inp_attn->self_v_idxs, ubatch);
++    // 0029: a graph of one layer of the other kind has no attention inputs (build_inp_mem_hybrid attn = false)
++    if (inp_attn->self_k_idxs) {
++        mctx->get_attn()->set_input_k_idxs(inp_attn->self_k_idxs, ubatch);
++        mctx->get_attn()->set_input_v_idxs(inp_attn->self_v_idxs, ubatch);
+ 
+-    mctx->get_attn()->set_input_kq_mask(inp_attn->self_kq_mask, ubatch, cparams.causal_attn);
++        mctx->get_attn()->set_input_kq_mask(inp_attn->self_kq_mask, ubatch, cparams.causal_attn);
+ 
+-    if (inp_attn->self_k_rot) {
+-        mctx->get_attn()->set_input_k_rot(inp_attn->self_k_rot);
+-    }
++        if (inp_attn->self_k_rot) {
++            mctx->get_attn()->set_input_k_rot(inp_attn->self_k_rot);
++        }
+ 
+-    if (inp_attn->self_v_rot) {
+-        mctx->get_attn()->set_input_v_rot(inp_attn->self_v_rot);
++        if (inp_attn->self_v_rot) {
++            mctx->get_attn()->set_input_v_rot(inp_attn->self_v_rot);
++        }
+     }
+ 
+     const int64_t n_rs = mctx->get_recr()->get_n_rs();
+@@ -1122,6 +1125,11 @@ bool llm_graph_input_mem_hybrid::can_reuse(const llm_graph_params & params) {
+ 
+     bool res = true;
+ 
++    // 0029: layer-major graphs have half of these empty and are never reused
++    if (!inp_attn->self_k_idxs || !inp_rs->s_copy) {
++        return false;
++    }
++
+     res &= inp_attn->self_k_idxs->ne[0] == params.ubatch.n_tokens;
+   //res &= inp_attn->self_v_idxs->ne[0] == params.ubatch.n_tokens; // TODO: need to move this to the unified cache and check there
+ 
+@@ -3683,11 +3691,21 @@ ggml_tensor * llm_graph_context::build_rwkv_token_shift_store(
+     );
+ }
+ 
+-llm_graph_input_mem_hybrid * llm_graph_context::build_inp_mem_hybrid() const {
++llm_graph_input_mem_hybrid * llm_graph_context::build_inp_mem_hybrid(bool attn, bool rs) const {
+     const auto * mctx_cur = static_cast<const llama_memory_hybrid_context *>(mctx);
+ 
+-    auto inp_rs   = build_rs_inp_impl     (ctx0, ubatch, mctx_cur->get_recr());
+-    auto inp_attn = build_attn_inp_kv_impl(ctx0, ubatch, hparams, cparams, mctx_cur->get_attn());
++    auto inp_rs   = rs   ? build_rs_inp_impl     (ctx0, ubatch, mctx_cur->get_recr())
++                         : std::make_unique<llm_graph_input_rs>(mctx_cur->get_recr());
++    auto inp_attn = attn ? build_attn_inp_kv_impl(ctx0, ubatch, hparams, cparams, mctx_cur->get_attn())
++                         : std::make_unique<llm_graph_input_attn_kv>(hparams, cparams, mctx_cur->get_attn());
++
++    if (!rs) {
++        inp_rs->s_copy       = nullptr;
++        inp_rs->s_copy_main  = nullptr;
++        inp_rs->s_copy_extra = nullptr;
++        inp_rs->head         = 0;
++        inp_rs->rs_z         = 0;
++    }
+ 
+     auto inp = std::make_unique<llm_graph_input_mem_hybrid>(cparams, std::move(inp_attn), std::move(inp_rs), mctx_cur);
+ 
+diff --git a/src/llama-graph.h b/src/llama-graph.h
+index 3daa425bc07bdb2ee9b618124bfa7dfcebc6094f..d9004ab2c890d5eeda07fa0621b850c9f4f31d83 100644
+--- a/src/llama-graph.h
++++ b/src/llama-graph.h
+@@ -813,6 +813,17 @@ struct llm_graph_params {
+ 
+     llm_graph_result * res;
+ 
++    // 0029, layer-major prefill (LLAMA_LAYER_MAJOR): a graph of the layers [lm_il0, lm_il1) only (lm_il1 == 0: the whole
++    // model, as always). Past layer 0 it starts from the rows of lm_h_in that belong to the ubatch (the persistent
++    // hidden-state buffer holds the wide residual of every token of the chunk), and short of the last layer it ends by
++    // copying the residual into the same rows of lm_h_out. Such a graph is never reused: each is built, allocated and
++    // fed once.
++    uint32_t       lm_il0     = 0;
++    uint32_t       lm_il1     = 0;
++    ggml_tensor *  lm_h_in    = nullptr;   // F32 [n_embd*hc, n_tokens of the chunk]
++    ggml_tensor *  lm_h_out   = nullptr;
++    uint32_t       lm_tok_off = 0;         // this ubatch's first row in both
++
+     // return true if the "other" params would result in a graph with the same topology as with the current params
+     //   having the same topology allows us to reuse the graph in some cases
+     bool allow_reuse(const llm_graph_params & other) const {
+@@ -1359,7 +1370,9 @@ struct llm_graph_context {
+     // hybrid
+     //
+ 
+-    llm_graph_input_mem_hybrid * build_inp_mem_hybrid() const;
++    // 0029: attn = false / rs = false leave that half's inputs empty (a graph of one layer of the other kind: an input
++    // nothing reads is never allocated, and set_input would write to it)
++    llm_graph_input_mem_hybrid * build_inp_mem_hybrid(bool attn = true, bool rs = true) const;
+     llm_graph_input_mem_hybrid_k * build_inp_mem_hybrid_k() const;
+ 
+     llm_graph_input_mem_hybrid_iswa * build_inp_mem_hybrid_iswa() const;
+diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
+index 0243783448ce03eb329f507124bd9f1608ca2019..e174457d017ef05315e86c7ae42f78499198b50e 100644
+--- a/src/llama-kv-cache.cpp
++++ b/src/llama-kv-cache.cpp
+@@ -2855,6 +2855,22 @@ bool llama_kv_cache_context::apply() {
+     return true;
+ }
+ 
++void llama_kv_cache_context::lm_record() {
++    GGML_ASSERT(i_cur < ubatches.size());
++
++    if (lm_n_kv.size() <= i_cur) {
++        lm_n_kv.resize(i_cur + 1, 0);
++    }
++    lm_n_kv[i_cur] = n_kv;
++}
++
++void llama_kv_cache_context::lm_seek(uint32_t i) {
++    GGML_ASSERT(i < ubatches.size() && i < lm_n_kv.size());
++
++    i_cur = i;
++    n_kv  = lm_n_kv[i];
++}
++
+ llama_memory_status llama_kv_cache_context::get_status() const {
+     return status;
+ }
+diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
+index 5051f43433cdbd8a770706a8f137cc9e25b4985f..d7dc3ed3a982c16dbab3ff4eba51b2e499c5e06b 100644
+--- a/src/llama-kv-cache.h
++++ b/src/llama-kv-cache.h
+@@ -434,6 +434,11 @@ public:
+     // see llama_kv_cache::get_prev_tokens()
+     void get_prev_tokens(const llama_ubatch & ubatch, uint32_t n, std::vector<llama_token> & res) const;
+ 
++    // 0029: layer-major replay (llama_memory_context_i::lm_*): the cell range each ubatch's graph is built over
++    bool lm_supported() const override { return !ubatches.empty(); }
++    void lm_record() override;
++    void lm_seek(uint32_t i) override;
++
+ private:
+     llama_memory_status status;
+ 
+@@ -466,4 +471,7 @@ private:
+     // a heuristic, to avoid attending the full cache if it is not yet utilized
+     // as the cache gets filled, the benefit from this heuristic disappears
+     int32_t n_kv;
++
++    // 0029: n_kv as apply() left it for each ubatch (index = ubatch)
++    std::vector<int32_t> lm_n_kv;
+ };
+diff --git a/src/llama-memory-hybrid-idx.cpp b/src/llama-memory-hybrid-idx.cpp
+index 3972ce9ce29346dc5fb319232a634b01897ec2e0..ced2790e5dda84311d2b8d731bc5fc7b259accd4 100644
+--- a/src/llama-memory-hybrid-idx.cpp
++++ b/src/llama-memory-hybrid-idx.cpp
+@@ -659,6 +659,28 @@ bool llama_memory_hybrid_idx_context::apply() {
+     return res;
+ }
+ 
++bool llama_memory_hybrid_idx_context::lm_supported() const {
++    return llama_memory_hybrid_context::lm_supported() && (!ctx_idx || ctx_idx->lm_supported());
++}
++
++void llama_memory_hybrid_idx_context::lm_record() {
++    llama_memory_hybrid_context::lm_record();
++
++    if (ctx_idx) {
++        ctx_idx->lm_record();
++    }
++}
++
++void llama_memory_hybrid_idx_context::lm_seek(uint32_t i) {
++    llama_memory_hybrid_context::lm_seek(i);
++
++    if (ctx_idx) {
++        ctx_idx->lm_seek(i);
++    }
++
++    i_cur = i;
++}
++
+ const llama_kv_cache_context * llama_memory_hybrid_idx_context::get_idx() const {
+     return static_cast<const llama_kv_cache_context *>(ctx_idx.get());
+ }
+diff --git a/src/llama-memory-hybrid-idx.h b/src/llama-memory-hybrid-idx.h
+index 705189e7eb5886b3faccefd6e21745aabf0d41fa..94d9b27066f63764bdd17d3ece4102b7fd95ff61 100644
+--- a/src/llama-memory-hybrid-idx.h
++++ b/src/llama-memory-hybrid-idx.h
+@@ -131,6 +131,11 @@ public:
+     bool next()  override;
+     bool apply() override;
+ 
++    // 0029: layer-major replay, see llama_memory_context_i (also the indexer cache's cell range and the stream count)
++    bool lm_supported() const override;
++    void lm_record() override;
++    void lm_seek(uint32_t i) override;
++
+     //
+     // llama_memory_hybrid_idx_context specific API
+     //
+diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
+index 62f12de954a0178d327ef6e36ee585ba0104423c..43d1f2bef91382f72f8a3dbf305388fa8a5b8fc3 100644
+--- a/src/llama-memory-hybrid.cpp
++++ b/src/llama-memory-hybrid.cpp
+@@ -277,6 +277,23 @@ llama_memory_status llama_memory_hybrid_context::get_status() const {
+     return status;
+ }
+ 
++bool llama_memory_hybrid_context::lm_supported() const {
++    return status == LLAMA_MEMORY_STATUS_SUCCESS && !ubatches.empty() && ctx_attn->lm_supported() && ctx_recr->lm_supported();
++}
++
++void llama_memory_hybrid_context::lm_record() {
++    ctx_attn->lm_record();
++    ctx_recr->lm_record();
++}
++
++void llama_memory_hybrid_context::lm_seek(uint32_t i) {
++    GGML_ASSERT(i < ubatches.size());
++
++    ctx_attn->lm_seek(i);
++    ctx_recr->lm_seek(i);
++    i_next = i;
++}
++
+ const llama_ubatch & llama_memory_hybrid_context::get_ubatch() const {
+     assert(status == LLAMA_MEMORY_STATUS_SUCCESS);
+     return ubatches[i_next];
+diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
+index 484eafb749910567b8c50ec36d46bdb678c75426..019a0bbf2abf354f8e450e3823260ada397109d4 100644
+--- a/src/llama-memory-hybrid.h
++++ b/src/llama-memory-hybrid.h
+@@ -127,6 +127,12 @@ public:
+     const llama_kv_cache_context * get_attn() const;
+     const llama_memory_recurrent_context * get_recr() const;
+ 
++    // 0029: layer-major replay, see llama_memory_context_i
++    bool     lm_supported() const override;
++    uint32_t lm_count() const override { return (uint32_t) ubatches.size(); }
++    void     lm_record() override;
++    void     lm_seek(uint32_t i) override;
++
+ private:
+     // the index of the next ubatch to process
+     size_t i_next = 0;
+diff --git a/src/llama-memory-recurrent.cpp b/src/llama-memory-recurrent.cpp
+index 528c90c419607222007c822c1101152dbe4e7965..3580b0c974a01edcc434daee65dbe05b32171a8c 100644
+--- a/src/llama-memory-recurrent.cpp
++++ b/src/llama-memory-recurrent.cpp
+@@ -1316,14 +1316,23 @@ const llama_ubatch & llama_memory_recurrent_context::get_ubatch() const {
+ }
+ 
+ uint32_t llama_memory_recurrent_context::get_n_rs() const {
++    if (lm_cur >= 0) {
++        return lm_rec[lm_cur].n;
++    }
+     return is_full ? mem->size : mem->n;
+ }
+ 
+ uint32_t llama_memory_recurrent_context::get_head() const {
++    if (lm_cur >= 0) {
++        return lm_rec[lm_cur].head;
++    }
+     return is_full ? 0 : mem->head;
+ }
+ 
+ int32_t llama_memory_recurrent_context::get_rs_z() const {
++    if (lm_cur >= 0) {
++        return lm_rec[lm_cur].rs_z;
++    }
+     return is_full ? 0 : mem->rs_z;
+ }
+ 
+@@ -1343,7 +1352,39 @@ ggml_tensor * llama_memory_recurrent_context::get_p_l(int32_t il) const {
+     return mem->p_l[il];
+ }
+ 
++void llama_memory_recurrent_context::lm_record() {
++    GGML_ASSERT(!ubatches.empty() && i_next < ubatches.size());
++
++    // what is recorded is what apply() just left in the live memory, never an earlier replay
++    lm_cur = -1;
++
++    if (lm_rec.size() <= i_next) {
++        lm_rec.resize(i_next + 1);
++    }
++
++    lm_state & st = lm_rec[i_next];
++    st.head = get_head();
++    st.n    = get_n_rs();
++    st.rs_z = get_rs_z();
++    st.s_copy.resize(st.n);
++    for (uint32_t i = 0; i < st.n; ++i) {
++        st.s_copy[i] = s_copy((int) i);
++    }
++}
++
++void llama_memory_recurrent_context::lm_seek(uint32_t i) {
++    GGML_ASSERT(i < ubatches.size() && i < lm_rec.size());
++
++    i_next = i;
++    lm_cur = i;
++}
++
+ int32_t llama_memory_recurrent_context::s_copy(int i) const {
++    if (lm_cur >= 0) {
++        GGML_ASSERT((size_t) i < lm_rec[lm_cur].s_copy.size());
++        return lm_rec[lm_cur].s_copy[i];
++    }
++
+     const uint32_t cell_idx = i + mem->head;
+     const int32_t  src0     = mem->cells[cell_idx].src0;
+ 
+diff --git a/src/llama-memory-recurrent.h b/src/llama-memory-recurrent.h
+index 25ade10e511821bd7dba3f06fc4c62c167239aaa..4e25964ff1fb2e59ae69f31d41d055f5c4a83dd5 100644
+--- a/src/llama-memory-recurrent.h
++++ b/src/llama-memory-recurrent.h
+@@ -179,6 +179,14 @@ public:
+ 
+     int32_t s_copy(int i) const;
+ 
++    // 0029: layer-major replay (llama_memory_context_i::lm_*). lm_record() reads what the graph of the ubatch just
++    // applied reads from the memory -- head, n, rs_z and every s_copy() id (which also consumes the rollback index
++    // of a sequence, once) -- and lm_seek(i) makes the getters above answer with the recorded values of ubatch i,
++    // until the next lm_record().
++    bool lm_supported() const override { return !ubatches.empty(); }
++    void lm_record() override;
++    void lm_seek(uint32_t i) override;
++
+ private:
+     const llama_memory_status status;
+ 
+@@ -194,4 +202,15 @@ private:
+     //
+ 
+     const bool is_full = false;
++
++    // 0029: the state of each applied ubatch, and the one lm_seek() selected (lm_cur < 0: the live memory)
++    struct lm_state {
++        uint32_t             head = 0;
++        uint32_t             n    = 0;
++        int32_t              rs_z = 0;
++        std::vector<int32_t> s_copy;
++    };
++
++    std::vector<lm_state> lm_rec;
++    int64_t               lm_cur = -1;
+ };
+diff --git a/src/llama-memory.h b/src/llama-memory.h
+index db825396645e61c94213ca1e94b78d71d1538d67..ee37e1c619491c0cfa9de100dd0a812c726d54af 100644
+--- a/src/llama-memory.h
++++ b/src/llama-memory.h
+@@ -64,6 +64,16 @@ struct llama_memory_context_i {
+ 
+     // get the status of the memory context - used for error handling and checking if any updates would be applied
+     virtual llama_memory_status get_status() const = 0;
++
++    // 0029, layer-major prefill (LLAMA_LAYER_MAJOR): the ubatches of a batch are applied once each, in order, and the
++    // graphs of every later layer are built and fed for ubatch i after ubatch i + 1.. were applied. lm_record() right
++    // after apply() keeps what the graph of the current ubatch reads from the memory (cell range, recurrent head and
++    // the state-copy ids), lm_seek(i) puts that back for ubatch i without applying anything. Only the hybrid context of
++    // qwen4exp implements it.
++    virtual bool     lm_supported() const { return false; }
++    virtual uint32_t lm_count() const { return 0; }    // ubatches in the context
++    virtual void     lm_record() {}
++    virtual void     lm_seek(uint32_t i) { (void) i; }
+ };
+ 
+ using llama_memory_context_ptr = std::unique_ptr<llama_memory_context_i>;
+diff --git a/src/models/qwen4exp.cpp b/src/models/qwen4exp.cpp
+index a501450cb641370b11134c47f51b20a1d2001335..ae231606631c25321223698aaf694a66dbb6baa9 100644
+--- a/src/models/qwen4exp.cpp
++++ b/src/models/qwen4exp.cpp
+@@ -407,11 +407,37 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
+     int sections[4];
+     std::copy(std::begin(hparams.rope_sections), std::begin(hparams.rope_sections) + 4, sections);
+ 
+-    ggml_tensor * inpL = build_inp_embd(model.tok_embd);
+-    cb(inpL, "model.input_embed", -1);
+-    ggml_build_forward_expand(gf, inpL);
++    // 0029: the layers of this graph. The whole model unless layer-major prefill asked for a range
++    const bool     lm      = params.lm_il1 > 0;
++    const int      il_beg  = lm ? (int) params.lm_il0 : 0;
++    const int      il_end  = lm ? (int) params.lm_il1 : n_layer;
++    const bool     lm_last = il_end == n_layer;
++
++    GGML_ASSERT(il_beg < il_end && il_end <= n_layer);
++    GGML_ASSERT(!lm || il_beg == 0 || (params.lm_h_in != nullptr && (lm_last || params.lm_h_out != nullptr)));
++
++    bool any_attn = false;
++    bool any_recr = false;
++    bool any_ple  = false;
++    for (int il = il_beg; il < il_end; ++il) {
++        (hparams.is_recr(il) ? any_recr : any_attn) = true;
++        any_ple = any_ple || hparams.is_ple(il);
++    }
++
++    // rows [lm_tok_off, +n_tokens) of a persistent [n_embd*hc, n_chunk] hidden-state buffer
++    auto lm_rows = [&](ggml_tensor * buf) {
++        return ggml_view_2d(ctx0, buf, n_embd*hc, n_tokens, buf->nb[1], (size_t) params.lm_tok_off*buf->nb[1]);
++    };
+ 
+-    auto * inp = build_inp_mem_hybrid();
++    ggml_tensor * inpL = nullptr;
++    if (il_beg == 0) {
++        inpL = build_inp_embd(model.tok_embd);
++        cb(inpL, "model.input_embed", -1);
++        ggml_build_forward_expand(gf, inpL);
++    }
++
++    // a range that holds no layer of a kind leaves that kind's inputs out: nothing would read (or allocate) them
++    auto * inp = build_inp_mem_hybrid(any_attn, any_recr);
+ 
+     // qwen4exp always builds llama_memory_hybrid_idx, so this downcast is safe
+     // the indexer cache inside it is absent when the GGUF has no indexer tensors
+@@ -423,23 +449,29 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
+                 "the indexer cache must track the attention cache cell for cell");
+     }
+ 
+-    ggml_tensor * inp_pos     = build_inp_pos();
+-    ggml_tensor * inp_out_ids = build_inp_out_ids();
++    ggml_tensor * inp_pos     = any_attn ? build_inp_pos() : nullptr;
++    ggml_tensor * inp_out_ids = lm_last  ? build_inp_out_ids() : nullptr;
+ 
+     ggml_tensor * ple_emb = nullptr;
+-    if (hparams.ple_n_heads > 0) {
++    if (hparams.ple_n_heads > 0 && (!lm || any_ple)) {
+         ple_emb = build_inp_ple(mctx_hyb);
+         // make sure ple_emb and build_inp_embd are in the same graph split
+         ggml_build_forward_expand(gf, ple_emb);
+     }
+ 
+-    // the wide residual starts as hc identical copies of the embedding
+-    ggml_tensor * res_hc = ggml_repeat_4d(ctx0,
+-            ggml_reshape_3d(ctx0, inpL, n_embd, 1, n_tokens),
+-            n_embd, hc, n_tokens, 1);
+-    cb(res_hc, "hc_init", -1);
++    ggml_tensor * res_hc = nullptr;
++    if (il_beg == 0) {
++        // the wide residual starts as hc identical copies of the embedding
++        res_hc = ggml_repeat_4d(ctx0,
++                ggml_reshape_3d(ctx0, inpL, n_embd, 1, n_tokens),
++                n_embd, hc, n_tokens, 1);
++        cb(res_hc, "hc_init", -1);
++    } else {
++        res_hc = ggml_reshape_3d(ctx0, lm_rows(params.lm_h_in), n_embd, hc, n_tokens);
++        cb(res_hc, "lm_hidden_in", il_beg);
++    }
+ 
+-    for (int il = 0; il < n_layer; ++il) {
++    for (int il = il_beg; il < il_end; ++il) {
+         res->t_layer_inp[il] = res_hc;
+ 
+         if (hparams.is_ple(il)) {
+@@ -492,6 +524,18 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
+         cb(res_hc, "l_last", il);
+     }
+ 
++    if (!lm_last) {
++        // 0029: this range ends mid-model; the residual goes to the persistent buffer the next range starts from
++        ggml_tensor * h = res_hc;
++        if (!ggml_is_contiguous(h)) {
++            h = ggml_cont(ctx0, h);
++        }
++        h = ggml_reshape_2d(ctx0, h, n_embd*hc, n_tokens);
++        cb(h, "lm_hidden_out", il_end - 1);
++        ggml_build_forward_expand(gf, ggml_cpy(ctx0, h, lm_rows(params.lm_h_out)));
++        return;
++    }
++
+     // export res_hc itself, never a reshape view: a pure view gets no backend assignment to read back.
+     if (cparams.embeddings_nextn) {
+         cb(res_hc, "h_nextn", -1);
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 996e7f58f3840f5eaac3e1b621aca9bbf553c2d3..ebfa1afc2a377bde8764ba562d92015e787bb4d0 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -310,6 +310,8 @@ endif()
+ llama_build(test-backend-ops.cpp)
+ 
+ llama_build_and_test(test-tiled-mulmat.cpp)
++# 0029: layer-major prefill against the ubatch-by-ubatch path, on a generated qwen4exp (CPU, exact)
++llama_build_and_test(test-layer-major.cpp)
+ llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
+ llama_build_and_test(test-autorelease.cpp       LABEL "model")
+ llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
+diff --git a/tests/split_gate_up.py b/tests/split_gate_up.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..1f7fc506053bd240302e2155e7deed2fe4f865b5
+--- /dev/null
++++ b/tests/split_gate_up.py
+@@ -0,0 +1,66 @@
++#!/usr/bin/env python3
++"""0029: rewrite a GGUF written by test-layer-major --save so that every fused blk.N.ffn_gate_up_exps.weight becomes the
++separate blk.N.ffn_gate_exps.weight / blk.N.ffn_up_exps.weight of the real Flash-Next files (a model synthesised from
++metadata always fuses them; the real one has three MUL_MAT_IDs per layer, and where the first of them sits in its
++scheduler split decides how its weight is copied). The two halves of the fused rows (gate rows, then up rows) are the
++new tensors, in the same type; nothing else changes.
++
++    python split_gate_up.py in.gguf out.gguf
++"""
++import re
++import sys
++
++import gguf
++from gguf import GGUFReader, GGUFWriter, GGUFValueType
++
++SKIP = {"GGUF.version", "GGUF.tensor_count", "GGUF.kv_count"}
++
++
++def main(src: str, dst: str) -> int:
++    r = GGUFReader(src)
++    arch = r.fields["general.architecture"].contents()
++    w = GGUFWriter(dst, arch)
++
++    for key, f in r.fields.items():
++        if key in SKIP or key == "general.architecture":
++            continue
++        t = f.types
++        val = f.contents()
++        if t[0] == GGUFValueType.ARRAY and len(val) == 0:
++            print("skipping the empty array", key)  # the saver writes one for a per-layer list the model does not use
++            continue
++        if t[0] == GGUFValueType.ARRAY:
++            w.add_key_value(key, val, t[0], sub_type=t[-1])
++        else:
++            w.add_key_value(key, val, t[0])
++
++    n_split = 0
++    for t in r.tensors:
++        m = re.fullmatch(r"blk\.(\d+)\.ffn_gate_up_exps\.weight", t.name)
++        data = t.data
++        if m is None:
++            w.add_tensor(t.name, data, raw_dtype=t.tensor_type)
++            continue
++        il = m.group(1)
++        # numpy shape is the reverse of ne: (n_expert, 2*n_ff, row) with row = n_embd (f32) or the row's bytes (quantized)
++        n_ff = data.shape[1] // 2
++        gate = data[:, :n_ff, :]
++        up = data[:, n_ff:, :]
++        for name, part in ((f"blk.{il}.ffn_gate_exps.weight", gate), (f"blk.{il}.ffn_up_exps.weight", up)):
++            part = part.copy()
++            w.add_tensor(name, part, raw_dtype=t.tensor_type)
++        n_split += 1
++
++    w.write_header_to_file()
++    w.write_kv_data_to_file()
++    w.write_tensors_to_file(progress=False)
++    w.close()
++    print(f"split {n_split} fused gate_up tensors; wrote {dst}")
++    return 0
++
++
++if __name__ == "__main__":
++    if len(sys.argv) != 3:
++        print(__doc__)
++        sys.exit(2)
++    sys.exit(main(sys.argv[1], sys.argv[2]))
+diff --git a/tests/test-layer-major.cpp b/tests/test-layer-major.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..b4153ed4c0d7eb6e1733c0b7cc0cb2980ff73a35
+--- /dev/null
++++ b/tests/test-layer-major.cpp
+@@ -0,0 +1,670 @@
++// 0029: layer-major prefill (LLAMA_LAYER_MAJOR) against the ubatch-by-ubatch path, on a small generated qwen4exp
++// (Gated DeltaNet + QSA attention layers, hyper-connection residual, PLE, routed experts): the same batches through
++// one model in two fresh contexts, the second with the switch on, and the logits of every output, the serialized
++// state of the sequence (KV cells, indexer cells, recurrent state) and a few generated tokens must agree.
++//
++//   test-layer-major                                  CPU only (mode 2): exact equality is the pass condition
++//   test-layer-major --device CUDA0 --experts-cpu     the experts in host memory, uploaded by the scheduler
++//                                                     (mode 1); the logits' NMSE against the ubatch path must stay
++//                                                     below test-llama-archs' 1e-4 (it is 0 when the kernels are the same)
++//
++// The model's tensors are synthesised from metadata (llama_model_init_from_user), like test-llama-archs does.
++
++#include "ggml.h"
++#include "ggml-backend.h"
++#include "ggml-cpu.h"
++#include "gguf.h"
++#include "llama.h"
++#include "../src/llama-ext.h"   // llama_set_embeddings_nextn: what the MTP draft reads of the target
++
++#include <algorithm>
++#include <cinttypes>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <functional>
++#include <random>
++#include <string>
++#include <vector>
++
++#ifdef _WIN32
++#include <stdlib.h>
++static void set_env(const char * k, const char * v) { _putenv_s(k, v ? v : ""); }
++#else
++static void set_env(const char * k, const char * v) { if (v) setenv(k, v, 1); else unsetenv(k); }
++#endif
++
++struct test_args {
++    std::string device;          // "" = the CPU
++    bool        experts_cpu = false;
++    bool        quant       = false;   // Q4_0 experts
++    int         mode        = 0;       // layer-major mode of the second run (0: 2 on the CPU, 1 with a device)
++    uint32_t    seed        = 1234;
++    float       stdev       = 0.1f;
++    uint32_t    n_layer     = 8;
++    uint32_t    interval    = 4;
++    uint32_t    n_expert    = 16;
++    uint32_t    n_used      = 4;
++    uint32_t    top_k       = 131072;
++    uint32_t    n_ubatch    = 64;
++    uint32_t    n_batch     = 512;
++    uint32_t    n_prompt    = 401;   // first decode: every token an output
++    uint32_t    n_prompt2   = 300;   // second decode: the last token only (a server's prompt batch)
++    uint32_t    n_gen       = 6;
++    uint32_t    rs_seq      = 0;      // recurrent rollback snapshots (what an MTP server runs with): n_rs_seq
++    uint32_t    rollback    = 0;      // after the second batch: seq_rm of its last K positions (a rejected draft), then a third batch
++    uint32_t    n_prompt3   = 200;    // the batch after the rollback
++    int         abort_at    = 0;      // CPU: the abort callback fires from its Nth call (a cancelled batch); 0 = no such run
++    bool        nextn       = false;  // llama_set_embeddings_nextn on: the rows an MTP draft takes of the target
++    uint32_t    n_seqs      = 1;     // sequences in every batch (equal-length ubatches across them)
++    int         threads     = 4;
++    std::string kv_type     = "f16";
++    std::string save;            // write the synthesised model to this GGUF (see split_gate_up.py)
++    std::string load;            // use this GGUF instead of synthesising one
++    bool        verbose     = false;
++};
++
++static std::vector<std::string> g_log_lines;
++static bool g_capture = false;
++static bool g_verbose = false;
++
++static void log_cb(enum ggml_log_level level, const char * text, void * /*ud*/) {
++    if (g_capture && (strstr(text, "decode_layer_major") || strstr(text, "decode_normal"))) {
++        g_log_lines.push_back(text);
++    }
++    if (g_verbose || level >= GGML_LOG_LEVEL_ERROR) {
++        fputs(text, stderr);
++    }
++}
++
++struct data_params { uint32_t seed; float stdev; };
++
++static void set_tensor_data(ggml_tensor * t, void * ud) {
++    const data_params & p = *(const data_params *) ud;
++    size_t seed = p.seed;
++    seed ^= std::hash<std::string>()(t->name);
++    std::mt19937 gen(seed);
++    std::normal_distribution<float> dis(0.0f, p.stdev);
++
++    const bool is_ssm_a = strstr(t->name, "ssm_a") != nullptr;
++    const int64_t ne = ggml_nelements(t);
++    std::vector<float> f(ne);
++    for (int64_t i = 0; i < ne; i++) {
++        const float v = dis(gen);
++        f[i] = is_ssm_a ? -fabsf(v) : v;
++    }
++
++    if (t->type == GGML_TYPE_F32) {
++        ggml_backend_tensor_set(t, f.data(), 0, ggml_nbytes(t));
++    } else if (t->type == GGML_TYPE_F16) {
++        std::vector<ggml_fp16_t> h(ne);
++        for (int64_t i = 0; i < ne; i++) {
++            h[i] = ggml_fp32_to_fp16(f[i]);
++        }
++        ggml_backend_tensor_set(t, h.data(), 0, ggml_nbytes(t));
++    } else if (ggml_is_quantized(t->type)) {
++        std::vector<uint8_t> q(ggml_nbytes(t));
++        ggml_quantize_chunk(t->type, f.data(), q.data(), 0, ggml_nrows(t), t->ne[0], nullptr);
++        ggml_backend_tensor_set(t, q.data(), 0, q.size());
++    } else {
++        fprintf(stderr, "unsupported tensor type %s for %s\n", ggml_type_name(t->type), t->name);
++        abort();
++    }
++}
++
++static void kv_u32(gguf_context * c, const char * k, uint32_t v) { gguf_set_val_u32(c, k, v); }
++static void kv_arr_u32(gguf_context * c, const char * k, const std::vector<uint32_t> & v) { gguf_set_arr_data(c, k, GGUF_TYPE_UINT32, v.data(), v.size()); }
++static void kv_arr_u64(gguf_context * c, const char * k, const std::vector<uint64_t> & v) { gguf_set_arr_data(c, k, GGUF_TYPE_UINT64, v.data(), v.size()); }
++
++// the metadata of a small qwen4exp (the layout of test-llama-archs' fixture, with layers of both kinds and more experts)
++static gguf_context * make_metadata(const test_args & a) {
++    gguf_context * c = gguf_init_empty();
++
++    const uint32_t n_vocab = 128, n_embd = 256, n_head = 4, n_head_kv = 2, head = 64, n_ff = 384;
++    const uint32_t hc = 4;
++
++    gguf_set_val_str(c, "general.architecture", "qwen4exp");
++    kv_u32(c, "qwen4exp.vocab_size", n_vocab);
++    kv_u32(c, "qwen4exp.context_length", 8192);
++    kv_u32(c, "qwen4exp.embedding_length", n_embd);
++    kv_u32(c, "qwen4exp.block_count", a.n_layer);
++    kv_u32(c, "qwen4exp.feed_forward_length", n_ff);
++    kv_u32(c, "qwen4exp.attention.head_count", n_head);
++    kv_u32(c, "qwen4exp.attention.head_count_kv", n_head_kv);
++    kv_u32(c, "qwen4exp.attention.key_length", head);
++    kv_u32(c, "qwen4exp.attention.value_length", head);
++    gguf_set_val_f32(c, "qwen4exp.attention.layer_norm_rms_epsilon", 1e-5f);
++    kv_u32(c, "qwen4exp.rope.dimension_count", head);
++    kv_arr_u32(c, "qwen4exp.rope.dimension_sections", { head/4, head/4, head/4, head/4 });
++    gguf_set_val_f32(c, "qwen4exp.rope.freq_base", 10000.0f);
++
++    kv_u32(c, "qwen4exp.expert_count", a.n_expert);
++    kv_u32(c, "qwen4exp.expert_used_count", a.n_used);
++    kv_u32(c, "qwen4exp.expert_feed_forward_length", 128);
++    kv_u32(c, "qwen4exp.expert_shared_feed_forward_length", 64);
++    gguf_set_val_f32(c, "qwen4exp.expert_weights_scale", 1.0f);
++
++    kv_u32(c, "qwen4exp.ssm.conv_kernel", 4);
++    kv_u32(c, "qwen4exp.ssm.state_size", 32);
++    kv_u32(c, "qwen4exp.ssm.group_count", 2);
++    kv_u32(c, "qwen4exp.ssm.time_step_rank", 4);
++    kv_u32(c, "qwen4exp.ssm.inner_size", 128);
++    kv_u32(c, "qwen4exp.full_attention_interval", a.interval);
++
++    kv_u32(c, "qwen4exp.hyper_connection.count", hc);
++    kv_u32(c, "qwen4exp.hyper_connection.low_rank", 8);
++
++    kv_u32(c, "qwen4exp.attention.indexer.head_count", 4);
++    kv_u32(c, "qwen4exp.attention.indexer.key_length", head);
++    kv_u32(c, "qwen4exp.attention.indexer.top_k", a.top_k);
++    kv_u32(c, "qwen4exp.attention.indexer.block_size", 4);
++    kv_u32(c, "qwen4exp.attention.indexer.local_blocks", 1);
++    kv_arr_u32(c, "qwen4exp.attention.compress_ratios", std::vector<uint32_t>(a.n_layer, 4));
++
++    // PLE on a linear-attention layer (the n-gram history is a row of the recurrent cache)
++    const uint32_t ple_ngram = 3, ple_hpn = 2, ple_heads = (ple_ngram - 1)*ple_hpn;
++    std::vector<uint64_t> off(ple_heads), voc(ple_heads, n_vocab);
++    for (uint32_t h = 0; h < ple_heads; h++) { off[h] = (uint64_t) h*n_vocab; }
++    kv_arr_u32(c, "qwen4exp.ple.layers", { 1 });
++    kv_u32(c, "qwen4exp.ple.ngram_size", ple_ngram);
++    kv_u32(c, "qwen4exp.ple.heads_per_ngram", ple_hpn);
++    kv_u32(c, "qwen4exp.ple.conv_kernel", 4);
++    kv_u32(c, "qwen4exp.ple.eos_token_id", 0);
++    kv_u32(c, "qwen4exp.embedding_length_per_layer_input", n_embd/ple_heads);
++    kv_arr_u64(c, "qwen4exp.ple.layer_multipliers", { 1, 3, 5 });
++    kv_arr_u64(c, "qwen4exp.ple.head_offsets", off);
++    kv_arr_u64(c, "qwen4exp.ple.head_vocab_sizes", voc);
++
++    // a dummy tokenizer
++    {
++        std::vector<std::string> toks(n_vocab);
++        std::vector<const char *> ptrs(n_vocab);
++        std::vector<float> scores(n_vocab, 0.0f);
++        for (uint32_t i = 0; i < n_vocab; i++) {
++            toks[i] = "tok_" + std::to_string(i);
++            ptrs[i] = toks[i].c_str();
++        }
++        gguf_set_val_str(c, "tokenizer.ggml.model", "test");
++        gguf_set_arr_str(c, "tokenizer.ggml.tokens", ptrs.data(), ptrs.size());
++        gguf_set_arr_data(c, "tokenizer.ggml.scores", GGUF_TYPE_FLOAT32, scores.data(), scores.size());
++    }
++
++    if (a.quant) {
++        // a tensor of the same name and another type makes the loader create that type
++        for (uint32_t il = 0; il < a.n_layer; il++) {
++            for (const char * w : { "gate_up", "gate", "up", "down" }) {
++                ggml_tensor t;
++                memset(&t, 0, sizeof(t));
++                t.type = GGML_TYPE_Q4_0;
++                ggml_format_name(&t, "blk.%u.ffn_%s_exps.weight", il, w);
++                gguf_add_tensor(c, &t);
++            }
++        }
++    }
++
++    return c;
++}
++
++struct run_result {
++    std::vector<std::vector<float>> logits;   // one entry per decode call (all its output rows)
++    std::vector<uint8_t>            state1, state2, state3;
++    std::vector<float>              nextn;    // the hidden state of every token of the two batches (--nextn)
++    std::vector<std::string>        lines;    // the layer-major debug lines
++    bool                            ok = false;
++};
++
++// one batch of n_seq sequences, each with the same number of tokens, sequence by sequence (llama_decode splits it into
++// ubatches of equal length per sequence); out[i] says whether token i of every sequence has an output; the output
++// rows come back in batch order
++static bool decode_seqs(llama_context * ctx, const std::vector<std::vector<llama_token>> & toks, int32_t pos0,
++        const std::vector<bool> & out, std::vector<float> & logits_out, uint32_t n_vocab) {
++    const size_t n_seq = toks.size();
++    const size_t n_per = toks[0].size();
++    llama_batch b = llama_batch_init((int32_t) (n_seq*n_per), 0, 1);
++    size_t k = 0;
++    for (size_t s = 0; s < n_seq; s++) {
++        for (size_t i = 0; i < n_per; i++, k++) {
++            b.token[k]     = toks[s][i];
++            b.pos[k]       = pos0 + (int32_t) i;
++            b.n_seq_id[k]  = 1;
++            b.seq_id[k][0] = (llama_seq_id) s;
++            b.logits[k]    = out[i];
++        }
++    }
++    b.n_tokens = (int32_t) k;
++
++    const int rc = llama_decode(ctx, b);
++    if (rc != 0) {
++        fprintf(stderr, "llama_decode failed: %d\n", rc);
++        llama_batch_free(b);
++        return false;
++    }
++
++    logits_out.clear();
++    k = 0;
++    for (size_t s = 0; s < n_seq; s++) {
++        for (size_t i = 0; i < n_per; i++, k++) {
++            if (!out[i]) {
++                continue;
++            }
++            const float * l = llama_get_logits_ith(ctx, (int32_t) k);
++            logits_out.insert(logits_out.end(), l, l + n_vocab);
++        }
++    }
++    llama_batch_free(b);
++    return true;
++}
++
++static std::vector<uint8_t> get_state(llama_context * ctx, int n_seq) {
++    std::vector<uint8_t> all;
++    for (int s = 0; s < n_seq; s++) {
++        std::vector<uint8_t> v(llama_state_seq_get_size(ctx, s));
++        const size_t n = llama_state_seq_get_data(ctx, v.data(), v.size(), s);
++        v.resize(n);
++        all.insert(all.end(), v.begin(), v.end());
++    }
++    return all;
++}
++
++static run_result run(llama_model * model, const test_args & a, const char * layer_major, const std::vector<llama_token> & prompt) {
++    run_result r;
++
++    set_env("LLAMA_LAYER_MAJOR", layer_major);
++    set_env("LLAMA_LAYER_MAJOR_DEBUG", "1");
++
++    llama_context_params cp = llama_context_default_params();
++    cp.n_ctx            = 4096;
++    cp.n_batch          = a.n_batch;
++    cp.n_ubatch         = a.n_ubatch;
++    cp.n_seq_max        = a.n_seqs;
++    cp.n_rs_seq         = a.rs_seq;
++    cp.n_threads        = a.threads;
++    cp.n_threads_batch  = a.threads;
++    cp.kv_unified       = true;
++    if (a.kv_type == "q8_0") {
++        cp.type_k = GGML_TYPE_Q8_0;
++        cp.type_v = GGML_TYPE_Q8_0;
++    }
++
++    llama_context * ctx = llama_init_from_model(model, cp);
++    if (!ctx) {
++        fprintf(stderr, "failed to create the context\n");
++        return r;
++    }
++
++    if (a.nextn) {
++        llama_set_embeddings_nextn(ctx, true, /*masked*/ false);
++    }
++    const uint32_t n_embd_out = llama_model_n_embd_out(model);
++
++    const uint32_t n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
++    const uint32_t n_seq   = a.n_seqs;
++    const uint32_t stride  = a.n_prompt + a.n_prompt2 + a.n_prompt3 + 8;
++
++    // sequence s reads its own stretch of the prompt array
++    auto slice = [&](uint32_t s, uint32_t from, uint32_t n) {
++        return std::vector<llama_token>(prompt.begin() + s*stride + from, prompt.begin() + s*stride + from + n);
++    };
++
++    g_capture = true;
++    g_log_lines.clear();
++
++    std::vector<float> lg;
++    bool ok = true;
++
++    // 1. a prompt batch with an output on every token
++    {
++        std::vector<std::vector<llama_token>> t;
++        for (uint32_t s = 0; s < n_seq; s++) { t.push_back(slice(s, 0, a.n_prompt)); }
++        ok = ok && decode_seqs(ctx, t, 0, std::vector<bool>(a.n_prompt, true), lg, n_vocab);
++        r.logits.push_back(lg);
++        r.state1 = get_state(ctx, (int) n_seq);
++        for (uint32_t i = 0; a.nextn && i < n_seq*a.n_prompt; i++) {
++            const float * e = llama_get_embeddings_nextn_ith(ctx, (int32_t) i);
++            r.nextn.insert(r.nextn.end(), e, e + n_embd_out);
++        }
++    }
++
++    // 2. the next batch, a server's: only the last token has an output
++    if (ok) {
++        std::vector<std::vector<llama_token>> t;
++        for (uint32_t s = 0; s < n_seq; s++) { t.push_back(slice(s, a.n_prompt, a.n_prompt2)); }
++        std::vector<bool> out(a.n_prompt2, false);
++        out.back() = true;
++        ok = ok && decode_seqs(ctx, t, (int32_t) a.n_prompt, out, lg, n_vocab);
++        r.logits.push_back(lg);
++        r.state2 = get_state(ctx, (int) n_seq);
++        for (uint32_t i = 0; a.nextn && i < n_seq*a.n_prompt2; i++) {
++            const float * e = llama_get_embeddings_nextn_ith(ctx, (int32_t) i);
++            r.nextn.insert(r.nextn.end(), e, e + n_embd_out);
++        }
++    }
++
++    // 2b. a rejected draft: the last K positions leave the memory (the recurrent state goes back to a snapshot, used once
++    // by the next batch), and a batch of several ubatches continues from there
++    int32_t pos_end = (int32_t) (a.n_prompt + a.n_prompt2);
++    if (ok && a.rollback > 0) {
++        bool all_rm = true;
++        for (uint32_t s = 0; s < n_seq; s++) {
++            all_rm = llama_memory_seq_rm(llama_get_memory(ctx), (llama_seq_id) s, pos_end - (int32_t) a.rollback, -1) && all_rm;
++        }
++        if (!all_rm) {
++            fprintf(stderr, "seq_rm of the last %u positions failed (n_rs_seq %u)\n", a.rollback, a.rs_seq);
++            ok = false;
++        }
++        pos_end -= (int32_t) a.rollback;
++
++        std::vector<std::vector<llama_token>> t;
++        for (uint32_t s = 0; s < n_seq; s++) { t.push_back(slice(s, a.n_prompt + a.n_prompt2, a.n_prompt3)); }
++        std::vector<bool> out(a.n_prompt3, false);
++        out.back() = true;
++        ok = ok && decode_seqs(ctx, t, pos_end, out, lg, n_vocab);
++        r.logits.push_back(lg);
++        pos_end += (int32_t) a.n_prompt3;
++    }
++
++    // 3. generated tokens, one at a time per sequence (the ordinary path, on the state the batches left)
++    if (ok) {
++        int32_t pos = pos_end;
++        for (uint32_t g = 0; ok && g < a.n_gen; g++) {
++            const std::vector<float> & last = r.logits.back();   // one row per sequence
++            std::vector<std::vector<llama_token>> t;
++            for (uint32_t s = 0; s < n_seq; s++) {
++                const float * row = last.data() + (size_t) s*n_vocab;
++                t.push_back({ (llama_token) (std::max_element(row, row + n_vocab) - row) });
++            }
++            ok = ok && decode_seqs(ctx, t, pos++, { true }, lg, n_vocab);
++            r.logits.push_back(lg);
++        }
++        r.state3 = get_state(ctx, (int) n_seq);
++    }
++
++    r.lines = g_log_lines;
++    g_capture = false;
++    llama_free(ctx);
++    r.ok = ok;
++    return r;
++}
++
++struct abort_state { int calls = 0; int from = 0; };
++
++static bool abort_cb(void * ud) {
++    abort_state * st = (abort_state *) ud;
++    return st->from > 0 && ++st->calls >= st->from;
++}
++
++// a prompt batch cancelled in the middle of a layer-major chunk: decode answers 2, the sequence leaves the memory (the
++// batch started at position 0, so nothing of it may stay: the recurrent state and the K/V are cleared), and the same
++// batch decoded again gives exactly the reference's rows and state
++static bool run_abort(llama_model * model, const test_args & a, const char * layer_major, const std::vector<llama_token> & prompt,
++        const run_result & ref) {
++    set_env("LLAMA_LAYER_MAJOR", layer_major);
++    set_env("LLAMA_LAYER_MAJOR_DEBUG", "1");
++
++    llama_context_params cp = llama_context_default_params();
++    cp.n_ctx = 4096; cp.n_batch = a.n_batch; cp.n_ubatch = a.n_ubatch; cp.n_seq_max = 1;
++    cp.n_threads = a.threads; cp.n_threads_batch = a.threads; cp.kv_unified = true;
++    llama_context * ctx = llama_init_from_model(model, cp);
++    if (!ctx) {
++        return false;
++    }
++    const uint32_t n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
++
++    abort_state st;
++    st.from = a.abort_at;
++    llama_set_abort_callback(ctx, abort_cb, &st);
++
++    std::vector<std::vector<llama_token>> t(1, std::vector<llama_token>(prompt.begin(), prompt.begin() + a.n_prompt));
++    std::vector<float> lg;
++    g_capture = false;
++    const bool first = decode_seqs(ctx, t, 0, std::vector<bool>(a.n_prompt, true), lg, n_vocab);   // false: it failed
++    const llama_pos pmax = llama_memory_seq_pos_max(llama_get_memory(ctx), 0);
++    printf("abort: the batch %s after %d abort-callback calls, the sequence's last position is %d\n",
++            first ? "was not cancelled" : "was cancelled", st.calls, (int) pmax);
++
++    st.from = 0;   // let it run
++    const bool second = decode_seqs(ctx, t, 0, std::vector<bool>(a.n_prompt, true), lg, n_vocab);
++    const bool same = second && lg.size() == ref.logits[0].size() &&
++        memcmp(lg.data(), ref.logits[0].data(), lg.size()*sizeof(float)) == 0;
++    const bool same_state = get_state(ctx, 1) == ref.state1;
++    llama_free(ctx);
++
++    int fails = 0;
++    auto check = [&](bool ok, const char * what) { printf("%s: %s\n", ok ? "PASS" : "FAIL", what); fails += ok ? 0 : 1; };
++    check(!first, "a cancelled layer-major batch is reported (llama_decode != 0)");
++    check(pmax == -1, "and leaves nothing of the sequence in the memory");
++    check(same && same_state, "the batch decoded again equals the reference (logits and state)");
++    return fails == 0;
++}
++
++static double nmse(const std::vector<float> & a, const std::vector<float> & b) {
++    double e = 0.0, n = 0.0;
++    for (size_t i = 0; i < a.size(); i++) {
++        e += (double) (a[i] - b[i])*(a[i] - b[i]);
++        n += (double) a[i]*a[i];
++    }
++    return n > 0 ? e/n : e;
++}
++
++int main(int argc, char ** argv) {
++    test_args a;
++    for (int i = 1; i < argc; i++) {
++        std::string s = argv[i];
++        auto next = [&]() -> const char * { return i + 1 < argc ? argv[++i] : ""; };
++        if      (s == "--device")      { a.device = next(); }
++        else if (s == "--experts-cpu") { a.experts_cpu = true; }
++        else if (s == "--quant")       { a.quant = true; }
++        else if (s == "--mode")        { a.mode = atoi(next()); }
++        else if (s == "--seed")        { a.seed = (uint32_t) atoi(next()); }
++        else if (s == "--stdev")       { a.stdev = (float) atof(next()); }
++        else if (s == "--layers")      { a.n_layer = (uint32_t) atoi(next()); }
++        else if (s == "--interval")    { a.interval = (uint32_t) atoi(next()); }
++        else if (s == "--experts")     { a.n_expert = (uint32_t) atoi(next()); }
++        else if (s == "--used")        { a.n_used = (uint32_t) atoi(next()); }
++        else if (s == "--top-k")       { a.top_k = (uint32_t) atoi(next()); }
++        else if (s == "--ub")          { a.n_ubatch = (uint32_t) atoi(next()); }
++        else if (s == "--batch")       { a.n_batch = (uint32_t) atoi(next()); }
++        else if (s == "--prompt")      { a.n_prompt = (uint32_t) atoi(next()); }
++        else if (s == "--prompt2")     { a.n_prompt2 = (uint32_t) atoi(next()); }
++        else if (s == "--gen")         { a.n_gen = (uint32_t) atoi(next()); }
++        else if (s == "--seqs")        { a.n_seqs = (uint32_t) atoi(next()); }
++        else if (s == "--nextn")       { a.nextn = true; }
++        else if (s == "--abort-at")    { a.abort_at = atoi(next()); }
++        else if (s == "--rs-seq")      { a.rs_seq = (uint32_t) atoi(next()); }
++        else if (s == "--rollback")    { a.rollback = (uint32_t) atoi(next()); }
++        else if (s == "--prompt3")     { a.n_prompt3 = (uint32_t) atoi(next()); }
++        else if (s == "--threads")     { a.threads = atoi(next()); }
++        else if (s == "--kv")          { a.kv_type = next(); }
++        else if (s == "--save")        { a.save = next(); }
++        else if (s == "--model")       { a.load = next(); }
++        else if (s == "-v")            { a.verbose = true; g_verbose = true; }
++        else { fprintf(stderr, "unknown argument %s\n", s.c_str()); return 2; }
++    }
++    if (a.mode == 0) {
++        a.mode = a.device.empty() ? 2 : 1;
++    }
++
++    llama_log_set(log_cb, nullptr);
++    ggml_backend_load_all();
++
++    gguf_context * meta = make_metadata(a);
++
++    llama_model_params mp = llama_model_default_params();
++    mp.progress_callback = [](float, void *) { return true; };
++    ggml_backend_dev_t devs[2] = { nullptr, nullptr };
++    if (!a.device.empty()) {
++        devs[0] = ggml_backend_dev_by_name(a.device.c_str());
++        if (!devs[0]) {
++            fprintf(stderr, "no device %s\n", a.device.c_str());
++            return 2;
++        }
++        mp.devices = devs;
++        mp.n_gpu_layers = 999;
++    } else {
++        ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++        devs[0] = cpu;
++        mp.devices = devs;
++        mp.n_gpu_layers = 0;
++    }
++    llama_model_tensor_buft_override ov[2] = { { "ffn_(gate_up|up|down|gate)_exps", ggml_backend_cpu_buffer_type() }, { nullptr, nullptr } };
++    if (a.experts_cpu) {
++        mp.tensor_buft_overrides = ov;
++    }
++
++    data_params dp = { a.seed, a.stdev };
++    llama_model * model = a.load.empty() ? llama_model_init_from_user(meta, set_tensor_data, &dp, mp)
++                                         : llama_model_load_from_file(a.load.c_str(), mp);
++    if (!model) {
++        fprintf(stderr, "failed to create the model\n");
++        return 2;
++    }
++    if (!a.save.empty()) {
++        llama_model_save_to_file(model, a.save.c_str());
++        printf("saved %s\n", a.save.c_str());
++        llama_model_free(model);
++        gguf_free(meta);
++        return 0;
++    }
++
++    const uint32_t n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
++    std::mt19937 gen(a.seed);
++    std::uniform_int_distribution<int> dis(0, (int) n_vocab - 1);
++    std::vector<llama_token> prompt((size_t) (a.n_prompt + a.n_prompt2 + a.n_prompt3 + 8)*a.n_seqs);
++    for (auto & t : prompt) { t = dis(gen); }
++
++    printf("model: %u layers (attention every %u), %u experts (%u used), top_k %u, experts %s%s, ubatch %u, batch %u, "
++           "prompt %u + %u (x%u sequences), device %s\n", a.n_layer, a.interval, a.n_expert, a.n_used, a.top_k,
++           a.experts_cpu ? "in host memory" : "with the model", a.quant ? " (Q4_0)" : "", a.n_ubatch, a.n_batch,
++           a.n_prompt, a.n_prompt2, a.n_seqs, a.device.empty() ? "CPU" : a.device.c_str());
++
++    run_result ref = run(model, a, nullptr, prompt);
++    run_result lmr = run(model, a, std::to_string(a.mode).c_str(), prompt);
++
++    // a control the comparison must be able to fail: the same layer-major run with the ubatches of every layer past the
++    // first taken back to front (the recurrent state and the K/V of a layer would see the batch in the wrong order)
++    run_result brk;
++    // mode 1 is for experts in host memory: with the experts on the device the switch must leave the batch alone
++    const bool expect_lm = a.n_prompt > a.n_ubatch && !(a.mode == 1 && !(a.experts_cpu && !a.device.empty()));
++    const bool multi = expect_lm;
++    if (multi) {
++        set_env("LLAMA_LAYER_MAJOR_BREAK", "1");
++        brk = run(model, a, std::to_string(a.mode).c_str(), prompt);
++        set_env("LLAMA_LAYER_MAJOR_BREAK", nullptr);
++    }
++    if (!ref.ok || !lmr.ok) {
++        printf("FAIL: a run did not finish\n");
++        return 1;
++    }
++
++    // the layer-major path must have run (not silently fallen back)
++    printf("layer-major lines: %zu\n", lmr.lines.size());
++    for (const auto & l : lmr.lines) { printf("  %s", l.c_str()); if (l.back() != '\n') printf("\n"); }
++
++    int fails = 0;
++    auto check = [&](bool ok, const char * what) { printf("%s: %s\n", ok ? "PASS" : "FAIL", what); fails += ok ? 0 : 1; };
++
++    {
++        size_t n_lm = 0;
++        for (const auto & l : lmr.lines) { n_lm += l.find("decode_layer_major") != std::string::npos; }
++        if (expect_lm) {
++            check(n_lm > 0, "layer-major prefill ran");
++        } else {
++            check(n_lm == 0, "layer-major prefill stayed off (one ubatch, or mode 1 without experts in host memory)");
++        }
++    }
++    printf("ubatch by ubatch (the reference run):\n");
++    for (const auto & l : ref.lines) { printf("  %s", l.c_str()); if (l.back() != '\n') printf("\n"); }
++
++    bool finite = true, argmax_same = true, exact = true;
++    double worst_nmse = 0.0, worst_abs = 0.0;
++    for (size_t k = 0; k < ref.logits.size(); k++) {
++        const auto & x = ref.logits[k];
++        const auto & y = lmr.logits[k];
++        if (x.size() != y.size() || x.empty()) { finite = false; continue; }
++        for (float v : x) { finite = finite && std::isfinite(v); }
++        for (float v : y) { finite = finite && std::isfinite(v); }
++        const size_t rows = x.size()/n_vocab;
++        for (size_t r = 0; r < rows; r++) {
++            const float * px = x.data() + r*n_vocab;
++            const float * py = y.data() + r*n_vocab;
++            argmax_same = argmax_same && (std::max_element(px, px + n_vocab) - px) == (std::max_element(py, py + n_vocab) - py);
++        }
++        exact = exact && memcmp(x.data(), y.data(), x.size()*sizeof(float)) == 0;
++        worst_nmse = std::max(worst_nmse, nmse(x, y));
++        for (size_t i = 0; i < x.size(); i++) { worst_abs = std::max(worst_abs, (double) fabsf(x[i] - y[i])); }
++    }
++    printf("logits: %zu decode calls, worst NMSE %.3e, worst |diff| %.3e, bit-exact %s\n", ref.logits.size(), worst_nmse, worst_abs, exact ? "yes" : "no");
++    if (a.nextn) {
++        const bool same = ref.nextn.size() == lmr.nextn.size() && !ref.nextn.empty() &&
++            memcmp(ref.nextn.data(), lmr.nextn.data(), ref.nextn.size()*sizeof(float)) == 0;
++        printf("nextn (MTP) hidden states: %zu floats, %s\n", ref.nextn.size(), same ? "identical" : "DIFFER");
++        check(same || !a.device.empty(), "the hidden state of every token (what the MTP draft reads) is identical");
++        check(nmse(ref.nextn, lmr.nextn) <= 1e-4, "hidden states' NMSE <= 1e-4");
++    }
++    check(finite, "every logit is finite");
++    check(argmax_same, "the argmax of every output row agrees");
++    check(worst_nmse <= 1e-4, "logits' NMSE <= 1e-4 (test-llama-archs' limit)");
++    if (a.device.empty()) {
++        check(exact, "CPU: logits bit-exact");
++    }
++
++    auto state_cmp = [&](const std::vector<uint8_t> & x, const std::vector<uint8_t> & y, const char * what) {
++        size_t diff = 0, first = (size_t) -1;
++        const size_t n = std::min(x.size(), y.size());
++        for (size_t i = 0; i < n; i++) {
++            if (x[i] != y[i]) { diff++; if (first == (size_t) -1) first = i; }
++        }
++        printf("state %s: %zu vs %zu bytes, %zu differ%s\n", what, x.size(), y.size(), diff + (x.size() != y.size() ? 1 : 0),
++               first == (size_t) -1 ? "" : (" (first at " + std::to_string(first) + ")").c_str());
++        return x.size() == y.size() && diff == 0;
++    };
++    const bool s1 = state_cmp(ref.state1, lmr.state1, "after the prompt batch");
++    const bool s2 = state_cmp(ref.state2, lmr.state2, "after the server-style batch");
++    const bool s3 = state_cmp(ref.state3, lmr.state3, "after the generated tokens");
++    if (a.device.empty()) {
++        check(s1 && s2 && s3, "CPU: sequence state (KV, indexer, recurrent) byte-identical");
++    } else {
++        printf("%s: sequence state byte-identical on the device (informational)\n", s1 && s2 && s3 ? "PASS" : "NOTE");
++    }
++
++    if (a.abort_at > 0 && multi) {
++        check(run_abort(model, a, std::to_string(a.mode).c_str(), prompt, ref), "a cancelled batch: rolled back and repeatable");
++    }
++
++    if (multi) {
++        bool logits_differ = false;
++        for (size_t k = 0; k < ref.logits.size() && k < brk.logits.size(); k++) {
++            logits_differ = logits_differ || ref.logits[k].size() != brk.logits[k].size() ||
++                memcmp(ref.logits[k].data(), brk.logits[k].data(), ref.logits[k].size()*sizeof(float)) != 0;
++        }
++        const bool state_differs = ref.state3 != brk.state3;
++        printf("control (layers past the first take the ubatches back to front): logits differ %s, state differs %s\n",
++                logits_differ ? "yes" : "no", state_differs ? "yes" : "no");
++        check(brk.ok && (logits_differ || state_differs), "the control is detected (the comparison can fail)");
++    }
++
++    // the activations are not degenerate: the rows differ from one another and the argmax moves
++    {
++        std::vector<llama_token> am;
++        const auto & x = ref.logits[0];
++        for (size_t r = 0; r < x.size()/n_vocab; r++) {
++            am.push_back((llama_token) (std::max_element(x.data() + r*n_vocab, x.data() + (r + 1)*n_vocab) - (x.data() + r*n_vocab)));
++        }
++        std::sort(am.begin(), am.end());
++        const size_t distinct = std::unique(am.begin(), am.end()) - am.begin();
++        double mean = 0, var = 0;
++        for (float v : x) { mean += v; }
++        mean /= x.size();
++        for (float v : x) { var += (v - mean)*(v - mean); }
++        var /= x.size();
++        printf("activations: logit std %.3g over %zu rows, %zu distinct argmax tokens\n", sqrt(var), x.size()/n_vocab, distinct);
++        check(var > 1e-8 && distinct > 1, "the logits are not degenerate");
++    }
++
++    llama_model_free(model);
++    gguf_free(meta);
++
++    printf(fails == 0 ? "all passed\n" : "FAILED\n");
++    return fails == 0 ? 0 : 1;
++}
+-- 
+2.45.2.windows.1
+

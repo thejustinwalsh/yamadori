@@ -179,6 +179,14 @@ public:
 
     int32_t s_copy(int i) const;
 
+    // 0029: layer-major replay (llama_memory_context_i::lm_*). lm_record() reads what the graph of the ubatch just
+    // applied reads from the memory -- head, n, rs_z and every s_copy() id (which also consumes the rollback index
+    // of a sequence, once) -- and lm_seek(i) makes the getters above answer with the recorded values of ubatch i,
+    // until the next lm_record().
+    bool lm_supported() const override { return !ubatches.empty(); }
+    void lm_record() override;
+    void lm_seek(uint32_t i) override;
+
 private:
     const llama_memory_status status;
 
@@ -194,4 +202,15 @@ private:
     //
 
     const bool is_full = false;
+
+    // 0029: the state of each applied ubatch, and the one lm_seek() selected (lm_cur < 0: the live memory)
+    struct lm_state {
+        uint32_t             head = 0;
+        uint32_t             n    = 0;
+        int32_t              rs_z = 0;
+        std::vector<int32_t> s_copy;
+    };
+
+    std::vector<lm_state> lm_rec;
+    int64_t               lm_cur = -1;
 };

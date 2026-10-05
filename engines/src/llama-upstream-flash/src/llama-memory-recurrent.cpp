@@ -1316,14 +1316,23 @@ const llama_ubatch & llama_memory_recurrent_context::get_ubatch() const {
 }
 
 uint32_t llama_memory_recurrent_context::get_n_rs() const {
+    if (lm_cur >= 0) {
+        return lm_rec[lm_cur].n;
+    }
     return is_full ? mem->size : mem->n;
 }
 
 uint32_t llama_memory_recurrent_context::get_head() const {
+    if (lm_cur >= 0) {
+        return lm_rec[lm_cur].head;
+    }
     return is_full ? 0 : mem->head;
 }
 
 int32_t llama_memory_recurrent_context::get_rs_z() const {
+    if (lm_cur >= 0) {
+        return lm_rec[lm_cur].rs_z;
+    }
     return is_full ? 0 : mem->rs_z;
 }
 
@@ -1343,7 +1352,39 @@ ggml_tensor * llama_memory_recurrent_context::get_p_l(int32_t il) const {
     return mem->p_l[il];
 }
 
+void llama_memory_recurrent_context::lm_record() {
+    GGML_ASSERT(!ubatches.empty() && i_next < ubatches.size());
+
+    // what is recorded is what apply() just left in the live memory, never an earlier replay
+    lm_cur = -1;
+
+    if (lm_rec.size() <= i_next) {
+        lm_rec.resize(i_next + 1);
+    }
+
+    lm_state & st = lm_rec[i_next];
+    st.head = get_head();
+    st.n    = get_n_rs();
+    st.rs_z = get_rs_z();
+    st.s_copy.resize(st.n);
+    for (uint32_t i = 0; i < st.n; ++i) {
+        st.s_copy[i] = s_copy((int) i);
+    }
+}
+
+void llama_memory_recurrent_context::lm_seek(uint32_t i) {
+    GGML_ASSERT(i < ubatches.size() && i < lm_rec.size());
+
+    i_next = i;
+    lm_cur = i;
+}
+
 int32_t llama_memory_recurrent_context::s_copy(int i) const {
+    if (lm_cur >= 0) {
+        GGML_ASSERT((size_t) i < lm_rec[lm_cur].s_copy.size());
+        return lm_rec[lm_cur].s_copy[i];
+    }
+
     const uint32_t cell_idx = i + mem->head;
     const int32_t  src0     = mem->cells[cell_idx].src0;
 

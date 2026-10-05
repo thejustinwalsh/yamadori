@@ -11,6 +11,8 @@
 #include "ggml-cpp.h"
 #include "ggml-opt.h"
 
+#include <functional>
+
 #include <array>
 #include <map>
 #include <vector>
@@ -271,6 +273,30 @@ private:
 
     llm_graph_cb graph_get_cb() const;
 
+    //
+    // 0029: layer-major prefill (LLAMA_LAYER_MAJOR). decode() runs a batch ubatch by ubatch, each ubatch through every
+    // layer, so a layer's experts that live in host memory are uploaded once per ubatch. With the switch on, a batch of
+    // two or more ubatches (qwen4exp) runs layer by layer instead: layer 0 for every ubatch, then layer 1 for every
+    // ubatch, ... , so the layer's experts are uploaded once per BATCH (the scheduler keeps them in a slot while the
+    // layer's graphs run) and the next layer's upload overlaps this layer's compute. What crosses layers is the wide
+    // residual of every token, in two ping-pong buffers on the device (40 KiB a token at hc 4, n_embd 2560).
+    //
+
+    // true when this batch runs layer-major; allocates the hidden buffers and the expert slots first (a batch is never
+    // half applied)
+    bool layer_major_ok(llama_memory_context_i * mctx, bool has_samplers);
+
+    // the batch's ubatches through the layers; finish() takes each ubatch's result when its last layer has run.
+    // Returns what decode() returns (0 = done).
+    int decode_layer_major(
+            llama_memory_context_i * mctx,
+            const std::function<void(const llm_graph_result *, const llama_ubatch &)> & finish);
+
+    // the graph of the layers [il0, il1) for one ubatch, built, allocated, fed and computed; never reused
+    llm_graph_result * process_ubatch_range(
+            const llama_ubatch & ubatch, llama_memory_context_i * mctx,
+            uint32_t il0, uint32_t il1, uint32_t tok_off, ggml_status & ret);
+
     // disable auto fused ops (Flash Attention, Gated Delta Net) whose op lands on a device
     // that differs from the layer it belongs to (usually due to missing backend support)
     void resolve_fused_ops(const llama_memory_context_i * mctx, uint32_t n_seqs);
@@ -390,6 +416,34 @@ private:
 
     // env: LLAMA_GRAPH_REUSE_DISABLE
     bool graph_reuse_disable = false;
+
+    // 0029: layer-major prefill. env LLAMA_LAYER_MAJOR: 0 off (default), 1 on where it can gain (a GPU backend and
+    // expert tensors in host memory), 2 on wherever it can run (the CPU test); LLAMA_LAYER_MAJOR_SLOTS (default 6, the
+    // gate/up/down of this layer and of the next); LLAMA_LAYER_MAJOR_MIN_UBATCHES (default 2); LLAMA_LAYER_MAJOR_DEBUG
+    struct layer_major_state {
+        int       mode         = 0;
+        int       n_slots      = 6;
+        uint32_t  min_ubatches = 2;
+        bool      debug        = false;
+
+        ggml_context_ptr        ctx;
+        ggml_backend_buffer_ptr buf;
+        ggml_tensor *           h[2]     = {nullptr, nullptr};   // F32 [n_embd*hc, n_batch]
+        uint32_t                h_tokens = 0;
+        size_t                  slot_bytes = 0;                  // the largest expert tensor in host memory, 0 = none
+        bool                    host_experts = false;
+        bool                    scanned      = false;            // slot_bytes / host_experts are known
+
+        std::unique_ptr<llm_graph_result> res;
+
+        // totals, for the debug line
+        uint64_t n_chunks = 0;
+        uint64_t n_tokens = 0;
+
+        // host time spent per graph (us), summed over a chunk: build, scheduler split + allocation, inputs, compute call
+        int64_t  t_build = 0, t_alloc = 0, t_inputs = 0, t_compute = 0;
+        uint64_t n_graphs = 0;
+    } lm;
 
     // perf
     mutable int64_t t_start_us  = 0;

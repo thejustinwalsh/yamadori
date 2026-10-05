@@ -10,6 +10,7 @@
 
 #include "ggml-backend.h"
 #include "ggml-backend-impl.h"
+#include "ggml-backend-lm.h"
 #include "ggml-alloc.h"
 #include "ggml-impl.h"
 
@@ -830,6 +831,11 @@ static bool ggml_is_view_op(enum ggml_op op) {
 #define GGML_SCHED_MAX_PREFETCH_SLOTS 4
 #endif
 
+// 0029: slots of the weight-stationary expert store of layer-major prefill (see ggml_backend_sched_resident_set)
+#ifndef GGML_SCHED_MAX_RESIDENT_SLOTS
+#define GGML_SCHED_MAX_RESIDENT_SLOTS 16
+#endif
+
 struct ggml_backend_sched_split {
     int backend_id;
     int i_start;
@@ -901,6 +907,43 @@ struct ggml_backend_sched {
     ggml_backend_event_t  prefetch_free [GGML_SCHED_MAX_PREFETCH_SLOTS];
     bool prefetch_used[GGML_SCHED_MAX_PREFETCH_SLOTS];
     int prefetch_cur;
+
+    // 0029: weight-stationary expert slots (layer-major prefill, LLAMA_LAYER_MAJOR). The offloaded MUL_MAT_ID weights
+    // of one layer are uploaded WHOLE into a slot once and every later graph that reads the same host tensor finds it
+    // there: the graphs of one layer run for each ubatch of a chunk, one after another, and the 512-token ubatch no
+    // longer pays the upload of the layer's experts alone. The uploads run on a second stream of the device
+    // (res.backend) and the consuming split waits on the slot's ready event, as with --prefetch-experts-slots; the
+    // caller names the next layer's weights (ggml_backend_sched_resident_prefetch) so that their upload overlaps this
+    // layer's compute. Slots of the current epoch (a layer) are never reused until the epoch moves on.
+    struct {
+        bool                on;
+        int                 n_slots;
+        size_t              slot_bytes;
+        ggml_backend_t      backend;
+        ggml_backend_dev_t  dev;
+        struct ggml_context * ctx;
+        struct {
+            ggml_backend_buffer_t     buf;
+            struct ggml_tensor *      t;      // descriptor of the slot for the upload (type i8, slot_bytes)
+            ggml_backend_event_t      ready;  // the upload has landed (recorded on res.backend)
+            ggml_backend_event_t      free;   // the last split that read the slot has been launched (recorded on its backend)
+            const struct ggml_tensor * key;   // the host weight the slot holds
+            size_t                    nbytes;
+            uint64_t                  epoch;  // the last epoch that asked for it
+            bool                      used;   // `free` has been recorded at least once
+        } slot[GGML_SCHED_MAX_RESIDENT_SLOTS];
+        uint64_t epoch;
+        // counters (ggml_backend_sched_upload_stats)
+        uint64_t up_bytes, up_n, hits, fallbacks, prefetched;
+    } res;
+
+    // 0029: bytes of the used-experts copy path (the one every offloaded MUL_MAT_ID takes without the slots)
+    uint64_t stat_sparse_bytes;
+    uint64_t stat_sparse_n;
+    // ... and of the whole-tensor copy of a host weight (a MUL_MAT_ID that does not start its split: its ids are
+    // computed inside the split, so the used experts cannot be read before it runs)
+    uint64_t stat_full_bytes;
+    uint64_t stat_full_n;
 
     char * context_buffer;
     size_t context_buffer_size;
@@ -1804,6 +1847,228 @@ static bool ggml_backend_sched_prefetch_init(ggml_backend_sched_t sched, ggml_ba
     return true;
 }
 
+// ---- 0029: weight-stationary expert slots (layer-major prefill) ----
+static void ggml_backend_sched_resident_release(ggml_backend_sched_t sched) {
+    if (sched->res.backend) {
+        ggml_backend_synchronize(sched->res.backend);
+    }
+    for (int i = 0; i < GGML_SCHED_MAX_RESIDENT_SLOTS; i++) {
+        if (sched->res.slot[i].buf)   { ggml_backend_buffer_free(sched->res.slot[i].buf); }
+        if (sched->res.slot[i].ready) { ggml_backend_event_free(sched->res.slot[i].ready); }
+        if (sched->res.slot[i].free)  { ggml_backend_event_free(sched->res.slot[i].free); }
+        memset(&sched->res.slot[i], 0, sizeof(sched->res.slot[i]));
+    }
+    if (sched->res.ctx) {
+        ggml_free(sched->res.ctx);
+        sched->res.ctx = NULL;
+    }
+    if (sched->res.backend) {
+        ggml_backend_free(sched->res.backend);
+        sched->res.backend = NULL;
+    }
+    sched->res.dev = NULL;
+}
+
+static bool ggml_backend_sched_resident_init(ggml_backend_sched_t sched, ggml_backend_t backend) {
+    if (sched->res.backend != NULL) {
+        return true;
+    }
+
+    ggml_backend_dev_t dev = backend->device;
+    ggml_backend_dev_props props;
+    ggml_backend_dev_get_props(dev, &props);
+    if (!props.caps.async || !props.caps.events || sched->res.n_slots <= 0 || sched->res.slot_bytes == 0) {
+        sched->res.on = false;
+        return false;
+    }
+
+    sched->res.backend = ggml_backend_dev_init(dev, NULL);
+    sched->res.dev     = dev;
+    if (sched->res.backend == NULL) {
+        sched->res.on = false;
+        return false;
+    }
+
+    struct ggml_init_params ip = {
+        /* .mem_size   = */ (size_t) GGML_SCHED_MAX_RESIDENT_SLOTS * ggml_tensor_overhead() + 1024,
+        /* .mem_buffer = */ NULL,
+        /* .no_alloc   = */ true,
+    };
+    sched->res.ctx = ggml_init(ip);
+
+    ggml_backend_buffer_type_t buft = ggml_backend_get_default_buffer_type(backend);
+    bool ok = sched->res.ctx != NULL;
+    for (int i = 0; ok && i < sched->res.n_slots; i++) {
+        auto & s = sched->res.slot[i];
+        s.buf = ggml_backend_buft_alloc_buffer(buft, sched->res.slot_bytes);
+        if (s.buf == NULL) {
+            // fewer slots than asked: a layer needs three (gate, up, down); fewer than that cannot hold one
+            if (i >= 3) {
+                sched->res.n_slots = i;
+                break;
+            }
+            ok = false;
+            break;
+        }
+        // an expert tensor is read to the end by MMQ tiles: no uninitialised bytes after the data
+        ggml_backend_buffer_clear(s.buf, 0);
+        s.ready = ggml_backend_event_new(dev);
+        s.free  = ggml_backend_event_new(dev);
+        s.t     = ggml_new_tensor_1d(sched->res.ctx, GGML_TYPE_I8, (int64_t) sched->res.slot_bytes);
+        s.t->buffer = s.buf;
+        s.t->data   = ggml_backend_buffer_get_base(s.buf);
+        ok = s.ready != NULL && s.free != NULL;
+    }
+    if (!ok) {
+        ggml_backend_sched_resident_release(sched);
+        sched->res.on = false;
+        return false;
+    }
+    return true;
+}
+
+// the slot holding `key`, else -1
+static int ggml_backend_sched_resident_find(ggml_backend_sched_t sched, const struct ggml_tensor * key) {
+    for (int i = 0; i < sched->res.n_slots; i++) {
+        if (sched->res.slot[i].key == key) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// a slot nobody asked for in this epoch or the next (an upload for the next layer is stamped epoch + 1), oldest
+// first; -1 when every slot is taken
+static int ggml_backend_sched_resident_victim(ggml_backend_sched_t sched) {
+    int best = -1;
+    for (int i = 0; i < sched->res.n_slots; i++) {
+        const auto & s = sched->res.slot[i];
+        if (s.key == NULL) {
+            return i;
+        }
+        if (s.epoch < sched->res.epoch && (best < 0 || s.epoch < sched->res.slot[best].epoch)) {
+            best = i;
+        }
+    }
+    return best;
+}
+
+// queue the upload of `weight` into slot i on the upload stream: after the last split that read the slot, and the
+// slot's ready event is recorded behind the copy
+static void ggml_backend_sched_resident_upload(ggml_backend_sched_t sched, int i, const struct ggml_tensor * weight, uint64_t epoch) {
+    auto & s = sched->res.slot[i];
+    if (s.used) {
+        ggml_backend_event_wait(sched->res.backend, s.free);
+    }
+    const size_t nbytes = ggml_nbytes(weight);
+    GGML_ASSERT(nbytes <= sched->res.slot_bytes);
+    ggml_backend_tensor_set_async(sched->res.backend, s.t, weight->data, 0, nbytes);
+    ggml_backend_event_record(s.ready, sched->res.backend);
+    s.key    = weight;
+    s.nbytes = nbytes;
+    s.epoch  = epoch;
+    sched->res.up_bytes += nbytes;
+    sched->res.up_n++;
+
+    static const bool dbg = getenv("GGML_SCHED_RESIDENT_DEBUG") != NULL;
+    if (dbg) {
+        GGML_LOG_INFO("%s: upload %s (%.1f MiB) -> slot %d, epoch %llu (now %llu)\n", "ggml_backend_sched_resident", weight->name,
+                nbytes/1024.0/1024.0, i, (unsigned long long) epoch, (unsigned long long) sched->res.epoch);
+    }
+}
+
+// the slot a split's weight is read from: the one that holds it (a hit), else the upload is queued now (a demand
+// upload: the first graph of a layer when nothing prefetched it); -1 when it cannot be resident (too big for a slot,
+// or no free slot): the caller falls back to the used-experts copy
+static int ggml_backend_sched_resident_acquire(ggml_backend_sched_t sched, ggml_backend_t backend, const struct ggml_tensor * weight) {
+    if (!sched->res.on || !ggml_backend_sched_resident_init(sched, backend)) {
+        return -1;
+    }
+    if (ggml_nbytes(weight) > sched->res.slot_bytes) {
+        sched->res.fallbacks++;
+        return -1;
+    }
+    int i = ggml_backend_sched_resident_find(sched, weight);
+    if (i >= 0) {
+        sched->res.hits++;
+        if (sched->res.slot[i].epoch < sched->res.epoch) {
+            sched->res.slot[i].epoch = sched->res.epoch;
+        }
+        return i;
+    }
+    i = ggml_backend_sched_resident_victim(sched);
+    if (i < 0) {
+        sched->res.fallbacks++;
+        return -1;
+    }
+    ggml_backend_sched_resident_upload(sched, i, weight, sched->res.epoch);
+    return i;
+}
+
+void ggml_backend_sched_resident_set(ggml_backend_sched_t sched, int n_slots, size_t slot_bytes) {
+    if (sched == NULL) { return; }
+    if (n_slots > GGML_SCHED_MAX_RESIDENT_SLOTS) { n_slots = GGML_SCHED_MAX_RESIDENT_SLOTS; }
+    if (n_slots < 3 || slot_bytes == 0) {
+        // off: the slots go back to the device
+        ggml_backend_sched_resident_release(sched);
+        sched->res.on = false;
+        sched->res.n_slots = 0;
+        sched->res.slot_bytes = 0;
+        return;
+    }
+    if (sched->res.on && sched->res.n_slots == n_slots && sched->res.slot_bytes >= slot_bytes) {
+        return;
+    }
+    ggml_backend_sched_resident_release(sched);
+    sched->res.on         = true;
+    sched->res.n_slots    = n_slots;
+    sched->res.slot_bytes = slot_bytes;
+}
+
+bool ggml_backend_sched_resident_is_on(ggml_backend_sched_t sched) {
+    return sched != NULL && sched->res.on;
+}
+
+// a new layer: the slots stamped with the epochs before it may be reused
+void ggml_backend_sched_resident_epoch(ggml_backend_sched_t sched) {
+    if (sched == NULL) { return; }
+    sched->res.epoch++;
+}
+
+// the weights of the NEXT layer (epoch + 1): their uploads are queued behind what the slots' last readers did, on the
+// upload stream, so they overlap the compute of this layer. Only the weights no slot holds yet, only into slots that
+// belong to an earlier epoch; whatever does not fit is left for the demand path.
+void ggml_backend_sched_resident_prefetch(ggml_backend_sched_t sched, struct ggml_tensor * const * weights, int n) {
+    if (sched == NULL || !sched->res.on || sched->res.backend == NULL) { return; }
+    for (int k = 0; k < n; k++) {
+        const struct ggml_tensor * w = weights[k];
+        if (w == NULL || w->buffer == NULL || !ggml_backend_buffer_is_host(w->buffer) ||
+            ggml_nbytes(w) > sched->res.slot_bytes ||
+            ggml_backend_sched_resident_find(sched, w) >= 0) {
+            continue;
+        }
+        const int i = ggml_backend_sched_resident_victim(sched);
+        if (i < 0) {
+            return;
+        }
+        ggml_backend_sched_resident_upload(sched, i, w, sched->res.epoch + 1);
+        sched->res.prefetched++;
+    }
+}
+
+void ggml_backend_sched_upload_stats(ggml_backend_sched_t sched, struct ggml_backend_sched_upload_stats * st) {
+    if (sched == NULL || st == NULL) { return; }
+    st->resident_bytes = sched->res.up_bytes;
+    st->resident_uploads = sched->res.up_n;
+    st->resident_hits = sched->res.hits;
+    st->resident_fallbacks = sched->res.fallbacks;
+    st->resident_prefetched = sched->res.prefetched;
+    st->sparse_bytes = sched->stat_sparse_bytes;
+    st->sparse_copies = sched->stat_sparse_n;
+    st->full_bytes = sched->stat_full_bytes;
+    st->full_copies = sched->stat_full_n;
+}
+
 static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t sched) {
     GGML_ASSERT(sched);
     struct ggml_backend_sched_split * splits = sched->splits;
@@ -1894,6 +2159,11 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         ggml_backend_buffer_t prefetch_saved_buffer = NULL;
         void * prefetch_saved_data = NULL;
         int lookahead_input_id = -1;
+        // 0029: the resident slot this split's weight is read from, with what to put back after the launch
+        int res_slot = -1;
+        ggml_tensor * res_input_cpy = NULL;
+        ggml_backend_buffer_t res_saved_buffer = NULL;
+        void * res_saved_data = NULL;
         if (lookahead[split_id].slot != -1) {
             split_prefetch_slot   = lookahead[split_id].slot;
             prefetch_input_cpy    = lookahead[split_id].input_cpy;
@@ -1938,6 +2208,34 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                     ggml_backend_event_wait(split_backend, sched->events[split_backend_id][sched->cur_copy]);
                 } else {
                     ggml_backend_synchronize(split_backend);
+                }
+
+                // 0029: layer-major prefill keeps the experts of a layer WHOLE in a slot across the graphs that read them
+                // (any MUL_MAT_ID of the split that reads it, not only the first node: the used-experts copy below
+                // needs the ids before the split runs, so it only takes a split that STARTS with the MUL_MAT_ID, and a
+                // MUL_MAT_ID in the middle of a split gets its weight copied whole, every time)
+                if (sched->res.on && !sched->callback_eval && split->graph.n_nodes > 0 && res_slot == -1 &&
+                    ggml_backend_buffer_get_usage(input->buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS &&
+                    ggml_backend_buffer_is_host(input->buffer)) {
+                    ggml_tensor * rnode = NULL;
+                    for (int n = 0; n < split->graph.n_nodes; n++) {
+                        if (split->graph.nodes[n]->op == GGML_OP_MUL_MAT_ID && split->graph.nodes[n]->src[0] == input_cpy) {
+                            rnode = split->graph.nodes[n];
+                            break;
+                        }
+                    }
+                    if (rnode != NULL && rnode->src[2]->ne[0]*rnode->src[2]->ne[1] >= 2*input->ne[2]) {
+                        const int rs = ggml_backend_sched_resident_acquire(sched, split_backend, input);
+                        if (rs >= 0) {
+                            res_slot         = rs;
+                            res_input_cpy    = input_cpy;
+                            res_saved_buffer = input_cpy->buffer;
+                            res_saved_data   = input_cpy->data;
+                            input_cpy->buffer = sched->res.slot[rs].buf;
+                            input_cpy->data   = ggml_backend_buffer_get_base(sched->res.slot[rs].buf);
+                            continue;
+                        }
+                    }
                 }
 
                 // mindcontrol-port: full-tensor prefetch for MoE expert weights during prefill.
@@ -2043,6 +2341,8 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                             // copy a bit extra at the to ensure there are no NaNs in the padding of the last expert
                             // this is necessary for MMQ in the CUDA backend
                             expert_size_copy + padding_end);
+                        sched->stat_sparse_bytes += expert_size_copy + padding_end;
+                        sched->stat_sparse_n++;
                     };
 
                     int id = 0;
@@ -2079,9 +2379,19 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                             ggml_backend_synchronize(split_backend);
                         }
                         ggml_backend_tensor_copy(input, input_cpy);
+                        if (ggml_backend_buffer_get_usage(input->buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS &&
+                            ggml_backend_buffer_is_host(input->buffer)) {
+                            sched->stat_full_bytes += ggml_nbytes(input);
+                            sched->stat_full_n++;
+                        }
                     }
                 }
             }
+        }
+
+        if (res_slot != -1) {
+            // 0029: the slot's upload runs on its own stream: the compute stream waits for it right before the launch
+            ggml_backend_event_wait(split_backend, sched->res.slot[res_slot].ready);
         }
 
         if (!sched->callback_eval) {
@@ -2096,6 +2406,14 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                 }
             }
             enum ggml_status ec = ggml_backend_graph_compute_async(split_backend, &split->graph);
+            if (res_slot != -1) {
+                // the kernels have captured the slot address at launch: put the staging copy back, and let the upload
+                // stream know when the slot may be written again
+                ggml_backend_event_record(sched->res.slot[res_slot].free, split_backend);
+                sched->res.slot[res_slot].used = true;
+                res_input_cpy->buffer = res_saved_buffer;
+                res_input_cpy->data   = res_saved_data;
+            }
             if (split_prefetch_slot != -1) {
                 // the kernels have captured the slot address at launch, safe to restore
                 ggml_backend_event_record(sched->prefetch_free[split_prefetch_slot], split_backend);
@@ -2269,6 +2587,7 @@ void ggml_backend_sched_free(ggml_backend_sched_t sched) {
             ggml_backend_event_free(sched->events[b][c]);
         }
     }
+    ggml_backend_sched_resident_release(sched);
     for (int i = 0; i < sched->prefetch_n_slots; i++) {
         if (sched->prefetch_slots[i]) { ggml_backend_buffer_free(sched->prefetch_slots[i]); }
         if (sched->prefetch_ready[i]) { ggml_backend_event_free(sched->prefetch_ready[i]); }

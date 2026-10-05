@@ -813,6 +813,17 @@ struct llm_graph_params {
 
     llm_graph_result * res;
 
+    // 0029, layer-major prefill (LLAMA_LAYER_MAJOR): a graph of the layers [lm_il0, lm_il1) only (lm_il1 == 0: the whole
+    // model, as always). Past layer 0 it starts from the rows of lm_h_in that belong to the ubatch (the persistent
+    // hidden-state buffer holds the wide residual of every token of the chunk), and short of the last layer it ends by
+    // copying the residual into the same rows of lm_h_out. Such a graph is never reused: each is built, allocated and
+    // fed once.
+    uint32_t       lm_il0     = 0;
+    uint32_t       lm_il1     = 0;
+    ggml_tensor *  lm_h_in    = nullptr;   // F32 [n_embd*hc, n_tokens of the chunk]
+    ggml_tensor *  lm_h_out   = nullptr;
+    uint32_t       lm_tok_off = 0;         // this ubatch's first row in both
+
     // return true if the "other" params would result in a graph with the same topology as with the current params
     //   having the same topology allows us to reuse the graph in some cases
     bool allow_reuse(const llm_graph_params & other) const {
@@ -1359,7 +1370,9 @@ struct llm_graph_context {
     // hybrid
     //
 
-    llm_graph_input_mem_hybrid * build_inp_mem_hybrid() const;
+    // 0029: attn = false / rs = false leave that half's inputs empty (a graph of one layer of the other kind: an input
+    // nothing reads is never allocated, and set_input would write to it)
+    llm_graph_input_mem_hybrid * build_inp_mem_hybrid(bool attn = true, bool rs = true) const;
     llm_graph_input_mem_hybrid_k * build_inp_mem_hybrid_k() const;
 
     llm_graph_input_mem_hybrid_iswa * build_inp_mem_hybrid_iswa() const;

@@ -465,6 +465,50 @@ def arms(n_cpu_moe: int = 42, cache_slots: int = 0, all_slots: dict | None = Non
                                         env={**table["cache-all-np1"]["env"], "LLAMA_PIN_EXPERTS": "0"},
                                         args={**table["cache-all-np1"]["args"], "--checkpoint-every": "16384"},
                                         checks=["needles", "corrupt", "speed"])
+    # PREFILL FIRST (the coordinator, 2026-10-02: the first prompt of a conversation, 24.6K tokens in 155-178 s, is the
+    # operator's main wait). `dep` is the deployed setting: unpinned, --checkpoint-every 16384, 70 slots, -np 1.
+    dep = dict(table["cache-all-np1-nopin"], checks=["prefill"])
+    table["pf-dep"] = dep
+    table["pf-int-off"] = dep          # the same arm under another name: the integration build with every port off
+    table["pf-dep-sched"] = dict(dep, env={**dep["env"], "GGML_SCHED_TIMING": "1"})
+    table["pf-dep-opt"] = dict(dep, env={**dep["env"], **opt})
+    table["pf-dep-nooffload"] = dict(dep, args={**dep["args"], "--no-op-offload": ""})
+    # -ub 1024: half the expert uploads per token; 1,898 MiB more compute buffer = 29 rows of 66.2 MiB: 70 - 29 = 41
+    # (FLASHNEXT_CACHE_SLOTS_UB1K_NP1; the arm's lowest free VRAM says whether it fits). `speed` = what that does to
+    # the decode
+    table["pf-ub1k"] = dict(dep, args={**dep["args"], "-ub": "1024", "--moe-expert-cache":
+                                       os.environ.get("FLASHNEXT_CACHE_SLOTS_UB1K_NP1", "41")},
+                            checks=["prefill", "speed", "needles", "corrupt"])
+    # 0002's ring: 2 staging slots of one expert tensor each (512.5 MiB = 8 rows: 62)
+    table["pf-ring"] = dict(dep, args={**dep["args"], "--prefetch-experts-slots": "2", "--moe-expert-cache":
+                                       os.environ.get("FLASHNEXT_CACHE_SLOTS_RING", "62")})
+    table["pf-qsa1"] = dict(dep, env={**dep["env"], "GGML_CUDA_QSA_PROMPT_ATTN": "1"},
+                            checks=["prefill", "needles", "corrupt"])
+    table["pf-qsa2"] = dict(dep, env={**dep["env"], "GGML_CUDA_QSA_PROMPT_ATTN": "2"},
+                            checks=["prefill", "needles", "corrupt"])
+    table["pf-ple"] = dict(dep, env={**dep["env"], "LLAMA_PLE_PREFETCH": "1"}, checks=["prefill", "needles", "corrupt"])
+    # the best combination: FLASHNEXT_PF_BEST_ENV (k=v,k=v) and FLASHNEXT_PF_BEST_ARGS (flag=value,flag=value)
+    best_env = dict(kv.split("=", 1) for kv in (os.environ.get("FLASHNEXT_PF_BEST_ENV") or "").split(",") if kv)
+    best_args = dict(kv.split("=", 1) for kv in (os.environ.get("FLASHNEXT_PF_BEST_ARGS") or "").split(",") if kv)
+    table["pf-best"] = dict(dep, env={**dep["env"], **best_env}, args={**dep["args"], **best_args},
+                            checks=["prefill", "speed", "needles", "corrupt", "kl"], kl_batch=4)
+    # 0029, LAYER-MAJOR PREFILL (LLAMA_LAYER_MAJOR=1; build int0029 = 0001-0029). The expert slots are device memory:
+    # LLAMA_LAYER_MAJOR_SLOTS x the largest expert tensor (256.25 MiB, docs/FLASH-NEXT.md 12.1): 6 = 1,537.5 MiB = 24
+    # rows of 66.2 MiB (70 - 24 = 46), 3 = 768.75 MiB = 12 rows (58); -b 8192 adds the residual buffers (2 x 40 KiB a
+    # token: 640 MiB at 8,192 against 160 at 2,048: 480 MiB = 8 rows more). FLASHNEXT_LM_ROWS_<tag> overrides each;
+    # the arm's lowest free VRAM says whether it fits. DEBUG=1: one line per batch (ms, bytes uploaded, hits)
+    lm = {**dep["env"], "LLAMA_LAYER_MAJOR": "1", "LLAMA_LAYER_MAJOR_DEBUG": "1"}
+    for tag, slots, b, rows in (("lm6", "6", "2048", "46"), ("lm3", "3", "2048", "58"),
+                                ("lm6-b8k", "6", "8192", "38"), ("lm3-b8k", "3", "8192", "50")):
+        rows = os.environ.get("FLASHNEXT_LM_ROWS_" + tag.replace("-", "_").upper(), rows)
+        table[f"pf-{tag}"] = dict(dep, env={**lm, "LLAMA_LAYER_MAJOR_SLOTS": slots},
+                                  args={**dep["args"], "-b": b, "--moe-expert-cache": rows},
+                                  checks=["prefill", "speed", "needles", "corrupt", "kl", "ckpt", "cancel"],
+                                  kl_batch=int(b), kl_ub=512)
+    # the ship candidate cand0029 ITSELF at the gated setting (the same arm under its own name)
+    table["pf-lm3-b8k-c29"] = table["pf-lm3-b8k"]
+    # the switch unset on the same build (the equivalence against cand0023's pf-dep)
+    table["pf-lm-off"] = dict(dep, checks=["prefill", "cancel"])
     # the prompt with 0021's mapped K/V, and with a 1,024-token ubatch (half the expert uploads per token; 1,898 MiB
     # more compute buffer = 29 cache rows of 66.2 MiB: 70 - 29 = 41 with the K/V on the card, 118 - 29 = 89 mapped)
     table["prefill-kv-np1"] = dict(table["kvcache-fit-np1"], checks=["prefill"])
@@ -721,7 +765,9 @@ def step_kl(name: str, arm: dict, out: str, base_logits: str, batch: int = 16, w
     textf = os.path.join(out, "kl-text.txt")
     if not os.path.exists(textf):
         open(textf, "w", encoding="utf-8").write(corpus()[: 4096 * 4 * 8])
-    cmd = [exe, "-m", SHARD1, "-f", textf, "-c", "4096", "--chunks", "8", "-b", str(batch), "-ub", str(batch),
+    # an arm's kl_ub: the ubatch, when the batch must hold several (0029's layer-major path needs >= 2 ubatches)
+    cmd = [exe, "-m", SHARD1, "-f", textf, "-c", "4096", "--chunks", "8", "-b", str(batch),
+           "-ub", str(arm.get("kl_ub") or batch),
            "-dev", "CUDA0", "-ngl", "999", "--n-cpu-moe", arm["args"].get("--n-cpu-moe", "42"),
            "-lm", "mmap", "--lazy-mode", "on", "--kl-divergence-base", base_logits]
     if not write_base:
@@ -1079,12 +1125,22 @@ def step_prefill(name: str, arm: dict, port: int, out: str) -> dict:
             row["warmup"] = {"prompt_n": w["prompt_n"], "prompt_tps": w["prompt_tps"]}
             mark = os.path.getsize(logp)
             for i in range(runs_n):
-                head = f"Run {name}-{k}k-{i}-{time.time_ns()}: read the following source.\n"
-                r = completion(srv.base, head + text[: k * 1024 * 4], 1, slot=0, fresh=True)
-                row["runs"].append({"prompt_n": r["prompt_n"], "prompt_tps": r["prompt_tps"]})
+                # the same prompts in every arm (cache_prompt off re-reads them whole), so the first token's top-5
+                # probabilities compare across arms: the prompt path's logits
+                head = f"Run {k}k-{i}: read the following source.\n"
+                r = _raw_completion(srv.base, head + text[: k * 1024 * 4], 1, fresh=True)
+                row["runs"].append({"prompt_n": r["prompt_n"], "prompt_tps": r["prompt_tps"],
+                                    "first_top": [(t["token"], round(t["logprob"], 4)) for t in r["first_top"]
+                                                  if t.get("logprob") is not None]})
             with open(logp, encoding="utf-8", errors="replace") as f:
                 f.seek(mark)
-                row.update(timing_tables(f.read().splitlines()))
+                tail = f.read().splitlines()
+                row.update(timing_tables(tail))
+                # 0029's per-batch lines (LLAMA_LAYER_MAJOR_DEBUG=1, or its slot setup at load): kept as written
+                lm_lines = [ln.split(" I ", 1)[-1].strip()[:300] for ln in tail
+                            if "ubatches," in ln or "ubatch by ubatch" in ln or "layer graphs" in ln]
+                if lm_lines:
+                    row["layer_major"] = lm_lines[-12:]
         except Exception as e:                                               # noqa: BLE001
             row["error"] = f"{type(e).__name__}: {e}"
         finally:
@@ -1187,6 +1243,53 @@ def step_ckpt(name: str, arm: dict, port: int, out: str) -> dict:
         rec["cold_runs_equal"] = cold_same
         rec["resumed_equals_cold"] = rec["B"]["content"] == rec["B_cold"]["content"]
         rec["PASS"] = bool(rec["reuse_PASS"] and (rec["resumed_equals_cold"] or not cold_same))
+    return rec
+
+
+LM_RE = re.compile(r"layer[- ]major.*", re.I)
+
+
+def step_cancel(name: str, arm: dict, port: int, out: str) -> dict:
+    """A client that hangs up in the middle of a long prompt, then asks again (the coordinator, 2026-10-02, for 0029:
+    a larger batch means a cancel mid-chunk). A ~25K prompt is streamed and the connection closed after
+    FLASHNEXT_CANCEL_AFTER seconds (default 20: inside the prompt at ~150-260 tok/s); then the SAME prompt (it must
+    finish, reusing what the slot kept), then a different one, then the first again cold-checked against a fresh
+    server is not repeated here: the greedy text of the retry is compared with a run that was never cancelled
+    (the first request of a second server)."""
+    import socket
+    rec: dict = {}
+    text = corpus()
+    p1 = "Cancel check.\n" + text[: 23 * 1024 * 4]
+    p2 = "Another prompt.\n" + text[3_000_000: 3_000_000 + 8 * 1024 * 4]
+    after = float(os.environ.get("FLASHNEXT_CANCEL_AFTER") or 20)
+    srv = None
+    try:
+        srv = Launched(name, arm, port, out)
+        body = json.dumps({"prompt": p1, "n_predict": 48, "cache_prompt": True, "temperature": 0.0, "top_k": 1,
+                           "seed": 0, "id_slot": 0, "stream": True}).encode()
+        s = socket.create_connection(("127.0.0.1", port), timeout=600)
+        s.sendall(b"POST /completion HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+                  + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+        time.sleep(after)
+        s.close()
+        rec["cancelled_after_s"] = after
+        time.sleep(2)
+        r1 = _raw_completion(srv.base, p1, 48)
+        r2 = _raw_completion(srv.base, p2, 48)
+        rec["retry_same"] = {k: r1[k] for k in ("cache_n", "prompt_n", "prompt_ms", "content")}
+        rec["then_other"] = {k: r2[k] for k in ("cache_n", "prompt_n", "prompt_ms", "content")}
+        rec["alive"] = ec.http("GET", srv.base + "/health", timeout=10)[0] == 200
+        rec.update(srv.stop())
+        srv = None
+        srv = Launched(name, arm, port, out)
+        r0 = _raw_completion(srv.base, p1, 48)
+        rec["never_cancelled"] = {k: r0[k] for k in ("cache_n", "prompt_n", "prompt_ms", "content")}
+        rec["retry_equals_uncancelled"] = r1["content"] == r0["content"]
+    except Exception as e:                                               # noqa: BLE001
+        rec["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        if srv is not None:
+            rec.update(srv.stop())
     return rec
 
 
@@ -1490,6 +1593,11 @@ def main(argv: list[str]) -> int:
                 pass
             elif "ckpt" in a.steps and "ckpt" in arm["checks"]:
                 r["ckpt"] = step_ckpt(n, arm, a.port, a.out)
+                save()
+            if "cancel" in a.steps and "cancel" in arm["checks"] and reuse("cancel"):
+                pass
+            elif "cancel" in a.steps and "cancel" in arm["checks"]:
+                r["cancel"] = step_cancel(n, arm, a.port, a.out)
                 save()
             if "prefill" in a.steps and "prefill" in arm["checks"] and reuse("prefill"):
                 pass

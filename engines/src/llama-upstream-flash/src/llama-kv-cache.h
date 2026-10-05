@@ -434,6 +434,11 @@ public:
     // see llama_kv_cache::get_prev_tokens()
     void get_prev_tokens(const llama_ubatch & ubatch, uint32_t n, std::vector<llama_token> & res) const;
 
+    // 0029: layer-major replay (llama_memory_context_i::lm_*): the cell range each ubatch's graph is built over
+    bool lm_supported() const override { return !ubatches.empty(); }
+    void lm_record() override;
+    void lm_seek(uint32_t i) override;
+
 private:
     llama_memory_status status;
 
@@ -466,4 +471,7 @@ private:
     // a heuristic, to avoid attending the full cache if it is not yet utilized
     // as the cache gets filled, the benefit from this heuristic disappears
     int32_t n_kv;
+
+    // 0029: n_kv as apply() left it for each ubatch (index = ubatch)
+    std::vector<int32_t> lm_n_kv;
 };

@@ -1,0 +1,26 @@
+====================================================================================================
+HARNESS SOAK  base http://127.0.0.1:1234  tier max  api chat  steps 12  system-tokens 26000  client-timeout 180s  (3.0 min)
+====================================================================================================
+  PASS    a cold_first_turn                    ttft 177.69 s, longest silence 5.07 s, swap 13.7 s
+
+PER-STEP TABLE (every agent step; proc% = processed/prompt; tail~ = estimated new tokens)
+       scn  ses  step  http  ttft_s  hb  silence  prompt  reused  processed  proc%  tail~  calls  tok/s      finish
+cold_first    A     1   200   177.7  35      5.1   24613       0      24613  100.0      -      2   37.3  tool_calls
+
+WORST SILENCE: 5.07 s in cold_first_turn/A #1 (to_first_event; client timeout 180 s)
+503 RESPONSES: 0   waits: none
+SWAPS: cold_first_turn/A#1 13.7s
+MEMORY (this machine): min commit available 69988 MiB of 114717, min physical available 13430 MiB
+
+--- a cold_first_turn: PASS
+    ok   HTTP 200 and the stream finished
+    ok   the longest silence is <= 10 s
+         longest silence 5.07 s (to_first_event); first event 5.07 s, first heartbeat 5.07 s, 35 heartbeats before the first token, client timeout 180 s
+    ok   an answer or a tool call arrives
+         content 66 chars, 2 tool calls, finish tool_calls
+    ok   served by the max tier's model
+         served by flash-next (expected flash-next)
+    note system+tools ~26070 estimated tokens (target 26000)
+    note the model swapped in: 13.7 s (first heartbeat 5.07 s)
+
+RESULT: 1 passed, 0 failed, 0 skipped, 0 not run

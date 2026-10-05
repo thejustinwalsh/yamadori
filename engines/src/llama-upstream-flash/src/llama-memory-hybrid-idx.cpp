@@ -659,6 +659,28 @@ bool llama_memory_hybrid_idx_context::apply() {
     return res;
 }
 
+bool llama_memory_hybrid_idx_context::lm_supported() const {
+    return llama_memory_hybrid_context::lm_supported() && (!ctx_idx || ctx_idx->lm_supported());
+}
+
+void llama_memory_hybrid_idx_context::lm_record() {
+    llama_memory_hybrid_context::lm_record();
+
+    if (ctx_idx) {
+        ctx_idx->lm_record();
+    }
+}
+
+void llama_memory_hybrid_idx_context::lm_seek(uint32_t i) {
+    llama_memory_hybrid_context::lm_seek(i);
+
+    if (ctx_idx) {
+        ctx_idx->lm_seek(i);
+    }
+
+    i_cur = i;
+}
+
 const llama_kv_cache_context * llama_memory_hybrid_idx_context::get_idx() const {
     return static_cast<const llama_kv_cache_context *>(ctx_idx.get());
 }

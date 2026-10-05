@@ -31,6 +31,10 @@
       # 0020: one graph per MTP verify-batch size, so the CUDA graphs replay instead of warming up every step (the gate's
       # gcache arm); 0 = llama.cpp's two arenas
       - "LLAMA_GRAPH_CACHE={{GRAPH_CACHE}}"
+      # 0029: a prompt batch runs layer by layer, so each layer's experts cross PCIe once per batch (-b), not once per
+      # 512-token ubatch; SLOTS = whole expert tensors kept on the card while a layer runs (0 = off)
+      - "LLAMA_LAYER_MAJOR={{LAYER_MAJOR}}"
+      - "LLAMA_LAYER_MAJOR_SLOTS={{LAYER_MAJOR_SLOTS}}"
     cmd: |
       ${server_upstream_moe}
       --port ${PORT}

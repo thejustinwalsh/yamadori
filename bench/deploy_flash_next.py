@@ -113,6 +113,10 @@ def values_from_gate(gate: dict, over: dict) -> tuple[dict, list[str]]:
          "KV_HOST_MAPPED": "1" if over.get("kv_host_mapped") else "0",
          # 0020: LLAMA_GRAPH_CACHE (the gate's gcache arm); 0 = off
          "GRAPH_CACHE": str(over.get("graph_cache") or 0),
+         # 0029: layer-major prefill (the gate's pf-lm arms); 0 = off. The slots default to 6 (the patch's own default)
+         # when the switch is on and no count is given
+         "LAYER_MAJOR": "1" if over.get("layer_major") else "0",
+         "LAYER_MAJOR_SLOTS": str(over.get("layer_major_slots") or (6 if over.get("layer_major") else 0)),
          # 0023: a context checkpoint every N prompt tokens (the gate's ckpt arm); empty = the flag is not passed
          # (an engine without 0023 does not know it)
          "CHECKPOINT": (f"--checkpoint-every {int(over['checkpoint_every'])}" if over.get("checkpoint_every") else ""),
@@ -440,6 +444,12 @@ def selftest() -> int:
     _, bg = fragment(read(FRAGMENT), vg, "C:/z/llama-upstream-flash-1/llama-server.exe")
     check("LLAMA_GRAPH_CACHE=0" in fq and "LLAMA_GRAPH_CACHE=8" in
           yaml.safe_load("models:\n" + bg)["models"]["flash-next"]["env"], "0020's switch fills the env line")
+    vl, _ = values_from_gate(gate, {"layer_major": True, "layer_major_slots": 3})
+    _, bl = fragment(read(FRAGMENT), vl, "C:/z/llama-upstream-flash-1/llama-server.exe")
+    el = yaml.safe_load("models:\n" + bl)["models"]["flash-next"]["env"]
+    check("LLAMA_LAYER_MAJOR=0" in fq and "LLAMA_LAYER_MAJOR_SLOTS=0" in fq
+          and "LLAMA_LAYER_MAJOR=1" in el and "LLAMA_LAYER_MAJOR_SLOTS=3" in el,
+          "0029's switch and slots fill the env lines (off by default)")
     vc, _ = values_from_gate(gate, {"checkpoint_every": 16384})
     _, bc = fragment(read(FRAGMENT), vc, "C:/z/llama-upstream-flash-1/llama-server.exe")
     check("--checkpoint-every" not in cq and "0023" not in bq
@@ -530,6 +540,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--mtp", action="store_true", help="the MTP draft layer (the gate's mtp arm)")
     ap.add_argument("--graph-cache", type=int, default=0,
                     help="LLAMA_GRAPH_CACHE (0020): graph arenas kept per verify-batch size; 0 = off")
+    ap.add_argument("--layer-major", action="store_true",
+                    help="LLAMA_LAYER_MAJOR=1 (0029): a prompt batch runs layer by layer (pair it with a larger -b)")
+    ap.add_argument("--layer-major-slots", type=int, default=0,
+                    help="LLAMA_LAYER_MAJOR_SLOTS (0029): whole expert tensors kept on the card per layer (the gate: 3)")
     ap.add_argument("--checkpoint-every", type=int, default=0,
                     help="--checkpoint-every N (0023): a context checkpoint every N prompt tokens; 0 = not passed. "
                          "Strata's value is 16384")
@@ -554,7 +568,8 @@ def main(argv: list[str]) -> int:
                                           "mtp": a.mtp, "mmproj": a.mmproj,
                                           "kv_host_mapped": a.kv_host_mapped, "cache_arm": a.cache_arm,
                                           "pin_arm": a.pin, "batch": a.batch, "graph_cache": a.graph_cache,
-                                          "checkpoint_every": a.checkpoint_every})
+                                          "checkpoint_every": a.checkpoint_every, "layer_major": a.layer_major,
+                                          "layer_major_slots": a.layer_major_slots})
     if why:
         print(json.dumps({"verdict": "REFUSED: the gate does not allow a deploy", "why": why}, indent=1))
         return 2

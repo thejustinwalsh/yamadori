@@ -407,11 +407,37 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
     int sections[4];
     std::copy(std::begin(hparams.rope_sections), std::begin(hparams.rope_sections) + 4, sections);
 
-    ggml_tensor * inpL = build_inp_embd(model.tok_embd);
-    cb(inpL, "model.input_embed", -1);
-    ggml_build_forward_expand(gf, inpL);
+    // 0029: the layers of this graph. The whole model unless layer-major prefill asked for a range
+    const bool     lm      = params.lm_il1 > 0;
+    const int      il_beg  = lm ? (int) params.lm_il0 : 0;
+    const int      il_end  = lm ? (int) params.lm_il1 : n_layer;
+    const bool     lm_last = il_end == n_layer;
 
-    auto * inp = build_inp_mem_hybrid();
+    GGML_ASSERT(il_beg < il_end && il_end <= n_layer);
+    GGML_ASSERT(!lm || il_beg == 0 || (params.lm_h_in != nullptr && (lm_last || params.lm_h_out != nullptr)));
+
+    bool any_attn = false;
+    bool any_recr = false;
+    bool any_ple  = false;
+    for (int il = il_beg; il < il_end; ++il) {
+        (hparams.is_recr(il) ? any_recr : any_attn) = true;
+        any_ple = any_ple || hparams.is_ple(il);
+    }
+
+    // rows [lm_tok_off, +n_tokens) of a persistent [n_embd*hc, n_chunk] hidden-state buffer
+    auto lm_rows = [&](ggml_tensor * buf) {
+        return ggml_view_2d(ctx0, buf, n_embd*hc, n_tokens, buf->nb[1], (size_t) params.lm_tok_off*buf->nb[1]);
+    };
+
+    ggml_tensor * inpL = nullptr;
+    if (il_beg == 0) {
+        inpL = build_inp_embd(model.tok_embd);
+        cb(inpL, "model.input_embed", -1);
+        ggml_build_forward_expand(gf, inpL);
+    }
+
+    // a range that holds no layer of a kind leaves that kind's inputs out: nothing would read (or allocate) them
+    auto * inp = build_inp_mem_hybrid(any_attn, any_recr);
 
     // qwen4exp always builds llama_memory_hybrid_idx, so this downcast is safe
     // the indexer cache inside it is absent when the GGUF has no indexer tensors
@@ -423,23 +449,29 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
                 "the indexer cache must track the attention cache cell for cell");
     }
 
-    ggml_tensor * inp_pos     = build_inp_pos();
-    ggml_tensor * inp_out_ids = build_inp_out_ids();
+    ggml_tensor * inp_pos     = any_attn ? build_inp_pos() : nullptr;
+    ggml_tensor * inp_out_ids = lm_last  ? build_inp_out_ids() : nullptr;
 
     ggml_tensor * ple_emb = nullptr;
-    if (hparams.ple_n_heads > 0) {
+    if (hparams.ple_n_heads > 0 && (!lm || any_ple)) {
         ple_emb = build_inp_ple(mctx_hyb);
         // make sure ple_emb and build_inp_embd are in the same graph split
         ggml_build_forward_expand(gf, ple_emb);
     }
 
-    // the wide residual starts as hc identical copies of the embedding
-    ggml_tensor * res_hc = ggml_repeat_4d(ctx0,
-            ggml_reshape_3d(ctx0, inpL, n_embd, 1, n_tokens),
-            n_embd, hc, n_tokens, 1);
-    cb(res_hc, "hc_init", -1);
+    ggml_tensor * res_hc = nullptr;
+    if (il_beg == 0) {
+        // the wide residual starts as hc identical copies of the embedding
+        res_hc = ggml_repeat_4d(ctx0,
+                ggml_reshape_3d(ctx0, inpL, n_embd, 1, n_tokens),
+                n_embd, hc, n_tokens, 1);
+        cb(res_hc, "hc_init", -1);
+    } else {
+        res_hc = ggml_reshape_3d(ctx0, lm_rows(params.lm_h_in), n_embd, hc, n_tokens);
+        cb(res_hc, "lm_hidden_in", il_beg);
+    }
 
-    for (int il = 0; il < n_layer; ++il) {
+    for (int il = il_beg; il < il_end; ++il) {
         res->t_layer_inp[il] = res_hc;
 
         if (hparams.is_ple(il)) {
@@ -490,6 +522,18 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
 
         // "l_last" is the layer output name that build_cvec and imatrix look for
         cb(res_hc, "l_last", il);
+    }
+
+    if (!lm_last) {
+        // 0029: this range ends mid-model; the residual goes to the persistent buffer the next range starts from
+        ggml_tensor * h = res_hc;
+        if (!ggml_is_contiguous(h)) {
+            h = ggml_cont(ctx0, h);
+        }
+        h = ggml_reshape_2d(ctx0, h, n_embd*hc, n_tokens);
+        cb(h, "lm_hidden_out", il_end - 1);
+        ggml_build_forward_expand(gf, ggml_cpy(ctx0, h, lm_rows(params.lm_h_out)));
+        return;
     }
 
     // export res_hc itself, never a reshape view: a pure view gets no backend assignment to read back.

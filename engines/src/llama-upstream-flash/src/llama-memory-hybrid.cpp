@@ -277,6 +277,23 @@ llama_memory_status llama_memory_hybrid_context::get_status() const {
     return status;
 }
 
+bool llama_memory_hybrid_context::lm_supported() const {
+    return status == LLAMA_MEMORY_STATUS_SUCCESS && !ubatches.empty() && ctx_attn->lm_supported() && ctx_recr->lm_supported();
+}
+
+void llama_memory_hybrid_context::lm_record() {
+    ctx_attn->lm_record();
+    ctx_recr->lm_record();
+}
+
+void llama_memory_hybrid_context::lm_seek(uint32_t i) {
+    GGML_ASSERT(i < ubatches.size());
+
+    ctx_attn->lm_seek(i);
+    ctx_recr->lm_seek(i);
+    i_next = i;
+}
+
 const llama_ubatch & llama_memory_hybrid_context::get_ubatch() const {
     assert(status == LLAMA_MEMORY_STATUS_SUCCESS);
     return ubatches[i_next];

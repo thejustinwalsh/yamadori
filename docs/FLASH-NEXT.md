@@ -933,3 +933,156 @@ bonsai-a4000 on the A4000).
 | 14 | A second conversation / a side call while flash-next holds the card | No `other_card` for flash-next: a second conversation gets 503 `conversation_at_capacity` with Retry-After (the owner's 60 s hold). Side calls and jjava go to bonsai-a4000 -- whose working set was paged out to ~50 MB by the pinned load, so its first answer pages back in. | The side call's latency right after a flash-next load, pinned vs not; the second conversation's 503 and its retry. |
 | 15 | An idle gap | `ttl: 0`: never unloaded; the slot keeps its cells. The watchdog polls `/health` (served by the HTTP thread during a decode). Nothing expires -- the "reused 0 after 2 h" was row 4. | A 30-minute gap, then the next step: `cache_n` as in row 5. |
 | 16 | The 1,024-token class of fault (0022) | Fixed for the MMQ src1 padding. Other first-use faults would show the same way: a 200 with 0 bytes (row 7) and an Xid 13 in the system log. | The soak's server log: no "CUDA error"; the system log: no nvlddmkm 13/153. |
+
+## 12. Layer-major prefill (design; 2026-10-02; prototype built offline as patch 0029, NOT pinned, NOT measured on the real model)
+
+The prompt path runs at 140-160 tok/s (6.3-6.5 ms a token; the engine profile of 2026-10-02, deployed setting, ~25K-token
+prompt, warm). This section reads where that time goes in the code, weighs the ways to cut it, and records the smallest
+prototype that tests the recommendation. Every number is labelled: measured (script / log), Strata's, llama.cpp's own, or
+derived (arithmetic shown). Line numbers are the vendored `llama-upstream-flash-int0028` tree, i.e. 0001-0028, before 0029.
+
+### 12.1 Where the time goes, from the code
+
+- **Who decides the upload.** `ggml_backend_sched_backend_id_from_cur` (`ggml/src/ggml-backend.cpp` :1046, cause "1.off") sends an
+  op whose weight is in host memory to the GPU when `ggml_backend_cuda_device_offload_op` says so: for MUL_MAT_ID that is
+  `op->ne[2] >= 32` tokens (`ggml-cuda.cu` :5831-5850; `GGML_OP_OFFLOAD_MIN_BATCH`, default 32, :6079). A ubatch of 512
+  tokens always qualifies; a batch's last ubatch of < 32 tokens does not (its experts run on the CPU, as today).
+- **One split per offloaded weight.** The split loop starts a new split at a node whose weight is on another backend when the
+  running split already has inputs (`need_new_split`, :1399-1418), and the previous offloaded weight is such an input: so each of
+  a layer's MUL_MAT_IDs (gate, up, down) is the FIRST node of its own split. A generated qwen4exp with separate gate/up
+  confirms it (below): in the normal path every expert weight takes the used-experts copy, none the whole-tensor one.
+- **The copy.** `ggml_backend_sched_compute_splits` (:1807), input loop :1921, the block at :1982-2070: for a split whose first node is
+  a MUL_MAT_ID with a host weight it reads the ids back (`ggml_backend_tensor_get_async` + `ggml_backend_synchronize`, :2014-2017: a
+  host-waits-for-GPU round trip per MUL_MAT_ID, 3 x 48 = 144 a ubatch), marks the used experts, and copies runs of consecutive
+  used experts (`copy_experts`, :2034-2046, + 512 bytes of padding for MMQ). **So it copies only the used experts** -- but with 512 tokens
+  x top-10 of 512 experts the chance a given expert is unused is (1 - 10/512)^512 = 4.1e-5 (0.02 experts a layer under uniform
+  routing; real routing is skewed, so some), i.e. nearly all. A weight that is not the first node of its split would be copied
+  whole and synchronously (:2071-2083); none of the experts is.
+- **The bytes.** `blk.N.ffn_{gate,up,down}_exps` of the IQ2_XS file (read from both shards): 35,454,976,000 B = 33.02 GiB = 35.45 GB
+  over 48 layers, 704.4 MiB a layer on average, 737.5 MiB the largest (gate 256.25 IQ2_S, up 256.25, down 225.0 Q2_0); the
+  largest single tensor is 268,697,600 B (256.2 MiB). The loader's "CPU model buffer size = 33,812.50 MiB" (section 11.1) is the same number.
+- **Arithmetic against the profile.** 2,348 ms of a 3,124 ms ubatch are outside the timed nodes (measured, engine profile);
+  35.45 GB / 2.348 s = 15.1 GB/s, against Strata's 14.1 GB/s H2D probe on this card at x8 (section 10.2: 35.45 / 14.1 = 2.51 s). The remaining
+  776 ms is the GPU's own work (1.6 ms a token x 512 = 819 ms, same profile). Taken together: a ubatch costs about C + U with C = 776 ms of
+  compute and U = 2,348 ms of expert upload (and its 144 syncs), and U does not depend on how many tokens the ubatch holds -- it is
+  paid per ubatch. (Section 8 reports 231-318 tok/s for cand0022 and section 11.1 131-158 for cand0023 from other scripts; the
+  model below is calibrated on the profile: 512 / 3.124 s = 164 tok/s.)
+- **What a ubatch needs from the memory.** `decode` (`llama-context.cpp` :1765) takes the batch's ubatches from `memory->init_batch` and runs
+  `process_ubatch` (:1403) on each: `mctx->apply()` (the KV cells: `llama_kv_cache::apply_ubatch` `llama-kv-cache.cpp` :1119; the
+  recurrent head/state-copy ids: `llama_memory_recurrent::find_slot` `llama-memory-recurrent.cpp` :505, `s_copy` :1346, which also
+  consumes a sequence's rollback index), then builds the WHOLE model's graph (qwen4exp.cpp :402-521, layer loop :443) over those
+  cells and runs it. The Gated DeltaNet state and the K/V are per layer, so a layer needs only its own earlier ubatches to have run.
+
+### 12.2 What Strata does (`Niko1221/Strata` @ d551edf, `C:/Users/jwals/octo/strata-src`)
+
+`src/prefill/prefill.cpp`: the prompt is cut into chunks of `m.T` tokens (8,192 in the claim; :752 `for (c0 ...; c0 += m.T)`); per chunk the
+embeddings and PLE rows of the WHOLE chunk are made first (:759-790), then **layers are the outer loop** (:855) and each layer runs
+its attention (GDN or QSA) and its MoE over the whole chunk with the experts of that layer streamed through a ring of expert
+slots (:798-826 builds the chunk's stream in layer-then-expert order; :854 primes the ring before layer 0; the copy of entry k+ring is
+issued as entry k is consumed, :1284-1312). The wide residual stays on the device between layers (one buffer set, ~680 KB of scratch a token
+of which the attention and MoE halves share ~260 KB, :355-359: 5.6 GB at 8,192 tokens, derived, their VRAM budget). Their measurement (Strata's, n=1):
+Q2_0, 8,192-token chunks, ring of 96 slots 1,153 tok/s, 384 slots 1,294 (:73-76: "the next layer's experts arrive during its attention half");
+the ring only engages from `STREAM_ALL_MIN` = 2,048 tokens (:71), because below that most experts are not routed. Each expert
+crosses PCIe once per chunk: that is the whole mechanism, and it is option (a) with the chunk as one batch per layer.
+
+### 12.3 The options
+
+Quantities used below, all from 12.1: U = 2,348 ms, C = 776 ms (per 512-token ubatch), N = ubatches per batch.
+Per token: no overlap `(N*C + U) / (512*N)`; the upload fully hidden behind compute `max(N*C, U) / (512*N)`.
+
+| N | no overlap: ms/token, tok/s | upload hidden: ms/token, tok/s |
+|---:|---|---|
+| 1 (today) | 6.10, 164 | 4.59, 218 |
+| 2 | 3.81, 263 | 2.29, 436 |
+| 4 (`-b 2048`, the deployed batch) | 2.66, 376 | 1.52, 660 |
+| 8 | 2.09, 479 | 1.52, 660 |
+| 16 (`-b 8192`) | 1.80, 555 | 1.52, 660 |
+| infinity | 1.52, 660 | 1.52, 660 |
+
+(The engine agent's ~0.3 ms a token of upload at 8K chunks is the N = 16 column: 2,348 / 8,192 = 0.29 ms. Not measured.)
+
+**(a) Layer-major execution.** *Changes:* the batch's ubatches go through the layers layer by layer: layer 0 for every ubatch, then layer 1, ...;
+a layer's experts are uploaded once and read by all its ubatch graphs. *VRAM:* the residual between layers, 2 x 40 KiB a token (hc 4 x n_embd
+2,560 x 4 B, ping-pong by layer parity): 160 MiB at `-b 2048`, 640 MiB at 8,192 (derived); the expert slots, 3 x 256.2 = 769 MiB for one
+layer, 6 x = 1,537 MiB with the next layer's upload in flight (derived from the tensor sizes); the compute buffer stays the ubatch's (no growth).
+*Host:* none beyond the `-b`-sized buffers a larger batch implies (the MTP target's unmasked hidden-state rows: 40 KiB a token, 320 MiB at 8,192).
+*Correctness:* below. *Estimate:* the table, N = 4 to 16: 376-555 tok/s without overlap, up to 660 with it (2.3-4x today).
+**(b) A bigger single ubatch.** `-ub 1024/2048/4096` has the same arithmetic (N = ub/512) and no new code. Its compute buffer
+grows 3.708 MiB a token: 1,871.61 MiB at 512 and 3,770.23 MiB at 1,024 (`C:/Users/jwals/octo/flashnext-gate-20260929/vram-cache48.log`,
+`vram-cache48-ub1024.log`: 3,770.23 - 1,871.61 = 1,898.62 MiB a 512 tokens, and the intercept is -27 MiB: it is all proportional) -- 14.8 bytes a
+cell a token at the reserved n_kv = 262,144, which is the worst-case `build_qsa_top_k` / `build_attn_qsa` graph (qwen4exp.cpp :952-968, :1020-1055):
+`expanded` [n_kv, n_tokens] f32 and its permuted copy, the f32 cast of the mask, the mask sum, `kq_mask_all` and `kq_mask_top_k`, ~3.7 f32 tensors
+live at the peak (derived). It is a reservation at n_ctx, not what a 25K prompt uses. **It can be avoided without changing results**: queries are
+independent rows, so the n_kv-wide part can be built in token slices that reuse one buffer (a 128-token slice is 475 MiB at any ub);
+`LLAMA_QSA_BLOCK_TOPK=1` removes `expanded` but not the masks. What remains is the rest of the layer's per-token scratch, which is not
+measured (the graph's MoE and DeltaNet tensors add up to roughly 0.5 MiB a token, derived, order of magnitude: ~1.1 GiB at 2,048, ~2.2 GiB at
+4,096). At the deployed 262K context `-ub 2048` is +5.6 GiB, `-ub 4096` +13.0 GiB (a 14.8 GiB compute buffer; section 9's "14.5 GB"): impossible as it is, and
+the card's lowest free is 1,289 MiB. *Estimate:* the table, N = 4 or 8, no overlap (the upload cannot overlap its own ubatch's compute).
+**(c) Make the 0002 ring hide the upload.** The ring (`--prefetch-experts-slots`, upstream #28414, `ggml-backend.cpp` :1837-1883) uploads the
+next weights while the current split computes. A layer's compute is 776 / 48 = 16.2 ms, its upload 2,348 / 48 = 48.9 ms: the ring can hide the
+compute behind the upload, not the upload behind the compute, so it is bounded by max(C, U) = 2,348 ms a ubatch = 512 / 2.348 = **218 tok/s
+(+33%)**, and it copies whole tensors (no saving where all experts are used). Built, never measured in the combined arm (section 10.4).
+**(d) Anything simpler in Strata.** No: Strata's order IS (a) (12.2); its extra is the ~5.6 GB of per-chunk scratch that lets the whole chunk be one batch
+per layer. Our version keeps the ubatch at 512 and pays for the order instead with per-layer graphs (0.04 ms to build, 0.04 to split and allocate,
+A4000, tiny model, n=1 each: ~0.1 ms a graph, 768 graphs an 8K batch = ~84 ms, under 1%).
+
+### 12.4 Recommendation
+
+**(a), at `-b 2048` first (N = 4) and `-b 8192` (N = 16) second, with the 0002 ring left off.** It is the only option that amortises the upload at the
+deployed 262K context without growing the compute buffer, its cost is a fixed ~0.9 GiB (3 slots + 160 MiB hidden) to ~1.7 GiB (6 slots, overlap)
+that comes out of the expert cache (66.2 MiB a slot row: 14 to 26 of its 70 rows; section 8's simulation puts 46 rows at a 56.4% hit rate against the measured 63-64% at 70: a decode trade for the operator, derived), and N
+is a flag (`-b`). (b) is the smaller change but needs the QSA slicing AND ~1-2 GiB of per-token scratch before it can leave 512; (c) is capped at +33%.
+**The smallest first step that proves the gain** needs no engine code: a prefill at `-ub 512/1024/2048 -c 16384` (the QSA reservation is then
+475 MiB at 2,048 tokens), n=3 warm, on the 5060 Ti. The model predicts 164 / 263 / 376 tok/s (N = 1, 2, 4, no overlap): if it holds, the
+upload is the cost and (a) removes it at any context. Then the prototype below at the deployed layout.
+
+### 12.5 What was built: patch 0029 (`engines/patches/llama-upstream-flash/0029-llama-layer-major-prefill.patch`, sha256 dfe4ed040c90eb0b01803f653bbd4b1d7892abbccd55dcd960a728be2c8e9a46; not in the manifest)
+
+Dev tree `C:/Users/jwals/engines/dev-layermajor` (int0028 + the patch; the base and the patch are two commits), built on the E-cores. The patch applies with
+`git apply --cached` on the repo's 0001-0028 (the result differs from int0028's tree only in `tests/test-moe-pcie-split.cpp` and
+`tests/test-moe-refill.cpp`, which the patches have moved on from). **Switch:** `LLAMA_LAYER_MAJOR` unset or 0 = today's code (the
+`GGML_SCHED_DEBUG=2` dump of `llama-bench -p 192 -n 4 -ub 64` on the A4000 with a generated qwen4exp is identical to int0028's: 454 splits, 18,560
+split/node lines after masking sizes); 1 = on where it gains (a GPU, experts in host memory, op offload, no `--prefetch-experts-slots`);
+2 = wherever it can run (the CPU test). `LLAMA_LAYER_MAJOR_SLOTS` (6; 3 = no overlap), `_MIN_UBATCHES` (2), `_DEBUG=1` (a line a batch: ms, MiB uploaded,
+hits, prefetched, host time a layer graph). qwen4exp only; the MTP context type, embeddings/pooling, backend samplers and layer-input taps take the old path.
+- **Execution.** `llama_context::decode_layer_major`: every ubatch is applied to the memory once, in order, with `lm_record()` keeping what its
+  graph reads (the K/V and indexer cell range; the recurrent head, rs_z and every `s_copy` id, incl. the one-shot rollback index);
+  then for each layer, for each ubatch, `lm_seek(i)` puts that back and `process_ubatch_range` builds, allocates, feeds and runs the graph of ONE layer
+  for it (never reused). Layer L of ubatch i therefore sees the cells and states the ubatch-by-ubatch path saw; ubatches after i may already be
+  in the cell array and are masked by position. `finish_ubatch` (logits, embeddings, `h_nextn`) is the old code after the last layer.
+- **Graph.** `llm_graph_params` carries a layer range; `qwen4exp::graph` starts a range past layer 0 from rows of a persistent device buffer and ends it by
+  copying the residual into the other of two ping-pong buffers; inputs a range does not read are not created.
+- **Scheduler.** `ggml-backend-lm.h`: weight-stationary slots. A split whose MUL_MAT_ID reads a host weight finds the tensor whole in a slot or uploads
+  it whole on a second stream (event to the compute stream); the driver names the next layer's weights after the first graph of a layer so the upload overlaps the
+  rest; a slot of the current layer is never reused. The ids readback and its sync are gone on a hit. Counters for the used-experts and whole-weight copies are always kept.
+- **Tests** (`tests/test-layer-major.cpp`, ctest `test-layer-major`; a generated qwen4exp: 8-12 layers, Gated DeltaNet + QSA, hyper connections, PLE, 16-64
+  experts, `tests/split_gate_up.py` makes the separate gate/up of the real files). The same batches in two contexts, the second with the switch on: a prompt
+  batch with an output on every token, a server-style batch (the last token only), an optional rollback of K positions with `n_rs_seq` snapshots
+  and a batch after it, generated tokens; logits, the serialized sequence state (K/V, indexer cells, recurrent state) and the MTP hidden states compared.
+  **CPU: 48 runs (6 seeds x 8 shapes: ubatch 20-128, 1-3 sequences, top-k 24-131,072, f16/q8_0 K/V, `n_rs_seq` 3-4, a batch cancelled by the abort callback) all
+  bit-exact, state byte-identical; A4000 (CUDA0, experts in host memory, f32 and Q4_0, fused and separate gate/up, 3-6 slots): 19 runs, also bit-exact** (NMSE 0; the
+  limit of test-llama-archs is 1e-4). A control the comparison must fail -- the ubatches of every layer past the first taken back to front -- fails it in
+  every run. On the A4000 a 401-token batch (6 full ubatches) copied 288.0 MiB of experts ubatch by ubatch and 48.0 MiB layer-major (24 uploads, 21 prefetched, 141 hits):
+  one ubatch's worth, as N = 6 predicts. These are correctness evidence on a small model: **no speed number from the real model or the 5060 Ti exists.** The
+  A4000 lane was already held by the coordinator; the tests ran for under a second each on `CUDA_VISIBLE_DEVICES` = the A4000's UUID, nothing was unloaded.
+
+### 12.6 What the GPU gate must measure
+
+1. **Off is off:** `GGML_SCHED_DEBUG=2` dump on the real model with the switch unset against cand0022/0023's (the claim for "off"), then KL (batch 4) and needles / corrupt with `-b 2048 LLAMA_LAYER_MAJOR=1`
+   (`llama-perplexity` at `-b 2048` goes through decode_layer_major): the real model's QSA/indexer path at 262K is tested only at 2^14 cells here.
+2. **Prefill speed, n=3 warm and cold** at ~1K / 8K / 32K, switch off vs on at `-b 2048` and `-b 8192`, deployed layout and flags, against 164 tok/s (the profile) and the 231-318 / 131-158 of sections 8 and 11.1; decode unchanged (1-token batches never take the new path). The pass rule from the model: >= 1.8x (>= 300 tok/s) at `-b 2048`
+   proves the upload amortises; between 1.2x and 1.8x, profile before concluding.
+3. **Does the upload overlap?** `LLAMA_LAYER_MAJOR_SLOTS=3` (none) against 6; the 0017 profile (sched `copy` / `other` / GPU wait) with the switch on. 0024's A4000 run found that on WDDM the compute stream waits for work queued on a second stream (a step took
+   ~0.9 s behind 600 x 256 MiB device copies): the first thing to look at. With `LLAMA_PIN_EXPERTS=0` the prefetch copies read pageable memory and block the calling thread for the copy (~25 ms a 256 MiB tensor at 11 GB/s): expect the no-overlap column.
+4. **VRAM:** lowest free MiB with 3 and 6 slots at `-b 2048` / `8192` (the log line `layer-major prefill: hidden-state buffers ... expert slots ...`), and the cache slot rows that still fit; decode tok/s and hit rate at that row count.
+5. **MTP and checkpoints:** draft acceptance after a layer-major prompt (the `h_nextn` rows) in its usual 0.6-0.9; `--checkpoint-every` (0023) checkpoints taken after a layer-major batch restore bit-identically; a client hang-up mid-batch (the cancel is taken between decode calls: ~15 s of prefill at 8,192 tokens and ~550 tok/s) and the retry.
+6. **The tail:** the last ubatch of < 32 tokens runs its experts on the CPU (as today) and the last layer's FFN sees only the output rows (one token in a server batch): the chunk's last ~1/48 layer and the tail cost, in ms.
+
+### 12.7 Risks
+
+- **The gain is an estimate**; the model has one calibration point (N = 1 -> 164 tok/s) and assumes U is pure copy and fully paid per ubatch. If routing is more skewed than assumed, U is smaller and the gain too.
+- **VRAM**: +0.9 to +1.7 GiB against 1,289 MiB free means fewer expert-cache rows, a decode cost the operator decides. The compute buffer still reserves the scheduler's own copy of each offloaded weight (up to 737 MiB of the 1,871 MiB, derived) although a slot-backed split never touches it: a follow-up could give those copies no space.
+- **Overlap is unproven** (WDDM, pageable memory, above). Without it the numbers are the left column: still 2.3x at `-b 2048` and 3.4x at 8,192 over today.
+- **A larger `-b` is a larger unit of work**: a cancelled batch costs a whole chunk, and a cancel in the middle of a chunk that did not start at position 0 leaves recurrent state that cannot be rolled back (as today within a ubatch).
+- **Maintenance**: the range graph is qwen4exp-only code in `qwen4exp.cpp` and `llama-graph`, and three new virtuals on the memory context; an upstream change to that graph or to the hybrid memory has to keep `lm_record` / `lm_seek` and the range builder in step (the test catches a divergence, on the CPU, exactly).
+- **PLE** (0028): the gather of ubatch i's rows now happens at layer 1 after layer 0 of the whole batch; the prefetch thread's "later ubatches first" order is unchanged, the first ubatch's cold rows are still on the critical path.

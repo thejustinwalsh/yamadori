@@ -64,6 +64,16 @@ struct llama_memory_context_i {
 
     // get the status of the memory context - used for error handling and checking if any updates would be applied
     virtual llama_memory_status get_status() const = 0;
+
+    // 0029, layer-major prefill (LLAMA_LAYER_MAJOR): the ubatches of a batch are applied once each, in order, and the
+    // graphs of every later layer are built and fed for ubatch i after ubatch i + 1.. were applied. lm_record() right
+    // after apply() keeps what the graph of the current ubatch reads from the memory (cell range, recurrent head and
+    // the state-copy ids), lm_seek(i) puts that back for ubatch i without applying anything. Only the hybrid context of
+    // qwen4exp implements it.
+    virtual bool     lm_supported() const { return false; }
+    virtual uint32_t lm_count() const { return 0; }    // ubatches in the context
+    virtual void     lm_record() {}
+    virtual void     lm_seek(uint32_t i) { (void) i; }
 };
 
 using llama_memory_context_ptr = std::unique_ptr<llama_memory_context_i>;

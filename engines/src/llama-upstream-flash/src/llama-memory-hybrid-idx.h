@@ -131,6 +131,11 @@ public:
     bool next()  override;
     bool apply() override;
 
+    // 0029: layer-major replay, see llama_memory_context_i (also the indexer cache's cell range and the stream count)
+    bool lm_supported() const override;
+    void lm_record() override;
+    void lm_seek(uint32_t i) override;
+
     //
     // llama_memory_hybrid_idx_context specific API
     //

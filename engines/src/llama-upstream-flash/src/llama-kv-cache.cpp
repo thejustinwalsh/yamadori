@@ -2855,6 +2855,22 @@ bool llama_kv_cache_context::apply() {
     return true;
 }
 
+void llama_kv_cache_context::lm_record() {
+    GGML_ASSERT(i_cur < ubatches.size());
+
+    if (lm_n_kv.size() <= i_cur) {
+        lm_n_kv.resize(i_cur + 1, 0);
+    }
+    lm_n_kv[i_cur] = n_kv;
+}
+
+void llama_kv_cache_context::lm_seek(uint32_t i) {
+    GGML_ASSERT(i < ubatches.size() && i < lm_n_kv.size());
+
+    i_cur = i;
+    n_kv  = lm_n_kv[i];
+}
+
 llama_memory_status llama_kv_cache_context::get_status() const {
     return status;
 }

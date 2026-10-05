@@ -1,0 +1,44 @@
+{
+ "base": "http://127.0.0.1:1234",
+ "tier": "max",
+ "out": "bench/results/harness_soak/20261002-b",
+ "scenarios": [
+  {
+   "key": "a",
+   "name": "cold_first_turn",
+   "status": "PASS",
+   "headline": "ttft 177.69 s, longest silence 5.07 s, swap 13.7 s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "system+tools ~26070 estimated tokens (target 26000)",
+    "the model swapped in: 13.7 s (first heartbeat 5.07 s)"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "HTTP 200 and the stream finished",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "the longest silence is <= 10 s",
+     "detail": "longest silence 5.07 s (to_first_event); first event 5.07 s, first heartbeat 5.07 s, 35 heartbeats before the first token, client timeout 180 s"
+    },
+    {
+     "ok": true,
+     "text": "an answer or a tool call arrives",
+     "detail": "content 66 chars, 2 tool calls, finish tool_calls"
+    },
+    {
+     "ok": true,
+     "text": "served by the max tier's model",
+     "detail": "served by flash-next (expected flash-next)"
+    }
+   ]
+  }
+ ],
+ "n_503": 0,
+ "waits": []
+}

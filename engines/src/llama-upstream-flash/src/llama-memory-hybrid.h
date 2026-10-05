@@ -127,6 +127,12 @@ public:
     const llama_kv_cache_context * get_attn() const;
     const llama_memory_recurrent_context * get_recr() const;
 
+    // 0029: layer-major replay, see llama_memory_context_i
+    bool     lm_supported() const override;
+    uint32_t lm_count() const override { return (uint32_t) ubatches.size(); }
+    void     lm_record() override;
+    void     lm_seek(uint32_t i) override;
+
 private:
     // the index of the next ubatch to process
     size_t i_next = 0;

@@ -310,6 +310,8 @@ endif()
 llama_build(test-backend-ops.cpp)
 
 llama_build_and_test(test-tiled-mulmat.cpp)
+# 0029: layer-major prefill against the ubatch-by-ubatch path, on a generated qwen4exp (CPU, exact)
+llama_build_and_test(test-layer-major.cpp)
 llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
 llama_build_and_test(test-autorelease.cpp       LABEL "model")
 llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
