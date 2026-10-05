@@ -35,6 +35,15 @@ export type KvSplit = {
   childRole: string | null;
   /** what the child slot serves, as the server lists it; empty when not reported */
   childServes: string[];
+  /** the model server's slot count (2026-10-05); null when the server does not say */
+  slots: number | null;
+  /**
+   * The card runs ONE conversation alone (-np 1: a locked model, layout v3): the pool has no child slot, so the
+   * child part is not drawn and its tokens are not counted -- jjava and side calls are on bonsai-a4000.
+   */
+  noLane: boolean;
+  /** the model whose pool this is (the one on the card), when the server says */
+  model: string | null;
 };
 
 /** What each part of the split is called, and what it is for. */
@@ -72,13 +81,18 @@ export function kvSplit(c: ContextPool | null | undefined): KvSplit | null {
     helpers = helper > 0 && rest > 0 && rest % helper === 0 ? rest / helper : helper > 0 ? 1 : 0;
   }
   const layout: KvLayout | null = c.layout === 'cap' || c.layout === 'split' ? c.layout : null;
+  const slots = finite(c.slots) && c.slots > 0 ? Math.floor(c.slots) : null;
+  const noLane = layout === 'cap' && slots === 1;
   return {
     pool,
     main,
-    helper,
-    helpers,
+    helper: noLane ? 0 : helper,
+    helpers: noLane ? 0 : helpers,
     helpersReported: reported,
-    reserve,
+    reserve: noLane ? Math.max(pool - main, 0) : reserve,
+    slots,
+    noLane,
+    model: typeof c.model === 'string' && c.model ? c.model : null,
     gib: finite(c.gib) ? c.gib : 0,
     layout,
     capSource: typeof c.cap_source === 'string' && c.cap_source ? c.cap_source : null,
@@ -96,6 +110,18 @@ export function kvSplit(c: ContextPool | null | undefined): KvSplit | null {
 export function kvNames(kv: KvSplit): KvNames {
   const role = kv.childRole ?? 'helper';
   const serves = kv.childServes.length ? kv.childServes.join(', ') : null;
+  if (kv.noLane) {
+    return {
+      main: 'MAIN · THE CONVERSATION',
+      mainWhy: `the whole pool: ${kv.model ?? 'the model'} runs one conversation alone on its card (-np 1, locked)${kv.capSource ? ` · ${kv.capSource}` : ''}`,
+      helper: 'CHILD · NONE',
+      helperWhy: 'no lane on this card: jjava and side calls run on bonsai-a4000 (the A4000)',
+      helperRole: 'none',
+      reserve: 'SECOND CONVERSATION',
+      reserveWhy: "a second conversation runs on the other card (bonsai-a4000), not in this pool",
+      tag: 'ONE CONVERSATION',
+    };
+  }
   if (kv.layout === 'cap') {
     return {
       main: 'MAIN · VRAM LINE',

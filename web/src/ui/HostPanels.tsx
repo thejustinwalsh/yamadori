@@ -75,6 +75,11 @@ export function ServingPanel({
                 </Chip>
               ))}
               {sv.switching_to ? <Chip tone="rose">SWITCHING TO {sv.switching_to}</Chip> : null}
+              {sv.swap_now ? (
+                <Chip tone="rose">
+                  SWAP {(sv.swap_now.from.join(', ') || 'nothing').toUpperCase()} → {sv.swap_now.to.toUpperCase()} · {sv.swap_now.phase === 'waiting' ? 'WAITING FOR THE WORK IN FLIGHT' : 'LOADING'} · {ago(now - sv.swap_now.since)}
+                </Chip>
+              ) : null}
               <Chip tone="muted">LAST MAX {sv.last_max_end ? `${ago(now - sv.last_max_end)} AGO` : '—'}</Chip>
               <Chip tone="muted">SWAP BACK {sv.idle_s == null ? 'ON THE NEXT NON-MAX REQUEST' : `AFTER ${n(sv.idle_s)} S IDLE`}</Chip>
             </div>

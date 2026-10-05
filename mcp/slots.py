@@ -1802,6 +1802,64 @@ def after_helper_run(what: str) -> dict | None:
                         f"second brain: {what} ended")
 
 
+def holds() -> dict:
+    """Who owns each card's one conversation, for the dashboard (read only, nothing decides from it): the main
+    card's owner (the conversation on slot 0 while it has a request in flight or was active less than
+    PRIMARY_HOLD_S ago) and the other card's, each {owner (first 8 characters), busy, idle_s, hold_s, rest_s}, None
+    when nobody holds it. Only meaningful inside the proxy, where the pins live. `one_conversation` says whether
+    the rule is in force (the served /props says 1 or 2 slots; None while the count has not been read: a view
+    never makes that read, count() would ask a server)."""
+    now = time.time()
+    with _lock:
+        out: dict = {"hold_s": PRIMARY_HOLD_S, "one_conversation": one_conversation(_n) if _n else None,
+                     "main": None, "other": None,
+                     "other_model": _other.get("model")}
+        for name, (k, busy, since) in (("main", _owner_of_card(now)), ("other", _other_owner(now))):
+            if k:
+                out[name] = {"owner": k[:8], "busy": bool(busy), "idle_s": round(since, 1),
+                             "hold_s": PRIMARY_HOLD_S, "rest_s": _rest_of_hold(busy, since)}
+    return out
+
+
+def occupants() -> dict:
+    """What each slot holds, for the dashboard (read only, nothing decides from it): the conversation pinned to
+    each slot of the MAIN card (`main`: slot -> {conv, busy, idle_s, held, rest_s}) and the other card's owner on
+    its conversation slot (`other`: {slot, conv, busy, idle_s, held, rest_s}). `conv` is the first 8 characters of
+    the conversation's key, `idle_s` the seconds since its latest activity (None when this process has not seen
+    one: a pin restored at a restart), `held` whether the one-conversation hold still keeps the card for it
+    (slot 0 only; None elsewhere) and `rest_s` what is left of that hold (0 when it has ended, None while a
+    request is in flight). Unlike holds(), an owner past its hold is still listed: its cells are still there.
+    Only meaningful inside the proxy, where the pins live."""
+    now = time.time()
+    out: dict = {"hold_s": PRIMARY_HOLD_S, "main": {}, "other": None, "other_model": _other.get("model")}
+    with _lock:
+        for k, s in _pins.items():
+            if k == HELPER:
+                continue
+            ended = _last_end.get(s, 0.0)
+            if _restore_stamp.get(s) == ended:
+                ended = 0.0
+            last = max(ended, _used.get(k, 0.0), _last_seen.get(k, 0.0))
+            busy = _busy.get(s, 0) > _warming.get(s, 0)
+            idle = round(now - last, 1) if last else None
+            row = {"conv": k[:8], "busy": bool(busy), "idle_s": idle, "held": None, "rest_s": None}
+            if s == 0:
+                row["held"] = bool(busy or (idle is not None and idle < PRIMARY_HOLD_S))
+                row["rest_s"] = (None if busy else
+                                 max(0, int(PRIMARY_HOLD_S - idle + 0.999)) if idle is not None else 0)
+            out["main"][s] = row
+        k = _other.get("owner")
+        if k:
+            busy = _other["busy"] > 0
+            last = max(_other["last_end"], _last_seen.get(k, 0.0))
+            idle = round(now - last, 1) if last else None
+            out["other"] = {"slot": OTHER_CONV_SLOT, "conv": k[:8], "busy": bool(busy), "idle_s": idle,
+                            "held": bool(busy or (idle is not None and idle < PRIMARY_HOLD_S)),
+                            "rest_s": (None if busy else
+                                       max(0, int(PRIMARY_HOLD_S - idle + 0.999)) if idle is not None else 0)}
+    return out
+
+
 def snapshot() -> dict:
     with _lock:
         return {"slots": _n, "source": _n_source,

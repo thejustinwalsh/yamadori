@@ -112,19 +112,25 @@ def test_the_fixture_cannot_reach_a_server():
     r = vitals.slots()
     check(r["ok"] is False and "blocked" in r["error"], "an unreachable server is ok: False, not a raise", str(r))
     check(any(u.endswith("/slots") for u in _leaks), "and the read went to /slots", str(_leaks[-3:]))
-    # Why it does not answer (2026-09-28, the Flash-Next gate): a bench
-    # window's pause record on the gpu lane is named in the error, the
-    # underlying failure kept as `cause`.
+    # Why it does not answer, in plain words (2026-10-05: the line read "bonsai is off the card: <the coordinator's
+    # note> holds it" -- a PAUSED JOB LANE named as the card's holder). Nothing loaded: say so, and say the lanes'
+    # pause is a pause on the worker's queue, not a hold on the card.
     import jobs
     real = jobs.paused
-    jobs.paused = lambda lane: {"why": "Flash-Next gate (bench/flashnext_gate.py)"} if lane == "gpu" else None
+    jobs.paused = lambda lane: ({"by": "coordinator", "why": "operator sessions 2026-10-02: held until the skills window",
+                                 "since": 1.0, "until": 4102444800.0} if lane == "gpu" else None)
+    _running([])
     try:
         r = vitals.slots()
     finally:
         jobs.paused = real
-    check(r["ok"] is False and r.get("off_card") is True
-          and "Flash-Next gate" in r["error"] and "blocked" in r.get("cause", ""),
-          "a bench window holding the card is named, not a bare timeout", str(r))
+        _running(None)
+    check(r["ok"] is False and r.get("off_card") is True and "no main model is loaded" in r["error"]
+          and "blocked" in r.get("cause", ""),
+          "nothing loaded: named as that, the underlying failure kept as `cause`", str(r))
+    check("holds it" not in r["error"] and "paused by coordinator" in r["error"]
+          and "not held by it" in r["error"] and "operator sessions" not in r["error"],
+          "a paused job lane is said as a pause on the worker's queue, never as the card's holder", str(r))
     _leaks.clear()
 
 
@@ -384,9 +390,8 @@ def test_max_mode_slots_and_off_card():
         url, model = vitals._slots_target()
         check(url == "http://127.0.0.1:10009/slots" and model == "flash-next",
               "while the max model holds the card /slots is read from its port", url)
-        why = vitals.off_card_why()
-        check(why is not None and "max mode (flash-next)" in why,
-              "and the main model's absence is named as max mode", str(why))
+        check(vitals.off_card_why() is None,
+              "a ready max model is the card's model: nothing is 'off the card'", str(vitals.off_card_why()))
         _running([{"model": "bonsai", "state": "ready", "proxy": "http://127.0.0.1:10001"}])
         check(vitals._slots_target() == (vitals.SLOTS_URL, vitals.MAIN_MODEL),
               "the main model on the card: its own /slots")

@@ -14,6 +14,7 @@ import { CHANNELS, inertChannels, treeParams, treeState } from '../mapping';
 import { hex32 } from '../prng';
 import { growSkeleton, limbSeeds } from '../skeleton';
 import type { TreeLayer } from './Scene';
+import { LoadoutCard } from './LoadoutCard';
 import { GpuCard, KvCard, QueueCard, RateCard, SeedCard, SlotsCard, StrataCard, telemetry, ToolsCard } from './Telemetry';
 
 const BonsaiCanvas = lazy(() => import('./Scene').then((m) => ({ default: m.BonsaiCanvas })));
@@ -205,13 +206,20 @@ export function Tokonoma({ vitals, datasets, fill }: { vitals: Vitals | null; da
         </div>
       </div>
       <div {...stylex.props(telemetry.grid)}>
-        <SlotsCard slots={pulse?.slots ?? vitals?.slots} lanes={pulse?.lanes ?? vitals?.lanes} context={pulse?.context ?? vitals?.context} since={since} />
+        <SlotsCard
+          slots={pulse?.slots ?? vitals?.slots}
+          lanes={pulse?.lanes ?? vitals?.lanes}
+          context={pulse?.context ?? vitals?.context}
+          since={since}
+          view={pulse?.cards ?? vitals?.cards}
+        />
+        <LoadoutCard view={pulse?.cards ?? vitals?.cards} />
         <ToolsCard tools={pulse?.tools ?? vitals?.tools} since={since} now={now} />
         <RateCard history={history} current={tps} />
         {gpus.map((g) => (
           <GpuCard key={g.index} g={g} />
         ))}
-        <KvCard context={pulse?.context ?? vitals?.context} />
+        <KvCard context={pulse?.context ?? vitals?.context} view={pulse?.cards ?? vitals?.cards} />
         <StrataCard strata={pulse?.strata ?? vitals?.strata} />
         <QueueCard queue={pulse?.queue ?? vitals?.queue} />
         <SeedCard seed={pulse?.seed ?? vitals?.seed} />

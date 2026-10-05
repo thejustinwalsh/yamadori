@@ -327,55 +327,128 @@ def _with_line(ctx: dict) -> dict:
         line = getattr(budget, "_LINE", None)
     except Exception:                                            # noqa: BLE001
         line = None
+        budget = None
+    n = getattr(budget, "_SLOTS", None) if budget is not None else None
     if isinstance(ctx, dict) and "error" not in ctx:
-        ctx = dict(ctx, vram_line=line if isinstance(line, int) else None)
+        ctx = dict(ctx, vram_line=line if isinstance(line, int) else None,
+                   slots=n if isinstance(n, int) and n > 0 else None)
     return ctx
 
 
+def local_url(url: str) -> str:
+    """llama-swap reports a model's address as http://localhost:<port>. On this machine `localhost` tries IPv6
+    first and costs 200-800 ms a call (power.py measured it: curl 0.21 s vs 0.002 s for 127.0.0.1) -- most of the
+    1 s /slots timeout; llama-server listens on 127.0.0.1."""
+    return str(url or "").rstrip("/").replace("://localhost:", "://127.0.0.1:")
+
+
+def default_model() -> str:
+    """The default main model: the tier table's (max_mode.MAIN) when it is on, else YAMADORI_MODEL."""
+    mm = _max_mode()
+    if mm is not None and getattr(mm, "ENABLED", False):
+        return str(getattr(mm, "MAIN", "") or MAIN_MODEL)
+    return MAIN_MODEL
+
+
+def main_models() -> list[str]:
+    """The models that can hold the main card: the table's main models when it is on (bonsai, mirai-s,
+    flash-next), else the one main model. Highest tier first."""
+    mm = _max_mode()
+    if mm is not None and getattr(mm, "ENABLED", False):
+        names = [str(m) for m in (list(getattr(mm, "MODELS", None) or []) + [getattr(mm, "MAX", "")]) if m]
+        names.append(default_model())
+        return sorted(set(names), key=lambda x: -int(mm.rank(x)))
+    return [MAIN_MODEL]
+
+
+def card_row(rows: list[dict] | None = None) -> dict | None:
+    """The llama-swap /running row of the model that is on the MAIN card now, whichever it is (bonsai, mirai-s,
+    flash-next: THE LOADED MODEL, not an assumed one -- 2026-10-05, the operator: "Flash-Next is not showing
+    anything"). A ready one wins over one still starting; of several, the highest tier. None when none is loaded
+    or /running could not be read. Reads /running only (cached), never a model."""
+    rows = running_rows() if rows is None else rows
+    if not rows:
+        return None
+    mine = main_models()
+    live = [r for r in rows if str(r.get("model")) in mine and _live_row(r)]
+    if not live:
+        return None
+    mm = _max_mode()
+
+    def key(r: dict):
+        rank = int(mm.rank(str(r.get("model")))) if mm is not None and getattr(mm, "ENABLED", False) else 0
+        return (str(r.get("state") or "ready") == "ready", rank)
+    return max(live, key=key)
+
+
 def main_loaded() -> bool | None:
-    """Is the main model loaded, per llama-swap's GET /running (which never
+    """Is a main model loaded, per llama-swap's GET /running (which never
     loads anything)? True / False, None when /running cannot be read."""
     rows = running_rows()
     if rows is None:
         return None
-    return any(str(r.get("model")) == MAIN_MODEL and _live_row(r)
-               for r in rows)
+    return card_row(rows) is not None
 
 
-def cached_context(how: str = "cached: the pool this process last read"
-                   ) -> dict:
+def cached_context(how: str = "cached: the pool this process last read",
+                   model: str | None = None) -> dict:
     """budget.budgets() over the pool this process last READ; asks nothing.
-    An explained unknown when no pool was ever read."""
+    An explained unknown when no pool was ever read. `model`: a main model
+    that is not the default (flash-next, mirai-s) has its own window in the
+    tier table (budget.model_window), read from nothing: its budgets are
+    that window's."""
     try:
         import budget
+        if model and model != default_model():
+            if budget.model_window(model):
+                return dict(_with_line_of(budget.budgets(model=model)), model=model,
+                            pool_read=f"the tier table's window for {model} (mcp/tier_models.yaml); "
+                                      "nothing was asked")
+            return {"error": f"{model} is on the card and the tier table declares no window for it",
+                    "model": model, "pool_read": how}
         pool = budget.known_pool()
         if pool is None:
-            return {"error": f"the pool is not known yet: {MAIN_MODEL} has not "
+            return {"error": f"the pool is not known yet: {default_model()} has not "
                              "been read by this process and is not loaded "
                              "(a view never loads a model)",
                     "pool_read": how}
-        return dict(_with_line(budget.budgets(pool)), pool_read=how)
+        return dict(_with_line(budget.budgets(pool)), model=default_model(), pool_read=how)
     except Exception as e:                                       # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def _with_line_of(ctx: dict) -> dict:
+    """A table model's window has no served /props line, and its slot count is the window's own (`slots`: the
+    table's, which the deploy wrote from the same -np it launched)."""
+    if not (isinstance(ctx, dict) and "error" not in ctx):
+        return ctx
+    w = ctx.get("model_window") or {}
+    return dict(ctx, vram_line=None, slots=w.get("slots") if isinstance(w.get("slots"), int) else None)
+
+
 def context_pool() -> dict:
     """budget.budgets() for the dashboard. A VIEW NEVER LOADS A MODEL
-    (2026-09-30): the pool is re-read only from the main model's own server
-    (budget.refresh_direct: never llama-swap's /upstream) and only while
-    llama-swap's /running lists it; otherwise the pool this process last
-    read, or an explained unknown. `pool_read` says which."""
+    (2026-09-30): the default model's pool is re-read only from ITS OWN
+    server -- the port llama-swap's /running reports for it (budget.
+    refresh_direct; never llama-swap's /upstream) -- and only while /running
+    lists it; another main model on the card (flash-next, mirai-s) is its
+    table window, read from nothing; otherwise the pool this process last
+    read, or an explained unknown. `pool_read` says which, `model` whose."""
     try:
         import budget
-        loaded = main_loaded()
-        if loaded:
-            _, how = budget.refresh_direct()
-        elif loaded is None:
-            how = ("cached: llama-swap /running could not be read, so nothing "
-                   "was asked (a view never loads a model)")
-        else:
-            how = (f"cached: {MAIN_MODEL} is not loaded (llama-swap /running), "
-                   "so nothing was asked")
+        rows = running_rows()
+        row = card_row(rows) if rows is not None else None
+        if rows is None:
+            return cached_context("cached: llama-swap /running could not be read, so nothing "
+                                  "was asked (a view never loads a model)")
+        if row is None:
+            return cached_context("cached: the main model is not loaded (llama-swap /running lists none), so nothing was asked")
+        m = str(row.get("model"))
+        if m != default_model():
+            return cached_context(model=m)
+        if str(row.get("state") or "ready") != "ready" or not row.get("proxy"):
+            return cached_context(f"cached: {m} is {row.get('state')} (llama-swap /running), so nothing was asked")
+        _, how = budget.refresh_direct(url=local_url(str(row["proxy"])))
         return cached_context(how)
     except Exception as e:                                       # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"}
@@ -407,36 +480,39 @@ SLOTS_TIMEOUT = 1.0
 PULSE_GPU_TTL = 1.0
 TOOL_WINDOW = 600          # seconds of tool calls counted in `calls_window`
 _lock = threading.Lock()
-_slot_prev: dict[int, tuple] = {}     # id -> (task, decoded, processed, t)
-_slot_rate: dict[int, tuple] = {}     # id -> (decode tok/s, prefill tok/s)
+_slot_prev: dict = {}     # id -> (task, decoded, processed, t)
+_slot_rate: dict = {}     # id -> (decode tok/s, prefill tok/s)
 _gpu_cache: tuple[float, list] = (0.0, [])
 _strata_cache: tuple[float, dict | None] = (0.0, None)
 
 
-def _slot_row(s: dict, now: float) -> dict:
+def _slot_row(s: dict, now: float, ns: str = "") -> dict:
+    """One /slots row. `ns` names the server it came from (the model), so two servers' slot 0 keep their own
+    rates; "" is the main card's model, as before."""
     nt = (s.get("next_token") or [{}])
     nt = nt[0] if isinstance(nt, list) and nt else (nt if isinstance(nt, dict) else {})
     sid = int(s.get("id", -1))
+    key = (ns, sid) if ns else sid
     busy = bool(s.get("is_processing"))
     decoded = int(nt.get("n_decoded") or 0)
     processed = int(s.get("n_prompt_tokens_processed") or 0)
     prompt = int(s.get("n_prompt_tokens") or 0)
     task = s.get("id_task")
     state = "idle" if not busy else ("prefill" if decoded == 0 else "decode")
-    prev = _slot_prev.get(sid)
-    tps, pps = _slot_rate.get(sid, (0.0, 0.0))
+    prev = _slot_prev.get(key)
+    tps, pps = _slot_rate.get(key, (0.0, 0.0))
     if not busy:
         tps, pps = 0.0, 0.0
-        _slot_prev.pop(sid, None)
+        _slot_prev.pop(key, None)
     elif prev is None or prev[0] != task:
-        _slot_prev[sid] = (task, decoded, processed, now)
+        _slot_prev[key] = (task, decoded, processed, now)
         tps, pps = 0.0, 0.0
     elif now - prev[3] >= 0.4:
         dt = now - prev[3]
         tps = max(0.0, (decoded - prev[1]) / dt)
         pps = max(0.0, (processed - prev[2]) / dt)
-        _slot_prev[sid] = (task, decoded, processed, now)
-    _slot_rate[sid] = (tps, pps)
+        _slot_prev[key] = (task, decoded, processed, now)
+    _slot_rate[key] = (tps, pps)
     return {"id": sid, "state": state, "n_ctx": int(s.get("n_ctx") or 0),
             # n_prompt_tokens grows with every decoded token on this build, so
             # it is already the context the slot holds.
@@ -513,63 +589,89 @@ def serving() -> dict:
             err = f"{type(e).__name__}: {e}"[:200]
     main = str(snap.get("main") or MAIN_MODEL)
     mx = str(snap.get("max") or "") or None
-    names = {x["model"] for x in loaded or [] if x["state"] != "stopped"}
-    on_card = (mx if mx and mx in names else main if main in names else None)
+    # the model on the main card, whichever it is: bonsai, mirai-s (xhigh) or flash-next (max)
+    cr = card_row(rows) if rows is not None else None
+    on_card = str(cr.get("model")) if cr else None
     return {"enabled": bool(snap.get("enabled")), "main": main, "max": mx,
             "max_tier": getattr(mm, "MAX_TIER", "max") if mm else "max",
             "on_card": on_card, "max_active": active,
             "inflight": snap.get("inflight") or {},
             "switching_to": snap.get("switching_to"),
+            "swap_now": snap.get("swap_now"), "models": snap.get("models"),
             "last_max_end": snap.get("last_max_end") or None,
             "idle_s": snap.get("idle_s"), "loaded": loaded, "error": err}
 
 
 def _slots_target() -> tuple[str, str]:
-    """(the /slots URL, the model it belongs to): the main model's server,
-    or another tier model's while it holds the card (the table's MODELS:
-    flash-next, mirai-s) -- llama-swap gives it its own port, read from GET
-    /running (which never loads), so SLOTS_URL would only say the main model
-    is not loaded. Never /upstream/<model>/: that would load an unloaded
-    one."""
-    mm = _max_mode()
-    if mm is not None and getattr(mm, "ENABLED", False):
-        others = {m for m in list(getattr(mm, "MODELS", None) or []) + [getattr(mm, "MAX", "")]
-                  if m and m != MAIN_MODEL}
-        for r in running_rows() or []:
-            if str(r.get("model")) in others and _live_row(r) and r.get("proxy"):
-                return str(r["proxy"]).rstrip("/") + "/slots", str(r.get("model"))
+    """(the /slots URL, the model it belongs to): the server of the model that holds the main card -- bonsai,
+    mirai-s or flash-next, whichever llama-swap's GET /running says is loaded (card_row), at the port it reports
+    (llama-swap gives each its own; read, never assumed) -- or, with nothing loaded, the default model's own
+    address, which then says it is not answering. Never /upstream/<model>/: that would load an unloaded one."""
+    row = card_row()
+    if row is not None and row.get("proxy") and str(row.get("state") or "ready") == "ready":
+        return local_url(str(row["proxy"])) + "/slots", str(row.get("model"))
     return SLOTS_URL, MAIN_MODEL
 
 
-def off_card_why() -> str | None:
-    """Why the main model is not answering, when the reason is known and not
-    an outage: a bench window holds the card (the gpu lane's pause record,
-    jobs.pause: its `why`), max mode's model holds it, or llama-swap has the
-    model unloaded (its GET /running, which never loads anything). None when
-    none says so. The dashboard printed "/slots not answering . URLError:
-    timed out" through the Flash-Next gate (2026-09-28) with nothing saying
-    the gate held the card."""
-    held = None
+def _a_swap_now() -> dict | None:
+    mm = _max_mode()
+    try:
+        return (mm.snapshot() or {}).get("swap_now") if mm is not None else None
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _jobs_paused() -> list[dict]:
+    """The worker's gpu job lanes that are paused (jobs.paused: a file per lane): [{lane, by, why, since, until}]."""
+    out: list[dict] = []
     try:
         import jobs
-        rec = jobs.paused("gpu")
-        if rec:
-            held = str(rec.get("why") or rec.get("by") or "a bench window")
+        for lane in jobs.GPU_SCOPES:
+            rec = jobs.paused(lane)
+            if rec:
+                out.append({"lane": lane, "by": rec.get("by"), "why": rec.get("why"),
+                            "since": rec.get("since"), "until": rec.get("until")})
     except Exception:                                            # noqa: BLE001
-        held = None
+        pass
+    return out
+
+
+def off_card_why() -> str | None:
+    """Why no main model is answering /slots, when the reason is known and not an outage, in plain words and in
+    this order: a swap is under way (from -> to, the phase, how long); a model is
+    starting; nothing is loaded (llama-swap loads one on the next request). The worker's PAUSED job lanes are
+    said last and as what they are -- a pause on the lane that starts the worker's jobs, not a hold on the card
+    (the old line, "bonsai is off the card: <a coordinator's note> holds it", read a paused lane as the card's
+    holder: 2026-10-05, the operator: "some weird line about someone else holding the GPU"). None when a main
+    model is loaded and ready: its /slots then failed for its own reason, which the caller prints."""
     rows = running_rows()
-    loaded = None if rows is None else any(
-        str(r.get("model")) == MAIN_MODEL and _live_row(r) for r in rows)
-    mm = _max_mode()
-    mx = getattr(mm, "MAX", "") if mm is not None and getattr(mm, "ENABLED", False) else ""
-    if mx and rows is not None and loaded is False and any(
-            str(r.get("model")) == mx and _live_row(r) for r in rows):
-        return f"{MAIN_MODEL} is off the card: max mode ({mx}) holds it"
-    if held and loaded is not True:
-        return f"{MAIN_MODEL} is off the card: {held} holds it"
-    if loaded is False:
-        return f"{MAIN_MODEL} is not loaded (llama-swap loads it on the next request)"
-    return None
+    now = time.time()
+    if rows is None:
+        return None            # unknown, not a reason: the caller prints the read's own failure
+    row = card_row(rows)
+    sw = _a_swap_now()
+    if sw:
+        el = max(0, int(now - float(sw.get("since") or now)))
+        frm = ", ".join(sw.get("from") or []) or "nothing"
+        phase = ("waiting for the work in flight on " + frm + " to end" if sw.get("phase") == "waiting"
+                 else "loading it (llama-swap)")
+        why = f"swapping the main card: {frm} -> {sw.get('to')}: {phase}, {el} s so far"
+    elif row is not None and str(row.get("state") or "ready") != "ready":
+        why = f"{row.get('model')} is {row.get('state')} (llama-swap /running)"
+    elif row is None:
+        why = "no main model is loaded (llama-swap loads one on the next request)"
+    else:
+        return None
+    pauses = _jobs_paused()
+    if pauses:
+        names = ", ".join(p["lane"] for p in pauses)
+        by = pauses[0].get("by") or "someone"
+        until = pauses[0].get("until")
+        why += (f". The worker's job lane{'s' if len(pauses) > 1 else ''} {names} "
+                f"{'are' if len(pauses) > 1 else 'is'} paused by {by}"
+                + (f" until {time.strftime('%Y-%m-%d %H:%M', time.localtime(float(until)))}" if until else "")
+                + " (no new job starts there; the card is not held by it)")
+    return why
 
 
 def _slot_roles(rows: list[dict]) -> None:
@@ -610,17 +712,18 @@ def slots(url: str | None = None) -> dict:
             data = json.load(r)
     except Exception as e:                                       # noqa: BLE001
         why = off_card_why()
+        cr = card_row()
         return {"ok": False,
-                "error": (why or f"{type(e).__name__}: {e}")[:200],
+                "error": (why or f"{type(e).__name__}: {e}")[:300],
                 "cause": f"{type(e).__name__}: {e}"[:200], "off_card": bool(why),
-                "model": model, "slots": [],
+                "model": model, "on_card": str(cr.get("model")) if cr else None, "slots": [],
                 "ms": round((time.time() - t0) * 1000)}
     if not isinstance(data, list):
         return {"ok": False, "error": "unexpected /slots shape", "slots": [],
                 "model": model, "ms": round((time.time() - t0) * 1000)}
     now = time.time()
     with _lock:
-        rows = [_slot_row(s, now) for s in data if isinstance(s, dict)]
+        rows = [_slot_row(s, now, ns=model or "") for s in data if isinstance(s, dict)]
     _slot_roles(rows)
     # A LOCKED model's slots are READ (coordinator, 2026-09-30: a cheap /slots read of a loaded model does not
     # compete for the card); the flag says the card runs its one conversation alone (the tier table)
@@ -742,6 +845,22 @@ def queue(db: str | None = None) -> dict | None:
             "oldest_queued_age": round(time.time() - oldest) if oldest else None}
 
 
+def _card_model_name() -> str | None:
+    """The model on the main card now (llama-swap's /running, cached 2 s), None when none or unreadable."""
+    row = card_row()
+    return str(row.get("model")) if row else None
+
+
+def cards(gpus_read: list | None = None) -> dict:
+    """mcp/lane_view.py snapshot(): what runs where (cards, job lanes, holds, swaps); a failed view says so and
+    fails alone."""
+    try:
+        import lane_view
+        return lane_view.snapshot(gpus_read)
+    except Exception as e:                                       # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"[:200]}
+
+
 def pulse() -> dict:
     """The fast subset the tokonoma animates from. See the block above."""
     global _gpu_cache, _strata_cache
@@ -761,8 +880,8 @@ def pulse() -> dict:
             _strata_cache = (now, st)
     # The cached pool only: no request at all (snapshot() re-reads it, and
     # only from the main model's own server while it is loaded).
-    ctx = cached_context()
-    return {"at": now, "gpus": _gpu_cache[1], "slots": slots(),
+    ctx = cached_context(model=_card_model_name())
+    return {"at": now, "gpus": _gpu_cache[1], "slots": slots(), "cards": cards(_gpu_cache[1]),
             "lanes": lanes(), "tools": tools(), "queue": queue(),
             "seed": seed(), "strata": _strata_cache[1], "context": ctx,
             "power": power_live()}
@@ -792,7 +911,7 @@ def snapshot() -> dict:
     return {"at": int(time.time()), "gpus": g, "processes": procs,
             "listeners": lis, "duplicates": dups, "endpoints": eps,
             "context": context_pool(), "seed": seed(), "strata": strata(),
-            "slots": slots(), "lanes": lanes(), "tools": tools(),
+            "slots": slots(), "cards": cards(g), "lanes": lanes(), "tools": tools(),
             "queue": queue(), "power": power_live(), "tree": tree(),
             "serving": serving(),
             "warnings": warnings}

@@ -921,6 +921,18 @@ def ensure_room(model: str | None, upstream: str | None = None) -> dict | None:
     return dec
 
 
+def leases() -> list[dict]:
+    """The A4000 models a request holds right now (a lease, from the coordinator's state file: `use`), for the
+    dashboard: [{model, pid, since, until}] oldest first. Read only -- no lock, no write, no request; the live
+    ones only (_load drops an expired lease or one whose process is gone). [] when the file cannot be read."""
+    try:
+        rows = _load()["leases"].values()
+    except Exception:                                            # noqa: BLE001
+        return []
+    return sorted(({"model": str(v.get("model")), "pid": v.get("pid"), "since": v.get("t"),
+                    "until": v.get("until")} for v in rows), key=lambda r: r.get("since") or 0)
+
+
 def describe() -> dict:
     """The table and settings, for the dashboard or a person reading."""
     return {"card_uuid": CARD_UUID, "headroom_mib": HEADROOM_MIB,

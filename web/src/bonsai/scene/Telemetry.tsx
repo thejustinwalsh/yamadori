@@ -7,10 +7,12 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useRef } from 'react';
 import { kvNames, kvSplit } from '../../api/kv';
+import { cardModel, laneView, slotDetail, type LaneCard, type LaneModel, type LaneSlot, type LaneView } from '../../api/lanes';
 import type { ContextPool, Gpu, JobQueue, Lanes, Seed, Slot, Slots, Strata, ToolActivity } from '../../api/types';
 import { ago, gib, n } from '../../format';
 import { colors, space } from '../../tokens/tokens.stylex';
 import { Label, Meter, SplitBar, type Tone } from '../../ui/primitives';
+import { KvLive } from '../../ui/KvLive';
 import { SeedBits } from '../../ui/SeedReadout';
 import { windowLabel } from '../../ui/Strata';
 import { text } from '../../ui/text';
@@ -64,12 +66,30 @@ const s = stylex.create({
   soft: { color: colors.onSurfaceVariant },
   moss: { color: colors.primaryContainer },
   cyan: { color: colors.tertiaryContainer },
+  // The first, second and fourth columns are as wide as their text (max-content), never a fixed width a label can
+  // outgrow (operator, 2026-10-05: "slot name overflow"); the bar takes the rest.
   slotRow: {
     display: 'grid',
-    gridTemplateColumns: '28px 64px minmax(0, 1fr) auto',
+    gridTemplateColumns: 'max-content 9ch minmax(24px, 1fr) max-content',
     alignItems: 'center',
     columnGap: space.spaceXs,
   },
+  slotBlock: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  modelBlock: { display: 'flex', flexDirection: 'column', gap: space.spaceXs, minWidth: 0 },
+  modelHead: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: space.spaceXs,
+    minWidth: 0,
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: `color-mix(in srgb, ${colors.outlineVariant} 35%, transparent)`,
+    paddingTop: space.spaceXs,
+  },
+  nowrap: { whiteSpace: 'nowrap' },
+  stateCol: { minWidth: '9ch' },
+  cells: { textAlign: 'right' },
+  detail: { overflowWrap: 'anywhere', paddingInlineStart: space.spaceXs },
   toolRow: {
     display: 'grid',
     gridTemplateColumns: 'minmax(0, 1fr) auto auto',
@@ -105,9 +125,10 @@ const fmtSec = (x: number) => (x < 10 ? `${x.toFixed(1)} s` : `${Math.round(x)} 
 const fmtMs = (ms: number | null | undefined) =>
   typeof ms === 'number' && Number.isFinite(ms) ? (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`) : '—';
 
-function Card({ label, right, wide, flashKey, tone, children }: {
+export function Card({ label, right, rightTitle, wide, flashKey, tone, children }: {
   label: string;
   right?: React.ReactNode;
+  rightTitle?: string;
   wide?: boolean;
   /** changes when the card's subject fires an event: the border flashes once */
   flashKey?: string | number | null;
@@ -121,7 +142,11 @@ function Card({ label, right, wide, flashKey, tone, children }: {
       )}
       <div {...stylex.props(s.head)}>
         <Label>{label}</Label>
-        {right !== undefined && <span {...stylex.props(text.labelXs, s.dim)}>{right}</span>}
+        {right !== undefined && (
+          <span title={rightTitle} {...stylex.props(text.labelXs, s.dim, s.nowrap)}>
+            {right}
+          </span>
+        )}
       </div>
       {children}
     </div>
@@ -130,25 +155,111 @@ function Card({ label, right, wide, flashKey, tone, children }: {
 
 const STATE_TONE: Record<Slot['state'], 'moss' | 'cyan' | 'dim'> = { decode: 'moss', prefill: 'cyan', idle: 'dim' };
 
-export function SlotsCard({ slots, lanes, context, since }: {
+/**
+ * One slot: its bar and the cells it holds against its window, then (wrapping freely) what it is for, which
+ * conversation is in it, how long it has been idle, what is left of its hold and its rate.
+ * Labels never wrap: the first, second and last columns are as wide as their text.
+ */
+function SlotRow({ x, window, since }: { x: LaneSlot; window: number; since: number }) {
+  const tone = STATE_TONE[x.state];
+  const rate = x.state === 'decode' ? x.tps : x.state === 'prefill' ? x.pps : 0;
+  const held = x.ctx > 0;
+  return (
+    <div {...stylex.props(s.slotBlock)}>
+      <div {...stylex.props(text.labelXs, s.slotRow)}>
+        <span {...stylex.props(s.dim, s.nowrap)}>S{x.id}</span>
+        <span {...stylex.props(s[tone], s.nowrap, s.stateCol)}>{x.state.toUpperCase()}</span>
+        <Meter
+          value={x.state === 'idle' && !held ? 0 : window > 0 ? Math.min(1, x.ctx / window) : null}
+          tone={x.state === 'prefill' ? 'cyan' : 'moss'}
+          label={`slot ${x.id} holds ${x.ctx} of ${window} tokens`}
+        />
+        <span
+          {...stylex.props(s.soft, s.nowrap, s.cells)}
+          title={x.state === 'idle' ? "tokens of the slot's last request, which llama-server still holds for it (/slots)" : 'tokens the slot holds now (prompt + decoded)'}
+        >
+          {x.state === 'idle' ? n(x.ctx) : <Ticker base={x.ctx} rate={rate} since={since} format={fmtInt} />} / {n(window)}
+        </span>
+      </div>
+      <span {...stylex.props(text.labelXs, s.dim, s.detail)}>{slotDetail(x).join(' · ')}</span>
+    </div>
+  );
+}
+
+/** A slot's window: the conversation window the tier table enforces on the main card, else the slot's own n_ctx. */
+function windowOf(x: LaneSlot, m: LaneModel, kv: ReturnType<typeof kvSplit>): number {
+  if (m.main && kv && kv.model === m.model) return x.role === 'child' ? kv.helper : kv.main;
+  return x.n_ctx;
+}
+
+/** One model's slots under a heading: the card, the model, what llama-swap says it is. */
+function ModelSlots({ card, m, kv, since }: { card: LaneCard; m: LaneModel; kv: ReturnType<typeof kvSplit>; since: number }) {
+  const where = card.key === 'main' ? '5060 TI' : card.key === 'a4000' ? 'A4000' : (card.name ?? card.key);
+  return (
+    <div {...stylex.props(s.modelBlock)}>
+      <div {...stylex.props(text.labelXs, s.modelHead)}>
+        <span {...stylex.props(s.soft, s.nowrap)}>
+          {where} · {m.model.toUpperCase()}
+        </span>
+        <span {...stylex.props(m.state === 'ready' ? s.moss : s.cyan, s.nowrap)}>{m.state.toUpperCase()}</span>
+      </div>
+      {m.state !== 'ready' ? (
+        <span {...stylex.props(text.labelXs, s.dim)}>llama-swap says {m.state}; its slots are read once it is ready</span>
+      ) : !m.slots ? (
+        <span {...stylex.props(text.labelXs, s.dim)}>no slots (not a chat server)</span>
+      ) : !m.slots.ok ? (
+        <span {...stylex.props(text.labelXs, s.dim)}>/slots not read · {m.slots.error ?? 'no reason given'}</span>
+      ) : (
+        m.slots.slots.map((x) => <SlotRow key={x.id} x={x} since={since} window={windowOf(x, m, kv)} />)
+      )}
+    </div>
+  );
+}
+
+export function SlotsCard({ slots, lanes, context, since, view }: {
   slots: Slots | null | undefined;
   lanes: Lanes | null | undefined;
   context: ContextPool | null | undefined;
   since: number;
+  /** what runs where (mcp/lane_view.py); absent on a server that predates it: the main card's slots alone */
+  view?: LaneView | null;
 }) {
   const kv = kvSplit(context);
-  const busy = slots?.ok ? slots.slots.filter((x) => x.state !== 'idle').length : null;
-  // The helper lane went with the second brain's jobs (docs/REMOVED.md):
-  // only the main lanes are shown.
-  const laneText =
-    lanes && lanes.in_proxy
-      ? `MAIN ${lanes.main}/${lanes.main_lanes ?? '—'}`
-      : busy === null
-        ? undefined
-        : `${busy} BUSY`;
+  const lv = laneView(view);
+  // every loaded model that has slots to show, or is on its way to having them
+  const llama = (lv?.cards ?? []).flatMap((c) => c.models.filter((m) => m.slots !== null || m.state !== 'ready').map((m) => ({ c, m })));
+  const busy = lv
+    ? llama.reduce((a, { m }) => a + (m.slots?.slots.filter((x) => x.state !== 'idle').length ?? 0), 0)
+    : slots?.ok
+      ? slots.slots.filter((x) => x.state !== 'idle').length
+      : null;
+  // The count in the header is ADMISSION's requests in flight over its main lanes (mcp/admission.py), not slots.
+  const laneText = lanes && lanes.in_proxy ? `REQUESTS ${lanes.main}/${lanes.main_lanes ?? '—'}` : busy === null ? undefined : `${busy} BUSY`;
+  const model = lv ? cardModel(lv.cards.find((c) => c.key === 'main'))?.model : slots?.model;
   return (
-    <Card label={`SLOTS · ${slots?.model ? slots.model.toUpperCase() : 'LLAMA-SERVER'}`} right={laneText} wide flashKey={busy ? `b${busy}` : null} tone="moss">
-      {!slots ? (
+    <Card
+      label={`SLOTS · ${model ? model.toUpperCase() : 'LLAMA-SERVER'}`}
+      right={laneText}
+      rightTitle={lanes && lanes.in_proxy ? 'requests the proxy is serving now / the requests it admits at once (admission). Slots are listed below.' : undefined}
+      wide
+      flashKey={busy ? `b${busy}` : null}
+      tone="moss"
+    >
+      {lv ? (
+        <>
+          {llama.length === 0 && <span {...stylex.props(text.labelXs, s.dim)}>no llama-server model is loaded (llama-swap loads one on the next request)</span>}
+          {llama.map(({ c, m }) => (
+            <ModelSlots key={`${c.key}/${m.model}`} card={c} m={m} kv={kv} since={since} />
+          ))}
+          {lv.cards.flatMap((c) =>
+            c.expected.map((e) => (
+              <span key={e.model} {...stylex.props(text.labelXs, s.dim, s.detail)} title={e.why}>
+                A4000 · {e.model.toUpperCase()} · NOT LOADED · {e.for}
+              </span>
+            )),
+          )}
+        </>
+      ) : !slots ? (
         <span {...stylex.props(text.labelXs, s.dim)}>slot state not reported by this server</span>
       ) : !slots.ok ? (
         <span {...stylex.props(text.labelXs, s.dim)}>
@@ -156,34 +267,7 @@ export function SlotsCard({ slots, lanes, context, since }: {
           {slots.error ?? 'no reason given'}
         </span>
       ) : (
-        slots.slots.map((x) => {
-          const tone = STATE_TONE[x.state];
-          const rate = x.state === 'decode' ? x.tps : x.state === 'prefill' ? x.pps : 0;
-          return (
-            <div key={x.id} {...stylex.props(text.labelXs, s.slotRow)}>
-              <span {...stylex.props(s.dim)} title={x.role === 'child' ? `the child slot: ${kv ? kvNames(kv).helperWhy : 'the decider lane'}` : x.role === 'conversation' ? `a conversation slot${x.pinned ? ', pinned' : ''}${x.primary ? ', the primary conversation (holds the VRAM line)' : ''}` : undefined}>
-                S{x.id}
-                {x.role === 'child' ? ' · CHILD' : x.primary ? ' · PRIMARY' : x.pinned ? ' · PINNED' : ''}
-              </span>
-              <span {...stylex.props(s[tone])}>{x.state.toUpperCase()}</span>
-              <Meter
-                value={x.state === 'idle' || !kv ? (x.state === 'idle' ? 0 : null) : Math.min(1, x.ctx / kv.main)}
-                tone={x.state === 'prefill' ? 'cyan' : 'moss'}
-                label={`slot ${x.id} holds ${x.ctx} tokens`}
-              />
-              <span {...stylex.props(s.soft)}>
-                {x.state === 'idle' ? (
-                  '—'
-                ) : (
-                  <>
-                    <Ticker base={x.ctx} rate={x.state === 'decode' ? x.tps : x.pps} since={since} format={fmtInt} /> CTX ·{' '}
-                    {rate ? `${rate.toFixed(rate < 100 ? 1 : 0)} TOK/S` : '…'}
-                  </>
-                )}
-              </span>
-            </div>
-          );
-        })
+        slots.slots.map((x) => <SlotRow key={x.id} x={x} since={since} window={kv ? (x.role === 'child' ? kv.helper : kv.main) : x.n_ctx} />)
       )}
     </Card>
   );
@@ -283,7 +367,7 @@ export function GpuCard({ g }: { g: Gpu }) {
   );
 }
 
-export function KvCard({ context }: { context: ContextPool | null | undefined }) {
+export function KvCard({ context, view }: { context: ContextPool | null | undefined; view?: LaneView | null }) {
   const kv = kvSplit(context);
   const nm = kv ? kvNames(kv) : null;
   return (
@@ -303,6 +387,7 @@ export function KvCard({ context }: { context: ContextPool | null | undefined })
           <span {...stylex.props(text.labelXs, s.soft, text.num)}>
             {kv.layout === 'cap' ? `MAIN ${n(kv.main)} · CHILD ${n(kv.helper)} · 2ND ${n(kv.reserve)}` : `MAIN ${n(kv.main)} · ${nm.helperRole.toUpperCase()} ${kv.helpers}×${n(kv.helper)}`}
           </span>
+          <KvLive view={view} noLane={kv.noLane} stacked />
         </>
       )}
     </Card>

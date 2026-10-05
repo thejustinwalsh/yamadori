@@ -14,6 +14,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { Panel } from '../ui/Panel';
 import { Chip, Label, layout, Meter, Row, SplitBar, Stat, type Tone } from '../ui/primitives';
 import { SeedPanel } from '../ui/SeedReadout';
+import { KvLive } from '../ui/KvLive';
 import { PowerPanel } from '../ui/PowerPanel';
 import { TOKENS_PATH } from '../api/tokens';
 import { SavingsPanel, TokensPanel, useTokens } from '../ui/TokenPanels';
@@ -187,6 +188,7 @@ export function KvPanel({ v, stale, failure, fill }: P) {
             <span title={nm.helperWhy}><i {...stylex.props(s.keyDot, s.kThink)} />{nm.helper}{kv.helpersReported ? '' : ' (DERIVED)'}</span>
             {kv.reserve > 0 && <span title={nm.reserveWhy}><i {...stylex.props(s.keyDot, s.kRes)} />{nm.reserve}</span>}
           </div>
+          <KvLive view={v.cards} noLane={kv.noLane} />
           <p {...stylex.props(text.labelXs, s.why)}>
             {nm.main.toLowerCase()}: {nm.mainWhy} · {nm.helper.toLowerCase()}: {nm.helperWhy} · {nm.reserve.toLowerCase()}: {nm.reserveWhy}
             {kv.vramLine != null ? ` · served VRAM line ${n(kv.vramLine)} cells` : ''}

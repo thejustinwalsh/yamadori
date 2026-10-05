@@ -3,6 +3,7 @@
 // mcp/concept_seed.py; the JJAVA and SOKUDO pages'
 // in ./stats.ts). Every field the server can omit
 // is optional here, so the compiler forces each panel to handle its absence.
+import type { LaneView } from './lanes';
 
 export type Gpu = {
   index: number;
@@ -116,6 +117,10 @@ export type ContextPool =
       child?: { role?: string; tokens?: number; serves?: string[]; kept?: boolean; ranked?: boolean; rank?: number | null; slot?: number | null } | null;
       /** how the pool was read this time (2026-09-30: a view never loads a model): direct from the main model's server, or cached and why */
       pool_read?: string;
+      /** the model whose pool this is (2026-10-05: the model on the card, whichever it is); absent on older servers */
+      model?: string;
+      /** the model server's slot count: /props total_slots (the default model), the tier table's window (another); null when not known */
+      slots?: number | null;
     }
   | { error: string; pool_read?: string };
 
@@ -155,6 +160,8 @@ export type Vitals = {
   strata?: Strata | null;
   /** the pulse fields below are also on the full snapshot; absent on older servers */
   slots?: Slots;
+  /** mcp/lane_view.py: what runs where (cards, job lanes, holds, swaps); absent on older servers */
+  cards?: LaneView;
   lanes?: Lanes | null;
   tools?: ToolActivity | null;
   queue?: JobQueue | null;
@@ -185,6 +192,8 @@ export type Serving = {
   max_active: boolean;
   inflight: Record<string, number>;
   switching_to: string | null;
+  /** the swap wait_ready is in the middle of (2026-10-05): waiting for another model's work to end, or loading; absent on older servers */
+  swap_now?: { to: string; from: string[]; phase: 'waiting' | 'loading' | string; since: number } | null;
   last_max_end: number | null;
   /** the operator's idle seconds before swapping back; null until given */
   idle_s: number | null;
@@ -221,6 +230,8 @@ export type Slots = {
   slots: Slot[];
   ms: number;
   error?: string;
+  /** the model llama-swap has on the main card now (also when its /slots could not be read); null when none */
+  on_card?: string | null;
   /** the model whose server answered (the max model's while it holds the card); absent on older servers */
   model?: string | null;
   off_card?: boolean;
@@ -270,6 +281,8 @@ export type Pulse = {
   strata: Strata | null;
   context: ContextPool;
   power?: PowerLive | Partial<PowerLive> | null;
+  /** mcp/lane_view.py: what runs where; absent on older servers */
+  cards?: LaneView;
 };
 
 export type JobRow = {

@@ -98,6 +98,11 @@ _switching_to: str | None = None
 _last_end: dict[str, float] = {}
 _last_swap: dict = {}
 _running_cache: tuple[float, set[str]] = (0.0, set())
+# FOR THE DASHBOARD (docs/DASHBOARD.md, 2026-10-05; read only, nothing decides from them): when each model's
+# oldest request in flight took its lease (`_since`), and the swap wait_ready is in the middle of (`_swap_now`:
+# {to, from, phase "waiting" for another model's work to end | "loading" the model, since}), None when none.
+_since: dict[str, float] = {}
+_swap_now: dict | None = None
 
 
 # ------------------------------------------------------------------ models --
@@ -584,6 +589,8 @@ class Lease:
         self.released = False
         self.t0 = time.time()
         with _lock:
+            if not _inflight.get(self.model):
+                _since[self.model] = self.t0
             _inflight[self.model] = _inflight.get(self.model, 0) + 1
             others = [m for m, n in _inflight.items() if m != self.model and n > 0]
             if ENABLED and others and all(rank(self.model) > rank(m) for m in others) and \
@@ -599,6 +606,8 @@ class Lease:
         self.released = True
         with _lock:
             _inflight[self.model] = max(0, _inflight.get(self.model, 0) - 1)
+            if not _inflight[self.model]:
+                _since.pop(self.model, None)
             _last_end[self.model] = time.time()
             if _switching_to is not None and (
                     not any(n > 0 for n in _inflight.values())
@@ -645,13 +654,19 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
         out["other_inflight_at_start"] = sum(n for m, n in _inflight.items() if m != model)
         if out["other_inflight_at_start"]:
             _card_wait(True)
-        while any(n > 0 for m, n in _inflight.items() if m != model):
-            cancel.check()
-            sw = _switching_to
-            if sw and sw != model and rank(sw) > rank(model):
-                raise ModelAtCapacity(model, holder=sw, why=(
-                    f"{model} did not start: {sw} (a higher tier's model) took the card while this request waited"))
-            _lock.wait(poll_s)
+            _swap_now_set({"to": model, "from": sorted(m for m, n in _inflight.items() if m != model and n > 0),
+                           "phase": "waiting", "since": t0})
+        try:
+            while any(n > 0 for m, n in _inflight.items() if m != model):
+                cancel.check()
+                sw = _switching_to
+                if sw and sw != model and rank(sw) > rank(model):
+                    raise ModelAtCapacity(model, holder=sw, why=(
+                        f"{model} did not start: {sw} (a higher tier's model) took the card while this request "
+                        "waited"))
+                _lock.wait(poll_s)
+        finally:
+            _swap_now_clear(model)
         if _switching_to == model:
             _switching_to = None
     out["waited_s"] = round(time.time() - t0, 2)
@@ -661,10 +676,12 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
     if FULL and model not in on:
         t1 = time.time()
         _card_wait(True)
+        _swap_now_set({"to": model, "from": sorted(on), "phase": "loading", "since": t1})
         try:
             ok, how = _load(model)
         finally:
             _card_wait(False)
+            _swap_now_clear(model)
         after = _fresh_running()
         left = sorted(m for m in MODELS if m != model and m in after)
         out["swap"] = {"from": sorted(on), "to": model, "load_s": round(time.time() - t1, 1), "ok": ok,
@@ -681,9 +698,21 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
     return out
 
 
+def _swap_now_set(rec: dict) -> None:
+    global _swap_now
+    _swap_now = dict(rec)
+
+
+def _swap_now_clear(model: str) -> None:
+    global _swap_now
+    if _swap_now is not None and _swap_now.get("to") == model:
+        _swap_now = None
+
+
 def snapshot() -> dict:
     with _lock:
         return {"enabled": ENABLED, "main": MAIN, "max": MAX, "models": list(MODELS),
+                "inflight_since": dict(_since), "swap_now": dict(_swap_now) if _swap_now else None,
                 "tiers": {t: TABLE.model_for(t) for t in tier_models.ORDER},
                 "inflight": dict(_inflight), "switching_to": _switching_to, "last_end": dict(_last_end),
                 "last_max_end": _last_end.get(MAX, 0.0) if MAX else 0.0, "idle_s": IDLE_S,
@@ -691,9 +720,11 @@ def snapshot() -> dict:
 
 
 def _reset_for_tests() -> None:
-    global _switching_to, _running_cache, _last_swap
+    global _switching_to, _running_cache, _last_swap, _swap_now
     with _lock:
         _inflight.clear()
+        _since.clear()
+        _swap_now = None
         _switching_to = None
         _last_end.clear()
         _last_swap = {}

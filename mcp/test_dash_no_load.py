@@ -139,6 +139,11 @@ class Swap(Fake):
                 return 500, {"error": "busy"}
             rows = [{"model": "embeddings", "state": "ready",
                      "proxy": "http://127.0.0.1:9", "cmd": "llama-server -m e.gguf"}]
+            if self.mode == "flash":
+                # flash-next holds the card, as llama-swap reports it: `localhost`, its own port
+                rows.append({"model": "flash-next", "state": "ready",
+                             "proxy": FLASH.url.replace("127.0.0.1", "localhost"),
+                             "cmd": f"llama-server -m flash-next.gguf --port {FLASH.port}"})
             if self.mode == "loaded":
                 rows.append({"model": MAIN, "state": "ready", "proxy": DIRECT.url,
                              "cmd": f"llama-server -m {MAIN}.gguf --port {DIRECT.port}"})
@@ -181,6 +186,20 @@ class Direct(Fake):
         return 404, {"error": "not served"}
 
 
+class FlashServer(Fake):
+    """flash-next's own llama-server: -np 1, its native window."""
+
+    def answer(self, method, path):
+        p = path.split("?", 1)[0]
+        if p == "/slots":
+            return 200, [{"id": 0, "is_processing": True, "id_task": 5, "n_ctx": 262144,
+                          "n_prompt_tokens": 26000, "n_prompt_tokens_processed": 40,
+                          "next_token": [{"n_decoded": 700, "n_remain": 1000}]}]
+        if p == "/props":
+            return 200, {"default_generation_settings": {"n_ctx": 262144}, "total_slots": 1}
+        return 404, {"error": "not served"}
+
+
 def _dead_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -191,6 +210,7 @@ def _dead_port() -> int:
 
 SWAP = Swap("llama-swap")
 DIRECT = Direct("main model server")
+FLASH = FlashServer("flash-next's server")
 DEAD = _dead_port()
 os.environ["LLAMA_STACK_URL"] = SWAP.url
 os.environ["YAMADORI_MODEL_SERVER"] = DIRECT.url
@@ -351,6 +371,62 @@ def test_loaded_reads_go_direct():
     check(not bad, "every dashboard route answers (no 5xx)", json.dumps(bad))
 
 
+def test_flash_next_holds_the_card():
+    """FLASH-NEXT IS NOT BONSAI (2026-10-05, the operator: "Flash-Next is not showing anything when running in the
+    dashboard"): with the max model on the card the dashboard reads ITS port, as /running reports it, shows its
+    slots and its window, and still never asks /upstream."""
+    import importlib
+    import max_mode
+    import tier_models
+    real_env = os.environ.get("YAMADORI_TIER_MODELS")
+    os.environ["YAMADORI_TIER_MODELS"] = os.path.join(HERE, "tier_models.yaml")
+    importlib.reload(max_mode)
+    try:
+        _reset_caches()
+        SWAP.reset("flash")
+        DIRECT.reset("off")
+        FLASH.reset("on")
+        OPENED.clear()
+        codes, bodies = {}, {}
+        for path in ("/dash/api/vitals", "/dash/api/vitals/pulse", "/dash/api/tiers"):
+            r = CLIENT.get(path)
+            codes[path] = r.status_code
+            bodies[path] = r.json() if r.status_code == 200 else None
+        check(not SWAP.upstream_all(), "flash-next on the card: ZERO /upstream requests",
+              json.dumps(SWAP.upstream_all()))
+        check(not any(c >= 500 for c in codes.values()), "every route answers (no 5xx)", json.dumps(codes))
+        pulse = bodies["/dash/api/vitals/pulse"] or {}
+        sl = pulse.get("slots") or {}
+        check(sl.get("ok") and sl.get("model") == "flash-next" and sl["slots"][0]["ctx"] == 26000
+              and sl["slots"][0]["n_ctx"] == 262144,
+              "/slots is read from flash-next's own server (not bonsai's port)", json.dumps(sl)[:300])
+        check(any(p.startswith("/slots") for _, p in FLASH.seen) and not DIRECT.seen,
+              "the positive control: flash-next's server was asked, bonsai's was not",
+              json.dumps({"flash": FLASH.seen, "bonsai": DIRECT.seen}))
+        check(not any("localhost" in u for u in OPENED if u.endswith("/slots")),
+              "and as 127.0.0.1, never the IPv6-first `localhost` llama-swap reports", json.dumps(OPENED)[:300])
+        cards = (pulse.get("cards") or {}).get("cards") or []
+        # nvidia-smi is answered empty here: the cards are unplaced, the models are still all listed
+        names = {m["model"]: m for c in cards for m in c.get("models", [])}
+        check("flash-next" in names and names["flash-next"]["slots"]["ok"] and names["flash-next"]["card"] == "main"
+              and names["embeddings"]["card"] == "a4000",
+              "the lane view lists flash-next on the main card with its slots and the embedder on the A4000",
+              json.dumps({k: (v["card"], v.get("state")) for k, v in names.items()}))
+        ctx = pulse.get("context") or {}
+        check(ctx.get("pool") == 262144 and ctx.get("model") == "flash-next",
+              "the KV pool is flash-next's window (262,144), not bonsai's", json.dumps(ctx)[:200])
+        sv = (bodies["/dash/api/vitals"] or {}).get("serving") or {}
+        check(sv.get("on_card") == "flash-next", "serving.on_card is flash-next", json.dumps(sv)[:200])
+    finally:
+        if real_env is None:
+            os.environ.pop("YAMADORI_TIER_MODELS", None)
+        else:
+            os.environ["YAMADORI_TIER_MODELS"] = real_env
+        tier_models.reload()
+        importlib.reload(max_mode)
+        _reset_caches()
+
+
 def _slot_readers() -> dict:
     """Every reader of a main model's /slots in the proxy's process (and the
     two bench runners), called once each: what it returned."""
@@ -442,7 +518,8 @@ def test_slot_readers_never_load():
 
 def main() -> int:
     for fn in (test_off_the_card, test_running_unreadable,
-               test_loaded_reads_go_direct, test_slot_readers_never_load):
+               test_loaded_reads_go_direct, test_slot_readers_never_load,
+               test_flash_next_holds_the_card):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

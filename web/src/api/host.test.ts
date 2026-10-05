@@ -111,8 +111,10 @@ describe('SlotsCard (the slot layout)', () => {
         since: 0,
       }),
     );
-    expect(out).toContain('S0 · PRIMARY');
-    expect(out).toContain('S2 · CHILD');
+    expect(out).toContain('S0');
+    expect(out).toContain('PRIMARY CONVERSATION');
+    expect(out).toContain('S2');
+    expect(out).toContain('JJAVA LANE');
     expect(out).toContain('SLOTS · BONSAI');
   });
   it('names the reason, not a bare timeout, when the model is off the card', () => {

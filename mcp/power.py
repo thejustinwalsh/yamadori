@@ -644,11 +644,16 @@ def _get_json(url: str, timeout: float):
 class SlotCounter:
     """Token deltas since the previous read, from the main model's /slots."""
 
-    def __init__(self, get=None, clock=time.time, model: str = MAIN_MODEL,
+    def __init__(self, get=None, clock=time.time, model: str | None = None,
                  swap: str = SWAP_URL):
+        """`model` None (the default): FOLLOW THE MAIN CARD -- whichever main model llama-swap says is loaded
+        (the tier table's: bonsai, mirai-s, flash-next); it was bonsai alone, so while flash-next held the card the
+        panel read "BONSAI NOT LOADED" and nothing else (2026-10-05, the operator: "Flash-Next is not showing
+        anything"). A name pins it to that one model."""
         self._get = get or _get_json
         self._clock = clock
-        self.model = model
+        self._pinned = model
+        self.model = model or MAIN_MODEL
         self.swap = swap
         self._url: str | None = None
         self._url_at = 0.0
@@ -666,20 +671,40 @@ class SlotCounter:
         except Exception as e:                                   # noqa: BLE001
             self._url = None
             return "swap_down", f"llama-swap /running: {type(e).__name__}: {e}"[:200]
-        for m in (run or {}).get("running") or []:
-            if isinstance(m, dict) and m.get("model") == self.model:
-                if m.get("state") != "ready" or not m.get("proxy"):
-                    self._url = None
-                    return str(m.get("state") or "starting"), None
-                # llama-swap reports http://localhost:<port>. On this machine
-                # `localhost` tries IPv6 first and costs 200-800 ms per call
-                # (measured: curl 0.21 s vs 0.002 s for 127.0.0.1), most of
-                # a 1 s tick. llama-server listens on 127.0.0.1.
-                url = str(m["proxy"]).rstrip("/").replace("://localhost:", "://127.0.0.1:")
-                self._url, self._url_at = url, now
-                return "ready", self._url
+        names, rank = self._names()
+        mine = [m for m in (run or {}).get("running") or []
+                if isinstance(m, dict) and m.get("model") in names and m.get("state") != "stopped"]
+        if mine:
+            m = max(mine, key=lambda x: (x.get("state") == "ready", rank(str(x.get("model")))))
+            if str(m.get("model")) != self.model:
+                # another main model holds the card now: its own counters, its own url
+                self.model = str(m.get("model"))
+                self._prev.clear()
+                self._primed = False
+            if m.get("state") != "ready" or not m.get("proxy"):
+                self._url = None
+                return str(m.get("state") or "starting"), None
+            # llama-swap reports http://localhost:<port>. On this machine
+            # `localhost` tries IPv6 first and costs 200-800 ms per call
+            # (measured: curl 0.21 s vs 0.002 s for 127.0.0.1), most of
+            # a 1 s tick. llama-server listens on 127.0.0.1.
+            url = str(m["proxy"]).rstrip("/").replace("://localhost:", "://127.0.0.1:")
+            self._url, self._url_at = url, now
+            return "ready", self._url
         self._url = None
         return "not_loaded", None
+
+    def _names(self):
+        """(the model names to follow, their rank): the pinned one, else the tier table's main models."""
+        if self._pinned:
+            return {self._pinned}, (lambda _m: 0)
+        try:
+            import max_mode
+            if max_mode.ENABLED:
+                return set(max_mode.MODELS) | {max_mode.MAIN}, max_mode.rank
+        except Exception:                                        # noqa: BLE001
+            pass
+        return {MAIN_MODEL}, (lambda _m: 0)
 
     def read(self) -> dict:
         now = self._clock()
@@ -689,16 +714,16 @@ class SlotCounter:
         if state != "ready":
             self._prev.clear()
             self._primed = False
-            return {"state": state, "why": where, "dt": dt}
+            return {"state": state, "why": where, "dt": dt, "model": self.model}
         try:
             slots = self._get(f"{where}/slots", SLOTS_TIMEOUT)
         except Exception as e:                                   # noqa: BLE001
             self._url = None                 # re-ask /running next time
             self._prev.clear()
             self._primed = False
-            return {"state": "no_answer", "dt": dt,
+            return {"state": "no_answer", "dt": dt, "model": self.model,
                     "why": f"/slots: {type(e).__name__}: {e}"[:200]}
-        return dict(self.deltas(slots if isinstance(slots, list) else []), dt=dt)
+        return dict(self.deltas(slots if isinstance(slots, list) else []), dt=dt, model=self.model)
 
     def deltas(self, slots: list[dict]) -> dict:
         """Tokens decoded and prompt tokens processed since the last read,
@@ -843,7 +868,7 @@ def series_of(ring: list[dict], now: float, window: float = RING_SAMPLES,
         stats.update(r_decode=rd, r_prompt=rp, r_n=len(pairs), r_min=MIN_R_SAMPLES)
     last = rows[-1]["tok"] if rows else {}
     return {"window_s": window, "interval_s": interval, "now": now,
-            "model": {"name": MAIN_MODEL, "state": last.get("state"),
+            "model": {"name": last.get("model") or MAIN_MODEL, "state": last.get("state"),
                       "why": last.get("why"), "busy": last.get("busy")},
             "gpus": gpus, "main_index": main_i,
             "t": t, "watts": watts, "decode_tps": dec, "prompt_tps": pre,

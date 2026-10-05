@@ -271,29 +271,31 @@ def known_pool() -> int | None:
     return _POOL
 
 
-def refresh_direct(timeout: float = 3) -> tuple[int | None, str]:
-    """Re-read the pool from the main model's OWN server (DIRECT, config.yaml
-    startPort) and nothing else -- never llama-swap, whose /upstream/<model>
-    route would start a model that is off the card. Updates the same cache
-    pool_size() keeps. (pool, how). A failed read keeps the last good pool
-    (pool_size's rule) and says why."""
+def refresh_direct(timeout: float = 3, url: str | None = None) -> tuple[int | None, str]:
+    """Re-read the pool from the main model's OWN server (`url`: the port
+    llama-swap's GET /running reports for the default model, as the dashboard
+    passes it; else DIRECT, config.yaml startPort) and nothing else -- never
+    llama-swap, whose /upstream/<model> route would start a model that is off
+    the card. Updates the same cache pool_size() keeps. (pool, how). A failed
+    read keeps the last good pool (pool_size's rule) and says why."""
     global _POOL, _SLOTS, _LINE, _READ
+    base = (url or DIRECT).rstrip("/")
     try:
-        with urllib.request.urlopen(f"{DIRECT}/props", timeout=timeout) as r:
+        with urllib.request.urlopen(f"{base}/props", timeout=timeout) as r:
             d = json.load(r)
     except Exception as e:                                       # noqa: BLE001
-        return _POOL, f"{DIRECT}/props: {type(e).__name__}"[:160]
+        return _POOL, f"{base}/props: {type(e).__name__}"[:160]
     n = ((d.get("default_generation_settings") or {}).get("n_ctx")
          or d.get("n_ctx"))
     if not n:
-        return _POOL, f"{DIRECT}/props carried no n_ctx"
+        return _POOL, f"{base}/props carried no n_ctx"
     _POOL = int(n)
     _READ = True
     if isinstance(d.get("total_slots"), int) and d["total_slots"] > 0:
         _SLOTS = d["total_slots"]
     if isinstance(d.get("kv_vram_cells"), int):
         _LINE = d["kv_vram_cells"]
-    return _POOL, f"{DIRECT}/props"
+    return _POOL, f"{base}/props"
 
 
 def lane_reserved() -> int:
