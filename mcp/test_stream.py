@@ -1441,7 +1441,8 @@ def test_a_stream_that_ends_without_a_finish_is_a_failure():
     saved = _ur.urlopen
     try:
         def empty(req, timeout=None):
-            calls.append(1)
+            if getattr(req, "data", None) is not None:           # the generation's POST, not llama-swap's /running
+                calls.append(1)
             return _Body([])
         _ur.urlopen = empty
         try:
@@ -1509,6 +1510,88 @@ def test_a_dead_model_server_mid_generation_is_an_error_not_an_answer():
             check(err.status == 503 and err.code == "model_unavailable",
                   f"{what}: the blocking turn raises too (HTTP 503 model_unavailable, Retry-After)",
                   f"{type(e).__name__}: {e}")
+
+
+def test_a_killed_model_server_is_waited_for_not_answered_502():
+    """LIVE 2026-10-05 (soak scenario k): flash-next killed; llama-swap answered the next request 502 (dial tcp
+    refused) for a moment BEFORE it noticed the process had exited, the proxy's one immediate retry met the same 502
+    and the client got a 502 server_error. The retry now waits for llama-swap to notice (GET /running no longer
+    lists the model as ready), then asks again -- and a 502 that survives is a 503 model_unavailable (retryable)."""
+    import api_errors
+    import time as _t
+    state = {"n": 0, "running_polls": 0, "dead": True}
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):                                        # noqa: N802
+            if self.path == "/running":
+                state["running_polls"] += 1
+                if state["running_polls"] >= 3:                  # llama-swap notices the exit on the 3rd look
+                    state["dead"] = False
+                rows = [{"model": "flash-next", "state": "ready"}] if state["dead"] else []
+                data = json.dumps({"running": rows}).encode()
+                self.send_response(200)
+            else:                                                # /upstream/<m>/health: refused while dead
+                data = b""
+                self.send_response(502 if state["dead"] else 200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_POST(self):                                       # noqa: N802
+            self.rfile.read(int(self.headers["Content-Length"]))
+            state["n"] += 1
+            if state["dead"]:
+                self.send_response(502)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            data = _sse(reply("back up"))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):                               # noqa: D102
+            pass
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    saved = proxy.UPSTREAM
+    proxy.UPSTREAM = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        t0 = _t.time()
+        evs = list(proxy._post_events_raw("/v1/chat/completions", {"model": "flash-next", "messages": []}))
+        done = [v for k, v in evs if k == "done"]
+        check(len(done) == 1 and done[0]["choices"][0]["message"]["content"] == "back up",
+              "a 502 with nothing in hand: the retry waits for llama-swap to notice and is then served",
+              f"{state} {str(done)[:200]}")
+        check(state["running_polls"] >= 3 and state["n"] == 2,
+              "it polled /running until the model was no longer ready (not an immediate second try)",
+              str(state))
+        # the helper alone: a model that answers its health goes at once; a stopped one at once
+        state.update(dead=False, running_polls=0)
+        w = proxy._await_swap_notice("flash-next")
+        check(w["why"] == "llama-swap no longer lists it as ready" and w["waited_s"] < 2, "a model not listed: no wait", str(w))
+        # a 502 that survives both tries is a retryable 503, not a 502 server_error
+        state.update(dead=True, running_polls=-10 ** 6)          # llama-swap never notices
+        saved_wait = proxy._await_swap_notice
+        proxy._await_swap_notice = lambda model, **k: {"waited_s": 0.0, "why": "test"}
+        try:
+            list(proxy._post_events_raw("/v1/chat/completions", {"model": "flash-next", "messages": []}))
+            check(False, "a 502 that survives the retry is raised")
+        except Exception as e:                                   # noqa: BLE001
+            err = api_errors.of_exception(e)
+            check(err.status == 503 and err.code == "model_unavailable"
+                  and (err.headers or {}).get("Retry-After"),
+                  "a 502 that survives the retry reaches the client as 503 model_unavailable with Retry-After",
+                  f"{type(e).__name__}: {err.status} {err.code}")
+        finally:
+            proxy._await_swap_notice = saved_wait
+        check(api_errors.of_upstream(500, {"message": "CUDA error", "type": "server_error"}).status == 502,
+              "a real server_error (500) still stays a 502")
+    finally:
+        proxy.UPSTREAM = saved
+        srv.shutdown()
 
 
 def test_the_wait_is_heard():
@@ -1628,7 +1711,7 @@ def main() -> int:
                test_a_retry_takes_the_lanes_its_abandoned_twins_hold,
                test_a_retry_after_a_while_replaces_its_twin_at_once,
                test_a_stream_that_never_starts_gives_its_lane_back,
-               test_a_dead_model_server_mid_generation_is_an_error_not_an_answer, test_the_wait_is_heard,
+               test_a_dead_model_server_mid_generation_is_an_error_not_an_answer, test_a_killed_model_server_is_waited_for_not_answered_502, test_the_wait_is_heard,
                test_a_stream_that_ends_without_a_finish_is_a_failure):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

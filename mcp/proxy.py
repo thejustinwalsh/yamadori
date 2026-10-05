@@ -367,6 +367,42 @@ def _request_shape(payload: dict) -> str:
             f"{json.dumps(pick, default=str)[:400]}")
 
 
+def _await_swap_notice(model: str | None, poll_s: float = 0.5, timeout: float | None = None) -> dict:
+    """THE MODEL SERVER IS GONE BUT LLAMA-SWAP HAS NOT NOTICED YET (live 2026-10-05, soak scenario k: flash-next
+    killed; the next request got 502 "dial tcp ... actively refused" TWICE within 4 ms -- the proxy's one retry --
+    and only then "upstream process exited unexpectedly"; the request after that started the model). A retry before
+    llama-swap has noticed meets the same 502, so the retry waits for the notice: it polls llama-swap's GET /running
+    (reports, never loads) until `model` is no longer listed as ready -- the next call then makes llama-swap start it
+    and waits for its health, as any load -- or until the model answers its own health (it was alive: the retry
+    goes at once). Bounded by what a load is bounded by (max_mode.LOAD_TIMEOUT_S, llama-swap's healthCheckTimeout);
+    the request's own cancel ends it sooner. {waited_s, why}."""
+    t0 = time.time()
+    limit = max_mode.LOAD_TIMEOUT_S if timeout is None else timeout
+    if not model:
+        return {"waited_s": 0.0, "why": "no model named"}
+    while True:
+        cancel.check()
+        try:
+            with urllib.request.urlopen(f"{UPSTREAM}/running", timeout=5) as r:
+                rows = (json.loads(r.read().decode("utf-8") or "{}") or {}).get("running") or []
+            row = next((x for x in rows if isinstance(x, dict) and x.get("model") == model), None)
+            if row is None or str(row.get("state") or "ready") != "ready":
+                return {"waited_s": round(time.time() - t0, 2),
+                        "why": "llama-swap no longer lists it as ready" if row is None
+                        else f"llama-swap reports it {row.get('state')}"}
+        except Exception:                                            # noqa: BLE001
+            return {"waited_s": round(time.time() - t0, 2), "why": "llama-swap /running did not answer"}
+        try:
+            with urllib.request.urlopen(f"{UPSTREAM}/upstream/{model}/health", timeout=5) as r:
+                if r.status == 200:
+                    return {"waited_s": round(time.time() - t0, 2), "why": "the model answers its health"}
+        except Exception:                                            # noqa: BLE001
+            pass
+        if time.time() - t0 >= limit:
+            return {"waited_s": round(time.time() - t0, 2), "why": f"still listed ready after {limit:g} s"}
+        time.sleep(poll_s)
+
+
 def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
                      retries: int = 1):
     """`_post`, as a generator: ("delta", delta) live, then ("done", response).
@@ -567,6 +603,10 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
                 print(f"  upstream dropped with nothing in hand after "
                       f"{time.time() - t0:.1f}s ({type(e).__name__}: "
                       f"{str(e)[:160]}); retrying once", flush=True)
+                if isinstance(e, urllib.error.HTTPError) and int(getattr(e, "code", 0) or 0) in (502, 504):
+                    # llama-swap could not reach the model server: wait for it to notice, then the retry loads it
+                    w = _await_swap_notice(payload.get("model"))
+                    print(f"  waited {w['waited_s']} s for llama-swap: {w['why']}", flush=True)
                 yield from _post_events_raw(
                     path, dict(payload, _image_guard=guard) if guard
                     else payload, timeout, retries - 1)
@@ -622,6 +662,8 @@ def _post_events_raw(path: str, payload: dict, timeout: int = 3600,
             if retries > 0:
                 print(f"  upstream ended the stream with nothing and no finish after {took:.1f}s (the model "
                       f"server exited?); retrying once", flush=True)
+                w = _await_swap_notice(payload.get("model"))
+                print(f"  waited {w['waited_s']} s for llama-swap: {w['why']}", flush=True)
                 yield from _post_events_raw(
                     path, dict(payload, _image_guard=guard) if guard
                     else payload, timeout, retries - 1)

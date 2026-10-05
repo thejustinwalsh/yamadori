@@ -260,7 +260,9 @@ def of_upstream(status: int | None, error: dict | None,
         keep = st if st in (400, 401, 403, 404, 409, 413, 422) else 400
         return ApiError(keep, msg, code=(kind or None)
                         if kind not in ("invalid_request_error", "") else None)
-    if st == 503 or kind == "unavailable_error":
+    if st in (502, 503, 504) or kind == "unavailable_error":
+        # 502/504 are llama-swap's own: it could not reach the model server behind it (killed, restarting).
+        # A client retries it as the 503 it is (live 2026-10-05: a killed flash-next answered 502 server_error).
         return ApiError(503, f"The model is not available right now (loading "
                         f"or restarting): {msg}", code="model_unavailable",
                         headers={"Retry-After": "30"},
