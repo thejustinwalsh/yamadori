@@ -1,0 +1,261 @@
+harness soak against http://127.0.0.1:1234: scenarios a,b,c,d,e,f,g,h,i,j; records in bench/results/harness_soak/20261005-c
+
+=== a cold_first_turn
+  [cold_first_turn/A #1 step] HTTP 200 ttft 147.81s total 156.52s silence 5.02s hb 29 prompt 24613 reused 0 processed 24613 model flash-next SWAP 16.7s
+  -> PASS  ttft 147.81 s, longest silence 5.02 s, swap 16.7 s
+     ok   HTTP 200 and the stream finished
+     ok   the longest silence is <= 10 s -- longest silence 5.02 s (mid); first event 5.01 s, first heartbeat 5.01 s, 29 heartbeats before the first token, client timeout 180 s
+     ok   an answer or a tool call arrives -- content 68 chars, 2 tool calls, finish tool_calls
+     ok   served by the max tier's model -- served by flash-next (expected flash-next)
+
+=== b agent_loop
+  [agent_loop/A #2 step] HTTP 200 ttft 4.58s total 9.32s silence 4.58s hb 0 prompt 24797 reused 24609 processed 188 model flash-next
+  [agent_loop/A #3 step] HTTP 200 ttft 4.28s total 7.57s silence 4.28s hb 0 prompt 25052 reused 24920 processed 132 model flash-next
+  [agent_loop/A #4 step] HTTP 200 ttft 3.13s total 4.61s silence 3.13s hb 0 prompt 25188 reused 25148 processed 40 model flash-next
+  [agent_loop/A #5 step] HTTP 200 ttft 2.17s total 5.08s silence 2.17s hb 0 prompt 25257 reused 25235 processed 22 model flash-next
+  [agent_loop/A #6 step] HTTP 200 ttft 2.17s total 5.78s silence 2.46s hb 0 prompt 25363 reused 25340 processed 23 model flash-next
+  [agent_loop/A #7 step] HTTP 200 ttft 2.2s total 4.76s silence 2.2s hb 0 prompt 25430 reused 25408 processed 22 model flash-next
+  [agent_loop/A #8 step] HTTP 200 ttft 2.35s total 7.04s silence 2.35s hb 0 prompt 25527 reused 25504 processed 23 model flash-next
+  [agent_loop/A #9 step] HTTP 200 ttft 2.72s total 5.39s silence 2.72s hb 0 prompt 25653 reused 25631 processed 22 model flash-next
+  [agent_loop/A #10 step] HTTP 200 ttft 4.19s total 9.69s silence 4.19s hb 0 prompt 25742 reused 25714 processed 28 model flash-next
+  [agent_loop/A #11 step] HTTP 200 ttft 4.32s total 6.76s silence 4.32s hb 0 prompt 25885 reused 25863 processed 22 model flash-next
+  [agent_loop/A #12 step] HTTP 200 ttft 2.28s total 85.96s silence 5.01s hb 6 prompt 25973 reused 25946 processed 27 model flash-next
+  -> PASS  12 steps, worst re-read after step 1 = 188 tokens, 0 flagged, worst silence 5.02 s
+     ok   every step returned 200 and finished (12 steps)
+     ok   every step served by the same (max tier) model -- models seen ['flash-next'], expected flash-next
+     ok   no step routed to another card
+     ok   after step 1 every step re-reads no more than the previous turn + its tail + 512
+     ok   tool calls are valid JSON for a declared tool
+     ok   no silence over 10 s in any step
+     ok   no step was cut off (finish_reason length)
+
+=== c side_call_mid_session
+  [side_call_mid_session/A-title #1 side] HTTP 200 ttft 26.35s total 26.35s silence 26.35s hb 0 prompt 137 reused 0 processed 137 model bonsai-a4000
+  [side_call_mid_session/A #13 step] HTTP 200 ttft 3.43s total 12.68s silence 4.9s hb 0 prompt 28198 reused 28153 processed 45 model flash-next
+  -> PASS  side call 26.35 s on bonsai-a4000; next step processed 45/28198 (0.2%)
+     ok   the title side call returned 200 -- content 'slugify utility test'
+     ok   served by a non-main model (capacity.model differs from the session's) -- side served by bonsai-a4000, session by flash-next, utility_kind title
+     ok   the session's next step still succeeds
+     ok   and still reuses its cache (processed small) -- processed 45/28198 (0.2%), resumed_cold null
+     ok   and is served by the same model -- flash-next vs flash-next
+
+=== d idle_gap
+  idle for 90 s
+  [idle_gap/A #14 step] HTTP 200 ttft 2.58s total 6.43s silence 2.58s hb 0 prompt 28567 reused 28540 processed 27 model flash-next
+  -> PASS  after 90 s idle: processed 27/28567 (0.1%), ttft 2.58 s
+     ok   served after 90 s idle
+     ok   cache reused -- reused 28540, processed 27/28567 (0.1%), prompt_ms 960, resumed_cold null
+     ok   same model as before the gap -- flash-next vs flash-next
+     ok   no silence over 10 s -- 2.58 s (to_first_event)
+
+=== e abort_and_retry
+  waiting 62 s for A's hold on the card to pass before E starts
+  [abort_and_retry/E #1 aborted] HTTP 200 total 8.02s silence 5.02s hb 1 (aborted by the client)
+  [abort_and_retry/E #2 step] HTTP 200 ttft 85.64s total 88.77s silence 10.05s hb 16 prompt 24613 reused 0 processed 24613 model flash-next
+  -> FAIL  retry ttft 85.64 s (HTTP 200)
+     ok   the retry is not refused 503 -- HTTP 200 
+     ok   the retry is served (200, finished)
+     FAIL the retry has no silence over 10 s -- 10.05 s (to_first_event), 16 heartbeats before the first token
+     ok   the retry is served by the max tier's model -- served by flash-next (expected flash-next)
+
+=== f second_conversation
+  waiting 62 s for E's hold on the card to pass before A starts
+  [second_conversation/A #15 step] HTTP 200 ttft 6.87s total 18.44s silence 5.03s hb 1 prompt 28743 reused 28669 processed 74 model flash-next
+  [second_conversation/B #1 step] HTTP 503 total 4.78s silence 4.78s hb 0 err {"message": "The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 56 s; this convers...
+  503 conversation_at_capacity: Retry-After 56.0; waiting 57.0 s, retry 1/5
+  [second_conversation/B #1.2 step] HTTP 200 ttft 85.52s total 87.62s silence 5.04s hb 17 prompt 24614 reused 0 processed 24614 model flash-next
+  [second_conversation/A #16 step] HTTP 503 total 1.49s silence 1.49s hb 0 err {"message": "The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 59 s; this convers...
+  503 conversation_at_capacity: Retry-After 59.0; waiting 60.0 s, retry 1/5
+  [second_conversation/A #16.2 step] HTTP 200 ttft 5.29s total 27.22s silence 5.02s hb 1 prompt 29123 reused 28986 processed 137 model flash-next
+  -> PASS  B: 2 attempts (1 x 503), A back: processed 137 of 29123
+     ok   the 503 carries a Retry-After -- Retry-After 56.0, error {"message": "The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 56 s; this conversation keeps its place in no queue, so re...
+     ok   the 503 is a capacity answer -- {"message": "The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 56 s; this conversation keeps its place in no queue, so re...
+     ok   B is served within 5 retries obeying Retry-After -- final HTTP 200 after 2 attempts; 
+     ok   B is served by the max tier's model -- served by flash-next (expected flash-next)
+     ok   back on A: served
+     ok   A's return has no silence over 10 s -- 5.02 s (to_first_event)
+
+=== g new_conversation_shared_prefix
+  waiting 62 s for A's hold on the card to pass before C starts
+  [new_conversation_shared_prefix/C #1 step] HTTP 200 ttft 29.55s total 33.77s silence 5.03s hb 5 prompt 24576 reused 16384 processed 8192 model flash-next
+  -> PASS  reused 16384 / processed 8192 of 24576, ttft 29.55 s
+     ok   C (same system+tools, a different first turn) is served
+     ok   no silence over 10 s -- 5.03 s (to_first_event), ttft 29.55 s
+     ok   C reuses at least 16384 tokens of A's prefix (the periodic-checkpoint patch) -- reused 16384 of prompt 24576
+
+=== h compaction
+  waiting 62 s for C's hold on the card to pass before A starts
+  [compaction/A #17 compaction] HTTP 200 ttft 25.3s total 85.68s silence 5.03s hb 5 prompt 29821 reused 24446 processed 5375 model flash-next
+  [compaction/A2 #1 step] HTTP 200 ttft 8.41s total 14.0s silence 5.05s hb 1 prompt 25432 reused 24446 processed 986 model flash-next
+  -> PASS  compaction processed 5375 of 29821; continuation processed 986 of 25432
+     ok   the in-place compaction request returns 200 and finishes
+     ok   no silence over 10 s in the compaction -- 5.03 s (to_first_event)
+     ok   the summary is text with no tool call -- 3543 chars, 0 tool calls, utility_kind compaction
+     ok   the continuation from the summary is served
+     ok   no silence over 10 s in the continuation -- 5.05 s (to_first_event)
+
+=== i responses_api
+  waiting 62 s for A2's hold on the card to pass before R starts
+  [responses_api/R #1 step] HTTP 200 ttft 62.32s total 64.79s silence 5.03s hb 11 prompt 24612 reused 0 processed 24612 model flash-next
+  [responses_api/R #2 step] HTTP 200 ttft 2.41s total 7.26s silence 4.17s hb 0 prompt 24726 reused 24693 processed 33 model flash-next
+  [responses_api/R #3 step] HTTP 200 ttft 3.85s total 7.52s silence 3.85s hb 0 prompt 25018 reused 24884 processed 134 model flash-next
+  [responses_api/R #4 step] HTTP 200 ttft 4.47s total 8.25s silence 4.46s hb 0 prompt 25185 reused 25143 processed 42 model flash-next
+  -> PASS  4 steps via /v1/responses, worst silence 5.03 s, heartbeats 11
+     ok   every step returned 200 and finished (4 steps)
+     ok   every step served by the same (max tier) model -- models seen ['flash-next'], expected flash-next
+     ok   no step routed to another card
+     ok   after step 1 every step re-reads no more than the previous turn + its tail + 512
+     ok   tool calls are valid JSON for a declared tool
+     ok   no silence over 10 s in any step
+     ok   no step was cut off (finish_reason length)
+     ok   a response.in_progress heartbeat arrives during every silence over 5 s
+     ok   every stream ends on response.completed/incomplete
+
+=== j long_run
+  -> SKIP  not requested (--long N)
+
+====================================================================================================
+HARNESS SOAK  base http://127.0.0.1:1234  tier max  api both  steps 12  system-tokens 26000  client-timeout 180s  (22.1 min)
+====================================================================================================
+  PASS    a cold_first_turn                    ttft 147.81 s, longest silence 5.02 s, swap 16.7 s
+  PASS    b agent_loop                         12 steps, worst re-read after step 1 = 188 tokens, 0 flagged, worst silence 5.02 s
+  PASS    c side_call_mid_session              side call 26.35 s on bonsai-a4000; next step processed 45/28198 (0.2%)
+  PASS    d idle_gap                           after 90 s idle: processed 27/28567 (0.1%), ttft 2.58 s
+  FAIL    e abort_and_retry                    retry ttft 85.64 s (HTTP 200)
+  PASS    f second_conversation                B: 2 attempts (1 x 503), A back: processed 137 of 29123
+  PASS    g new_conversation_shared_prefix     reused 16384 / processed 8192 of 24576, ttft 29.55 s
+  PASS    h compaction                         compaction processed 5375 of 29821; continuation processed 986 of 25432
+  PASS    i responses_api                      4 steps via /v1/responses, worst silence 5.03 s, heartbeats 11
+  SKIP    j long_run                           not requested (--long N)
+
+PER-STEP TABLE (every agent step; proc% = processed/prompt; tail~ = estimated new tokens)
+       scn  ses  step  http  ttft_s  hb  silence  prompt  reused  processed  proc%  tail~  calls  tok/s      finish
+cold_first    A     1   200   147.8  29      5.0   24613       0      24613  100.0      -      2   16.2  tool_calls
+agent_loop    A     2   200     4.6   0      4.6   24797   24609        188    0.8    127      4   29.7  tool_calls
+agent_loop    A     3   200     4.3   0      4.3   25052   24920        132    0.5    245      2   30.2  tool_calls
+agent_loop    A     4   200     3.1   0      3.1   25188   25148         40    0.2    126      1   32.9  tool_calls
+agent_loop    A     5   200     2.2   0      2.2   25257   25235         22    0.1     61      1   29.6  tool_calls
+agent_loop    A     6   200     2.2   0      2.5   25363   25340         23    0.1     75      1   23.6  tool_calls
+agent_loop    A     7   200     2.2   0      2.2   25430   25408         22    0.1     60      1   30.1  tool_calls
+agent_loop    A     8   200     2.4   0      2.4   25527   25504         23    0.1     72      1   22.6  tool_calls
+agent_loop    A     9   200     2.7   0      2.7   25653   25631         22    0.1     65      1   24.2  tool_calls
+agent_loop    A    10   200     4.2   0      4.2   25742   25714         28    0.1     60      1   22.2  tool_calls
+agent_loop    A    11   200     4.3   0      4.3   25885   25863         22    0.1     67      1   25.9  tool_calls
+agent_loop    A    12   200     2.3   6      5.0   25973   25946         27    0.1     60      2   26.1  tool_calls
+side_call_    A    13   200     3.4   0      4.9   28198   28153         45    0.2    629      2   37.2  tool_calls
+  idle_gap    A    14   200     2.6   0      2.6   28567   28540         27    0.1    201      1   27.0  tool_calls
+abort_and_    E     2   200    85.6  16     10.1   24613       0      24613  100.0      -      2   30.4  tool_calls
+second_con    A    15   200     6.9   1      5.0   28743   28669         74    0.3    110      2   21.1  tool_calls
+second_con    B     1   200    85.5  17      5.0   24614       0      24614  100.0      -      2   35.3  tool_calls
+second_con    A    16   200     5.3   1      5.0   29123   28986        137    0.5    190      2   27.5  tool_calls
+new_conver    C     1   200    29.6   5      5.0   24576   16384       8192   33.3      -      2   30.2  tool_calls
+compaction   A2     1   200     8.4   1      5.0   25432   24446        986    3.9      -      2   32.3  tool_calls
+responses_    R     1   200    62.3  11      5.0   24612       0      24612  100.0      -      2   40.5  tool_calls
+responses_    R     2   200     2.4   0      4.2   24726   24693         33    0.1    299      4   41.6  tool_calls
+responses_    R     3   200     3.9   0      3.9   25018   24884        134    0.5    571      2   35.4  tool_calls
+responses_    R     4   200     4.5   0      4.5   25185   25143         42    0.2    354      1   32.0  tool_calls
+
+WORST SILENCE: 10.05 s in abort_and_retry/E #2 (to_first_event; client timeout 180 s)
+503 RESPONSES: 2   waits: idle 90.0s, hold 62.0s, hold 62.0s, retry-after 57.0s, retry-after 60.0s, hold 62.0s, hold 62.0s, hold 62.0s
+SWAPS: cold_first_turn/A#1 16.7s
+MEMORY (this machine): min commit available 46138 MiB of 114717, min physical available 1717 MiB
+
+--- a cold_first_turn: PASS
+    ok   HTTP 200 and the stream finished
+    ok   the longest silence is <= 10 s
+         longest silence 5.02 s (mid); first event 5.01 s, first heartbeat 5.01 s, 29 heartbeats before the first token, client timeout 180 s
+    ok   an answer or a tool call arrives
+         content 68 chars, 2 tool calls, finish tool_calls
+    ok   served by the max tier's model
+         served by flash-next (expected flash-next)
+    note system+tools ~26070 estimated tokens (target 26000)
+    note the model swapped in: 16.7 s (first heartbeat 5.01 s)
+
+--- b agent_loop: PASS
+    ok   every step returned 200 and finished (12 steps)
+    ok   every step served by the same (max tier) model
+         models seen ['flash-next'], expected flash-next
+    ok   no step routed to another card
+    ok   after step 1 every step re-reads no more than the previous turn + its tail + 512
+    ok   tool calls are valid JSON for a declared tool
+    ok   no silence over 10 s in any step
+    ok   no step was cut off (finish_reason length)
+    note the loop ended: the step limit was reached; 12 answered steps (12 requests)
+    note the step limit was reached with the model still calling tools (not a failure)
+    note processed/prompt per step: #1 24613/24613 (100.0%), #2 188/24797 (0.8%), #3 132/25052 (0.5%), #4 40/25188 (0.2%), #5 22/25257 (0.1%), #6 23/25363 (0.1%), #7 22/25430 (0.1%), #8 23/25527 (0.1%), #9 22/25653 (0.1%), #10 28/25742 (0.1%), #11 22/25885 (0.1%), #12 27/25973 (0.1%)
+
+--- c side_call_mid_session: PASS
+    ok   the title side call returned 200
+         content 'slugify utility test'
+    ok   served by a non-main model (capacity.model differs from the session's)
+         side served by bonsai-a4000, session by flash-next, utility_kind title
+    ok   the session's next step still succeeds
+    ok   and still reuses its cache (processed small)
+         processed 45/28198 (0.2%), resumed_cold null
+    ok   and is served by the same model
+         flash-next vs flash-next
+    note side call 26.35 s on bonsai-a4000
+
+--- e abort_and_retry: FAIL
+    ok   the retry is not refused 503
+         HTTP 200 
+    ok   the retry is served (200, finished)
+    FAIL the retry has no silence over 10 s
+         10.05 s (to_first_event), 16 heartbeats before the first token
+    ok   the retry is served by the max tier's model
+         served by flash-next (expected flash-next)
+    note attempt 1: client hung up after 8 s (aborted=True, HTTP 200, 1 events, first event 5.02)
+    note retry: first event 10.05 s, first token 85.64 s, prompt 24613, reused 0, processed 24613, session 7999e29ae01c (minted)
+
+--- f second_conversation: PASS
+    ok   the 503 carries a Retry-After
+         Retry-After 56.0, error {"message": "The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 56 s; this conversation keeps its place in no queue, so re...
+    ok   the 503 is a capacity answer
+         {"message": "The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 56 s; this conversation keeps its place in no queue, so re...
+    ok   B is served within 5 retries obeying Retry-After
+         final HTTP 200 after 2 attempts; 
+    ok   B is served by the max tier's model
+         served by flash-next (expected flash-next)
+    ok   back on A: served
+    ok   A's return has no silence over 10 s
+         5.02 s (to_first_event)
+    note B inside A's hold: HTTP 503 conversation_at_capacity Retry-After 56.0 s (the designed answer at max); 1 refusals before it was served
+    note A after B: 1 refusals; resumed_cold {"slot": 0, "cleared_at": 1791237810.7, "idle_s": 146.8, "cells_cleared": null, "by": "a switch: 9d798c93 took the card after the hold", "how": "restored", "reused": 28986, "processed": 137, "prompt_m...; switch {"from": "9d798c93", "owner_idle_s": 63.1, "saved": "llama-server host-RAM prompt cache (--cache-ram): saved when this prompt diverges from it, restored if it r...; processed 137/29123 (0.5%); prompt_ms 2842; ttft 5.29 s
+
+--- g new_conversation_shared_prefix: PASS
+    ok   C (same system+tools, a different first turn) is served
+    ok   no silence over 10 s
+         5.03 s (to_first_event), ttft 29.55 s
+    ok   C reuses at least 16384 tokens of A's prefix (the periodic-checkpoint patch)
+         reused 16384 of prompt 24576
+    note C: prompt 24576, reused 16384, processed 8192, prompt_ms 25689, ttft 29.55 s; shared prefix ~26070 estimated tokens
+
+--- h compaction: PASS
+    ok   the in-place compaction request returns 200 and finishes
+    ok   no silence over 10 s in the compaction
+         5.03 s (to_first_event)
+    ok   the summary is text with no tool call
+         3543 chars, 0 tool calls, utility_kind compaction
+    ok   the continuation from the summary is served
+    ok   no silence over 10 s in the continuation
+         5.05 s (to_first_event)
+    note compaction: prompt 29821, reused 24446, processed 5375, ttft 25.3 s, total 85.68 s, 3543 chars, session 996d5ba28748 (tool_call_id), utility_kind compaction
+    note continuation: prompt 25432, reused 24446, processed 986, ttft 8.41 s; session 996d5ba28748 (summary_line) vs A 996d5ba28748: the conversation continued
+
+--- i responses_api: PASS
+    ok   every step returned 200 and finished (4 steps)
+    ok   every step served by the same (max tier) model
+         models seen ['flash-next'], expected flash-next
+    ok   no step routed to another card
+    ok   after step 1 every step re-reads no more than the previous turn + its tail + 512
+    ok   tool calls are valid JSON for a declared tool
+    ok   no silence over 10 s in any step
+    ok   no step was cut off (finish_reason length)
+    ok   a response.in_progress heartbeat arrives during every silence over 5 s
+    ok   every stream ends on response.completed/incomplete
+    note heartbeats per step: #1 11, #2 0, #3 0, #4 0
+
+FAILURES
+  e abort_and_retry
+     - the retry has no silence over 10 s: 10.05 s (to_first_event), 16 heartbeats before the first token
+RESULT: 8 passed, 1 failed, 1 skipped, 0 not run

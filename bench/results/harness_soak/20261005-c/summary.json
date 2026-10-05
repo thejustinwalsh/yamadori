@@ -1,0 +1,431 @@
+{
+ "base": "http://127.0.0.1:1234",
+ "tier": "max",
+ "out": "bench/results/harness_soak/20261005-c",
+ "scenarios": [
+  {
+   "key": "a",
+   "name": "cold_first_turn",
+   "status": "PASS",
+   "headline": "ttft 147.81 s, longest silence 5.02 s, swap 16.7 s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "system+tools ~26070 estimated tokens (target 26000)",
+    "the model swapped in: 16.7 s (first heartbeat 5.01 s)"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "HTTP 200 and the stream finished",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "the longest silence is <= 10 s",
+     "detail": "longest silence 5.02 s (mid); first event 5.01 s, first heartbeat 5.01 s, 29 heartbeats before the first token, client timeout 180 s"
+    },
+    {
+     "ok": true,
+     "text": "an answer or a tool call arrives",
+     "detail": "content 68 chars, 2 tool calls, finish tool_calls"
+    },
+    {
+     "ok": true,
+     "text": "served by the max tier's model",
+     "detail": "served by flash-next (expected flash-next)"
+    }
+   ]
+  },
+  {
+   "key": "b",
+   "name": "agent_loop",
+   "status": "PASS",
+   "headline": "12 steps, worst re-read after step 1 = 188 tokens, 0 flagged, worst silence 5.02 s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "the loop ended: the step limit was reached; 12 answered steps (12 requests)",
+    "the step limit was reached with the model still calling tools (not a failure)",
+    "processed/prompt per step: #1 24613/24613 (100.0%), #2 188/24797 (0.8%), #3 132/25052 (0.5%), #4 40/25188 (0.2%), #5 22/25257 (0.1%), #6 23/25363 (0.1%), #7 22/25430 (0.1%), #8 23/25527 (0.1%), #9 22/25653 (0.1%), #10 28/25742 (0.1%), #11 22/25885 (0.1%), #12 27/25973 (0.1%)"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "every step returned 200 and finished (12 steps)",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "every step served by the same (max tier) model",
+     "detail": "models seen ['flash-next'], expected flash-next"
+    },
+    {
+     "ok": true,
+     "text": "no step routed to another card",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "after step 1 every step re-reads no more than the previous turn + its tail + 512",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "tool calls are valid JSON for a declared tool",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s in any step",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no step was cut off (finish_reason length)",
+     "detail": ""
+    }
+   ]
+  },
+  {
+   "key": "c",
+   "name": "side_call_mid_session",
+   "status": "PASS",
+   "headline": "side call 26.35 s on bonsai-a4000; next step processed 45/28198 (0.2%)",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "side call 26.35 s on bonsai-a4000"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "the title side call returned 200",
+     "detail": "content 'slugify utility test'"
+    },
+    {
+     "ok": true,
+     "text": "served by a non-main model (capacity.model differs from the session's)",
+     "detail": "side served by bonsai-a4000, session by flash-next, utility_kind title"
+    },
+    {
+     "ok": true,
+     "text": "the session's next step still succeeds",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "and still reuses its cache (processed small)",
+     "detail": "processed 45/28198 (0.2%), resumed_cold null"
+    },
+    {
+     "ok": true,
+     "text": "and is served by the same model",
+     "detail": "flash-next vs flash-next"
+    }
+   ]
+  },
+  {
+   "key": "d",
+   "name": "idle_gap",
+   "status": "PASS",
+   "headline": "after 90 s idle: processed 27/28567 (0.1%), ttft 2.58 s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [],
+   "checks": [
+    {
+     "ok": true,
+     "text": "served after 90 s idle",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "cache reused",
+     "detail": "reused 28540, processed 27/28567 (0.1%), prompt_ms 960, resumed_cold null"
+    },
+    {
+     "ok": true,
+     "text": "same model as before the gap",
+     "detail": "flash-next vs flash-next"
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s",
+     "detail": "2.58 s (to_first_event)"
+    }
+   ]
+  },
+  {
+   "key": "e",
+   "name": "abort_and_retry",
+   "status": "FAIL",
+   "headline": "retry ttft 85.64 s (HTTP 200)",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "attempt 1: client hung up after 8 s (aborted=True, HTTP 200, 1 events, first event 5.02)",
+    "retry: first event 10.05 s, first token 85.64 s, prompt 24613, reused 0, processed 24613, session 7999e29ae01c (minted)"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "the retry is not refused 503",
+     "detail": "HTTP 200 "
+    },
+    {
+     "ok": true,
+     "text": "the retry is served (200, finished)",
+     "detail": ""
+    },
+    {
+     "ok": false,
+     "text": "the retry has no silence over 10 s",
+     "detail": "10.05 s (to_first_event), 16 heartbeats before the first token"
+    },
+    {
+     "ok": true,
+     "text": "the retry is served by the max tier's model",
+     "detail": "served by flash-next (expected flash-next)"
+    }
+   ]
+  },
+  {
+   "key": "f",
+   "name": "second_conversation",
+   "status": "PASS",
+   "headline": "B: 2 attempts (1 x 503), A back: processed 137 of 29123",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "B inside A's hold: HTTP 503 conversation_at_capacity Retry-After 56.0 s (the designed answer at max); 1 refusals before it was served",
+    "A after B: 1 refusals; resumed_cold {\"slot\": 0, \"cleared_at\": 1791237810.7, \"idle_s\": 146.8, \"cells_cleared\": null, \"by\": \"a switch: 9d798c93 took the card after the hold\", \"how\": \"restored\", \"reused\": 28986, \"processed\": 137, \"prompt_m...; switch {\"from\": \"9d798c93\", \"owner_idle_s\": 63.1, \"saved\": \"llama-server host-RAM prompt cache (--cache-ram): saved when this prompt diverges from it, restored if it r...; processed 137/29123 (0.5%); prompt_ms 2842; ttft 5.29 s"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "the 503 carries a Retry-After",
+     "detail": "Retry-After 56.0, error {\"message\": \"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 56 s; this conversation keeps its place in no queue, so re..."
+    },
+    {
+     "ok": true,
+     "text": "the 503 is a capacity answer",
+     "detail": "{\"message\": \"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 56 s; this conversation keeps its place in no queue, so re..."
+    },
+    {
+     "ok": true,
+     "text": "B is served within 5 retries obeying Retry-After",
+     "detail": "final HTTP 200 after 2 attempts; "
+    },
+    {
+     "ok": true,
+     "text": "B is served by the max tier's model",
+     "detail": "served by flash-next (expected flash-next)"
+    },
+    {
+     "ok": true,
+     "text": "back on A: served",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "A's return has no silence over 10 s",
+     "detail": "5.02 s (to_first_event)"
+    }
+   ]
+  },
+  {
+   "key": "g",
+   "name": "new_conversation_shared_prefix",
+   "status": "PASS",
+   "headline": "reused 16384 / processed 8192 of 24576, ttft 29.55 s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "C: prompt 24576, reused 16384, processed 8192, prompt_ms 25689, ttft 29.55 s; shared prefix ~26070 estimated tokens"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "C (same system+tools, a different first turn) is served",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s",
+     "detail": "5.03 s (to_first_event), ttft 29.55 s"
+    },
+    {
+     "ok": true,
+     "text": "C reuses at least 16384 tokens of A's prefix (the periodic-checkpoint patch)",
+     "detail": "reused 16384 of prompt 24576"
+    }
+   ]
+  },
+  {
+   "key": "h",
+   "name": "compaction",
+   "status": "PASS",
+   "headline": "compaction processed 5375 of 29821; continuation processed 986 of 25432",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "compaction: prompt 29821, reused 24446, processed 5375, ttft 25.3 s, total 85.68 s, 3543 chars, session 996d5ba28748 (tool_call_id), utility_kind compaction",
+    "continuation: prompt 25432, reused 24446, processed 986, ttft 8.41 s; session 996d5ba28748 (summary_line) vs A 996d5ba28748: the conversation continued"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "the in-place compaction request returns 200 and finishes",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s in the compaction",
+     "detail": "5.03 s (to_first_event)"
+    },
+    {
+     "ok": true,
+     "text": "the summary is text with no tool call",
+     "detail": "3543 chars, 0 tool calls, utility_kind compaction"
+    },
+    {
+     "ok": true,
+     "text": "the continuation from the summary is served",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s in the continuation",
+     "detail": "5.05 s (to_first_event)"
+    }
+   ]
+  },
+  {
+   "key": "i",
+   "name": "responses_api",
+   "status": "PASS",
+   "headline": "4 steps via /v1/responses, worst silence 5.03 s, heartbeats 11",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "heartbeats per step: #1 11, #2 0, #3 0, #4 0"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "every step returned 200 and finished (4 steps)",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "every step served by the same (max tier) model",
+     "detail": "models seen ['flash-next'], expected flash-next"
+    },
+    {
+     "ok": true,
+     "text": "no step routed to another card",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "after step 1 every step re-reads no more than the previous turn + its tail + 512",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "tool calls are valid JSON for a declared tool",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s in any step",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no step was cut off (finish_reason length)",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "a response.in_progress heartbeat arrives during every silence over 5 s",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "every stream ends on response.completed/incomplete",
+     "detail": ""
+    }
+   ]
+  },
+  {
+   "key": "j",
+   "name": "long_run",
+   "status": "SKIP",
+   "headline": "",
+   "skipped": "not requested (--long N)",
+   "not_run": null,
+   "crashed": null,
+   "notes": [],
+   "checks": []
+  }
+ ],
+ "n_503": 2,
+ "waits": [
+  {
+   "why": "idle",
+   "s": 90.0,
+   "for": "A"
+  },
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "A",
+   "for": "E"
+  },
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "E",
+   "for": "A"
+  },
+  {
+   "why": "retry-after",
+   "s": 57.0,
+   "for": "B"
+  },
+  {
+   "why": "retry-after",
+   "s": 60.0,
+   "for": "A"
+  },
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "A",
+   "for": "C"
+  },
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "C",
+   "for": "A"
+  },
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "A2",
+   "for": "R"
+  }
+ ]
+}

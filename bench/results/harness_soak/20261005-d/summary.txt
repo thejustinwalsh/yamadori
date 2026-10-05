@@ -1,0 +1,57 @@
+====================================================================================================
+HARNESS SOAK  base http://127.0.0.1:1234  tier max  api chat  steps 12  system-tokens 26000  client-timeout 180s  (1.9 min)
+====================================================================================================
+  FAIL    e abort_and_retry                    retry ttft None s (HTTP 503)
+  FAIL    k kill_mid_generation                killed after 20 events: HTTP 200, finish 'tool_calls'; reload ttft None s
+
+PER-STEP TABLE (every agent step; proc% = processed/prompt; tail~ = estimated new tokens)
+       scn  ses  step  http  ttft_s  hb  silence  prompt  reused  processed  proc%  tail~  calls  tok/s      finish
+abort_and_    E     2   503       -   0      3.5    None    None       None      -      -      0      -        None
+kill_mid_g    A     1   200    62.0  12      5.0   24612       0      24612  100.0      -      2   46.0  tool_calls
+kill_mid_g    A     2   200     4.3   0      4.3   24721   24686         35    0.1    119      4   41.9  tool_calls
+kill_mid_g    A     3   502       -   0      1.6    None    None       None      -    119      0      -        None
+
+WORST SILENCE: 5.02 s in kill_mid_generation/A #1 (mid; client timeout 180 s)
+503 RESPONSES: 3   waits: retry-after 29.0s
+MEMORY (this machine): min commit available 46758 MiB of 114717, min physical available 4968 MiB
+
+--- e abort_and_retry: FAIL
+    FAIL the retry is not refused 503
+         HTTP 503 {"error":{"message":"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 31 s; this conversation keeps its place in no queu
+    FAIL the retry is served (200, finished)
+         HTTP 503: {"error":{"message":"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 31 s; this conversation keeps its place in no queue, so retry then.","type":"service_unavailable_error","param":null,"code":"conversation_at_capacity"
+    ok   the retry has no silence over 10 s
+         3.52 s (to_error), 0 heartbeats before the first token
+    FAIL the retry is served by the max tier's model
+         no x_yamadori.capacity.model on the final event (cannot tell which model served it)
+    note attempt 1: client hung up after 8 s (aborted=False, HTTP 503, 0 events, first event None)
+    note attempt 1 was refused: {"message": "The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 35 s; this conversation keeps its place in no queue, so re...
+    note retry: first event None s, first token None s, prompt None, reused None, processed None, session None (None)
+
+--- k kill_mid_generation: FAIL
+    FAIL the client gets an error (HTTP 5xx or an SSE error event), not an answer
+         HTTP 200, finish 'tool_calls', error {}, stream_error None, content 'Small workspace: README, package.json, tsconfig.json, and `src/index.ts`. Let me read them to match existing conventions.\n\n', 4 tool calls
+    FAIL and no finish_reason says the turn ended normally
+         finish 'tool_calls'
+    ok   and the stream did not hang
+         hung_up False, silence 4.29 s
+    FAIL the same request is served afterwards (the model reloads)
+         HTTP 502: {"error":{"message":"The model server failed: the model server refused the request","type":"server_error","param":null,"code":"upstream_error"}}
+    ok   and the reload has no silence over 10 s
+         1.57 s (to_error), ttft None s, 0 heartbeats before the first token
+    FAIL and is served by the max tier's model
+         no x_yamadori.capacity.model on the final event (cannot tell which model served it)
+    note killed flash-next's llama-server PID 94924 (port 10008; SUCCESS: The process with PID 94924 has been terminated.) after 20 streamed events; 67 reasoning chars and 123 content chars had arrived
+    note after the kill: prompt None, reused None, processed None, ttft None s, swap None
+
+FAILURES
+  e abort_and_retry
+     - the retry is not refused 503: HTTP 503 {"error":{"message":"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 31 s; this conversation keeps its place in no queu
+     - the retry is served (200, finished): HTTP 503: {"error":{"message":"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 31 s; this conversation keeps its place in no queue, so retry then.","type":"service_unavailable_error","param":null,"code":"conversation_at_capacity"
+     - the retry is served by the max tier's model: no x_yamadori.capacity.model on the final event (cannot tell which model served it)
+  k kill_mid_generation
+     - the client gets an error (HTTP 5xx or an SSE error event), not an answer: HTTP 200, finish 'tool_calls', error {}, stream_error None, content 'Small workspace: README, package.json, tsconfig.json, and `src/index.ts`. Let me read them to match existing conventions.\n\n', 4 tool calls
+     - and no finish_reason says the turn ended normally: finish 'tool_calls'
+     - the same request is served afterwards (the model reloads): HTTP 502: {"error":{"message":"The model server failed: the model server refused the request","type":"server_error","param":null,"code":"upstream_error"}}
+     - and is served by the max tier's model: no x_yamadori.capacity.model on the final event (cannot tell which model served it)
+RESULT: 0 passed, 2 failed, 0 skipped, 0 not run

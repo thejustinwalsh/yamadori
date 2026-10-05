@@ -864,6 +864,21 @@ empty or error calls is a tool defect to fix, not a budget spent.
   client's stored history), and so was the "[no answer: the model stopped
   ...]" notice on a stop with nothing written (blank content, finish
   `stop`).
+- **A model server that dies mid-generation is an ERROR, never an answer**
+  (operator, 2026-10-05; `proxy._post_events_raw`, `_run_turn`). llama-swap
+  answers 200 and closes the body; a stream with no finish chunk and nothing
+  in hand is retried once, then 503; with reasoning or text in hand the turn
+  RAISES (HTTP 503 `model_unavailable`, Retry-After 30, before the first
+  byte; ONE `data: {"error": ...}` event and `[DONE]` after it) -- it was
+  delivered as content plus a note with finish_reason "incomplete", which a
+  harness read as the model's reply. Nothing is recorded as delivered. The
+  request AFTER a kill: llama-swap answers 502 (connection refused) until it
+  notices the exit (live 2026-10-05: two 502s 4 ms apart, then "upstream
+  process exited unexpectedly"), so the retry waits for it
+  (`proxy._await_swap_notice`: GET /running no longer lists the model ready,
+  then llama-swap loads it) and a 502/504 that survives is a retryable 503
+  `model_unavailable`, never a 502 `server_error`. `mcp/test_stream.py`;
+  live: `bench/harness_soak.py --only k`.
 - **The client's own window** (C1, `docs/OPENAI-CONFORMANCE.md`,
   2026-09-25). `/v1/models` `context_length` is the main share and it is THE
   LIMIT ENFORCED (`proxy.window_limit`; a compaction's is its budget

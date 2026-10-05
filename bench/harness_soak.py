@@ -45,6 +45,11 @@ SCENARIOS (--only a,b,... selects; each prints PASS/FAIL with its evidence)
   h  compaction                    in-place summarise turn on A, then A continued from the summary as a harness would
   i  responses_api                 a + 3 steps of b through POST /v1/responses (needs --api responses|both)
   j  long_run                      --long N extra agent steps to a larger context (skipped without --long)
+  k  kill_mid_generation           the max model's llama-server is killed (its PID, found from llama-swap's /running
+                                   and the listening port; never by image name) after --kill-after streamed events:
+                                   the client must get an ERROR (an HTTP 5xx or an SSE error event), never an empty
+                                   or finished-looking answer; then the same request is served again (the reload).
+                                   Opt-in: --only k (it kills a process and the model reloads).
 
 OUTPUT
 
@@ -90,10 +95,11 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
 HEARTBEAT_S = 5.0             # proxy.HEARTBEAT: the beat the stream is meant to keep (docs/FLASH-NEXT.md)
 REREAD_SLACK = 512            # the operator's allowance beyond the previous assistant turn and its new tail
-SCENARIOS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
+SCENARIOS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]
+DESTRUCTIVE = {"k"}           # kills a server process: only with --only k (never in the default list)
 NAMES = {"a": "cold_first_turn", "b": "agent_loop", "c": "side_call_mid_session", "d": "idle_gap",
          "e": "abort_and_retry", "f": "second_conversation", "g": "new_conversation_shared_prefix",
-         "h": "compaction", "i": "responses_api", "j": "long_run"}
+         "h": "compaction", "i": "responses_api", "j": "long_run", "k": "kill_mid_generation"}
 
 
 class NotRun(Exception):
@@ -659,6 +665,10 @@ def xflat(x: dict) -> dict:
             "mode": cache.get("mode"), "routed": sl.get("routed"), "switch": sl.get("switch"),
             "resumed_cold": sl.get("resumed_cold"), "session_id": ses.get("id"),
             "session_source": ses.get("source"), "utility_kind": x.get("utility_kind"),
+            # where the wall clock went (mcp/stage_timing.py): the proxy's own stages, in ms, and the upstream's
+            # first event / queue estimate -- the evidence for a silence before the first token
+            "stages_ms": (x.get("timing") or {}).get("stages"), "points_ms": (x.get("timing") or {}).get("points"),
+            "wall_ms": (x.get("timing") or {}).get("wall_ms"),
             "has_x": bool(x)}
 
 
@@ -885,7 +895,7 @@ class Soak:
 
     def _one(self, *, scenario: str, label: str, step: int, api: str, path: str, body: dict, stream: bool,
              abort_after: float | None, kind: str, tail_est: int | None, attempt: int,
-             extra_headers: dict | None) -> Req:
+             extra_headers: dict | None, on_token: tuple | None = None) -> Req:
         cfg = self.cfg
         raw = json.dumps(body).encode()
         req = Req()
@@ -902,7 +912,7 @@ class Soak:
         last = t0
         mx, phase = 0.0, "to_first_event"
         t_first_event = t_first_hb = t_first_token = None
-        hb = hb_before_token = comments = n_events = 0
+        hb = hb_before_token = comments = n_events = n_tokens = 0
         tail_lines: list[str] = []
         other_lines: list[str] = []
 
@@ -1003,6 +1013,10 @@ class Soak:
                             tail_lines.append(data)
                             del tail_lines[:-6]
                             what = parser.feed(data)
+                            if what == "token":
+                                n_tokens += 1
+                                if on_token and n_tokens == on_token[0]:
+                                    on_token[1]()                       # a hook fired mid-stream (scenario k)
                             if what == "hb":
                                 hb += 1
                                 if t_first_hb is None:
@@ -1057,13 +1071,14 @@ class Soak:
 
     def send(self, *, scenario: str, label: str, step: int, api: str, path: str, body: dict, stream: bool = True,
              retry503: bool = True, abort_after: float | None = None, kind: str = "step",
-             tail_est: int | None = None, main: bool = True, extra_headers: dict | None = None) -> Req:
+             tail_est: int | None = None, main: bool = True, extra_headers: dict | None = None,
+             on_token: tuple | None = None) -> Req:
         cfg = self.cfg
         attempts: list[Req] = []
         while True:
             req = self._one(scenario=scenario, label=label, step=step, api=api, path=path, body=body,
                             stream=stream, abort_after=abort_after, kind=kind, tail_est=tail_est,
-                            attempt=len(attempts) + 1, extra_headers=extra_headers)
+                            attempt=len(attempts) + 1, extra_headers=extra_headers, on_token=on_token)
             attempts.append(req)
             self.log(req)
             if req.status == 429:
@@ -1111,7 +1126,7 @@ class Soak:
 
     # -- one step of a session
     def step(self, sess: Session, scenario: str, *, retry503: bool = True, abort_after: float | None = None,
-             during=None, during_delay: float = 3.0, absorb: bool = True) -> Req:
+             during=None, during_delay: float = 3.0, absorb: bool = True, on_token: tuple | None = None) -> Req:
         body = sess.request_body()
         sess_step = len(sess.reqs) + 1
         tail = sess.tail_est()
@@ -1131,7 +1146,7 @@ class Soak:
             th.daemon = True
             th.start()
         try:
-            req = self._send_step(sess, scenario, path, body, sess_step, tail, sent, retry503, abort_after)
+            req = self._send_step(sess, scenario, path, body, sess_step, tail, sent, retry503, abort_after, on_token)
         finally:
             if th is not None:
                 th.join(timeout=self.cfg.client_timeout + 30)
@@ -1140,9 +1155,10 @@ class Soak:
             sess.absorb(req)
         return req
 
-    def _send_step(self, sess, scenario, path, body, sess_step, tail, sent, retry503, abort_after) -> Req:
+    def _send_step(self, sess, scenario, path, body, sess_step, tail, sent, retry503, abort_after,
+                   on_token=None) -> Req:
         req = self.send(scenario=scenario, label=sess.label, step=sess_step, api=sess.api, path=path, body=body,
-                        retry503=retry503, abort_after=abort_after, tail_est=tail)
+                        retry503=retry503, abort_after=abort_after, tail_est=tail, on_token=on_token)
         req.sent_entries = sent
         sess.reqs.append(req)
         return req
@@ -1562,6 +1578,82 @@ def sc_i(S: Soak, sc: Scn) -> None:
                    f"{sum(r['hb'] for r in recs)}")
 
 
+def find_model_pid(base_llama_swap: str, model: str) -> tuple[int | None, str]:
+    """The PID of `model`'s llama-server: llama-swap's /running names the model's upstream port, and the process
+    LISTENING on that port is checked to be a llama-server.exe. (None, why) when it cannot be identified."""
+    import subprocess
+    import urllib.request
+    try:
+        with urllib.request.urlopen(base_llama_swap.rstrip("/") + "/running", timeout=10) as r:
+            running = json.loads(r.read().decode())["running"]
+    except Exception as e:                                                             # noqa: BLE001
+        return None, f"llama-swap /running did not answer: {e}"
+    row = next((m for m in running if m.get("model") == model), None)
+    if row is None:
+        return None, f"{model} is not in llama-swap's /running"
+    port = urlsplit(row.get("proxy") or "").port
+    if not port:
+        return None, f"no port in {row.get('proxy')!r}"
+    out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=30).stdout
+    pids = {int(parts[-1]) for ln in out.splitlines() if (parts := ln.split()) and len(parts) >= 5
+            and parts[0] == "TCP" and parts[3] == "LISTENING" and parts[1].endswith(f":{port}")}
+    if len(pids) != 1:
+        return None, f"{len(pids)} processes listen on port {port}"
+    pid = pids.pop()
+    img = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
+                         text=True, timeout=30).stdout
+    if "llama-server" not in img.lower():
+        return None, f"PID {pid} on port {port} is not a llama-server: {img.strip()[:80]}"
+    return pid, f"port {port}"
+
+
+def sc_k(S: Soak, sc: Scn) -> None:
+    import subprocess
+    model = S.cfg.expect_model or "flash-next"
+    sess = S.warm("A", sc.name, 1)
+    killed: dict = {}
+    # the PID is found BEFORE the step: finding it takes seconds (netstat, tasklist), and a short generation is over
+    # before a hook that looks it up has run (2026-10-05: the first run killed the server after the answer had ended)
+    pid0, why0 = find_model_pid(S.cfg.swap_base, model)
+
+    def kill() -> None:
+        pid, why = pid0, why0
+        killed["pid"], killed["why"], killed["at"] = pid, why, time.time()
+        if pid is not None:
+            r = subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, text=True, timeout=30)
+            killed["taskkill"] = (r.stdout + r.stderr).strip()[:160]
+
+    req = S.step(sess, sc.name, retry503=False, absorb=False, on_token=(S.cfg.kill_after, kill))
+    r, p = req.rec, req.parser
+    if killed.get("pid") is None:
+        raise Abort(f"the {model} server was not killed (the generation ended before {S.cfg.kill_after} streamed "
+                    f"events, or its PID could not be identified): {killed.get('why', 'the hook never fired')}")
+    sc.note(f"killed {model}'s llama-server PID {killed['pid']} ({killed['why']}; {killed.get('taskkill')}) after "
+            f"{S.cfg.kill_after} streamed events; {len(p.reasoning)} reasoning chars and {len(p.content)} content "
+            f"chars had arrived")
+    errored = bool(p.error or (req.status is not None and req.status >= 500))
+    sc.check(errored, "the client gets an error (HTTP 5xx or an SSE error event), not an answer",
+             f"HTTP {req.status}, finish {p.finish_reason!r}, error {_short(p.error or req.err, 200)}, stream_error "
+             f"{req.stream_error}, content {_short(p.content, 160)!r}, {r['n_tool_calls']} tool calls")
+    sc.check(p.finish_reason not in ("stop", "tool_calls"), "and no finish_reason says the turn ended normally",
+             f"finish {p.finish_reason!r}")
+    sc.check(not req.hung_up, "and the stream did not hang", f"hung_up {req.hung_up}, silence {r['max_silence_s']} s")
+    nxt = S.step(sess, sc.name)
+    nr = nxt.rec
+    sc.check(nxt.ok, "the same request is served afterwards (the model reloads)", "" if nxt.ok
+             else describe_fail(nxt))
+    sc.check(silence_ok(S, nr), f"and the reload has no silence over {S.cfg.silence_limit:g} s",
+             f"{nr['max_silence_s']} s ({nr['max_silence_phase']}), ttft {nr['ttft_s']} s, "
+             f"{nr['hb_before_token']} heartbeats before the first token")
+    ok, why = served_by(S, nr)
+    sc.check(nxt.ok and ok, "and is served by the max tier's model", why)
+    sc.note(f"after the kill: prompt {nr.get('prompt')}, reused {nr.get('reused')}, processed {nr.get('processed')}, "
+            f"ttft {nr.get('ttft_s')} s, swap {nr.get('swap_load_s')}")
+    sc.headline = (f"killed after {S.cfg.kill_after} events: HTTP {req.status}, "
+                   f"{'error ' + str(_short(p.error, 80)) if p.error else 'finish ' + repr(p.finish_reason)}; "
+                   f"reload ttft {nr.get('ttft_s')} s")
+
+
 def sc_j(S: Soak, sc: Scn) -> None:
     n = S.cfg.long
     if n <= 0:
@@ -1597,7 +1689,7 @@ def sc_j(S: Soak, sc: Scn) -> None:
 
 
 SCENARIO_FN = {"a": sc_a, "b": sc_b, "c": sc_c, "d": sc_d, "e": sc_e, "f": sc_f, "g": sc_g, "h": sc_h, "i": sc_i,
-               "j": sc_j}
+               "j": sc_j, "k": sc_k}
 
 
 # ----------------------------------------------------------------------------------------------- summary
@@ -1703,6 +1795,10 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-retry-wait", type=float, default=180.0)
     ap.add_argument("--retry-margin", type=float, default=1.0, help="seconds added to every Retry-After")
     ap.add_argument("--long", type=int, default=0, help="scenario j: N extra agent steps")
+    ap.add_argument("--kill-after", type=int, default=6, help="scenario k: kill the model server after this many "
+                    "streamed token/reasoning events")
+    ap.add_argument("--swap-base", default=os.environ.get("YAMADORI_SWAP", "http://127.0.0.1:11434"),
+                    help="llama-swap's address (scenario k reads /running to find the server's PID)")
     ap.add_argument("--expect-prefix-reuse", type=int, default=16384,
                     help="scenario g: tokens a new conversation with the same system+tools should reuse (0: off)")
     ap.add_argument("--side-concurrent", action="store_true", help="scenario c also fires a title request while a "
@@ -1713,7 +1809,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 def pick(only: str | None, api: str) -> list[str]:
     if not only:
-        return ["i"] if api == "responses" else list(SCENARIOS)
+        return ["i"] if api == "responses" else [k for k in SCENARIOS if k not in DESTRUCTIVE]
     byname = {v: k for k, v in NAMES.items()}
     keys = []
     for tok in [t.strip() for t in only.split(",") if t.strip()]:
@@ -1743,6 +1839,11 @@ def main(argv: list[str] | None = None) -> int:
     out = cfg.out or os.path.join(ROOT, "bench", "results", "harness_soak", stamp)
     os.makedirs(out, exist_ok=True)
     S = Soak(cfg)
+    if keys and keys[0] != "a" and cfg.hold:
+        # a run that does not begin with the cold first turn may follow another run's conversation, which still
+        # holds the card for `hold` s (the one-conversation rule): the first scenario waits it out (2026-10-05: scenario
+        # e began with a 503 conversation_at_capacity from the run before it)
+        S.owner, S.owner_end = "an earlier run", time.time()
     S.fh = open(os.path.join(out, "requests.jsonl"), "w", encoding="utf-8")
     print(f"harness soak against {cfg.base}: scenarios {','.join(keys)}; records in {out}", flush=True)
     t_all = time.time()

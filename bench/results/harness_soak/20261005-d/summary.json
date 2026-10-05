@@ -1,0 +1,96 @@
+{
+ "base": "http://127.0.0.1:1234",
+ "tier": "max",
+ "out": "bench/results/harness_soak/20261005-d",
+ "scenarios": [
+  {
+   "key": "e",
+   "name": "abort_and_retry",
+   "status": "FAIL",
+   "headline": "retry ttft None s (HTTP 503)",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "attempt 1: client hung up after 8 s (aborted=False, HTTP 503, 0 events, first event None)",
+    "attempt 1 was refused: {\"message\": \"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 35 s; this conversation keeps its place in no queue, so re...",
+    "retry: first event None s, first token None s, prompt None, reused None, processed None, session None (None)"
+   ],
+   "checks": [
+    {
+     "ok": false,
+     "text": "the retry is not refused 503",
+     "detail": "HTTP 503 {\"error\":{\"message\":\"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 31 s; this conversation keeps its place in no queu"
+    },
+    {
+     "ok": false,
+     "text": "the retry is served (200, finished)",
+     "detail": "HTTP 503: {\"error\":{\"message\":\"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 31 s; this conversation keeps its place in no queue, so retry then.\",\"type\":\"service_unavailable_error\",\"param\":null,\"code\":\"conversation_at_capacity\""
+    },
+    {
+     "ok": true,
+     "text": "the retry has no silence over 10 s",
+     "detail": "3.52 s (to_error), 0 heartbeats before the first token"
+    },
+    {
+     "ok": false,
+     "text": "the retry is served by the max tier's model",
+     "detail": "no x_yamadori.capacity.model on the final event (cannot tell which model served it)"
+    }
+   ]
+  },
+  {
+   "key": "k",
+   "name": "kill_mid_generation",
+   "status": "FAIL",
+   "headline": "killed after 20 events: HTTP 200, finish 'tool_calls'; reload ttft None s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "killed flash-next's llama-server PID 94924 (port 10008; SUCCESS: The process with PID 94924 has been terminated.) after 20 streamed events; 67 reasoning chars and 123 content chars had arrived",
+    "after the kill: prompt None, reused None, processed None, ttft None s, swap None"
+   ],
+   "checks": [
+    {
+     "ok": false,
+     "text": "the client gets an error (HTTP 5xx or an SSE error event), not an answer",
+     "detail": "HTTP 200, finish 'tool_calls', error {}, stream_error None, content 'Small workspace: README, package.json, tsconfig.json, and `src/index.ts`. Let me read them to match existing conventions.\\n\\n', 4 tool calls"
+    },
+    {
+     "ok": false,
+     "text": "and no finish_reason says the turn ended normally",
+     "detail": "finish 'tool_calls'"
+    },
+    {
+     "ok": true,
+     "text": "and the stream did not hang",
+     "detail": "hung_up False, silence 4.29 s"
+    },
+    {
+     "ok": false,
+     "text": "the same request is served afterwards (the model reloads)",
+     "detail": "HTTP 502: {\"error\":{\"message\":\"The model server failed: the model server refused the request\",\"type\":\"server_error\",\"param\":null,\"code\":\"upstream_error\"}}"
+    },
+    {
+     "ok": true,
+     "text": "and the reload has no silence over 10 s",
+     "detail": "1.57 s (to_error), ttft None s, 0 heartbeats before the first token"
+    },
+    {
+     "ok": false,
+     "text": "and is served by the max tier's model",
+     "detail": "no x_yamadori.capacity.model on the final event (cannot tell which model served it)"
+    }
+   ]
+  }
+ ],
+ "n_503": 3,
+ "waits": [
+  {
+   "why": "retry-after",
+   "s": 29.0,
+   "for": "A"
+  }
+ ]
+}

@@ -70,6 +70,9 @@ class Knobs:
         self.status429 = False
         self.no_x = False
         self.wrong_title_status = None
+        self.reasoning_chunks = 0       # extra reasoning deltas (0.05 s apart) before the answer: scenario k kills here
+        self.on_kill = "error"          # what the proxy does when the model server dies mid-stream:
+                                        # error (an SSE error event) | empty_stop | incomplete | http500 (no stream)
         self.__dict__.update(kw)
 
 
@@ -88,6 +91,7 @@ class Fake:
         self.loaded = False
         self.log: list[tuple] = []
         self.srv = None
+        self.killed = False             # set by the test's taskkill stand-in (scenario k); read by chat_stream
 
     def start(self) -> str:
         fake = self
@@ -302,6 +306,23 @@ class Fake:
         ch({"reasoning_content": "Let me think. "})
         if k.mid_silence_step == n:
             time.sleep(k.mid_silence_s)
+        for i in range(k.reasoning_chunks):
+            time.sleep(0.05)
+            ch({"reasoning_content": f"step {i}. "})
+            if self.killed:
+                self.killed = False                  # the server is gone; the next request reloads it
+                if k.on_kill == "error":
+                    h.emit(b'data: {"error": {"message": "the model server ended the stream", "type": "api_error", '
+                           b'"code": "service_unavailable"}}\n\n')
+                    h.emit(b"data: [DONE]\n\n")
+                elif k.on_kill == "empty_stop":
+                    ch({}, finish="stop", extra={} if k.no_x else {"x_yamadori": x})
+                    h.emit(b"data: [DONE]\n\n")
+                else:
+                    ch({"content": "\n\n[the connection to the model dropped]"}, finish="incomplete",
+                       extra={} if k.no_x else {"x_yamadori": x})
+                    h.emit(b"data: [DONE]\n\n")
+                return h.finish_stream()
         ch({"reasoning_content": "Done thinking."})
         if k.error_event_step == n:
             h.emit(b'data: {"error": {"message": "the model server dropped", "type": "api_error", '
@@ -638,6 +659,48 @@ def test_side_call_and_abort():
           and first[0]["status"] is None, str(res["sc"]["e"]["checks"]) + str(first[:1]))
 
 
+def run_kill(knobs: Knobs, extra: list[str] | None = None, pid=4242):
+    """Scenario k against the fake, with the PID lookup and taskkill replaced: the 'kill' flips Fake.killed."""
+    import subprocess
+    from unittest import mock
+    holder: dict = {}
+    orig_start = Fake.start
+
+    def start(self):
+        holder["fake"] = self
+        return orig_start(self)
+
+    def fake_run(cmd, *a, **kw):
+        assert cmd[:3] == ["taskkill", "/F", "/PID"], cmd           # by PID, never by image name
+        holder["cmd"] = cmd
+        holder["fake"].killed = True
+        return subprocess.CompletedProcess(cmd, 0, "SUCCESS", "")
+
+    with mock.patch.object(Fake, "start", start), mock.patch("subprocess.run", fake_run),             mock.patch.object(H, "find_model_pid", lambda base, model: (pid, "fake port") if pid else (None, "gone")):
+        res = run(knobs, ["--kill-after", "3"] + (extra or []), only="k")
+    res["cmd"] = holder.get("cmd")
+    return res
+
+
+def test_kill_mid_generation():
+    res = run_kill(Knobs(reasoning_chunks=30, on_kill="error"))
+    check("kill_mid_generation: an SSE error event + a reload that serves = PASS", res["sc"]["k"]["status"] == "PASS",
+          str(res["sc"]["k"]["checks"]) + str(res["sc"]["k"].get("crashed")))
+    check("... the server is killed by PID (taskkill /F /PID 4242)", res["cmd"] == ["taskkill", "/F", "/PID", "4242"],
+          str(res["cmd"]))
+    res = run_kill(Knobs(reasoning_chunks=30, on_kill="empty_stop"))
+    ok, detail = chk(res, "k", "the client gets an error")
+    check("an empty answer with finish stop after the kill: k FAIL", ok is False and res["sc"]["k"]["status"] == "FAIL",
+          detail)
+    res = run_kill(Knobs(reasoning_chunks=30, on_kill="incomplete"))
+    ok, detail = chk(res, "k", "the client gets an error")
+    check("a partial answer finish 'incomplete' (no error): k FAIL", ok is False, detail)
+    res = run_kill(Knobs(reasoning_chunks=30), pid=None)
+    check("a PID that cannot be identified: nothing is killed, k FAIL with the reason",
+          res["cmd"] is None and res["sc"]["k"]["status"] == "FAIL" and "gone" in str(res["sc"]["k"]["checks"]),
+          str(res["sc"]["k"]["checks"]))
+
+
 def test_second_conversation():
     res = run(Knobs(never_free=True), ["--max-retries", "2", "--retry-margin", "0.1"], only="f")
     ok, detail = chk(res, "f", "B is served within")
@@ -712,13 +775,16 @@ def test_idle_and_cli():
         except SystemExit:
             check("an unknown --only is refused", True)
     check("--only takes names and letters", H.pick("agent_loop,c", "chat") == ["b", "c"])
+    check("the default list never includes the scenario that kills a server",
+          "k" not in H.pick(None, "both") and H.pick("kill_mid_generation", "chat") == ["k"])
 
 
 def main() -> int:
     fns = [test_parsers_and_builders, test_reread_rule, test_everything_passes_on_a_good_fake,
            test_silent_swap_hangs_the_client_up, test_silence_over_the_limit_without_a_hangup,
            test_wrong_model_and_missing_record, test_a_rereading_fake_is_flagged,
-           test_loop_failures_are_recorded_not_raised, test_side_call_and_abort, test_second_conversation,
+           test_loop_failures_are_recorded_not_raised, test_side_call_and_abort, test_kill_mid_generation,
+           test_second_conversation,
            test_shared_prefix_and_compaction, test_responses_api, test_idle_and_cli]
     for fn in fns:
         t0 = time.time()
