@@ -5986,11 +5986,19 @@ class _TurnPump:
         if not self._pulling:
             self._pulling = True
             self._want.release()
+        # THE HEARTBEAT IS DUE AT HEARTBEAT s OF SILENCE OR, IF THE PRE-FLIGHT IS STILL RUNNING THEN, AS SOON AS IT ENDS
+        # (soak 2026-10-05, scenario e: prepare + session took 5.2 s, one look at 5.0 s found the pre-flight
+        # unfinished and the next look was at 10.0 s -- a 10.07 s silence for a 0.2 s overrun). The queue is polled
+        # at a twentieth of HEARTBEAT, which bounds that overrun; nothing is sent earlier than HEARTBEAT.
+        t_pull = time.time()
+        poll = max(0.005, HEARTBEAT / 20)
         while True:
             try:
-                what, item = self._q.get(timeout=HEARTBEAT)
+                what, item = self._q.get(timeout=poll)
                 break
             except self._empty:
+                if time.time() - t_pull < HEARTBEAT:
+                    continue
                 # heartbeats once the turn's pre-flight is over (_run_turn sets it after the window check): until
                 # then a refusal must still be a real HTTP status (E1), however long the check takes -- EXCEPT
                 # while the request waits for the card or loads its model (max_mode.wait_ready's `card_wait`:

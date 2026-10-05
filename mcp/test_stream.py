@@ -1594,6 +1594,35 @@ def test_a_killed_model_server_is_waited_for_not_answered_502():
         srv.shutdown()
 
 
+def test_a_heartbeat_follows_the_end_of_a_pre_flight_that_overran_the_beat():
+    """SOAK 2026-10-05 (scenario e): prepare + session took 5.2 s of a 5 s HEARTBEAT; the pump looked once at 5.0 s
+    (pre-flight unfinished: no beat) and again at 10.0 s -- a 10 s silence for a 0.2 s overrun. The beat now goes as
+    soon as the pre-flight ends once HEARTBEAT s have passed (nothing is sent before HEARTBEAT)."""
+    import cancel
+    import time
+    saved_turn, saved_beat = proxy._run_turn, proxy.HEARTBEAT
+    proxy.HEARTBEAT = 1.0
+
+    def slow_pre(body, streamed):
+        time.sleep(1.3)                                  # the pre-flight overruns the first beat by 0.3 s
+        cancel.current().preflight_done = True
+        time.sleep(1.5)                                  # then the model works
+        yield ("content", "hi")
+        return {"choices": [{"finish_reason": "stop"}], "x_yamadori": {}}
+    proxy._run_turn = slow_pre
+    try:
+        t0, stamps = time.time(), []
+        for b in proxy.stream_body({"model": "yamadori", "stream": True,
+                                    "messages": [{"role": "user", "content": "x"}]}, "yamadori"):
+            stamps.append((round(time.time() - t0, 2), b[:40]))
+        first = stamps[0][0]
+        check(1.25 <= first <= 1.65, "the first beat comes when the pre-flight ends (1.3 s), not at the next beat (2.0 s)",
+              str(stamps[:3]))
+        check(stamps[-1][1].strip() == b"data: [DONE]", "and the turn still ends normally", str(stamps[-2:]))
+    finally:
+        proxy._run_turn, proxy.HEARTBEAT = saved_turn, saved_beat
+
+
 def test_the_wait_is_heard():
     """THE WAIT IS HEARD (proxy._TurnPump; the operator's live session, 2026-10-01 ET: VS Copilot hung up at 180 s
     with no byte while Flash-Next loaded). A turn that produces nothing for HEARTBEAT seconds sends heartbeats
@@ -1711,7 +1740,7 @@ def main() -> int:
                test_a_retry_takes_the_lanes_its_abandoned_twins_hold,
                test_a_retry_after_a_while_replaces_its_twin_at_once,
                test_a_stream_that_never_starts_gives_its_lane_back,
-               test_a_dead_model_server_mid_generation_is_an_error_not_an_answer, test_a_killed_model_server_is_waited_for_not_answered_502, test_the_wait_is_heard,
+               test_a_dead_model_server_mid_generation_is_an_error_not_an_answer, test_a_killed_model_server_is_waited_for_not_answered_502, test_a_heartbeat_follows_the_end_of_a_pre_flight_that_overran_the_beat, test_the_wait_is_heard,
                test_a_stream_that_ends_without_a_finish_is_a_failure):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
