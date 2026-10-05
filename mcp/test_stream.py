@@ -120,6 +120,9 @@ def _sse(r: dict) -> bytes:
         out.append(ev({"content": piece}))
     for i, c in enumerate(r["calls"]):
         out.append(ev({"tool_calls": [dict(c, index=i)]}))
+    if r.get("drop"):
+        # the model server died: llama-swap answers 200 and closes the body -- no finish chunk, no usage, no [DONE]
+        return b"".join(out)
     out.append(ev({}, r["finish"]))
     d = {"id": "up-1", "object": "chat.completion.chunk", "choices": [],
          "usage": r["usage"]}
@@ -1472,6 +1475,42 @@ def test_a_stream_that_ends_without_a_finish_is_a_failure():
         _ur.urlopen = saved
 
 
+def test_a_dead_model_server_mid_generation_is_an_error_not_an_answer():
+    """THE OPERATOR'S RULE (2026-10-05): kill flash-next mid-generation and the client gets an ERROR, never an
+    answer. The stream ended with reasoning (and text) in hand and no finish chunk: the chat wire used to deliver
+    the fragment as content plus a note with finish_reason "incomplete" (a value no client knows), which a harness
+    read as the model's reply and ended its turn on. It is now the error path's: raised from the turn, so
+    stream_body's caller (server._serve_turn) sends the HTTP 503 before the first byte or ONE error event and
+    [DONE] after it; `complete` raises the same."""
+    import api_errors
+    for what, rep in (("reasoning only", reply("", reasoning="let me think about this for a while")),
+                      ("reasoning and text", reply("half an ans", reasoning="thinking done"))):
+        reset([dict(rep, drop=True), dict(rep, drop=True)])
+        ev = []
+        for b in proxy.stream_body({"model": "yamadori", "stream": True,
+                                    "messages": [{"role": "user", "content": "write the file"}]}, "yamadori"):
+            ev.append(b)
+        errs = [json.loads(b[6:])["error"] for b in ev if b.startswith(b'data: {"error"')]
+        check(len(errs) == 1 and errs[0].get("code") == "model_unavailable" and errs[0].get("retryable") is True
+              and ev[-1].strip() == b"data: [DONE]" and ev.index(next(b for b in ev if b.startswith(b'data: {"error"')))
+              == len(ev) - 2,
+              f"{what}: the stream ends with ONE error event (model_unavailable, retryable) then [DONE]",
+              str(ev[-2:])[:300])
+        check(not any(b"\"finish_reason\": \"" in b and b"\"finish_reason\": null" not in b for b in ev)
+              and not any(b"connection to the model dropped" in b and b"choices" in b for b in ev),
+              f"{what}: no chunk carries a finish_reason or the fragment as a note", str(ev[-3:])[:300])
+        check(not answers(), f"{what}: nothing is recorded as an answer that was delivered", str(answers()))
+        reset([dict(rep, drop=True), dict(rep, drop=True)])
+        try:
+            proxy.complete({"model": "yamadori", "messages": [{"role": "user", "content": "write the file"}]})
+            check(False, f"{what}: the blocking turn raises too")
+        except Exception as e:                                   # noqa: BLE001
+            err = api_errors.of_exception(e)
+            check(err.status == 503 and err.code == "model_unavailable",
+                  f"{what}: the blocking turn raises too (HTTP 503 model_unavailable, Retry-After)",
+                  f"{type(e).__name__}: {e}")
+
+
 def test_the_wait_is_heard():
     """THE WAIT IS HEARD (proxy._TurnPump; the operator's live session, 2026-10-01 ET: VS Copilot hung up at 180 s
     with no byte while Flash-Next loaded). A turn that produces nothing for HEARTBEAT seconds sends heartbeats
@@ -1589,7 +1628,7 @@ def main() -> int:
                test_a_retry_takes_the_lanes_its_abandoned_twins_hold,
                test_a_retry_after_a_while_replaces_its_twin_at_once,
                test_a_stream_that_never_starts_gives_its_lane_back,
-               test_the_wait_is_heard,
+               test_a_dead_model_server_mid_generation_is_an_error_not_an_answer, test_the_wait_is_heard,
                test_a_stream_that_ends_without_a_finish_is_a_failure):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

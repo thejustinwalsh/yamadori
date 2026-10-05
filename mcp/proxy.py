@@ -4849,12 +4849,20 @@ def _run_turn(body: dict, streamed: bool):
         # finish_reason stop is what the client gets.
         fin = "stop" if fin == "tool_calls" else fin
     if fin == "incomplete":
+        # THE MODEL SERVER DIED MID-GENERATION (operator 2026-10-05: a killed flash-next must give the client an
+        # ERROR, never an answer). What arrived is a fragment of a turn that did not end; delivered as content
+        # with a made-up finish it was read as the model's reply, ended the harness's turn and went into its
+        # stored history. It is raised instead: the one error path (api_errors) sends an HTTP 503 before the
+        # first byte, and after it ONE `data: {"error": ...}` event and [DONE] -- the Responses and Messages
+        # wires already ended a drop as `failed` / an error. Nothing is recorded as delivered, so the retry
+        # re-sends the same request.
         took = (d.get("_transport") or {}).get("dropped_after")
-        t = (f"\n\n[the connection to the model dropped"
-             f"{f' after {took}s' if took is not None else ''}; "
-             f"the answer above is the part that arrived]")
-        yield from out.content(t)
-        content += t
+        raise streaming.UpstreamError(
+            f"the model server's connection dropped mid-answer"
+            f"{f' after {took}s' if took is not None else ''}; send the request again",
+            status=503,
+            error={"message": "the model server's connection dropped mid-answer; send the request again",
+                   "type": "unavailable_error", "code": "upstream_dropped"})
     # A `length` finish is a BUDGET EVENT: finish_reason "length" says so,
     # and the content is what was generated (the "[no answer: ...]" /
     # "[answer cut off ...]" notice and the empty-answer notice were REMOVED
