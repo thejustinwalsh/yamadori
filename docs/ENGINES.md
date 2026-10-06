@@ -1293,6 +1293,13 @@ header `From: Justin Walsh`, the original authors credited in each body:
 | 0021 | `LLAMA_KV_HOST_MAPPED=1` maps only the sparse (QSA) layers; the MTP draft's dense layer stays on the card (not in the series yet) | ours |
 | 0022 | `mul_mat_id`'s MMQ pads src1 for the tile width it picks, not by ne11: fixes a fresh server's illegal memory access on a 508-token ubatch (upstream bug at the base; applies on 0018, independent of 0019-0021) | ours |
 | 0023 | `--checkpoint-every N`: llama-server also makes a context checkpoint every N prompt tokens, so a prompt that differs inside a long system + tools block resumes from the last one before the difference instead of from 0 (off by default; the deploy passes Strata's 16,384; in the series since 2026-10-02, live check in docs/FLASH-NEXT.md 10.5) | ours |
+| 0024 | `LLAMA_MOE_PCIE_FRAC`: a share of a step's missed experts computed on the GPU from a pool of slots (Strata `expert_source.cpp`; BUILT, unit tests only, not in the series; docs/FLASH-NEXT.md 13.2) | Strata (MIT) + ours |
+| 0025 | `LLAMA_MOE_CACHE_QUEUED_REFILL=1`: the cache's refills on a second stream, published when their event completes (BUILT, unit tests only, not in the series) | Strata `generate.cpp` (MIT) + ours |
+| 0026 | `LLAMA_KV_PAGE_WINDOW`: Strata's VRAM page window for the host-mapped K/V (M3; BUILT, unit tests only, not in the series) | Strata `kv_stream.cu` (MIT) + ours |
+| 0027 | `GGML_CUDA_QSA_PROMPT_ATTN`: QSA prompt attention on tensor cores, one block per (query, KV head) (BUILT, no gain measured, not in the series) | Strata D-1 idea (MIT) + ours |
+| 0028 | `LLAMA_PLE_PREFETCH`: the n-gram table's rows of later ubatches read in the background (BUILT, no gain measured, not in the series) | ours |
+| 0029 | `LLAMA_LAYER_MAJOR=1`: a prompt batch runs layer by layer so each layer's host experts cross PCIe once per batch (`-b`), not once per ubatch (SHIPPED in cand0029; docs/FLASH-NEXT.md 12, 13.1) | ours (Strata's prompt order, `prefill.cpp:752/:855`) |
+| 0030 | `LLAMA_STAGER=1`: a ring of pinned buffers fed by memcpy threads for host-to-device copies of PAGEABLE experts, plus OS read-ahead; used by 0029's slot upload (BUILT, CPU-tested, NOT in the series, NOT measured; candidate cand0030; docs/FLASH-NEXT.md 13.5) | Strata `prefill.cpp` Stager (MIT) + ours |
 
 Operator, 2026-09-29: "I approve strata engine source patches"; "Port kernels we
 are not re-writing everything from scratch". Strata's MIT notice:

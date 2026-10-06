@@ -744,7 +744,8 @@ order of the ports is decided by the profiles of step (b) (`bench/flashnext_gate
 - **Port (D-4 only)**: swaps issued through a second backend instance with an event; the slot table changes at the
   next step whose event has completed (victim -> the dummy slot at once, so the CPU serves it meanwhile). The
   issuer thread and the pageable-blob stager are NOT ported: our experts are pinned (0005), so `cudaMemcpyAsync`
-  returns at once and there is nothing for a thread to hide.
+  returns at once and there is nothing for a thread to hide. **Superseded 2026-10-06 (13.5): the experts have been
+  unpinned since 2026-10-05, so the copy from pageable memory does block its thread; the stager is patch 0030.**
 - **Tests**: the cache's unit test of the table (a swap never leaves a slot whose rows are half-written visible:
   poison the slot before the copy, the gate's kernels + needles); speed n=3.
 - **When**: if the decode profile shows copies or waits attributable to swaps (0017's `copy` is 4-5 ms of ~84).
@@ -1073,7 +1074,7 @@ hits, prefetched, host time a layer graph). qwen4exp only; the MTP context type,
 2. **Prefill speed, n=3 warm and cold** at ~1K / 8K / 32K, switch off vs on at `-b 2048` and `-b 8192`, deployed layout and flags, against 164 tok/s (the profile) and the 231-318 / 131-158 of sections 8 and 11.1; decode unchanged (1-token batches never take the new path). The pass rule from the model: >= 1.8x (>= 300 tok/s) at `-b 2048`
    proves the upload amortises; between 1.2x and 1.8x, profile before concluding.
 3. **Does the upload overlap?** `LLAMA_LAYER_MAJOR_SLOTS=3` (none) against 6; the 0017 profile (sched `copy` / `other` / GPU wait) with the switch on. 0024's A4000 run found that on WDDM the compute stream waits for work queued on a second stream (a step took
-   ~0.9 s behind 600 x 256 MiB device copies): the first thing to look at. With `LLAMA_PIN_EXPERTS=0` the prefetch copies read pageable memory and block the calling thread for the copy (~25 ms a 256 MiB tensor at 11 GB/s): expect the no-overlap column.
+   ~0.9 s behind 600 x 256 MiB device copies): the first thing to look at. With `LLAMA_PIN_EXPERTS=0` the prefetch copies read pageable memory and block the calling thread for the copy (~25 ms a 256 MiB tensor at 11 GB/s): expect the no-overlap column. **Confirmed by the gate (13.3):** 6 slots with prefetch read 433.1 / 443.4 / 434.6 tok/s, 3 slots 434.1 / 433.1 / 438.7 (n=3 each); and 0024's observation was device-to-device copies, not pageable memory (13.3).
 4. **VRAM:** lowest free MiB with 3 and 6 slots at `-b 2048` / `8192` (the log line `layer-major prefill: hidden-state buffers ... expert slots ...`), and the cache slot rows that still fit; decode tok/s and hit rate at that row count.
 5. **MTP and checkpoints:** draft acceptance after a layer-major prompt (the `h_nextn` rows) in its usual 0.6-0.9; `--checkpoint-every` (0023) checkpoints taken after a layer-major batch restore bit-identically; a client hang-up mid-batch (the cancel is taken between decode calls: ~15 s of prefill at 8,192 tokens and ~550 tok/s) and the retry.
 6. **The tail:** the last ubatch of < 32 tokens runs its experts on the CPU (as today) and the last layer's FFN sees only the output rows (one token in a server batch): the chunk's last ~1/48 layer and the tail cost, in ms.
@@ -1086,3 +1087,200 @@ hits, prefetched, host time a layer graph). qwen4exp only; the MTP context type,
 - **A larger `-b` is a larger unit of work**: a cancelled batch costs a whole chunk, and a cancel in the middle of a chunk that did not start at position 0 leaves recurrent state that cannot be rolled back (as today within a ubatch).
 - **Maintenance**: the range graph is qwen4exp-only code in `qwen4exp.cpp` and `llama-graph`, and three new virtuals on the memory context; an upstream change to that graph or to the hybrid memory has to keep `lm_record` / `lm_seek` and the range builder in step (the test catches a divergence, on the CPU, exactly).
 - **PLE** (0028): the gather of ubatch i's rows now happens at layer 1 after layer 0 of the whole batch; the prefetch thread's "later ubatches first" order is unchanged, the first ubatch's cold rows are still on the critical path.
+
+## 13. Port status 2026-10-06: the ledger, the stager (0030), the overlap question, and the next lever
+
+Operator, 2026-09-29: "We must get strata speed or this model is of no value to me. And strata proves it can work." The work
+stalled on 2026-10-02 when the priority moved to session stability and is resumed. Labels as everywhere: **measured** (script +
+n), **Strata's** (theirs, n=1, RTX 5070 12 GB), **derived** (arithmetic shown). Strata's source is `Niko1221/Strata` @ d551edf
+(`C:/Users/jwals/octo/strata-src`, MIT, `engines/patches/llama-upstream-flash/LICENSE.strata`). Raw results are in
+`C:/Users/jwals/octo/flashnext-gate-20260929/` (`gate.json` and the per-arm `*.server.log`) and `C:/Users/jwals/octo/fn-crash/`.
+
+### 13.1 Section 9's rows, one by one
+
+Status words: **SHIPPED** (in the manifest's series and in the running entry), **MEASURED** (built, run on the card, a number
+below), **BUILT** (compiled and tested offline or on the A4000's unit tests only, never gated), **NOT STARTED**, **N/A**.
+The deployed entry (config.yaml, 2026-10-05) is `llama-upstream-flash-cand0029` = 0001-0018 + 0022 + 0023 + 0029, `-np 1 -c 262144`,
+`-b 8192 -ub 512`, `--moe-expert-cache 50`, `LLAMA_PIN_EXPERTS=0`, `LLAMA_LAYER_MAJOR=1`, `LLAMA_LAYER_MAJOR_SLOTS=3`, MTP 3 drafts.
+
+| # | Strata mechanism (section 9) | status | evidence |
+|---|---|---|---|
+| 1 | MTP draft layer, 3 drafts | **SHIPPED** (0006) | window C/D speed tables (section 8): acceptance 0.7-0.85, decode 28-31 tok/s deployed (`pin_compare.py`, n=3: 28.2-31.0 at ~4K) |
+| 2 | Profile-ranked VRAM expert cache + adaptive tier | **SHIPPED** (0003/0004/0007/0013/0016) | window D `cache-all-np1` hit rate 63-64% at 70 rows (n=3); at the entry's 50 rows (`pf-lm3-b8k` speed probe, n=1) 53.9% at ~4K |
+| 3 | CPU AVX2 multi-token i-quant rows | **SHIPPED** (0009) | `moe_cpu_bench`, n=300; the operator's KL decision 2026-09-29 |
+| 4 | Q2_0 CPU kernel | **SHIPPED** (0008) | down layer 0.575 -> 0.118 ms (n=300) |
+| 5 | E-2 AVX-512 row prefetch | **N/A** | the CPU is AVX2 only; ~2% in Strata's own claim |
+| 6 | Pinned expert arena + helper copy threads | **SHIPPED as code, OFF in the entry** (0005) | `LLAMA_PIN_EXPERTS=0` since 2026-10-05: pinning cost 36.4 GB of commit and ~78 s of load (11.1, `pin_compare.py` n=3) |
+| 7 | Windows large-page arena | **BUILT**, never run | needs "Lock pages in memory" (a system policy we do not change) |
+| 8 | Expert streaming ring (0002, upstream #28414) | **MEASURED, no gain, not used** | `pf-ring` (2 staging slots, 62 rows) 149.4 / 141.9 / 147.5 tok/s against `pf-dep` 138.4 / 159.7 / 158.7 and `pf-int-off` 142.2 / 145.8 / 148.0 (n=3 each, ~25.6K prompt, `gate.json`); `--prefetch-experts-slots 0` in the entry |
+| 9 | MMQ experts in the prompt path | llama.cpp's own | `GGML_CUDA_OP_TIMING` table, `pf-dep-opt` (23k prompt, n=1 run): MUL_MAT_ID iq2_s 26.5% + q2_0 20.0% + iq1_m 10.1% + iq2_xxs 6.0% = 62.6% of GPU op time at 512-token ubatches: the lever of 13.6 |
+| 10 | Larger prompt chunks (8K) | **SHIPPED** as `-b 8192` over 0029 | `pf-lm3-b8k-c29`; `-ub 1024` alone (`pf-ub1k`, 41 rows): 254.2 / 257.8 / 260.7 tok/s against 142-148 at `-ub 512`, needles 4/5 (one answer a refusal; the arm's PASS false), lowest free VRAM 397 MiB: not taken |
+| 11 | Batched PLE gather | **BUILT, no gain measured** (0028) | `pf-ple` 157.9 / 157.3 / 156.3 against `pf-dep` 138-160 (n=3, warm; the cold-row case it was written for is not what that arm measures) |
+| 12 | D-1 QSA prompt attention on tensor cores | **BUILT, no gain measured** (0027) | `pf-qsa1` 155.4 / 154.8 / 153.8, `pf-qsa2` 150.2 / 155.9 / 156.2 (n=3) -- the upload dominated then; FLASH_ATTN_EXT is 6.6% of GPU op time at 23k, so 6.6% is the ceiling; test-backend-ops FLASH_ATTN_EXT on the A4000 with the switch on (1, 2, poisoned) passes (`fn-crash/a4000-fa-on1-poison.log`, `-on2-poison.log`); needles/corrupt on the real model not run |
+| 13 | QSA select (decode half) | **SHIPPED** the decode half (0011, 0014, 0015, 0018) | window B/D; 0019 (13.2) is the n_kv-sized remainder |
+| 14 | C-1/C-2 select grid, chunked indexer appends | **NOT STARTED** | prompt side; the profile does not rank it |
+| 15 | D-2 GDN recurrence split, C-3 short conv | **NOT STARTED** | GATED_DELTA_NET is 6.2% of GPU op time at 23k (`pf-dep-opt`); Strata's own gain is 1,258 -> 1,308 tok/s (4%) |
+| 16 | D-4/D-5 queued refills, stream issuer | **BUILT** refills (0025); the stager is now 0030 | 0025: unit tests only (13.2); 0030: 13.5 |
+| 17 | E-6 device plan (a layer whose experts are all resident skips the host) | **NOT STARTED** | needs a cache that holds whole layers |
+| 18 | Batched verify-window kernels | llama.cpp's own | MTP verify batches of 4: window D profile |
+| 19 | PCIe share (`pcie_frac`) | **BUILT** (0024) | unit tests only (13.2); the arithmetic says little is on the table (10.2) |
+| 20 | KV streaming `--kv-resident` | **PART**: 0012 SHIPPED as code (off: `LLAMA_KV_HOST_MAPPED=0`); 0021 **MEASURED, slower**; 0026 **BUILT** | 0021, `kvcache-fit-np1` at 118 rows: **13.0 / 15.1 / 18.0 tok/s** at 4.4K / 32K / 128K against `cache-fit-np1`'s 26.9 / 28.5 at 4.4K / 32K (n=1 probes, `gate.json`): the mapped K/V halves the decode, which is 10.1's trigger for the page window (0026, never run on the real model) |
+| 21 | q4_0 KV + Hadamard | **MEASURED, refused** | `cache-all-np1-q4kv`: KL 0.026247 against 0.0110, needles 13/15 (section 8, window D) |
+| 22 | Prompt-lookup drafter beside MTP | **NOT STARTED** | |
+| 23 | Conversation cache | **SHIPPED** (server slots, `--cache-ram`, 0023) | `ckpt-np1`; `pf-lm3-b8k` ckpt: B reused the 16,384-token boundary |
+| 24 | Layer split over several GPUs (`flash-a4000`) | arm **defined, never run** | no entry in `gate.json` |
+| 25 | Bulk expert-arena reads on MSVC | **N/A** | llama.cpp mmap |
+| 26 | Refusal-direction speed projection | **NOT TAKEN** | a behaviour change |
+
+What section 9 did not list and 0029 added: **layer-major prefill** (Strata's `prefill.cpp:752/:855` order) -- **SHIPPED**, the one big win:
+~25.6K prompts **433.1 / 443.4 / 434.6** tok/s (`pf-lm6-b8k`) and **434.1 / 433.1 / 438.7** (`pf-lm3-b8k`, the entry's setting) against
+154-160 without it (n=3 each, `gate.json`); KL 0.011379 / 96.458% same top (batch 8192, the yardstick 0.010993 / 96.757%), needles 5/5
+at 32K, corrupt clean, `--checkpoint-every` restore exact, cancel mid-prompt clean. After the deploy, warm and unpinned
+(`bench/results/fn_first_prompt/20261006-a/summary.txt`, n=3, the proxy's own 24.6K prompts): 8,192-token batches take 16.0-16.9 s
+(485-512 tok/s) as a prompt's first batch, 17.5-18.5 s as its second; the whole prompt 58.4-61.3 s (400-422 tok/s).
+
+### 13.2 Patches 0019-0030, one by one
+
+| patch | what | status | evidence |
+|---|---|---|---|
+| 0019 | `LLAMA_QSA_BLOCK_TOPK=1`: QSA budget as whole blocks (M2b) | **BUILT, half-gated**, not in the series | KL **0.010651 / 96.373%** (`cache-all-np1-blk`, batch 4, against 0.011094 / 96.532%; `kl-cache-all-np1-blk-b4.log`); the needles/corrupt/speed run of window E2c was killed by the gate's guard (llama-swap started `bonsai` on the card, `runE2c.out`): **needles, corrupt and speed never ran**. A4000 numbers in the patch text only |
+| 0020 | `LLAMA_GRAPH_CACHE=N` | **MEASURED, inconclusive**, not in the series, off | window E1 (section 8): 31.1 vs 29.6 tok/s at 4.4K, 38.0 vs 38.4 at 35K, 33.0 vs 29.2 at 68K, 25.4 vs 29.7 at 140K (n=3 each); the profile's launches fell 15.6 -> 3.6 ms and the GPU wait grew by as much; coordinator 2026-10-01 "no graph cache" |
+| 0021 | `LLAMA_KV_HOST_MAPPED=1` maps only the sparse layers | **MEASURED, slower**, not in the series | row 20 (13.0 / 15.1 / 18.0 tok/s, 118 rows, n=1) |
+| 0022 | MMQ src1 padding (the 1,024-token crash) | **SHIPPED** | test-backend-ops MUL_MAT_ID 932/932 on the 5060 Ti; the fresh 1,024-token request serves |
+| 0023 | `--checkpoint-every` | **SHIPPED** | `ckpt-np1`: a prompt sharing 22,344 tokens reused 16,384 (0 without) |
+| 0024 | `LLAMA_MOE_PCIE_FRAC` | **BUILT**, unit tests only, not in the series | CPU `test-moe-pcie-split` 60 trials bit-exact (patch text). The only saved A4000 log (`fn-crash/a4000-test-moe-pcie-split_--device_CUDA0.log`) shows 74 of 25,567 checks failing on a NaN; 10.2 and the patch state a later run with 0 failed (the failure was the test's, not the engine's) but **no log of that run is in the tree**. Speed never measured |
+| 0025 | `LLAMA_MOE_CACHE_QUEUED_REFILL=1` | **BUILT**, unit tests only, not in the series | CPU `test-moe-refill` 846 checks, 0 failed (`a4000-test-moe-refill.log`, which says "no CUDA-capable device": the CPU run). The only saved `--device` log (`..._--device_CUDA0.log`) shows 1,252 checks with 1 failed ("no poll ever found a batch still in flight"); the patch text's 1,411 checks, 0 failed has **no kept log**. No GPU gate (`refill-np1` is not in `gate.json`) |
+| 0026 | `LLAMA_KV_PAGE_WINDOW` (Strata's M3) | **BUILT**, unit tests only, not in the series | `test-kv-page-window` on the A4000: 60 checks, 0 failed (`a4000-test-kv-page-window.log`); CPU model test 12,000 calls, 0 failed. `kvpage-fit-np1` / `cache-all-np1-kvpage` never ran; the patch text says the window "has not been measured" |
+| 0027 | `GGML_CUDA_QSA_PROMPT_ATTN` (D-1) | **BUILT, no gain measured**, not in the series | row 12 |
+| 0028 | `LLAMA_PLE_PREFETCH` | **BUILT, no gain measured**, not in the series | row 11 |
+| 0029 | layer-major prefill | **SHIPPED** (cand0029, deployed 2026-10-05) | 13.1 |
+| 0030 | the staging ring for pageable expert uploads (`LLAMA_STAGER=1`) | **BUILT, CPU-tested, NOT in the series, NOT measured** | 13.5 |
+
+The vendored tree (`engines/src/llama-upstream-flash`, 21 patches) and the manifest series are 0001-0018, 0022, 0023, 0029. 0019-0021 and
+0024-0028 are in `engines/patches/` and were built into `llama-upstream-flash-int0028` (0001-0028, `C:/Users/jwals/engines/`) for the
+offline tests and the `pf-*` arms above; **no shipped build contains them**. 0030 is written against the shipped series, not against
+them.
+
+### 13.3 What the data say about the upload (derived; the model behind 13.4-13.6)
+
+**The prefetch of 0029 did nothing, and the reason is in the data.** `pf-lm6-b8k` (6 slots: the next layer's three tensors are queued after the
+layer's first graph, **141 of 144 uploads prefetched**) and `pf-lm3-b8k` (3 slots: every upload is a demand upload) read the same, **433.1 /
+443.4 / 434.6** against **434.1 / 433.1 / 438.7** tok/s (n=3 each); per 8,192-token batch, first batch of a prompt, `LLAMA_LAYER_MAJOR_DEBUG`
+lines: lm6 15,229 / 14,876 / 15,023 ms (the first batch of each of three prompts), lm3 14,655-15,772 ms (the first batches of ten prompts) (`pf-lm*-b8k.server.log`). What did move: the host time of
+the layer graph's "compute call", 19.1 ms (lm3) -> 16.1 ms (lm6), because the blocking copy left the compute call and went to the prefetch call. **With the
+experts unpinned the copy is a `cudaMemcpyAsync` from pageable memory; the driver stages it and the calling thread is blocked for the whole
+copy** (CUDA's documented behaviour for pageable sources), so after the first graph is launched the host sits in the prefetch call for the layer's whole upload and launches nothing, and the GPU
+idles behind its one running graph. A pinned source would not block; that arm (`LLAMA_PIN_EXPERTS=1` with 6 slots) was never run: every layer-major arm used the
+unpinned `dep` setting.
+
+**Calibration (derived from the first batch of each prompt, which has no context, so attention does not grow the numbers).** A layer-major batch of N ubatches of 512 costs
+T(N) = N x C + U, with U the whole-batch expert upload (35.45 GB = 33.02 GiB, 12.1) that nothing hides.
+lm3 (3 slots): N = 4 (`pf-lm3`, the first batch of each of three prompts) 5,605 / 5,778 / 6,012 ms and N = 16 (`pf-lm3-b8k`) 14,655-15,772 ms (median ~15,100), so C = (15,100 - 5,800) / 12 = **~780 ms** per
+512-token ubatch (1.52 ms a token; the engine profile's C was 776 ms) and U = 5,800 - 4 x 780 = **~2,600 ms** (2.57-2.70 s depending on the pairing) = 35.45 GB / 2.6 s = **~13.6 GB/s**, the rate of
+Strata's pinned-copy probe of this card (14.1 GB/s at x8, 10.2): the pageable path through the driver is not slower than pinned DMA, it is **blocking**.
+(A two-point fit from 3-10 first batches each: +-5%.) Over the 25.6K prompt the batches grow with context: 15.1 / 16.2 / 17.5 s (`pf-lm3-b8k`, the three batches
+of every prompt), the extra being attention.
+
+**What hiding the upload is worth** (a batch of 16 ubatches, no context): 16 x 780 ms = 12.5 s of compute, plus 2.6 s of upload = 15.1 s now (8,192 / 15.1 = 542 tok/s); with the upload
+fully hidden ~12.5-12.6 s: **~652 tok/s, +20%** per batch (derived). The end-to-end prompt rate is lower than the batch rate
+by the tail: the server runs a 24.6K prompt as 8,192 + 8,192 + 7,706 + **409 + 103**, and the last two take 4.0-4.5 s and 1.8-2.4 s
+(`fn_first_prompt` per-batch lines, n=3): 6.0-6.9 s of 58.4-61.3 s, ~11%, because a batch under two ubatches does not take the layer-major
+path and pays the whole upload (U ~ 2.6 s) for 409 or 103 tokens (a 103-token batch is above `GGML_OP_OFFLOAD_MIN_BATCH` = 32, so its experts go to the card). Not fixed here; the options
+are an offload minimum near 200-300 tokens (the CPU computes prompt experts at ~87 tok/s, `pf-dep-nooffload`) for the 103-token piece, and not splitting the prompt there.
+
+**The first prompt after a load** (`fn_first_prompt`, n=3 per arm): with the file cache cold the first 8,192-token batch is 75.0 / 76.0 / 87.3 s against 16.0-16.9 s warm: 31.3
+GB read from disk at **~0.44-0.54 GB/s** (demand paging; derived: 31.3 GB / (75.0 - 16.5) s and / (87.3 - 16.5) s). The same disk reads sequentially at 2.25-2.39 GB/s (the arm's cached sequential pre-read, 39.23 GB in 17.0-17.4 s,
+and its eviction pass, 66.42 GB in 27.6-29.0 s). Parallel reads ahead of need are therefore worth up to ~58-71 s on a cold first prompt, which the proxy-side pre-read
+(built separately) and the stager's read-ahead (13.5) both address.
+
+**Was "on WDDM the compute stream waits for work on a second stream" (10.2, 0024) about pageable memory?** No. That observation (a step took ~0.9 s behind
+600 x 256 MiB **device-to-device** copies on the second stream, A4000) involved no host memory at all, and the same notes say "any device-synchronising call also
+waits for the second stream", so the 0.9 s may be the step's own synchronise rather than a stalled compute stream; and a same-device cudaMemcpyAsync is
+commonly executed by SM copy kernels, which would compete with compute on any OS (an assumption, not checked here). It says nothing about the **host-to-device DMA engine**, which is what a prefetch uses. So the
+question is open, and it is the probe's first line (13.4): pinned H2D against a compute kernel, on this card, under WDDM.
+
+### 13.4 The probe: does a copy on a second stream overlap compute here? (written and built; NOT RUN: the GPU is shared)
+
+`bench/fn_probe/h2d_overlap.cu` (a standalone CUDA program), `build.bat`, `run_probe.py`. It copies 0029's structure: per "layer", `graphs` kernels of ~16.2 ms on the
+main stream (the host syncs after each, as the engine's compute call does), and right after the first one the next layer's 3 x 256 MiB tensors are uploaded into the other slot
+set on a second stream; the next layer's first kernel waits for the upload's event. The kernel is an ALU loop on all SMs, calibrated to the target time with events.
+Per mode it reports T_c (compute alone), T_u (the upload alone), T_o (both), the host thread's time inside the upload call, copy GB/s, and the overlap efficiency
+**E = (T_c + T_u - T_o) / (T_c + T_u - max(T_c, T_u))**: 1 = hidden, 0 = added. Modes: `pin` (a: pinned source, `cudaMemcpyAsync`), `pageable` (b: malloc),
+`mmap` (b, the experts' real source: a mapped temp file), `stage-heap` / `stage-mmap` (c: the **engine's own `ggml-stager.cpp`**, 0030, compiled into the probe, with CUDA hooks written in the probe),
+`register` (e: `cudaHostRegister` on the mapped range per layer, then the async copy -- an alternative to the ring if registering is cheap and works on a file view) and `d2d` (the 0024 observation).
+A sweep over ring threads {1,2,3,4,6} x chunk {4,16,64} MiB x ring {8,16,32} gives the copy-only throughput the ring can feed. Three runs: `engine`, `nosync` (without the per-graph host sync) and `b2048` (4 graphs a layer, where the upload dominates).
+
+How to read the answer: **E(pin) >= 0.8** says the card overlaps H2D DMA with compute and the unlock is "make the source async": **E(stage-mmap)** against it then says whether the ring achieves it
+(and the sweep how many threads it costs); `register` is the cheaper way if it works. **E(pin) < 0.5** says this card and driver do not overlap at all: the stager is not the unlock, 13.5 stays as built but off, and the whole
+remaining gain is 13.6's compute side. `d2d` explains 10.2.
+
+Correctness, offline: `python bench/fn_probe/run_probe.py --selftest` runs the whole harness on a simulated device (threads and spin loops standing in for streams, a pageable copy that blocks its caller) and
+checks that pinned and ring sources score E >= 0.8 and pageable and mapped ones < 0.5: **PASS, 5 checks** (pin 1.00, stage-heap 1.00, stage-mmap 1.00, pageable 0.22, mmap 0.22). The CUDA build compiles
+(`nvcc`, sm_86 + sm_120). **Run time on the 5060 Ti: ~6 minutes for the three runs (~2.5 + ~2 + ~1; derived: 16 graphs x 16.2 ms x 9 layers x 5 reps = 11.7 s per mode, 8 modes, plus the copy-only passes and the sweep), 2.5 GiB of
+VRAM, a 768 MiB temp file.** `run_probe.py --go` refuses unless the 5060 Ti has >= 4,096 MiB free (the stack's model unloaded through the operator's window; the script never touches a process, :1234, :11434 or config.yaml).
+
+### 13.5 Patch 0030: the stager, ported (Strata `prefill.cpp:122-239`)
+
+`engines/patches/llama-upstream-flash/0030-ggml-staging-ring-for-pageable-expert-uploads.patch` (sha256 `2b4c44414ba96b24ccf497ffad79b4eeee1409d58eb4a7013f1c7d1039f16844`; on the shipped
+series; **not in the manifest's series, not pinned, not shipped**; candidate `C:/Users/jwals/engines/llama-upstream-flash-cand0030`, built by `build_engine.py build` from a re-vendored tree
+(a `--manifest` copy that lists the patch, `--src-root` outside the repo) so nothing in `engines/src` or the manifest's vendor record changed). **Off unless `LLAMA_STAGER=1`**; with it unset the slot upload makes the calls 0029 makes, in the same order.
+- **Design, Strata's:** a ring of pinned buffers, memcpy worker threads that fill them in launch order from the pageable source ahead of the DMA, a buffer reused only after an event says the DMA that read it has landed,
+  in-order claims. **Ours:** the unit is a 16 MiB chunk of a tensor (a 256 MiB expert tensor streams through a 16 x 16 MiB ring = 256 MiB pinned), not an expert blob; a separate **issuer thread** queues the DMA (Strata issues
+  from the launching thread and waits for the memcpy there; here the thread that launches compute never blocks on a copy); a request names the event to record behind its last chunk and an event the copy stream waits on first
+  (the last reader of the destination slot). Because that event is recorded by the issuer, a launch that reads a staged slot first calls `ggml_stager_wait_enqueued()` -- queued, not landed.
+- **Used by:** 0029's slot upload (`ggml_backend_sched_resident_upload`) for any host weight that is not in the device's own pinned host buffer (a pinned one is already asynchronous and takes the direct path).
+  Defaults: `LLAMA_STAGER_THREADS` = Strata's max(2, min(4, hw / 4)) = 4 here, `LLAMA_STAGER_RING` = 16 (Strata's `kRing`), `LLAMA_STAGER_CHUNK_MIB` = 16 (ours: 1.2 ms of a 14 GB/s link, so a copy call is < 2% of it) -- **starting values for the probe's sweep, not results**.
+- **Read-ahead:** the workers copy up to a ring's worth ahead, and `ggml_stager_will_need()` asks the OS to read the pages of the layer after next (Windows `PrefetchVirtualMemory`, else `madvise(WILLNEED)`, on a hint thread) and
+  of layers 0-1 when a batch starts (`LLAMA_STAGER_WILLNEED=0` turns it off), so a cold mapping is read by queued I/O and parallel faults instead of one fault at a time (the 0.44-0.54 GB/s of 13.3).
+- **Not done: the refills (0025).** 0025 is not in the shipped series, so a patch on the series cannot call it; and in the series the cache's refill already runs on a worker thread, so there is nothing for a stager to hide. With 0025's
+  queued path and unpinned experts (it falls back to the thread then, by its own text) the request API fits: one `ggml_stager_submit` per matrix with a done event. That is a follow-up that needs 0025 in the series.
+- **Cost:** 4 + 1 + 1 threads, 256 MiB pinned (commit), and **the 6 slots that overlap needs (13.6): +769 MiB over the entry's 3 = 12 of the cache's 66.2 MiB rows (50 -> 38; section 12.4's trade)**. With 3 slots the stager still replaces the blocking copy by a parallel one, but nothing overlaps.
+- **Tests** (`tests/test-stager.cpp`, in the patch; CPU, no GPU): a fake device whose DMA lands each chunk after a random delay, in stream order, with events; destinations and ring buffers poisoned and guarded;
+  random requests (0 bytes, chunk +-1, several chunks), 1-4 workers, chunks 4-64 KiB, rings of 2-9: 200 trials, 0 wrong destinations; three further seeds x 1,500 trials, ~71,000 checks each, 0 failed; a request that names a wait event lands nothing until it completes; `wait_enqueued` returns with the done event recorded and the
+  done event completes after the last byte; `free()` drains. **Controls that must fail do:** workers that skip the DMA wait are caught in 50 of 50 trials; two mutations of the stager (no stream wait for the wait event; the done event recorded before the copies) fail 391 and 1,608 checks.
+  `test-layer-major` (0029, CPU, 48 runs) passes unchanged. **The candidate itself** (`cand0030`, MSVC + CUDA 12.8, the shipped flags, network fenced; `llama-server.exe` sha256 `ceafc357bbad75fc1260e4479e5c43cae6d36f675e5ca8fef3a3c45212cb0d33`, `ggml-base.dll` `d2d5c9cd...`, `ggml-cuda.dll` `d14416bf...`; engine tests 2/2): its own CUDA-built `test-stager.exe` and `test-layer-major.exe` were run with `CUDA_VISIBLE_DEVICES=-1` (no GPU visible): 9,570 checks 0 failed, and 71,752 at another seed, test-layer-major all passed. **Not run: `test-stager --device CUDA0`** (a pageable source through the real pinned ring to the card, read back; written, in the CUDA build only), and **no speed number exists**.
+
+### 13.6 The bigger lever: the MoE over the whole chunk (a plan; no code)
+
+**What Strata's prompt path does with the experts** (`src/prefill/moe_mmq.hpp`, `prefill.cpp:1132-1243`): the experts of a layer run through **llama.cpp's own MMQ kernels** (int8 tensor cores, quantized weights) over the
+rows of the **whole 8,192-token chunk grouped by expert**: `mmq::quantize` of all T x K rows, then one launch per product with per-expert row bounds. That is the kernel family `MUL_MAT_ID` uses here; the
+difference is N: 8,192 x 10 / 512 = **160 rows an expert** against 512 x 10 / 512 = **10** in our 512-token ubatch. (Their header says the FP16-dequantize + cuBLAS route it replaced wrote ~10 MB of FP16 per expert while MMQ reads the 1.4-2 MB expert once, and that IQ1_M is not covered by their MMQ.)
+
+**Where our compute goes (measured):** at 512-token ubatches the experts are **62.6%** of GPU op time (`pf-dep-opt`, 23k prompt, n=1 run: iq2_s 26.5, q2_0 20.0, iq1_m 10.1, iq2_xxs 6.0); the weights of a layer are read once per ubatch (704 MiB x 48 = 33 GiB / 448 GB/s = 79 ms of a ~780 ms ubatch, derived), so
+the time is not weight bandwidth: it is MMQ running tiles that are mostly empty (10 columns in a 16-128 column tile) and unpacking each expert's weights per ubatch. **Evidence that the per-token cost falls with N:** non-layer-major `-ub 1024` (`pf-ub1k`) took 3.98 s per 1,024-token ubatch against 3.41 s per 512 (`pf-dep`, ~150 tok/s);
+with U ~ 2.6 s in both (13.3; 3.41 s minus the layer-major C of ~0.86 s averaged over the prompt = 2.55 s) C(1,024) ~ 1.43 s against C(512) ~ 0.86 s: **per token 1.40 ms against 1.67 ms, -16%** (derived; two points, assumes U equal).
+Fitting c(ub) = c0 + k / ub through them gives **c0 = 1.12 ms, k = 283 ms-tokens**, so c(2,048) = 1.26, c(4,096) = 1.19, c(8,192) = 1.155 ms a token. **This extrapolates two derived points by 16x; it is the thing to measure first (13.7 step 4).**
+
+**The design:** keep 0029's layer-major order and split each layer into two graph ranges. (1) The attention half (DeltaNet or QSA + the residual mix) runs per 512-token ubatch exactly as now. (2) The **MoE half** (FFN norm, router, top-10, the three `MUL_MAT_ID`, the shared expert, the hyper-connection post) runs as ONE graph over G tokens =
+all the ubatches of the layer's chunk (G = 2,048 at `-b 2048`, up to 8,192), reading and writing rows of the persistent hidden buffer 0029 already has (2 x 40 KiB a token: 160 MiB at 2,048, 640 MiB at 8,192, **already allocated** at `-b 8192`). The MoE is per-token independent, so the only numeric change is MMQ's tile shape (the stream-k fixup order): KL and needles, not bit equality.
+The last layer's FFN sees only the output rows, as today. MTP's `h_nextn` taps are the last layer's output rows and are unchanged.
+
+**VRAM on the 16 GB card (derived).** The MoE half's scratch is ~0.3 MiB a token live at once (gate, up and swiglu [640 x 10] f32 = 25.6 KB each, the down output and its weighted copy [2560 x 10] f32 = 102 KB each, the quantized activations 3 KB, ids; the ggml
+allocator reuses what is dead): **0.6 GiB at G = 2,048, 1.2 at 4,096, 2.4 at 8,192**. The attention half's graph is reserved at its worst case already (the compute buffer is **1,871.6 MiB** at `-ub 512`, 3.7 MiB a token, dominated by the QSA's n_kv-wide scratch at the reserved 262,144 cells, 12.3(b)), and the two halves run one after the other and can share it:
+**the MoE half costs nothing extra while 0.3 x G stays under ~1.8 GiB, i.e. up to G ~ 6,000**; at G = 8,192 it is ~+0.5 GiB. The deployed card has **~750-780 MiB free at its lowest** (`pf-lm3-b8k` 763, `pf-lm6-b8k` 781 MiB), so anything beyond that comes out of the cache's 66.2 MiB rows (the decode cost of a row is
+small, section 8's hit-rate simulation, derived): 100 MiB = 1.5 rows. Reclaimable room, in order of cost: (a) the scheduler's own copy of every offloaded weight inside the compute buffer, up to **737 MiB** of the 1,871 (12.7, derived; a slot-backed split never touches it) = 11 rows free of any decode cost; (b) 0019's block top-k removes the `expanded` [n_kv, n_tokens] f32
+(1 MiB a token at 262,144 cells) from the attention half (its needles and speed gate never ran, 13.2); (c) 0029's 3 slots (769 MiB) become 6 for the overlap (+769 MiB). Net at G = 4,096 with (a) and (b): **no row lost**; with the 6 slots ~ -1 row. (Derived; the arm's `lowest free` line decides.)
+
+**Expected speed (derived from 13.3's fit; compute-only ceilings at 25.6K-prompt averages, tok/s = 1000 / c(ub) with the batch's upload added or hidden).** Now: 8,192 x 1.672 ms = 13.7 s + U 2.6 s = **16.3 s a batch, 503 tok/s** (the measured end-to-end 433-439 is lower by the 409 + 103 tail, 13.3).
+
+| | per batch | tok/s (batch) |
+|---|---:|---:|
+| now (ub 512 MoE, upload blocking) | 16.3 s | 503 |
+| + the stager, upload hidden (6 slots) | 13.7 s | 598 |
+| + MoE over 2,048 tokens, upload hidden | 10.3 s | 794 |
+| + MoE over 4,096, upload hidden | 9.7 s | 840 |
+| + MoE over 8,192, upload hidden | 9.5 s | 866 |
+| the asymptote (c0 = 1.12 ms) | 9.2 s | 893 |
+
+So the stager is **+19%** and the whole-chunk MoE a further **+33-45%**: **~800-870 tok/s on the batch, ~1.6-1.7x the current batch rate**, against Strata's **1,153-1,294** (theirs: Q2_0, RTX 5070, 32K, n=1): **~65-70% of theirs**. The remainder is not in this lever: the non-MoE share
+(0.66 ms a token at 512: DeltaNet 6.2%, attention 6.6% at 23K and growing with context, the dense MUL_MATs, norms, hyper-connection ops: ~37% of C), the iq1_m layers (10.1% of op time; Strata's MMQ does not cover IQ1_M either), the tail batches, and the card (the 5070's memory bandwidth is ~1.5x ours: spec sheets, 672 vs 448 GB/s). **Risks:** the fit is two points;
+MMQ's per-tile cost may flatten earlier than c0 says; the QSA scratch and the MoE half may not share the buffer as cleanly as the allocator's liveness suggests; an 8,192-token MoE graph is a longer uninterruptible unit (a cancel costs a chunk, 12.7). **Decode is untouched** (1-token batches never take the path).
+
+### 13.7 GPU steps, in order (each needs the operator's "GPU go" and a free card; none was run)
+
+1. **The probe** (`python bench/fn_probe/run_probe.py --go`; ~6 minutes; flash-next unloaded; 2.5 GiB of VRAM). Answers 13.4. If E(pin) < 0.5 the stager is not the unlock: report, and go to step 4.
+2. **cand0030 on the card, unit level** (seconds): `test-stager --device CUDA0` (the pinned ring and the real events); the sweep's best threads / chunk / ring into the entry's env.
+3. **The stager in the engine** (`bench/flashnext_gate.py` arms next to `pf-lm3-b8k` / `pf-lm6-b8k`; n=3 each, ~25.6K prompts, warm, the entry's flags): `LLAMA_STAGER=0` (the control: must read 433-439: "off is off"), `LLAMA_STAGER=1` with 3 slots (no overlap: the parallel-copy effect alone), with 6 slots (38 rows: the overlap), and `LLAMA_PIN_EXPERTS=1` with 6 slots (the pinned
+   ceiling: how much of the gain the pin, at 36.4 GB of commit, would buy); `LLAMA_LAYER_MAJOR_DEBUG=1` for the stager's line (memcpy / ring-wait / launching-thread-block ms); then KL (batch 8192), needles 5/5 at 32K, corrupt, the `--checkpoint-every` restore, a cancel mid-prompt, the lowest free VRAM, and the decode at 38 rows (4.4K / 35K, n=3). And `fn_first_prompt` cold-cache with `LLAMA_STAGER=1` (the read-ahead's own effect; its pre-read arm as the comparison).
+4. **The compute curve (no new code):** layer-major at `-c 16384` (the QSA reservation is then small) with `-ub` 512 / 1,024 / 2,048 / 4,096 (and `-b` 8,192), n=3 warm, the upload hidden by step 3's best setting if there is one: C(ub) per token. The table in 13.6 rests on it: if c(2,048) is not ~1.3 ms a token or lower, the plan is wrong and the lever is smaller.
+5. Only then the MoE-half graph (13.6), gated by KL / needles / corrupt, the lowest free VRAM, and a 6-slot + G sweep.

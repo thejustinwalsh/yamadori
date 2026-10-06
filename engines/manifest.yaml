@@ -1268,6 +1268,14 @@ engines:
       # 0020-llama-graph-cache-per-batch-size.patch (sha256 0ebf732d0f7cfc459bbd8a27a76e075d3dcb2adc6d19f5ed2b0f844c6154cafb),
       # the same: LLAMA_GRAPH_CACHE=N keeps one graph per verify-batch size so ggml-cuda's CUDA graphs replay (A4000, MTP:
       # launches 15.6-18 -> 2.5-3.9 ms a verify step, greedy output identical); joins the series when gated on the 5060 Ti
+      # 0030-ggml-staging-ring-for-pageable-expert-uploads.patch (sha256 2b4c44414ba96b24ccf497ffad79b4eeee1409d58eb4a7013f1c7d1039f16844),
+      # NOT in the series, NOT pinned, NOT shipped: LLAMA_STAGER=1 (off by default) streams the pageable (unpinned, mmapped) experts
+      # of 0029's slot upload through a ring of pinned buffers filled by memcpy threads (Strata's prefill.cpp Stager, MIT,
+      # LICENSE.strata) + OS read-ahead; written against the shipped series (0001-0018, 0022, 0023, 0029). Candidate built 2026-10-06 by
+      # `build_engine.py build llama-upstream-flash --out llama-upstream-flash-cand0030` from a re-vendored tree (a copy of this manifest
+      # that lists the patch, --src-root outside the repo; this manifest's vendor record is unchanged): llama-server.exe sha256
+      # ceafc357bbad75fc1260e4479e5c43cae6d36f675e5ca8fef3a3c45212cb0d33, engine tests 2/2, test-stager (CPU, GPU hidden) 9,570 checks
+      # 0 failed, test-layer-major passes. NOT run on a GPU: no speed number. Gate: docs/FLASH-NEXT.md 13.4-13.7 (the probe first)
     vendor:
       # Written by `python scripts/build_engine.py vendor llama-upstream-flash`;
       # `check` verifies the tree against it offline. Do not edit.
