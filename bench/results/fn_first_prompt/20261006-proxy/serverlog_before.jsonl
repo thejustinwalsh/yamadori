@@ -1,0 +1,185 @@
+{"t": 1791271487.837, "line": "0.00.080.803 I srv  llama_server: initializing ..."}
+{"t": 1791271487.837, "line": "0.00.080.817 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)"}
+{"t": 1791271487.837, "line": "0.00.086.577 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)"}
+{"t": 1791271487.837, "line": "0.00.101.380 I srv    load_model: loading model 'C:/Users/jwals/textgen/user_data/models/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'"}
+{"t": 1791271487.837, "line": "0.02.671.808 E llama_init_from_model: failed to initialize the context: qwen4exp requires ctx_other to be set (this warning is normal during memory fitting)"}
+{"t": 1791271487.837, "line": "0.02.746.317 W operator (): failed to measure the memory of the extra model, fitting without it: failed to create llama_context from model"}
+{"t": 1791271487.837, "line": "0.04.158.405 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance"}
+{"t": 1791271487.837, "line": "1.00.217.280 I cmn          init: llama threadpool init, n_threads = 16"}
+{"t": 1791271487.837, "line": "1.04.696.138 I common_speculative_init_result: loading draft model 'C:/Users/jwals/textgen/user_data/models/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf'"}
+{"t": 1791271487.837, "line": "1.06.324.315 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'true'"}
+{"t": 1791271487.837, "line": "1.06.573.343 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)"}
+{"t": 1791271487.837, "line": "1.06.573.360 I srv  llama_server: model loaded"}
+{"t": 1791271487.837, "line": "1.06.573.362 I srv  llama_server: listening on http://127.0.0.1:10008"}
+{"t": 1791271487.837, "line": "1.15.338.818 I slot get_availabl: id  0 | task -1 | selected slot by id (0)"}
+{"t": 1791271487.837, "line": "1.15.339.504 I slot launch_slot_: id  0 | task 23 | processing task, is_child = 0"}
+{"t": 1791271487.837, "line": "2.16.763.458 I slot print_timing: id  0 | task 23 | prompt processing, n_tokens =   8192, progress = 0.37, t =  60.42 s / 135.58 tokens per second"}
+{"t": 1791271487.837, "line": "2.34.308.859 I slot print_timing: id  0 | task 23 | prompt processing, n_tokens =  16384, progress = 0.75, t =  78.19 s / 209.54 tokens per second"}
+{"t": 1791271487.837, "line": "2.46.805.017 I slot print_timing: id  0 | task 23 | prompt processing, n_tokens =  21355, progress = 0.98, t =  91.01 s / 234.65 tokens per second"}
+{"t": 1791271487.837, "line": "2.50.126.851 I slot print_timing: id  0 | task 23 | prompt processing, n_tokens =  21781, progress = 1.00, t =  94.74 s / 229.90 tokens per second"}
+{"t": 1791271487.837, "line": "2.51.844.336 I slot print_timing: id  0 | task 23 | prompt processing, n_tokens =  21867, progress = 1.00, t =  96.49 s / 226.62 tokens per second"}
+{"t": 1791271487.837, "line": "2.58.994.400 I slot print_timing: id  0 | task 23 | n_gen =    101, tg =  14.53 t/s, tg_3s =  14.68 t/s"}
+{"t": 1791271487.837, "line": "3.02.037.127 I slot print_timing: id  0 | task 23 | n_gen =    174, tg =  17.43 t/s, tg_3s =  23.99 t/s"}
+{"t": 1791271487.837, "line": "3.05.054.586 I slot print_timing: id  0 | task 23 | n_gen =    240, tg =  18.47 t/s, tg_3s =  21.87 t/s"}
+{"t": 1791271487.837, "line": "3.08.099.778 I slot print_timing: id  0 | task 23 | n_gen =    316, tg =  19.70 t/s, tg_3s =  24.96 t/s"}
+{"t": 1791271487.837, "line": "3.11.156.219 I slot print_timing: id  0 | task 23 | n_gen =    393, tg =  20.59 t/s, tg_3s =  25.19 t/s"}
+{"t": 1791271487.837, "line": "3.13.026.792 I slot print_timing: id  0 | task 23 | prompt eval time =   96770.40 ms / 21871 tokens (    4.42 ms per token,   226.01 tokens per second)"}
+{"t": 1791271487.837, "line": "3.13.026.797 I slot print_timing: id  0 | task 23 |        eval time =   20913.21 ms /   435 tokens (   48.19 ms per token,    20.75 tokens per second)"}
+{"t": 1791271487.837, "line": "3.13.026.798 I slot print_timing: id  0 | task 23 |       total time =  117683.61 ms / 22306 tokens"}
+{"t": 1791271487.837, "line": "3.13.026.798 I slot print_timing: id  0 | task 23 |    graphs reused =         99"}
+{"t": 1791271487.837, "line": "3.13.026.803 I slot print_timing: id  0 | task 23 | draft acceptance = 0.61687 (  256 accepted /   415 generated), mean len =  2.66"}
+{"t": 1791271487.837, "line": "3.13.027.449 I slot      release: id  0 | task 23 | stop processing: n_tokens = 22306, truncated = 0"}
+{"t": 1791271487.837, "line": "0.00.125.828 I srv  llama_server: initializing ..."}
+{"t": 1791271487.837, "line": "0.00.125.838 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)"}
+{"t": 1791271487.837, "line": "0.00.129.488 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)"}
+{"t": 1791271487.837, "line": "0.00.143.925 I srv    load_model: loading model 'C:/Users/jwals/textgen/user_data/models/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'"}
+{"t": 1791271487.837, "line": "0.03.421.657 E llama_init_from_model: failed to initialize the context: qwen4exp requires ctx_other to be set (this warning is normal during memory fitting)"}
+{"t": 1791271487.837, "line": "0.03.491.875 W operator (): failed to measure the memory of the extra model, fitting without it: failed to create llama_context from model"}
+{"t": 1791271487.837, "line": "0.04.894.208 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance"}
+{"t": 1791271487.837, "line": "0.58.014.970 I cmn          init: llama threadpool init, n_threads = 16"}
+{"t": 1791271487.837, "line": "1.02.248.778 I common_speculative_init_result: loading draft model 'C:/Users/jwals/textgen/user_data/models/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf'"}
+{"t": 1791271487.837, "line": "1.03.906.346 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'true'"}
+{"t": 1791271487.837, "line": "1.04.101.750 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)"}
+{"t": 1791271487.837, "line": "1.04.101.766 I srv  llama_server: model loaded"}
+{"t": 1791271487.837, "line": "1.04.101.767 I srv  llama_server: listening on http://127.0.0.1:10008"}
+{"t": 1791271487.837, "line": "1.04.670.225 I slot get_availabl: id  0 | task -1 | selected slot by id (0)"}
+{"t": 1791271487.837, "line": "1.04.670.784 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0"}
+{"t": 1791271487.837, "line": "2.07.368.347 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =   8192, progress = 0.37, t =  61.69 s / 132.80 tokens per second"}
+{"t": 1791271487.837, "line": "2.25.227.974 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  16384, progress = 0.75, t =  79.82 s / 205.27 tokens per second"}
+{"t": 1791271487.837, "line": "2.37.956.926 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21397, progress = 0.98, t =  92.82 s / 230.53 tokens per second"}
+{"t": 1791271487.837, "line": "2.41.157.111 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21823, progress = 1.00, t =  96.43 s / 226.30 tokens per second"}
+{"t": 1791271487.837, "line": "2.42.905.238 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21909, progress = 1.00, t =  98.22 s / 223.06 tokens per second"}
+{"t": 1791271487.837, "line": "2.49.425.711 I slot print_timing: id  0 | task 1 | n_gen =    101, tg =  15.91 t/s, tg_3s =  16.07 t/s"}
+{"t": 1791271487.837, "line": "2.52.445.684 I slot print_timing: id  0 | task 1 | n_gen =    145, tg =  15.48 t/s, tg_3s =  14.57 t/s"}
+{"t": 1791271487.837, "line": "2.55.591.425 I slot print_timing: id  0 | task 1 | n_gen =    218, tg =  17.43 t/s, tg_3s =  23.21 t/s"}
+{"t": 1791271487.837, "line": "2.58.633.353 I slot print_timing: id  0 | task 1 | n_gen =    299, tg =  19.23 t/s, tg_3s =  26.63 t/s"}
+{"t": 1791271487.837, "line": "2.59.018.172 I slot print_timing: id  0 | task 1 | prompt eval time =   98466.85 ms / 21913 tokens (    4.49 ms per token,   222.54 tokens per second)"}
+{"t": 1791271487.837, "line": "2.59.018.177 I slot print_timing: id  0 | task 1 |        eval time =   15877.09 ms /   307 tokens (   51.89 ms per token,    19.27 tokens per second)"}
+{"t": 1791271487.837, "line": "2.59.018.178 I slot print_timing: id  0 | task 1 |       total time =  114343.94 ms / 22220 tokens"}
+{"t": 1791271487.837, "line": "2.59.018.178 I slot print_timing: id  0 | task 1 |    graphs reused =         61"}
+{"t": 1791271487.837, "line": "2.59.018.183 I slot print_timing: id  0 | task 1 | draft acceptance = 0.73208 (  194 accepted /   265 generated), mean len =  2.96"}
+{"t": 1791271487.837, "line": "2.59.018.828 I slot      release: id  0 | task 1 | stop processing: n_tokens = 22222, truncated = 0"}
+{"t": 1791271487.837, "line": "0.00.091.183 I srv  llama_server: initializing ..."}
+{"t": 1791271487.837, "line": "0.00.091.194 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)"}
+{"t": 1791271487.837, "line": "0.00.094.722 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)"}
+{"t": 1791271487.837, "line": "0.00.104.702 I srv    load_model: loading model 'C:/Users/jwals/textgen/user_data/models/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'"}
+{"t": 1791271487.837, "line": "0.02.097.542 E llama_init_from_model: failed to initialize the context: qwen4exp requires ctx_other to be set (this warning is normal during memory fitting)"}
+{"t": 1791271487.837, "line": "0.02.170.346 W operator (): failed to measure the memory of the extra model, fitting without it: failed to create llama_context from model"}
+{"t": 1791271487.837, "line": "0.03.549.580 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance"}
+{"t": 1791271487.837, "line": "0.59.765.504 I cmn          init: llama threadpool init, n_threads = 16"}
+{"t": 1791271487.837, "line": "1.03.831.476 I common_speculative_init_result: loading draft model 'C:/Users/jwals/textgen/user_data/models/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf'"}
+{"t": 1791271487.837, "line": "1.05.531.885 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'true'"}
+{"t": 1791271487.837, "line": "1.05.760.489 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)"}
+{"t": 1791271487.837, "line": "1.05.760.504 I srv  llama_server: model loaded"}
+{"t": 1791271487.837, "line": "1.05.760.506 I srv  llama_server: listening on http://127.0.0.1:10008"}
+{"t": 1791271487.837, "line": "1.10.095.425 I slot get_availabl: id  0 | task -1 | selected slot by id (0)"}
+{"t": 1791271487.837, "line": "1.10.095.957 I slot launch_slot_: id  0 | task 10 | processing task, is_child = 0"}
+{"t": 1791271487.837, "line": "2.08.852.168 I slot print_timing: id  0 | task 10 | prompt processing, n_tokens =   8192, progress = 0.37, t =  57.79 s / 141.77 tokens per second"}
+{"t": 1791271487.837, "line": "2.26.148.142 I slot print_timing: id  0 | task 10 | prompt processing, n_tokens =  16384, progress = 0.75, t =  75.29 s / 217.60 tokens per second"}
+{"t": 1791271487.837, "line": "2.38.993.379 I slot print_timing: id  0 | task 10 | prompt processing, n_tokens =  21353, progress = 0.98, t =  88.44 s / 241.43 tokens per second"}
+{"t": 1791271487.837, "line": "2.42.330.252 I slot print_timing: id  0 | task 10 | prompt processing, n_tokens =  21779, progress = 1.00, t =  92.19 s / 236.24 tokens per second"}
+{"t": 1791271487.837, "line": "2.44.208.715 I slot print_timing: id  0 | task 10 | prompt processing, n_tokens =  21865, progress = 1.00, t =  94.10 s / 232.36 tokens per second"}
+{"t": 1791271487.837, "line": "2.51.675.174 I slot print_timing: id  0 | task 10 | n_gen =    101, tg =  13.83 t/s, tg_3s =  13.97 t/s"}
+{"t": 1791271487.837, "line": "2.54.687.277 I slot print_timing: id  0 | task 10 | n_gen =    187, tg =  18.16 t/s, tg_3s =  28.55 t/s"}
+{"t": 1791271487.837, "line": "2.57.780.431 I slot print_timing: id  0 | task 10 | n_gen =    257, tg =  19.20 t/s, tg_3s =  22.63 t/s"}
+{"t": 1791271487.837, "line": "3.00.873.460 I slot print_timing: id  0 | task 10 | n_gen =    328, tg =  19.91 t/s, tg_3s =  22.96 t/s"}
+{"t": 1791271487.837, "line": "3.03.873.729 I slot print_timing: id  0 | task 10 | n_gen =    387, tg =  19.87 t/s, tg_3s =  19.67 t/s"}
+{"t": 1791271487.837, "line": "3.06.955.281 I slot print_timing: id  0 | task 10 | n_gen =    459, tg =  20.35 t/s, tg_3s =  23.37 t/s"}
+{"t": 1791271487.837, "line": "3.09.979.366 I slot print_timing: id  0 | task 10 | n_gen =    530, tg =  20.72 t/s, tg_3s =  23.48 t/s"}
+{"t": 1791271487.837, "line": "3.11.866.161 I slot print_timing: id  0 | task 10 | prompt eval time =   94347.54 ms / 21869 tokens (    4.31 ms per token,   231.79 tokens per second)"}
+{"t": 1791271487.837, "line": "3.11.866.166 I slot print_timing: id  0 | task 10 |        eval time =   27419.01 ms /   586 tokens (   46.87 ms per token,    21.34 tokens per second)"}
+{"t": 1791271487.837, "line": "3.11.866.167 I slot print_timing: id  0 | task 10 |       total time =  121766.56 ms / 22455 tokens"}
+{"t": 1791271487.837, "line": "3.11.866.168 I slot print_timing: id  0 | task 10 |    graphs reused =        103"}
+{"t": 1791271487.837, "line": "3.11.866.172 I slot print_timing: id  0 | task 10 | draft acceptance = 0.62619 (  330 accepted /   527 generated), mean len =  2.54"}
+{"t": 1791271487.837, "line": "3.11.866.791 I slot      release: id  0 | task 10 | stop processing: n_tokens = 22455, truncated = 0"}
+{"t": 1791271551.521, "line": "0.00.058.877 I srv  llama_server: initializing ..."}
+{"t": 1791271551.521, "line": "0.00.058.888 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)"}
+{"t": 1791271551.524, "line": "0.00.061.356 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)"}
+{"t": 1791271551.529, "line": "0.00.067.024 I srv    load_model: loading model 'C:/Users/jwals/textgen/user_data/models/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'"}
+{"t": 1791271552.999, "line": "0.01.536.374 E llama_init_from_model: failed to initialize the context: qwen4exp requires ctx_other to be set (this warning is normal during memory fitting)"}
+{"t": 1791271553.033, "line": "0.01.570.878 W operator (): failed to measure the memory of the extra model, fitting without it: failed to create llama_context from model"}
+{"t": 1791271553.572, "line": "0.02.109.480 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance"}
+{"t": 1791271592.519, "line": "0.41.055.824 I cmn          init: llama threadpool init, n_threads = 16"}
+{"t": 1791271596.762, "line": "0.45.299.017 I common_speculative_init_result: loading draft model 'C:/Users/jwals/textgen/user_data/models/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf'"}
+{"t": 1791271598.416, "line": "0.46.948.996 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'true'"}
+{"t": 1791271598.715, "line": "0.47.252.086 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)"}
+{"t": 1791271598.715, "line": "0.47.252.103 I srv  llama_server: model loaded"}
+{"t": 1791271598.715, "line": "0.47.252.105 I srv  llama_server: listening on http://127.0.0.1:10008"}
+{"t": 1791271599.934, "line": "0.48.471.254 I slot get_availabl: id  0 | task -1 | selected slot by id (0)"}
+{"t": 1791271599.935, "line": "0.48.472.711 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0"}
+{"t": 1791271655.375, "line": "1.43.912.851 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =   8192, progress = 0.37, t =  54.45 s / 150.46 tokens per second"}
+{"t": 1791271673.06, "line": "2.01.597.455 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  16384, progress = 0.75, t =  72.36 s / 226.41 tokens per second"}
+{"t": 1791271685.748, "line": "2.14.285.178 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21378, progress = 0.98, t =  85.35 s / 250.46 tokens per second"}
+{"t": 1791271688.926, "line": "2.17.463.498 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21804, progress = 1.00, t =  88.95 s / 245.14 tokens per second"}
+{"t": 1791271690.658, "line": "2.19.195.109 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21890, progress = 1.00, t =  90.71 s / 241.32 tokens per second"}
+{"t": 1791271698.722, "line": "2.27.259.035 I slot print_timing: id  0 | task 1 | n_gen =    100, tg =  12.66 t/s, tg_3s =  12.79 t/s"}
+{"t": 1791271701.886, "line": "2.30.423.176 I slot print_timing: id  0 | task 1 | n_gen =    143, tg =  12.93 t/s, tg_3s =  13.59 t/s"}
+{"t": 1791271703.949, "line": "2.32.485.905 I slot print_timing: id  0 | task 1 | prompt eval time =   90962.83 ms / 21894 tokens (    4.15 ms per token,   240.69 tokens per second)"}
+{"t": 1791271703.949, "line": "2.32.485.911 I slot print_timing: id  0 | task 1 |        eval time =   13047.05 ms /   184 tokens (   71.30 ms per token,    14.03 tokens per second)"}
+{"t": 1791271703.949, "line": "2.32.485.912 I slot print_timing: id  0 | task 1 |       total time =  104009.89 ms / 22078 tokens"}
+{"t": 1791271703.949, "line": "2.32.485.912 I slot print_timing: id  0 | task 1 |    graphs reused =         34"}
+{"t": 1791271703.949, "line": "2.32.485.920 I slot print_timing: id  0 | task 1 | draft acceptance = 0.66471 (  113 accepted /   170 generated), mean len =  2.66"}
+{"t": 1791271703.949, "line": "2.32.486.515 I slot      release: id  0 | task 1 | stop processing: n_tokens = 22079, truncated = 0"}
+{"t": 1791271854.465, "line": "0.00.143.959 I srv  llama_server: initializing ..."}
+{"t": 1791271854.465, "line": "0.00.143.971 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)"}
+{"t": 1791271854.485, "line": "0.00.163.438 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)"}
+{"t": 1791271854.502, "line": "0.00.180.451 I srv    load_model: loading model 'C:/Users/jwals/textgen/user_data/models/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'"}
+{"t": 1791271859.831, "line": "0.05.510.099 E llama_init_from_model: failed to initialize the context: qwen4exp requires ctx_other to be set (this warning is normal during memory fitting)"}
+{"t": 1791271859.923, "line": "0.05.601.800 W operator (): failed to measure the memory of the extra model, fitting without it: failed to create llama_context from model"}
+{"t": 1791271862.444, "line": "0.08.122.335 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance"}
+{"t": 1791271938.718, "line": "1.24.396.848 I cmn          init: llama threadpool init, n_threads = 16"}
+{"t": 1791271943.183, "line": "1.28.861.567 I common_speculative_init_result: loading draft model 'C:/Users/jwals/textgen/user_data/models/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf'"}
+{"t": 1791271944.774, "line": "1.30.450.402 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'true'"}
+{"t": 1791271944.993, "line": "1.30.671.120 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)"}
+{"t": 1791271944.993, "line": "1.30.671.138 I srv  llama_server: model loaded"}
+{"t": 1791271944.993, "line": "1.30.671.140 I srv  llama_server: listening on http://127.0.0.1:10008"}
+{"t": 1791271946.674, "line": "1.32.353.015 I slot get_availabl: id  0 | task -1 | selected slot by id (0)"}
+{"t": 1791271946.675, "line": "1.32.353.900 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0"}
+{"t": 1791272010.219, "line": "2.35.896.382 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   8192, progress = 0.37, t =  62.40 s / 131.28 tokens per second"}
+{"t": 1791272039.382, "line": "3.05.060.913 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  16384, progress = 0.75, t =  91.79 s / 178.50 tokens per second"}
+{"t": 1791272054.851, "line": "3.20.529.291 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  21366, progress = 0.98, t = 107.56 s / 198.64 tokens per second"}
+{"t": 1791272059.815, "line": "3.25.493.372 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  21792, progress = 1.00, t = 113.09 s / 192.70 tokens per second"}
+{"t": 1791272061.839, "line": "3.27.517.873 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  21878, progress = 1.00, t = 115.15 s / 190.00 tokens per second"}
+{"t": 1791272071.354, "line": "3.37.032.555 I slot print_timing: id  0 | task 0 | n_gen =    101, tg =  10.84 t/s, tg_3s =  10.95 t/s"}
+{"t": 1791272074.495, "line": "3.40.174.011 I slot print_timing: id  0 | task 0 | n_gen =    160, tg =  12.86 t/s, tg_3s =  18.78 t/s"}
+{"t": 1791272077.496, "line": "3.43.174.843 I slot print_timing: id  0 | task 0 | n_gen =    216, tg =  13.99 t/s, tg_3s =  18.66 t/s"}
+{"t": 1791272080.601, "line": "3.46.279.752 I slot print_timing: id  0 | task 0 | n_gen =    278, tg =  15.00 t/s, tg_3s =  19.97 t/s"}
+{"t": 1791272083.64, "line": "3.49.318.354 I slot print_timing: id  0 | task 0 | n_gen =    326, tg =  15.11 t/s, tg_3s =  15.80 t/s"}
+{"t": 1791272085.896, "line": "3.51.574.670 I slot print_timing: id  0 | task 0 | prompt eval time =  115449.40 ms / 21882 tokens (    5.28 ms per token,   189.54 tokens per second)"}
+{"t": 1791272085.896, "line": "3.51.574.675 I slot print_timing: id  0 | task 0 |        eval time =   23767.25 ms /   374 tokens (   63.72 ms per token,    15.69 tokens per second)"}
+{"t": 1791272085.896, "line": "3.51.574.676 I slot print_timing: id  0 | task 0 |       total time =  139216.65 ms / 22256 tokens"}
+{"t": 1791272085.896, "line": "3.51.574.676 I slot print_timing: id  0 | task 0 |    graphs reused =         81"}
+{"t": 1791272085.896, "line": "3.51.574.680 I slot print_timing: id  0 | task 0 | draft acceptance = 0.66071 (  222 accepted /   336 generated), mean len =  2.72"}
+{"t": 1791272085.899, "line": "3.51.577.978 I slot      release: id  0 | task 0 | stop processing: n_tokens = 22256, truncated = 0"}
+{"t": 1791272149.103, "line": "0.00.060.505 I srv  llama_server: initializing ..."}
+{"t": 1791272149.103, "line": "0.00.060.526 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)"}
+{"t": 1791272149.106, "line": "0.00.063.069 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)"}
+{"t": 1791272149.113, "line": "0.00.070.686 I srv    load_model: loading model 'C:/Users/jwals/textgen/user_data/models/flash-next/IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'"}
+{"t": 1791272150.654, "line": "0.01.611.099 E llama_init_from_model: failed to initialize the context: qwen4exp requires ctx_other to be set (this warning is normal during memory fitting)"}
+{"t": 1791272150.691, "line": "0.01.648.685 W operator (): failed to measure the memory of the extra model, fitting without it: failed to create llama_context from model"}
+{"t": 1791272151.23, "line": "0.02.187.506 W llama_model_loader: tensor overrides to CPU are used with mmap enabled - consider using --load-mode none for better performance"}
+{"t": 1791272194.32, "line": "0.45.277.315 I cmn          init: llama threadpool init, n_threads = 16"}
+{"t": 1791272198.244, "line": "0.49.200.833 I common_speculative_init_result: loading draft model 'C:/Users/jwals/textgen/user_data/models/flash-next/mtp-Qwen3.8-Flash-Next-Q8_0-shared-embd.gguf'"}
+{"t": 1791272200.15, "line": "0.51.107.504 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'true'"}
+{"t": 1791272200.396, "line": "0.51.353.124 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)"}
+{"t": 1791272200.396, "line": "0.51.353.140 I srv  llama_server: model loaded"}
+{"t": 1791272200.396, "line": "0.51.353.142 I srv  llama_server: listening on http://127.0.0.1:10008"}
+{"t": 1791272201.674, "line": "0.52.631.018 I slot get_availabl: id  0 | task -1 | selected slot by id (0)"}
+{"t": 1791272201.674, "line": "0.52.631.640 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0"}
+{"t": 1791272264.653, "line": "1.55.609.948 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =   8192, progress = 0.37, t =  61.84 s / 132.46 tokens per second"}
+{"t": 1791272295.662, "line": "2.25.753.032 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  16384, progress = 0.75, t =  92.22 s / 177.66 tokens per second"}
+{"t": 1791272310.502, "line": "2.41.459.695 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21347, progress = 0.98, t = 108.13 s / 197.42 tokens per second"}
+{"t": 1791272314.303, "line": "2.45.259.852 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21773, progress = 1.00, t = 112.58 s / 193.41 tokens per second"}
+{"t": 1791272316.14, "line": "2.47.097.274 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  21859, progress = 1.00, t = 114.45 s / 190.99 tokens per second"}
+{"t": 1791272325.337, "line": "2.56.294.495 I slot print_timing: id  0 | task 1 | n_gen =    101, tg =  11.19 t/s, tg_3s =  11.31 t/s"}
+{"t": 1791272328.388, "line": "2.59.345.504 I slot print_timing: id  0 | task 1 | n_gen =    145, tg =  12.02 t/s, tg_3s =  14.42 t/s"}
+{"t": 1791272331.568, "line": "3.02.525.219 I slot print_timing: id  0 | task 1 | n_gen =    207, tg =  13.58 t/s, tg_3s =  19.50 t/s"}
+{"t": 1791272334.616, "line": "3.05.572.843 I slot print_timing: id  0 | task 1 | n_gen =    253, tg =  13.84 t/s, tg_3s =  15.09 t/s"}
+{"t": 1791272337.775, "line": "3.08.732.319 I slot print_timing: id  0 | task 1 | n_gen =    309, tg =  14.41 t/s, tg_3s =  17.72 t/s"}
+{"t": 1791272340.871, "line": "3.11.827.902 I slot print_timing: id  0 | task 1 | n_gen =    370, tg =  15.08 t/s, tg_3s =  19.71 t/s"}
+{"t": 1791272342.812, "line": "3.13.769.704 I slot print_timing: id  0 | task 1 | prompt eval time =  114725.60 ms / 21863 tokens (    5.25 ms per token,   190.57 tokens per second)"}
+{"t": 1791272342.812, "line": "3.13.769.709 I slot print_timing: id  0 | task 1 |        eval time =   26408.15 ms /   417 tokens (   63.48 ms per token,    15.75 tokens per second)"}
+{"t": 1791272342.812, "line": "3.13.769.710 I slot print_timing: id  0 | task 1 |       total time =  141133.75 ms / 22280 tokens"}
+{"t": 1791272342.812, "line": "3.13.769.710 I slot print_timing: id  0 | task 1 |    graphs reused =         75"}
+{"t": 1791272342.812, "line": "3.13.769.715 I slot print_timing: id  0 | task 1 | draft acceptance = 0.63587 (  234 accepted /   368 generated), mean len =  2.60"}
+{"t": 1791272342.816, "line": "3.13.773.344 I slot      release: id  0 | task 1 | stop processing: n_tokens = 22280, truncated = 0"}

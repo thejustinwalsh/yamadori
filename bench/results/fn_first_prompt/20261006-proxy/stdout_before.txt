@@ -1,0 +1,16 @@
+== rep 1
+  unloaded flash-next in 4.5 s; /running: ['embeddings']
+  main card emptied: []; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.39 s (2.42 GB/s); available 48122 MiB
+  a1 first prompt after load [proxy read-then-load]: HTTP 200 ttft 166.13 s, prompt None, server prefill None tok/s (None tok, None s, cached None) 
+== rep 2
+  unloaded flash-next in 7.1 s; /running: ['embeddings', 'imagegen-turbo']
+  main card emptied: []; /running: ['embeddings', 'imagegen-turbo']
+  evicted: read 66.42 GB of other model files in 27.07 s (2.45 GB/s); available 38836 MiB
+  a2 first prompt after load [proxy read-then-load]: HTTP 200 ttft 241.27 s, prompt 21882, server prefill None tok/s (None tok, None s, cached None) 
+== rep 3
+  unloaded flash-next in 6.5 s; /running: ['embeddings', 'imagegen-turbo']
+  main card emptied: []; /running: ['embeddings', 'imagegen-turbo']
+  evicted: read 66.42 GB of other model files in 27.68 s (2.4 GB/s); available 38109 MiB
+  a3 first prompt after load [proxy read-then-load]: HTTP 200 ttft 193.59 s, prompt 21863, server prefill None tok/s (None tok, None s, cached None) 
+exit 0

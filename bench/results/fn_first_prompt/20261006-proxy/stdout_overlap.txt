@@ -1,0 +1,15 @@
+== rep 1
+  main card emptied: []; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.26 s (2.44 GB/s); available 47952 MiB
+  a1 first prompt after load [proxy overlap]: HTTP 200 ttft 173.94 s, prompt 21871, server prefill None tok/s (None tok, None s, cached None) 
+== rep 2
+  unloaded flash-next in 4.0 s; /running: ['embeddings']
+  main card emptied: []; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.26 s (2.44 GB/s); available 47877 MiB
+  a2 first prompt after load [proxy overlap]: HTTP 200 ttft 164.73 s, prompt 21913, server prefill None tok/s (None tok, None s, cached None) 
+== rep 3
+  unloaded flash-next in 4.5 s; /running: ['embeddings']
+  main card emptied: []; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.87 s (2.38 GB/s); available 47691 MiB
+  a3 first prompt after load [proxy overlap]: HTTP 200 ttft 165.51 s, prompt 21869, server prefill None tok/s (None tok, None s, cached None) 
+exit 0

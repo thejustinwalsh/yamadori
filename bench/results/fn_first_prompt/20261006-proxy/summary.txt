@@ -1,0 +1,26 @@
+fn_first_prompt: raw records in requests*.jsonl, samples*.jsonl, serverlog*.jsonl
+disk = PhysicalDisk(1 c:) Disk Read Bytes/sec x interval; pgin = Memory Pages Input/sec x 4 KiB; both over the prefill window (the server's launch_slot line to the first streamed token)
+
+request                                          ttft  load prompt srv t/s   pf s disk GB pgin GB avail GB start/min fnWS GB end standby GB start
+a1 first prompt after load [proxy overlap]      173.9  68.4  21871     0.0    0.0   31.74   31.85      37.0/7.7             41.1             39.2
+a2 first prompt after load [proxy overlap]      164.7  65.7  21913     0.0    0.0   33.05   33.16      37.5/7.9             40.8             40.1
+a3 first prompt after load [proxy overlap]      165.5  66.8  21869     0.0    0.0   31.56   31.66      37.0/7.7             41.2             39.6
+a1 first prompt after load [proxy read-then-load]  166.1  73.9      0     0.0    0.0   31.50   31.60      37.2/7.5             41.4             39.8
+a2 first prompt after load [proxy read-then-load]  241.3 124.1  21882     0.0    0.0   39.13   39.26      27.8/0.3             38.7             29.7
+a3 first prompt after load [proxy read-then-load]  193.6  77.5  21863     0.0    0.0   39.04   39.15      27.3/0.3             39.0             29.2
+
+per batch from the server's own `prompt processing, n_tokens = N ... t = T s` lines (tokens, seconds, tok/s) and the disk read GB over that batch's span (print-line arrival times):
+  a1 first prompt after load [proxy overlap]: 8192 tok 60.4 s 136 t/s 31.3 GB; 8192 tok 17.8 s 461 t/s 0.2 GB; 4971 tok 12.8 s 388 t/s 0.0 GB; 426 tok 3.7 s 114 t/s 0.1 GB; 86 tok 1.8 s 49 t/s 0.1 GB
+  a2 first prompt after load [proxy overlap]: 8192 tok 61.7 s 133 t/s 32.9 GB; 8192 tok 18.1 s 452 t/s 0.1 GB; 5013 tok 13.0 s 386 t/s 0.0 GB; 426 tok 3.6 s 118 t/s 0.0 GB; 86 tok 1.8 s 48 t/s 0.1 GB
+  a3 first prompt after load [proxy overlap]: 8192 tok 57.8 s 142 t/s 31.1 GB; 8192 tok 17.5 s 468 t/s 0.2 GB; 4969 tok 13.1 s 378 t/s 0.0 GB; 426 tok 3.8 s 114 t/s 0.1 GB; 86 tok 1.9 s 45 t/s 0.1 GB
+  a1 first prompt after load [proxy read-then-load]: 8192 tok 54.5 s 150 t/s 31.1 GB; 8192 tok 17.9 s 457 t/s 0.2 GB; 4994 tok 13.0 s 384 t/s 0.0 GB; 426 tok 3.6 s 118 t/s 0.1 GB; 86 tok 1.8 s 49 t/s 0.1 GB
+  a2 first prompt after load [proxy read-then-load]: 8192 tok 62.4 s 131 t/s 31.4 GB; 8192 tok 29.4 s 279 t/s 5.3 GB; 4982 tok 15.8 s 316 t/s 1.4 GB; 426 tok 5.5 s 77 t/s 0.9 GB; 86 tok 2.1 s 42 t/s 0.2 GB
+  a3 first prompt after load [proxy read-then-load]: 8192 tok 61.8 s 132 t/s 31.4 GB; 8192 tok 30.4 s 270 t/s 5.7 GB; 4963 tok 15.9 s 312 t/s 1.4 GB; 426 tok 4.5 s 96 t/s 0.3 GB; 86 tok 1.9 s 46 t/s 0.1 GB
+
+prep reads before the request (cached sequential reads, 16 MiB):
+  a1 first prompt after load [proxy overlap]: evict: 66.42 GB in 27.26 s = 2.44 GB/s; physical available after 46.8 GB
+  a2 first prompt after load [proxy overlap]: evict: 66.42 GB in 27.26 s = 2.44 GB/s; physical available after 46.8 GB
+  a3 first prompt after load [proxy overlap]: evict: 66.42 GB in 27.87 s = 2.38 GB/s; physical available after 46.6 GB
+  a1 first prompt after load [proxy read-then-load]: evict: 66.42 GB in 27.39 s = 2.42 GB/s; physical available after 47.0 GB
+  a2 first prompt after load [proxy read-then-load]: evict: 66.42 GB in 27.07 s = 2.45 GB/s; physical available after 37.9 GB
+  a3 first prompt after load [proxy read-then-load]: evict: 66.42 GB in 27.68 s = 2.4 GB/s; physical available after 37.2 GB

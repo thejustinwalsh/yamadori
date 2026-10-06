@@ -1,0 +1,16 @@
+== rep 1
+== rep 2
+== rep 3
+== arm d rep 1: a fresh prompt after the server's working set is trimmed
+  trimmed: {'pid': 17444, 'ws_before_mb': 38345, 'ws_after_mb': 4, 'ok': True}
+  evicted: read 66.42 GB in 30.29 s (2.19 GB/s)
+  d1 request after working-set trim [proxy trimmed]: HTTP 200 ttft 133.84 s, prompt None, server prefill None tok/s (None tok, None s, cached None) 
+== arm d rep 2: a fresh prompt after the server's working set is trimmed
+  trimmed: {'pid': 17444, 'ws_before_mb': 32874, 'ws_after_mb': 3, 'ok': True}
+  evicted: read 66.42 GB in 28.55 s (2.33 GB/s)
+  d2 request after working-set trim [proxy trimmed]: HTTP 200 ttft None s, prompt None, server prefill None tok/s (None tok, None s, cached None) 
+== arm d rep 3: a fresh prompt after the server's working set is trimmed
+  trimmed: {'pid': 17444, 'ws_before_mb': 7, 'ws_after_mb': 3, 'ok': True}
+  evicted: read 66.42 GB in 31.36 s (2.12 GB/s)
+  d3 request after working-set trim [proxy trimmed]: HTTP 200 ttft 265.97 s, prompt 21893, server prefill None tok/s (None tok, None s, cached None) 
+exit 0

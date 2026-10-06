@@ -189,6 +189,9 @@ def one_request(label: str, system: str, user: str, tap: LogTap, rec_sink, timeo
     base = SWAP
     if PROXY["base"]:
         base = PROXY["base"]
+        # through the proxy the model thinks at the tier's effort and answers in full: a short question (not a one-word contract: the proxy serves those as side calls on whichever model is loaded) keeps the turn
+        # short (the system message, ~24.6K tokens, is the same; the prefill is what is measured)
+        body["messages"][1]["content"] = "Say hello, then tell me in two short sentences what you would look at first in this workspace."
         body.update({"model": "yamadori", "reasoning_effort": PROXY["tier"]})
         hdrs["Authorization"] = "Bearer " + PROXY["key"]
         if PROXY["features"]:
@@ -221,6 +224,8 @@ def one_request(label: str, system: str, user: str, tap: LogTap, rec_sink, timeo
                 if not chunk:
                     break
                 buf += chunk
+                if PROXY["base"] and t_first is not None and time.time() - t_first > 90:
+                    break
                 while b"\n" in buf:
                     ln, buf = buf.split(b"\n", 1)
                     s = ln.decode("utf-8", "replace").strip()
@@ -236,6 +241,9 @@ def one_request(label: str, system: str, user: str, tap: LogTap, rec_sink, timeo
                     now = time.time()
                     max_silence = max(max_silence, now - t_chunk)
                     t_chunk = now
+                    if PROXY["base"] and t_first is not None and now - t_first > 90:
+                        finish = finish or "stopped by the bench 90 s after the first token"
+                        break
                     if j.get("x_yamadori"):
                         xy.update({k: v for k, v in j["x_yamadori"].items() if k in ("preread", "capacity")})
                     if any((ch.get("delta") == {} and not ch.get("finish_reason")) for ch in j.get("choices") or []):
@@ -345,6 +353,27 @@ def unload_and_wait(model: str = MODEL, wait: float = 120.0) -> float:
     return time.time() - t0
 
 
+MAIN_CARD = ("bonsai", "flash-next", "mirai-s")
+
+
+def unload_main_card(wait: float = 180.0) -> list[str]:
+    """Through the proxy a swap should start from the same place every rep: no main-card model loaded (the first rep
+    would otherwise swap out the bonsai the stack starts with, the later ones nothing). A model still `starting` is
+    waited for first. Direct to llama-swap, as unload_and_wait."""
+    t0 = time.time()
+    gone: list[str] = []
+    while time.time() - t0 < wait:
+        rows = [m for m in running() if m.get("model") in MAIN_CARD]
+        if not rows:
+            return gone
+        for m in rows:
+            if m.get("state") == "ready":
+                http_json("POST", f"/api/models/unload/{m['model']}", timeout=wait)
+                gone.append(m["model"])
+        time.sleep(1.0)
+    raise RuntimeError("the main card did not empty")
+
+
 def cmd_run(a) -> int:
     os.makedirs(a.out, exist_ok=True)
     tag = a.tag
@@ -384,6 +413,9 @@ def cmd_run(a) -> int:
                 if loaded() or any(m.get("model") == MODEL for m in running()):
                     s = unload_and_wait()
                     print(f"  unloaded {MODEL} in {s:.1f} s; /running: {[m['model'] for m in running()]}", flush=True)
+                if PROXY["base"]:
+                    print(f"  main card emptied: {unload_main_card()}; /running: {[m['model'] for m in running()]}",
+                          flush=True)
                 time.sleep(a.settle)
                 prep: dict = {"mem_after_unload": hs.mem_sample()}
                 if a.evict:
@@ -410,6 +442,16 @@ def cmd_run(a) -> int:
             print("== arm c: fresh prompt on the loaded server (no unload)", flush=True)
             sysm, user = build_prompt(seed, a.target, a.cpt)
             one_request("c fresh prompt, server already loaded", sysm, user, tap, sink)
+        if "e" in arms:
+            # a WARM back-to-back pair on the loaded server: the pre-read rule must NOT fire (x_yamadori.preread skipped)
+            for rep in range(1, a.reps + 1):
+                for k in (1, 2):
+                    if not loaded():
+                        print("  flash-next is not loaded for arm e; skipping (run arm a first)", flush=True)
+                        break
+                    sysm, user = build_prompt(seed, a.target, a.cpt)
+                    seed += 1
+                    one_request(f"e{rep}.{k} warm back-to-back{a.name}", sysm, user, tap, sink)
         if "d" in arms:
             for rep in range(1, a.reps + 1):
                 print(f"== arm d rep {rep}: a fresh prompt after the server's working set is trimmed", flush=True)

@@ -1,0 +1,10 @@
+== rep 1
+== rep 2
+== rep 3
+  e1.1 warm back-to-back [proxy warm pair]: HTTP 200 ttft 126.33 s, prompt 21854, server prefill None tok/s (None tok, None s, cached None) 
+  e1.2 warm back-to-back [proxy warm pair]: HTTP 503 ttft None s, prompt None, server prefill None tok/s (None tok, None s, cached None) {"error":{"message":"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 1 s; this conversation keeps its place in no queue, so retry then.","type":"service_unavailable_error","param":null,"code":"conversation_at_capacity","retryable":true,"why":"another conversation holds the main card (its latest activity was 3 s ago, t
+  e2.1 warm back-to-back [proxy warm pair]: HTTP 200 ttft 155.75 s, prompt 21822, server prefill None tok/s (None tok, None s, cached None) 
+  e2.2 warm back-to-back [proxy warm pair]: HTTP 503 ttft None s, prompt None, server prefill None tok/s (None tok, None s, cached None) {"error":{"message":"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 2 s; this conversation keeps its place in no queue, so retry then.","type":"service_unavailable_error","param":null,"code":"conversation_at_capacity","retryable":true,"why":"another conversation holds the main card (its latest activity was 1 s ago, t
+  e3.1 warm back-to-back [proxy warm pair]: HTTP 503 ttft None s, prompt None, server prefill None tok/s (None tok, None s, cached None) {"error":{"message":"The model is at capacity: another conversation is using it right now (one conversation at a time on this server). Retry in about 1 s; this conversation keeps its place in no queue, so retry then.","type":"service_unavailable_error","param":null,"code":"conversation_at_capacity","retryable":true,"why":"another conversation holds the main card (its latest activity was 2 s ago, t
+  e3.2 warm back-to-back [proxy warm pair]: HTTP 200 ttft 103.72 s, prompt 21898, server prefill None tok/s (None tok, None s, cached None) 
+exit 0

@@ -1,0 +1,11 @@
+fn_first_prompt 20261006-proxy: the pre-read (mcp/preread.py, commit b43b548 + 75783ae half-file rule) measured THROUGH THE PROXY (:1234, tier max,
+account live-test, key from file, not recorded), build 1: the read thread INHERITS the proxy's memory priority 2 (fixed afterwards: see 20261006-proxy-b).
+Synthetic ~21.9K-token prompts (the proxy's template renders the same text shorter than llama-swap's 24.6K), a short non-contract user question,
+streamed; the bench stops reading 90 s after the first token (the proxy cancels the turn). Arms (n=3 each unless noted):
+  _overlap  cold swap, pre-read overlapped with the load (default)         _before  cold swap, read-then-load (X-Yamadori-Features preread_overlap false)
+  _off      control: preread false                                         _trim    loaded server, working set emptied (psapi EmptyWorkingSet) + 66 GB evict, then a request
+  _warm     back-to-back requests on the loaded server (preread must not fire); 3 of 6 got 503 conversation_at_capacity (the one-conversation hold, a bench artifact)
+Confounds: from rep 2 of _before an imagegen-turbo model was loaded on the A4000 by someone else, and later bonsai-a4000: available memory before the request was
+37-38 GB instead of 48 GB, and 0.3-3 GB during _warm. The first rep of each arm that had 48 GB available showed the same result as the rest.
+Found: the stack's processes run at memory priority 2 / I/O priority low (the bench's shell: 5 / normal). The pre-read cached 39 GB and the load (~40 GB private
+memory) consumed those low-priority pages: the prefill read 31.1-33.1 GB from disk in 6 of 6 swaps, as with no pre-read.

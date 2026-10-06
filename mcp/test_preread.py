@@ -204,6 +204,32 @@ def test_file_and_plan():
     check(pl and pl["path"] == SHARD1 and pl["on"] and pl["overlap"] and not pl.get("skipped"),
           "a plan for flash-next: shard 1, on, overlap by default", pl)
     check(preread.read_sequential(SHARD1, lambda: False) == SIZE, "read_sequential reads the whole file, once")
+    pri = preread._PRIORITY.get(SHARD1) or {}
+    if os.name == "nt":
+        check(pri.get("memory") == 5 and pri.get("io_hint") == 2 and "error" not in pri,
+              "the read sets its thread's memory priority to normal (5) and the file's I/O hint to normal (2): the "
+              "stack's processes run at 2 and low, and the pages a priority-2 read caches are the load's first victims", pri)
+        got = {}
+
+        def probe():
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.windll.kernel32
+            k32.GetCurrentThread.restype = ctypes.c_void_p
+            k32.GetThreadInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+            k32.SetThreadInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+            low = wintypes.ULONG(2)
+            k32.SetThreadInformation(k32.GetCurrentThread(), 0, ctypes.byref(low), 4)   # as a stack process's thread
+            with open(SHARD1, "rb", buffering=0) as f:
+                got["r"] = preread.raise_cache_priority(f)
+            now = wintypes.ULONG(0)
+            k32.GetThreadInformation(k32.GetCurrentThread(), 0, ctypes.byref(now), 4)
+            got["now"] = now.value
+        th = threading.Thread(target=probe)
+        th.start()
+        th.join()
+        check(got.get("now") == 5 and got["r"].get("memory") == 5,
+              "a thread at memory priority 2 reads back 5 after raise_cache_priority", got)
     n = [0]
 
     def stop_soon():

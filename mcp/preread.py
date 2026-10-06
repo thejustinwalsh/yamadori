@@ -32,10 +32,17 @@ ONE READ AT A TIME (`_read_lock`): a read in flight for the same file is JOINED,
 waits its turn. The read is bounded by max_mode.LOAD_TIMEOUT_S (llama-swap's own 900 s health-check timeout, the longest a
 load may already take): after that the request goes on and the record says `timed_out`.
 
-NO DISK PRIORITY: Windows can lower a file's I/O priority (SetFileInformationByHandle), but the request WAITS for this
-read, the measured arms ran at normal priority, and the only competitor (the load) is also awaited; a low priority would
-add an unmeasured variable and could only make the waiter wait longer. (THREAD_MODE_BACKGROUND_BEGIN also lowers the
-thread's memory priority, which would make the pages it caches the first to be evicted.)
+THE READ RUNS AT NORMAL MEMORY AND I/O PRIORITY (found 2026-10-06; the cause is INFERRED, the fix not yet re-measured live: the stack-process priorities and the six swaps are measured, bench/results/fn_first_prompt/20261006-proxy, n=3 per
+arm, and a probe of the stack's processes): every process of the stack (the proxy, llama-server) runs at BELOW_NORMAL with
+MEMORY priority 2 and I/O priority low, against 5 and normal for the bench's shell. Pages a read puts in the file cache are
+tagged with the reader's memory priority, and the standby list gives up its lowest priority first: the first proxy version
+(a thread inheriting priority 2) read the file in 26-31 s and the load, which takes ~40 GB of private memory, then
+consumed exactly those pages -- the prefill still read 31.1-33.1 GB from disk (6 of 6 swaps, overlap and read-then-load
+alike), where the same read from the bench (priority 5) left 1.6-3.8 GB. So the read thread sets ITS OWN memory priority
+to 5 (SetThreadInformation ThreadMemoryPriority, MEMORY_PRIORITY_NORMAL) and the file's I/O hint to normal
+(SetFileInformationByHandle FileIoPriorityHintInfo, IoPriorityHintNormal): both are allowed from a priority-2 process
+(probed) and are recorded in x_yamadori.preread.priority. The request waits for this read, so a low I/O priority could
+only make the waiter wait longer. (THREAD_MODE_BACKGROUND_BEGIN would do the opposite: it lowers memory priority too.)
 
 SWITCHES (tiers.BEHAVIOURS, default ON): `preread` (YAMADORI_PREREAD; X-Yamadori-Features {"preread": false}) and
 `preread_overlap` (YAMADORI_PREREAD_OVERLAP; {"preread_overlap": false} = read, then load). x_yamadori.preread and one
@@ -153,12 +160,42 @@ def working_set(path: str) -> tuple[int | None, str]:
 
 
 # ---------------------------------------------------------------------- read --
+_PRIORITY: dict[str, dict] = {}       # path -> what the last read set (read_sequential), for the record
+
+
+def raise_cache_priority(f) -> dict:
+    """THIS thread's memory priority to normal (5) and the open file's I/O hint to normal (2), so the pages the read
+    caches are not the first the standby list gives up (see THE READ RUNS AT NORMAL ... above). Windows only; each
+    call is best effort and the result says what took: {memory: 5|None, io_hint: 2|None, error?}."""
+    out: dict = {"memory": None, "io_hint": None}
+    if os.name != "nt":
+        return out
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+        k32 = ctypes.windll.kernel32                                # type: ignore[attr-defined]
+        k32.GetCurrentThread.restype = ctypes.c_void_p
+        k32.SetThreadInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        k32.SetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        v = wintypes.ULONG(5)                                        # MEMORY_PRIORITY_NORMAL
+        if k32.SetThreadInformation(k32.GetCurrentThread(), 0, ctypes.byref(v), 4):   # ThreadMemoryPriority
+            out["memory"] = 5
+        h = wintypes.ULONG(2)                                        # IoPriorityHintNormal
+        if k32.SetFileInformationByHandle(msvcrt.get_osfhandle(f.fileno()), 12, ctypes.byref(h), 4):  # FileIoPriorityHintInfo
+            out["io_hint"] = 2
+    except Exception as e:                                           # noqa: BLE001
+        out["error"] = f"{type(e).__name__}: {e}"[:120]
+    return out
+
+
 def read_sequential(path: str, should_stop) -> int:
-    """Read the file once, front to back, with ordinary cached reads (the bytes are discarded). Stops early when
-    should_stop() says so. Returns the bytes read."""
+    """Read the file once, front to back, with ordinary cached reads (the bytes are discarded) at normal memory and I/O
+    priority (raise_cache_priority). Stops early when should_stop() says so. Returns the bytes read."""
     n = 0
     buf = bytearray(CHUNK)
     with open(path, "rb", buffering=0) as f:
+        _PRIORITY[path] = raise_cache_priority(f)
         while not should_stop():
             k = f.readinto(buf)
             if not k:
@@ -228,7 +265,7 @@ class Handle:
         return {"why": self.why, "model": self.model, "file": os.path.basename(self.path), "file_rule": FILE_RULE,
                 "file_bytes": self.size, "bytes": self.bytes, "ms": round((t1 - t0) * 1000),
                 "gb_per_s": round(self.bytes / 1e9 / max(t1 - t0, 1e-6), 2),
-                "overlapped": self.overlapped,
+                "overlapped": self.overlapped, "priority": _PRIORITY.get(self.path),
                 "working_set_mb": None if self.ws is None else round(self.ws / 1e6),
                 "joined": joined, "waited_ms": round(waited_s * 1000), "finished": self.done.is_set(),
                 "timed_out": self.timed_out, "ok": self.done.is_set() and not self.error and not self.timed_out,
