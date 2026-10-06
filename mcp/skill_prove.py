@@ -1404,6 +1404,97 @@ def release_reprove(priority: dict | None = None) -> dict:
             "priority": {a: prio.get(a, 0) for a in done}}
 
 
+def run_reprove_here(limit: int | None = None, worker: str | None = None,
+                     stop_after_s: float | None = None) -> dict:
+    """Run queued re-prove jobs IN THIS PROCESS, highest priority first,
+    claiming each row atomically (so a worker and any number of these never
+    take the same one) and finishing it like the worker does. The process has
+    no tier table, so its generations go to the model named in model.py
+    (`bonsai`, the MAIN card) instead of the locked model's helper on the
+    A4000: the main card decodes about 74 tok/s (AGENTS.md; kv_rank lane
+    arms), the A4000 helper about a third of that, and a decider read beside
+    it on the same A4000 cut its decode to ~6 tok/s (measured 2026-10-06,
+    slot 0 n_decoded 2587 -> 2644 in 10 s while slot 1 read). The coordinator's
+    GPU window ("GPU go", 2026-10-06): the card is idle."""
+    import socket
+    import threading
+    worker = worker or f"{socket.gethostname()}:{os.getpid()}:reprove-here"
+    q = _queue()[0]
+    done, t0 = [], time.time()
+
+    def claim():
+        con = jobs._db()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            for r in con.execute(
+                    "SELECT id, payload, attempts FROM jobs WHERE queue=? "
+                    "AND state='queued' AND (not_before IS NULL OR "
+                    "not_before <= ?) ORDER BY priority DESC, created ASC",
+                    (q, time.time())).fetchall():
+                pl = json.loads(r[1] or "{}")
+                if not pl.get("reprove"):
+                    continue
+                now = time.time()
+                con.execute("UPDATE jobs SET state='running', started=?, "
+                            "heartbeat=?, worker=?, card='gpu', "
+                            "attempts=attempts+1 WHERE id=? AND "
+                            "state='queued'", (now, now, worker, r[0]))
+                con.execute("COMMIT")
+                return {"id": r[0], "payload": pl}
+            con.execute("COMMIT")
+            return None
+        except Exception:                                        # noqa: BLE001
+            try:
+                con.execute("ROLLBACK")
+            except Exception:                                    # noqa: BLE001
+                pass
+            raise
+        finally:
+            con.close()
+
+    class Ctx:
+        def __init__(self, jid):
+            self.jid = jid
+
+        def beat(self, progress=None):
+            jobs.beat(self.jid, progress)
+
+    while limit is None or len(done) < limit:
+        if stop_after_s and time.time() - t0 > stop_after_s:
+            break
+        job = claim()
+        if job is None:
+            break
+        stop = threading.Event()
+
+        def hb(jid=job["id"], ev=stop):
+            while not ev.wait(60):
+                try:
+                    jobs.beat(jid)
+                except Exception:                                # noqa: BLE001
+                    pass
+        threading.Thread(target=hb, daemon=True).start()
+        try:
+            res = _handle_reprove(job, Ctx(job["id"]))
+            jobs.finish(job["id"], res)
+            done.append({"job": job["id"], "skill": job["payload"]["skill"],
+                         "verdict": res.get("prove"),
+                         "rearmed": bool(res.get("rearmed")),
+                         "seconds": res.get("seconds")})
+            print(f"  reprove {job['payload']['skill']}: "
+                  f"{res.get('prove')}"
+                  f"{' REARMED' if res.get('rearmed') else ''} "
+                  f"{res.get('seconds')} s", flush=True)
+        except Exception as e:                                   # noqa: BLE001
+            jobs.fail(job["id"], f"{type(e).__name__}: {e}")
+            print(f"  reprove {job['payload'].get('skill')}: failed "
+                  f"{type(e).__name__}: {str(e)[:200]}", flush=True)
+        finally:
+            stop.set()
+    return {"done": len(done), "rows": done,
+            "seconds": round(time.time() - t0, 1)}
+
+
 def _handle_reprove(job: dict, ctx) -> dict:
     p = job.get("payload") or {}
     sid, v = p.get("skill"), p.get("version")
@@ -1573,8 +1664,14 @@ if __name__ == "__main__":
     ap.add_argument("--release-reprove", action="store_true",
                     help="take the idle gate off the queued re-proofs and "
                     "order them by area (REPROVE_PRIORITY)")
+    ap.add_argument("--run-reprove-here", action="store_true",
+                    help="run the queued re-proofs in THIS process on the "
+                    "main card's model (run_reprove_here), highest priority "
+                    "first")
     a = ap.parse_args()
-    if a.release_reprove:
+    if a.run_reprove_here:
+        print(json.dumps(run_reprove_here(a.limit), indent=1))
+    elif a.release_reprove:
         print(json.dumps(release_reprove(), indent=1))
     elif a.reprove:
         print(json.dumps(reprove_quarantined(
