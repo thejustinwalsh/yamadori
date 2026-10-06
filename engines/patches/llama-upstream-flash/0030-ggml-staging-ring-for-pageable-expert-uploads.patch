@@ -1,0 +1,1741 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Tue, 6 Oct 2026 02:18:17 -0400
+Subject: [PATCH] ggml: LLAMA_STAGER=1, a staging ring (pinned buffers + memcpy
+ threads) for host-to-device copies of PAGEABLE experts
+
+Strata code in this patch: Copyright (c) 2026 Niko1221 and the Strata contributors, MIT License
+(LICENSE added in Strata c0107c3; the full notice is engines/patches/llama-upstream-flash/LICENSE.strata). Ported
+from src/prefill/prefill.cpp @ d551edf :122-239 (`struct Stager`: a ring of 16 pinned buffers and 2-4 memcpy workers
+for unpinned blobs; a buffer is reused only after the DMA that read it, tracked by an event the issuing side records;
+claims are taken in order) and its use at :795-870 and :1159-1194 (the next entries' memcpy runs ahead of the DMA).
+
+Why. With the experts UNPINNED (LLAMA_PIN_EXPERTS=0, the deployed setting since 2026-10-05) the layer-major prefill's
+weight slots (0029) are filled by cudaMemcpyAsync from the mmapped model file. From pageable memory that call is not
+asynchronous: the driver stages it through its own pinned buffer and the calling host thread is blocked for the copy
+(~23 ms for a 256 MiB tensor at the ~11 GB/s pageable rate: docs/FLASH-NEXT.md 8 item 6 and 12.6, derived), so the "overlap" 0029 sets up
+(the next layer's three expert tensors uploaded while the current layer's 16 graphs run, LLAMA_LAYER_MAJOR_SLOTS=6) has
+nothing to overlap with: the gate (bench/flashnext_gate.py pf-lm6-b8k / pf-lm3-b8k, cand0023+0029, n=3 each, ~25.6K-token
+prompts) read 433.1 / 443.4 / 434.6 and 434.1 / 433.1 / 438.7 tok/s with and without prefetch (141 of 144 uploads
+prefetched), the layer-major batch 17,594 and 17,274 ms. The same arithmetic says an overlapped upload would bring a
+8,192-token batch to about 13.8 s (derived, docs/FLASH-NEXT.md 13.3). Whether it can overlap on this card at all (WDDM)
+is what the probe in bench/fn_probe/ measures first.
+
+What. ggml/include/ggml-stager.h, ggml/src/ggml-stager.cpp (ggml-base):
+- a ring of n_chunks pinned host buffers (the device's host buffer type; 16 x 16 MiB), n_workers memcpy threads that fill
+  them in order from the pageable source, ahead of need; one ISSUER thread that waits for a chunk's memcpy and queues the
+  DMA on the stager's own stream (a second backend instance), recording one event per ring buffer; a worker overwrites a
+  ring buffer only after that event says the DMA that read it has landed. Strata issues from the launching thread and
+  waits for the memcpy there; here the thread that launches compute never blocks on a copy. The unit is a chunk of a
+  tensor, not an expert blob, so a 256 MiB tensor streams through 256 MiB of ring.
+- a request names the event to record after its last chunk and an optional event the stream waits for first (the last
+  reader of the destination slot). The launch that reads a staged slot first calls ggml_stager_wait_enqueued(): the
+  slot's `ready` event is recorded by the issuer, and a stream wait on an event not yet recorded would wait for nothing.
+- OS read-ahead (ggml_stager_will_need: PrefetchVirtualMemory, else madvise WILLNEED, on a thread of its own) for the
+  weights of the layer after next, and for layers 0 and 1 when a batch starts: with the experts demand-paged from disk the
+  first 8,192-token batch after a load ran at 75-87 s against 16.2-16.9 s warm (bench/results/fn_first_prompt/20261006-a,
+  n=3, ~0.4 GB/s); parallel worker copies and the hint turn that into queued reads.
+- ggml-backend.cpp: resident slots take the staged path for a weight that is not in the device's own pinned host buffer
+  (a pinned one is already asynchronous: the direct path as before); ggml-cuda.cu offers "ggml_backend_bind_thread" as a
+  registry proc address (the stager's threads make the device current); the layer-major driver names layers 0, 1 and il + 2.
+  LLAMA_LAYER_MAJOR_DEBUG=1 prints one more line per batch (memcpy, ring waits, launching-thread block, hints).
+- Switch LLAMA_STAGER (unset or 0: off, and every path is the one 0029 has; the slot upload's order of calls is unchanged),
+  LLAMA_STAGER_THREADS (Strata's max(2, min(4, hw / 4))), LLAMA_STAGER_CHUNK_MIB (16), LLAMA_STAGER_RING (16: Strata's
+  kRing), LLAMA_STAGER_WILLNEED (1). The chunk and the ring are starting values: a chunk is 1.2 ms of a 14 GB/s link
+  (Strata's probe of this card on x8), so a copy call's cost is under 2% of it (derived); the probe sweeps threads, chunk
+  and ring.
+
+Not done: the expert cache's refills (0025's queued path, which is not in the shipped series; the series' own refill runs
+on a worker thread already, so there is nothing for the stager to hide there). A request API that fits them is here.
+
+Tested (tests/test-stager.cpp, ctest; CPU, no GPU): a fake device whose copies land after a random delay, in order, on one
+stream with events; the destination poisoned and guarded before every request, the ring buffer poisoned after its DMA
+lands; random requests (0 bytes, chunk +-1, several chunks), 1-4 workers, chunks 4-64 KiB (one not a power of two), rings
+of 2-9, up to 12 requests per trial with waits at random points: 200 trials 0 wrong destinations, 71,000 checks per
+1,500 trials at three seeds, 0 failed; a request that names a wait event lands nothing until it completes; wait_enqueued
+returns with the done event recorded and the done event completes after the last byte; free() drains. Controls that must
+fail do: workers that skip the DMA wait are caught in 50 of 50 trials; two mutations of the stager (no stream wait for the
+wait event; done recorded before the copies) fail 391 and 1,608 checks; a read before the done event sees poison. The
+default hooks run over the CPU backend (no events, ordinary-memory ring). test-layer-major (0029, CPU, 48 runs) passes
+unchanged. NOT RUN ON A GPU: `test-stager --device CUDA0` (a pageable source through the pinned ring to the card, read
+back) is written and compiled with the CUDA build only. NO speed number exists for this patch.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ggml/include/ggml-backend-lm.h  |   9 +
+ ggml/include/ggml-stager.h      | 124 +++++++
+ ggml/src/CMakeLists.txt         |   2 +
+ ggml/src/ggml-backend.cpp       |  93 ++++-
+ ggml/src/ggml-cuda/ggml-cuda.cu |  10 +
+ ggml/src/ggml-stager.cpp        | 603 +++++++++++++++++++++++++++++++
+ src/llama-context.cpp           |  30 ++
+ tests/CMakeLists.txt            |   3 +
+ tests/test-stager.cpp           | 611 ++++++++++++++++++++++++++++++++
+ 9 files changed, 1480 insertions(+), 5 deletions(-)
+ create mode 100644 ggml/include/ggml-stager.h
+ create mode 100644 ggml/src/ggml-stager.cpp
+ create mode 100644 tests/test-stager.cpp
+
+diff --git a/ggml/include/ggml-backend-lm.h b/ggml/include/ggml-backend-lm.h
+index 890ab167a..f0ce3440f 100644
+--- a/ggml/include/ggml-backend-lm.h
++++ b/ggml/include/ggml-backend-lm.h
+@@ -11,6 +11,7 @@
+ 
+ #include "ggml.h"
+ #include "ggml-backend.h"
++#include "ggml-stager.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -26,6 +27,11 @@ extern "C" {
+         uint64_t sparse_copies;
+         uint64_t full_bytes;          // bytes of host weights copied WHOLE and synchronously (always counted)
+         uint64_t full_copies;
++        // 0030 (LLAMA_STAGER=1)
++        uint64_t staged_bytes;        // bytes of pageable weights sent through the staging ring
++        uint64_t staged_uploads;
++        uint64_t stage_wait_us;       // the launching thread, blocked until a staged request had been queued
++        struct ggml_stager_stats stager;
+     };
+ 
+     // n_slots < 3 or slot_bytes == 0: off (the slots are freed). Slots are allocated on the first split that uses them.
+@@ -38,6 +44,9 @@ extern "C" {
+     // queue the uploads of the next layer's host weights now (async, on the upload stream)
+     GGML_API void ggml_backend_sched_resident_prefetch(ggml_backend_sched_t sched, struct ggml_tensor * const * weights, int n);
+ 
++    // 0030: the weights of a layer two ahead: the stager asks the OS to read their pages now (a no-op without LLAMA_STAGER=1)
++    GGML_API void ggml_backend_sched_resident_hint(ggml_backend_sched_t sched, struct ggml_tensor * const * weights, int n);
++
+     GGML_API void ggml_backend_sched_upload_stats(ggml_backend_sched_t sched, struct ggml_backend_sched_upload_stats * stats);
+ 
+ #ifdef __cplusplus
+diff --git a/ggml/include/ggml-stager.h b/ggml/include/ggml-stager.h
+new file mode 100644
+index 000000000..6c3b18626
+--- /dev/null
++++ b/ggml/include/ggml-stager.h
+@@ -0,0 +1,124 @@
++#pragma once
++
++// 0030: a staging ring for host-to-device copies of PAGEABLE memory (LLAMA_STAGER=1).
++//
++// cudaMemcpyAsync from pageable host memory (an mmapped model file) is not asynchronous: the driver copies it through
++// its own small pinned buffer and the calling host thread is blocked for the whole copy. A thread that has to keep
++// launching kernels, or that has other copies to queue, loses that time (docs/FLASH-NEXT.md 12.5/13: the layer-major
++// prefill's "overlapped" upload of the next layer's experts ran with and without it at the same speed, 433-443 against
++// 433-439 tok/s, n=3).
++//
++// This is the stager of Niko1221/Strata (src/prefill/prefill.cpp @ d551edf :122-239 `struct Stager`, MIT, notice in
++// engines/patches/llama-upstream-flash/LICENSE.strata): a ring of pinned buffers, a few worker threads that memcpy the
++// pageable source into the ring ahead of need (a ring buffer is reused only once the DMA that read it has landed, an
++// event recorded by the issuing side), and one issuer that queues the DMA from the ring on the device's copy stream.
++// Differences from Strata's: the unit is a chunk of a tensor (chunk_bytes), not one expert blob, so a 256 MiB expert
++// tensor streams through a 16 x 16 MiB ring; the issuer is a thread of its own (Strata issues from the launching thread
++// and waits for the memcpy there), so the thread that launches compute never blocks on a copy; a request names the event
++// to record when its last chunk has been queued and an optional event the copy stream waits for first (the last reader
++// of the destination).
++//
++// What a caller must know: a request is DONE (its event recorded) only when ggml_stager_wait_enqueued() returns; an event
++// the compute stream waits on before that has not been recorded yet and the wait would be a no-op.
++
++#include "ggml.h"
++#include "ggml-backend.h"
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++    typedef struct ggml_stager * ggml_stager_t;
++
++    // What the stager asks of the device. ggml_stager_new_backend() fills it from a ggml backend; the tests supply a
++    // fake one whose copies land when it says so. Every hook is called from the stager's own threads (bind_thread first).
++    struct ggml_stager_ops {
++        void * ctx;
++
++        // called once on each thread the stager starts (a CUDA backend makes its device current)
++        void   (*bind_thread)(void * ctx);
++
++        // a host buffer the DMA reads; *pinned says whether the device can DMA from it directly (else it is ordinary memory
++        // and the copy is synchronous: correct, not overlapped)
++        void * (*host_alloc)(void * ctx, size_t size, bool * pinned);
++        void   (*host_free)(void * ctx, void * ptr);
++
++        // queue dst[off, off + n) <- src on the stager's stream. `dst` is whatever the caller passed to submit
++        void   (*copy_async)(void * ctx, void * dst, size_t off, const void * src, size_t n);
++
++        // events (may be NULL when the device has none: then the copies are synchronous and there is nothing to wait for)
++        void * (*event_new)(void * ctx);
++        void   (*event_free)(void * ctx, void * ev);
++        void   (*event_record)(void * ctx, void * ev);  // on the stager's stream
++        void   (*stream_wait)(void * ctx, void * ev);   // the stager's stream waits for what `ev` last recorded
++        void   (*event_sync)(void * ctx, void * ev);    // the host waits for what `ev` last recorded
++        void   (*sync)(void * ctx);                     // the host waits for the stager's stream
++    };
++
++    struct ggml_stager_params {
++        int    n_workers;            // memcpy threads (>= 1)
++        size_t chunk_bytes;          // one ring buffer
++        int    n_chunks;             // ring buffers (>= 2)
++        bool   will_need;            // ggml_stager_will_need() does something (else a no-op)
++        bool   unsafe_skip_dma_wait; // TESTS ONLY: a worker reuses a ring buffer without waiting for the DMA that read it
++    };
++
++    struct ggml_stager_stats {
++        uint64_t requests;
++        uint64_t chunks;
++        uint64_t bytes;
++        uint64_t worker_copy_us;     // time the workers spent in memcpy (summed over workers)
++        uint64_t worker_ring_us;     // time the workers waited for a ring buffer to be free again
++        uint64_t issuer_fill_us;     // time the issuer waited for a chunk's memcpy
++        uint64_t caller_wait_us;     // time callers spent in ggml_stager_wait_enqueued()
++        uint64_t hint_calls;
++        uint64_t hint_bytes;
++        uint64_t hint_us;            // time the hint thread spent in the OS call
++    };
++
++    GGML_API struct ggml_stager_params ggml_stager_params_default(void);
++
++    // reads LLAMA_STAGER_THREADS, LLAMA_STAGER_CHUNK_MIB, LLAMA_STAGER_RING and LLAMA_STAGER_WILLNEED over the defaults;
++    // *enabled is LLAMA_STAGER (unset or 0: false). Nothing is created here.
++    GGML_API struct ggml_stager_params ggml_stager_params_from_env(bool * enabled);
++
++    GGML_API ggml_stager_t ggml_stager_new(const struct ggml_stager_ops * ops, const struct ggml_stager_params * params);
++
++    // the stager over a ggml backend (its own stream: pass a backend instance made for it). The ring is the device's host
++    // buffer type (pinned) when it has one.
++    GGML_API ggml_stager_t ggml_stager_new_backend(ggml_backend_t backend, ggml_backend_dev_t dev, const struct ggml_stager_params * params);
++
++    // waits for every submitted request to be queued and landed, then stops the threads
++    GGML_API void ggml_stager_free(ggml_stager_t st);
++
++    // Queue the copy of src[0, n) into dst[0, n). If `wait_event` is not NULL the stager's stream waits for what it has
++    // recorded before the first chunk; `done_event` (not NULL) is recorded on the stager's stream after the last. Returns a
++    // ticket (> 0). The source must stay readable until the request has landed (the model file mapping does).
++    GGML_API uint64_t ggml_stager_submit(ggml_stager_t st, void * dst, const void * src, size_t n, void * wait_event, void * done_event);
++
++    // every chunk of the ticket's request, and every request before it, has been queued and its done event recorded
++    GGML_API bool ggml_stager_enqueued(ggml_stager_t st, uint64_t ticket);
++    GGML_API void ggml_stager_wait_enqueued(ggml_stager_t st, uint64_t ticket);
++
++    // everything submitted so far has been queued and has landed
++    GGML_API void ggml_stager_drain(ggml_stager_t st);
++
++    // Ask the operating system to read src[0, n) into memory now (PrefetchVirtualMemory, else madvise WILLNEED): for the
++    // layer after the one being streamed, so the first read of a cold mapping is not a page fault per page. Returns at
++    // once; the OS call runs on a thread of the stager's. A no-op unless params.will_need.
++    GGML_API void ggml_stager_will_need(ggml_stager_t st, const void * src, size_t n);
++
++    // the OS call itself, synchronously (what the hint thread runs; the tests call it)
++    GGML_API void ggml_stager_will_need_now(const void * src, size_t n);
++
++    GGML_API void ggml_stager_get_stats(ggml_stager_t st, struct ggml_stager_stats * stats);
++    GGML_API const struct ggml_stager_params * ggml_stager_get_params(ggml_stager_t st);
++    GGML_API bool ggml_stager_ring_pinned(ggml_stager_t st);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/ggml/src/CMakeLists.txt b/ggml/src/CMakeLists.txt
+index 947732000..b93042336 100644
+--- a/ggml/src/CMakeLists.txt
++++ b/ggml/src/CMakeLists.txt
+@@ -201,6 +201,8 @@ add_library(ggml-base
+             ggml-alloc.c
+             ggml-backend.cpp
+             ggml-backend-meta.cpp
++            ggml-stager.cpp
++            ../include/ggml-stager.h
+             ggml-opt.cpp
+             ggml-threading.cpp
+             ggml-threading.h
+diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index b82ee2d34..c75b837ed 100644
+--- a/ggml/src/ggml-backend.cpp
++++ b/ggml/src/ggml-backend.cpp
+@@ -11,6 +11,7 @@
+ #include "ggml-backend.h"
+ #include "ggml-backend-impl.h"
+ #include "ggml-backend-lm.h"
++#include "ggml-stager.h"
+ #include "ggml-alloc.h"
+ #include "ggml-impl.h"
+ 
+@@ -928,6 +929,7 @@ struct ggml_backend_sched {
+             ggml_backend_event_t      ready;  // the upload has landed (recorded on res.backend)
+             ggml_backend_event_t      free;   // the last split that read the slot has been launched (recorded on its backend)
+             const struct ggml_tensor * key;   // the host weight the slot holds
++            uint64_t                  ticket; // 0030: the stager request that fills it (0: queued directly)
+             size_t                    nbytes;
+             uint64_t                  epoch;  // the last epoch that asked for it
+             bool                      used;   // `free` has been recorded at least once
+@@ -935,6 +937,12 @@ struct ggml_backend_sched {
+         uint64_t epoch;
+         // counters (ggml_backend_sched_upload_stats)
+         uint64_t up_bytes, up_n, hits, fallbacks, prefetched;
++        // 0030: LLAMA_STAGER=1: a weight in PAGEABLE host memory is streamed to its slot through a pinned ring by
++        // worker threads (ggml-stager.h) instead of a cudaMemcpyAsync that blocks the calling thread for the copy
++        ggml_stager_t stager;
++        bool          stager_tried;
++        uint64_t      staged_bytes, staged_n, direct_pinned_n;
++        uint64_t      stage_wait_us;              // the compute thread, blocked until a request had been queued
+     } res;
+ 
+     // 0029: bytes of the used-experts copy path (the one every offloaded MUL_MAT_ID takes without the slots)
+@@ -1849,6 +1857,11 @@ static bool ggml_backend_sched_prefetch_init(ggml_backend_sched_t sched, ggml_ba
+ 
+ // ---- 0029: weight-stationary expert slots (layer-major prefill) ----
+ static void ggml_backend_sched_resident_release(ggml_backend_sched_t sched) {
++    if (sched->res.stager) {
++        ggml_stager_free(sched->res.stager);   // drains: every queued request has landed
++        sched->res.stager = NULL;
++    }
++    sched->res.stager_tried = false;
+     if (sched->res.backend) {
+         ggml_backend_synchronize(sched->res.backend);
+     }
+@@ -1924,9 +1937,38 @@ static bool ggml_backend_sched_resident_init(ggml_backend_sched_t sched, ggml_ba
+         sched->res.on = false;
+         return false;
+     }
++
++    // 0030: the staging ring for weights in pageable host memory (off unless LLAMA_STAGER=1). Created here, on the thread that
++    // launches the compute, after the backend instance's stream has been made to exist (its first use is a synchronise)
++    if (!sched->res.stager_tried) {
++        sched->res.stager_tried = true;
++        bool enabled = false;
++        const ggml_stager_params sp = ggml_stager_params_from_env(&enabled);
++        if (enabled) {
++            sched->res.stager = ggml_stager_new_backend(sched->res.backend, dev, &sp);
++            if (sched->res.stager == NULL) {
++                GGML_LOG_WARN("%s: LLAMA_STAGER=1 but the staging ring could not be made (%d x %zu MiB): uploads stay direct\n",
++                        "ggml_backend_sched_resident", sp.n_chunks, sp.chunk_bytes >> 20);
++            } else {
++                GGML_LOG_INFO("%s: staging ring: %d x %zu MiB (%s), %d memcpy threads, OS read-ahead %s\n", "ggml_backend_sched_resident",
++                        sp.n_chunks, sp.chunk_bytes >> 20, ggml_stager_ring_pinned(sched->res.stager) ? "pinned" : "NOT pinned: copies are synchronous",
++                        sp.n_workers, sp.will_need ? "on" : "off");
++            }
++        }
++    }
+     return true;
+ }
+ 
++// 0030: is this host weight in the device's own pinned host buffer (LLAMA_PIN_EXPERTS=1)? Then a direct cudaMemcpyAsync is
++// already asynchronous and the ring would only add a copy. Anything else (an mmapped file, plain malloc) is pageable.
++static bool ggml_backend_sched_resident_pageable(ggml_backend_sched_t sched, const struct ggml_tensor * w) {
++    if (w == NULL || w->buffer == NULL || sched->res.dev == NULL) {
++        return false;
++    }
++    ggml_backend_buffer_type_t host = ggml_backend_dev_host_buffer_type(sched->res.dev);
++    return host == NULL || ggml_backend_buffer_get_type(w->buffer) != host;
++}
++
+ // the slot holding `key`, else -1
+ static int ggml_backend_sched_resident_find(ggml_backend_sched_t sched, const struct ggml_tensor * key) {
+     for (int i = 0; i < sched->res.n_slots; i++) {
+@@ -1957,13 +1999,25 @@ static int ggml_backend_sched_resident_victim(ggml_backend_sched_t sched) {
+ // slot's ready event is recorded behind the copy
+ static void ggml_backend_sched_resident_upload(ggml_backend_sched_t sched, int i, const struct ggml_tensor * weight, uint64_t epoch) {
+     auto & s = sched->res.slot[i];
+-    if (s.used) {
+-        ggml_backend_event_wait(sched->res.backend, s.free);
+-    }
+     const size_t nbytes = ggml_nbytes(weight);
+     GGML_ASSERT(nbytes <= sched->res.slot_bytes);
+-    ggml_backend_tensor_set_async(sched->res.backend, s.t, weight->data, 0, nbytes);
+-    ggml_backend_event_record(s.ready, sched->res.backend);
++    if (sched->res.stager != NULL && ggml_backend_sched_resident_pageable(sched, weight)) {
++        // 0030: the ring's issuer queues the copy chunk by chunk (after the last reader of the slot, `free`) and records
++        // `ready` behind it; the launch that reads the slot waits for the request to be QUEUED first (compute_splits)
++        s.ticket = ggml_stager_submit(sched->res.stager, s.t, weight->data, nbytes, s.used ? (void *) s.free : NULL, (void *) s.ready);
++        sched->res.staged_bytes += nbytes;
++        sched->res.staged_n++;
++    } else {
++        s.ticket = 0;
++        if (sched->res.stager != NULL) {
++            sched->res.direct_pinned_n++;
++        }
++        if (s.used) {
++            ggml_backend_event_wait(sched->res.backend, s.free);
++        }
++        ggml_backend_tensor_set_async(sched->res.backend, s.t, weight->data, 0, nbytes);
++        ggml_backend_event_record(s.ready, sched->res.backend);
++    }
+     s.key    = weight;
+     s.nbytes = nbytes;
+     s.epoch  = epoch;
+@@ -2056,6 +2110,17 @@ void ggml_backend_sched_resident_prefetch(ggml_backend_sched_t sched, struct ggm
+     }
+ }
+ 
++// 0030: the layer after the next: ask the OS to read its pageable weights into memory now (the stager's hint thread).
++void ggml_backend_sched_resident_hint(ggml_backend_sched_t sched, struct ggml_tensor * const * weights, int n) {
++    if (sched == NULL || !sched->res.on || sched->res.stager == NULL) { return; }
++    for (int k = 0; k < n; k++) {
++        const struct ggml_tensor * w = weights[k];
++        if (w != NULL && w->buffer != NULL && ggml_backend_buffer_is_host(w->buffer) && ggml_backend_sched_resident_pageable(sched, w)) {
++            ggml_stager_will_need(sched->res.stager, w->data, ggml_nbytes(w));
++        }
++    }
++}
++
+ void ggml_backend_sched_upload_stats(ggml_backend_sched_t sched, struct ggml_backend_sched_upload_stats * st) {
+     if (sched == NULL || st == NULL) { return; }
+     st->resident_bytes = sched->res.up_bytes;
+@@ -2067,6 +2132,13 @@ void ggml_backend_sched_upload_stats(ggml_backend_sched_t sched, struct ggml_bac
+     st->sparse_copies = sched->stat_sparse_n;
+     st->full_bytes = sched->stat_full_bytes;
+     st->full_copies = sched->stat_full_n;
++    st->staged_bytes = sched->res.staged_bytes;
++    st->staged_uploads = sched->res.staged_n;
++    st->stage_wait_us = sched->res.stage_wait_us;
++    memset(&st->stager, 0, sizeof(st->stager));
++    if (sched->res.stager != NULL) {
++        ggml_stager_get_stats(sched->res.stager, (struct ggml_stager_stats *) &st->stager);
++    }
+ }
+ 
+ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t sched) {
+@@ -2390,6 +2462,17 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+         }
+ 
+         if (res_slot != -1) {
++            // 0030: a staged slot's `ready` event is recorded by the ring's issuer after its last chunk: until then a wait on
++            // it would wait for nothing, so the launching thread blocks here until the request has been queued (not landed)
++            if (sched->res.slot[res_slot].ticket != 0 && sched->res.stager != NULL) {
++                struct ggml_stager_stats a = {}, b = {};
++                if (!ggml_stager_enqueued(sched->res.stager, sched->res.slot[res_slot].ticket)) {
++                    ggml_stager_get_stats(sched->res.stager, &a);
++                    ggml_stager_wait_enqueued(sched->res.stager, sched->res.slot[res_slot].ticket);
++                    ggml_stager_get_stats(sched->res.stager, &b);
++                    sched->res.stage_wait_us += b.caller_wait_us - a.caller_wait_us;
++                }
++            }
+             // 0029: the slot's upload runs on its own stream: the compute stream waits for it right before the launch
+             ggml_backend_event_wait(split_backend, sched->res.slot[res_slot].ready);
+         }
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 53dc92b1f..7e38595a7 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -5979,8 +5979,18 @@ static ggml_backend_buffer_type_t ggml_backend_cuda_host_mapped_buffer_type_of_d
+     return &types[device];
+ }
+ 
++// 0030: a host thread of the staging ring (ggml-stager.h) makes the backend's device current before it issues copies or
++// waits on events; the registry's proc address, so no ggml header changes
++static void ggml_backend_cuda_bind_thread(ggml_backend_t backend) {
++    ggml_backend_cuda_context * cuda_ctx = (ggml_backend_cuda_context *) backend->context;
++    ggml_cuda_set_device(cuda_ctx->device);
++}
++
+ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, const char * name) {
+     GGML_UNUSED(reg);
++    if (strcmp(name, "ggml_backend_bind_thread") == 0) {
++        return (void *)ggml_backend_cuda_bind_thread;
++    }
+     if (strcmp(name, "ggml_backend_cuda_host_mapped_buffer_type") == 0) {
+         return (void *)ggml_backend_cuda_host_mapped_buffer_type_of_dev;
+     }
+diff --git a/ggml/src/ggml-stager.cpp b/ggml/src/ggml-stager.cpp
+new file mode 100644
+index 000000000..4e713b79d
+--- /dev/null
++++ b/ggml/src/ggml-stager.cpp
+@@ -0,0 +1,603 @@
++// 0030: the staging ring. See ggml/include/ggml-stager.h.
++//
++// Strata's `Stager` (Niko1221/Strata src/prefill/prefill.cpp @ d551edf :122-239), MIT, Copyright (c) 2026 Niko1221 and
++// the Strata contributors (engines/patches/llama-upstream-flash/LICENSE.strata): kRing pinned buffers, worker threads
++// that memcpy a pageable source into them in launch order, a buffer reused only once the DMA that read it is done (the
++// issuing side records an event per buffer, the worker waits for it before overwriting), claims taken in order. What is
++// changed is listed in the header: chunks of a tensor instead of expert blobs, an issuer thread, request events.
++
++#include "ggml-stager.h"
++#include "ggml-backend.h"
++
++#include <algorithm>
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <deque>
++#include <memory>
++#include <mutex>
++#include <thread>
++#include <unordered_map>
++#include <vector>
++
++#ifdef _WIN32
++#  ifndef NOMINMAX
++#    define NOMINMAX
++#  endif
++#  include <windows.h>
++#elif defined(__unix__) || defined(__APPLE__)
++#  include <sys/mman.h>
++#  include <unistd.h>
++#endif
++
++using clk = std::chrono::steady_clock;
++
++static uint64_t us_since(clk::time_point t) {
++    return (uint64_t) std::chrono::duration_cast<std::chrono::microseconds>(clk::now() - t).count();
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++// the OS read-ahead
++
++void ggml_stager_will_need_now(const void * src, size_t n) {
++    if (src == nullptr || n == 0) {
++        return;
++    }
++    const uintptr_t page  = 4096;
++    const uintptr_t start = (uintptr_t) src & ~(page - 1);
++    const uintptr_t end   = ((uintptr_t) src + n + page - 1) & ~(page - 1);
++#ifdef _WIN32
++    // PrefetchVirtualMemory (Windows 8 and later), looked up so the build does not depend on the SDK's target version
++    struct range_entry { PVOID addr; SIZE_T size; };
++    typedef BOOL (WINAPI * prefetch_fn)(HANDLE, ULONG_PTR, range_entry *, ULONG);
++    static const prefetch_fn fn = [] {
++        HMODULE k = GetModuleHandleW(L"kernel32.dll");
++        return k ? (prefetch_fn) (void *) GetProcAddress(k, "PrefetchVirtualMemory") : (prefetch_fn) nullptr;
++    }();
++    if (fn) {
++        range_entry e = { (PVOID) start, (SIZE_T) (end - start) };
++        fn(GetCurrentProcess(), 1, &e, 0);
++    }
++#elif defined(__unix__) || defined(__APPLE__)
++    madvise((void *) start, (size_t) (end - start), MADV_WILLNEED);
++#else
++    (void) start; (void) end;
++#endif
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++// parameters
++
++struct ggml_stager_params ggml_stager_params_default(void) {
++    struct ggml_stager_params p;
++    // Strata's: 16 ring buffers (prefill.cpp:123 kRing) and max(2, min(4, hw / 4)) threads (:451). The chunk is ours: 16 MiB
++    // is 1.2 ms of a 14 GB/s link (Strata's probe of this card on x8, docs/FLASH-NEXT.md 10.2), so one copy call's cost
++    // (tens of microseconds) is under 2% of it; a ring of 16 is 256 MiB of pinned memory. Starting values: the probe's sweep
++    // (bench/fn_probe/) decides them on this machine.
++    const unsigned hw = std::thread::hardware_concurrency();
++    p.n_workers            = (int) std::max(2u, std::min(4u, hw / 4));
++    p.chunk_bytes          = (size_t) 16 << 20;
++    p.n_chunks             = 16;
++    p.will_need            = true;
++    p.unsafe_skip_dma_wait = false;
++    return p;
++}
++
++static long env_long(const char * name, long def) {
++    const char * v = getenv(name);
++    if (v == nullptr || *v == '\0') {
++        return def;
++    }
++    char * end = nullptr;
++    const long x = strtol(v, &end, 10);
++    return end == v ? def : x;
++}
++
++struct ggml_stager_params ggml_stager_params_from_env(bool * enabled) {
++    struct ggml_stager_params p = ggml_stager_params_default();
++    if (enabled) {
++        *enabled = env_long("LLAMA_STAGER", 0) != 0;
++    }
++    p.n_workers = (int) std::max(1L, std::min(64L, env_long("LLAMA_STAGER_THREADS", p.n_workers)));
++    p.chunk_bytes = (size_t) std::max(1L, std::min(1024L, env_long("LLAMA_STAGER_CHUNK_MIB", (long) (p.chunk_bytes >> 20)))) << 20;
++    p.n_chunks = (int) std::max(2L, std::min(256L, env_long("LLAMA_STAGER_RING", p.n_chunks)));
++    p.will_need = env_long("LLAMA_STAGER_WILLNEED", 1) != 0;
++    return p;
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++// the default hooks: a ggml backend (GGML_STAGER_NO_BACKEND: compiled without them, for the standalone probe in
++// bench/fn_probe/, which links this file with its own hooks and no ggml library)
++
++#ifndef GGML_STAGER_NO_BACKEND
++
++namespace {
++
++struct backend_ops_ctx {
++    ggml_backend_t             backend    = nullptr;
++    ggml_backend_dev_t         dev        = nullptr;
++    ggml_backend_buffer_type_t host_buft  = nullptr;
++    bool                       has_events = false;
++    void                    (* bind)(ggml_backend_t) = nullptr;
++    std::mutex                 mu;
++    std::unordered_map<void *, ggml_backend_buffer_t> bufs;
++    std::unordered_map<void *, void *> plain;   // host_alloc without a pinned buffer type: the pointer to free
++};
++
++void be_bind(void * c) {
++    auto * x = (backend_ops_ctx *) c;
++    if (x->bind) {
++        x->bind(x->backend);
++    }
++}
++
++void * be_host_alloc(void * c, size_t size, bool * pinned) {
++    auto * x = (backend_ops_ctx *) c;
++    *pinned = false;
++    if (x->host_buft != nullptr) {
++        ggml_backend_buffer_t b = ggml_backend_buft_alloc_buffer(x->host_buft, size);
++        if (b != nullptr) {
++            void * p = ggml_backend_buffer_get_base(b);
++            std::lock_guard<std::mutex> lk(x->mu);
++            x->bufs[p] = b;
++            *pinned = true;
++            return p;
++        }
++    }
++    void * p = malloc(size);
++    if (p != nullptr) {
++        std::lock_guard<std::mutex> lk(x->mu);
++        x->plain[p] = p;
++    }
++    return p;
++}
++
++void be_host_free(void * c, void * ptr) {
++    auto * x = (backend_ops_ctx *) c;
++    std::lock_guard<std::mutex> lk(x->mu);
++    auto it = x->bufs.find(ptr);
++    if (it != x->bufs.end()) {
++        ggml_backend_buffer_free(it->second);
++        x->bufs.erase(it);
++        return;
++    }
++    auto jt = x->plain.find(ptr);
++    if (jt != x->plain.end()) {
++        free(jt->second);
++        x->plain.erase(jt);
++    }
++}
++
++void be_copy_async(void * c, void * dst, size_t off, const void * src, size_t n) {
++    auto * x = (backend_ops_ctx *) c;
++    ggml_backend_tensor_set_async(x->backend, (ggml_tensor *) dst, src, off, n);
++}
++
++void * be_event_new(void * c) {
++    auto * x = (backend_ops_ctx *) c;
++    return x->has_events ? (void *) ggml_backend_event_new(x->dev) : nullptr;
++}
++
++void be_event_free(void *, void * ev) {
++    if (ev) {
++        ggml_backend_event_free((ggml_backend_event_t) ev);
++    }
++}
++
++void be_event_record(void * c, void * ev) {
++    if (ev) {
++        ggml_backend_event_record((ggml_backend_event_t) ev, ((backend_ops_ctx *) c)->backend);
++    }
++}
++
++void be_stream_wait(void * c, void * ev) {
++    if (ev) {
++        ggml_backend_event_wait(((backend_ops_ctx *) c)->backend, (ggml_backend_event_t) ev);
++    }
++}
++
++void be_event_sync(void *, void * ev) {
++    if (ev) {
++        ggml_backend_event_synchronize((ggml_backend_event_t) ev);
++    }
++}
++
++void be_sync(void * c) {
++    ggml_backend_synchronize(((backend_ops_ctx *) c)->backend);
++}
++
++} // namespace
++
++#endif // GGML_STAGER_NO_BACKEND
++
++// ---------------------------------------------------------------------------------------------------------------------
++// the stager
++
++namespace {
++
++#ifdef GGML_STAGER_NO_BACKEND
++struct backend_ops_ctx {};
++#endif
++
++struct req {
++    uint64_t        ticket;
++    void *          dst;
++    const uint8_t * src;
++    size_t          n;
++    void *          wait_ev;
++    void *          done_ev;
++    int64_t         j0;       // the first chunk's global index
++    int64_t         nchunks;
++};
++
++} // namespace
++
++struct ggml_stager {
++    ggml_stager_ops    ops;
++    ggml_stager_params params;
++    std::unique_ptr<backend_ops_ctx> own;   // the default hooks' context
++
++    std::vector<uint8_t *> buf;
++    std::vector<void *>    dma_done;        // one event per ring buffer: the DMA that read it has landed
++    bool                   pinned = false;
++
++    std::mutex              mu;
++    std::condition_variable cv_work;        // workers: a chunk to claim
++    std::condition_variable cv_ring;        // workers: the issuer has queued another chunk's DMA
++    std::condition_variable cv_fill;        // issuer: a chunk has been copied into its ring buffer / a request arrived
++    std::condition_variable cv_done;        // callers: a request has been queued
++    std::condition_variable cv_hint;        // the hint thread
++
++    // under mu
++    std::deque<req>        reqs;            // submitted, not yet fully queued
++    std::vector<int64_t>   filled;          // per ring buffer: the chunk whose bytes it holds (memcpy complete), else -1
++    int64_t                total_chunks = 0;
++    int64_t                next_claim   = 0;
++    int64_t                dma_issued   = 0; // chunks whose DMA has been queued: [0, dma_issued)
++    uint64_t               next_ticket  = 1;
++    uint64_t               enqueued     = 0; // every request up to this ticket is queued
++    bool                   quit         = false;
++    std::deque<std::pair<const void *, size_t>> hints;
++
++    std::vector<std::thread> workers;
++    std::thread              issuer;
++    std::thread              hinter;
++
++    ggml_stager_stats stats = {};
++    std::atomic<uint64_t> s_worker_copy_us{0}, s_worker_ring_us{0};
++
++    void worker_main();
++    void issuer_main();
++    void hinter_main();
++};
++
++void ggml_stager::worker_main() {
++    ops.bind_thread ? ops.bind_thread(ops.ctx) : (void) 0;
++    const int64_t K = (int64_t) buf.size();
++    for (;;) {
++        int64_t j;
++        const uint8_t * src;
++        size_t len;
++        {
++            std::unique_lock<std::mutex> lk(mu);
++            cv_work.wait(lk, [&] { return quit || next_claim < total_chunks; });
++            if (next_claim >= total_chunks) {
++                return; // quit, and nothing left to claim
++            }
++            j = next_claim++;
++            const req * r = nullptr;
++            for (const req & q : reqs) {
++                if (j >= q.j0 && j < q.j0 + q.nchunks) {
++                    r = &q;
++                    break;
++                }
++            }
++            if (r == nullptr) {
++                fprintf(stderr, "ggml_stager: no request holds chunk %lld\n", (long long) j);
++                abort();
++            }
++            const size_t off = (size_t) (j - r->j0) * params.chunk_bytes;
++            src = r->src + off;
++            len = std::min(params.chunk_bytes, r->n - off);
++
++            // the ring buffer of chunk j was read by the DMA of chunk j - K: it must have been queued (the issuer records
++            // dma_done after queueing it; always waited for, the issuer would otherwise wait for a chunk that was
++            // overwritten) and then must have landed (the event below; the one wait the tests' control leaves out)
++            if (j >= K) {
++                const auto t0 = clk::now();
++                cv_ring.wait(lk, [&] { return dma_issued > j - K; });
++                s_worker_ring_us += us_since(t0);
++            }
++        }
++        const int b = (int) (j % K);
++        if (j >= K && !params.unsafe_skip_dma_wait && dma_done[(size_t) b] != nullptr) {
++            const auto t0 = clk::now();
++            ops.event_sync(ops.ctx, dma_done[(size_t) b]);
++            s_worker_ring_us += us_since(t0);
++        }
++        const auto t1 = clk::now();
++        memcpy(buf[(size_t) b], src, len);
++        s_worker_copy_us += us_since(t1);
++        {
++            std::lock_guard<std::mutex> lk(mu);
++            filled[(size_t) b] = j;
++        }
++        cv_fill.notify_all();
++    }
++}
++
++void ggml_stager::issuer_main() {
++    ops.bind_thread ? ops.bind_thread(ops.ctx) : (void) 0;
++    const int64_t K = (int64_t) buf.size();
++    uint64_t fill_us = 0;
++    for (;;) {
++        req r;
++        {
++            std::unique_lock<std::mutex> lk(mu);
++            cv_fill.wait(lk, [&] { return quit || !reqs.empty(); });
++            if (reqs.empty()) {
++                return;
++            }
++            r = reqs.front();
++        }
++        if (r.wait_ev != nullptr) {
++            ops.stream_wait(ops.ctx, r.wait_ev);
++        }
++        for (int64_t c = 0; c < r.nchunks; ++c) {
++            const int64_t j = r.j0 + c;
++            const int b = (int) (j % K);
++            {
++                const auto t0 = clk::now();
++                std::unique_lock<std::mutex> lk(mu);
++                cv_fill.wait(lk, [&] { return filled[(size_t) b] == j; });
++                fill_us += us_since(t0);
++            }
++            const size_t off = (size_t) c * params.chunk_bytes;
++            const size_t len = std::min(params.chunk_bytes, r.n - off);
++            ops.copy_async(ops.ctx, r.dst, off, buf[(size_t) b], len);
++            if (dma_done[(size_t) b] != nullptr) {
++                ops.event_record(ops.ctx, dma_done[(size_t) b]);
++            }
++            {
++                std::lock_guard<std::mutex> lk(mu);
++                dma_issued = j + 1;
++            }
++            cv_ring.notify_all();
++        }
++        if (r.done_ev != nullptr) {
++            ops.event_record(ops.ctx, r.done_ev);
++        }
++        {
++            std::lock_guard<std::mutex> lk(mu);
++            reqs.pop_front();
++            enqueued = r.ticket;
++            stats.issuer_fill_us = fill_us;
++        }
++        cv_done.notify_all();
++    }
++}
++
++void ggml_stager::hinter_main() {
++    for (;;) {
++        std::pair<const void *, size_t> h;
++        {
++            std::unique_lock<std::mutex> lk(mu);
++            cv_hint.wait(lk, [&] { return quit || !hints.empty(); });
++            if (hints.empty()) {
++                return;
++            }
++            h = hints.front();
++            hints.pop_front();
++        }
++        const auto t0 = clk::now();
++        ggml_stager_will_need_now(h.first, h.second);
++        const uint64_t us = us_since(t0);
++        std::lock_guard<std::mutex> lk(mu);
++        stats.hint_us += us;
++    }
++}
++
++ggml_stager_t ggml_stager_new(const struct ggml_stager_ops * ops, const struct ggml_stager_params * params) {
++    if (ops == nullptr || params == nullptr || ops->copy_async == nullptr || ops->host_alloc == nullptr) {
++        return nullptr;
++    }
++    std::unique_ptr<ggml_stager> st(new ggml_stager());
++    st->ops    = *ops;
++    st->params = *params;
++    st->params.n_workers   = std::max(1, st->params.n_workers);
++    st->params.n_chunks    = std::max(2, st->params.n_chunks);
++    st->params.chunk_bytes = std::max<size_t>(4096, st->params.chunk_bytes);
++
++    const int K = st->params.n_chunks;
++    st->buf.assign((size_t) K, nullptr);
++    st->dma_done.assign((size_t) K, nullptr);
++    st->filled.assign((size_t) K, -1);
++    bool all_pinned = true;
++    for (int i = 0; i < K; ++i) {
++        bool p = false;
++        st->buf[(size_t) i] = (uint8_t *) st->ops.host_alloc(st->ops.ctx, st->params.chunk_bytes, &p);
++        if (st->buf[(size_t) i] == nullptr) {
++            for (int k = 0; k < i; ++k) {
++                st->ops.host_free(st->ops.ctx, st->buf[(size_t) k]);
++            }
++            return nullptr;
++        }
++        all_pinned = all_pinned && p;
++        st->dma_done[(size_t) i] = st->ops.event_new ? st->ops.event_new(st->ops.ctx) : nullptr;
++    }
++    st->pinned = all_pinned;
++
++    // the stream of the backend instance is created lazily by its first call: make that happen on this thread
++    if (st->ops.sync) {
++        st->ops.sync(st->ops.ctx);
++    }
++
++    ggml_stager * raw = st.get();
++    raw->issuer = std::thread([raw] { raw->issuer_main(); });
++    for (int i = 0; i < raw->params.n_workers; ++i) {
++        raw->workers.emplace_back([raw] { raw->worker_main(); });
++    }
++    if (raw->params.will_need) {
++        raw->hinter = std::thread([raw] { raw->hinter_main(); });
++    }
++    return st.release();
++}
++
++#ifndef GGML_STAGER_NO_BACKEND
++ggml_stager_t ggml_stager_new_backend(ggml_backend_t backend, ggml_backend_dev_t dev, const struct ggml_stager_params * params) {
++    if (backend == nullptr || dev == nullptr) {
++        return nullptr;
++    }
++    auto ctx = std::make_unique<backend_ops_ctx>();
++    ctx->backend   = backend;
++    ctx->dev       = dev;
++    ctx->host_buft = ggml_backend_dev_host_buffer_type(dev);
++    ggml_backend_dev_props props;
++    ggml_backend_dev_get_props(dev, &props);
++    ctx->has_events = props.caps.events && props.caps.async;
++    if (ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev)) {
++        ctx->bind = (void (*)(ggml_backend_t)) ggml_backend_reg_get_proc_address(reg, "ggml_backend_bind_thread");
++    }
++
++    ggml_stager_ops ops = {};
++    ops.ctx          = ctx.get();
++    ops.bind_thread  = be_bind;
++    ops.host_alloc   = be_host_alloc;
++    ops.host_free    = be_host_free;
++    ops.copy_async   = be_copy_async;
++    ops.event_new    = be_event_new;
++    ops.event_free   = be_event_free;
++    ops.event_record = be_event_record;
++    ops.stream_wait  = be_stream_wait;
++    ops.event_sync   = be_event_sync;
++    ops.sync         = be_sync;
++
++    ggml_stager_t st = ggml_stager_new(&ops, params);
++    if (st == nullptr) {
++        return nullptr;
++    }
++    st->own = std::move(ctx);
++    return st;
++}
++#endif // GGML_STAGER_NO_BACKEND
++
++void ggml_stager_free(ggml_stager_t st) {
++    if (st == nullptr) {
++        return;
++    }
++    ggml_stager_drain(st);
++    {
++        std::lock_guard<std::mutex> lk(st->mu);
++        st->quit = true;
++    }
++    st->cv_work.notify_all();
++    st->cv_fill.notify_all();
++    st->cv_ring.notify_all();
++    st->cv_hint.notify_all();
++    if (st->issuer.joinable()) {
++        st->issuer.join();
++    }
++    for (auto & t : st->workers) {
++        t.join();
++    }
++    if (st->hinter.joinable()) {
++        st->hinter.join();
++    }
++    for (size_t i = 0; i < st->buf.size(); ++i) {
++        if (st->dma_done[i] != nullptr && st->ops.event_free) {
++            st->ops.event_free(st->ops.ctx, st->dma_done[i]);
++        }
++        if (st->buf[i] != nullptr && st->ops.host_free) {
++            st->ops.host_free(st->ops.ctx, st->buf[i]);
++        }
++    }
++    delete st;
++}
++
++uint64_t ggml_stager_submit(ggml_stager_t st, void * dst, const void * src, size_t n, void * wait_event, void * done_event) {
++    uint64_t ticket;
++    {
++        std::lock_guard<std::mutex> lk(st->mu);
++        req r;
++        r.ticket  = st->next_ticket++;
++        r.dst     = dst;
++        r.src     = (const uint8_t *) src;
++        r.n       = n;
++        r.wait_ev = wait_event;
++        r.done_ev = done_event;
++        r.j0      = st->total_chunks;
++        r.nchunks = (int64_t) ((n + st->params.chunk_bytes - 1) / st->params.chunk_bytes);
++        st->total_chunks += r.nchunks;
++        st->stats.requests++;
++        st->stats.chunks += (uint64_t) r.nchunks;
++        st->stats.bytes  += n;
++        ticket = r.ticket;
++        st->reqs.push_back(r);
++    }
++    st->cv_work.notify_all();
++    st->cv_fill.notify_all();
++    return ticket;
++}
++
++bool ggml_stager_enqueued(ggml_stager_t st, uint64_t ticket) {
++    std::lock_guard<std::mutex> lk(st->mu);
++    return st->enqueued >= ticket;
++}
++
++void ggml_stager_wait_enqueued(ggml_stager_t st, uint64_t ticket) {
++    std::unique_lock<std::mutex> lk(st->mu);
++    if (st->enqueued >= ticket) {
++        return;
++    }
++    const auto t0 = clk::now();
++    st->cv_done.wait(lk, [&] { return st->enqueued >= ticket; });
++    st->stats.caller_wait_us += us_since(t0);
++}
++
++void ggml_stager_drain(ggml_stager_t st) {
++    uint64_t last;
++    {
++        std::lock_guard<std::mutex> lk(st->mu);
++        last = st->next_ticket - 1;
++    }
++    if (last > 0) {
++        ggml_stager_wait_enqueued(st, last);
++    }
++    if (st->ops.sync) {
++        st->ops.sync(st->ops.ctx);
++    }
++}
++
++void ggml_stager_will_need(ggml_stager_t st, const void * src, size_t n) {
++    if (st == nullptr || !st->params.will_need || src == nullptr || n == 0) {
++        return;
++    }
++    {
++        std::lock_guard<std::mutex> lk(st->mu);
++        st->hints.emplace_back(src, n);
++        st->stats.hint_calls++;
++        st->stats.hint_bytes += n;
++    }
++    st->cv_hint.notify_all();
++}
++
++void ggml_stager_get_stats(ggml_stager_t st, struct ggml_stager_stats * out) {
++    if (st == nullptr || out == nullptr) {
++        return;
++    }
++    std::lock_guard<std::mutex> lk(st->mu);
++    *out = st->stats;
++    out->worker_copy_us = st->s_worker_copy_us.load();
++    out->worker_ring_us = st->s_worker_ring_us.load();
++}
++
++const struct ggml_stager_params * ggml_stager_get_params(ggml_stager_t st) {
++    return st ? &st->params : nullptr;
++}
++
++bool ggml_stager_ring_pinned(ggml_stager_t st) {
++    return st != nullptr && st->pinned;
++}
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index be3c1d49a..ba15cdca4 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1751,6 +1751,15 @@ int llama_context::decode_layer_major(
+     // 2. layer by layer: the layer's graph for every ubatch in turn, then the next layer
+     const bool lm_break = [] { const char * e = getenv("LLAMA_LAYER_MAJOR_BREAK"); return e && atoi(e) != 0; }();
+ 
++    // 0030 (LLAMA_STAGER=1): the OS reads the first two layers' pageable experts into memory while the first graphs are built
++    if (ggml_backend_sched_resident_is_on(sched.get())) {
++        for (uint32_t il0 = 0; il0 < std::min<uint32_t>(2, n_layer); ++il0) {
++            const auto & l0 = model.layers[il0];
++            ggml_tensor * w[4] = { l0.ffn_gate_exps, l0.ffn_up_exps, l0.ffn_down_exps, l0.ffn_gate_up_exps };
++            ggml_backend_sched_resident_hint(sched.get(), w, 4);
++        }
++    }
++
+     for (uint32_t il = 0; il < n_layer; ++il) {
+         ggml_backend_sched_resident_epoch(sched.get());
+ 
+@@ -1786,6 +1795,11 @@ int llama_context::decode_layer_major(
+                 const auto & next = model.layers[il + 1];
+                 ggml_tensor * w[4] = { next.ffn_gate_exps, next.ffn_up_exps, next.ffn_down_exps, next.ffn_gate_up_exps };
+                 ggml_backend_sched_resident_prefetch(sched.get(), w, 4);
++                if (il + 2 < n_layer) {
++                    const auto & next2 = model.layers[il + 2];
++                    ggml_tensor * w2[4] = { next2.ffn_gate_exps, next2.ffn_up_exps, next2.ffn_down_exps, next2.ffn_gate_up_exps };
++                    ggml_backend_sched_resident_hint(sched.get(), w2, 4);
++                }
+             }
+         }
+     }
+@@ -1810,6 +1824,22 @@ int llama_context::decode_layer_major(
+                 (st1.full_bytes - st0.full_bytes)/1024.0/1024.0,
+                 (unsigned long long) (st1.full_copies - st0.full_copies));
+ 
++        if (st1.staged_uploads != st0.staged_uploads) {
++            // 0030: what the staging ring did for this batch (ms are summed over threads)
++            LLAMA_LOG_INFO("%s: staging ring: %.1f MiB in %llu requests (%llu chunks); memcpy %.1f ms, workers waiting for a ring buffer %.1f ms, "
++                    "issuer waiting for a chunk %.1f ms, launching thread blocked %.1f ms; OS read-ahead hints %llu (%.1f MiB, %.1f ms)\n",
++                    __func__, (st1.staged_bytes - st0.staged_bytes)/1024.0/1024.0,
++                    (unsigned long long) (st1.staged_uploads - st0.staged_uploads),
++                    (unsigned long long) (st1.stager.chunks - st0.stager.chunks),
++                    (st1.stager.worker_copy_us - st0.stager.worker_copy_us)/1000.0,
++                    (st1.stager.worker_ring_us - st0.stager.worker_ring_us)/1000.0,
++                    (st1.stager.issuer_fill_us - st0.stager.issuer_fill_us)/1000.0,
++                    (st1.stage_wait_us - st0.stage_wait_us)/1000.0,
++                    (unsigned long long) (st1.stager.hint_calls - st0.stager.hint_calls),
++                    (st1.stager.hint_bytes - st0.stager.hint_bytes)/1024.0/1024.0,
++                    (st1.stager.hint_us - st0.stager.hint_us)/1000.0);
++        }
++
+         const double ng = std::max<double>(1.0, (double) (lm.n_graphs - ng0));
+         LLAMA_LOG_INFO("%s: %llu layer graphs; host time per graph: build %.3f ms, split + allocate %.3f ms, inputs %.3f ms, compute call %.3f ms\n",
+                 __func__, (unsigned long long) (lm.n_graphs - ng0),
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index ebfa1afc2..ed2c67936 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -312,6 +312,9 @@ llama_build(test-backend-ops.cpp)
+ llama_build_and_test(test-tiled-mulmat.cpp)
+ # 0029: layer-major prefill against the ubatch-by-ubatch path, on a generated qwen4exp (CPU, exact)
+ llama_build_and_test(test-layer-major.cpp)
++
++# 0030: the staging ring for pageable host-to-device copies against a fake device (CPU, no GPU)
++llama_build_and_test(test-stager.cpp)
+ llama_build_and_test(test-model-load-cancel.cpp LABEL "model")
+ llama_build_and_test(test-autorelease.cpp       LABEL "model")
+ llama_build_and_test(test-backend-sampler.cpp   LABEL "model")
+diff --git a/tests/test-stager.cpp b/tests/test-stager.cpp
+new file mode 100644
+index 000000000..cc18f0872
+--- /dev/null
++++ b/tests/test-stager.cpp
+@@ -0,0 +1,611 @@
++// 0030: the staging ring (ggml/include/ggml-stager.h) against a fake device whose copies land when IT says so.
++//
++//   test-stager                          CPU only: random requests through the ring with a slow, jittery fake DMA engine
++//   test-stager --device CUDA0           also the real backend: a pageable source through the pinned ring to the card, read
++//                                        back and compared (needs a GPU; not run in the offline gate)
++//   test-stager --trials N --seed S
++//
++// What is checked, after every request, with the destination poisoned before the copy and guard bytes on both sides:
++//   - every byte of the destination equals the source, and the guards are untouched (a chunk landed in the wrong place,
++//     twice, or not at all fails it);
++//   - a ring buffer is never overwritten while the DMA that reads it is still to land: the fake engine reads the buffer
++//     when the copy LANDS (after a random delay), and poisons it right after, so a worker that reuses it too early either
++//     corrupts the destination or is read back as poison;
++//   - ggml_stager_wait_enqueued(t) returns only once the request's done event has been recorded, and the done event
++//     completes only after its last byte landed (the consumer's reading rule);
++//   - a request that names a wait event lands nothing until the event completes (the last reader of the slot);
++//   - ggml_stager_free() with requests still in flight drains them;
++//   - the CONTROLS: the same test with the DMA-completion wait left out of the workers (params.unsafe_skip_dma_wait) must
++//     be caught, and a consumer that reads the destination without waiting for the done event must read poison.
++// The default hooks (ggml_stager_new_backend) are exercised on the CPU backend, which has no events and copies
++// synchronously.
++
++#include "ggml.h"
++#include "ggml-backend.h"
++#include "ggml-cpu.h"
++#include "ggml-stager.h"
++
++#include <algorithm>
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <deque>
++#include <memory>
++#include <mutex>
++#include <random>
++#include <string>
++#include <thread>
++#include <vector>
++
++static int g_checks = 0;
++static int g_failed = 0;
++
++#define CHECK(cond, ...)                                                                                              \
++    do {                                                                                                              \
++        ++g_checks;                                                                                                   \
++        if (!(cond)) {                                                                                                \
++            ++g_failed;                                                                                               \
++            if (g_failed <= 40) {                                                                                     \
++                fprintf(stderr, "FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond);                                     \
++                fprintf(stderr, __VA_ARGS__);                                                                         \
++                fprintf(stderr, "\n");                                                                                \
++            }                                                                                                         \
++        }                                                                                                             \
++    } while (0)
++
++using clk = std::chrono::steady_clock;
++
++static void spin_us(int us) {
++    if (us <= 0) {
++        return;
++    }
++    const auto t = clk::now() + std::chrono::microseconds(us);
++    while (clk::now() < t) {
++        std::this_thread::yield();
++    }
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++// the fake device: one in-order stream (a thread), events, a destination region
++
++struct fake_event {
++    std::mutex              mu;
++    std::condition_variable cv;
++    int64_t                 recorded  = 0;   // records queued
++    int64_t                 completed = 0;   // records the stream has reached
++};
++
++struct fake_dst {
++    std::vector<uint8_t> mem;        // guard + body + guard
++    size_t               guard = 64;
++    size_t               n     = 0;
++    std::atomic<bool>    reader_active{false};   // a "kernel" is reading it: nothing may land
++    std::atomic<int64_t> landed{0};
++    uint8_t *            body() { return mem.data() + guard; }
++};
++
++struct fake_engine {
++    enum kind_t { COPY, RECORD, WAIT };
++    struct op {
++        kind_t      kind;
++        fake_dst *  dst;
++        size_t      off, n;
++        uint8_t *   src;
++        fake_event *ev;
++        int64_t     target;
++    };
++
++    std::mutex              mu;
++    std::condition_variable cv;
++    std::deque<op>          q;
++    bool                    stop = false;
++    std::thread             th;
++    std::atomic<int>        max_delay_us{0};
++    std::atomic<int>        violations{0};      // landed into a region a reader was using
++    std::atomic<int64_t>    in_flight{0};
++    std::mt19937            rng{1};
++    bool                    poison_after_copy = true;
++    std::vector<std::pair<void *, size_t>> allocs;
++    std::mutex              amu;
++
++    fake_engine() { th = std::thread([this] { run(); }); }
++    ~fake_engine() {
++        {
++            std::lock_guard<std::mutex> lk(mu);
++            stop = true;
++        }
++        cv.notify_all();
++        th.join();
++        for (auto & a : allocs) {
++            free(a.first);
++        }
++    }
++
++    void push(const op & o) {
++        {
++            std::lock_guard<std::mutex> lk(mu);
++            q.push_back(o);
++            in_flight++;
++        }
++        cv.notify_all();
++    }
++
++    void run() {
++        for (;;) {
++            op o;
++            {
++                std::unique_lock<std::mutex> lk(mu);
++                cv.wait(lk, [&] { return stop || !q.empty(); });
++                if (q.empty()) {
++                    return;
++                }
++                o = q.front();
++                q.pop_front();
++            }
++            if (o.kind == COPY) {
++                spin_us(max_delay_us.load() > 0 ? (int) (rng() % (uint32_t) (max_delay_us.load() + 1)) : 0);
++                if (o.dst->reader_active.load()) {
++                    violations++;
++                }
++                // the DMA reads the host buffer NOW; if the stager gave it to a worker too early this is not the chunk's data
++                memcpy(o.dst->body() + o.off, o.src, o.n);
++                o.dst->landed += (int64_t) o.n;
++                if (poison_after_copy) {
++                    memset(o.src, 0xFF, o.n);   // the ring buffer is nobody's until the stager fills it again
++                }
++            } else if (o.kind == RECORD) {
++                std::lock_guard<std::mutex> lk(o.ev->mu);
++                o.ev->completed++;
++                o.ev->cv.notify_all();
++            } else {
++                std::unique_lock<std::mutex> lk(o.ev->mu);
++                o.ev->cv.wait(lk, [&] { return o.ev->completed >= o.target; });
++            }
++            in_flight--;
++        }
++    }
++};
++
++static void f_bind(void *) {}
++
++static void * f_host_alloc(void * c, size_t size, bool * pinned) {
++    auto * e = (fake_engine *) c;
++    *pinned = true;
++    void * p = malloc(size);
++    memset(p, 0xFF, size);
++    std::lock_guard<std::mutex> lk(e->amu);
++    e->allocs.emplace_back(p, size);
++    return p;
++}
++
++static void f_host_free(void * c, void * ptr) {
++    auto * e = (fake_engine *) c;
++    std::lock_guard<std::mutex> lk(e->amu);
++    for (size_t i = 0; i < e->allocs.size(); ++i) {
++        if (e->allocs[i].first == ptr) {
++            free(ptr);
++            e->allocs.erase(e->allocs.begin() + (long) i);
++            return;
++        }
++    }
++}
++
++static void f_copy(void * c, void * dst, size_t off, const void * src, size_t n) {
++    auto * e = (fake_engine *) c;
++    fake_engine::op o = {};
++    o.kind = fake_engine::COPY;
++    o.dst  = (fake_dst *) dst;
++    o.off  = off;
++    o.n    = n;
++    o.src  = (uint8_t *) src;
++    e->push(o);
++}
++
++static void * f_event_new(void *) { return new fake_event(); }
++static void   f_event_free(void *, void * ev) { delete (fake_event *) ev; }
++
++static void f_event_record(void * c, void * ev) {
++    auto * e = (fake_engine *) c;
++    auto * x = (fake_event *) ev;
++    {
++        std::lock_guard<std::mutex> lk(x->mu);
++        x->recorded++;
++    }
++    fake_engine::op o = {};
++    o.kind = fake_engine::RECORD;
++    o.ev   = x;
++    e->push(o);
++}
++
++static void f_stream_wait(void * c, void * ev) {
++    auto * e = (fake_engine *) c;
++    auto * x = (fake_event *) ev;
++    fake_engine::op o = {};
++    o.kind = fake_engine::WAIT;
++    o.ev   = x;
++    {
++        std::lock_guard<std::mutex> lk(x->mu);
++        o.target = x->recorded;
++    }
++    e->push(o);
++}
++
++static void f_event_sync(void *, void * ev) {
++    auto * x = (fake_event *) ev;
++    std::unique_lock<std::mutex> lk(x->mu);
++    const int64_t t = x->recorded;
++    x->cv.wait(lk, [&] { return x->completed >= t; });
++}
++
++static void f_sync(void * c) {
++    auto * e = (fake_engine *) c;
++    while (e->in_flight.load() != 0) {
++        std::this_thread::yield();
++    }
++}
++
++static ggml_stager_ops fake_ops(fake_engine * e) {
++    ggml_stager_ops o = {};
++    o.ctx          = e;
++    o.bind_thread  = f_bind;
++    o.host_alloc   = f_host_alloc;
++    o.host_free    = f_host_free;
++    o.copy_async   = f_copy;
++    o.event_new    = f_event_new;
++    o.event_free   = f_event_free;
++    o.event_record = f_event_record;
++    o.stream_wait  = f_stream_wait;
++    o.event_sync   = f_event_sync;
++    o.sync         = f_sync;
++    return o;
++}
++
++// ---------------------------------------------------------------------------------------------------------------------
++
++static std::unique_ptr<fake_dst> make_dst(size_t n) {
++    auto d = std::make_unique<fake_dst>();
++    d->n = n;
++    d->mem.assign(n + 2 * d->guard, 0xA5);   // the guards and the body start poisoned
++    return d;
++}
++
++static bool guards_ok(fake_dst & d) {
++    for (size_t i = 0; i < d.guard; ++i) {
++        if (d.mem[i] != 0xA5 || d.mem[d.guard + d.n + i] != 0xA5) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static std::vector<uint8_t> random_bytes(std::mt19937 & r, size_t n) {
++    std::vector<uint8_t> v(n);
++    for (size_t i = 0; i < n; ++i) {
++        v[i] = (uint8_t) r();
++    }
++    return v;
++}
++
++struct trial_cfg {
++    int    workers;
++    size_t chunk;
++    int    ring;
++    int    delay_us;
++    int    n_req;
++    bool   unsafe = false;
++};
++
++// returns the number of requests whose destination was wrong
++static int run_trial(std::mt19937 & r, const trial_cfg & cfg, bool control) {
++    fake_engine eng;
++    eng.max_delay_us = cfg.delay_us;
++    eng.rng.seed((uint32_t) r());
++    ggml_stager_ops ops = fake_ops(&eng);
++    ggml_stager_params p = ggml_stager_params_default();
++    p.n_workers = cfg.workers;
++    p.chunk_bytes = cfg.chunk;
++    p.n_chunks = cfg.ring;
++    p.will_need = true;
++    p.unsafe_skip_dma_wait = cfg.unsafe;
++    ggml_stager_t st = ggml_stager_new(&ops, &p);
++    CHECK(st != nullptr, "ggml_stager_new");
++    if (st == nullptr) {
++        return 0;
++    }
++
++    struct item {
++        std::unique_ptr<fake_dst>    dst;
++        std::vector<uint8_t>         src;
++        std::unique_ptr<fake_event>  done;
++        std::unique_ptr<fake_event>  wait;
++        uint64_t                     ticket = 0;
++    };
++    std::vector<item> items((size_t) cfg.n_req);
++    int bad = 0;
++
++    for (int k = 0; k < cfg.n_req; ++k) {
++        item & it = items[(size_t) k];
++        const size_t pick = r() % 8;
++        size_t n;
++        switch (pick) {
++            case 0:  n = 0; break;
++            case 1:  n = cfg.chunk - 1; break;
++            case 2:  n = cfg.chunk; break;
++            case 3:  n = cfg.chunk + 1; break;
++            case 4:  n = 2 * cfg.chunk; break;
++            default: n = 1 + r() % (size_t) (cfg.chunk * 5 + 17); break;
++        }
++        if (control) {
++            n = cfg.chunk * (4 + r() % 4);
++        }
++        it.src  = random_bytes(r, n);
++        it.dst  = make_dst(n);
++        it.done.reset(new fake_event());
++        // a source that does not start on a chunk boundary or a page: the model's tensors do not
++        const bool use_wait = !control && (r() % 4 == 0);
++        if (use_wait) {
++            it.wait.reset(new fake_event());
++            it.wait->recorded = 1;     // the last reader's `free` event: recorded, not yet complete
++            it.dst->reader_active = true;
++        }
++        it.ticket = ggml_stager_submit(st, it.dst.get(), it.src.data(), n, it.wait.get(), it.done.get());
++        CHECK(it.ticket > 0, "ticket");
++
++        if (use_wait) {
++            // nothing may land while the reader runs; then it finishes and the copy may go
++            spin_us(300);
++            CHECK(it.dst->landed.load() == 0, "request %d landed %lld bytes before the slot's last reader finished", k, (long long) it.dst->landed.load());
++            it.dst->reader_active = false;
++            {
++                std::lock_guard<std::mutex> lk(it.wait->mu);
++                it.wait->completed = 1;
++                it.wait->cv.notify_all();
++            }
++        }
++
++        // sometimes consume at once, sometimes let several requests pile up
++        if (r() % 3 == 0 || k + 1 == cfg.n_req) {
++            for (int q = 0; q <= k; ++q) {
++                item & jt = items[(size_t) q];
++                if (jt.ticket == 0) {
++                    continue;
++                }
++                ggml_stager_wait_enqueued(st, jt.ticket);
++                CHECK(ggml_stager_enqueued(st, jt.ticket), "enqueued after the wait");
++                {
++                    std::lock_guard<std::mutex> lk(jt.done->mu);
++                    CHECK(jt.done->recorded == 1, "request %d: wait_enqueued returned with the done event recorded %lld times", q, (long long) jt.done->recorded);
++                }
++                if (control) {
++                    // the consumer that does not wait for the done event reads whatever has landed so far
++                    // (nothing to assert here: the unsafe-ring control below does the checking)
++                }
++                f_event_sync(nullptr, jt.done.get());
++                const bool equal = jt.src.empty() || memcmp(jt.dst->body(), jt.src.data(), jt.src.size()) == 0;
++                CHECK(jt.dst->landed.load() == (int64_t) jt.src.size(), "request %d landed %lld of %zu bytes", q, (long long) jt.dst->landed.load(), jt.src.size());
++                if (!control) {
++                    CHECK(equal, "request %d (%zu bytes, chunk %zu, ring %d, %d workers): the destination differs from the source", q, jt.src.size(), cfg.chunk, cfg.ring, cfg.workers);
++                    CHECK(guards_ok(*jt.dst), "request %d: a guard byte was written", q);
++                }
++                bad += equal && guards_ok(*jt.dst) ? 0 : 1;
++                jt.ticket = 0;
++            }
++        }
++    }
++
++    if (!control) {
++        CHECK(eng.violations.load() == 0, "%d copies landed into a region a reader was using", eng.violations.load());
++    }
++    ggml_stager_stats s = {};
++    ggml_stager_get_stats(st, &s);
++    uint64_t total = 0;
++    for (auto & it : items) {
++        total += it.src.size();
++    }
++    if (!control) {
++        CHECK(s.bytes == total, "stats: %llu bytes submitted, expected %llu", (unsigned long long) s.bytes, (unsigned long long) total);
++        CHECK(s.requests == (uint64_t) cfg.n_req, "stats: %llu requests", (unsigned long long) s.requests);
++    }
++    ggml_stager_free(st);
++    return bad;
++}
++
++// requests still queued when the stager is freed are drained, not dropped
++static void test_free_drains(std::mt19937 & r) {
++    fake_engine eng;
++    eng.max_delay_us = 150;
++    ggml_stager_ops ops = fake_ops(&eng);
++    ggml_stager_params p = ggml_stager_params_default();
++    p.n_workers = 3;
++    p.chunk_bytes = 4096;
++    p.n_chunks = 4;
++    ggml_stager_t st = ggml_stager_new(&ops, &p);
++    std::vector<std::unique_ptr<fake_dst>> dsts;
++    std::vector<std::vector<uint8_t>> srcs;
++    std::vector<std::unique_ptr<fake_event>> evs;
++    for (int k = 0; k < 6; ++k) {
++        srcs.push_back(random_bytes(r, 4096 * 5 + 11));
++        dsts.push_back(make_dst(srcs.back().size()));
++        evs.emplace_back(new fake_event());
++        ggml_stager_submit(st, dsts.back().get(), srcs.back().data(), srcs.back().size(), nullptr, evs.back().get());
++    }
++    ggml_stager_free(st);   // no wait before this
++    for (int k = 0; k < 6; ++k) {
++        CHECK(memcmp(dsts[(size_t) k]->body(), srcs[(size_t) k].data(), srcs[(size_t) k].size()) == 0, "request %d not drained by free", k);
++    }
++}
++
++// a consumer that reads the destination before the done event completes reads poison: the check the real consumer
++// (a kernel launched after `stream wait on done`) must never fail, and proof that the poison is visible if it did
++static void test_early_read_sees_poison(std::mt19937 & r) {
++    fake_engine eng;
++    eng.max_delay_us = 2000;   // a slow link
++    ggml_stager_ops ops = fake_ops(&eng);
++    ggml_stager_params p = ggml_stager_params_default();
++    p.n_workers = 2;
++    p.chunk_bytes = 4096;
++    p.n_chunks = 4;
++    ggml_stager_t st = ggml_stager_new(&ops, &p);
++    auto src = random_bytes(r, 4096 * 8);
++    auto dst = make_dst(src.size());
++    fake_event done;
++    const uint64_t t = ggml_stager_submit(st, dst.get(), src.data(), src.size(), nullptr, &done);
++    ggml_stager_wait_enqueued(st, t);
++    // queued, not landed: with a 2 ms-a-chunk link the first read sees poison
++    const bool early_poison = memcmp(dst->body(), src.data(), src.size()) != 0;
++    CHECK(early_poison, "the control did not see an unfinished copy: the fake link is not slow enough to prove anything");
++    f_event_sync(nullptr, &done);
++    CHECK(memcmp(dst->body(), src.data(), src.size()) == 0, "after the done event the bytes are there");
++    ggml_stager_free(st);
++}
++
++// the default hooks over the CPU backend: no events, synchronous copies, an ordinary-memory ring
++static void test_cpu_backend(std::mt19937 & r) {
++    ggml_backend_t cpu = ggml_backend_cpu_init();
++    ggml_backend_dev_t dev = ggml_backend_get_device(cpu);
++    ggml_stager_params p = ggml_stager_params_default();
++    p.n_workers = 3;
++    p.chunk_bytes = 4096;
++    p.n_chunks = 5;
++    ggml_stager_t st = ggml_stager_new_backend(cpu, dev, &p);
++    CHECK(st != nullptr, "ggml_stager_new_backend on the CPU backend");
++    if (st == nullptr) {
++        ggml_backend_free(cpu);
++        return;
++    }
++    CHECK(!ggml_stager_ring_pinned(st), "a CPU ring is not pinned");
++    ggml_init_params ip = { 4 * ggml_tensor_overhead() + 1024, nullptr, true };
++    ggml_context * ctx = ggml_init(ip);
++    const size_t n = 4096 * 7 + 123;
++    ggml_tensor * t = ggml_new_tensor_1d(ctx, GGML_TYPE_I8, (int64_t) n);
++    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, cpu);
++    ggml_backend_buffer_clear(buf, 0xA5);
++    auto src = random_bytes(r, n);
++    const uint64_t k = ggml_stager_submit(st, t, src.data(), n, nullptr, nullptr);
++    ggml_stager_wait_enqueued(st, k);
++    ggml_stager_drain(st);
++    std::vector<uint8_t> back(n);
++    ggml_backend_tensor_get(t, back.data(), 0, n);
++    CHECK(back == src, "CPU backend: the tensor differs from the source");
++    ggml_stager_will_need(st, src.data(), src.size());   // must not crash on ordinary memory
++    ggml_stager_will_need_now(src.data(), src.size());
++    ggml_stager_will_need_now(nullptr, 10);
++    ggml_stager_free(st);
++    ggml_backend_buffer_free(buf);
++    ggml_free(ctx);
++    ggml_backend_free(cpu);
++}
++
++// the real backend: a pageable source (ordinary malloc, odd offset) through the pinned ring to the card
++static void test_device(const std::string & name, std::mt19937 & r) {
++    ggml_backend_dev_t dev = ggml_backend_dev_by_name(name.c_str());
++    if (dev == nullptr) {
++        fprintf(stderr, "no device %s\n", name.c_str());
++        g_failed++;
++        return;
++    }
++    ggml_backend_t be = ggml_backend_dev_init(dev, nullptr);
++    ggml_backend_t be2 = ggml_backend_dev_init(dev, nullptr);   // the stager's own instance (its own stream)
++    ggml_stager_params p = ggml_stager_params_default();
++    ggml_stager_t st = ggml_stager_new_backend(be2, dev, &p);
++    CHECK(st != nullptr, "ggml_stager_new_backend on %s", name.c_str());
++    if (st == nullptr) {
++        return;
++    }
++    printf("device %s: ring %d x %zu MiB, %s, %d threads\n", name.c_str(), ggml_stager_get_params(st)->n_chunks,
++           ggml_stager_get_params(st)->chunk_bytes >> 20, ggml_stager_ring_pinned(st) ? "pinned" : "NOT pinned",
++           ggml_stager_get_params(st)->n_workers);
++    CHECK(ggml_stager_ring_pinned(st), "the device's host buffer type should give a pinned ring");
++    const size_t n = (size_t) 300 << 20;
++    ggml_init_params ip = { 4 * ggml_tensor_overhead() + 1024, nullptr, true };
++    ggml_context * ctx = ggml_init(ip);
++    ggml_tensor * t = ggml_new_tensor_1d(ctx, GGML_TYPE_I8, (int64_t) n);
++    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, be);
++    CHECK(buf != nullptr, "device buffer");
++    ggml_backend_buffer_clear(buf, 0xA5);
++    ggml_backend_synchronize(be);
++    std::vector<uint8_t> big = random_bytes(r, n + 4099);
++    const uint8_t * src = big.data() + 4099;   // not page aligned
++    ggml_backend_event_t done = ggml_backend_event_new(dev);
++    const auto t0 = clk::now();
++    const uint64_t k = ggml_stager_submit(st, t, src, n, nullptr, done);
++    ggml_stager_wait_enqueued(st, k);
++    ggml_backend_event_wait(be, done);   // the consumer's stream
++    ggml_backend_synchronize(be);
++    const double ms = std::chrono::duration<double, std::milli>(clk::now() - t0).count();
++    std::vector<uint8_t> back(n);
++    ggml_backend_tensor_get(t, back.data(), 0, n);
++    CHECK(memcmp(back.data(), src, n) == 0, "%s: the tensor differs from the source", name.c_str());
++    printf("device %s: %.0f MiB staged in %.1f ms = %.2f GB/s (n=1: a smoke check, not the probe)\n", name.c_str(), n / 1048576.0, ms, n / 1e6 / ms);
++    ggml_stager_stats s = {};
++    ggml_stager_get_stats(st, &s);
++    printf("device %s: memcpy %.1f ms (summed), workers waited for the ring %.1f ms, issuer waited for a chunk %.1f ms\n", name.c_str(),
++           s.worker_copy_us / 1000.0, s.worker_ring_us / 1000.0, s.issuer_fill_us / 1000.0);
++    ggml_stager_free(st);
++    ggml_backend_event_free(done);
++    ggml_backend_buffer_free(buf);
++    ggml_free(ctx);
++    ggml_backend_free(be2);
++    ggml_backend_free(be);
++}
++
++int main(int argc, char ** argv) {
++    int trials = 200;
++    uint32_t seed = 20261006;
++    std::string device;
++    for (int i = 1; i < argc; ++i) {
++        const std::string a = argv[i];
++        if (a == "--trials" && i + 1 < argc) { trials = atoi(argv[++i]); }
++        else if (a == "--seed" && i + 1 < argc) { seed = (uint32_t) strtoul(argv[++i], nullptr, 10); }
++        else if (a == "--device" && i + 1 < argc) { device = argv[++i]; }
++        else if (a == "--quick") { trials = 40; }
++        else { fprintf(stderr, "unknown argument %s\n", a.c_str()); return 2; }
++    }
++    std::mt19937 r(seed);
++
++    // 1. random requests, workers 1-4, chunks 4-64 KiB (including one that is not a power of two), rings 2-9, a fake DMA
++    //    engine that lands each chunk after 0-300 us
++    int total_bad = 0;
++    for (int t = 0; t < trials; ++t) {
++        static const size_t chunks[] = { 4096, 8192, 12288, 16384, 65536 };
++        trial_cfg c;
++        c.workers  = 1 + (int) (r() % 4);
++        c.chunk    = chunks[r() % 5];
++        c.ring     = 2 + (int) (r() % 8);
++        c.delay_us = (int) (r() % 4) * 100;
++        c.n_req    = 1 + (int) (r() % 12);
++        total_bad += run_trial(r, c, false);
++    }
++    printf("1. random requests: %d trials, %d wrong destinations\n", trials, total_bad);
++
++    // 2. the control: no wait for the DMA that reads a ring buffer. It must be caught.
++    int caught = 0, ctrl_trials = std::max(20, trials / 4);
++    for (int t = 0; t < ctrl_trials; ++t) {
++        trial_cfg c;
++        c.workers  = 4;
++        c.chunk    = 4096;
++        c.ring     = 2;
++        c.delay_us = 400;
++        c.n_req    = 3;
++        c.unsafe   = true;
++        caught += run_trial(r, c, true) > 0 ? 1 : 0;
++    }
++    printf("2. control (workers do not wait for the DMA): caught in %d of %d trials\n", caught, ctrl_trials);
++    CHECK(caught >= ctrl_trials * 9 / 10, "the control must be caught in nearly every trial (%d of %d)", caught, ctrl_trials);
++
++    test_free_drains(r);
++    printf("3. free() drains what is queued\n");
++    test_early_read_sees_poison(r);
++    printf("4. a read before the done event sees poison; after it, the data\n");
++    test_cpu_backend(r);
++    printf("5. the default hooks over the CPU backend (no events, synchronous copies)\n");
++    if (!device.empty()) {
++        test_device(device, r);
++    }
++
++    printf("%d checks, %d failed\n", g_checks, g_failed);
++    return g_failed == 0 ? 0 : 1;
++}
+-- 
+2.45.2.windows.1
+
