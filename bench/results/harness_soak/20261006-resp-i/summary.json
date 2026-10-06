@@ -1,0 +1,75 @@
+{
+ "base": "http://127.0.0.1:1234",
+ "tier": "max",
+ "out": "bench/results/harness_soak/20261006-resp-i",
+ "scenarios": [
+  {
+   "key": "i",
+   "name": "responses_api",
+   "status": "PASS",
+   "headline": "4 steps via /v1/responses, worst silence 5.23 s, heartbeats 30",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "heartbeats per step: #1 29, #2 1, #3 0, #4 0"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "every step returned 200 and finished (4 steps)",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "every step served by the same (max tier) model",
+     "detail": "models seen ['flash-next'], expected flash-next"
+    },
+    {
+     "ok": true,
+     "text": "no step routed to another card",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "after step 1 every step re-reads no more than the previous turn + its tail + 512",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "tool calls are valid JSON for a declared tool",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no silence over 10 s in any step",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "no step was cut off (finish_reason length)",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "a response.in_progress heartbeat arrives during every silence over 5 s",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "every stream ends on response.completed/incomplete",
+     "detail": ""
+    }
+   ]
+  }
+ ],
+ "n_503": 0,
+ "waits": [
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "an earlier run",
+   "for": "R"
+  }
+ ]
+}

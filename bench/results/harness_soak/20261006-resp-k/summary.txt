@@ -1,0 +1,31 @@
+====================================================================================================
+HARNESS SOAK  base http://127.0.0.1:1234  tier max  api responses  steps 12  system-tokens 26000  client-timeout 180s  (3.7 min)
+====================================================================================================
+  PASS    k kill_mid_generation                killed after 6 events: HTTP 200, error {"code": "server_is_overloaded", "message": "The model is not available right no...; reload ttft 84.54 s
+
+PER-STEP TABLE (every agent step; proc% = processed/prompt; tail~ = estimated new tokens)
+       scn  ses  step  http  ttft_s  hb  silence  prompt  reused  processed  proc%  tail~  calls  tok/s      finish
+kill_mid_g    A     1   200    67.4  12      5.2   24612       0      24612  100.0      -      2   31.0  tool_calls
+kill_mid_g    A     2   200     3.2   0      3.2    None    None       None      -    285      0      -      failed
+kill_mid_g    A     3   200    84.5  15      5.2   24722       0      24722  100.0    285      3   28.6  tool_calls
+
+WORST SILENCE: 5.21 s in kill_mid_generation/A #1 (mid; client timeout 180 s)
+503 RESPONSES: 0   waits: hold 62.0s
+MEMORY (this machine): min commit available 61684 MiB of 114717, min physical available 4877 MiB
+
+--- k kill_mid_generation: PASS
+    ok   the client gets an error (HTTP 5xx or an SSE error event), not an answer
+         HTTP 200, finish 'failed', error {"code": "server_is_overloaded", "message": "The model is not available right now (loading or restarting): the model server's connection dropped mid-answer; send the request again", "x_yamadori_code":..., stream_error None, content '', 0 tool calls
+    ok   and no finish_reason says the turn ended normally
+         finish 'failed'
+    ok   and the stream did not hang
+         hung_up False, silence 3.24 s
+    ok   the same request is served afterwards (the model reloads)
+    ok   and the reload has no silence over 10 s
+         5.18 s (mid), ttft 84.54 s, 15 heartbeats before the first token
+    ok   and is served by the max tier's model
+         served by flash-next (expected flash-next)
+    note killed flash-next's llama-server PID 24152 (port 10008; SUCCESS: The process with PID 24152 has been terminated.) after 6 streamed events; 22 reasoning chars and 0 content chars had arrived
+    note after the kill: prompt 24722, reused 0, processed 24722, ttft 84.54 s, swap None
+
+RESULT: 1 passed, 0 failed, 0 skipped, 0 not run

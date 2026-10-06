@@ -1,0 +1,61 @@
+{
+ "base": "http://127.0.0.1:1234",
+ "tier": "max",
+ "out": "bench/results/harness_soak/20261006-resp-k",
+ "scenarios": [
+  {
+   "key": "k",
+   "name": "kill_mid_generation",
+   "status": "PASS",
+   "headline": "killed after 6 events: HTTP 200, error {\"code\": \"server_is_overloaded\", \"message\": \"The model is not available right no...; reload ttft 84.54 s",
+   "skipped": null,
+   "not_run": null,
+   "crashed": null,
+   "notes": [
+    "killed flash-next's llama-server PID 24152 (port 10008; SUCCESS: The process with PID 24152 has been terminated.) after 6 streamed events; 22 reasoning chars and 0 content chars had arrived",
+    "after the kill: prompt 24722, reused 0, processed 24722, ttft 84.54 s, swap None"
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "text": "the client gets an error (HTTP 5xx or an SSE error event), not an answer",
+     "detail": "HTTP 200, finish 'failed', error {\"code\": \"server_is_overloaded\", \"message\": \"The model is not available right now (loading or restarting): the model server's connection dropped mid-answer; send the request again\", \"x_yamadori_code\":..., stream_error None, content '', 0 tool calls"
+    },
+    {
+     "ok": true,
+     "text": "and no finish_reason says the turn ended normally",
+     "detail": "finish 'failed'"
+    },
+    {
+     "ok": true,
+     "text": "and the stream did not hang",
+     "detail": "hung_up False, silence 3.24 s"
+    },
+    {
+     "ok": true,
+     "text": "the same request is served afterwards (the model reloads)",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "text": "and the reload has no silence over 10 s",
+     "detail": "5.18 s (mid), ttft 84.54 s, 15 heartbeats before the first token"
+    },
+    {
+     "ok": true,
+     "text": "and is served by the max tier's model",
+     "detail": "served by flash-next (expected flash-next)"
+    }
+   ]
+  }
+ ],
+ "n_503": 0,
+ "waits": [
+  {
+   "why": "hold",
+   "s": 62.0,
+   "owner": "an earlier run",
+   "for": "A"
+  }
+ ]
+}
