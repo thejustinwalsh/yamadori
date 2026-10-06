@@ -128,11 +128,54 @@ def gate_argv(tag: str, forwards: list[tuple[int, str, int, int | None]] = (),
     for listen, _host, _port, host_port in forwards:
         if host_port is not None:
             argv += ["-p", f"127.0.0.1:{host_port}:{listen}"]
-    argv += ["-v", f"{HERE}:{GATE_MOUNT}:ro", "--entrypoint", "python3", GATE_IMAGE,
+    argv += ["-v", f"{host_path(HERE)}:{GATE_MOUNT}:ro", "--entrypoint", "python3", GATE_IMAGE,
              f"{GATE_MOUNT}/egress_gate.py"]
     for listen, host, port, _hp in forwards:
         argv += ["--forward", f"{listen}:{host}:{port}"]
     return argv
+
+
+def _remote_engine() -> bool:
+    """True when the `docker` this process runs talks to an engine OUTSIDE
+    Windows (Docker Engine in WSL Ubuntu since 2026-10-06, docs/DOCKER-WSL.md:
+    a `tcp://` DOCKER_HOST or docker context). Such an engine reads a bind
+    mount's source as one of ITS paths, and Docker Desktop's own translation
+    of `C:\\...` is gone. YAMADORI_DOCKER_PATHS=wsl|native decides it
+    outright; an offline suite (YAMADORI_OFFLINE_GUARD=1) is never remote, so
+    its argv checks do not depend on this machine's docker context."""
+    forced = os.environ.get("YAMADORI_DOCKER_PATHS", "").lower()
+    if forced in ("wsl", "native"):
+        return forced == "wsl"
+    if os.environ.get("YAMADORI_OFFLINE_GUARD") == "1":
+        return False
+    host = os.environ.get("DOCKER_HOST", "")
+    if not host:
+        try:
+            d = os.environ.get("DOCKER_CONFIG") or os.path.join(os.path.expanduser("~"), ".docker")
+            with open(os.path.join(d, "config.json"), encoding="utf-8") as f:
+                ctx = json.load(f).get("currentContext") or ""
+            ctx = os.environ.get("DOCKER_CONTEXT") or ctx
+            if ctx and ctx != "default":
+                meta = os.path.join(d, "contexts", "meta")
+                for sub in os.listdir(meta):
+                    with open(os.path.join(meta, sub, "meta.json"), encoding="utf-8") as f:
+                        m = json.load(f)
+                    if m.get("Name") == ctx:
+                        host = (m.get("Endpoints") or {}).get("docker", {}).get("Host", "")
+                        break
+        except (OSError, ValueError, AttributeError):
+            host = ""
+    return host.startswith(("tcp://", "ssh://"))
+
+
+def host_path(p: str) -> str:
+    """A Windows path as the engine reads it: `C:\\a\\b` -> `/mnt/c/a/b` for a
+    WSL engine (WSL mounts the drive there), unchanged for Docker Desktop
+    (which translates it itself) and for a path that is not a drive path."""
+    m = re.match(r"^([A-Za-z]):[\\/](.*)$", p)
+    if not m or not _remote_engine():
+        return p
+    return f"/mnt/{m.group(1).lower()}/" + m.group(2).replace("\\", "/")
 
 
 def _docker(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
@@ -369,7 +412,7 @@ def docker_runner(tag: str, image: str, prefix: str, no_proxy_extra=(),
             with open(os.path.join(d, "probe.py"), "w", encoding="utf-8") as f:
                 f.write(PROBE)
             r = _docker(["run", "--rm", *network_args(tag, alias, prefix),
-                         *env_args(no_proxy_extra), "-v", f"{d}:/p:ro", "--entrypoint", "python3",
+                         *env_args(no_proxy_extra), "-v", f"{host_path(d)}:/p:ro", "--entrypoint", "python3",
                          image, "/p/probe.py", json.dumps(spec)], 600)
         return r.returncode, r.stdout + ("\n" + r.stderr if r.returncode else "")
     return run

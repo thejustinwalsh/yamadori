@@ -355,6 +355,12 @@ function Restart-Service($svc) {
     Write-Log "  $($svc.Name) restart issued"
 }
 
+# Docker Engine in WSL (2026-10-06, docs\DOCKER-WSL.md): keep the one hidden keep-alive that holds the Ubuntu distro up
+# (WSL stops a distro seconds after its last session) and the engine reachable. Idempotent; logs to logs\wsl-engine.log.
+if (Test-Path (Join-Path $PSScriptRoot 'wsl_engine.ps1')) {
+    & (Join-Path $PSScriptRoot 'wsl_engine.ps1') -Quiet -WaitSec 30
+}
+
 $down = @()
 foreach ($svc in $Services) {
     if ($svc.Process -and -not (Get-Process $svc.Process -ErrorAction SilentlyContinue)) {

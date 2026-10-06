@@ -33,6 +33,11 @@ if not exist "%CFG%"  ( echo ERROR: config missing at "%CFG%" & exit /b 1 )
 
 if not exist "logs" mkdir "logs"
 
+REM Docker Engine in the Ubuntu WSL distro (2026-10-06, docs\DOCKER-WSL.md): the MCP host's PackageLens, the npm
+REM resolver and the type check run containers there. WSL stops the distro seconds after its last session, so this
+REM starts the one hidden keep-alive and waits (60 s at most) for the engine; a failure is logged, never fatal.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\wsl_engine.ps1" -Quiet
+
 REM Code-intelligence HTTP API (port 1235). Same tools as the MCP server,
 REM different transport: MCP is for agents, this is for your own software.
 REM Every route but /health needs an account key (Authorization: Bearer, the

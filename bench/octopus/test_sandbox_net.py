@@ -171,6 +171,40 @@ def test_argv_and_env() -> None:
     check(sn.GATE_IMAGE == runmod.IMAGE, "the gate runs on run.py's pinned image (no download)")
 
 
+def test_wsl_engine_paths() -> None:
+    """Docker Engine in WSL (2026-10-06, docs/DOCKER-WSL.md): the gate's bind mount names the
+    directory as the ENGINE reads it; Docker Desktop's own translation is gone."""
+    old = {k: os.environ.get(k) for k in ("YAMADORI_DOCKER_PATHS", "YAMADORI_OFFLINE_GUARD", "DOCKER_HOST")}
+    try:
+        os.environ["YAMADORI_DOCKER_PATHS"] = "wsl"
+        check(sn.host_path("C:\\Users\\j\\llama-stack\\bench\\sandbox") == "/mnt/c/Users/j/llama-stack/bench/sandbox"
+              and sn.host_path("d:/x/y") == "/mnt/d/x/y" and sn.host_path("/already/posix") == "/already/posix",
+              "wsl engine: a drive path becomes /mnt/<drive>/..., anything else is untouched")
+        g = sn.gate_argv("t")
+        mount = g[g.index("-v") + 1]
+        check(mount == f"{sn.host_path(sn.HERE)}:/sandbox:ro" and mount.startswith("/mnt/"),
+              "wsl engine: the gate mounts the sandbox directory by its WSL path", mount)
+        os.environ["YAMADORI_DOCKER_PATHS"] = "native"
+        check(sn.host_path("C:\\a\\b") == "C:\\a\\b", "docker desktop / native: unchanged")
+        del os.environ["YAMADORI_DOCKER_PATHS"]
+        os.environ["YAMADORI_OFFLINE_GUARD"] = "1"
+        os.environ["DOCKER_HOST"] = "tcp://127.0.0.1:2376"
+        check(sn.host_path("C:\\a\\b") == "C:\\a\\b",
+              "an offline suite is never remote (its argv does not depend on this machine's docker context)")
+        del os.environ["YAMADORI_OFFLINE_GUARD"]
+        check(sn._remote_engine() is True, "a tcp:// DOCKER_HOST is a remote engine")
+        os.environ["DOCKER_HOST"] = "npipe:////./pipe/docker_engine"
+        os.environ["DOCKER_CONFIG"] = tempfile.mkdtemp()      # no config.json: the default context
+        check(sn._remote_engine() is False, "a named pipe is Docker Desktop's, not remote")
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        os.environ.pop("DOCKER_CONFIG", None)
+
+
 PROFILE = "\n".join([
     "terminal:",
     '  backend: "docker"',
@@ -296,7 +330,8 @@ def test_runner_wiring() -> None:
 
 
 def main() -> int:
-    for fn in (test_destination_rule, test_proxy_protocol, test_argv_and_env, test_profile_line,
+    for fn in (test_destination_rule, test_proxy_protocol, test_argv_and_env, test_wsl_engine_paths,
+               test_profile_line,
                test_lifecycle, test_runner_wiring):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
