@@ -1023,6 +1023,28 @@ served template). The rules that are Responses-only:
 - **Errors**: before the first byte, the HTTP status and the error object
   (as chat); after it, `response.failed` with Codex's codes. `length` is
   `response.incomplete` (`max_output_tokens`).
+- **Coverage: every feature of the chat wire runs through Responses, offline
+  and live** (operator, 2026-10-06, his VS Code agents use this wire, often at
+  max: "ensure we have sound responses api coverage and our image generation,
+  vision, and all other api's work with responses api too"). Offline
+  `mcp/test_responses_api.py` (175 checks, 2026-10-06): the wait heard
+  (`response.in_progress` beats through a swap and a cold prefill), a killed
+  model server (`response.failed`, or 503 before the first byte), the window
+  (HTTP 400 before any byte), titles and classifiers, both compaction shapes,
+  the concept seed, the one-conversation rule and the other card (503 +
+  Retry-After; `x_yamadori.slots.routed`), every effort a tier and a refused
+  tier a 503, the package tools, `yama_describe_image` as a hidden hop (an
+  `input_image` and a tool output that carries one), drawing without the
+  hosted tool, closing the stream cancelling the turn, reasoning `off`. Live
+  (`mcp/test_live_stack.py` groups `responses`, `responses_features`,
+  `responses_compaction`, `responses_slots`, `responses_tiers`, 2026-10-06, all
+  passing): the same on the real models, the tier walk with its swaps heard,
+  a lower tier served on bonsai-a4000 while max works, xhigh refused 503; and
+  `bench/harness_soak.py --api responses` (scenario i, and `--only k`: a killed
+  model is `response.failed`). Not covered live: the package tools while
+  Docker is down (NOT APPLICABLE, recorded), `length` ->
+  `response.incomplete` and the `content` reasoning mode (offline only).
+  Rows R1-R17 of docs/LIVE-COVERAGE.md.
 
 ## The Messages API (operator, 2026-09-29)
 

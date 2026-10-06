@@ -323,6 +323,10 @@ def _sse(r: dict, finish: str, timings: dict | None = None) -> bytes:
     out += [ev({"content": s[i:i + 40]}) for i in range(0, len(s), 40)]
     for i, c in enumerate(r["calls"]):
         out.append(ev({"tool_calls": [dict(c, index=i)]}))
+    if r.get("drop"):
+        # the model server died: llama-swap answers 200 and closes the body -- no finish chunk, no usage, no [DONE]
+        # (test_stream.py's fake does the same; the Responses suite reads this path end to end)
+        return b"".join(out)
     out.append(ev({}, finish))
     out.append(b"data: " + json.dumps({"id": "u", "choices": [], "usage": {
         "prompt_tokens": 100, "completion_tokens": 10,
@@ -390,6 +394,8 @@ class _Up(BaseHTTPRequestHandler):
                 r["reasoning"] = last["reasoning_content"] + "\n" \
                     + r["reasoning"]
         _gens.append({"request": body, "reply": r, "at": arrived})
+        if r.get("delay"):
+            time.sleep(r["delay"])     # a slow generation (a model load, a cold prefill): the pump's heartbeats
         timings = None
         if BY_CHARS == "server":
             p = render(body)

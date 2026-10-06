@@ -47,9 +47,10 @@ SCENARIOS (--only a,b,... selects; each prints PASS/FAIL with its evidence)
   j  long_run                      --long N extra agent steps to a larger context (skipped without --long)
   k  kill_mid_generation           the max model's llama-server is killed (its PID, found from llama-swap's /running
                                    and the listening port; never by image name) after --kill-after streamed events:
-                                   the client must get an ERROR (an HTTP 5xx or an SSE error event), never an empty
-                                   or finished-looking answer; then the same request is served again (the reload).
-                                   Opt-in: --only k (it kills a process and the model reloads).
+                                   the client must get an ERROR (an HTTP 5xx or an SSE error event; over --api
+                                   responses a response.failed), never an empty or finished-looking answer; then the
+                                   same request is served again (the reload). Opt-in: --only k (it kills a process and
+                                   the model reloads); --api responses --only k runs it through /v1/responses.
 
 OUTPUT
 
@@ -1610,7 +1611,9 @@ def find_model_pid(base_llama_swap: str, model: str) -> tuple[int | None, str]:
 def sc_k(S: Soak, sc: Scn) -> None:
     import subprocess
     model = S.cfg.expect_model or "flash-next"
-    sess = S.warm("A", sc.name, 1)
+    # --api responses runs this scenario through POST /v1/responses (the operator's VS Code client; 2026-10-06): the
+    # kill must end in response.failed (or an HTTP 5xx), never a response.completed holding the fragment
+    sess = S.warm("A", sc.name, 1, api="responses" if S.cfg.api == "responses" else "chat")
     killed: dict = {}
     # the PID is found BEFORE the step: finding it takes seconds (netstat, tasklist), and a short generation is over
     # before a hook that looks it up has run (2026-10-05: the first run killed the server after the answer had ended)

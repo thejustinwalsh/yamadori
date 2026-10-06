@@ -62,6 +62,22 @@ Contract, never wording:
                   round trip replayed Codex-style (same session, cache
                   reused), an input_image, the hosted image_generation
                   tool, previous_response_id refused
+    responses_features   (2026-10-06, the operator's VS Code client) the rest of
+                  the chat API's features over Responses: a no-key tool loop
+                  (our id in the call_id), reasoning summary events, usage
+                  details, a title and a classifier (utility calls), the concept
+                  seed, a prompt past the window (HTTP 400 before any byte),
+                  json_schema output, drawing without the hosted tool, our link
+                  looked at, a tool output that carries an image, the package
+                  tools (NOT APPLICABLE while Docker is down)
+    responses_compaction   both shapes over Responses and the key that changes
+                  at a compaction (aliased_to)
+    responses_slots   the other card (bonsai-a4000) for a second conversation,
+                  and a client that hangs up stops the generation
+    responses_tiers   the tier walk by reasoning.effort with its swaps: each
+                  swap heard (response.in_progress beats), a lower tier while max
+                  works served on the other card, xhigh refused 503 with
+                  Retry-After
     router       one real request per class returns that x_yamadori.route
     slots         a side call's transient slot holds ~0 tokens afterwards
                   (the lane: at most its cells) (/slots via the proxy's
@@ -2681,6 +2697,855 @@ def test_one_model_per_tier():
           f"then medium is served again on {tiers_of.get('medium')} ({dt:.0f}s): the card is back", str(status))
 
 
+# ---------------------------------------------------------------------------
+# THE RESPONSES API, EVERYTHING THE CHAT API DOES (operator, 2026-10-06: "In
+# my vscode tests I was using the responses api, ensure we have sound
+# responses api coverage and our image generation, vision, and all other
+# api's work with responses api too."). Groups: `responses` (above, the
+# basics), `responses_features` (bonsai-resident features over Responses:
+# usage and reasoning, no-key sessions, titles, the concept seed, the window,
+# structured output, drawing and looking, the package tools), `responses_compaction`
+# (both shapes and the key that changes), `responses_slots` (the other card,
+# hanging up) and `responses_tiers` (the tier walk with its swaps and
+# heartbeats, a lower tier while a higher one works). docs/LIVE-COVERAGE.md,
+# rows 89-120.
+# ---------------------------------------------------------------------------
+def _resp_call(body: dict, *, stream: bool = False, features: dict | None = None,
+               capacity_retry: bool = True, stop=None,
+               timeout: int = TIMEOUT) -> dict:
+    """POST /v1/responses through :1234. -> {status, headers (lower-case),
+    seconds, events [(t, event)], final (the terminal Response, or the
+    blocking body), error (the error object of a non-200), raw, hung_up}.
+    A 503 conversation_at_capacity is waited out (Retry-After) like `_post`;
+    a 429 is NOT RUN; any other HTTP error is returned, not raised. `stop`
+    (event, events so far) -> True hangs the client up (closes the socket)."""
+    headers = {"Content-Type": "application/json",
+               "Authorization": f"Bearer {KEY}"}
+    if _features(features):
+        headers["X-Yamadori-Features"] = _features(features)
+    body = dict(body, stream=bool(stream))
+    t_wait0 = time.time()
+    while True:
+        req = urllib.request.Request(f"{PROXY}/v1/responses",
+                                     data=json.dumps(body).encode(),
+                                     headers=headers)
+        t0 = time.time()
+        out: dict = {"status": None, "headers": {}, "events": [],
+                     "final": None, "error": None, "raw": "",
+                     "hung_up": False}
+        try:
+            r = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", "replace")
+            ra = _capacity_retry_after(e.code, raw, e.headers) \
+                if capacity_retry else None
+            if ra is not None and time.time() - t_wait0 + ra <= \
+                    CAPACITY_WAIT_MAX_S:
+                _capacity_waits.append({"url": "responses", "retry_after": ra})
+                time.sleep(ra)
+                continue
+            if e.code == 429:
+                raise NotRun(f"429 from /v1/responses: {raw[:200]}") from None
+            out.update(status=e.code, raw=raw, seconds=time.time() - t0,
+                       headers={k.lower(): v for k, v in e.headers.items()})
+            try:
+                out["error"] = (json.loads(raw) or {}).get("error")
+            except (ValueError, AttributeError):
+                pass
+            return out
+        with r:
+            out["status"] = r.status
+            out["headers"] = {k.lower(): v for k, v in r.headers.items()}
+            if not stream:
+                out["raw"] = r.read().decode("utf-8", "replace")
+                try:
+                    out["final"] = json.loads(out["raw"])
+                except ValueError:
+                    pass
+            else:
+                block: list[str] = []
+                for line in r:
+                    s = line.decode("utf-8", "replace").rstrip("\r\n")
+                    if s:
+                        block.append(s)
+                        continue
+                    data = [ln[5:].lstrip() for ln in block
+                            if ln.startswith("data:")]
+                    block = []
+                    if not data:
+                        continue
+                    try:
+                        ev = json.loads("\n".join(data))
+                    except ValueError:
+                        ev = {"type": "_unparsed"}
+                    out["events"].append((round(time.time() - t0, 3), ev))
+                    if ev.get("type") in ("response.completed",
+                                          "response.incomplete",
+                                          "response.failed"):
+                        out["final"] = ev.get("response")
+                    if stop is not None and stop(ev, out["events"]):
+                        out["hung_up"] = True
+                        break
+        out["seconds"] = time.time() - t0
+        return out
+
+
+def _rx(r: dict) -> dict:
+    """The Response's x_yamadori."""
+    return ((r.get("final") or {}).get("x_yamadori") or {})
+
+
+def _rtypes(r: dict) -> list[str]:
+    return [e.get("type") for _t, e in r["events"]]
+
+
+def _ritems(r: dict, kind: str) -> list[dict]:
+    """The output items of one kind: the stream's output_item.done items, or
+    the blocking body's output."""
+    if r["events"]:
+        return [e["item"] for _t, e in r["events"]
+                if e.get("type") == "response.output_item.done"
+                and (e.get("item") or {}).get("type") == kind]
+    return [o for o in ((r.get("final") or {}).get("output") or [])
+            if o.get("type") == kind]
+
+
+def _rbeats(r: dict) -> list[float]:
+    """When the heartbeats (response.in_progress after the opening one)
+    arrived."""
+    ips = [t for t, e in r["events"] if e.get("type") == "response.in_progress"]
+    return ips[1:]
+
+
+def _rmsg(role: str, text: str) -> dict:
+    return {"type": "message", "role": role, "content": [{
+        "type": "input_text" if role != "assistant" else "output_text",
+        "text": text}]}
+
+
+def _flat_tools(chat_tools: list[dict]) -> list[dict]:
+    return [dict(type="function", **t["function"]) for t in chat_tools]
+
+
+def _to_responses(messages: list[dict]) -> tuple[str, list[dict]]:
+    """Chat messages (the compaction history's shape) -> (instructions, input
+    items) as a Responses client sends them."""
+    instr: list[str] = []
+    items: list[dict] = []
+    for m in messages:
+        role = m.get("role")
+        if role in ("system", "developer"):
+            instr.append(m.get("content") or "")
+        elif role == "user":
+            items.append(_rmsg("user", m.get("content") or ""))
+        elif role == "assistant":
+            if m.get("content"):
+                items.append(_rmsg("assistant", m["content"]))
+            for tc in m.get("tool_calls") or []:
+                items.append({"type": "function_call", "call_id": tc["id"],
+                              "name": tc["function"]["name"],
+                              "arguments": tc["function"]["arguments"]})
+        elif role == "tool":
+            items.append({"type": "function_call_output",
+                          "call_id": m["tool_call_id"],
+                          "output": m.get("content") or ""})
+    return "\n\n".join(instr), items
+
+
+_WEATHER = {"type": "function", "name": "get_weather",
+            "description": "Get the current weather for a city.",
+            "parameters": {"type": "object", "properties": {
+                "city": {"type": "string"}}, "required": ["city"]}}
+
+
+def test_responses_usage_reasoning_and_no_key_sessions():
+    """What a VS Code Copilot agent sends: NO prompt_cache_key, streamed, a
+    function tool, a tool round trip echoing the call_id. The conversation is
+    named by our id in the call_id (the carrier), the second request finds it
+    there and reuses the slot's cache; the Response carries a reasoning item
+    whose summary is what the deltas streamed, usage with cached and
+    reasoning token details, and x_yamadori."""
+    import session_id
+    n = _nonce()
+    b = {"model": "yamadori", "instructions": f"You are a helpful agent. [{n}]",
+         "input": [_rmsg("user", "What is the weather in Paris right now? Use "
+                         "the tool, then tell me in one sentence.")],
+         "tools": [_WEATHER], "tool_choice": "auto", "store": False,
+         "reasoning": {"effort": "low", "summary": "auto"},
+         "include": ["reasoning.encrypted_content"]}
+    r1 = _resp_call(b, stream=True)
+    calls = _ritems(r1, "function_call")
+    x1 = _rx(r1)
+    ses1 = x1.get("session") or {}
+    cid = calls[0].get("call_id") if calls else ""
+    check(r1["status"] == 200 and calls and calls[0].get("name") == "get_weather"
+          and session_id.of_call_id(cid) and ses1.get("source") == "minted"
+          and session_id.of_call_id(cid) == ses1.get("id"),
+          "responses (no prompt_cache_key): the minted session id rides in the "
+          "function_call's call_id (the carrier), as it does in chat's "
+          "tool_calls[].id",
+          json.dumps({"st": r1["status"], "call_id": cid, "session": ses1}))
+    types = _rtypes(r1)
+    reasoning = _ritems(r1, "reasoning")
+    deltas = "".join(e.get("delta", "") for _t, e in r1["events"]
+                     if e.get("type") == "response.reasoning_summary_text.delta")
+    summ = ((reasoning[0].get("summary") or [{}])[0].get("text")
+            if reasoning else "")
+    first_out = next((i for i, t in enumerate(types) if t in (
+        "response.output_text.delta", "response.function_call_arguments.delta")),
+        len(types))
+    check(reasoning and deltas and deltas == summ
+          and "response.reasoning_summary_text.delta" in types[:first_out]
+          and types.index("response.reasoning_summary_part.added") <
+          types.index("response.reasoning_summary_text.done"),
+          "responses: the model's reasoning streams as reasoning_summary_text "
+          "deltas BEFORE its call or answer, and the reasoning item's summary "
+          "is exactly what streamed",
+          json.dumps({"deltas_chars": len(deltas), "summary_chars": len(summ),
+                      "types": types[:12]}))
+    if not calls:
+        return
+    inp2 = b["input"] + _items_replay(r1) + [
+        {"type": "function_call_output", "call_id": cid,
+         "output": json.dumps({"city": "Paris", "temp_c": 18,
+                               "sky": "sunny"})}]
+    r2 = _resp_call(dict(b, input=inp2), stream=True)
+    f2, x2 = r2["final"] or {}, _rx(r2)
+    ses2, cache2 = x2.get("session") or {}, x2.get("cache") or {}
+    u = f2.get("usage") or {}
+    ud = u.get("input_tokens_details") or {}
+    od = u.get("output_tokens_details") or {}
+    check(r2["status"] == 200 and f2.get("status") == "completed"
+          and "18" in _resp_text(f2)
+          and ses2.get("source") == "tool_call_id"
+          and ses2.get("id") == ses1.get("id")
+          and int(cache2.get("reused") or 0) > 0,
+          "responses (no key): the second request finds its conversation from "
+          "the call_id echoed in function_call / function_call_output (source "
+          "tool_call_id, the same id) and reuses the slot's cache",
+          json.dumps({"text": _resp_text(f2)[:160], "session": ses2,
+                      "cache": {k: cache2.get(k) for k in (
+                          "prompt", "reused", "processed", "slot")}}))
+    check(isinstance(u.get("input_tokens"), int) and u["input_tokens"] > 0
+          and u.get("total_tokens") == u["input_tokens"] + u.get(
+              "output_tokens", 0)
+          and int(ud.get("cached_tokens") or 0) > 0
+          and int(ud["cached_tokens"]) <= u["input_tokens"]
+          and isinstance(od.get("reasoning_tokens"), int)
+          and 0 < od["reasoning_tokens"] <= u.get("output_tokens", 0),
+          "responses: usage is the final generation's, with cached_tokens "
+          "(the reused prefix) and output_tokens_details.reasoning_tokens",
+          json.dumps(u))
+    final_types = _rtypes(r2)
+    check(final_types[:2] == ["response.created", "response.in_progress"]
+          and final_types[-1] == "response.completed"
+          and [e.get("sequence_number") for _t, e in r2["events"]] ==
+          list(range(len(r2["events"]))),
+          "responses: created, in_progress, ..., completed with sequence "
+          "numbers 0..n", json.dumps(final_types[:3] + final_types[-2:]))
+
+
+def _items_replay(r: dict) -> list[dict]:
+    """The output items a Codex-style client replays: every output item it
+    was given (the stream's output_item.done items)."""
+    return [e["item"] for _t, e in r["events"]
+            if e.get("type") == "response.output_item.done"]
+
+
+def test_responses_titles_and_side_calls():
+    """A VS Code Copilot chat-title request over Responses (no tools, the
+    effort it sends ignored): a utility call served by the bare model --
+    through the helper when the card is locked -- fast, one-word classifiers
+    too."""
+    n = _nonce()
+    b = {"model": "yamadori", "instructions": "You are a title generator. You "
+         "output ONLY a thread title. Keep it under 50 characters.",
+         "input": [_rmsg("user", "Generate a title for this conversation:\n\n"
+                         f"how do I reverse a linked list in rust [{n}]")],
+         "reasoning": {"effort": "high"}, "store": False}
+    r = _resp_call(b)
+    x, f = _rx(r), r["final"] or {}
+    title = _resp_text(f).strip()
+    card = _card()
+    helper = (card.get("helpers") or {}).get("side_calls") \
+        if card.get("locked") else None
+    cap = (x.get("capacity") or {}).get("model")
+    check(r["status"] == 200 and f.get("status") == "completed"
+          and x.get("utility") is True and x.get("utility_kind") == "title"
+          and x.get("tier_overridden") == "minimal" and not x.get("tools")
+          and 0 < len(title) <= 120 and r["seconds"] < 60
+          and (not helper or cap == helper),
+          f"responses: a title request (reasoning.effort=high sent) is a "
+          f"utility call of kind title, tier overridden to minimal, served "
+          f"by {helper or 'the lane'} ({r['seconds']:.1f}s)",
+          json.dumps({"st": r["status"], "title": title[:80],
+                      "utility_kind": x.get("utility_kind"),
+                      "tier_overridden": x.get("tier_overridden"),
+                      "capacity_model": cap, "helper": helper})[:500])
+    rs = _resp_call({"model": "yamadori", "instructions": (
+        "You are a security reviewer for an AI coding agent.\n\nRespond with "
+        f"exactly one word: APPROVE, DENY, or ESCALATE [{n}]"),
+        "input": "<command>ls -la</command>\n\nRespond with exactly one word: "
+                 "APPROVE, DENY, or ESCALATE", "max_output_tokens": 16},
+        stream=True)
+    xs = _rx(rs)
+    word = _resp_text(rs["final"] or {}).strip().upper().rstrip(".")
+    check(rs["status"] == 200 and xs.get("utility") is True
+          and word in ("APPROVE", "DENY", "ESCALATE")
+          and rs["events"] and _rtypes(rs)[-1] == "response.completed",
+          "responses (streamed): a one-word approval classifier is a utility "
+          "call answered with one of its words",
+          json.dumps({"word": word, "utility": xs.get("utility"),
+                      "types": _rtypes(rs)[-2:]}))
+
+
+def test_responses_seed_and_window():
+    """The concept seed at `high` and none at `medium` (the first user turn of
+    a Responses conversation), and a prompt past the window refused HTTP 400
+    context_length_exceeded BEFORE any byte, blocking and streamed -- the
+    answer Codex and Copilot compact on."""
+    q = "Name one data structure for fast prefix lookups on strings, in one word."
+    for effort, want in (("high", True), ("medium", False)):
+        r = _resp_call({"model": "yamadori", "instructions":
+                        f"[session {_nonce()}]", "input": [_rmsg("user", q)],
+                        "reasoning": {"effort": effort}, "max_output_tokens": 300,
+                        "store": False})
+        x = _rx(r)
+        seed = (x.get("session") or {}).get("seed") or {}
+        inj = (x.get("ledger") or {}).get("inject") or {}
+        if want:
+            check(r["status"] == 200 and bool(seed.get("word"))
+                  and "seed" in (inj.get("parts") or []),
+                  f"responses {effort}: the first user turn carries the "
+                  f"concept seed (x_yamadori.session.seed, ledger inject)",
+                  json.dumps({"st": r["status"], "seed": seed, "inject": inj})[:400])
+        else:
+            check(r["status"] == 200 and not seed
+                  and "seed" not in (inj.get("parts") or []),
+                  f"responses {effort}: no concept seed",
+                  json.dumps({"st": r["status"], "seed": seed, "inject": inj})[:400])
+    window = None
+    try:
+        with urllib.request.urlopen(f"{PROXY}/v1/models", timeout=60) as r:
+            window = json.load(r)["data"][0].get("context_length")
+    except Exception as ex:                                      # noqa: BLE001
+        check(False, "responses window: /v1/models answers", str(ex))
+        return
+    big = " ".join(["lorem"] * (int(window or 132096) + 30000))
+    for stream in (False, True):
+        t0 = time.time()
+        r = _resp_call({"model": "yamadori", "instructions":
+                        f"[session {_nonce()}]", "input": [_rmsg("user", big)],
+                        "reasoning": {"effort": "low"}, "max_output_tokens": 16,
+                        "store": False}, stream=stream)
+        e = r.get("error") or {}
+        check(r["status"] == 400 and e.get("code") == "context_length_exceeded"
+              and f"maximum context length is {window} tokens" in
+              e.get("message", "") and int(e.get("n_prompt_tokens") or 0) >
+              int(window or 0) and not r["events"]
+              and "application/json" in r["headers"].get("content-type", ""),
+              f"responses ({'streamed' if stream else 'blocking'}): a prompt "
+              f"past the {window}-token window is HTTP 400 "
+              f"context_length_exceeded with the model server's count, before "
+              f"any byte ({time.time() - t0:.1f}s)",
+              f"{r['status']} {r['raw'][:300]}")
+
+
+def test_responses_structured_output():
+    """text.format json_schema over Responses (Copilot's and the SDKs'
+    structured output): the answer parses as JSON of the schema's shape."""
+    schema = {"type": "object", "properties": {
+        "colour": {"type": "string"}, "hex": {"type": "string"}},
+        "required": ["colour", "hex"], "additionalProperties": False}
+    r = _resp_call({"model": "yamadori", "instructions": f"[session {_nonce()}]",
+                    "input": [_rmsg("user", "Give the colour of a clear "
+                                    "daytime sky and its hex code.")],
+                    "text": {"format": {"type": "json_schema", "name": "sky",
+                                        "schema": schema, "strict": True}},
+                    "reasoning": {"effort": "low"}, "store": False})
+    text = _resp_text(r["final"] or {}).strip()
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        obj = None
+    check(r["status"] == 200 and isinstance(obj, dict)
+          and set(obj) == {"colour", "hex"}
+          and all(isinstance(v, str) for v in obj.values()),
+          "responses: text.format json_schema -> the answer is JSON of the "
+          "schema's shape", json.dumps({"st": r["status"], "text": text[:200],
+                                        "error": r.get("error")}))
+
+
+def test_responses_draw_and_look():
+    """Image generation and vision over Responses, as a VS Code client uses
+    them: (1) with NO hosted tool declared yama_generate_image still draws --
+    the picture is the message's signed /media line and no
+    image_generation_call item is invented; (2) our signed link sent back as
+    an input_image is read from the media store (never fetched) and described;
+    (3) a function_call_output that carries an image (Codex's view_image) is a
+    placeholder the model looks through yama_describe_image, and its answer
+    names the colours; (4) the hosted image_generation tool, in the `responses`
+    group, is the same engine."""
+    import re
+    import base64
+    n = _nonce()
+    r = _resp_call({"model": "yamadori", "instructions": f"[session {n}]",
+                    "input": [_rmsg("user", "Use yama_generate_image to draw a "
+                                    "simple flat icon of a red apple on a white "
+                                    "background. Then put the image line the "
+                                    "tool gave you in your answer, exactly as "
+                                    "given.")],
+                    "reasoning": {"effort": "low"}, "store": False}, stream=True)
+    f, x = r["final"] or {}, _rx(r)
+    text = _resp_text(f)
+    imgs = x.get("images") or []
+    ev = json.dumps({"st": r["status"], "images": imgs, "tools": x.get("tools"),
+                     "text": text[:240], "types": sorted(set(_rtypes(r)))[:14]})[:700]
+    check(r["status"] == 200 and imgs and imgs[0].get("ok") is True
+          and not _ritems(r, "image_generation_call"),
+          f"responses (no hosted tool): yama_generate_image ran and succeeded "
+          f"({r['seconds']:.0f}s); no image_generation_call item was invented",
+          ev)
+    m = re.search(r"https?://[^\s)]*/media/([0-9a-f]{64})\.png\?([^\s)]+)", text)
+    if not check(bool(m), "responses: the answer carries the signed /media "
+                 "link", ev):
+        return
+    code, ctype, png = _get(f"{PROXY}/media/{m.group(1)}.png?{m.group(2)}")
+    check(code == 200 and png[:8] == b"\x89PNG\r\n\x1a\n",
+          f"responses: the signed link serves a PNG ({len(png)} bytes)",
+          f"HTTP {code} {ctype}")
+    r2 = _resp_call({"model": "yamadori", "input": [{
+        "type": "message", "role": "user", "content": [
+            {"type": "input_text", "text": "Describe this image in one or two "
+             "sentences. What object is it, and what colour?"},
+            {"type": "input_image", "image_url": m.group(0)}]}],
+        "reasoning": {"effort": "low"}, "store": False})
+    x2 = _rx(r2)
+    att = x2.get("attachments") or []
+    vis = x2.get("vision") or []
+    t2 = _resp_text(r2["final"] or {})
+    ev2 = json.dumps({"st": r2["status"], "route": (x2.get("route") or {}).get(
+        "class"), "attachments": att, "vision": vis, "text": t2[:240]})[:800]
+    check(r2["status"] == 200 and not x2.get("utility") and len(att) == 1
+          and att[0].get("source") == "media" and not att[0].get("error")
+          and ((att[0].get("passed") and _served_sees())
+               or (vis and vis[0].get("ok") is True)),
+          "responses: our signed link as an input_image is read from the "
+          "media store (not fetched), the turn is not a utility call, and the "
+          "model saw it", ev2)
+    check(re.search(r"\bapple\b", t2.lower()) is not None
+          and re.search(r"\bred\b", t2.lower()) is not None,
+          "responses: the description names the red apple it drew", ev2)
+    # (3) a tool output that carries an image
+    img = _png(256, 256, lambda x_, y_: (255, 0, 0) if x_ < 128 else (0, 0, 255))
+    uri = "data:image/png;base64," + base64.b64encode(img).decode()
+    view = {"type": "function", "name": "view_image",
+            "description": "View a local image file.",
+            "parameters": {"type": "object", "properties": {
+                "path": {"type": "string"}}, "required": ["path"]}}
+    cid = f"call_view_{n}"
+    r3 = _resp_call({"model": "yamadori", "instructions": f"[session {n}b]",
+                     "tools": [view], "input": [
+        _rmsg("user", "Open /tmp/shot.png with view_image and tell me what "
+              "colour is on its left half and what colour is on its right "
+              "half. Answer exactly in the form: left=<colour>, "
+              "right=<colour>"),
+        {"type": "function_call", "call_id": cid, "name": "view_image",
+         "arguments": json.dumps({"path": "/tmp/shot.png"})},
+        {"type": "function_call_output", "call_id": cid, "output": [
+            {"type": "input_image", "image_url": uri}]}],
+        "reasoning": {"effort": "low"}, "store": False}, stream=True)
+    x3 = _rx(r3)
+    vis3 = x3.get("vision") or []
+    t3 = _resp_text(r3["final"] or {}).lower()
+    ev3 = json.dumps({"st": r3["status"], "attachments": x3.get("attachments"),
+                      "vision": vis3, "text": t3[:200]})[:700]
+    check(r3["status"] == 200 and len(x3.get("attachments") or []) == 1
+          and not (x3["attachments"][0].get("error"))
+          and ((x3["attachments"][0].get("passed") and _served_sees())
+               or (vis3 and vis3[0].get("ok") is True)),
+          f"responses (function_call_output image): the tool result's image "
+          f"is one attachment and the model saw it ({r3['seconds']:.0f}s)", ev3)
+    check(re.search(r"left\W{0,3}red", t3) is not None
+          and re.search(r"right\W{0,3}blue", t3) is not None,
+          "responses (function_call_output image): the answer names left=red, "
+          "right=blue", ev3)
+
+
+def test_responses_package_tools():
+    """The MCP host's package lookups over Responses (tiers medium and up):
+    x_yamadori.mcp says what was offered; when PackageLens is running the
+    model's lookup is a hidden hop (the client sees no call of ours). When the
+    host cannot start (Docker down: its container is the server) the record
+    says so and the check is NOT APPLICABLE, never a false pass."""
+    r = _resp_call({"model": "yamadori", "instructions": f"[session {_nonce()}]",
+                    "input": [_rmsg("user", "Which npm package is pmndrs math? "
+                                    "Use yama_find_package, then answer with the "
+                                    "exact package name.")],
+                    "tools": [_WEATHER], "reasoning": {"effort": "medium"},
+                    "max_output_tokens": 600, "store": False}, stream=True)
+    x = _rx(r)
+    mcp = x.get("mcp") or {}
+    offered = mcp.get("offered") or []
+    if not offered:
+        na("responses: the package tools are offered at medium and a lookup is "
+           "a hidden hop",
+           f"the MCP host offered nothing on this stack (x_yamadori.mcp: "
+           f"{json.dumps({k: mcp.get(k) for k in ('switch', 'offered', 'why', 'kept')})[:300]}"
+           f"); PackageLens runs in Docker, which is down")
+        check(r["status"] == 200 and isinstance(mcp.get("switch"), dict)
+              and not [i for i in _ritems(r, "function_call")
+                       if i.get("name", "").startswith("yama_")],
+              "responses: with the host unavailable the request is still "
+              "served, x_yamadori.mcp is recorded, and no call of ours reaches "
+              "the client", json.dumps(mcp)[:300])
+        return
+    calls = [c for c in mcp.get("calls") or []]
+    check(r["status"] == 200 and "yama_find_package" in offered
+          and calls and all(c.get("ok") for c in calls)
+          and not [i for i in _ritems(r, "function_call")
+                   if str(i.get("name", "")).startswith("yama_")],
+          "responses: the package tools are offered at medium, the lookup ran "
+          "as a hidden hop, and no call of ours reached the client",
+          json.dumps({"offered": offered, "calls": calls,
+                      "text": _resp_text(r["final"] or {})[:160]})[:600])
+
+
+def test_responses_features():
+    test_responses_usage_reasoning_and_no_key_sessions()
+    test_responses_titles_and_side_calls()
+    test_responses_seed_and_window()
+    test_responses_structured_output()
+    test_responses_draw_and_look()
+    test_responses_package_tools()
+
+
+def _judge_resp_summary(tag: str, r: dict, prev_x: dict, shape: str,
+                        modes: tuple) -> None:
+    """test_compaction_both_shapes' judge, over a Responses result."""
+    f = r["final"] or {}
+    text = _resp_text(f)
+    fin = "stop" if f.get("status") == "completed" else (
+        "length" if f.get("status") == "incomplete" else f.get("status"))
+    d = {"choices": [{"message": {"content": text}, "finish_reason": fin}],
+         "x_yamadori": _rx(r)}
+    _judge_summary(tag, d, prev_x, shape, modes)
+
+
+def test_responses_compaction():
+    """Both compaction shapes over Responses, live. IN PLACE (the history's
+    items plus a summarise turn: Codex, Copilot): served on the stored prompt
+    (ledger / spliced), >= 90% of it reused, the summary whole and keeping a
+    path and an error string, opening with the conversation's session line;
+    then Hermes' continuation under a NEW prompt_cache_key carrying that
+    summary continues the conversation (aliased_to). FLATTENED (Hermes' one
+    user message): rewritten onto the stored prompt."""
+    key = f"resp-cmp-{_nonce()}"
+    instr, items = _to_responses(_compaction_history())
+    tools = _flat_tools(_CACHE_TOOLS)
+    base = {"model": "yamadori", "instructions": instr, "tools": tools,
+            "reasoning": {"effort": "medium"}, "store": False,
+            "prompt_cache_key": key}
+    r = _resp_call(dict(base, input=items), stream=True)
+    text = _resp_text(r["final"] or {})
+    if not check(r["status"] == 200 and bool(text.strip())
+                 and (r["final"] or {}).get("status") == "completed",
+                 f"responses compaction: the conversation's turn answers "
+                 f"({r['seconds']:.0f}s)",
+                 f"{r['status']} {r['raw'][:200]} text={text[:200]!r}"):
+        return
+    prev_x = _rx(r)
+    carrier = (prev_x.get("session") or {}).get("carrier")
+    hist = items + [_rmsg("assistant", text)]
+    rc = _resp_call(dict(base, input=hist + [_rmsg("user", CLAUDE_COMPACT)]),
+                    stream=True)
+    _judge_resp_summary("responses compaction in place", rc, prev_x,
+                        "in_place", ("ledger", "spliced"))
+    summary = _resp_text(rc["final"] or {})
+    import session_id
+    check(carrier and summary.startswith(session_id.line(carrier)),
+          "responses compaction in place: the summary opens with the "
+          "conversation's session line (the evidence a new key needs)",
+          json.dumps({"carrier": carrier, "head": summary[:100]}))
+    # Hermes after a compaction: a NEW key, the summary it kept, a follow-up
+    key2 = key + "-b"
+    r2 = _resp_call({"model": "yamadori", "instructions": instr,
+                     "tools": tools, "input": [
+                         _rmsg("user", summary), _rmsg("user", "Continue: what "
+                                                       "is the first thing I "
+                                                       "should check?")],
+                     "reasoning": {"effort": "medium"}, "store": False,
+                     "prompt_cache_key": key2}, stream=True)
+    s2 = (_rx(r2).get("session") or {})
+    check(r2["status"] == 200 and s2.get("aliased_to") == carrier
+          and s2.get("carrier") == carrier,
+          "responses: a NEW prompt_cache_key whose history carries the "
+          "summary line continues the conversation as an alias (Hermes' key "
+          "changes at a compaction)",
+          json.dumps({"st": r2["status"], "session": s2}))
+    # flattened: Hermes' one user message (a new conversation to compact)
+    r3 = _resp_call(dict(base, input=items, prompt_cache_key=key + "-c"),
+                    stream=True)
+    t3 = _resp_text(r3["final"] or {})
+    if not check(r3["status"] == 200 and bool(t3.strip()),
+                 f"responses compaction: a second conversation answers "
+                 f"({r3['seconds']:.0f}s)", f"{r3['status']} {r3['raw'][:200]}"):
+        return
+    flat = (f"{HERMES_PREAMBLE}\n\nCreate a structured checkpoint summary for "
+            f"the conversation after earlier turns are compacted.\n\nTURNS TO "
+            f"SUMMARIZE:\n{_hermes_records(_compaction_history()[1:5])}\n\n"
+            f"Use this exact structure:\n\n{HERMES_SECTIONS}")
+    rf = _resp_call({"model": "yamadori", "input": flat,
+                     "max_output_tokens": 2000, "store": False})
+    _judge_resp_summary("responses compaction flattened", rf, _rx(r3),
+                        "flattened", ("rewritten",))
+
+
+def test_responses_other_card_and_hangup():
+    """The one-conversation rule and cancel on disconnect over Responses, live.
+    A NEW conversation (a new prompt_cache_key) inside the owner's hold is
+    served on THE OTHER CARD (bonsai-a4000) when the card's model has one --
+    x_yamadori.slots.routed -- and keeps it; else 503 conversation_at_capacity
+    + Retry-After. A client that hangs up mid-stream stops the generation: the
+    card's slot goes idle within seconds, never run to its end."""
+    card = _card()
+    if not card.get("model"):
+        raise NotRun("the card's /slots could not be read through the proxy")
+    if card.get("n") not in (1, 2):
+        na("responses: one conversation per card",
+           f"the card serves {card.get('n')} slots: the rule is on at 1 or 2")
+        return
+    n = _nonce()
+    tail = f"[resp-one {n}]"
+    a = {"model": "yamadori", "instructions": f"You are a coding agent. {tail} A",
+         "input": [_rmsg("user", "In one sentence: what is a closure?")],
+         "reasoning": {"effort": "medium"}, "max_output_tokens": 300,
+         "prompt_cache_key": f"resp-one-a-{n}", "store": False}
+    ra = _resp_call(a)
+    ca = (_rx(ra).get("cache") or {})
+    check(ra["status"] == 200 and ca.get("slot") == 0,
+          f"responses: the first conversation is served on {card['model']}'s "
+          f"slot 0 ({ra['seconds']:.0f}s)",
+          json.dumps({"st": ra["status"], "cache": ca}))
+    other = card.get("other_card")
+    b = {"model": "yamadori", "instructions": f"You are a coding agent. {tail} B",
+         "input": [_rmsg("user", "In one sentence: what is a generator?")],
+         "reasoning": {"effort": "medium"}, "max_output_tokens": 300,
+         "prompt_cache_key": f"resp-one-b-{n}", "store": False}
+    rb = _resp_call(b, stream=True, features={"primary_hold_s": None},
+                    capacity_retry=False)
+    xb = _rx(rb)
+    ro = (xb.get("slots") or {}).get("routed") or {}
+    err = rb.get("error") or {}
+    ev = json.dumps({"st": rb["status"], "routed": ro, "cache": xb.get("cache"),
+                     "error": err, "other_card": other})[:700]
+    if other:
+        check(rb["status"] == 200 and ro.get("routed") == "other_card"
+              and ro.get("model") == other and ro.get("why")
+              and (xb.get("cache") or {}).get("slot") == 0
+              and (rb["final"] or {}).get("status") == "completed",
+              f"responses (streamed): a new conversation id inside the owner's "
+              f"hold is served on the other card ({other}), x_yamadori.slots."
+              f"routed says so ({rb['seconds']:.0f}s)", ev)
+        b2 = dict(b, input=b["input"] + [_rmsg("assistant", _resp_text(
+            rb["final"] or {}) or "ok"), _rmsg("user", "And an iterator, in "
+                                               "one sentence?")])
+        rb2 = _resp_call(b2, features={"primary_hold_s": None},
+                         capacity_retry=False)
+        r2 = ((_rx(rb2).get("slots") or {}).get("routed") or {})
+        check(rb2["status"] == 200 and r2.get("model") == other
+              and int(((_rx(rb2).get("cache") or {}).get("first") or {}).get(
+                  "reused") or 0) > 0,
+              f"responses: and it keeps that card for its life (its next turn "
+              f"is on {other} again, reusing its cached prefix)",
+              json.dumps({"st": rb2["status"], "routed": r2,
+                          "cache": _rx(rb2).get("cache")})[:500])
+    else:
+        check(rb["status"] == 503 and err.get("code") ==
+              "conversation_at_capacity"
+              and int(rb["headers"].get("retry-after") or 0) > 0
+              and not rb["events"],
+              f"responses: {card['model']} has no other card: a new "
+              f"conversation inside the hold is 503 conversation_at_capacity "
+              f"with Retry-After, before any byte", ev)
+    # hanging up: a long generation, closed after its first token
+    n2 = _nonce()
+    long_req = {"model": "yamadori", "instructions": f"[resp-hangup {n2}]",
+                "input": [_rmsg("user", "Write a 1500-word essay on the history "
+                                "of the lighthouse, with a numbered section for "
+                                "every century.")],
+                "reasoning": {"effort": "low"}, "store": False,
+                "prompt_cache_key": f"resp-hang-{n2}"}
+    seen = {"n": 0}
+
+    def stop(ev, evs):
+        if ev.get("type") in ("response.reasoning_summary_text.delta",
+                              "response.output_text.delta"):
+            seen["n"] += 1
+        return seen["n"] >= 3
+    t0 = time.time()
+    rh = _resp_call(long_req, stream=True, stop=stop)
+    hung_at = time.time()
+    states: list[str] = []
+    idle_after = None
+    while time.time() - hung_at < 60:
+        code, _, raw = _get(f"{PROXY}/dash/api/vitals/pulse", auth=True)
+        try:
+            rows = (json.loads(raw.decode("utf-8", "replace")).get("slots")
+                    or {}).get("slots") or []
+        except ValueError:
+            rows = []
+        st = next((r_.get("state") for r_ in rows if r_.get("id") == 0), None)
+        states.append(str(st))
+        if st == "idle":
+            idle_after = time.time() - hung_at
+            break
+        time.sleep(1.0)
+    check(rh["hung_up"] and idle_after is not None and idle_after < 30,
+          "responses: a client that hangs up after the first tokens stops the "
+          "generation (the card's slot 0 reads idle within seconds, not at the "
+          "end of a 1500-word essay)",
+          json.dumps({"hung_up": rh["hung_up"], "events_before": len(
+              rh["events"]), "s_streamed": round(hung_at - t0, 1),
+              "idle_after_s": idle_after, "states": states[-8:]}))
+    rn = _resp_call({"model": "yamadori", "instructions": f"[resp-after {n2}]",
+                     "input": [_rmsg("user", "Reply with exactly: ok")],
+                     "reasoning": {"effort": "low"}, "max_output_tokens": 64,
+                     "store": False})
+    check(rn["status"] == 200 and "ok" in _resp_text(rn["final"] or {}).lower()
+          and rn["seconds"] < 120,
+          f"responses: and the next request is served at once, not queued "
+          f"behind the abandoned one ({rn['seconds']:.1f}s)",
+          json.dumps({"st": rn["status"], "text": _resp_text(
+              rn["final"] or {})[:80]}))
+
+
+def test_responses_slots():
+    test_responses_other_card_and_hangup()
+
+
+def test_responses_tiers():
+    """ONE MODEL PER EFFORT TIER over Responses, live: the walk low -> xhigh ->
+    max -> low by reasoning.effort. Each answer is its tier's model
+    (x_yamadori.capacity.model and why), each swap loaded its model and left no
+    other loaded, and a swap is HEARD: response.in_progress beats (the only
+    thing Hermes' codex transport and Codex's idle timers count) keep the
+    stream alive -- the longest silence between two parsed events stays under
+    the client limit. While max works, a lower tier is served on the other card
+    (bonsai-a4000) and xhigh (no other card) is 503 model_at_capacity with
+    Retry-After as a Responses client reads it. NOT RUN when the table is
+    off."""
+    import threading
+    code, _ct, raw = _get(f"{PROXY}/dash/api/tiers", auth=True)
+    mm = (json.loads(raw) or {}).get("max_mode") or {} if code == 200 else {}
+    tiers_of = {k: (v or {}).get("model") for k, v in (
+        (json.loads(raw) or {}).get("tiers") or {}).items()} if code == 200 else {}
+    tb = mm.get("table") or {}
+    if not mm.get("enabled") or not tb.get("profiles"):
+        raise NotRun("the tier -> model table is not in force on this proxy")
+    prompt = [_rmsg("user", "Reply with exactly: ok")]
+    SILENCE_LIMIT_S = 12.0     # Hermes' codex transport: HERMES_CODEX_EVENT_STALE_TIMEOUT_SECONDS
+    for tier in ("low", "xhigh", "max", "low"):
+        r = _resp_call({"model": "yamadori", "instructions":
+                        f"[resp-tier {_nonce()}]", "input": prompt,
+                        "reasoning": {"effort": tier}, "max_output_tokens": 64,
+                        "store": False}, stream=True)
+        x = _rx(r)
+        cap = x.get("capacity") or {}
+        want = tiers_of.get(tier)
+        ts = [t for t, _e in r["events"]]
+        gaps = [b - a for a, b in zip([0.0] + ts, ts)]
+        sw = cap.get("swap")
+        text = _resp_text(r["final"] or {})
+        check(r["status"] == 200 and (r["final"] or {}).get("status") ==
+              "completed" and cap.get("model") == want and cap.get("why")
+              and "ok" in text.lower(),
+              f"responses tier {tier}: answered by {want} ({r['seconds']:.0f}s), "
+              f"x_yamadori.capacity says which model and why",
+              json.dumps({"st": r["status"], "capacity": cap, "text": text[:60],
+                          "error": r.get("error")})[:600])
+        if sw:
+            beats = _rbeats(r)
+            check(sw.get("ok") and sw.get("to") == want
+                  and sw.get("left_loaded") == [],
+                  f"responses tier {tier}: the swap to {want} loaded it and "
+                  f"left no other main model loaded ({sw.get('load_s')} s)",
+                  json.dumps(sw))
+            # a beat every HEARTBEAT (5 s) of silence: a 9.7 s swap needs one beat after the opening pair, a 28 s one
+            # several; what must hold is that no gap between two PARSED events nears the client's limit
+            check(len(beats) >= (1 if float(sw.get("load_s") or 0) >= 5 else 0)
+                  and max(gaps or [0]) < SILENCE_LIMIT_S,
+                  f"responses tier {tier}: the swap ({sw.get('load_s')} s) is "
+                  f"heard -- {len(beats)} response.in_progress beats, the "
+                  f"longest silence between parsed events {max(gaps or [0]):.1f}"
+                  f" s (limit {SILENCE_LIMIT_S:g} s)",
+                  json.dumps({"beats": len(beats), "max_gap_s": round(max(
+                      gaps or [0]), 1), "first_beat_s": beats[:3],
+                      "ttfe_s": ts[:1]}))
+    # a lower tier while max works, over Responses
+    other = ((tb.get("models") or {}).get(tiers_of.get("low")) or {}).get(
+        "other_card")
+    got: dict = {}
+
+    def max_turn():
+        got["max"] = _resp_call({
+            "model": "yamadori", "instructions": f"[resp-max {_nonce()}]",
+            "input": [_rmsg("user", "Write a 60-line Python module that parses "
+                            "INI files, with tests.")],
+            "reasoning": {"effort": "max"}, "store": False}, stream=True)
+    th = threading.Thread(target=max_turn)
+    th.start()
+    time.sleep(25)
+    low = _resp_call({"model": "yamadori", "instructions":
+                      f"[resp-low {_nonce()}]", "input": prompt,
+                      "reasoning": {"effort": "low"}, "max_output_tokens": 64,
+                      "store": False}, features={"primary_hold_s": None},
+                     capacity_retry=False)
+    xl = _rx(low)
+    served = (xl.get("capacity") or {}).get("model")
+    routed = ((xl.get("slots") or {}).get("routed") or {})
+    ev = json.dumps({"st": low["status"], "error": low.get("error"),
+                     "capacity_model": served, "routed": routed,
+                     "other_card": other})[:600]
+    if other:
+        check(low["status"] == 200 and (routed.get("model") == other
+                                        or served == other),
+              f"responses: low while max works is served on the other card "
+              f"({other}), x_yamadori says so", ev)
+    else:
+        check(low["status"] == 503, "responses: low while max works: 503", ev)
+    xh = _resp_call({"model": "yamadori", "instructions":
+                     f"[resp-xh {_nonce()}]", "input": prompt,
+                     "reasoning": {"effort": "xhigh"}, "max_output_tokens": 64,
+                     "store": False}, stream=True,
+                    features={"primary_hold_s": None}, capacity_retry=False)
+    e = xh.get("error") or {}
+    check(xh["status"] == 503 and e.get("code") in (
+        "model_at_capacity", "conversation_at_capacity")
+        and int(xh["headers"].get("retry-after") or 0) > 0
+        and not xh["events"],
+        "responses: xhigh while max works (no other card for its model) is "
+        "HTTP 503 model_at_capacity with Retry-After, before any byte -- the "
+        "status a Responses client retries, never a 200 stream",
+        json.dumps({"st": xh["status"], "error": e,
+                    "retry_after": xh["headers"].get("retry-after")})[:500])
+    th.join(TIMEOUT)
+    mx = got.get("max") or {}
+    check(mx.get("status") == 200 and (mx.get("final") or {}).get("status") in (
+        "completed", "incomplete"),
+        "responses: and the max request it waited behind was not disturbed",
+        json.dumps({"st": mx.get("status"), "final_status": (mx.get(
+            "final") or {}).get("status")}))
+    back = _resp_call({"model": "yamadori", "instructions":
+                       f"[resp-back {_nonce()}]", "input": prompt,
+                       "reasoning": {"effort": "low"}, "max_output_tokens": 64,
+                       "store": False}, stream=True)
+    check(back["status"] == 200 and (_rx(back).get("capacity") or {}).get(
+        "model") == tiers_of.get("low"),
+        f"responses: then low is served again on {tiers_of.get('low')} "
+        f"({back['seconds']:.0f}s): the card is back", str(back["status"]))
+
+
 ONBOARD_PROMPT = ""
 ONBOARD_WAIT_S = 0.0
 
@@ -2767,6 +3632,10 @@ TESTS = {
     "tokens": test_the_token_ledger_counts_requests,
     "conformance": test_openai_conformance,
     "responses": test_responses_api,
+    "responses_features": test_responses_features,
+    "responses_compaction": test_responses_compaction,
+    "responses_slots": test_responses_slots,
+    "responses_tiers": test_responses_tiers,
     "agent_loop": test_a_harness_agent_loop,
     "compaction": test_compaction_both_shapes,
     "images": test_images,
