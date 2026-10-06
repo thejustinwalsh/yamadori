@@ -937,7 +937,7 @@ empty or error calls is a tool defect to fix, not a budget spent.
   returned uncached, and the next call asks again, at most once per `budget.RETRY_S` (5 s, the heartbeat) while
   the server is away, so a starting server is noticed within one beat.
 - **Flash-Next's first prompt: the expert file is PRE-READ into the OS file cache** (2026-10-06; `mcp/preread.py`,
-  wired in `max_mode.wait_ready`, tier-table row key `preread` on flash-next; `mcp/test_preread.py` 41 checks, offline
+  wired in `max_mode.wait_ready`, tier-table row key `preread` on flash-next; `mcp/test_preread.py` 50 checks, offline
   only -- **not yet run live**). Evidence (`bench/fn_first_prompt.py`, `bench/results/fn_first_prompt/20261006-a`, n=3 per
   arm, n=1 for the idle arm, requests sent to llama-swap :11434, ~24.6K-token fresh prompts): the experts (IQ2_XS shard 1,
   39.2 GB, mmapped, unpinned: `LLAMA_PIN_EXPERTS=0`) are demand-paged from disk during the first 8,192-token batch of the
@@ -958,8 +958,17 @@ empty or error calls is a tool defect to fix, not a budget spent.
   (the first build) put the warm 39.1 GB on the trimmed side and would have re-read 39 GB on ordinary agent turns
   (coordinator, 2026-10-06). A pure continuation cannot be told from a first prompt before it is sent. One read at a time (a lock); a read in flight is
   joined, never restarted; bounded by 900 s (`max_mode.LOAD_TIMEOUT_S`, llama-swap's health-check timeout), then the
-  request goes on (`timed_out`). No disk priority: the request waits for the read, the measured arms ran at normal
-  priority, and Windows' background thread mode would also lower the cached pages' memory priority. A missing file or
+  request goes on (`timed_out`). THE READ RUNS AT NORMAL MEMORY AND I/O PRIORITY (found 2026-10-06, `bench/results/fn_first_prompt/20261006-proxy`, n=3 per
+  arm through :1234 at tier max): the stack's processes run at memory priority 2 / low I/O priority (the bench's shell at 5 /
+  normal), a read thread inherited that, and the load's ~40 GB of private memory consumed exactly the pages it had cached --
+  the prefill still read 31-33 GB in 6 of 6 swaps (ttft 165-174 s, the same as no read, 163-167 s). Setting the thread's
+  memory priority to 5 and the file's I/O hint to normal (`raise_cache_priority`) gave prefill disk reads of 1.7-1.8 GB, batch 1
+  24-26 s and ttft 91-99 s (`20261006-proxy-b`, 48 GB available, n=2; the cause is inferred from the priorities and this
+  result). THE CACHE MUST HAVE ROOM FOR THE WHOLE FILE (`decide_room`): with ~38 GB available (another model's host memory,
+  imagegen-turbo, was resident) a read evicts its own head -- read-then-load ttft 191-205 s, overlapped 240 s, trimmed-server
+  reads (33-35 GB available) 26 s for nothing, against 163-167 s with no read -- so the read is skipped, with
+  `available_mb` recorded, when the memory available (free + standby) is below the file's size; the margin between 39 and 47 GB
+  is unmeasured. Windows' background thread mode is not used: it would lower the cached pages' memory priority. A missing file or
   an unreadable working set records its reason and the request goes on. Recorded: `x_yamadori.preread` {why swap |
   trimmed, model, file, file_bytes, bytes, ms, gb_per_s, overlapped, working_set_mb, joined, waited_ms, ok, timed_out,
   error | skipped} and one log line. Switches (default ON): `YAMADORI_PREREAD` / X-Yamadori-Features `{"preread":

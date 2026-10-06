@@ -695,6 +695,8 @@ def wait_ready(model: str | None, poll_s: float = 0.5, features=None) -> dict:
         try:
             if pl is not None and pl.get("skipped"):
                 out["preread"] = preread.skipped_record(pl, "swap", pl["skipped"])
+            elif pl is not None and not (room := preread.decide_room(pl))["ok"]:
+                out["preread"] = preread.skipped_record(pl, "swap", room["skipped"], room)
             elif pl is not None:
                 pr = _start_preread(pl, "swap", bool(pl["overlap"]))
                 if pr is not None and not pl["overlap"]:
@@ -728,8 +730,11 @@ def wait_ready(model: str | None, poll_s: float = 0.5, features=None) -> dict:
         else:
             joined = preread.inflight(pl["path"])
             d = {"read": True} if joined is not None else preread.decide_trimmed(pl)
+            room = preread.decide_room(pl) if d["read"] and joined is None else {"ok": True}
             if not d["read"]:
                 out["preread"] = preread.skipped_record(pl, "trimmed", d["skipped"], d)
+            elif not room["ok"]:
+                out["preread"] = preread.skipped_record(pl, "trimmed", room["skipped"], dict(d, **room))
             else:
                 _card_wait(True)
                 try:

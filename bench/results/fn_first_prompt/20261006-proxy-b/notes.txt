@@ -1,0 +1,8 @@
+fn_first_prompt 20261006-proxy-b: build 2 of the pre-read through the proxy (:1234, tier max, account live-test): the read thread sets its memory priority to 5
+and the file's I/O hint to normal (mcp/preread.py raise_cache_priority; the stack's processes run at memory priority 2 / low I/O). Same method as 20261006-proxy
+(see its notes.txt): synthetic ~21.9K-token prompts, a short non-contract question, 90 s read cap after the first token.
+  _overlap  cold swap, overlapped read: a1 99.3 s, a2 90.7 s (48 GB available: prefill disk 1.7-1.8 GB, batch 1 24-26 s); a3 240.6 s with ~38 GB available
+  _before   cold swap, read-then-load, ~38 GB available all three reps: ttft 204.9 / 197.8 / 190.9 s, prefill disk 43 GB (load_s 14-15 s: the load is fast after the read)
+  _trim     loaded server, working set emptied + 66 GB evicted, ~33-35 GB available: ttft 153.1 / 149.7 / 150.4 s, prefill disk 26-29 GB despite a 26 s read
+Confound: imagegen-turbo (A4000, started by someone else) held host memory from rep 3 of _overlap on, cutting the memory available to the file cache from 48 to 33-39 GB.
+With less memory available than the file (39.2 GB) the read evicts its own head and costs time (ttft vs the no-read control of 20261006-proxy: 163-167 s). Hence decide_room.

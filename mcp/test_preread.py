@@ -90,6 +90,7 @@ _ACTIVE = {"n": 0, "peak": 0}
 READ_S = 0.5
 LOAD_S = 0.25
 WS = {"v": 100_000_000, "why": ""}
+AVAIL = {"v": 200 * 1024 ** 3}
 
 
 def ev(s: str) -> None:
@@ -132,6 +133,7 @@ def reload_stack(table_path: str | None = None):
     max_mode._load = fake_load
     max_mode._reset_for_tests()
     preread._READ = fake_read
+    preread.available_bytes = lambda: AVAIL["v"]
     preread.working_set = lambda path: (WS["v"], WS["why"]) if WS["v"] is not None else (None, WS["why"] or "stub")
     preread._current.clear()
     preread._pid_cache.clear()
@@ -141,6 +143,7 @@ def reload_stack(table_path: str | None = None):
     _LOADED.clear()
     _ACTIVE.update(n=0, peak=0)
     WS.update(v=100_000_000, why="")
+    AVAIL["v"] = 200 * 1024 ** 3
     for v in ("YAMADORI_PREREAD", "YAMADORI_PREREAD_OVERLAP"):
         os.environ.pop(v, None)
     try:
@@ -468,6 +471,35 @@ def test_timeout_bound():
     settle()
 
 
+def test_no_room_no_read():
+    """The cache must have room for the whole file: a read of a file larger than the memory available evicts its own
+    head (measured 2026-10-06: 191-240 s ttft with ~38 GB available against 163-167 s with no read)."""
+    reload_stack()
+    AVAIL["v"] = SIZE - 1
+    out, *_ = run_wait("flash-next")
+    pr = out["r"].get("preread") or {}
+    check(READS == [] and LOADS == ["flash-next"] and "less than the file" in (pr.get("skipped") or "")
+          and pr.get("available_mb") is not None and pr.get("why") == "swap",
+          "a swap with less memory available than the file: no read, the numbers recorded, the swap goes ahead", pr)
+    reload_stack()
+    _LOADED.add("flash-next")
+    WS.update(v=1_000_000, why="")
+    AVAIL["v"] = SIZE - 1
+    out, *_ = run_wait("flash-next")
+    pr = out["r"].get("preread") or {}
+    check(READS == [] and pr.get("why") == "trimmed" and "less than the file" in (pr.get("skipped") or ""),
+          "a trimmed server with less memory available than the file: no read either", pr)
+    reload_stack()
+    AVAIL["v"] = SIZE
+    out, *_ = run_wait("flash-next")
+    check(READS == [SHARD1], "memory available equal to the file: read")
+    reload_stack()
+    AVAIL["v"] = None
+    out, *_ = run_wait("flash-next")
+    check(READS == [SHARD1], "an unreadable memory figure does not block the read")
+    settle()
+
+
 def test_offline_guard_never_reads_a_real_file():
     """Found 2026-10-06: test_max_mode swaps flash-next on the live table, whose config.yaml names a 39 GB file that
     exists on this machine. Under the offline guard the real reader plans nothing."""
@@ -503,7 +535,8 @@ def main() -> int:
     for fn in (test_file_and_plan, test_swap_overlap_waits_with_heartbeats, test_swap_read_then_load,
                test_bonsai_swap_starts_no_read, test_working_set_rule, test_lock_and_join, test_switch,
                test_missing_file_degrades, test_cancel_leaves_the_wait, test_timeout_bound,
-               test_offline_guard_never_reads_a_real_file, test_x_yamadori_carries_it):
+               test_no_room_no_read, test_offline_guard_never_reads_a_real_file,
+               test_x_yamadori_carries_it):
         try:
             fn()
         except Exception as e:                                       # noqa: BLE001

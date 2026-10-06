@@ -28,6 +28,16 @@ WHEN (mcp/max_mode.py wait_ready calls this; the request's heartbeats keep flowi
            file sits inside that gap (decide_trimmed). The proxy cannot know prefix reuse before it sends, so the working
            set alone decides.
 
+ONLY WHEN THE CACHE HAS ROOM FOR THE WHOLE FILE (decide_room; found 2026-10-06, bench/results/fn_first_prompt/
+20261006-proxy and -proxy-b, n=3 per arm): a sequential read of a file larger than the memory available to the file cache
+evicts its own head, and the prefill reads from the head. With ~48 GB available (free + standby, before the request) the
+overlapped read left 1.7-1.8 GB of disk reads in the prefill and ttft 91-99 s, against 165-174 s with the priority-2
+read and 163-167 s with no read (n=3, same box); with ~38 GB available (another model's host memory, imagegen-turbo, was
+resident) the read-then-load swap cost ttft 191-205 s and the overlapped one 240 s (n=3 / n=1), against the 163-167 s of no
+read at all, and the trimmed-server read (33-35 GB available) waited 26 s for nothing (prefill 26-29 GB from disk,
+n=3). So the read is skipped, with the numbers recorded, when the memory available is below the file's size. The margin
+between 39 GB (the file) and 47 GB (the largest measured working case) is UNMEASURED.
+
 ONE READ AT A TIME (`_read_lock`): a read in flight for the same file is JOINED, never restarted; a read of another file
 waits its turn. The read is bounded by max_mode.LOAD_TIMEOUT_S (llama-swap's own 900 s health-check timeout, the longest a
 load may already take): after that the request goes on and the record says `timed_out`.
@@ -317,6 +327,27 @@ def plan(model: str, table, features=None, config_path: str | None = None) -> di
     return out
 
 
+def available_bytes() -> int | None:
+    """Memory available to the file cache now (free + standby: psutil's `available`, Windows' Available MBytes)."""
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:                                                # noqa: BLE001
+        return None
+
+
+def decide_room(pl: dict) -> dict:
+    """Does the cache have room for the whole file? {ok, available?, file_bytes, skipped?}. An unreadable figure does
+    not block the read."""
+    size = os.path.getsize(pl["path"])
+    av = available_bytes()
+    if av is not None and av < size:
+        return {"ok": False, "available": av, "file_bytes": size,
+                "skipped": f"only {av / 1e6:.0f} MB are available to the file cache, less than the file's {size / 1e6:.0f} "
+                           "MB: a read would evict its own head (fn_first_prompt 20261006-proxy)"}
+    return {"ok": True, "available": av, "file_bytes": size}
+
+
 def decide_trimmed(pl: dict) -> dict:
     """The working-set rule for a LOADED model: {read: bool, ws?, file_bytes?, skipped?}."""
     path = pl["path"]
@@ -339,7 +370,8 @@ def skipped_record(pl: dict, why: str, reason: str, d: dict | None = None) -> di
     d = d or {}
     return {"why": why, "model": pl["model"], "skipped": reason, "file": os.path.basename(pl["path"] or "") or None,
             "file_bytes": d.get("file_bytes"),
-            "working_set_mb": None if d.get("ws") is None else round(d["ws"] / 1e6)}
+            "working_set_mb": None if d.get("ws") is None else round(d["ws"] / 1e6),
+            "available_mb": None if d.get("available") is None else round(d["available"] / 1e6)}
 
 
 def _main(argv: list[str]) -> int:

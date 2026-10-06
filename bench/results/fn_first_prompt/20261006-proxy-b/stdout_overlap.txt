@@ -1,0 +1,15 @@
+== rep 1
+  main card emptied: ['bonsai']; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 26.78 s (2.48 GB/s); available 48184 MiB
+  a1 first prompt after load [proxy overlap, priority fix]: HTTP 200 ttft 99.31 s, prompt 21875, server prefill None tok/s (None tok, None s, cached None) 
+== rep 2
+  unloaded flash-next in 4.1 s; /running: ['embeddings']
+  main card emptied: []; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.0 s (2.46 GB/s); available 47801 MiB
+  a2 first prompt after load [proxy overlap, priority fix]: HTTP 200 ttft 90.66 s, prompt None, server prefill None tok/s (None tok, None s, cached None) 
+== rep 3
+  unloaded flash-next in 3.8 s; /running: ['embeddings', 'imagegen-turbo']
+  main card emptied: []; /running: ['embeddings', 'imagegen-turbo']
+  evicted: read 66.42 GB of other model files in 27.62 s (2.41 GB/s); available 38872 MiB
+  a3 first prompt after load [proxy overlap, priority fix]: HTTP 200 ttft 240.56 s, prompt 22457, server prefill None tok/s (None tok, None s, cached None) 
+exit 0
