@@ -1,0 +1,18 @@
+== rep 1
+  unloaded flash-next in 7.0 s; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 29.03 s (2.29 GB/s); available 45424 MiB
+  pre-read shard 1: 39.23 GB in 17.43 s (2.25 GB/s); available 45345 MiB
+  a1 first prompt after load [cold + pre-read shard 1]: HTTP 200 ttft 102.77 s, prompt 24630, server prefill 318.9 tok/s (24630 tok, 77.2 s, cached 0) 
+  b1 second different prompt [cold + pre-read shard 1]: HTTP 200 ttft 60.07 s, prompt 24610, server prefill 412.4 tok/s (24610 tok, 59.7 s, cached 0) 
+== rep 2
+  unloaded flash-next in 4.2 s; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.82 s (2.39 GB/s); available 43722 MiB
+  pre-read shard 1: 39.23 GB in 17.14 s (2.29 GB/s); available 43595 MiB
+  a2 first prompt after load [cold + pre-read shard 1]: HTTP 200 ttft 82.75 s, prompt 24686, server prefill 366.6 tok/s (24686 tok, 67.3 s, cached 0) 
+  b2 second different prompt [cold + pre-read shard 1]: HTTP 200 ttft 58.87 s, prompt 24698, server prefill 422.2 tok/s (24698 tok, 58.5 s, cached 0) 
+== rep 3
+  unloaded flash-next in 4.2 s; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.58 s (2.41 GB/s); available 43564 MiB
+  pre-read shard 1: 39.23 GB in 17.02 s (2.31 GB/s); available 43565 MiB
+  a3 first prompt after load [cold + pre-read shard 1]: HTTP 200 ttft 82.67 s, prompt 24636, server prefill 361.1 tok/s (24636 tok, 68.2 s, cached 0) 
+  b3 second different prompt [cold + pre-read shard 1]: HTTP 200 ttft 60.34 s, prompt 24602, server prefill 410.4 tok/s (24602 tok, 59.9 s, cached 0) 

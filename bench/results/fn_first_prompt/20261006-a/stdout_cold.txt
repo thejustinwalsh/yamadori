@@ -1,0 +1,15 @@
+== rep 1
+  unloaded flash-next in 4.1 s; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 27.85 s (2.39 GB/s); available 46924 MiB
+  a1 first prompt after load [cold cache]: HTTP 200 ttft 211.4 s, prompt 24677, server prefill 202.9 tok/s (24677 tok, 121.6 s, cached 0) 
+  b1 second different prompt [cold cache]: HTTP 200 ttft 61.45 s, prompt 24644, server prefill 403.5 tok/s (24644 tok, 61.1 s, cached 0) 
+== rep 2
+  unloaded flash-next in 4.4 s; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 28.27 s (2.35 GB/s); available 46236 MiB
+  a2 first prompt after load [cold cache]: HTTP 200 ttft 208.32 s, prompt 24648, server prefill 201.1 tok/s (24648 tok, 122.6 s, cached 0) 
+  b2 second different prompt [cold cache]: HTTP 200 ttft 61.35 s, prompt 24640, server prefill 404.2 tok/s (24640 tok, 61.0 s, cached 0) 
+== rep 3
+  unloaded flash-next in 7.7 s; /running: ['embeddings']
+  evicted: read 66.42 GB of other model files in 28.02 s (2.37 GB/s); available 46336 MiB
+  a3 first prompt after load [cold cache]: HTTP 200 ttft 200.83 s, prompt 24612, server prefill 186.3 tok/s (24612 tok, 132.1 s, cached 0) 
+  b3 second different prompt [cold cache]: HTTP 200 ttft 60.28 s, prompt 24663, server prefill 411.7 tok/s (24663 tok, 59.9 s, cached 0) 

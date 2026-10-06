@@ -1,0 +1,55 @@
+fn_first_prompt: raw records in requests*.jsonl, samples*.jsonl, serverlog*.jsonl
+disk = PhysicalDisk(1 c:) Disk Read Bytes/sec x interval; pgin = Memory Pages Input/sec x 4 KiB; both over the prefill window (the server's launch_slot line to the first streamed token)
+
+request                                          ttft  load prompt srv t/s   pf s disk GB pgin GB avail GB start/min fnWS GB end standby GB start
+c fresh prompt, server already loaded            99.6     -  24606   249.4   98.7   24.57   24.71      44.2/9.9             39.1             47.2
+a1 first prompt after load [natural]            101.8  14.8  24649   285.5   86.3   13.86   14.02      37.9/6.6             42.8             40.6
+b1 second different prompt [natural]             60.5     -  24655   410.7   60.0    0.17    0.23       5.8/5.1             43.6              6.1
+a2 first prompt after load [natural]             79.6  11.8  24647   366.9   67.2    1.41    1.48      37.4/5.9             43.1             38.9
+b2 second different prompt [natural]             58.9     -  24683   422.4   58.4    0.22    0.29       5.1/4.1             44.4              5.4
+a3 first prompt after load [natural]             79.3  11.7  24660   368.4   66.9    1.49    1.56      36.7/5.4             43.1             38.0
+b3 second different prompt [natural]             61.3     -  24699   405.8   60.9    1.31    1.41       4.2/3.4             44.2              4.4
+a1 first prompt after load [cold cache]         211.4  88.9  24677   202.9  121.6   31.54   31.68      35.0/6.5             40.3             37.5
+b1 second different prompt [cold cache]          61.5     -  24644   403.5   61.1    0.22    0.29       6.1/6.0             39.6              5.8
+a2 first prompt after load [cold cache]         208.3  85.0  24648   201.1  122.6   31.86   32.06      35.5/6.8             40.0             38.0
+b2 second different prompt [cold cache]          61.4     -  24640   404.2   61.0    0.23    0.33       6.4/6.3             39.6              6.0
+a3 first prompt after load [cold cache]         200.8  68.0  24612   186.3  132.1   31.57   31.71      35.5/6.7             40.5             38.0
+b3 second different prompt [cold cache]          60.3     -  24663   411.7   59.9    0.20    0.26       6.0/5.6             39.8              6.3
+a1 first prompt after load [cold + pre-read shard 1]  102.8  24.5  24630   318.9   77.2    1.55    1.68      35.0/3.9             42.8             37.4
+b1 second different prompt [cold + pre-read shard 1]   60.1     -  24610   412.4   59.7    0.59    0.67       2.7/1.9             43.3              2.1
+a2 first prompt after load [cold + pre-read shard 1]   82.8  14.8  24686   366.6   67.3    1.72    1.79      33.3/2.2             42.8             35.6
+b2 second different prompt [cold + pre-read shard 1]   58.9     -  24698   422.2   58.5    0.24    0.30       1.2/0.8             43.0              0.5
+a3 first prompt after load [cold + pre-read shard 1]   82.7  14.2  24636   361.1   68.2    3.78    3.86      33.4/2.3             42.9             35.7
+b3 second different prompt [cold + pre-read shard 1]   60.3     -  24602   410.4   59.9    0.28    0.35       1.7/1.2             43.5              1.7
+
+per batch from the server's own `prompt processing, n_tokens = N ... t = T s` lines (tokens, seconds, tok/s) and the disk read GB over that batch's span (print-line arrival times):
+  c fresh prompt, server already loaded: 8192 tok 54.5 s 150 t/s 24.1 GB; 8192 tok 19.1 s 430 t/s 0.1 GB; 7706 tok 18.5 s 417 t/s 0.1 GB; 409 tok 4.0 s 102 t/s 0.0 GB; 103 tok 2.4 s 43 t/s 0.1 GB
+  a1 first prompt after load [natural]: 8192 tok 40.5 s 202 t/s 13.5 GB; 8192 tok 18.7 s 438 t/s 0.1 GB; 7749 tok 20.3 s 382 t/s 0.1 GB; 409 tok 4.3 s 96 t/s 0.0 GB; 103 tok 2.2 s 48 t/s 0.1 GB
+  b1 second different prompt [natural]: 8192 tok 16.3 s 503 t/s 0.1 GB; 8192 tok 17.6 s 465 t/s 0.0 GB; 7755 tok 19.9 s 390 t/s 0.0 GB; 409 tok 4.2 s 98 t/s 0.0 GB; 103 tok 1.9 s 55 t/s 0.0 GB
+  a2 first prompt after load [natural]: 8192 tok 22.1 s 370 t/s 0.9 GB; 8192 tok 18.2 s 449 t/s 0.2 GB; 7747 tok 20.1 s 385 t/s 0.1 GB; 409 tok 4.3 s 96 t/s 0.1 GB; 103 tok 2.1 s 49 t/s 0.2 GB
+  b2 second different prompt [natural]: 8192 tok 16.2 s 505 t/s 0.1 GB; 8192 tok 17.8 s 460 t/s 0.0 GB; 7783 tok 18.4 s 424 t/s 0.0 GB; 409 tok 4.0 s 101 t/s 0.0 GB; 103 tok 1.8 s 56 t/s 0.0 GB
+  a3 first prompt after load [natural]: 8192 tok 22.0 s 373 t/s 1.1 GB; 8192 tok 18.2 s 450 t/s 0.1 GB; 7760 tok 20.2 s 383 t/s 0.1 GB; 409 tok 4.1 s 100 t/s 0.0 GB; 103 tok 2.1 s 49 t/s 0.1 GB
+  b3 second different prompt [natural]: 8192 tok 16.9 s 486 t/s 0.6 GB; 8192 tok 18.5 s 442 t/s 0.2 GB; 7799 tok 18.8 s 414 t/s 0.4 GB; 409 tok 4.5 s 92 t/s 0.0 GB; 103 tok 1.9 s 53 t/s 0.0 GB
+  a1 first prompt after load [cold cache]: 8192 tok 75.0 s 109 t/s 31.3 GB; 8192 tok 19.0 s 432 t/s 0.1 GB; 7777 tok 20.8 s 375 t/s 0.1 GB; 409 tok 4.2 s 96 t/s 0.1 GB; 103 tok 2.2 s 46 t/s 0.1 GB
+  b1 second different prompt [cold cache]: 8192 tok 16.5 s 497 t/s 0.2 GB; 8192 tok 17.8 s 459 t/s 0.0 GB; 7744 tok 20.2 s 383 t/s 0.0 GB; 409 tok 4.3 s 95 t/s 0.0 GB; 103 tok 2.0 s 53 t/s 0.0 GB
+  a2 first prompt after load [cold cache]: 8192 tok 76.0 s 108 t/s 31.2 GB; 8192 tok 19.5 s 420 t/s 0.4 GB; 7748 tok 20.3 s 381 t/s 0.2 GB; 409 tok 4.2 s 98 t/s 0.0 GB; 103 tok 2.1 s 49 t/s 0.1 GB
+  b2 second different prompt [cold cache]: 8192 tok 16.9 s 486 t/s 0.1 GB; 8192 tok 18.0 s 456 t/s 0.0 GB; 7740 tok 19.9 s 390 t/s 0.1 GB; 409 tok 4.2 s 98 t/s 0.1 GB; 103 tok 1.9 s 54 t/s 0.0 GB
+  a3 first prompt after load [cold cache]: 8192 tok 87.3 s 94 t/s 31.3 GB; 8192 tok 18.6 s 440 t/s 0.1 GB; 7712 tok 19.7 s 391 t/s 0.1 GB; 409 tok 4.1 s 99 t/s 0.0 GB; 103 tok 2.1 s 49 t/s 0.1 GB
+  b3 second different prompt [cold cache]: 8192 tok 16.1 s 507 t/s 0.1 GB; 8192 tok 17.6 s 464 t/s 0.0 GB; 7763 tok 19.9 s 391 t/s 0.1 GB; 409 tok 4.1 s 99 t/s 0.0 GB; 103 tok 1.9 s 54 t/s 0.0 GB
+  a1 first prompt after load [cold + pre-read shard 1]: 8192 tok 30.3 s 270 t/s 0.9 GB; 8192 tok 18.8 s 435 t/s 0.2 GB; 7730 tok 21.3 s 363 t/s 0.3 GB; 409 tok 4.3 s 95 t/s 0.0 GB; 103 tok 2.0 s 50 t/s 0.1 GB
+  b1 second different prompt [cold + pre-read shard 1]: 8192 tok 16.0 s 512 t/s 0.1 GB; 8192 tok 17.5 s 468 t/s 0.5 GB; 7710 tok 19.9 s 387 t/s 0.0 GB; 409 tok 4.2 s 98 t/s 0.0 GB; 103 tok 1.9 s 54 t/s 0.0 GB
+  a2 first prompt after load [cold + pre-read shard 1]: 8192 tok 23.3 s 351 t/s 1.3 GB; 8192 tok 18.4 s 445 t/s 0.1 GB; 7786 tok 18.8 s 415 t/s 0.2 GB; 409 tok 4.1 s 100 t/s 0.1 GB; 103 tok 2.2 s 47 t/s 0.1 GB
+  b2 second different prompt [cold + pre-read shard 1]: 8192 tok 16.2 s 505 t/s 0.1 GB; 8192 tok 17.8 s 459 t/s 0.1 GB; 7798 tok 18.2 s 427 t/s 0.1 GB; 409 tok 4.1 s 99 t/s 0.0 GB; 103 tok 1.9 s 55 t/s 0.0 GB
+  a3 first prompt after load [cold + pre-read shard 1]: 8192 tok 23.0 s 356 t/s 3.4 GB; 8192 tok 18.2 s 450 t/s 0.1 GB; 7736 tok 20.2 s 383 t/s 0.2 GB; 409 tok 4.1 s 100 t/s 0.1 GB; 103 tok 2.1 s 48 t/s 0.1 GB
+  b3 second different prompt [cold + pre-read shard 1]: 8192 tok 16.4 s 500 t/s 0.1 GB; 8192 tok 17.6 s 465 t/s 0.1 GB; 7702 tok 19.6 s 393 t/s 0.1 GB; 409 tok 4.2 s 97 t/s 0.0 GB; 103 tok 1.9 s 55 t/s 0.0 GB
+
+prep reads before the request (cached sequential reads, 16 MiB):
+  a1 first prompt after load [cold cache]: evict: 66.42 GB in 27.85 s = 2.39 GB/s; physical available after 45.8 GB
+  a2 first prompt after load [cold cache]: evict: 66.42 GB in 28.27 s = 2.35 GB/s; physical available after 45.2 GB
+  a3 first prompt after load [cold cache]: evict: 66.42 GB in 28.02 s = 2.37 GB/s; physical available after 45.2 GB
+  a1 first prompt after load [cold + pre-read shard 1]: evict: 66.42 GB in 29.03 s = 2.29 GB/s; physical available after 44.4 GB
+  a1 first prompt after load [cold + pre-read shard 1]: preread: 39.23 GB in 17.43 s = 2.25 GB/s; physical available after 44.3 GB
+  a2 first prompt after load [cold + pre-read shard 1]: evict: 66.42 GB in 27.82 s = 2.39 GB/s; physical available after 42.7 GB
+  a2 first prompt after load [cold + pre-read shard 1]: preread: 39.23 GB in 17.14 s = 2.29 GB/s; physical available after 42.6 GB
+  a3 first prompt after load [cold + pre-read shard 1]: evict: 66.42 GB in 27.58 s = 2.41 GB/s; physical available after 42.5 GB
+  a3 first prompt after load [cold + pre-read shard 1]: preread: 39.23 GB in 17.02 s = 2.31 GB/s; physical available after 42.5 GB
