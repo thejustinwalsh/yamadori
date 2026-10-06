@@ -903,6 +903,11 @@ def other_card_for(model: str | None) -> tuple[str | None, str]:
     the one switch YAMADORI_OTHER_CARD_DOWNGRADE=1 lets it run on the default model's other card."""
     try:
         import max_mode
+        # A request max_mode ALREADY sent to the other card's model (a lower tier while a higher tier's model holds the
+        # main card: operator 2026-10-06, "Serve it on the A4000") runs there itself.
+        if model and max_mode.ENABLED and not max_mode.is_main(model) and max_mode.TABLE.full and any(
+                (max_mode.TABLE.row(m).get("other_card") == model) for m in max_mode.MODELS):
+            return model, f"{model} is the other card's model (max_mode routed this request there)"
         return max_mode.other_card(model)
     except Exception as e:                                           # noqa: BLE001
         return None, f"no tier table ({type(e).__name__})"
@@ -918,6 +923,25 @@ def _route(key: str, model: str | None, now: float) -> dict | None:
             return {"routed": "other_card", "model": om, "why": "this conversation's card (it keeps it for its life)"}
         _other.update(owner=None, model=None)          # its tier's model cannot run there now: it is a newcomer again
     owner, busy, since = _owner_of_card(now, key)
+    try:
+        import max_mode
+        sent_there = bool(model and max_mode.ENABLED and not max_mode.is_main(model)
+                          and other_card_for(model)[0] == model)
+    except Exception:                                                # noqa: BLE001
+        sent_there = False
+    if sent_there:
+        # max_mode already sent it to the other card's model (operator 2026-10-06): it takes that card whoever owns
+        # the main one, unless another conversation holds the other card
+        o, obusy, osince = _other_owner(now, key)
+        if o is not None and o != key:
+            raise ConversationAtCapacity(
+                f"this request's tier runs on {model} while a higher tier's model holds the main card, and {model} "
+                f"holds another conversation ({'in flight' if obusy else f'active {osince:.0f} s ago'}); one "
+                "conversation per card (operator, 2026-09-30)", _rest_of_hold(obusy, osince, _hold_against(o, key)),
+                o)
+        _other.update(owner=key, model=model)
+        return {"routed": "other_card", "model": model,
+                "why": f"a higher tier's model holds the main card: this tier runs on {model} (operator 2026-10-06)"}
     if owner is None or owner == key:
         return None
     hold = _hold_against(owner, key)

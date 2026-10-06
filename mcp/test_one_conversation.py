@@ -224,6 +224,45 @@ def _other_card(ok_models=("bonsai",)):
     return lambda m: (("bonsai-a4000", "test table") if m in ok_models else (None, f"{m}: no other card (test)"))
 
 
+def test_sent_to_the_other_card_by_max_mode():
+    """A request max_mode ALREADY sent to the other card's model (a lower tier while a higher tier's model holds the
+    main card; operator 2026-10-06, "Serve it on the A4000") takes that card whoever owns the main one -- deploy_check
+    2026-10-06 refused it 503 because it was checked against the main card's owner -- and is refused only when the
+    other card holds another conversation."""
+    import max_mode
+    saved = (slots.other_card_for, max_mode.ENABLED, max_mode.is_main)
+    slots.other_card_for = lambda m: (("bonsai-a4000", "test") if m in ("bonsai", "bonsai-a4000")
+                                      else (None, f"{m}: none (test)"))
+    max_mode.ENABLED = True
+    max_mode.is_main = lambda m: m in ("bonsai", "mirai-s", "flash-next")
+    try:
+        fresh(1)
+        wa = {"key": "convA", "account": "acct1"}
+        check(slots.check_owner(wa, "mirai-s") is None, "the xhigh conversation takes the main card")
+        a = slots.acquire("convA")
+        wb = {"key": "convB", "account": "acct1"}
+        r = slots.check_owner(wb, "bonsai-a4000")
+        check(r and r["model"] == "bonsai-a4000" and wb.get("routed", {}).get("routed") == "other_card",
+              "a medium request max_mode sent to bonsai-a4000 takes the other card (no 503)", wb)
+        b = slots.acquire("convB")
+        check(b["slot"] == slots.OTHER_CONV_SLOT and b.get("_server") == "bonsai-a4000" and slots._busy.get(0) == 1,
+              "its grant is the other server's conversation slot; the main card's count untouched", b)
+        try:
+            slots.check_owner({"key": "convC", "account": "acct2"}, "bonsai-a4000")
+            check(False, "a second conversation sent there while the other card is held is refused")
+        except slots.ConversationAtCapacity as e:
+            check("holds another conversation" in str(e), "a second one sent there while it is held: 503", str(e))
+        done(a)
+        done(b)
+        fresh(1)
+        wd = {"key": "convD", "account": "acct1"}
+        r = slots.check_owner(wd, "bonsai-a4000")
+        check(r and r["model"] == "bonsai-a4000", "sent there with the main card free: still the other card's slot "
+              "(never the main card's slot 0 for an A4000 request)", wd)
+    finally:
+        slots.other_card_for, max_mode.ENABLED, max_mode.is_main = saved
+
+
 def test_other_card_routing():
     """THE OTHER CARD (operator, 2026-09-30): a conversation whose id is not the main card's owner, while the owner
     is mid-request or inside the 60 s hold (from its LATEST activity), is ROUTED to the other card and keeps it; a
@@ -448,7 +487,8 @@ def test_a_restart_is_not_activity():
 
 def main() -> int:
     for fn in (test_off_at_three_slots, test_owner_and_refusal, test_compactions_and_side_calls, test_check_owner,
-               test_lane_cleared, test_np1_locked_card, test_other_card_routing,
+               test_lane_cleared, test_np1_locked_card, test_sent_to_the_other_card_by_max_mode,
+               test_other_card_routing,
                test_owner_first_race, test_suite_hold_override, test_unanswered_attempt_holds_nothing,
                test_a_restart_is_not_activity):
         try:
