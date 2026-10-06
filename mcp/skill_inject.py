@@ -566,13 +566,19 @@ def render(items: list[dict], profile: dict) -> dict:
 # ----------------------------------------------------------------- entry ---
 def inject(skills: list[dict], kind: str, *, turn=None, model: str | None
            = None, given: dict | None = None, events: dict | None = None,
-           profile: dict | None = None, last: list | None = None
-           ) -> tuple[str, dict]:
+           profile: dict | None = None, last: list | None = None,
+           serving: str | None = None) -> tuple[str, dict]:
     """(text for the end of what the model reads next, the record). `skills` are stage 1's candidates in its
     order; `turn` the request's decide_turn.Turn (None: no decider -> the
     safe default, nothing); `given` the conversation's items given before
     ({key: req}); `events` {skill id: stage 1's trigger}; `last` the keys of
-    the conversation's last injection."""
+    the conversation's last injection. `model` is the model that READS (the
+    decider's: `bonsai-a4000` while a LOCKED model holds the card,
+    max_mode.decider_model) and keys THRESHOLDS; `serving` is the model that
+    RECEIVES the text (the request's own: max_mode.bound_model) and keys the
+    PROFILE (format, voice, size), which is a property of the reader of the
+    injected text, not of the model that judged it. Where the two are not
+    told apart, `serving` is the bound model of the request, else `model`."""
     t0 = time.time()
     if model is None:
         try:
@@ -580,9 +586,16 @@ def inject(skills: list[dict], kind: str, *, turn=None, model: str | None
             model = D.model_name()
         except Exception:                                        # noqa: BLE001
             model = ""
-    prof = profile or profile_for(model)
+    if serving is None:
+        try:
+            import max_mode
+            serving = max_mode.bound_model()
+        except Exception:                                        # noqa: BLE001
+            serving = None
+    prof = profile or profile_for(serving or model)
     rec: dict = {"version": INJECTOR_VERSION, "questions": QUESTION_VERSION,
-                 "model": model, "profile": prof.get("family"),
+                 "model": model, "serving": serving or model,
+                 "profile": prof.get("family"),
                  "kind": kind, "stage1": {"skills": [s["id"] for s in
                                                      skills or []]}}
     try:

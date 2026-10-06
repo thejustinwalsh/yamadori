@@ -326,6 +326,51 @@ def test_profiles() -> None:
                   for v in p["evidence"].values()), p)
 
 
+def test_profile_follows_the_serving_model_not_the_reader() -> None:
+    """A LOCKED model's jjava reads on bonsai-a4000 (max_mode.decider_model)
+    whoever holds the card: the PROFILE is the model that receives the text
+    (flash-next's), THRESHOLDS stay the reader's."""
+    I.THRESHOLDS.clear()
+    saved = dict(I.PROFILES)
+    try:
+        I.PROFILES["flash-next"] = dict(I.PROFILES["flash-next"],
+                                        max_items=1, format="table")
+        fake = Fake(level_for({"world.query": 3}))
+        with T.Turn(user("koota query"), post=fake, upstream=upstream,
+                    count=len, on=True, key="conv", request="req1") as t:
+            text, rec = I.inject([KOOTA], "user", turn=t,
+                                 model="bonsai-a4000", serving="flash-next")
+        check("the record names the reader and the serving model, the "
+              "profile is the serving model's",
+              rec["model"] == "bonsai-a4000"
+              and rec["serving"] == "flash-next"
+              and rec["profile"] == "flash-next"
+              and rec["rendered"]["format"] == "table", rec)
+        fake = Fake(level_for({"world.query": 3}))
+        with T.Turn(user("koota query"), post=fake, upstream=upstream,
+                    count=len, on=True, key="conv", request="req1") as t:
+            _t2, rec2 = I.inject([KOOTA], "user", turn=t,
+                                 model="bonsai-a4000")
+        check("no serving model given and none bound to a request: the "
+              "reader's family, as before", rec2["serving"] ==
+              "bonsai-a4000" and rec2["profile"] == "bonsai", rec2)
+        import cancel
+        import max_mode
+        fake = Fake(level_for({"world.query": 3}))
+        with cancel.bound(cancel.Token()):
+            max_mode.set_current("mirai-s")
+            with T.Turn(user("koota query"), post=fake, upstream=upstream,
+                        count=len, on=True, key="conv", request="req1") as t:
+                _t3, rec3 = I.inject([KOOTA], "user", turn=t,
+                                     model="bonsai-a4000")
+        check("a request bound to mirai-s: its profile, whoever reads",
+              rec3["serving"] == "mirai-s" and rec3["profile"] == "mirai-s",
+              rec3)
+    finally:
+        I.PROFILES.clear()
+        I.PROFILES.update(saved)
+
+
 def test_no_decider() -> None:
     text, rec = I.inject([KOOTA], "user", turn=None, model="bonsai")
     check("no decider -> nothing goes in, and the record says why",
@@ -396,7 +441,8 @@ def test_select_wiring() -> None:
 def main() -> int:
     D.release = lambda slot, why="": {"released": True, "slot": slot}
     for fn in (test_items, test_gate, test_tiers, test_room_and_render,
-               test_profiles, test_no_decider, test_select_wiring):
+               test_profiles, test_profile_follows_the_serving_model_not_the_reader,
+               test_no_decider, test_select_wiring):
         try:
             fn()
         except Exception:                                        # noqa: BLE001

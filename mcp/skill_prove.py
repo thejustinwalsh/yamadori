@@ -1297,9 +1297,17 @@ def reprove_targets(include_unproven: bool = False
             skipped["live_job"] += 1
             continue
         rec = record_of(ver)
+        probes = rec.get("probes") or []
         rows.append({"skill": sid, "version": v, "name": s.get("name"),
-                     "verdict": rec.get("verdict"),
-                     "probes": len(rec.get("probes") or [])})
+                     "verdict": rec.get("verdict"), "probes": len(probes),
+                     "seconds_before": rec.get("seconds"),
+                     # what each flagged probe's pair took: its repeat costs
+                     # about the same again
+                     "flagged_pair_seconds": round(sum(
+                         sum((p.get("seconds") or {}).values())
+                         for p in probes if any(
+                             c.get("pair") == PAIR_WORSE
+                             for c in p.get("checks") or [])), 3)})
     return rows, skipped
 
 
@@ -1329,24 +1337,30 @@ def reprove_quarantined(limit: int | None = None, *,
         out.append(dict(r, job=jid))
     return {"dry_run": dry_run, "rule": RULE, "repeats": REPEATS,
             ("would_enqueue" if dry_run else "enqueued"): out,
-            "skipped": skipped, "estimate": reprove_estimate(len(rows))}
+            "skipped": skipped, "estimate": reprove_estimate(rows)}
 
 
-def reprove_estimate(n: int) -> dict:
-    """What a re-prove costs, from the code's own counts: per skill 2
-    generations per probe (both sides) plus 2 x REPEATS more per probe with a
-    flagged check. The seconds are the MEASURED proofs' (`estimate`), else
-    unknown; no figure of ours."""
-    est = estimate()
-    out: dict = {"skills": n, "generations": (
+def reprove_estimate(rows: list[dict]) -> dict:
+    """What a re-prove costs, from the targets' own earlier records (the
+    seconds those proofs MEASURED): a fresh proof of the same skills takes
+    about what the old ones took (`lower_bound_seconds`: no flag repeats),
+    and at most that plus one more pair for each probe that was flagged
+    before (`upper_bound_seconds`: every old flag flags again, which the
+    repeat rule makes less likely). Generations: 2 per probe, plus 2 x
+    REPEATS per flagged probe."""
+    first = sum(float(r.get("seconds_before") or 0) for r in rows)
+    flagged = sum(float(r.get("flagged_pair_seconds") or 0) for r in rows)
+    out: dict = {"skills": len(rows), "generations": (
         f"2 x probes, plus 2 x {REPEATS} per probe with a flagged check")}
-    if est.get("mean_seconds"):
-        out["seconds_per_proof_one_sample"] = est["mean_seconds"]
-        out["lower_bound_seconds"] = round(est["mean_seconds"] * n, 1)
-        out["basis"] = ("one-sample proofs' mean seconds x skills: a LOWER "
-                        "bound; each flagged probe adds its pair again")
+    if first:
+        out.update(lower_bound_seconds=round(first, 1),
+                   upper_bound_seconds=round(first + REPEATS * flagged, 1),
+                   basis=f"the {len(rows)} targets' own earlier proof "
+                         "seconds (flagged probes' pair seconds for the "
+                         "upper bound); the model and card that run the "
+                         "job set the real figure")
     else:
-        out["basis"] = "no proof measured yet: unknown until the first runs"
+        out["basis"] = "no earlier proof seconds recorded: unknown"
     return out
 
 
