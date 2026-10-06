@@ -1,0 +1,14 @@
+device: NVIDIA GeForce RTX 5060 Ti (sm_120, 36 SMs, 15.9 GiB), device 0, kernel rate 3.99e+04 iters/ms
+config: 3 x 256 MiB tensors per layer, 16 graphs of 16.2 ms per layer, 9 timed layers x 5 reps, host syncs per graph: no, ring 16 x 16 MiB, 4 threads
+free VRAM before: 15170 MiB
+
+per layer, median of 5 x 9 samples (n=5 reps); ms. T_c = compute alone, T_u = the upload alone, T_o = both
+mode              T_c       T_u       T_o   T_c+T_u       max       E host-blocked copy GB/s  reading
+pin             262.3      33.3     263.5     295.6     262.3    0.96          0.0     24.18  OVERLAPS
+pageable        262.3      55.6     316.9     317.9     262.3    0.02         71.1     14.56  mostly serial
+mmap            262.3      53.2     317.7     315.5     262.3   -0.04         71.8     15.15  mostly serial
+stage-heap      262.3      43.5     263.6     305.7     262.3    0.97         43.5     18.53  OVERLAPS
+stage-mmap      262.3      43.9     263.6     306.2     262.3    0.97         43.4     18.38  OVERLAPS
+register        262.3      42.0     285.6     304.3     262.3    0.44          2.7     19.16  mostly serial
+d2d             262.3      33.5     262.2     295.8     262.3    1.00          0.1    192.22  OVERLAPS
+compute alone: median 262.3 ms a layer (16 graphs x 16.2 ms = 259.2 ms ideal), min 261.3 max 263.2

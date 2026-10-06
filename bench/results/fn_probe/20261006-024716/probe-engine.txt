@@ -1,0 +1,25 @@
+device: NVIDIA GeForce RTX 5060 Ti (sm_120, 36 SMs, 15.9 GiB), device 0, kernel rate 4.01e+04 iters/ms
+config: 3 x 256 MiB tensors per layer, 16 graphs of 16.2 ms per layer, 9 timed layers x 5 reps, host syncs per graph: yes, ring 16 x 16 MiB, 4 threads
+free VRAM before: 15170 MiB
+
+per layer, median of 5 x 9 samples (n=5 reps); ms. T_c = compute alone, T_u = the upload alone, T_o = both
+mode              T_c       T_u       T_o   T_c+T_u       max       E host-blocked copy GB/s  reading
+pin             264.2      33.4     264.1     297.6     264.2    1.00          0.0     24.14  OVERLAPS
+pageable        264.2      53.3     316.8     317.5     264.2    0.01         69.6     15.11  mostly serial
+mmap            264.2      54.4     319.2     318.6     264.2   -0.01         71.9     14.82  mostly serial
+stage-heap      264.2      43.6     264.2     307.8     264.2    1.00          0.1     18.46  OVERLAPS
+stage-mmap      264.2      43.7     265.1     307.9     264.2    0.98          0.0     18.43  OVERLAPS
+register        264.2      42.1     286.1     306.3     264.2    0.48          2.7     19.12  mostly serial
+d2d             264.2      33.5     263.5     297.7     264.2    1.02          0.1    192.24  OVERLAPS
+compute alone: median 264.2 ms a layer (16 graphs x 16.2 ms = 259.2 ms ideal), min 262.2 max 264.5
+
+ring sweep (copy-only throughput through the stager, source mmap, n=3 layers each):
+   6 threads, chunk  4 MiB, ring  8: 20.51 GB/s
+   2 threads, chunk  4 MiB, ring 16: 20.38 GB/s
+   4 threads, chunk  4 MiB, ring  8: 20.20 GB/s
+   6 threads, chunk  4 MiB, ring 16: 20.16 GB/s
+   2 threads, chunk 16 MiB, ring 16: 20.09 GB/s
+   3 threads, chunk  4 MiB, ring 16: 19.91 GB/s
+   4 threads, chunk  4 MiB, ring 16: 19.86 GB/s
+   3 threads, chunk  4 MiB, ring  8: 19.67 GB/s
+  ... worst: 6 threads, chunk 64 MiB, ring 32: 15.21 GB/s (45 configurations)

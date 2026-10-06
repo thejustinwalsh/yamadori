@@ -1219,6 +1219,24 @@ checks that pinned and ring sources score E >= 0.8 and pageable and mapped ones 
 (`nvcc`, sm_86 + sm_120). **Run time on the 5060 Ti: ~6 minutes for the three runs (~2.5 + ~2 + ~1; derived: 16 graphs x 16.2 ms x 9 layers x 5 reps = 11.7 s per mode, 8 modes, plus the copy-only passes and the sweep), 2.5 GiB of
 VRAM, a 768 MiB temp file.** `run_probe.py --go` refuses unless the 5060 Ti has >= 4,096 MiB free (the stack's model unloaded through the operator's window; the script never touches a process, :1234, :11434 or config.yaml).
 
+**RESULT (2026-10-06 02:47, the 5060 Ti alone after flash-next was unloaded through llama-swap; `bench/results/fn_probe/20261006-024716/`, n=5 reps x 9 layers per mode, medians).** Engine shape (3 x 256 MiB, 16 graphs of 16.2 ms, host sync per graph; T_c 264.2 ms a layer):
+
+| mode | T_u ms | T_o ms | E | host-blocked ms | copy GB/s |
+|---|---:|---:|---:|---:|---:|
+| pin | 33.4 | 264.1 | **1.00** | 0.0 | 24.1 |
+| pageable (malloc) | 53.3 | 316.8 | **0.01** | 69.6 | 15.1 |
+| mmap (the experts' situation) | 54.4 | 319.2 | **-0.01** | 71.9 | 14.8 |
+| stage-heap (the ring) | 43.6 | 264.2 | **1.00** | 0.1 | 18.5 |
+| stage-mmap (the ring) | 43.7 | 265.1 | **0.98** | 0.0 | 18.4 |
+| register (cudaHostRegister on the mapped file) | 42.1 | 286.1 | 0.48 | 2.7 | 19.1 |
+| d2d (24 x 256 MiB a layer) | 33.5 | 263.5 | 1.02 | 0.1 | 192 |
+
+Without the per-graph host sync (`nosync`): pin 0.96, pageable 0.02, mmap -0.04, stage-heap 0.97, stage-mmap 0.97, register 0.44, d2d 1.00. At 4 graphs a layer (`b2048`, T_c 65.8): pin 1.00, pageable 0.00, mmap 0.03, stage-heap 1.00, stage-mmap 1.00, register 0.48, **d2d 0.28** (T_o 90.0 against T_c + T_u 99.4: a 192 GB/s device copy stream does steal compute at that ratio, which is the shape of 0024's observation, but not at the engine's ratio). **Reading: this card, under WDDM, overlaps host-to-device DMA from pinned memory with compute completely; a pageable or mapped source blocks the calling thread for the whole copy and nothing overlaps; the staging ring restores full overlap from a mapped file (E 0.98-1.00) at 18.4 GB/s against 24.1 pinned; `cudaHostRegister` on the file view works (no failure) but overlaps only about half (E 0.44-0.48), so it is not the better route.** The stager is the unlock for unpinned experts: 13.3's explanation is confirmed, and the 6-slot overlap is worth the whole upload of ~2.6 s a batch (13.6's +19%) if the engine behaves like the probe. The probe's pageable copy ran at 15.1 GB/s (13.3's engine-derived 13.6 GB/s) and a pinned one at 24.1 GB/s (a pinned-expert upload would be 35.45 GB / 24.1 = 1.5 s, not 2.6 s).
+
+Ring sweep (copy-only throughput from the mapped file through the stager, 45 configurations, n=3 layers each; differences under ~3% are noise): best **6 threads / 4 MiB / ring 8: 20.5 GB/s**, 2 threads / 4 MiB / 16: 20.4, 4 / 4 / 8: 20.2, 6 / 4 / 16: 20.2, 2 / 16 / 16: 20.1; the engine default (4 threads, 16 MiB, ring 16) read 18.4 in the table above; worst 6 threads / 64 MiB / 32: 15.2. **The chunk size is what matters (4 MiB ~ +8% over 16 MiB, 64 MiB worst); threads 2-6 are within noise.** Suggested starting setting for the engine arm: `LLAMA_STAGER_THREADS=3 LLAMA_STAGER_CHUNK_MIB=4 LLAMA_STAGER_RING=16` (64 MiB pinned). Not a tuned result.
+
+**`test-stager --device CUDA0` on cand0030** (the real pinned ring and events, RTX 5060 Ti, CUDA hidden from nothing): 5,072 checks, 0 failed; 300 MiB from an unaligned pageable source staged in 19.1 ms = 16.5 GB/s (n=1 smoke), read back equal; the control caught in 25 of 25 trials.
+
 ### 13.5 Patch 0030: the stager, ported (Strata `prefill.cpp:122-239`)
 
 `engines/patches/llama-upstream-flash/0030-ggml-staging-ring-for-pageable-expert-uploads.patch` (sha256 `2b4c44414ba96b24ccf497ffad79b4eeee1409d58eb4a7013f1c7d1039f16844`; on the shipped
