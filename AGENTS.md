@@ -938,7 +938,7 @@ empty or error calls is a tool defect to fix, not a budget spent.
   the server is away, so a starting server is noticed within one beat.
 - **Flash-Next's first prompt: the expert file is PRE-READ into the OS file cache** (2026-10-06; `mcp/preread.py`,
   wired in `max_mode.wait_ready`, tier-table row key `preread` on flash-next; `mcp/test_preread.py` 50 checks, offline
-  only -- **not yet run live**). Evidence (`bench/fn_first_prompt.py`, `bench/results/fn_first_prompt/20261006-a`, n=3 per
+  offline; run live through :1234 on 2026-10-06 in two rounds, results below, the no-room skip offline only). Evidence (`bench/fn_first_prompt.py`, `bench/results/fn_first_prompt/20261006-a`, n=3 per
   arm, n=1 for the idle arm, requests sent to llama-swap :11434, ~24.6K-token fresh prompts): the experts (IQ2_XS shard 1,
   39.2 GB, mmapped, unpinned: `LLAMA_PIN_EXPERTS=0`) are demand-paged from disk during the first 8,192-token batch of the
   first prompt after a load -- from a cold file cache 31.5-31.9 GB read at ~0.4 GB/s, batch 1 75-87 s against 16.2-16.9 s
