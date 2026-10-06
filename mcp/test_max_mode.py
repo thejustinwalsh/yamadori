@@ -566,10 +566,17 @@ def test_table_capacity_and_preemption():
     _LOADED.add("mirai-s")
     lease = max_mode.Lease(max_mode.decide("xhigh", False))
     d = max_mode.decide("medium", False)
-    check(d.refuse and d.holder == "mirai-s", "a medium request while mirai-s (xhigh) works is refused 503",
-          d.record())
-    err = api_errors.at_capacity(d.holder, d.retry_after, d.why, model=d.model, tier="medium")
-    check(err.status == 503 and 'reasoning_effort "medium"' in err.message and "keeps its model" in err.message,
+    check(not d.refuse and d.model == "bonsai-a4000" and d.holder == "mirai-s" and "other card" in d.why,
+          "a medium request while mirai-s (xhigh) works is served on bonsai's other card, bonsai-a4000 "
+          "(operator 2026-10-06: \"Serve it on the A4000\")", d.record())
+    # a lower tier whose model has NO other card is still refused: xhigh (mirai-s) while flash-next works
+    lease_fn = max_mode.Lease(max_mode.Decision("flash-next", "max", False))
+    d = max_mode.decide("xhigh", False)
+    lease_fn.release()
+    check(d.refuse and d.holder in ("flash-next", "mirai-s"),
+          "a lower tier with no other card (mirai-s) is still refused 503", d.record())
+    err = api_errors.at_capacity(d.holder, d.retry_after, d.why, model=d.model, tier="xhigh")
+    check(err.status == 503 and 'reasoning_effort "xhigh"' in err.message and "keeps its model" in err.message,
           "the client is told plainly: its tier, that another tier's model holds the card, retry, it keeps its model",
           err.message)
     d = max_mode.decide("max", False)
@@ -774,10 +781,17 @@ def test_table_server_records():
         lease = max_mode.Lease(max_mode.decide("xhigh", False))
         r = client.post("/v1/chat/completions", json={"model": "yamadori", "messages": msg,
                                                       "reasoning_effort": "high"}, headers=h)
+        cap = seen[-1]["cap"] or {}
+        check(r.status_code == 200 and seen[-1]["model"] == "bonsai-a4000" and cap.get("model") == "bonsai-a4000",
+              "server: high while xhigh holds the card -> served on bonsai-a4000 (operator 2026-10-06)", cap)
+        lease.release()
+        lease = max_mode.Lease(max_mode.decide("max", False))
+        r = client.post("/v1/chat/completions", json={"model": "yamadori", "messages": msg,
+                                                      "reasoning_effort": "xhigh"}, headers=h)
         body = r.json()
         check(r.status_code == 503 and body["error"]["code"] == "model_at_capacity"
-              and body["error"].get("holder") == "mirai-s" and body["error"].get("tier") == "high",
-              "server: high while xhigh holds the card -> 503, the holder and the asked tier in the error", body)
+              and body["error"].get("holder") == "flash-next" and body["error"].get("tier") == "xhigh",
+              "server: xhigh (no other card) while max holds the card -> 503, the holder and the asked tier", body)
         lease.release()
     finally:
         proxy.complete = saved

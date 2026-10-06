@@ -14,7 +14,9 @@ THE RULES (operator, 2026-09-27/28/29)
   - "If a medium tier comes in on max mode, we reject it. Plain and simple, model is at capacity error." (operator,
     2026-09-28). GENERALISED to the table and CONFIRMED (operator, 2026-09-29: "swap order is fine"): tiers are
     ordered, max > xhigh > the Bonsai tiers; a request for a
-    LOWER tier's model while a HIGHER tier's model holds the card is refused at once -- HTTP 503 model_at_capacity
+    LOWER tier's model while a HIGHER tier's model holds the card is served on that model's OTHER CARD when the table
+    gives it one (bonsai: bonsai-a4000; operator 2026-10-06, "Serve it on the A4000" -- it evicts nothing), and
+    otherwise refused at once -- HTTP 503 model_at_capacity
     with Retry-After (api_errors.at_capacity), recorded in x_yamadori.capacity; a request for a HIGHER tier's model
     while a lower one has work in flight WAITS for that work (never cancels it) and then takes the card. A waiter
     that a still higher tier overtakes before it starts is refused the same way (it never ran).
@@ -560,6 +562,16 @@ def decide(tier: str | None, utility: bool, kind: str | None = None) -> Decision
         if rank(want) > rank(h):
             return Decision(want, tier, utility, holder=h,
                             why=f"{why_tier}; it outranks {h}, which holds the card: waits for its work, then swaps")
+        # THE OTHER CARD BEFORE A REFUSAL (operator, 2026-10-06, choosing between this and 2026-09-28's "we reject
+        # it": "Serve it on the A4000"): a lower tier whose model has the table's `other_card` (bonsai: bonsai-a4000)
+        # is served there while the higher model holds the card -- it evicts nothing, so the swap order stands; only a
+        # model with no other card is refused. Found by deploy_check 2026-10-06 (test_live_stack "medium while xhigh
+        # works").
+        oc = TABLE.row(want).get("other_card") if TABLE.full else None
+        if oc:
+            return Decision(str(oc), tier, utility, holder=h,
+                            why=f"{why_tier}; {h} (a higher tier's model) holds the card: served on {want}'s other "
+                                f"card, {oc} (operator 2026-10-06)")
         return Decision(want, tier, utility, refuse=True, retry_after=retry_after(), holder=h,
                         why=f"{why_tier}; {h} (a higher tier's model) holds the card")
     on = card_model()
