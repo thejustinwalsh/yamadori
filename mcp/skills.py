@@ -755,6 +755,45 @@ def arm(sid: str, v: int) -> dict:
     return get(sid)
 
 
+def rearm(sid: str, v: int, **fields) -> dict:
+    """Serve a version again that PROVE quarantined, after a later proof
+    (the repeat rule, skill_prove.REPEATS) did not confirm the worse result.
+    Only a quarantined version with text, of a skill that is enabled and not
+    archived, whose reason is PROVE's. `fields` are stored with it (the new
+    prove record). The served version of any other state is superseded, as
+    arm does."""
+    s = _require(sid)
+    ver = version(sid, v)
+    if ver is None:
+        raise KeyError(f"no such version: {sid} v{v}")
+    if ver["state"] != "quarantined" or not ver.get("text") \
+            or not str(ver.get("reason") or "").startswith("prove:"):
+        raise ValueError(f"v{v} is {ver['state']}"
+                         f"{'' if ver.get('text') else ' with no text'}"
+                         "; only a version quarantined by prove, with text, "
+                         "is served again by rearm")
+    if not s.get("enabled", True) or s.get("status") == "archived":
+        raise ValueError(f"{sid} is disabled or archived; enable it first")
+
+    def fn(con):
+        now = time.time()
+        sets = ["state='armed'", "stage='arm'", "reason=NULL", "armed_at=?",
+                "updated=?"]
+        args = [now, now]
+        for k, val in fields.items():
+            sets.append(f"{k}=?")
+            args.append(json.dumps(val) if k in _JSON_V else val)
+        con.execute("UPDATE skill_versions SET state='superseded', updated=? "
+                    "WHERE skill=? AND state='armed'", (now, sid))
+        con.execute(f"UPDATE skill_versions SET {','.join(sets)} WHERE "
+                    "skill=? AND version=?", args + [sid, int(v)])
+        title = (ver.get("validate") or {}).get("title") or ""
+        con.execute("UPDATE skills SET served_version=?, title=? WHERE id=?",
+                    (int(v), title[:200], sid))
+    _with(sid, fn)
+    return get(sid)
+
+
 def reinstate(sid: str, v: int) -> dict:
     """Serve version v again after a later version failed to arm (an
     operator's edit that quarantined): v must be superseded and have text.

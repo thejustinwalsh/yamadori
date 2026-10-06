@@ -45,6 +45,12 @@ is recorded as the author of a submission, an edit or a state change.
                                              state change
     POST /dash/api/skill/disable|enable|archive|quarantine  {id, reason?}
     POST /dash/api/skill/rerun               {id, stage}
+    POST /dash/api/skill/reprove             {limit?, include_unproven?,
+                                             dry_run?}: enqueue the idle-
+                                             gated re-proof of every skill
+                                             PROVE quarantined under the
+                                             one-sample rule
+                                             (skill_prove.reprove_quarantined)
     POST /dash/api/skill/licence             {id, licence, quote}
     POST /dash/api/skill/watch               {id, hours}: 0 or null stops
     POST /dash/api/skill/refetch             {id}: enqueue a watch now
@@ -100,6 +106,7 @@ POSTS = ("/dash/api/skill", "/dash/api/skill/edit", "/dash/api/skill/tests",
          "/dash/api/skill/activation", "/dash/api/skill/disable",
          "/dash/api/skill/enable", "/dash/api/skill/archive",
          "/dash/api/skill/quarantine", "/dash/api/skill/rerun",
+         "/dash/api/skill/reprove",
          "/dash/api/skill/licence", "/dash/api/skill/watch",
          "/dash/api/skill/refetch",
          "/dash/api/skill-factory/onboarding/review",
@@ -464,6 +471,13 @@ def handle_post(path: str, body: dict, who: str = "operator"):
             else:
                 got = onboarding.tier3(did, author=author)
             return _json(200, dict(got, ok=True, id=did))
+        if p == "/dash/api/skill/reprove":
+            import skill_prove
+            lim = body.get("limit")
+            return _json(200, dict(skill_prove.reprove_quarantined(
+                int(lim) if lim not in (None, "") else None,
+                include_unproven=bool(body.get("include_unproven")),
+                dry_run=bool(body.get("dry_run"))), ok=True))
         sid = str(body.get("id") or "")
         if p == "/dash/api/skill/activation":
             return _json(200, {"ok": True, "id": sid,

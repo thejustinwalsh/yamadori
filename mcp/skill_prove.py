@@ -61,13 +61,22 @@ WHAT A PROOF IS
      injects it (skill_select._render_turn: the body under the craft header,
      appended to the user turn by message_text.append_text), with the same
      `seed` and the same sampling and budget fields on both bodies.
-  4. THE DECISION, paired per probe and per check: WORSE when a check that
-     passed WITHOUT fails WITH. Any worse -> quarantine. Otherwise arm: a
+  4. THE DECISION, paired per probe and per check: a check that passed
+     WITHOUT and fails WITH is FLAGGED. A flag is one sample, so the probe
+     is run again (THE REPEAT RULE, below) and the check is WORSE only if
+     the worse result repeats. Any worse -> quarantine. Otherwise arm: a
      check that failed without and passed with is `better`; none either way
      is a tie, recorded "no measurable gain". No threshold (operator: "do
      not invent a threshold"). A side that ended on the token limit is a
      budget event, never an answer (model.BudgetEvent): that probe is
      `undecided`.
+
+  reprove    a version PROVE quarantined as worse under an earlier rule (a
+             record without `rule`): `reprove_quarantined` enqueues it as
+             an idle-gated gpu-lane job (payload `reprove`); the proof runs
+             again under the repeat rule, and only a CONFIRMED worse keeps
+             it quarantined -- anything else serves it again
+             (skills.rearm), `unproven` leaves it quarantined.
 
 THE RECORD: `validate["prove"]` until skill_versions has its own `prove`
 column (skills._ADDED / _JSON_V); `record_of` reads either. Per probe: the
@@ -117,6 +126,46 @@ BACKLOG = os.environ.get("YAMADORI_SKILL_PROVE_BACKLOG", "1") != "0"
 PROVED = ("worse", "better", "tie", "unproven", "undecided")
 PAIR_WORSE, PAIR_BETTER, PAIR_SAME, PAIR_NOT_RUN = (
     "worse", "better", "same", "not_run")
+
+# THE REPEAT RULE (operator, 2026-10-06: "fix the quarantine rule"; the repo's
+# own rule, docs/PROTOCOL.md: "If a measurement does not survive a repeat, it
+# is not a result"). Until 2026-10-06 ONE pair per probe decided. Measured on
+# the local library (index/jobs.sqlite3, read 2026-10-06, n=114 quarantined
+# skills): 107 were quarantined by a proof of that kind, all backlog proofs,
+# 100 of them on 2 probes, 67 of the worse checks a `parse` check -- a
+# syntax error in one WITH sample.
+#
+# THE RULE. A check that passed WITHOUT and failed WITH (a FLAG) is run again:
+# its probe's pair is generated REPEATS more times, each time on a NEW seed
+# shared by both sides (the same seed on the same prompt gives the same text,
+# so a repeat on the old seed repeats nothing). The check is WORSE only if
+# WITH is worse than WITHOUT on it in a strict majority (more than half) of
+# its runs: the flagging run plus the repeats. A repeat that ends on the
+# token limit, or that no check decided, is not a worse result. Only a probe
+# with a flag is repeated.
+#
+# WHY REPEATS = 1 (derived; not measured). A generation fails a check with
+# some probability q even when the skill changes nothing, and the two sides
+# are independent draws (the WITH prompt differs). So a skill that changes
+# nothing is FLAGGED on a check with probability w = q(1-q) <= 1/4 (q = 1/2),
+# and a skill has probes x checks of them. REPEATS = 0 is the old rule: it
+# quarantines such a skill with probability w. With REPEATS = 1 there are two
+# runs and a majority of two is both, so it is quarantined with probability
+# w^2 (<= 1/16: at least 4x fewer false quarantines, and more at smaller w);
+# a tie, one worse and one not, quarantines nothing. REPEATS = 1 is the
+# smallest count that is a repeat at all. Two repeats (3 runs, worse in 2 of
+# 3) would be WEAKER: the flagging run is selected for being worse, so it
+# counts as a free vote and either repeat confirms: 2w^2 - w^3 > w^2. Three
+# repeats (4 runs, worse in 3) is stricter, 3w^3 - 2w^4, at three times the
+# generations; the operator may raise REPEATS. The price of any repeat is
+# recall: a skill that is really worse is confirmed with probability about
+# (1 - q0) q1 per repeat, where q0 and q1 are its failure rates without and
+# with it, so one that is worse only some of the time may arm. The repeat's
+# own sample count (n=1 per flag) is the evidence; no threshold is added.
+REPEATS = 1
+# Stamped on every record this rule decided: the re-prove path
+# (`reprove_backlog`) selects quarantines whose record lacks it.
+RULE = "repeat/1"
 
 # ---------------------------------------------------------------------------
 # Injectables. Tests replace them; the defaults are the stack's.
@@ -827,12 +876,17 @@ def _generate(body: dict) -> tuple[str | None, str, float]:
 
 
 def run_probe(sid: str, v: int, probe: dict, row: dict,
-              packages: list[str], beat=None, *, attempt: int = 1) -> dict:
+              packages: list[str], beat=None, *, attempt: int = 1,
+              repeat: int = 0) -> dict:
     """One pair. `attempt` 2 is the retry of an undecided probe: the job's
     full answer room (full_answer_room) and a second seed, the same on both
-    sides (the first pair's seed would give the first pair back)."""
+    sides (the first pair's seed would give the first pair back). `repeat`
+    k >= 1 is the k-th REPEAT of a flagged probe (THE REPEAT RULE): the same
+    task and answer room as the run it repeats, a seed of its own, the same
+    on both sides."""
     task = probe["task"]
-    seed = seed_of(sid, v, task if attempt == 1 else f"{task}#{attempt}")
+    base = task if attempt == 1 else f"{task}#{attempt}"
+    seed = seed_of(sid, v, base if not repeat else f"{base}#r{repeat}")
     answer = full_answer_room(task, row) if attempt > 1 else None
     a, b, equalised = bodies(task, row, seed, answer=answer)
     res: dict = {"probe_sha256": _sha(task), "excerpt": task[:160],
@@ -840,6 +894,8 @@ def run_probe(sid: str, v: int, probe: dict, row: dict,
                  "language": probe["language"], "seed": seed,
                  "attempt": attempt, "max_tokens": a.get("max_tokens"),
                  "seconds": {}, "checks": []}
+    if repeat:
+        res["repeat"] = repeat
     if equalised:
         res["equalised"] = equalised
     answers = {}
@@ -895,33 +951,92 @@ def _rename(res: dict) -> dict:
 # ---------------------------------------------------------------------------
 # 4. The decision.
 # ---------------------------------------------------------------------------
+def confirm(sid: str, v: int, derived: list[dict], probes: list[dict],
+            row: dict, packages: list[str], beat=None) -> list[dict]:
+    """THE REPEAT RULE. `probes` are the run results of `derived` (the same
+    order). Every probe with a worse check is run REPEATS more times on fresh
+    seeds (both sides, one seed per run); each flagged check keeps `runs`
+    {pairs, worse, of} and stays worse only when worse in a strict majority
+    of its runs. A flag that does not repeat becomes `same` with
+    `unconfirmed` set, its first result kept as `flagged`. Returns the
+    probes, changed in place; each repeated probe carries `repeats` (the
+    compact records of its repeat runs)."""
+    if REPEATS < 1:
+        return probes
+    for d, p in zip(derived, probes):
+        flagged = [c for c in p["checks"] if c["pair"] == PAIR_WORSE]
+        if not flagged:
+            continue
+        runs = [run_probe(sid, v, d, row, packages, beat,
+                          attempt=int(p.get("attempt") or 1), repeat=k)
+                for k in range(1, REPEATS + 1)]
+        p["repeats"] = [{
+            "repeat": r["repeat"], "seed": r["seed"],
+            "seconds": r["seconds"], "decided": r.get("decided"),
+            "checks": [{k: c.get(k) for k in ("id", "kind", "pair", "without",
+                                              "with", "why_without",
+                                              "why_with")}
+                       for c in r["checks"]]} for r in runs]
+        for c in flagged:
+            pairs = [PAIR_WORSE]
+            for r in runs:
+                m = next((x for x in r["checks"] if x.get("id") == c.get("id")
+                          and x["kind"] == c["kind"]), None)
+                pairs.append(m["pair"] if m else PAIR_NOT_RUN)
+            n_worse = pairs.count(PAIR_WORSE)
+            c["runs"] = {"pairs": pairs, "worse": n_worse, "of": len(pairs)}
+            if n_worse * 2 > len(pairs):
+                c["confirmed"] = True
+            else:
+                c["flagged"] = {k: c.get(k) for k in ("without", "with",
+                                                      "why_without",
+                                                      "why_with")}
+                c["unconfirmed"] = True
+                c["pair"] = PAIR_SAME
+    return probes
+
+
 def decide(probes: list[dict]) -> dict:
-    """{verdict, worse, better, why}: paired, per probe and per check."""
-    worse, better, same = [], [], 0
+    """{verdict, worse, better, why}: paired, per probe and per check. A
+    check `confirm` did not confirm is listed in `unconfirmed`, and counts as
+    the same on both sides."""
+    worse, better, same, unconfirmed = [], [], 0, []
     for n, p in enumerate(probes, 1):
         for c in p["checks"]:
             ref = {"probe": n, "check": c.get("id"), "kind": c["kind"],
                    "judge": c.get("judge"), "pattern": c.get("pattern"),
                    "without": c.get("why_without"),
                    "with": c.get("why_with")}
+            if c.get("runs"):
+                ref["runs"] = c["runs"]
+            if c.get("unconfirmed"):
+                fl = c.get("flagged") or {}
+                unconfirmed.append(dict(ref, without=fl.get("why_without"),
+                                        **{"with": fl.get("why_with")}))
             if c["pair"] == PAIR_WORSE:
                 worse.append(ref)
             elif c["pair"] == PAIR_BETTER:
                 better.append(ref)
             elif c["pair"] == PAIR_SAME:
                 same += 1
+    extra = {"unconfirmed": unconfirmed} if unconfirmed else {}
+    note = (f"; {len(unconfirmed)} flagged check(s) did not repeat "
+            "(unconfirmed)" if unconfirmed else "")
     if worse:
-        return {"verdict": "worse", "worse": worse, "better": better,
-                "why": f"{len(worse)} check(s) that passed without the skill "
-                       "failed with it"}
+        return dict({"verdict": "worse", "worse": worse, "better": better,
+                     "why": f"{len(worse)} check(s) that passed without the "
+                            "skill failed with it, in a majority of their "
+                            "runs" + note}, **extra)
     if better:
-        return {"verdict": "better", "worse": [], "better": better,
-                "why": f"{len(better)} check(s) that failed without the "
-                       "skill passed with it; none got worse"}
+        return dict({"verdict": "better", "worse": [], "better": better,
+                     "why": f"{len(better)} check(s) that failed without the "
+                            "skill passed with it; none got worse" + note},
+                    **extra)
     if same:
-        return {"verdict": "tie", "worse": [], "better": [],
-                "gain": "no measurable gain",
-                "why": f"{same} paired check(s), each the same on both sides"}
+        return dict({"verdict": "tie", "worse": [], "better": [],
+                     "gain": "no measurable gain",
+                     "why": f"{same} paired check(s), each the same on both "
+                            "sides" + note}, **extra)
     return {"verdict": "unproven", "worse": [], "better": [],
             "why": "no check decided on both sides (a budget event, or "
                    "nothing could be checked)",
@@ -961,7 +1076,11 @@ def prove(sid: str, v: int, ver: dict, *, mode: str = "pipeline",
     pk = _packages(sid, ver.get("classify") or {})
     _PIN.update(pin_of(sid, ver, pk))
     rec["type_pin"] = dict(_PIN)
+    rec.update(rule=RULE if REPEATS >= 1 else "one-sample",
+               repeats=REPEATS)
     probes = [run_probe(sid, v, p, row, pk, beat) for p in d["probes"]]
+    # THE REPEAT RULE: a flagged check is run again before it counts.
+    confirm(sid, v, d["probes"], probes, row, pk, beat)
     rec["probes"] = probes
     if len(probes) < MIN_PROBES:
         rec["probes_short"] = (f"{len(probes)} probe(s), under the operator's "
@@ -980,12 +1099,15 @@ def prove(sid: str, v: int, ver: dict, *, mode: str = "pipeline",
         # recorded as the retry (the latest attempt).
         probes = [a if a.get("decided") else b
                   for a, b in zip(probes, again)]
+        confirm(sid, v, d["probes"], probes, row, pk, beat)
         rec["probes"] = probes
         dec = decide(probes)
     rec.update(dec)
     rec["seconds"] = round(time.time() - t0, 3)
     rec["generation_seconds"] = round(sum(
-        sum(p["seconds"].values()) for p in probes), 3)
+        sum(p["seconds"].values()) + sum(
+            sum(r["seconds"].values()) for r in p.get("repeats") or [])
+        for p in probes), 3)
     return rec
 
 
@@ -1043,8 +1165,11 @@ def quarantine_reason(rec: dict) -> str:
     parts = []
     for w in (rec.get("worse") or [])[:4]:
         what = w["kind"] + (f" {w['pattern']}" if w.get("pattern") else "")
+        runs = w.get("runs") or {}
         parts.append(f"probe {w['probe']} {what}: without {w['without']!r}; "
-                     f"with {w['with']!r}")
+                     f"with {w['with']!r}"
+                     + (f"; worse in {runs['worse']} of {runs['of']} runs"
+                        if runs else ""))
     return ("prove: WITH the skill a check that passed without it failed ("
             + "; ".join(parts) + ") | retryable: no | remedy (operator): "
             "read validate.prove (or the prove record) for the probes, edit "
@@ -1070,6 +1195,8 @@ def handle_prove(job: dict, ctx, *, inline: bool = False) -> dict:
     import skill_pipeline
     p = job.get("payload") or {}
     backlog = bool(p.get("backlog"))
+    if p.get("reprove"):
+        return _handle_reprove(job, ctx)
     if backlog:
         t = _backlog_target(p)
         if t is None:
@@ -1113,6 +1240,148 @@ def handle_prove(job: dict, ctx, *, inline: bool = False) -> dict:
         return dict(_x(rec), quarantined=True)
     store(sid, v, rec)
     return _x(rec)
+
+
+# ---------------------------------------------------------------------------
+# The re-prove: versions quarantined as worse by the one-sample rule.
+# ---------------------------------------------------------------------------
+def _reprove_ok(s: dict | None, ver: dict | None, v: int,
+                include_unproven: bool = False) -> str | None:
+    """Why a version is NOT a re-prove target (None: it is). A target is the
+    skill's latest version, quarantined by PROVE (its reason says so), whose
+    record has a verdict `worse` (or, with include_unproven, `unproven`)
+    and was not decided by this rule (no `rule`), of a skill that is enabled
+    and not archived, and that has text to inject."""
+    if s is None or ver is None:
+        return "no such skill version"
+    if int(s.get("latest_version") or 0) != int(v):
+        return "not the skill's latest version"
+    if ver.get("state") != "quarantined":
+        return f"the version is {ver.get('state')}, not quarantined"
+    if not str(ver.get("reason") or "").startswith("prove:"):
+        return "not quarantined by prove"
+    if not (ver.get("text") or "").strip():
+        return "the version has no text"
+    if not s.get("enabled", True) or s.get("status") == "archived":
+        return "the skill is disabled or archived"
+    rec = record_of(ver)
+    if rec.get("rule") == RULE:
+        return f"already decided by {RULE}"
+    ok = ("worse", "unproven") if include_unproven else ("worse",)
+    if rec.get("verdict") not in ok:
+        return f"the prove verdict is {rec.get('verdict')!r}"
+    return None
+
+
+def reprove_targets(include_unproven: bool = False
+                    ) -> tuple[list[dict], dict]:
+    """(rows, skipped): every quarantined skill whose latest version PROVE
+    quarantined under an earlier rule (see `_reprove_ok`) and that has no
+    live prove job. Read-only. Sorted by skill id for a stable order."""
+    live = _live_jobs()
+    rows, skipped = [], {"live_job": 0, "not_target": 0}
+    con = skills._db()
+    try:
+        cands = [r["id"] for r in con.execute(
+            "SELECT id FROM skills WHERE status='quarantined' ORDER BY id")]
+    finally:
+        con.close()
+    for sid in cands:
+        s = skills.get(sid)
+        v = int((s or {}).get("latest_version") or 0)
+        ver = skills.version(sid, v)
+        if _reprove_ok(s, ver, v, include_unproven) is not None:
+            skipped["not_target"] += 1
+            continue
+        if live.get(sid):
+            skipped["live_job"] += 1
+            continue
+        rec = record_of(ver)
+        rows.append({"skill": sid, "version": v, "name": s.get("name"),
+                     "verdict": rec.get("verdict"),
+                     "probes": len(rec.get("probes") or [])})
+    return rows, skipped
+
+
+def reprove_quarantined(limit: int | None = None, *,
+                        include_unproven: bool = False,
+                        dry_run: bool = False) -> dict:
+    """THE re-prove command: enqueue one idle-gated gpu-lane prove job
+    (payload `reprove`) for every skill `reprove_targets` lists. Each runs
+    the proof again under the repeat rule when the stack is idle
+    (worker.run_one defers it while busy, mcp/idle.py); `_handle_reprove`
+    then serves the skill again or keeps it quarantined. `dry_run` lists and
+    enqueues nothing. Idempotent: a skill with a live job, or already
+    decided under this rule, is not enqueued again."""
+    rows, skipped = reprove_targets(include_unproven)
+    if limit is not None:
+        rows = rows[:max(0, int(limit))]
+    q, lane = _queue()
+    out = []
+    for r in rows:
+        if dry_run:
+            out.append(dict(r))
+            continue
+        jid = jobs.add(q, {"skill": r["skill"], "version": r["version"],
+                           "stage": "prove", "reprove": True, "idle": True},
+                       lane=lane, dataset=f"skill:{r['skill']}",
+                       stage="prove")
+        out.append(dict(r, job=jid))
+    return {"dry_run": dry_run, "rule": RULE, "repeats": REPEATS,
+            ("would_enqueue" if dry_run else "enqueued"): out,
+            "skipped": skipped, "estimate": reprove_estimate(len(rows))}
+
+
+def reprove_estimate(n: int) -> dict:
+    """What a re-prove costs, from the code's own counts: per skill 2
+    generations per probe (both sides) plus 2 x REPEATS more per probe with a
+    flagged check. The seconds are the MEASURED proofs' (`estimate`), else
+    unknown; no figure of ours."""
+    est = estimate()
+    out: dict = {"skills": n, "generations": (
+        f"2 x probes, plus 2 x {REPEATS} per probe with a flagged check")}
+    if est.get("mean_seconds"):
+        out["seconds_per_proof_one_sample"] = est["mean_seconds"]
+        out["lower_bound_seconds"] = round(est["mean_seconds"] * n, 1)
+        out["basis"] = ("one-sample proofs' mean seconds x skills: a LOWER "
+                        "bound; each flagged probe adds its pair again")
+    else:
+        out["basis"] = "no proof measured yet: unknown until the first runs"
+    return out
+
+
+def _handle_reprove(job: dict, ctx) -> dict:
+    p = job.get("payload") or {}
+    sid, v = p.get("skill"), p.get("version")
+    s = skills.get(sid) if sid else None
+    ver = skills.version(sid, v) if s and v else None
+    why = _reprove_ok(s, ver, int(v or 0), include_unproven=True)
+    if why:
+        return {"skipped": f"reprove of {sid} v{v}: {why}"}
+    v = int(v)
+    rec = prove(sid, v, ver, mode="reprove", beat=getattr(ctx, "beat", None))
+    old = record_of(ver)
+    rec["reproved"] = {"from": {k: old.get(k) for k in
+                                ("verdict", "mode", "at", "seconds")},
+                       "reason": str(ver.get("reason") or "")[:300]}
+    if rec["verdict"] == "worse":
+        skills.quarantine(sid, v, quarantine_reason(rec),
+                          **_fields(sid, v, rec))
+        return dict(_x(rec), quarantined=True)
+    if rec["verdict"] in ("unproven", "not_run"):
+        # No decided proof: it stays quarantined, its record updated.
+        reason = (unproven_reason(rec) if rec["verdict"] == "unproven"
+                  else str(ver.get("reason")))
+        skills.quarantine(sid, v, reason, **_fields(sid, v, rec))
+        return dict(_x(rec), quarantined=True)
+    skills.rearm(sid, v, **_fields(sid, v, rec))
+    try:
+        import skill_select
+        skill_select.refresh_triggers()
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  prove: trigger index not rebuilt after rearm: "
+              f"{type(e).__name__}: {e}"[:200], file=sys.stderr, flush=True)
+    return dict(_x(rec), rearmed=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1238,8 +1507,21 @@ if __name__ == "__main__":
     ap.add_argument("--estimate", action="store_true")
     ap.add_argument("--enqueue", type=int, metavar="N",
                     help="enqueue N idle-gated backlog proofs")
+    ap.add_argument("--reprove", action="store_true",
+                    help="enqueue idle-gated re-proofs of every skill PROVE "
+                    "quarantined under the one-sample rule (repeat rule)")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="with --reprove: at most N skills")
+    ap.add_argument("--include-unproven", action="store_true",
+                    help="with --reprove: also the `unproven` quarantines")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="with --reprove: list, enqueue nothing")
     a = ap.parse_args()
-    if a.enqueue:
+    if a.reprove:
+        print(json.dumps(reprove_quarantined(
+            a.limit, include_unproven=a.include_unproven,
+            dry_run=a.dry_run), indent=1))
+    elif a.enqueue:
         print(json.dumps(enqueue_backlog(limit=a.enqueue), indent=1))
     else:
         print(json.dumps(estimate(), indent=1))

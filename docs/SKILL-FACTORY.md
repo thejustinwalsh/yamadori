@@ -738,8 +738,13 @@ package is "not run": the box has no pip; a DO's code present, a DO NOT's
 absent; a model judge only when no code check decides, labelled `judge:
 model`); the served model answers each WITHOUT and WITH the skill injected
 exactly as the selector injects it, the same seed and sampling per pair. A
-check that passed without and failed with QUARANTINES the version with the
-evidence; a tie arms with "no measurable gain"; no threshold. A proof in
+check that passed without and failed with is FLAGGED, and a flag is one
+sample: the probe is run again on a NEW seed (the same on both sides) and the
+check is worse only if worse in a strict majority of its runs (THE REPEAT RULE,
+2026-10-06, `skill_prove.REPEATS` = 1, so two runs and a majority of two; the
+derivation is in that constant's comment). A confirmed worse QUARANTINES the
+version with the evidence and the runs; an unconfirmed flag is recorded in the
+record's `unconfirmed`; a tie arms with "no measurable gain"; no threshold. A proof in
 which no check decided (every probe on the token limit, or nothing
 checkable, or no probe derivable) is retried ONCE -- each probe again with
 the job's full answer room and a second seed, the same on both sides -- and
@@ -1024,6 +1029,17 @@ the latest version is marked and the skill disarmed.
 its path; refused for an armed, superseded or decomposed version -- edit
 instead). For a licence supplied after the fact, edited tests, or a failure
 that has passed.
+
+### POST /dash/api/skill/reprove
+
+`{"limit"?, "include_unproven"?, "dry_run"?}`: enqueue an idle-gated gpu-lane
+prove job (payload `reprove`) for every skill whose latest version PROVE
+quarantined as `worse` under the one-sample rule (a record with no `rule`;
+not the activation-test quarantines). Each job proves it again under THE
+REPEAT RULE and serves it again unless the worse result repeats. `dry_run`
+lists and enqueues nothing. Same as `python mcp/skill_prove.py --reprove
+[--limit N] [--include-unproven] [--dry-run]`. Returns `{enqueued |
+would_enqueue, skipped, estimate, rule, repeats}`.
 
 ### POST /dash/api/skill/licence
 

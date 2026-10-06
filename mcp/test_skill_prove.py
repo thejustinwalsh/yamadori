@@ -30,6 +30,14 @@ pipeline." What this gates:
   7. THE BACKLOG: newest-updated first, a skill proved at its served
      version skipped, a live job skipped, jobs idle-gated on the gpu lane;
      a backlog proof that finds WORSE disarms the skill.
+  9. THE REPEAT RULE (operator, 2026-10-06): a flagged check (passed
+     without, failed with) is run again on fresh seeds, the same on both
+     sides, and quarantines only if worse in a strict majority of its runs;
+     only a probe with a flag is repeated.
+ 10. THE RE-PROVE: a skill PROVE quarantined under the one-sample rule is
+     listed, enqueued idle-gated on the gpu lane, and either served again
+     (the worse result did not repeat) or kept quarantined (it did); the
+     activation-test quarantines are not touched.
 
 Every store is a temp path set BEFORE any mcp module is imported
 (mcp/offline_stores.py).
@@ -623,7 +631,8 @@ def test_judge_is_the_last_resort():
     js = [c for p in rec.get("probes") or [] for c in p["checks"]]
     check(js and all(c["kind"] == "judge" and c["judge"] == "model"
                      and c.get("caveat") for c in js)
-          and asked.count(P.JUDGE_SYSTEM) == 2 * len(rec["probes"]),
+          and asked.count(P.JUDGE_SYSTEM) == 2 * len(rec["probes"]) * (
+              1 + P.REPEATS),
           "[judge] no code check can decide a prose probe: one model judge "
           "per answer, labelled judge: model with its caveat", js[:1])
     check(out.get("prove") == "worse",
@@ -794,6 +803,268 @@ def test_templates():
     proh = len(re.findall(r"\b(?:NOT|never|do not)\b", P.PROBE_SYSTEM))
     check(proh <= 2, "[templates] at most two prohibitions in the probe "
           "template (AGENTS.md)", proh)
+
+
+# ===========================================================================
+# 9. the repeat rule
+# ===========================================================================
+class SeedChat(FakeChat):
+    """WITH answers `with_` only when `bad(body)` says so, else `without`'s
+    answer: a skill whose failure is a flake of particular seeds."""
+
+    def __init__(self, without, with_, bad):
+        super().__init__(without, with_)
+        self.bad = bad
+
+    def __call__(self, body):
+        self.bodies.append(json.loads(json.dumps(body)))
+        user = body["messages"][-1]["content"]
+        on = skill_prompts.CRAFT_HEADER in user
+        text = self.with_ if (on and self.bad(body)) else self.without
+        return {"choices": [{"message": {"content": text},
+                             "finish_reason": "stop"}],
+                "usage": {"completion_tokens": 10}}
+
+
+def _first_seeds(sid: str) -> dict[str, int]:
+    """{task: the seed of its first (flagging) run}."""
+    d = P.derive(sid, skills.version(sid, 1), use_model=False)
+    return {p["task"]: P.seed_of(sid, 1, p["task"]) for p in d["probes"]}
+
+
+def test_a_flag_that_does_not_repeat_quarantines_nothing():
+    reset_store()
+    sid = make_skill("koota-flake")
+    first = set(_first_seeds(sid).values())
+    chat = SeedChat(GOOD_TS, BROKEN_TS, lambda b: b["seed"] in first)
+    with with_fakes(chat):
+        out = P.handle_prove(job_for(sid), Ctx())
+    rec = P.record_of(skills.version(sid, 1))
+    n = len(rec["probes"])
+    check(out.get("prove") == "tie" and not out.get("quarantined")
+          and rec.get("unconfirmed") and not rec.get("worse"),
+          "[repeat] WITH worse on the first sample only: not quarantined, "
+          "the flags recorded as unconfirmed", (out, rec.get("why")))
+    check(len(chat.bodies) == 2 * n + 2 * n * P.REPEATS,
+          "[repeat] every flagged probe is run again: both sides, REPEATS "
+          "more times", (len(chat.bodies), n))
+    pairs = list(zip(chat.bodies[0::2], chat.bodies[1::2]))
+    seeds = [x["seed"] for x, _y in pairs]
+    check(all(x["seed"] == y["seed"] for x, y in pairs)
+          and len(set(seeds)) == len(seeds),
+          "[repeat] each repeat uses a NEW seed, the same on both sides "
+          "(the old seed would give the old text back)", seeds)
+    u = rec["unconfirmed"][0]
+    check(u["runs"]["worse"] == 1 and u["runs"]["of"] == 1 + P.REPEATS
+          and rec["rule"] == P.RULE and rec["repeats"] == P.REPEATS,
+          "[repeat] the record carries the runs of a flag, the rule and "
+          "the repeat count", (u.get("runs"), rec.get("rule")))
+    check(all(len(p.get("repeats") or []) == P.REPEATS and
+              all(r["seed"] != p["seed"] for r in p["repeats"])
+              for p in rec["probes"]),
+          "[repeat] each repeated probe keeps its repeat runs' seeds and "
+          "checks")
+    check(skills.version(sid, 1)["state"] == "running",
+          "[repeat] the version goes on (the pipeline arms it)")
+
+
+def test_a_flag_that_repeats_quarantines_with_the_runs():
+    reset_store()
+    sid = make_skill("koota-repeats")
+    chat = SeedChat(GOOD_TS, BROKEN_TS, lambda b: True)
+    with with_fakes(chat):
+        out = P.handle_prove(job_for(sid), Ctx())
+    rec = P.record_of(skills.version(sid, 1))
+    s = skills.get(sid)
+    check(out.get("prove") == "worse" and out.get("quarantined")
+          and rec["worse"] and all(
+              w["runs"]["worse"] == w["runs"]["of"] == 1 + P.REPEATS
+              for w in rec["worse"]),
+          "[repeat] a worse result that repeats QUARANTINES, each worse "
+          "check with its runs", (out, rec["worse"][:1]))
+    check("worse in 2 of 2 runs" in (s["reason"] or ""),
+          "[repeat] the quarantine reason says how often it was worse",
+          s["reason"])
+
+
+def test_a_majority_of_the_runs_decides():
+    """REPEATS = 2: three runs, worse in a strict majority (2 of 3)."""
+    reset_store()
+    sid = make_skill("koota-majority")
+    first = _first_seeds(sid)
+    saved = P.REPEATS
+    try:
+        P.REPEATS = 2
+        # worse in the flagging run only: 1 of 3 -> unconfirmed
+        a = set(first.values())
+        with with_fakes(SeedChat(GOOD_TS, BROKEN_TS,
+                                 lambda b: b["seed"] in a)):
+            out1 = P.handle_prove(job_for(sid), Ctx())
+        # worse in the flagging run and the first repeat: 2 of 3 -> worse
+        reset_store()
+        sid = make_skill("koota-majority")
+        first = _first_seeds(sid)
+        b_seeds = set(first.values()) | {
+            P.seed_of(sid, 1, f"{t}#r1") for t in first}
+        with with_fakes(SeedChat(GOOD_TS, BROKEN_TS,
+                                 lambda b: b["seed"] in b_seeds)):
+            out2 = P.handle_prove(job_for(sid), Ctx())
+        rec2 = P.record_of(skills.version(sid, 1))
+    finally:
+        P.REPEATS = saved
+    check(out1.get("prove") == "tie",
+          "[repeat] 1 worse of 3 runs is not a majority", out1)
+    check(out2.get("prove") == "worse" and all(
+        w["runs"]["worse"] == 2 and w["runs"]["of"] == 3
+        for w in rec2["worse"]),
+          "[repeat] 2 worse of 3 runs is a majority", rec2.get("worse"))
+
+
+def test_only_a_probe_with_a_flag_is_repeated():
+    reset_store()
+    sid = make_skill("koota-one-flag")
+    tasks = list(_first_seeds(sid))
+    only = tasks[0]
+    chat = SeedChat(GOOD_TS, BROKEN_TS, lambda b: only in
+                    (b["messages"][-1]["content"] or ""))
+    with with_fakes(chat):
+        out = P.handle_prove(job_for(sid), Ctx())
+    n = len(tasks)
+    check(len(chat.bodies) == 2 * n + 2 * P.REPEATS
+          and out.get("prove") == "worse",
+          "[repeat] one probe flagged: only that probe is run again",
+          (len(chat.bodies), n))
+
+
+# ===========================================================================
+# 10. the re-prove
+# ===========================================================================
+def _quarantined_by_one_sample(name: str) -> str:
+    """A skill the backlog's proof quarantined as worse, as the library's
+    107 were: its record has no `rule`."""
+    sid = make_skill(name, stage="validate", arm=True)
+    saved = P.REPEATS
+    try:
+        P.REPEATS = 0           # the old one-sample rule
+        with with_fakes(FakeChat(GOOD_TS, BROKEN_TS)):
+            P.handle_prove(job_for(sid, backlog=True), Ctx())
+    finally:
+        P.REPEATS = saved
+    rec = P.record_of(skills.version(sid, 1))
+    assert skills.get(sid)["status"] == "quarantined" and rec["verdict"] == \
+        "worse", (rec.get("verdict"), rec.get("rule"))
+    # The library's records were written before the rule existed.
+    rec.pop("rule", None)
+    rec.pop("repeats", None)
+    P.store(sid, 1, rec)
+    return sid
+
+
+def test_reprove_lists_and_enqueues_exactly_the_prove_quarantines():
+    reset_store()
+    flake = _quarantined_by_one_sample("reprove-flake")
+    real = _quarantined_by_one_sample("reprove-real")
+    act = make_skill("reprove-activation", stage="validate", arm=True)
+    skills.quarantine(act, 1, "activation tests: should-case 2 did not "
+                      "select it | retryable: no")
+    fine = make_skill("reprove-armed", stage="validate", arm=True)
+    rows, skipped = P.reprove_targets()
+    check(sorted(r["skill"] for r in rows) == sorted([flake, real])
+          and skipped["not_target"] >= 1,
+          "[reprove] the targets are the skills PROVE quarantined as worse "
+          "under the old rule: not an activation-test quarantine, not an "
+          "armed skill", ([r["name"] for r in rows], skipped))
+    dry = P.reprove_quarantined(dry_run=True)
+    check(len(dry["would_enqueue"]) == 2 and not jobs.listing(limit=50),
+          "[reprove] a dry run lists and enqueues nothing", list(dry))
+    got = P.reprove_quarantined()
+    js = {j["id"]: j for j in jobs.listing(limit=50)}
+
+    def payload(e):
+        x = js[e["job"]]["payload"]
+        return x if isinstance(x, dict) else json.loads(x or "{}")
+    pl = [payload(e) for e in got["enqueued"]]
+    check(len(got["enqueued"]) == 2 and all(
+        js[e["job"]]["lane"] == "gpu" and js[e["job"]]["queue"] == P.JOB[0]
+        for e in got["enqueued"]) and all(
+        x.get("reprove") and x.get("idle") and not x.get("backlog")
+        for x in pl),
+          "[reprove] one idle-gated gpu-lane job per target, payload "
+          "reprove", pl)
+    again = P.reprove_quarantined()
+    check(not again["enqueued"] and again["skipped"]["live_job"] == 2,
+          "[reprove] running it again enqueues nothing while the jobs live",
+          again["skipped"])
+    check(skills.get(fine)["status"] == "armed",
+          "[reprove] enqueueing touches no skill")
+    try:
+        skills.rearm(act, 1)
+        refused = False
+    except ValueError:
+        refused = True
+    check(refused and skills.get(act)["status"] == "quarantined",
+          "[reprove] skills.rearm refuses a version a prove did not "
+          "quarantine (an activation-test quarantine stays)")
+    import dash_skills
+    code, _ct, raw = dash_skills.handle_post("/dash/api/skill/reprove",
+                                             {"dry_run": True})
+    body = json.loads(raw)
+    check(code == 200 and body.get("ok") and not body.get("enqueued")
+          and body["skipped"]["live_job"] == 2,
+          "[reprove] POST /dash/api/skill/reprove is the same call (dry "
+          "run: nothing enqueued)", body.get("skipped"))
+
+
+def test_reprove_serves_a_flake_again_and_keeps_a_real_one_out():
+    reset_store()
+    flake = _quarantined_by_one_sample("reprove-flake")
+    real = _quarantined_by_one_sample("reprove-real")
+    # `flake`'s WITH answers fail only on the seeds of the first sample (the
+    # old record's); `real`'s fail on every seed.
+    seeds_flake = set(_first_seeds(flake).values())
+    chat_flake = SeedChat(GOOD_TS, BROKEN_TS, lambda b: b["seed"] in
+                          seeds_flake)
+    with with_fakes(chat_flake):
+        out = P.handle_prove(job_for(flake, reprove=True, idle=True), Ctx())
+    s = skills.get(flake)
+    rec = P.record_of(skills.version(flake, 1))
+    check(out.get("rearmed") and s["status"] == "armed"
+          and s["served_version"] == 1 and rec["rule"] == P.RULE
+          and rec["mode"] == "reprove" and rec["reproved"]["from"]["verdict"]
+          == "worse" and skills.version(flake, 1)["state"] == "armed"
+          and any(x["id"] == flake for x in skills.armed()),
+          "[reprove] the worse result did not repeat: the skill is SERVED "
+          "again, the record stamped with the rule and the old verdict",
+          (out, s["status"], rec.get("verdict")))
+    with with_fakes(SeedChat(GOOD_TS, BROKEN_TS, lambda b: True)):
+        out2 = P.handle_prove(job_for(real, reprove=True, idle=True), Ctx())
+    s2 = skills.get(real)
+    rec2 = P.record_of(skills.version(real, 1))
+    check(out2.get("prove") == "worse" and out2.get("quarantined")
+          and s2["status"] == "quarantined" and rec2["rule"] == P.RULE
+          and "2 of 2 runs" in (s2["reason"] or "")
+          and not any(x["id"] == real for x in skills.armed()),
+          "[reprove] the worse result repeated: it stays quarantined, with "
+          "the runs in the reason", (out2, s2["reason"]))
+    rows, _ = P.reprove_targets()
+    check(not rows, "[reprove] once decided under the rule a skill is not "
+          "a target again", [r["name"] for r in rows])
+    out3 = P.handle_prove(job_for(flake, reprove=True), Ctx())
+    check("skipped" in out3,
+          "[reprove] a job for a version that is no longer a target is "
+          "skipped, not re-run", out3)
+
+
+def test_reprove_leaves_an_unproven_one_quarantined():
+    reset_store()
+    sid = _quarantined_by_one_sample("reprove-budget")
+    with with_fakes(FakeChat(GOOD_TS, CAST_TS, finish=("stop", "length"))):
+        out = P.handle_prove(job_for(sid, reprove=True, idle=True), Ctx())
+    s = skills.get(sid)
+    check(out.get("prove") == "unproven" and s["status"] == "quarantined"
+          and "unproven" in (s["reason"] or ""),
+          "[reprove] a re-proof no check decided leaves it quarantined "
+          "(never armed)", (out, s["status"]))
 
 
 def main() -> int:
