@@ -7,15 +7,19 @@
 import * as stylex from '@stylexjs/stylex';
 import type { ReactNode } from 'react';
 import {
+  distText,
   MODEL_SLOT,
   part,
   perfPath,
   shortCard,
   spreadText,
+  tierLabel,
   tpsText,
   type GateFile,
   type ModelPerf,
   type Perf,
+  type TierGroup,
+  type TrafficName,
 } from '../api/stats';
 import { SERIES_PATH } from '../api/powerSeries';
 import { usePoll } from '../api/usePoll';
@@ -28,7 +32,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { KogoseiLive } from '../ui/KogoseiPanel';
 import { Panel } from '../ui/Panel';
 import { Chip, Label, layout, Stat } from '../ui/primitives';
-import { Counts, KV, Note, SectionError, useWindow, WindowPicker } from '../ui/StatsParts';
+import { Counts, KV, Note, SectionError, TrafficPicker, useTraffic, useWindow, WindowPicker } from '../ui/StatsParts';
 import { PollState, StateView } from '../ui/StateView';
 import { Table } from '../ui/Table';
 import { text } from '../ui/text';
@@ -36,10 +40,10 @@ import { text } from '../ui/text';
 const areas = stylex.create({
   page: {
     gridTemplateAreas: {
-      default: '"head" "speed" "ctx" "gpu" "live" "gates" "swaps" "left"',
-      [MQ.tablet]: '"head head head head head head" "speed speed speed speed speed speed" "ctx ctx ctx ctx ctx ctx" "gpu gpu gpu gpu gpu gpu" "live live live swaps swaps swaps" "gates gates gates gates gates gates" "left left left left left left"',
+      default: '"head" "tiers" "speed" "ctx" "gpu" "live" "gates" "swaps" "left"',
+      [MQ.tablet]: '"head head head head head head" "tiers tiers tiers tiers tiers tiers" "speed speed speed speed speed speed" "ctx ctx ctx ctx ctx ctx" "gpu gpu gpu gpu gpu gpu" "live live live swaps swaps swaps" "gates gates gates gates gates gates" "left left left left left left"',
       [MQ.desktop]:
-        '"head head head head head head head head head head head head" "speed speed speed speed speed speed speed ctx ctx ctx ctx ctx" "gpu gpu gpu gpu gpu gpu gpu gpu live live live live" "gates gates gates gates gates gates gates gates swaps swaps swaps swaps" "gates gates gates gates gates gates gates gates left left left left"',
+        '"head head head head head head head head head head head head" "tiers tiers tiers tiers tiers tiers tiers tiers tiers tiers tiers tiers" "speed speed speed speed speed speed speed ctx ctx ctx ctx ctx" "gpu gpu gpu gpu gpu gpu gpu gpu live live live live" "gates gates gates gates gates gates gates gates swaps swaps swaps swaps" "gates gates gates gates gates gates gates gates left left left left"',
     },
   },
 });
@@ -56,7 +60,7 @@ type D = { data: Perf | null; stale?: boolean };
 
 const slotOf = (model: string, i: number) => MODEL_SLOT[model] ?? Math.min(3, i);
 
-function Head({ d, w, setW, failure }: { d: Perf | null; w: ReturnType<typeof useWindow>[0]; setW: ReturnType<typeof useWindow>[1]; failure: Parameters<typeof PollState>[0]['failure'] }) {
+function Head({ d, w, setW, failure, path }: { path: string; d: Perf | null; w: ReturnType<typeof useWindow>[0]; setW: ReturnType<typeof useWindow>[1]; failure: Parameters<typeof PollState>[0]['failure'] }) {
   const ms = part(d?.models) ?? [];
   const st = d?.sources.stats;
   return (
@@ -67,7 +71,7 @@ function Head({ d, w, setW, failure }: { d: Perf | null; w: ReturnType<typeof us
         {d ? <Label>READ {clock(d.at)} · BUCKET {Math.round(d.window.bucket_s / 60)} MIN</Label> : null}
       </div>
       {!d ? (
-        <PollState path={perfPath(w)} failure={failure} />
+        <PollState path={path} failure={failure} />
       ) : (
         <div {...stylex.props(layout.grid4)}>
           {ms.slice(0, 3).map((m) => (
@@ -75,6 +79,68 @@ function Head({ d, w, setW, failure }: { d: Perf | null; w: ReturnType<typeof us
           ))}
           <Stat label="STATS STORE" value={st?.enabled ? 'RECORDING' : 'NOT HERE'} sub={`${st?.enabled ? '' : 'this process does not record · '}${n(st?.written ?? 0)} written · ${n(st?.dropped ?? 0)} dropped`} tone={st?.enabled ? 'moss' : 'rose'} />
         </div>
+      )}
+    </Panel>
+  );
+}
+
+/**
+ * TOK/S BY EFFORT TIER (2026-10-06): the different Qwen variants are one model
+ * behind the proxy, so speed is read per tier. Decode and prefill per tier x
+ * model x role from the stats store's generation rows, traffic filtered; the
+ * context size, warm and cold apart, under the table.
+ */
+export function TierPanel({ data, stale, traffic, setTraffic }: D & { traffic: TrafficName; setTraffic: (t: TrafficName) => void }) {
+  const bt = part(data?.by_tier);
+  const gens = bt?.generations;
+  const ctxRows = (bt?.rows ?? []).flatMap((g) => (g.by_ctx ?? []).map((c) => ({ g, c })));
+  return (
+    <Panel kanji="段" title="TOK/S BY EFFORT TIER" tag={bt ? `${traffic.toUpperCase()} · ${n(bt.rows.reduce((a, g) => a + g.n, 0))} GENERATIONS` : '—'} tagTone="moss" stale={stale} fill
+      sub="decode and prefill tok/s as llama-server reports them, per effort tier and model; prefill only where >= 2,048 tokens were processed, a cold one being the first after its model was loaded or read in">
+      <div {...stylex.props(s.head)}>
+        <TrafficPicker value={traffic} onChange={setTraffic} />
+        {gens ? <Label>{n(gens.client)} CLIENT · {n(gens.test)} TEST · {n(gens.unrecorded)} UNRECORDED IN THE WINDOW</Label> : null}
+      </div>
+      {!data ? null : !bt ? (
+        <SectionError what="by_tier" x={data.by_tier ?? { error: 'this server predates the by-tier table' }} />
+      ) : !bt.rows.length ? (
+        <StateView kind="empty" title={`no ${traffic === 'all' ? '' : `${traffic} `}generation with a tier in this window`}
+          detail="Rows recorded before 2026-10-06 carry no tier and no traffic class: they appear under ALL, as tier unrecorded." />
+      ) : (
+        <>
+          <Table
+            rows={bt.rows}
+            rowKey={(g: TierGroup) => `${g.tier}-${g.model}-${g.role}`}
+            columns={[
+              { key: 't', head: 'tier', cell: (g) => tierLabel(g.tier) },
+              { key: 'm', head: 'model', cell: (g) => g.model },
+              { key: 'r', head: 'role', cell: (g) => g.role },
+              { key: 'd', head: 'decode p50 · mean · p90', num: true, cell: (g) => distText(g.decode) },
+              { key: 'dn', head: 'decode n', num: true, cell: (g) => n(g.decode.n) },
+              { key: 'pw', head: 'prefill warm p50', num: true, cell: (g) => (g.prefill_warm.n ? `${tpsText(g.prefill_warm.p50)} (n ${n(g.prefill_warm.n)})` : '—') },
+              { key: 'pc', head: 'prefill cold p50', num: true, cell: (g) => (g.prefill_cold.n ? `${tpsText(g.prefill_cold.p50)} (n ${n(g.prefill_cold.n)})` : '—') },
+              { key: 'n', head: 'n', num: true, cell: (g) => n(g.n) },
+            ]}
+          />
+          <details>
+            <summary {...stylex.props(text.labelMd, text.primary, s.summary)}>BY CONTEXT SIZE · {bt.ctx_buckets.join(' / ')} TOKENS</summary>
+            <Table
+              tall
+              rows={ctxRows}
+              rowKey={(r) => `${r.g.tier}-${r.g.model}-${r.g.role}-${r.c.bucket}`}
+              columns={[
+                { key: 't', head: 'tier', cell: (r) => tierLabel(r.g.tier) },
+                { key: 'm', head: 'model', cell: (r) => `${r.g.model} · ${r.g.role}` },
+                { key: 'b', head: 'context', cell: (r) => r.c.bucket },
+                { key: 'd', head: 'decode p50 · mean · p90', num: true, cell: (r) => distText(r.c.decode) },
+                { key: 'dn', head: 'decode n', num: true, cell: (r) => n(r.c.decode.n) },
+                { key: 'pw', head: 'prefill warm p50', num: true, cell: (r) => (r.c.prefill_warm.n ? `${tpsText(r.c.prefill_warm.p50)} (n ${n(r.c.prefill_warm.n)})` : '—') },
+                { key: 'pc', head: 'prefill cold p50', num: true, cell: (r) => (r.c.prefill_cold.n ? `${tpsText(r.c.prefill_cold.p50)} (n ${n(r.c.prefill_cold.n)})` : '—') },
+              ]}
+            />
+          </details>
+          <Note>{bt.rules}</Note>
+        </>
       )}
     </Panel>
   );
@@ -296,9 +362,10 @@ function LeftOutPanel({ data }: D) {
 
 export function PerformanceScreen() {
   const [w, setW] = useWindow('yamadori_perf_window');
-  const poll = usePoll<Perf>(perfPath(w), 30000);
+  const [traffic, setTraffic] = useTraffic('yamadori_perf_traffic');
+  const P = perfPath(w, traffic);
+  const poll = usePoll<Perf>(P, 30000);
   const d = poll.data;
-  const P = perfPath(w);
   const guard = (what: string, node: ReactNode, source = P) => (
     <ErrorBoundary what={what} source={source} fill>
       {node}
@@ -306,7 +373,8 @@ export function PerformanceScreen() {
   );
   return (
     <Bento areas={areas.page}>
-      <Cell area="head">{guard('SOKUDO', <Head d={d} w={w} setW={setW} failure={poll.failure} />)}</Cell>
+      <Cell area="head">{guard('SOKUDO', <Head d={d} w={w} setW={setW} failure={poll.failure} path={P} />)}</Cell>
+      <Cell area="tiers">{guard('TOK/S BY TIER', <TierPanel data={d} stale={poll.stale} traffic={traffic} setTraffic={setTraffic} />)}</Cell>
       <Cell area="speed">{guard('TOK/S PER MODEL', <SpeedPanel data={d} stale={poll.stale} />)}</Cell>
       <Cell area="ctx">{guard('TOK/S BY DEPTH', <CtxPanel data={d} stale={poll.stale} />)}</Cell>
       <Cell area="gpu">{guard('BOTH GPUS', <GpuPanel data={d} stale={poll.stale} />)}</Cell>

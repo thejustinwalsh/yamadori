@@ -10,6 +10,11 @@ information is available."
 
     GET /dash/api/perf            the last 24 hours
     GET /dash/api/perf/<window>   1h | 6h | 24h | 7d | 30d
+    GET /dash/api/perf/<window>/<traffic>   client (default) | test | all
+
+`by_tier` (2026-10-06) is decode and prefill tok/s per effort tier and per
+model, by context bucket, for the traffic asked for (tier_section); every
+other section is as it was, over all traffic.
 
 Under /dash/api (gated in server.py). READ-ONLY and MODEL-FREE: nothing here
 asks llama-swap or a model server anything (mcp/test_dash_no_load.py).
@@ -58,6 +63,26 @@ GPU_BUCKET = {"1h": 60, "6h": 300, "24h": 900, "7d": 3600, "30d": 6 * 3600}
 CTX_EDGES = (4096, 8192, 32768, 65536, 131072)
 SCATTER_MAX = 600
 GENERATION_ROLES = ("main", "side_call", "internal", "second_brain")
+
+# THE TIER TABLE (operator, 2026-10-06: "What are we averaging on tok/s per
+# model, are we collecting those stats ... at least by 'effort' tier since we
+# consider different qwen variants the same model behind our proxy").
+# DISPLAY BUCKETS for the context size, in prompt tokens: they group what is
+# shown and decide nothing (the gates' own depths stay CTX_EDGES above).
+TIER_CTX = ((0, 8192, "0-8K"), (8192, 32768, "8-32K"),
+            (32768, 65536, "32-64K"), (65536, None, "64K+"))
+# A generation's prefill rate is read only where it processed this many
+# tokens (the operator's figure, 2026-10-06): a short prompt's time is mostly
+# fixed cost, not a rate.
+PREFILL_MIN_PROCESSED = 2048
+# traffic filter (stats_store `traffic`): the operator's own use, the live
+# suites' and soaks' test accounts, or both. Rows with no traffic class (the
+# worker's jobs, and every row before 2026-10-06) are in `all` only.
+TRAFFIC = ("client", "test", "all")
+DEFAULT_TRAFFIC = "client"
+# conversation roles; a decider read is one token and has no rate, a warm is
+# not a generation anyone waits for
+TIER_ROLES = ("main", "side_call", "internal")
 CACHE_S = 15
 GATE_GROUPS_MAX = 400          # a memory guard per file
 
@@ -161,6 +186,119 @@ def models_section(rows: list[dict], since: float, step: int, n: int) -> list[di
                        for k in bins_order() if k in p["ctx"]],
             "scatter": p["scatter"][-SCATTER_MAX:]})
     return out
+
+
+# ------------------------------------------------------------- by tier ------
+def tier_ctx(prompt) -> str | None:
+    if not isinstance(prompt, (int, float)):
+        return None
+    for lo, hi, name in TIER_CTX:
+        if hi is None or prompt <= hi:
+            return name
+    return None
+
+
+def dist(xs: list[float]) -> dict:
+    """n, p50, mean and p90 of a list of rates (nearest-rank percentiles, as
+    everywhere on this page); n 0 and nulls when empty."""
+    xs = [float(x) for x in xs if isinstance(x, (int, float))]
+    return {"n": len(xs), "p50": pct(xs, 0.5),
+            "mean": round(sum(xs) / len(xs), 2) if xs else None,
+            "p90": pct(xs, 0.9)}
+
+
+def _rates(r: dict) -> tuple[float | None, float | None, bool]:
+    """(decode tok/s, prefill tok/s, cold) of one generation row: the decode
+    rate as llama-server reported it, where it decoded more than one token
+    (a one-token read has none); the prefill rate where it processed at least
+    PREFILL_MIN_PROCESSED tokens; cold is the row's own flag (NULL = not
+    known to be cold)."""
+    d = r.get("decode_tps")
+    dec = float(d) if isinstance(d, (int, float)) and d > 0 and \
+        (r.get("completion") or 0) > 1 else None
+    pre = prompt_tps(r) if (r.get("processed") or 0) >= PREFILL_MIN_PROCESSED \
+        else None
+    return dec, pre, r.get("cold") == 1
+
+
+class _Acc:
+    """One group's rates, whole and by context bucket."""
+
+    def __init__(self) -> None:
+        self.n = 0
+        self.dec: list[float] = []
+        self.warm: list[float] = []
+        self.cold: list[float] = []
+        self.ctx: dict[str, "_Acc"] = {}
+
+    def add(self, r: dict, by_ctx: bool = True) -> None:
+        dec, pre, cold = _rates(r)
+        self.n += 1
+        if dec is not None:
+            self.dec.append(dec)
+        if pre is not None:
+            (self.cold if cold else self.warm).append(pre)
+        if by_ctx:
+            b = tier_ctx(r.get("prompt"))
+            if b:
+                self.ctx.setdefault(b, _Acc()).add(r, by_ctx=False)
+
+    def out(self) -> dict:
+        d = {"n": self.n, "decode": dist(self.dec),
+             "prefill_warm": dist(self.warm), "prefill_cold": dist(self.cold)}
+        if self.ctx:
+            d["by_ctx"] = [{"bucket": name, **self.ctx[name].out()}
+                           for _, _, name in TIER_CTX if name in self.ctx]
+        return d
+
+
+def tier_section(rows: list[dict], traffic: str = DEFAULT_TRAFFIC,
+                 window: str | None = None) -> dict:
+    """Decode and prefill tok/s per effort TIER and per model, by context
+    bucket, from the generation rows; `traffic` picks which rows (TRAFFIC).
+    Rows before 2026-10-06 have no tier and no traffic class: they are the
+    tier `null` and only in `all`. Every number is from the rows."""
+    if traffic not in TRAFFIC:
+        traffic = DEFAULT_TRAFFIC
+    per: dict[tuple, _Acc] = {}
+    per_model: dict[tuple, _Acc] = {}
+    seen = {"client": 0, "test": 0, "unrecorded": 0}
+    left_out = {"traffic": 0, "role": 0}
+    for r in rows:
+        t = r.get("traffic")
+        seen[t if t in ("client", "test") else "unrecorded"] += 1
+        role = str(r.get("role") or "?")
+        if role not in TIER_ROLES:
+            left_out["role"] += 1
+            continue
+        if traffic != "all" and t != traffic:
+            left_out["traffic"] += 1
+            continue
+        model = str(r.get("model") or "unknown")
+        per.setdefault((r.get("tier") or None, model, role), _Acc()).add(r)
+        per_model.setdefault((model, role), _Acc()).add(r)
+
+    def order(k):                     # recorded tiers first, then the unrecorded
+        return (k[0] is None, k[0] or "", k[1], k[2])
+    return {
+        "traffic": traffic, "traffic_names": list(TRAFFIC),
+        "window": window, "ctx_buckets": [n for _, _, n in TIER_CTX],
+        "prefill_min_processed": PREFILL_MIN_PROCESSED,
+        "generations": {"in_window": len(rows), **seen},
+        "left_out": left_out,
+        "rows": [{"tier": k[0], "model": k[1], "role": k[2], **per[k].out()}
+                 for k in sorted(per, key=order)],
+        "by_model": [{"model": k[0], "role": k[1], **per_model[k].out()}
+                     for k in sorted(per_model)],
+        "rules": ("decode: llama-server's predicted_n / predicted_ms where "
+                  "more than one token was decoded; prefill: processed * "
+                  f"1000 / prompt_ms where >= {PREFILL_MIN_PROCESSED} tokens "
+                  "were processed, `cold` where the request loaded or read "
+                  "in its model (stats_store `cold`), else warm; context "
+                  "buckets by the prompt's tokens; tier null = recorded "
+                  "before the tier column existed; roles main, side_call and "
+                  "internal"),
+    }
 
 
 # -------------------------------------------------------------------- GPUs --
@@ -402,7 +540,8 @@ LEFT_OUT = [
 
 
 # -------------------------------------------------------------------- build --
-def overview(window: str = DEFAULT_WINDOW, now: float | None = None) -> dict:
+def overview(window: str = DEFAULT_WINDOW, now: float | None = None,
+             traffic: str = DEFAULT_TRAFFIC) -> dict:
     now = time.time() if now is None else now
     span, step = WINDOWS[window]
     n = int(span // step)
@@ -418,6 +557,7 @@ def overview(window: str = DEFAULT_WINDOW, now: float | None = None) -> dict:
                                 if k != "db"},
                       "generations": len(gens)}
     for name, fn in (("models", lambda: models_section(gens, since, step, n)),
+                     ("by_tier", lambda: tier_section(gens, traffic, window)),
                      ("gpus", lambda: gpus_section(since, window)),
                      ("swaps", lambda: swaps_section(since)),
                      ("gates", gates_section)):
@@ -428,31 +568,49 @@ def overview(window: str = DEFAULT_WINDOW, now: float | None = None) -> dict:
     return out
 
 
-def cached(window: str) -> dict:
+def cached(window: str, traffic: str = DEFAULT_TRAFFIC) -> dict:
     now = time.time()
+    key = (window, traffic)
     with _lock:
-        hit = _cache.get(window)
+        hit = _cache.get(key)
         if hit and now - hit[0] < CACHE_S:
             return hit[1]
-    d = overview(window, now)
+    d = overview(window, now, traffic)
     with _lock:
-        _cache[window] = (now, d)
+        _cache[key] = (now, d)
     return d
 
 
 def handle_get(path: str):
-    p = path.rstrip("/")
+    """/dash/api/perf[/<window>[/<traffic>]], traffic one of TRAFFIC (default
+    client). A `?traffic=` on the path is read too (server.dash_get passes
+    the path without its query, so the path form is the contract)."""
+    p, _, query = path.partition("?")
+    p = p.rstrip("/")
+    traffic = DEFAULT_TRAFFIC
+    for kv in query.split("&"):
+        k, _, v = kv.partition("=")
+        if k == "traffic" and v:
+            traffic = v
     if p == "/dash/api/perf":
         w = DEFAULT_WINDOW
     elif p.startswith("/dash/api/perf/"):
-        w = p[len("/dash/api/perf/"):]
+        parts = p[len("/dash/api/perf/"):].split("/")
+        w = parts[0]
         if w not in WINDOWS:
             return _json(404, {"error": f"no window {w!r}: one of "
                                         f"{', '.join(WINDOWS)}"})
+        if len(parts) > 2:
+            return None
+        if len(parts) == 2:
+            traffic = parts[1]
     else:
         return None
+    if traffic not in TRAFFIC:
+        return _json(404, {"error": f"no traffic class {traffic!r}: one of "
+                                    f"{', '.join(TRAFFIC)}"})
     try:
-        return _json(200, cached(w))
+        return _json(200, cached(w, traffic))
     except Exception as e:                                       # noqa: BLE001
         return _json(500, {"error": f"perf overview raised "
                                     f"{type(e).__name__}: {e}"})

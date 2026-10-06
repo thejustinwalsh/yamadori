@@ -5,14 +5,18 @@ import { useState, type ReactNode } from 'react';
 import {
   errorOf,
   injectorTotals,
+  DEFAULT_TRAFFIC,
+  isTraffic,
   isWindow,
   msText,
   part,
   ranked,
   spreadText,
+  TRAFFIC,
   WINDOWS,
   type Injector,
   type Jjava,
+  type TrafficName,
   type WindowName,
 } from '../api/stats';
 import { n } from '../format';
@@ -83,6 +87,42 @@ export function WindowPicker({ value, onChange }: { value: WindowName; onChange:
       {WINDOWS.map((w) => (
         <button key={w} type="button" aria-pressed={w === value} onClick={() => onChange(w)} {...stylex.props(text.labelMd, s.tab, w === value && s.tabOn)}>
           {w.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The by-tier table's traffic class, remembered in this browser only (a per-viewer convenience). */
+export function useTraffic(key: string): [TrafficName, (t: TrafficName) => void] {
+  const [t, setT] = useState<TrafficName>(() => {
+    let v: string | null = null;
+    try {
+      v = localStorage.getItem(key);
+    } catch {
+      v = null; // storage blocked: the default
+    }
+    return isTraffic(v) ? v : DEFAULT_TRAFFIC;
+  });
+  return [
+    t,
+    (x: TrafficName) => {
+      setT(x);
+      try {
+        localStorage.setItem(key, x);
+      } catch {
+        /* storage blocked: the choice lasts this visit */
+      }
+    },
+  ];
+}
+
+export function TrafficPicker({ value, onChange }: { value: TrafficName; onChange: (t: TrafficName) => void }) {
+  return (
+    <div role="group" aria-label="traffic class" {...stylex.props(s.tabs)}>
+      {TRAFFIC.map((t) => (
+        <button key={t} type="button" aria-pressed={t === value} onClick={() => onChange(t)} {...stylex.props(text.labelMd, s.tab, t === value && s.tabOn)}>
+          {t.toUpperCase()}
         </button>
       ))}
     </div>

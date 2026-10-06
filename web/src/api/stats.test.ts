@@ -7,10 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { href, legacyTarget, resolve } from '../router';
 import { dataFor } from '../routes';
 import { Histogram, LineChart, StackedBars } from '../ui/Charts';
+import { TierPanel } from '../screens/Performance';
 import { InjectorPanel } from '../ui/StatsParts';
 import {
   bucketLabel,
+  distText,
   injectorTotals,
+  isTraffic,
   isWindow,
   jjavaPath,
   part,
@@ -18,10 +21,12 @@ import {
   ranked,
   spreadText,
   statusTone,
+  tierLabel,
   topSeries,
   total,
   type Injector,
   type Jjava,
+  type Perf,
 } from './stats';
 
 const parser = (p: string) => {
@@ -48,6 +53,13 @@ describe('routes', () => {
     expect(legacyTarget('/skills')).toBeNull();
     expect(dataFor({ name: 'skills', view: 'library' })).toContain('/dash/api/skill-factory/library');
   });
+  it('a traffic class other than client names its path, window first', () => {
+    expect(perfPath('24h', 'all')).toBe('/dash/api/perf/24h/all');
+    expect(perfPath('7d', 'test')).toBe('/dash/api/perf/7d/test');
+    expect(perfPath('7d', 'client')).toBe('/dash/api/perf/7d');
+    expect(isTraffic('all')).toBe(true);
+    expect(isTraffic('both')).toBe(false);
+  });
   it('each page warms its default window; the Skills selections view warms jjava', () => {
     expect(dataFor({ name: 'perf' })).toEqual(['/dash/api/perf']);
     expect(dataFor({ name: 'jjava' })).toEqual(['/dash/api/jjava']);
@@ -57,6 +69,7 @@ describe('routes', () => {
     expect(jjavaPath('24h')).toBe('/dash/api/jjava');
     expect(jjavaPath('7d')).toBe('/dash/api/jjava/7d');
     expect(perfPath('1h')).toBe('/dash/api/perf/1h');
+    expect(perfPath('24h', 'client')).toBe('/dash/api/perf');
     expect(isWindow('30d')).toBe(true);
     expect(isWindow('2d')).toBe(false);
   });
@@ -160,5 +173,64 @@ describe('InjectorPanel (the Skills page and JJAVA)', () => {
   it("a section the server failed shows the server's error", () => {
     const html = renderToStaticMarkup(createElement(InjectorPanel, { data: { injector: { error: 'injector: KeyError' } } as unknown as Jjava }));
     expect(html).toContain('injector: KeyError');
+  });
+});
+
+describe('tok/s by effort tier', () => {
+  const dist = (n: number, p50: number | null, mean: number | null, p90: number | null) => ({ n, p50, mean, p90 });
+  const none = dist(0, null, null, null);
+  const perf = {
+    at: 1,
+    window: { name: '7d', since: 0, until: 1, bucket_s: 21600, buckets: [], names: [] },
+    ctx_bins: [],
+    left_out: [],
+    sources: { stats: { enabled: true, queued: 0, written: 0, dropped: 0, errors: 0, last_error: null }, generations: 3 },
+    models: [],
+    gpus: { bucket_s: 60, cards: [], rows: 0 },
+    swaps: { rows: [], load_s: {}, last_in_memory: null, table: {} },
+    gates: { files: [], errors: [], globs: [] },
+    by_tier: {
+      traffic: 'client',
+      traffic_names: ['client', 'test', 'all'],
+      window: '7d',
+      ctx_buckets: ['0-8K', '8-32K', '32-64K', '64K+'],
+      prefill_min_processed: 2048,
+      generations: { in_window: 5, client: 3, test: 1, unrecorded: 1 },
+      left_out: { traffic: 1, role: 0 },
+      rows: [
+        {
+          tier: 'max', model: 'flash-next', role: 'main', n: 3, decode: dist(3, 28.8, 29.1, 31.4), prefill_warm: dist(1, 410.5, 410.5, 410.5), prefill_cold: dist(1, 95.2, 95.2, 95.2),
+          by_ctx: [{ bucket: '8-32K', n: 3, decode: dist(3, 28.8, 29.1, 31.4), prefill_warm: dist(1, 410.5, 410.5, 410.5), prefill_cold: none }],
+        },
+        { tier: null, model: 'bonsai', role: 'main', n: 2, decode: dist(2, 60, 60, 60), prefill_warm: none, prefill_cold: none },
+      ],
+      by_model: [],
+      rules: 'decode: llama-server predicted_n / predicted_ms',
+    },
+  } as unknown as Perf;
+  it('reads rates as p50 / mean / p90 and a tier recorded before the column as unrecorded', () => {
+    expect(distText(dist(3, 28.8, 29.1, 31.4))).toBe('28.8 · 29.1 · 31.4');
+    expect(distText(none)).toBe('—');
+    expect(distText(null)).toBe('—');
+    expect(tierLabel('max')).toBe('max');
+    expect(tierLabel(null)).toBe('unrecorded');
+  });
+  it('renders the table: tier, model, decode, prefill warm and cold, n, and the context breakdown', () => {
+    const html = renderToStaticMarkup(createElement(TierPanel, { data: perf, traffic: 'client', setTraffic: () => undefined }));
+    expect(html).toContain('TOK/S BY EFFORT TIER');
+    expect(html).toContain('flash-next');
+    expect(html).toContain('28.8 · 29.1 · 31.4');
+    expect(html).toContain('411 (n 1)');
+    expect(html).toContain('95.2 (n 1)');
+    expect(html).toContain('unrecorded');
+    expect(html).toContain('8-32K');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('3 CLIENT · 1 TEST · 1 UNRECORDED');
+  });
+  it('a server that predates the table says so; no row says why', () => {
+    const old = { ...perf, by_tier: undefined } as unknown as Perf;
+    expect(renderToStaticMarkup(createElement(TierPanel, { data: old, traffic: 'client', setTraffic: () => undefined }))).toContain('predates the by-tier table');
+    const empty = { ...perf, by_tier: { ...(perf.by_tier as object), rows: [] } } as unknown as Perf;
+    expect(renderToStaticMarkup(createElement(TierPanel, { data: empty, traffic: 'client', setTraffic: () => undefined }))).toContain('no client generation with a tier');
   });
 });

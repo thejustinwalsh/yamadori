@@ -7,8 +7,17 @@ export const WINDOWS = ['1h', '6h', '24h', '7d', '30d'] as const;
 export type WindowName = (typeof WINDOWS)[number];
 export const DEFAULT_WINDOW: WindowName = '24h';
 
+// The traffic class of the by-tier table (mcp/dash_perf.py TRAFFIC): the
+// operator's own use, the live suites' and soaks' test accounts, or both.
+export const TRAFFIC = ['client', 'test', 'all'] as const;
+export type TrafficName = (typeof TRAFFIC)[number];
+export const DEFAULT_TRAFFIC: TrafficName = 'client';
+export const isTraffic = (x: unknown): x is TrafficName => typeof x === 'string' && (TRAFFIC as readonly string[]).includes(x);
+
 export const jjavaPath = (w: WindowName = DEFAULT_WINDOW) => (w === DEFAULT_WINDOW ? '/dash/api/jjava' : `/dash/api/jjava/${w}`);
-export const perfPath = (w: WindowName = DEFAULT_WINDOW) => (w === DEFAULT_WINDOW ? '/dash/api/perf' : `/dash/api/perf/${w}`);
+/** /dash/api/perf[/<window>[/<traffic>]]: the bare route is the default window and the default traffic. */
+export const perfPath = (w: WindowName = DEFAULT_WINDOW, traffic: TrafficName = DEFAULT_TRAFFIC) =>
+  traffic !== DEFAULT_TRAFFIC ? `/dash/api/perf/${w}/${traffic}` : w === DEFAULT_WINDOW ? '/dash/api/perf' : `/dash/api/perf/${w}`;
 export const JJAVA_PATH = jjavaPath();
 export const PERF_PATH = perfPath();
 
@@ -125,6 +134,26 @@ export type ModelPerf = {
   scatter: [number, number, string][];
 };
 
+/** n, p50, mean and p90 of a list of rates (mcp/dash_perf.py dist). */
+export type Dist = { n: number; p50: number | null; mean: number | null; p90: number | null };
+export type TierRates = { n: number; decode: Dist; prefill_warm: Dist; prefill_cold: Dist };
+export type TierCtxRow = TierRates & { bucket: string };
+/** One group of the by-tier table: a tier (null: recorded before the column existed) on a model in a role. */
+export type TierGroup = TierRates & { tier: string | null; model: string; role: string; by_ctx?: TierCtxRow[] };
+export type TierModelGroup = TierRates & { model: string; role: string; by_ctx?: TierCtxRow[] };
+export type TierPerf = {
+  traffic: TrafficName;
+  traffic_names: TrafficName[];
+  window: string | null;
+  ctx_buckets: string[];
+  prefill_min_processed: number;
+  generations: { in_window: number; client: number; test: number; unrecorded: number };
+  left_out: { traffic: number; role: number };
+  rows: TierGroup[];
+  by_model: TierModelGroup[];
+  rules: string;
+};
+
 export type GpuCard = {
   idx: number; name: string | null; uuid: string | null; total_mib: number | null; main?: boolean;
   series: { t: number[]; util_avg: (number | null)[]; util_max: (number | null)[]; used_max: (number | null)[]; watts_avg: (number | null)[]; temp_max: (number | null)[]; samples: number[] };
@@ -150,6 +179,8 @@ export type Perf = {
   left_out: { graph: string; why: string }[];
   sources: { stats: Jjava['sources']['stats']; generations: number };
   models: ModelPerf[] | Err;
+  /** absent from a server older than 2026-10-06 */
+  by_tier?: TierPerf | Err;
   gpus: { bucket_s: number; cards: GpuCard[]; rows: number } | Err;
   swaps: { rows: SwapRow[]; load_s: Record<string, Spread>; last_in_memory: Record<string, unknown> | null; table: Record<string, unknown> } | Err;
   gates: { files: GateFile[]; errors: { file: string; error: string }[]; globs: { kind: string; glob: string }[] } | Err;
@@ -199,6 +230,12 @@ export function bucketLabel(ts: number, bucketS: number): string {
 
 export const msText = (x: number | null | undefined): string => (!ok(x) ? '—' : x >= 10000 ? `${(x / 1000).toFixed(1)} s` : `${Math.round(x)} ms`);
 export const tpsText = (x: number | null | undefined): string => (!ok(x) ? '—' : x >= 100 ? `${Math.round(x)}` : x.toFixed(1));
+
+/** A tier's name for a table: null is a row from before the tier was recorded. */
+export const tierLabel = (t: string | null | undefined): string => t ?? 'unrecorded';
+
+/** "p50 · mean · p90" of a rate list as "68.0 · 66.2 · 71.9", or a dash when empty. */
+export const distText = (d: Dist | null | undefined): string => (!d || !d.n ? '—' : `${tpsText(d.p50)} · ${tpsText(d.mean)} · ${tpsText(d.p90)}`);
 
 /** "p50 420 ms · p90 610 ms · n 88", or "no measurement" when n is 0. */
 export function spreadText(s: Spread | null | undefined, f: (x: number | null | undefined) => string = msText): string {

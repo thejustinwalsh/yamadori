@@ -1627,6 +1627,13 @@ learning was scheduled by deep_learn, which is gone.
   answers, thresholds, the lane, the Jev API's endpoints, the injector) and
   SOKUDO (`/performance`, `/dash/api/perf`, `mcp/dash_perf.py`: tok/s per
   model, both GPUs, the gates, the swaps; it replaced the benchmark page;
+  since 2026-10-06 also TOK/S BY EFFORT TIER, `by_tier`: decode and prefill
+  tok/s per tier x model x role and context bucket, warm and cold apart,
+  traffic `client` | `test` | `all` at `/dash/api/perf/<window>/<traffic>`,
+  from `stats.sqlite3` generation rows that now carry tier, traffic, corpus
+  turn id and a cold flag -- rows before the deploy carry none (tier null,
+  in `all` only; operator: "we consider different qwen variants the same
+  model behind our proxy");
   NEBARI was retired the same day and folded into the Skills page's LIBRARY
   view: served skills by area, held packages and what reads them,
   `/dash/api/skill-factory/library`; `/nebari` redirects to `/skills`)

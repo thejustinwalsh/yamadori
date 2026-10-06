@@ -65,6 +65,7 @@ import route as router  # noqa: E402
 import tool_code  # noqa: E402
 import slots  # noqa: E402
 import recent_turns  # noqa: E402
+import stats_store  # noqa: E402
 import token_ledger  # noqa: E402
 import stage_timing  # noqa: E402
 import compaction  # noqa: E402
@@ -2145,6 +2146,10 @@ def prepare(body: dict) -> dict:
         # compaction), no augmentation. A one-word probe at minimal answered
         # in 1.97 s against 409 s for the classifier at medium.
         tier = dict(tiers.TIERS["minimal"], name="minimal")
+    # the dashboard's history files this request's generations under its
+    # tier and account (mcp/stats_store.py): the decider's reads and the side
+    # calls model.post sends inside prepare reach it through this
+    stats_store.note_context(tier=tier.get("name"), account=account)
 
     # THE ROUTE'S GATE: can any library source this server holds bear on
     # this request? A fact, read from the package store
@@ -4571,6 +4576,14 @@ def _run_turn(body: dict, streamed: bool):
     payload["_mcp_calls"] = state["_mcp_calls"]
     payload["_tool_calls"] = []
     turn = corpus.new_turn()
+    # the dashboard's history (mcp/stats_store.py): this request's corpus turn
+    # id, and whether its FIRST generation runs cold (its model was loaded or
+    # its file read in for it: x_yamadori.capacity.swap / .preread)
+    payload["_turn"] = turn
+    payload["_cold"] = {"why": stats_store.cold_why(payload.get("_capacity"),
+                                                    payload.get("_preread")),
+                        "used": False}
+    stats_store.note_context(turn=turn)
     # The decider's rows of this request join the corpus turn (decide_turn:
     # decisions pending before this point; later ones carry it themselves).
     # Never raises.
@@ -5118,7 +5131,8 @@ def _run_turn(body: dict, streamed: bool):
     d["x_yamadori"]["timing"] = stage_timing.record()
     stage_timing.log_if_slow(d["x_yamadori"]["timing"],
                              "side call" if (payload.get("_utility") or {}).get("utility") else "request")
-    recent_turns.note(d["x_yamadori"])
+    recent_turns.note(d["x_yamadori"], turn=turn,
+                      account=body.get("_account") or "")
     corpus.log_answer(turn, root, content, hop,
                       (time.time() - t_start) * 1000,
                       finish=fin, tool_calls=len(client_calls))

@@ -16,7 +16,11 @@ WHAT IS RECORDED (numbers, ids and model names -- never text):
                 (main / side_call / second_brain / internal / decider /
                 warm), the slot, prompt tokens (reused / processed), the
                 prefill's ms, completion tokens and the decode rate -- from
-                llama-server's own `timings` (slots.cache_record). Hooks:
+                llama-server's own `timings` (slots.cache_record); since
+                2026-10-06 also the request's effort TIER, its TRAFFIC class
+                (test | client), its corpus TURN id and a COLD flag (TABLES).
+                Prefill tok/s is not a column: processed * 1000 / prompt_ms,
+                derived where it is read. Hooks:
                 token_ledger.record_upstream (the proxy's generations) and
                 token_ledger.record (model.post: the worker's, the tools
                 API's, the decider's reads)
@@ -77,12 +81,26 @@ _force: bool | None = None
 PROCESS = os.path.basename(sys.argv[0] or "") or "python"
 
 TABLES = {
+    # tier, traffic, turn and cold (2026-10-06; added by a forward-only
+    # migration, _migrate: older rows hold NULL in them):
+    #   tier     the effort tier the request ran at (x_yamadori.tier: a
+    #            client's side call is `minimal`), where the request is known
+    #   traffic  test | client, corpus.account_traffic of the request's
+    #            account, resolved on the writer thread; NULL where no account
+    #            is known (the worker's jobs) or the row predates the column
+    #   turn     the request's corpus turn id (corpus.new_turn): the join to
+    #            `requests.turn`. Never an account or a key
+    #   cold     1 for the first generation of a request that loaded its
+    #            model (x_yamadori.capacity.swap) or read its model file in
+    #            (x_yamadori.preread), 0 for the other generations of a
+    #            proxy request, NULL where it is not known
     "generations": ("ts REAL NOT NULL, model TEXT, role TEXT, process TEXT, "
                     "slot INTEGER, prompt INTEGER, reused INTEGER, "
                     "processed INTEGER, prompt_ms REAL, completion INTEGER, "
-                    "predicted_ms REAL, decode_tps REAL"),
+                    "predicted_ms REAL, decode_tps REAL, tier TEXT, "
+                    "traffic TEXT, turn TEXT, cold INTEGER"),
     "requests": ("ts REAL NOT NULL, model TEXT, tier TEXT, utility INTEGER, "
-                 "route TEXT, rec TEXT"),
+                 "route TEXT, rec TEXT, traffic TEXT, turn TEXT"),
     "releases": ("ts REAL NOT NULL, slot INTEGER, why TEXT, by_why TEXT, "
                  "released INTEGER, skipped TEXT, cells_before INTEGER, "
                  "ms REAL, method TEXT, process TEXT"),
@@ -133,8 +151,29 @@ def _connect(p: str | None = None) -> sqlite3.Connection:
     con.execute("PRAGMA busy_timeout=30000")
     for name, cols in TABLES.items():
         con.execute(f"CREATE TABLE IF NOT EXISTS {name}({cols})")
+        _migrate(con, name, cols)
         con.execute(f"CREATE INDEX IF NOT EXISTS {name}_ts ON {name}(ts)")
     return con
+
+
+def _migrate(con: sqlite3.Connection, name: str, cols: str) -> list[str]:
+    """FORWARD-ONLY: a table made before a column was declared gains it
+    (ALTER TABLE ADD COLUMN); its rows read NULL there. Nothing is dropped,
+    renamed or rewritten. Three services open this file, so a column another
+    process added a moment ago is not an error. Returns the columns added."""
+    have = {r[1] for r in con.execute(f"PRAGMA table_info({name})")}
+    added = []
+    for decl in cols.split(", "):
+        col = decl.split()[0]
+        if col in have:
+            continue
+        try:
+            con.execute(f"ALTER TABLE {name} ADD COLUMN {decl}")
+            added.append(col)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+    return added
 
 
 def _put(table: str, row: dict) -> None:
@@ -176,8 +215,18 @@ def flush_batch(batch: list[tuple[str, dict]], p: str | None = None) -> int:
     try:
         con = _connect(p)
         try:
+            seen: dict[str, str | None] = {}
             for table, row in batch:
                 cols = [c.split()[0] for c in TABLES[table].split(", ")]
+                if "traffic" in cols and row.get("traffic") is None \
+                        and row.get("account"):
+                    # resolved here, on the writer thread, never on the
+                    # response path (it reads the account registry); the
+                    # account itself is not a column and is not kept
+                    a = str(row["account"])
+                    if a not in seen:
+                        seen[a] = traffic_of(a)
+                    row = dict(row, traffic=seen[a])
                 vals = [row.get(c) for c in cols]
                 con.execute(f"INSERT INTO {table}({', '.join(cols)}) VALUES("
                             f"{', '.join('?' for _ in cols)})", vals)
@@ -219,14 +268,85 @@ def _int(x) -> int | None:
     return None if v is None else int(v)
 
 
+def traffic_of(account: str | None) -> str | None:
+    """`test` | `client` (corpus.account_traffic, which fails closed to
+    `test`), or None when no account is known: the worker's own jobs and a
+    row from before this column are neither."""
+    if not account:
+        return None
+    try:
+        import corpus
+        return corpus.account_traffic(account)
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def tier_name(tier) -> str | None:
+    """A tier as a name: the proxy's `_tier` dict ({"name": ...}) or a string."""
+    if isinstance(tier, dict):
+        tier = tier.get("name")
+    return str(tier)[:16] if tier else None
+
+
+def cold_why(capacity: dict | None, preread: dict | None) -> str | None:
+    """Why a request's first generation runs cold, or None. Its model was
+    loaded for it (x_yamadori.capacity.swap), or its model file was read into
+    the OS cache for it (x_yamadori.preread: a record that was not skipped).
+    The prompt then waited behind the load or ran over a cold file cache."""
+    if isinstance(capacity, dict) and isinstance(capacity.get("swap"), dict):
+        return "swap"
+    if isinstance(preread, dict) and preread and not preread.get("skipped"):
+        return "preread"
+    return None
+
+
+def note_context(**kw) -> None:
+    """Remember, for the request on this thread (its cancel token, which the
+    threads it starts share: mcp/cancel.py), what its generations are filed
+    under -- tier, account, turn -- for the ones that reach `generation`
+    without it (the decider's reads and the side calls model.post sends).
+    Nothing off a request thread: a no-op. Never raises."""
+    try:
+        import cancel
+        tok = cancel.current()
+        if tok is None:
+            return
+        ctx = getattr(tok, "stats_ctx", None)
+        if ctx is None:
+            ctx = tok.stats_ctx = {}
+        ctx.update({k: v for k, v in kw.items() if v})
+    except Exception:                                            # noqa: BLE001
+        pass
+
+
+def _context() -> dict:
+    try:
+        import cancel
+        tok = cancel.current()
+        return dict(getattr(tok, "stats_ctx", None) or {}) if tok else {}
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
 def generation(*, model: str | None, role: str, cache: dict | None = None,
                timings: dict | None = None, usage: dict | None = None,
-               slot: int | None = None) -> None:
+               slot: int | None = None, tier=None, account: str | None = None,
+               turn: str | None = None, cold: bool | None = None) -> None:
     """One upstream generation. `cache` is slots.cache_record()'s record
-    (the proxy has one); else it is made from `timings` / `usage`."""
+    (the proxy has one); else it is made from `timings` / `usage`.
+
+    `tier`, `account`, `turn` and `cold` file it (TABLES): the proxy's own
+    generations pass them from their payload; a generation sent through
+    model.post inside a request takes the request's (note_context). The
+    account is resolved to `traffic` by the writer thread and is not
+    stored."""
     try:
         if not enabled():
             return
+        ctx = _context()
+        tier = tier_name(tier) or tier_name(ctx.get("tier"))
+        account = account or ctx.get("account")
+        turn = turn or ctx.get("turn")
         t = timings if isinstance(timings, dict) else {}
         u = usage if isinstance(usage, dict) else {}
         c = cache if isinstance(cache, dict) else None
@@ -247,7 +367,10 @@ def generation(*, model: str | None, role: str, cache: dict | None = None,
             "prompt": _int(c.get("prompt")), "reused": _int(c.get("reused")),
             "processed": _int(c.get("processed")),
             "prompt_ms": _num(c.get("prompt_ms")), "completion": completion,
-            "predicted_ms": predicted_ms, "decode_tps": dec})
+            "predicted_ms": predicted_ms, "decode_tps": dec,
+            "tier": tier, "account": account or None,
+            "turn": str(turn)[:32] if turn else None,
+            "cold": None if cold is None else (1 if cold else 0)})
     except Exception as e:                                       # noqa: BLE001
         _state["errors"] += 1
         _state["last_error"] = f"generation: {type(e).__name__}: {e}"[:200]
@@ -309,8 +432,11 @@ def request_record(x: dict) -> dict:
     return rec
 
 
-def request(x: dict | None) -> None:
-    """One proxy request, from its x_yamadori (recent_turns.note)."""
+def request(x: dict | None, turn: str | None = None,
+            account: str | None = None) -> None:
+    """One proxy request, from its x_yamadori (recent_turns.note). `turn` is
+    its corpus turn id (the join to `generations.turn`); `account` becomes
+    `traffic` on the writer thread and is not stored."""
     try:
         if not enabled() or not isinstance(x, dict):
             return
@@ -327,7 +453,9 @@ def request(x: dict | None) -> None:
             "utility": 1 if x.get("utility") else 0,
             "route": ((x.get("route") or {}).get("class")
                       if isinstance(x.get("route"), dict) else None),
-            "rec": json.dumps(request_record(x), default=str)[:20000]})
+            "rec": json.dumps(request_record(x), default=str)[:20000],
+            "account": account or None,
+            "turn": str(turn)[:32] if turn else None})
     except Exception as e:                                       # noqa: BLE001
         _state["errors"] += 1
         _state["last_error"] = f"request: {type(e).__name__}: {e}"[:200]

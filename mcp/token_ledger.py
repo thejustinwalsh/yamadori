@@ -215,7 +215,8 @@ def record(role: str, *, account: str = "", usage: dict | None = None,
         try:
             import stats_store
             stats_store.generation(model=model, role=stats_role or role,
-                                   timings=timings, usage=usage, cache=cache)
+                                   timings=timings, usage=usage, cache=cache,
+                                   account=account or None)
         except Exception:                                        # noqa: BLE001
             pass
     try:
@@ -276,8 +277,18 @@ def record_upstream(payload: dict | None, response: dict | None) -> bool:
             # The dashboard's history (mcp/stats_store.py): this
             # generation's speed, by the model it went to.
             import stats_store
+            # filed under the request's tier, account (-> traffic), corpus
+            # turn and cold flag (proxy._run_turn sets `_turn` and `_cold`;
+            # the cold flag belongs to the request's FIRST generation only)
+            cold = p.get("_cold")
+            cold_now = None
+            if isinstance(cold, dict):
+                cold_now = bool(cold.get("why")) and not cold.get("used")
+                cold["used"] = True
             stats_store.generation(model=p.get("model"), role=role,
-                                   cache=r.get("_cache"), usage=r.get("usage"))
+                                   cache=r.get("_cache"), usage=r.get("usage"),
+                                   tier=p.get("_tier"), account=account or None,
+                                   turn=p.get("_turn"), cold=cold_now)
         except Exception:                                        # noqa: BLE001
             pass
         return record(role, account=str(account), usage=r.get("usage"),

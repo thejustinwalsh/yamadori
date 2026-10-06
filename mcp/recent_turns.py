@@ -69,7 +69,8 @@ def _skills_of(x: dict) -> dict | None:
     return out
 
 
-def note(x: dict | None, now: float | None = None) -> None:
+def note(x: dict | None, now: float | None = None, turn: str | None = None,
+         account: str | None = None) -> None:
     try:
         if not isinstance(x, dict):
             return
@@ -85,8 +86,10 @@ def note(x: dict | None, now: float | None = None) -> None:
         # The dashboard's history (mcp/stats_store.py): this request's
         # model, tier, decider Turn and injector record, numbers only. A
         # queue put, off the response path; a no-op outside the services.
+        # `turn` (the corpus turn id) joins it to its generations; `account`
+        # becomes its traffic class on the writer thread and is not kept.
         import stats_store
-        stats_store.request(x)
+        stats_store.request(x, turn=turn, account=account)
     except Exception:                                            # noqa: BLE001
         pass
 
