@@ -1142,6 +1142,15 @@ def running(upstream: str) -> list[str]:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--area")
+    ap.add_argument("--cases", help="only these case ids (comma separated)")
+    ap.add_argument("--only-ready", action="store_true",
+                    help="only cases whose every named skill is armed NOW "
+                    "(a case with a skill still being re-proved or still a "
+                    "gap is left for a later run)")
+    ap.add_argument("--skip-done", action="store_true",
+                    help="skip case ids already in the results file (the "
+                    "library is read when the process starts, so a later "
+                    "run covers the cases a skill had not armed for)")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--model")
@@ -1152,6 +1161,21 @@ def main(argv=None) -> int:
     ap.add_argument("--report", action="store_true")
     a = ap.parse_args(argv)
     cases = load_cases(a.area)
+    if a.cases:
+        want = {x.strip() for x in a.cases.split(",") if x.strip()}
+        cases = [c for c in cases if c["id"] in want]
+    if a.only_ready:
+        import replay_selection  # noqa: F401  (store isolation)
+        cases = [c for c in cases if c.get("skills")
+                 and not library_skills(c["skills"])[1]]
+    if a.skip_done and a.model:
+        try:
+            with open(os.path.join(RESULTS, f"pitfall_{a.model}.jsonl"),
+                      encoding="utf-8") as f:
+                done = {json.loads(ln)["case"] for ln in f if ln.strip()}
+        except OSError:
+            done = set()
+        cases = [c for c in cases if c["id"] not in done]
     if a.self_test:
         print(json.dumps(self_test(), indent=1))
         return 0
