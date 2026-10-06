@@ -507,6 +507,23 @@ def arms(n_cpu_moe: int = 42, cache_slots: int = 0, all_slots: dict | None = Non
                                   kl_batch=int(b), kl_ub=512)
     # the ship candidate cand0029 ITSELF at the gated setting (the same arm under its own name)
     table["pf-lm3-b8k-c29"] = table["pf-lm3-b8k"]
+    # 0030, THE STAGER (LLAMA_STAGER=1; build cand0030 = 0001-0018, 0022, 0023, 0029, 0030; FLASHNEXT_FLASH_BIN points at it).
+    # The sweep's start (bench/results/fn_probe/20261006-024716): 3 memcpy threads, 4 MiB chunks, a ring of 16 (64 MiB pinned).
+    # st0 = the switch OFF (the control: must read like pf-lm3-b8k), st1 = on; lm3 / lm6 = 3 / 6 slots (rows 50 / 38 of
+    # 66.2 MiB: 6 slots is +769 MiB = 12 rows); st1p = on with the experts PINNED (LLAMA_PIN_EXPERTS=1: the pinned ceiling,
+    # the stager takes no pinned weight). `-b8k` = prefill only (n=3, 8K and 32K prompts); `-full` = the rest of the gate.
+    st_on = {"LLAMA_STAGER": "1", "LLAMA_STAGER_THREADS": "3", "LLAMA_STAGER_CHUNK_MIB": "4", "LLAMA_STAGER_RING": "16"}
+    for tag, stg, slots, rows, pin in (("st0-lm3", False, "3", "50", False), ("st1-lm3", True, "3", "50", False),
+                                        ("st0-lm6", False, "6", "38", False), ("st1-lm6", True, "6", "38", False),
+                                        ("st1p-lm6", True, "6", "38", True)):
+        env = {**lm, "LLAMA_LAYER_MAJOR_SLOTS": slots, "LLAMA_STAGER": "0", **(st_on if stg else {})}
+        if pin:
+            env["LLAMA_PIN_EXPERTS"] = "1"
+        a8 = {**dep["args"], "-b": "8192", "--moe-expert-cache": rows}
+        table[f"pf-{tag}-b8k"] = dict(dep, env=env, args=a8, checks=["prefill"], kl_batch=8192, kl_ub=512)
+        table[f"pf-{tag}-b8k-full"] = dict(dep, env=env, args=a8, kl_batch=8192, kl_ub=512,
+                                           checks=["speed", "needles", "corrupt", "kl", "ckpt", "cancel"])
+        table[f"pf-{tag}-b8k-cold"] = dict(dep, env=env, args=a8, checks=["cold"])
     # the switch unset on the same build (the equivalence against cand0023's pf-dep)
     table["pf-lm-off"] = dict(dep, checks=["prefill", "cancel"])
     # the prompt with 0021's mapped K/V, and with a 1,024-token ubatch (half the expert uploads per token; 1,898 MiB
@@ -1150,6 +1167,50 @@ def step_prefill(name: str, arm: dict, port: int, out: str) -> dict:
     return rec
 
 
+def step_cold(name: str, arm: dict, port: int, out: str) -> dict:
+    """The first prompt after a load with a COLD file cache (docs/FLASH-NEXT.md 13.3, bench/fn_first_prompt.py's
+    `cold cache` arm without the proxy): n (FLASHNEXT_COLD_N, 3) times: read 61.9 GB of a model file the stack never loads through
+    the cache (pushes the experts out), a fresh server, one ~24.6K-token prompt, cache_prompt off; the server's own prompt tok/s and
+    each layer-major batch's ms (LLAMA_LAYER_MAJOR_DEBUG). Never touches the proxy."""
+    evict = ["C:/Users/jwals/textgen/user_data/models/flash-next/Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-0000%d-of-00002.gguf" % i
+             for i in (1, 2)]
+    logp = os.path.join(out, f"{name}.server.log")
+    text = corpus()[: 24600 * 37 // 10]
+    rec: dict = {"runs": []}
+    for i in range(int(os.environ.get("FLASHNEXT_COLD_N") or 3)):
+        row: dict = {}
+        srv = None
+        try:
+            t0 = time.time()
+            nbytes = 0
+            for p in evict:
+                with open(p, "rb", buffering=0) as f:
+                    while True:
+                        b = f.read(16 << 20)
+                        if not b:
+                            break
+                        nbytes += len(b)
+            row["evict_s"] = round(time.time() - t0, 1)
+            row["evict_GB"] = round(nbytes / 1e9, 1)
+            srv = Launched(name, arm, port, out)
+            row["load_s"] = srv.load_s
+            mark = os.path.getsize(logp)
+            r = _raw_completion(srv.base, f"Cold {i}: read the following source." + chr(10) + text, 1, fresh=True)
+            row.update({"prompt_n": r["prompt_n"], "prompt_ms": r["prompt_ms"], "prompt_tps": r["prompt_tps"]})
+            with open(logp, encoding="utf-8", errors="replace") as f:
+                f.seek(mark)
+                tail = f.read().splitlines()
+            row["batch_ms"] = [float(m.group(1)) for ln in tail for m in [re.search(r"ubatches, \d+ tokens through 48 layers in ([0-9.]+) ms", ln)] if m]
+            row["stager_lines"] = [ln.split(" I ", 1)[-1].strip()[:260] for ln in tail if "staging ring" in ln][-4:]
+        except Exception as e:                                               # noqa: BLE001
+            row["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            if srv is not None:
+                row.update(srv.stop())
+        rec["runs"].append(row)
+    return rec
+
+
 CKPT_RE = re.compile(r"created context checkpoint (\d+) of (\d+) \(pos_min = (-?\d+), pos_max = (-?\d+), "
                      r"n_tokens = (\d+), size = ([0-9.]+) MiB(?:, ([0-9.]+) ms)?\)")
 
@@ -1603,6 +1664,11 @@ def main(argv: list[str]) -> int:
                 pass
             elif "prefill" in a.steps and "prefill" in arm["checks"]:
                 r["prefill"] = step_prefill(n, arm, a.port, a.out)
+                save()
+            if "cold" in a.steps and "cold" in arm["checks"] and reuse("cold"):
+                pass
+            elif "cold" in a.steps and "cold" in arm["checks"]:
+                r["cold"] = step_cold(n, arm, a.port, a.out)
                 save()
             if "lane" in a.steps and "lane" in arm["checks"] and reuse("lane"):
                 pass

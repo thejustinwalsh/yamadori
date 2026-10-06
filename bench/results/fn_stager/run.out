@@ -1,0 +1,21 @@
+[02:55:40] === arm pf-st0-lm3-b8k steps ['prefill']
+[03:02:57] restore: {'restored': 'nothing: the card is left empty on purpose', 'gpu': {'used': 0, 'free': 16050, 'util': 0}, 'running': ['embeddings']}
+[03:02:57] lane: {'held_by': 'coordinator', 'resumed': False, 'lane': 'gpu'}
+{
+ "pf-st0-lm3-b8k": {
+  "prefill": null
+ }
+}
+[03:02:57] === arm pf-st1-lm3-b8k steps ['prefill']
+[03:08:39] restore: {'restored': 'nothing: the card is left empty on purpose', 'gpu': {'used': 0, 'free': 16050, 'util': 0}, 'running': ['embeddings']}
+[03:08:39] lane: {'held_by': 'coordinator', 'resumed': False, 'lane': 'gpu'}
+{
+ "pf-st0-lm3-b8k": {
+  "prefill": null
+ },
+ "pf-st1-lm3-b8k": {
+  "prefill": null
+ }
+}
+[03:08:39] YIELD: stopping before pf-st1-lm6-b8k
+{"ran": [["pf-st0-lm3-b8k", 0], ["pf-st1-lm3-b8k", 0]], "yielded": true, "card_used_mib": 0, "running": ["embeddings"]}

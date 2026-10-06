@@ -1,0 +1,473 @@
+{
+ "started": "2026-10-06T03:02:57-0400",
+ "arms": {
+  "pf-st0-lm3-b8k": {
+   "prefill": {
+    "env": {},
+    "8k": {
+     "runs": [
+      {
+       "prompt_n": 8768,
+       "prompt_tps": 252.8886864933358,
+       "first_top": [
+        [
+         " less",
+         -1.0333
+        ],
+        [
+         " fewer",
+         -1.6287
+        ],
+        [
+         " {",
+         -1.7003
+        ],
+        [
+         " at",
+         -2.343
+        ],
+        [
+         " only",
+         -3.1433
+        ]
+       ]
+      },
+      {
+       "prompt_n": 8768,
+       "prompt_tps": 408.31228438801594,
+       "first_top": [
+        [
+         " less",
+         -1.0344
+        ],
+        [
+         " {",
+         -1.4151
+        ],
+        [
+         " fewer",
+         -1.6428
+        ],
+        [
+         " at",
+         -3.1986
+        ],
+        [
+         " no",
+         -3.2708
+        ]
+       ]
+      },
+      {
+       "prompt_n": 8768,
+       "prompt_tps": 405.41664004116313,
+       "first_top": [
+        [
+         " less",
+         -0.982
+        ],
+        [
+         " {",
+         -1.553
+        ],
+        [
+         " fewer",
+         -1.8075
+        ],
+        [
+         " at",
+         -2.5601
+        ],
+        [
+         " only",
+         -2.971
+        ]
+       ]
+      }
+     ],
+     "load_s": 16.6,
+     "warmup": {
+      "prompt_n": 1038,
+      "prompt_tps": 44.15618613066105
+     },
+     "layer_major": [
+      "decode_normal: ubatch by ubatch: 512 tokens in 17.2 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 112.3 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 1.8 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 16 ubatches, 8192 tokens through 48 layers in 15364.9 ms; slots: 33812.5 MiB uploaded (144 uploads, 0 prefetched, 2160 hits, 0 fallbacks), used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 768 layer graphs; host time per graph: build 0.052 ms, split + allocate 1.067 ms, inputs 0.329 ms, compute call 18.489 ms",
+      "decode_normal: ubatch by ubatch: 8192 tokens in 248.4 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 60 tokens in 1692.4 ms; used-experts copies: 12203.6 MiB (16935), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 60 tokens in 4.2 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 3577.7 ms; used-experts copies: 24775.4 MiB (13266), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 17.5 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 107.5 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 1.7 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)"
+     ],
+     "gpu_min_free": 765,
+     "gpu_max_used": 15286,
+     "guard": null,
+     "commit_free_mib": {
+      "loaded": 67884,
+      "end": 63577
+     }
+    },
+    "32k": {
+     "runs": [
+      {
+       "prompt_n": 35187,
+       "prompt_tps": 287.240806947239,
+       "first_top": [
+        [
+         "\n\n",
+         -0.4661
+        ],
+        [
+         "",
+         -1.0554
+        ],
+        [
+         " ",
+         -5.5035
+        ],
+        [
+         " it",
+         -5.8251
+        ],
+        [
+         "\n\n\n",
+         -6.1685
+        ]
+       ]
+      },
+      {
+       "prompt_n": 35187,
+       "prompt_tps": 428.9902090821008,
+       "first_top": [
+        [
+         "",
+         -0.2556
+        ],
+        [
+         "\n\n",
+         -1.6305
+        ],
+        [
+         " it",
+         -4.5073
+        ],
+        [
+         "",
+         -6.2795
+        ],
+        [
+         " `",
+         -6.3628
+        ]
+       ]
+      },
+      {
+       "prompt_n": 35187,
+       "prompt_tps": 431.4419894322645,
+       "first_top": [
+        [
+         "",
+         -0.5378
+        ],
+        [
+         "\n\n",
+         -1.1345
+        ],
+        [
+         " it",
+         -3.4572
+        ],
+        [
+         " `",
+         -4.4419
+        ],
+        [
+         " ",
+         -5.4047
+        ]
+       ]
+      }
+     ],
+     "load_s": 8.5,
+     "warmup": {
+      "prompt_n": 1038,
+      "prompt_tps": 72.23514753506953
+     },
+     "layer_major": [
+      "decode_layer_major: 768 layer graphs; host time per graph: build 0.052 ms, split + allocate 1.060 ms, inputs 1.088 ms, compute call 20.745 ms",
+      "decode_normal: ubatch by ubatch: 8192 tokens in 355.5 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 16 ubatches, 8192 tokens through 48 layers in 18533.7 ms; slots: 33812.5 MiB uploaded (144 uploads, 0 prefetched, 2160 hits, 0 fallbacks), used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 768 layer graphs; host time per graph: build 0.052 ms, split + allocate 1.075 ms, inputs 1.473 ms, compute call 21.470 ms",
+      "decode_normal: ubatch by ubatch: 8192 tokens in 415.4 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 4 ubatches, 1903 tokens through 48 layers in 6233.4 ms; slots: 33812.5 MiB uploaded (144 uploads, 0 prefetched, 432 hits, 0 fallbacks), used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 192 layer graphs; host time per graph: build 0.053 ms, split + allocate 1.187 ms, inputs 1.578 ms, compute call 29.578 ms",
+      "decode_normal: ubatch by ubatch: 1903 tokens in 106.5 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 2935.1 ms; used-experts copies: 22831.2 MiB (15054), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 28.5 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 96.4 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 1.8 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)"
+     ],
+     "gpu_min_free": 765,
+     "gpu_max_used": 15286,
+     "guard": null,
+     "commit_free_mib": {
+      "loaded": 68665,
+      "end": 62438
+     }
+    }
+   }
+  },
+  "pf-st1-lm3-b8k": {
+   "prefill": {
+    "env": {},
+    "8k": {
+     "runs": [
+      {
+       "prompt_n": 8768,
+       "prompt_tps": 427.31493773717244,
+       "first_top": [
+        [
+         " less",
+         -1.0575
+        ],
+        [
+         " fewer",
+         -1.5505
+        ],
+        [
+         " {",
+         -1.784
+        ],
+        [
+         " at",
+         -2.309
+        ],
+        [
+         " only",
+         -3.1131
+        ]
+       ]
+      },
+      {
+       "prompt_n": 8768,
+       "prompt_tps": 423.20387050058093,
+       "first_top": [
+        [
+         " less",
+         -1.0007
+        ],
+        [
+         " {",
+         -1.4039
+        ],
+        [
+         " fewer",
+         -1.7276
+        ],
+        [
+         " at",
+         -3.1381
+        ],
+        [
+         " only",
+         -3.1729
+        ]
+       ]
+      },
+      {
+       "prompt_n": 8768,
+       "prompt_tps": 442.4049816980672,
+       "first_top": [
+        [
+         " less",
+         -1.0451
+        ],
+        [
+         " {",
+         -1.5037
+        ],
+        [
+         " fewer",
+         -1.7488
+        ],
+        [
+         " at",
+         -2.5222
+        ],
+        [
+         " only",
+         -3.0149
+        ]
+       ]
+      }
+     ],
+     "load_s": 8.6,
+     "warmup": {
+      "prompt_n": 1038,
+      "prompt_tps": 94.33939971421889
+     },
+     "layer_major": [
+      "decode_normal: ubatch by ubatch: 512 tokens in 17.2 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 113.0 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 1.8 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 16 ubatches, 8192 tokens through 48 layers in 14261.4 ms; slots: 33812.5 MiB uploaded (144 uploads, 0 prefetched, 2160 hits, 0 fallbacks), used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 768 layer graphs; host time per graph: build 0.054 ms, split + allocate 1.083 ms, inputs 0.327 ms, compute call 17.038 ms",
+      "decode_normal: ubatch by ubatch: 8192 tokens in 244.8 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 60 tokens in 1482.9 ms; used-experts copies: 12203.6 MiB (16935), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 60 tokens in 4.3 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 3111.1 ms; used-experts copies: 24775.4 MiB (13266), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 17.2 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 113.6 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 1.9 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)"
+     ],
+     "gpu_min_free": 765,
+     "gpu_max_used": 15286,
+     "guard": null,
+     "commit_free_mib": {
+      "loaded": 68860,
+      "end": 64571
+     }
+    },
+    "32k": {
+     "runs": [
+      {
+       "prompt_n": 35187,
+       "prompt_tps": 456.01816452267593,
+       "first_top": [
+        [
+         "\n\n",
+         -0.4843
+        ],
+        [
+         "",
+         -1.0117
+        ],
+        [
+         " ",
+         -5.5317
+        ],
+        [
+         " it",
+         -6.2351
+        ],
+        [
+         "\n\n\n",
+         -6.3688
+        ]
+       ]
+      },
+      {
+       "prompt_n": 35187,
+       "prompt_tps": 461.45021894788016,
+       "first_top": [
+        [
+         "",
+         -0.2012
+        ],
+        [
+         "\n\n",
+         -1.8064
+        ],
+        [
+         " it",
+         -5.1907
+        ],
+        [
+         "\n\n\n",
+         -6.6143
+        ],
+        [
+         "",
+         -6.621
+        ]
+       ]
+      },
+      {
+       "prompt_n": 35187,
+       "prompt_tps": 457.35403371908154,
+       "first_top": [
+        [
+         "",
+         -0.2647
+        ],
+        [
+         "\n\n",
+         -1.7912
+        ],
+        [
+         " it",
+         -3.5339
+        ],
+        [
+         " `",
+         -4.8992
+        ],
+        [
+         " ",
+         -5.7238
+        ]
+       ]
+      }
+     ],
+     "load_s": 8.6,
+     "warmup": {
+      "prompt_n": 1038,
+      "prompt_tps": 93.81651550277248
+     },
+     "layer_major": [
+      "decode_layer_major: 768 layer graphs; host time per graph: build 0.056 ms, split + allocate 1.086 ms, inputs 1.087 ms, compute call 19.626 ms",
+      "decode_normal: ubatch by ubatch: 8192 tokens in 359.2 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 16 ubatches, 8192 tokens through 48 layers in 17916.5 ms; slots: 33812.5 MiB uploaded (144 uploads, 0 prefetched, 2160 hits, 0 fallbacks), used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 768 layer graphs; host time per graph: build 0.055 ms, split + allocate 1.099 ms, inputs 1.482 ms, compute call 20.621 ms",
+      "decode_normal: ubatch by ubatch: 8192 tokens in 416.3 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 4 ubatches, 1903 tokens through 48 layers in 5467.9 ms; slots: 33812.5 MiB uploaded (144 uploads, 0 prefetched, 432 hits, 0 fallbacks), used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_layer_major: 192 layer graphs; host time per graph: build 0.062 ms, split + allocate 1.289 ms, inputs 1.570 ms, compute call 25.467 ms",
+      "decode_normal: ubatch by ubatch: 1903 tokens in 105.6 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 3127.9 ms; used-experts copies: 22864.9 MiB (15039), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 512 tokens in 29.0 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 93.2 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)",
+      "decode_normal: ubatch by ubatch: 4 tokens in 2.6 ms; used-experts copies: 0.0 MiB (0), whole-weight copies: 0.0 MiB (0)"
+     ],
+     "gpu_min_free": 765,
+     "gpu_max_used": 15286,
+     "guard": null,
+     "commit_free_mib": {
+      "loaded": 68933,
+      "end": 62518
+     }
+    }
+   }
+  }
+ },
+ "steps": [
+  "prefill"
+ ],
+ "kl_yardstick": {
+  "mean_kld": 0.010993,
+  "same_top1_pct": 96.757,
+  "source": "flashnext-gate-20260928b/kl-base-b8.log: llama-upstream 1b446647, -b/-ub 8 vs the base logits at 16, 8 chunks x 4096 tokens",
+  "reused_from": "2026-10-02T21:00:59-0400"
+ },
+ "restore": {
+  "restored": "nothing: the card is left empty on purpose",
+  "gpu": {
+   "used": 0,
+   "free": 16050,
+   "util": 0
+  },
+  "running": [
+   "embeddings"
+  ]
+ },
+ "lane": {
+  "held_by": "coordinator",
+  "resumed": false,
+  "lane": "gpu"
+ },
+ "finished": "2026-10-06T03:08:39-0400"
+}
