@@ -1518,7 +1518,6 @@ def test_a_killed_model_server_is_waited_for_not_answered_502():
     and the client got a 502 server_error. The retry now waits for llama-swap to notice (GET /running no longer
     lists the model as ready), then asks again -- and a 502 that survives is a 503 model_unavailable (retryable)."""
     import api_errors
-    import time as _t
     state = {"n": 0, "running_polls": 0, "dead": True}
 
     class H(BaseHTTPRequestHandler):
@@ -1559,7 +1558,6 @@ def test_a_killed_model_server_is_waited_for_not_answered_502():
     saved = proxy.UPSTREAM
     proxy.UPSTREAM = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
-        t0 = _t.time()
         evs = list(proxy._post_events_raw("/v1/chat/completions", {"model": "flash-next", "messages": []}))
         done = [v for k, v in evs if k == "done"]
         check(len(done) == 1 and done[0]["choices"][0]["message"]["content"] == "back up",

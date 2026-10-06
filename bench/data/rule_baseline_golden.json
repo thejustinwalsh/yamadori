@@ -313,9 +313,7 @@
    "context": "Vite 6, @react-three/drei 9.x.",
    "rule": "investigate",
    "signals": {
-    "domains": [
-     "ui-component"
-    ],
+    "domains": [],
     "libraries": [],
     "symbols": [],
     "code_block": false,
@@ -1284,9 +1282,7 @@
    "context": "",
    "rule": "investigate",
    "signals": {
-    "domains": [
-     "ui-component"
-    ],
+    "domains": [],
     "libraries": [],
     "symbols": [
      "max_len"
