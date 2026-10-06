@@ -197,6 +197,10 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only-labelled", action="store_true",
                     help="only cases bench/skills/inject/labels.jsonl labels")
+    ap.add_argument("--skip-done", action="store_true",
+                    help="skip cases that already have a row in "
+                    "run_<model>.jsonl for every requested variant (resume "
+                    "a run that was stopped)")
     ap.add_argument("--dry-run", action="store_true",
                     help="build every question, send nothing")
     a = ap.parse_args(argv)
@@ -213,6 +217,18 @@ def main(argv=None) -> int:
         import inject_labels
         lab = {k[0] for k in inject_labels.labels("A")}
         cases = [c for c in cases if c["case"] in lab]
+    if a.skip_done:
+        have: dict = {}
+        try:
+            with open(os.path.join(RESULTS, f"run_{a.model}.jsonl"),
+                      encoding="utf-8") as f:
+                for ln in f:
+                    r = json.loads(ln)
+                    have.setdefault(r["case"], set()).add(r["variant"])
+        except OSError:
+            pass
+        cases = [c for c in cases if not set(variants) <= have.get(
+            c["case"], set())]
     cases = cases[:a.limit] if a.limit else cases
     if a.dry_run:
         n = sum(len(questions(v, c["items"])) + 1 for c in cases
