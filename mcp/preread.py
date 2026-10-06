@@ -21,7 +21,7 @@ WHEN (mcp/max_mode.py wait_ready calls this; the request's heartbeats keep flowi
            waits for it before its prompt is sent (OVERLAP, the default: the read and the load share the disk -- whether
            that helps or contends is UNMEASURED), or the read runs first and the load follows (switch `preread_overlap`
            off). The cold load itself took 68-89 s, against 14-24 s after a pre-read (same bench).
-  trimmed  the model is loaded and the llama-server process's working set is below the file's size. DERIVED, not
+  trimmed  the model is loaded and the llama-server process's working set is below HALF the file's size (see decide_trimmed: the measured trimmed and warm working sets, and why half). Originally DERIVED, not
            chosen: the experts must be resident in the process for the prefill not to hard-fault, and they are mapped
            file pages; a working set under the file's size cannot hold them all. CAVEAT (measured, n=1): after a full
            prompt on a trimmed server the working set was 39.1 GB, 0.1 GB UNDER the 39.23 GB file (other arms 39.6-44.4 GB
@@ -288,9 +288,14 @@ def decide_trimmed(pl: dict) -> dict:
     ws, why = working_set(path)
     if ws is None:
         return {"read": False, "file_bytes": size, "skipped": f"the working set could not be read: {why}"}
-    if ws >= size:
+    # TRIMMED MEANS FAR BELOW, not just below (coordinator, 2026-10-06): the measured states fall in two groups with a
+    # wide gap -- trimmed 67 MB (4 h idle, n=1) and ~900 MB (`preread.py status` on the idle server), warm 39.1-44.4 GB
+    # after a prompt (fn_first_prompt 20261006-a). "Below the file's size" put the warm 39.1 GB on the trimmed side, so a
+    # warm agent loop would re-read 39 GB on ordinary turns. Half the file's size sits inside the measured gap with
+    # ~19 GB either side; any cut in that gap reads the same data alike.
+    if ws >= size // 2:
         return {"read": False, "ws": ws, "file_bytes": size,
-                "skipped": f"working set {ws / 1e6:.0f} MB >= the file's {size / 1e6:.0f} MB: the experts can be resident"}
+                "skipped": f"working set {ws / 1e6:.0f} MB >= half the file's {size / 1e6:.0f} MB: not trimmed"}
     return {"read": True, "ws": ws, "file_bytes": size}
 
 

@@ -9,7 +9,7 @@ WHAT IS GATED
      the default: the read is under way before the load ends; `preread_overlap` off: the read ends before the load
      starts); card_wait -- the flag proxy._TurnPump heartbeats on -- is up for the whole wait. A bonsai swap starts no
      thread.
-  3. THE WORKING-SET RULE for a loaded model: below the file's size -> read (why `trimmed`, working_set_mb recorded);
+  3. THE WORKING-SET RULE for a loaded model: below half the file's size -> read (why `trimmed`, working_set_mb recorded);
      at or above it, or unreadable -> no read, the reason recorded.
   4. THE LOCK: a read in flight for a file is joined, never restarted; reads of two files never overlap.
   5. THE SWITCH: YAMADORI_PREREAD=0 and X-Yamadori-Features {"preread": false} (the header wins over env), recorded.
@@ -289,6 +289,9 @@ def test_working_set_rule():
     WS.update(v=SIZE + 5_000_000_000, why="")
     out, *_ = run_wait("flash-next")
     check(READS == [], "a working set above it: no read")
+    WS.update(v=SIZE - SIZE // 400, why="")   # the warm 39.1 GB of a 39.23 GB file, scaled: just under the size
+    out, *_ = run_wait("flash-next")
+    check(READS == [], "a WARM working set just under the file's size: no read (trimmed means below half the file)")
     WS.update(v=None, why="no llama-server process has this file in its command line")
     out, *_ = run_wait("flash-next")
     pr = out["r"].get("preread") or {}

@@ -952,11 +952,11 @@ empty or error calls is a tool defect to fix, not a budget spent.
   waits for it under `card_wait`, so the stream's heartbeats keep flowing (`_TurnPump`); whether the overlap helps or
   contends for the disk with the load is UNMEASURED, the live check measures both; (2) on a request for the LOADED
   model, when the llama-server process's working set (psutil rss = Windows WorkingSetSize, the process found by the
-  model file in its command line) is below the file's size -- DERIVED, not chosen: the mapped experts must be resident
-  for the prefill not to hard-fault, and a working set smaller than the file cannot hold them (caveat, measured n=1:
-  after a full prompt on the trimmed server the working set was 39.1 GB, under the 39.23 GB file, and a read adds
-  nothing to the working set until the pages are touched, so the rule can fire on consecutive requests; a pure
-  continuation cannot be told from a first prompt before it is sent). One read at a time (a lock); a read in flight is
+  model file in its command line) is below HALF the file's size: the measured states fall in two groups with a wide
+  gap -- trimmed 67 MB (4 h idle, n=1) and ~900 MB (an idle server, `preread.py status`), warm 39.1-44.4 GB after a
+  prompt (fn_first_prompt 20261006-a) -- and half the file (~19.6 GB) sits inside that gap. "Below the file's size"
+  (the first build) put the warm 39.1 GB on the trimmed side and would have re-read 39 GB on ordinary agent turns
+  (coordinator, 2026-10-06). A pure continuation cannot be told from a first prompt before it is sent. One read at a time (a lock); a read in flight is
   joined, never restarted; bounded by 900 s (`max_mode.LOAD_TIMEOUT_S`, llama-swap's health-check timeout), then the
   request goes on (`timed_out`). No disk priority: the request waits for the read, the measured arms ran at normal
   priority, and Windows' background thread mode would also lower the cached pages' memory priority. A missing file or
