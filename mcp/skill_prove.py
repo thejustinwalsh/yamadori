@@ -1364,6 +1364,46 @@ def reprove_estimate(rows: list[dict]) -> dict:
     return out
 
 
+# The order a re-prove runs in when released (operator via coordinator,
+# 2026-10-06: "prioritise the skills the pagoda stack needs first (r3f v10 /
+# drei, koota, pmndrs math, TSL/three, React, TypeScript)"): higher first
+# (jobs.claim orders by priority DESC). Areas are skill_select.area_of's.
+REPROVE_PRIORITY = {"r3f": 60, "koota": 60, "pmndrs_math": 60, "threejs": 50,
+                    "react": 40, "typescript": 30}
+
+
+def release_reprove(priority: dict | None = None) -> dict:
+    """Take the idle gate off the QUEUED re-prove jobs (payload `reprove`)
+    and order them by area (REPROVE_PRIORITY). Touches only those rows'
+    `idle` flag and `priority`; mcp/idle.py's definition of an idle stack is
+    unchanged, and every other idle-gated job keeps its gate. The operator's
+    one-off: the stack was never idle for 15 minutes, and the card is theirs
+    to use ("GPU go", 2026-10-06)."""
+    import skill_select
+    prio = REPROVE_PRIORITY if priority is None else priority
+    q = _queue()[0]
+    con = jobs._db()
+    done: dict[str, int] = {}
+    try:
+        rows = con.execute("SELECT id, payload FROM jobs WHERE queue=? AND "
+                           "state='queued'", (q,)).fetchall()
+        for jid, payload in rows:
+            pl = json.loads(payload or "{}")
+            if not pl.get("reprove"):
+                continue
+            ver = skills.version(pl.get("skill"), pl.get("version")) or {}
+            area = skill_select.area_of(ver.get("classify") or {})
+            pl["idle"] = False
+            con.execute("UPDATE jobs SET payload=?, priority=? WHERE id=? "
+                        "AND state='queued'",
+                        (json.dumps(pl), int(prio.get(area, 0)), jid))
+            done[area] = done.get(area, 0) + 1
+    finally:
+        con.close()
+    return {"released": sum(done.values()), "by_area": done,
+            "priority": {a: prio.get(a, 0) for a in done}}
+
+
 def _handle_reprove(job: dict, ctx) -> dict:
     p = job.get("payload") or {}
     sid, v = p.get("skill"), p.get("version")
@@ -1530,8 +1570,13 @@ if __name__ == "__main__":
                     help="with --reprove: also the `unproven` quarantines")
     ap.add_argument("--dry-run", action="store_true",
                     help="with --reprove: list, enqueue nothing")
+    ap.add_argument("--release-reprove", action="store_true",
+                    help="take the idle gate off the queued re-proofs and "
+                    "order them by area (REPROVE_PRIORITY)")
     a = ap.parse_args()
-    if a.reprove:
+    if a.release_reprove:
+        print(json.dumps(release_reprove(), indent=1))
+    elif a.reprove:
         print(json.dumps(reprove_quarantined(
             a.limit, include_unproven=a.include_unproven,
             dry_run=a.dry_run), indent=1))
