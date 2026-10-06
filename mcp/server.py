@@ -72,6 +72,7 @@ import max_mode  # noqa: E402
 import nebari  # noqa: E402
 import messages_api  # noqa: E402
 import proxy  # noqa: E402
+import response_store  # noqa: E402
 import responses_api  # noqa: E402
 
 app = FastAPI(title="yamadori", version="1", docs_url=None, redoc_url=None)
@@ -128,7 +129,8 @@ async def root(request: Request) -> Response:
     return JSONResponse({
         "service": "yamadori",
         "endpoints": ["/v1/models", "/v1/models/{id}", "/v1/chat/completions",
-                      "/v1/responses", "/v1/messages",
+                      "/v1/responses", "/v1/responses/{id}",
+                      "/v1/responses/{id}/input_items", "/v1/messages",
                       "/v1/messages/count_tokens", "/v1/images/generations",
                       "/v1/systemone", "/jev/v1/systemone", "/jev/v1/models",
                       "/health",
@@ -384,10 +386,12 @@ async def chat(request: Request) -> Response:
 
 @app.post("/v1/responses")
 async def responses(request: Request) -> Response:
-    """The OpenAI Responses API, stateless (mcp/responses_api.py): the
-    request is translated to the chat body, the SAME turn runs
-    (_serve_turn -> proxy.complete / proxy.stream_body), and its result is
-    translated back -- a Response object, or the Responses event stream."""
+    """The OpenAI Responses API (mcp/responses_api.py): the request is
+    translated to the chat body, the SAME turn runs (_serve_turn ->
+    proxy.complete / proxy.stream_body), and its result is translated back --
+    a Response object, or the Responses event stream. A request that did not
+    say `store: false` is stored under the account (mcp/response_store.py)
+    and `previous_response_id` rebuilds a conversation from it."""
     account, why = accounts.identify(request.headers.get("authorization"))
     if account is None:
         return _unauthorised(why)
@@ -397,13 +401,109 @@ async def responses(request: Request) -> Response:
         return _api_error(api_errors.invalid(
             f"The request body is not valid JSON: {e}", code="invalid_json"))
     try:
-        chat_body, ctx = responses_api.to_chat(body)
+        # In a thread: a previous_response_id reads the response store.
+        chat_body, ctx = await run_in_threadpool(
+            responses_api.to_chat, body, "yamadori", account)
     except Exception as e:                                       # noqa: BLE001
         # A request we cannot serve is its 400 (ApiError); anything else is
         # our fault, and says so (500 internal_error), in the one object.
         return _api_error(api_errors.of_exception(e))
     return await _serve_turn(request, account, chat_body, ctx.model,
                              responses=ctx)
+
+
+# STORED RESPONSES (mcp/response_store.py; operator, 2026-10-06): OpenAI's
+# retrieve, delete and list-input-items routes. Another account's id is as
+# "not found" as an unknown one. Errors: 404, invalid_request_error,
+# "Response with id '<id>' not found." (OpenAI's wording, as its SDKs print it;
+# the reference does not document the body).
+def _response_not_found(rid: str) -> JSONResponse:
+    return _api_error(api_errors.ApiError(
+        404, f"Response with id '{rid}' not found."))
+
+
+def _storing() -> bool:
+    return response_store.enabled()
+
+
+@app.get("/v1/responses/{response_id}")
+async def response_get(response_id: str, request: Request) -> Response:
+    """GET /v1/responses/{id}: the stored Response object. `stream=true` (a
+    replay of the event stream) is not served."""
+    account, why = accounts.identify(request.headers.get("authorization"))
+    if account is None:
+        return _unauthorised(why)
+    if request.query_params.get("stream", "").lower() in ("1", "true"):
+        return _api_error(api_errors.invalid(
+            "'stream' is not supported on retrieve: this server does not "
+            "replay a stored response as events; read the object.",
+            param="stream", code="unsupported_parameter"))
+    obj = await run_in_threadpool(response_store.get, account,
+                                  response_id) if _storing() else None
+    if obj is None:
+        return _response_not_found(response_id)
+    return JSONResponse(responses_api.rehydrate_images(obj))
+
+
+@app.delete("/v1/responses/{response_id}")
+async def response_delete(response_id: str, request: Request) -> Response:
+    """DELETE /v1/responses/{id}: {id, object: "response.deleted", deleted:
+    true}."""
+    account, why = accounts.identify(request.headers.get("authorization"))
+    if account is None:
+        return _unauthorised(why)
+    gone = await run_in_threadpool(response_store.delete, account,
+                                   response_id) if _storing() else False
+    if not gone:
+        return _response_not_found(response_id)
+    print(f"responses: deleted {response_id}", flush=True)
+    return JSONResponse({"id": response_id, "object": "response.deleted",
+                         "deleted": True})
+
+
+@app.get("/v1/responses/{response_id}/input_items")
+async def response_input_items(response_id: str, request: Request) -> Response:
+    """GET /v1/responses/{id}/input_items: the response's own input items,
+    newest first by default (`order` desc, OpenAI's default), `limit` 1-100
+    (default 20), `after` an item id: {object: "list", data, first_id, last_id,
+    has_more}."""
+    account, why = accounts.identify(request.headers.get("authorization"))
+    if account is None:
+        return _unauthorised(why)
+    q = request.query_params
+    try:
+        limit = int(q.get("limit", "20"))
+        if not 1 <= limit <= 100:
+            raise ValueError
+    except ValueError:
+        return _api_error(api_errors.invalid(
+            "'limit' must be an integer from 1 to 100.", param="limit",
+            code="invalid_value"))
+    order = q.get("order", "desc")
+    if order not in ("asc", "desc"):
+        return _api_error(api_errors.invalid(
+            "'order' must be 'asc' or 'desc'.", param="order",
+            code="invalid_value"))
+    items = await run_in_threadpool(response_store.input_items, account,
+                                    response_id) if _storing() else None
+    if items is None:
+        return _response_not_found(response_id)
+    if order == "desc":
+        items = items[::-1]
+    after = q.get("after")
+    if after:
+        ids = [i.get("id") if isinstance(i, dict) else None for i in items]
+        if after not in ids:
+            return _api_error(api_errors.invalid(
+                f"Item with id '{after}' not found.", param="after",
+                code="invalid_value"))
+        items = items[ids.index(after) + 1:]
+    page = items[:limit]
+    ids = [i.get("id") if isinstance(i, dict) else None for i in page]
+    return JSONResponse({"object": "list", "data": page,
+                         "first_id": ids[0] if ids else None,
+                         "last_id": ids[-1] if ids else None,
+                         "has_more": len(items) > limit})
 
 
 @app.post("/v1/messages")
@@ -701,7 +801,10 @@ async def _serve_turn(request: Request, account: str, body: dict,
     d = catalog.rewrite_response(d, public_name)
     print(f"{route} {time.time() - t0:.1f}s", flush=True)
     if responses is not None:
-        return JSONResponse(responses_api.of_chat(d, responses))
+        # In a thread: it stores the response (a sqlite write) before it
+        # returns, and the event loop must not wait on the disk.
+        return JSONResponse(await run_in_threadpool(responses_api.of_chat, d,
+                                                    responses))
     if messages is not None:
         try:
             return JSONResponse(messages_api.of_chat(d, messages))

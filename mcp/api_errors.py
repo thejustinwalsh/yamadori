@@ -102,6 +102,7 @@ def invalid(message: str, param: str | None = None,
 def unknown_route(method: str, path: str) -> ApiError:
     return ApiError(404, f"Unknown request URL: {method} {path}. This server "
                     "serves POST /v1/chat/completions, POST /v1/responses, "
+                    "GET and DELETE /v1/responses/{id}, GET /v1/responses/{id}/input_items, "
                     "POST /v1/messages, POST /v1/messages/count_tokens, "
                     "GET /v1/models, GET /v1/models/{model} and POST "
                     "/v1/images/generations.",

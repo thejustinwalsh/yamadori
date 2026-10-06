@@ -124,7 +124,7 @@ run yet** -- V0 will be the first.
 
 ---
 
-## Status: R1 landed -- `POST /v1/responses`, stateless (2026-09-26)
+## Status: R1 landed -- `POST /v1/responses` (2026-09-26; stored state 2026-10-06)
 
 Operator, 2026-09-26: "If everyone supports responses api... both need to
 exist"; Responses is the primary path harnesses should use. Built as
@@ -242,27 +242,57 @@ session state and `_run_our_tool` hands them to `images.run_tool`
   `output_tokens`, `output_tokens_details {reasoning_tokens}` -- LEFT OUT
   when the reasoning count is unknown (never guessed; the spec marks it
   required, Codex reads it as optional).
-- *Refused (400 `unsupported_parameter`):* `previous_response_id`,
-  `conversation`, `background: true`, `prompt`, `item_reference` items --
-  each needs server state. `store: true` is accepted and answered `store:
-  false`. `input_file` in a message is 400 (as chat's `file` parts); in a
-  `function_call_output` it becomes a note (refusing would wedge the
-  conversation: it is in every later request). Hosted-call records in the
-  input (`web_search_call`, `image_generation_call` -- Codex replays the
-  image's base64 -- `compaction`, ...) are ignored and do not split the
-  turn they sit in.
+- *Refused (400 `unsupported_parameter`):* `conversation`, `background:
+  true`, `prompt`, `item_reference` items. `previous_response_id` and `store`
+  are served since 2026-10-06 (below). `input_file` in a message is 400 (as
+  chat's `file` parts); in a `function_call_output` it becomes a note (refusing
+  would wedge the conversation: it is in every later request). Hosted-call
+  records in the input (`web_search_call`, `image_generation_call` -- Codex
+  replays the image's base64 -- `compaction`, ...) are ignored and do not split
+  the turn they sit in.
 
-**How state would map onto the ledger, when it is built.** A stored
-response is the turn `ledger_record_turn` already keeps (the delivered turn
-under the conversation's chain key; its hidden hops expanded on replay). A
-`previous_response_id` would name that row, but resolving it means
-rebuilding the chat messages up to and including that turn, and the
-caller's own input items of earlier requests are NOT in the ledger -- only
-their hashes are (nebari's rule: "Not kept: the caller's code"). So state
-needs a new per-account store of callers' input items by response id,
-under the ledger's size-based eviction. That is a decision about keeping
-callers' content -- the operator's. Until then: 400 with "send the whole
-conversation in `input`".
+**Stored responses (2026-10-06; supersedes "stateless" above).** Operator,
+AskUserQuestion, chosen "Store, local, capped": "Save each response's full
+input and output under its id, per account, on this machine only. Same size
+and age limits as the ledger (256 MB per account, 2 GB total, 30 days).
+previous_response_id rebuilds the conversation from it, and GET and DELETE
+/v1/responses/{id} work like OpenAI's. Applies when the client asks to store
+(OpenAI's default). This ends the rule that client messages are only hashed,
+for Responses requests." Why: refusing `previous_response_id` was a production
+trap -- `store` defaults to true at OpenAI and a client may send only the new
+input plus the id. Built as a store beside the ledger (`mcp/response_store.py`,
+its module doc has the schema) and the same translation: `previous_response_id`
+rebuilds the items (input then output of every response of the chain, root
+first) and `_messages` translates the whole list, so the chat messages, the
+ledger's chain keys, the session and the slot's cache are a full-resend
+client's (`mcp/test_responses_api.py`: the messages compared turn by turn, the
+served template's prefix checked through a chain of 3, blocking and streamed).
+Rules and sources:
+
+| rule | source |
+|---|---|
+| `store` absent = true; `false` = nothing kept | OpenAI create-response reference; guide "Conversation state": "Response objects are saved for 30 days by default ... setting `store` to `false`" (developers.openai.com/api/docs/guides/conversation-state) |
+| `instructions` are not carried over; `tools` are the current request's | the `instructions` parameter: "When using along with previous_response_id, the instructions from a previous response will not be carried over to the next response" (create-response reference; confirmed by search 2026-10-06, the reference page itself did not render for the fetch tool) |
+| unknown / other account's / deleted / evicted id: **400** `invalid_request_error`, `param: previous_response_id`, `code: previous_response_not_found`, "Previous response with id '<id>' not found." | OpenAI clients' reports of the live API (github.com/dotnet/extensions/issues/7704, github.com/microsoft/semantic-kernel/issues/13128). The official reference does not print the body: UNVERIFIED against the live service |
+| `GET /v1/responses/{id}`: the Response; `stream` and `starting_after` are not served (`stream=true` is 400) | retrieve reference (query: include, include_obfuscation, starting_after, stream) |
+| `DELETE`: `{id, object: "response.deleted", deleted: true}` | delete reference |
+| `GET .../input_items`: `{object: "list", data, first_id, last_id, has_more}`, `limit` 1-100 default 20, `order` default `desc`, `after` an item id; `include` ignored | input-items reference |
+| unknown id on GET / DELETE / input_items: 404 `Response with id '<id>' not found.`, type `invalid_request_error`, code null | OpenAI's wording as its SDKs print it; the reference does not document the body: UNVERIFIED |
+| caps: 256 MB per account, 2 GB total, 30 days, whole chains least recently used first | the operator's decision above; the numbers are the ledger's (nebari.LEDGER_*, operator 2026-09-24) |
+
+Decisions in the build (each the module's, for the operator to change):
+a continuation that sends no `prompt_cache_key` keeps the chain's (the
+previous response is an explicit id; the slot's cache is the reason);
+`failed` and `incomplete` responses are stored like any other and may be
+chained from; a stream the client hangs up before its terminal event is not
+stored; an `image_generation_call`'s base64 is not stored (the media store
+has the PNG; GET puts it back while it is there); `item_reference` stays
+refused (an index of every item id and the ordering rules for a reference to
+an item of another chain, for a request no harness we serve makes);
+`DELETE` removes one response and leaves its descendants, whose chain is then
+"not found"; a chain longer than the window is the same 400
+`context_length_exceeded` as a long full resend (`truncation: auto` is not
+served, so the client starts a new chain).
 
 **Evidence.** Offline: `mcp/test_responses_api.py` (every item type
 translated, the 400s, a Codex-shaped request with a `view_image` output
@@ -416,7 +446,7 @@ Observed (`minimal`, `include_usage`): chunk 1 `delta: {content: "yamadori sessi
 |---|---|---|---|---|---|
 | `POST /v1/embeddings` | `{input, model, encoding_format, dimensions}` -> `{object: "list", data: [{object: "embedding", index, embedding}], model, usage}` | absent (405, section 4). The embedder exists (`embeddings` in llama-swap, used through `code_search._post` inside `gpu_room.use`) | Continue, when configured with an OpenAI-compatible embeddings provider (`POST {apiBase}/embeddings {input: string[], model}`, reads `data[].embedding`; it has a local default otherwise); Hermes, OpenCode, Codex, Cline, Pi do not call it | M: authenticated pass-through inside `gpu_room.use("embeddings")`, `encoding_format` both ways, `dimensions` refused (not a Matryoshka model unless it is) | P2 |
 | `POST /v1/completions` (legacy) | still in the spec: `prompt`, `suffix`, `echo`, `logprobs` (int), `best_of` -> `text_completion` | absent Continue's autocomplete with provider `openai` goes to `/completions` by default (its `/fim/completions` path is not OpenAI's and is off for that class; inferred from code, not traced); nothing else in the target set | M-L: FIM needs the model's FIM tokens, a separate lane and no tier logic | P2 / won't do until someone asks for autocomplete |
-| `POST /v1/responses` | the Responses API (section 10) | **served since 2026-09-26** (`mcp/responses_api.py`, stateless; Status: R1) | **Codex CLI** (section 9) | -- | done |
+| `POST /v1/responses` | the Responses API (section 10) | **served since 2026-09-26** (`mcp/responses_api.py`; stored state since 2026-10-06; Status: R1) | **Codex CLI** (section 9) | -- | done |
 | `POST /v1/images/generations` | `{prompt, n, size, response_format, model, quality, output_format, background, style, moderation, output_compression, stream, partial_images, user}` -> `{created, data: [{url|b64_json, revised_prompt}], output_format, size, background, quality}` | implemented (`server.images_generations`). Checked against the spec 2026-09-26: `quality` accepted (it does NOT pick the image model: the caller's saved preference does, turbo by default -- a client that always sends `high` would otherwise override the operator's choice; echoed), `output_format` png only (jpeg/webp 400: nothing converts), `background` opaque/auto (transparent 400: ask for it in the prompt, real alpha is kept), `stream` 400, `model` picks ours only by our names (`yamadori-image[-turbo]`; `dall-e-3`, `gpt-image-1` ignored), `n` 1-4 (spec 1-10: 400 above 4), sizes per `images.parse_size` (1792x1024 400 with the remedy); `style`, `moderation`, `output_compression`, `user`, `partial_images` ignored; bad JSON is the one error object (`invalid_json`); the response now carries `output_format`, `size`, `background` and the requested `quality`; `usage` is not sent (token counts do not apply) | none | -- | -- |
 | `GET /v1/chat/completions/{id}`, `/v1/files`, `/v1/batches`, `/v1/audio/*`, `/v1/moderations` | -- | absent | no target calls them | -- | won't do |
 
@@ -506,7 +536,7 @@ calls), in `server.py` beside `chat`, not a second pipeline.
 | `text.format` `{type: "json_schema", name, schema, strict}` | `response_format` in the chat (nested) form | `text.verbosity` ignored |
 | `prompt_cache_key` | kept (the conversation id; Codex always sends one, so no session line) | |
 | `store: true` | accepted, not stored (`"store": false` in the response) -- or 400; operator's choice | |
-| `previous_response_id`, `conversation`, `background` | 400 `unsupported_parameter`: "this server is stateless; send the whole input" | Codex does not use them with `store: false` |
+| `previous_response_id`, `conversation`, `background` | (as planned: 400, stateless.) Built differently, 2026-10-06: `previous_response_id` is served from the response store (Status: R1, "Stored responses"); `conversation` and `background` are still 400 `unsupported_parameter` | Codex does not use them with `store: false` |
 | `include` | ignored except `reasoning.encrypted_content` (see output) | |
 | `temperature`, `top_p` | enforced as in chat (section 8) | echoed back as the values used |
 | `metadata`, `user`, `safety_identifier`, `service_tier`, `truncation` | accepted, ignored; `metadata` echoed | |

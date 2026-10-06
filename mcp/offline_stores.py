@@ -32,6 +32,7 @@ STORES = {
     "YAMADORI_SKILL_LABELS": "router_labels.jsonl",
     "YAMADORI_CORPUS_DB": "corpus.sqlite3",      # turns
     "YAMADORI_NEBARI_DB": "nebari.sqlite3",      # sessions, the ledger
+    "YAMADORI_RESPONSES_DB": "responses.sqlite3",  # stored Responses (callers' items)
     "RINGS_DB": "rings.sqlite3",                 # the work log
     "YAMADORI_TOKEN_LEDGER": "token_ledger.sqlite3",
     # the dashboard's history (mcp/stats_store.py): generations, requests,

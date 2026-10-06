@@ -61,7 +61,8 @@ Contract, never wording:
                   (event order, deltas = the message), a function-call
                   round trip replayed Codex-style (same session, cache
                   reused), an input_image, the hosted image_generation
-                  tool, previous_response_id refused
+                  tool, an unknown previous_response_id is 400
+                  previous_response_not_found
     responses_features   (2026-10-06, the operator's VS Code client) the rest of
                   the chat API's features over Responses: a no-key tool loop
                   (our id in the call_id), reasoning summary events, usage
@@ -69,7 +70,9 @@ Contract, never wording:
                   seed, a prompt past the window (HTTP 400 before any byte),
                   json_schema output, drawing without the hosted tool, our link
                   looked at, a tool output that carries an image, the package
-                  tools (NOT APPLICABLE while Docker is down)
+                  tools (NOT APPLICABLE while Docker is down), STORED
+                  RESPONSES (a three-turn chain by previous_response_id only,
+                  GET, input_items, DELETE then 404, store:false)
     responses_compaction   both shapes over Responses and the key that changes
                   at a compaction (aliased_to)
     responses_slots   the other card (bonsai-a4000) for a second conversation,
@@ -2178,10 +2181,11 @@ def test_responses_api():
                           "bytes": len(raw)})[:600])
     st, _h, t = _raw_post("/v1/responses", json.dumps(dict(
         body, previous_response_id="resp_abc")).encode())
-    check(st == 400 and _err(t).get("code") == "unsupported_parameter"
+    check(st == 400 and _err(t).get("code") == "previous_response_not_found"
           and _err(t).get("param") == "previous_response_id",
-          "responses: previous_response_id is 400 unsupported_parameter "
-          "(stateless)", f"{st} {t[:300]}")
+          "responses: an unknown previous_response_id is 400 "
+          "previous_response_not_found (the stored-state chain itself: "
+          "responses_features)", f"{st} {t[:300]}")
 
 
 
@@ -3211,6 +3215,144 @@ def test_responses_package_tools():
                       "text": _resp_text(r["final"] or {})[:160]})[:600])
 
 
+def _resp_http(method: str, path: str) -> tuple[int, dict]:
+    """GET / DELETE on /v1/responses/... through :1234 -> (status, JSON
+    body or {})."""
+    req = urllib.request.Request(f"{PROXY}{path}", method=method, headers={
+        "Authorization": f"Bearer {KEY}"})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            raw, st = r.read().decode("utf-8", "replace"), r.status
+    except urllib.error.HTTPError as e:
+        raw, st = e.read().decode("utf-8", "replace"), e.code
+        if st == 429:
+            raise NotRun(f"429 from {path}") from None
+    try:
+        return st, json.loads(raw)
+    except ValueError:
+        return st, {}
+
+
+def _resp_http_post(body: dict) -> tuple[int, str]:
+    st, _h, t = _raw_post("/v1/responses", json.dumps(body).encode())
+    return st, t
+
+
+def test_responses_stored_state():
+    """STORED RESPONSES (operator, 2026-10-06, "Store, local, capped";
+    mcp/response_store.py): a three-turn conversation chained by
+    previous_response_id ONLY -- turn 2 sends just a function_call_output
+    (blocking turn 1, streamed turn 2, blocking turn 3), `store` never sent
+    (OpenAI's default is true), instructions and tools resent each time (not
+    carried over). The model must answer from the stored history, the slot's
+    cache must be reused, GET and input_items read it back, DELETE removes it,
+    and a chain through a deleted response or a `store: false` one is 400
+    previous_response_not_found."""
+    ck = f"live-resp-store-{_nonce()}"
+    ins = f"You are a helpful agent. [{ck}]"
+    common = {"model": "yamadori", "instructions": ins, "tools": [_WEATHER],
+              "tool_choice": "auto", "reasoning": {"effort": "low"},
+              "prompt_cache_key": ck}
+    r1 = _resp_call(dict(common, input=[_rmsg(
+        "user", "What is the weather in Paris right now? Use the tool, then "
+                "tell me in one sentence.")]))
+    f1 = r1["final"] or {}
+    calls = _ritems(r1, "function_call")
+    st1 = (_rx(r1).get("responses") or {}).get("stored") or {}
+    check(r1["status"] == 200 and f1.get("store") is True and calls
+          and calls[0].get("name") == "get_weather"
+          and st1.get("stored") is True and st1.get("id") == f1.get("id")
+          and int(st1.get("bytes") or 0) > 0,
+          "responses (stored): `store` absent is stored (the object says "
+          "store true; x_yamadori.responses.stored names the id and its size)",
+          json.dumps({"st": r1["status"], "store": f1.get("store"),
+                      "stored": st1, "calls": len(calls)}))
+    if not calls:
+        return
+    r2 = _resp_call(dict(common, previous_response_id=f1["id"], input=[
+        {"type": "function_call_output", "call_id": calls[0]["call_id"],
+         "output": json.dumps({"city": "Paris", "temp_c": 18,
+                               "sky": "sunny"})}]), stream=True)
+    f2, x2 = r2["final"] or {}, _rx(r2)
+    c2 = x2.get("cache") or {}
+    check(r2["status"] == 200 and f2.get("status") == "completed"
+          and f2.get("previous_response_id") == f1["id"]
+          and "18" in _resp_text(f2)
+          and ((x2.get("responses") or {}).get("previous_response") or {}
+               ).get("chain") == 1
+          and (x2.get("session") or {}).get("id")
+          == (_rx(r1).get("session") or {}).get("id")
+          and int(c2.get("reused") or 0) > 0,
+          "responses (stored, streamed): a function_call_output and "
+          "previous_response_id are enough -- the model answers from the "
+          "stored turn, the same session, the slot's cache reused",
+          json.dumps({"text": _resp_text(f2)[:160], "cache": {k: c2.get(k)
+                      for k in ("prompt", "reused", "processed")},
+                      "session": x2.get("session"),
+                      "prev": (x2.get("responses") or {}).get(
+                          "previous_response")}))
+    r3 = _resp_call(dict(common, previous_response_id=f2.get("id"), input=[
+        _rmsg("user", "Which city did I ask about? Answer with the city "
+                      "name only.")]))
+    f3, x3 = r3["final"] or {}, _rx(r3)
+    c3 = x3.get("cache") or {}
+    check(r3["status"] == 200 and "paris" in _resp_text(f3).lower()
+          and ((x3.get("responses") or {}).get("previous_response") or {}
+               ).get("chain") == 2
+          and int(c3.get("reused") or 0) > 0,
+          "responses (stored): the third turn, chained again, answers from "
+          "turn 1's stored input (Paris); chain of 3; cache reused",
+          json.dumps({"text": _resp_text(f3)[:160], "cache": {k: c3.get(k)
+                      for k in ("prompt", "reused", "processed")}}))
+    st, g = _resp_http("GET", f"/v1/responses/{f3.get('id')}")
+    check(st == 200 and g.get("id") == f3.get("id")
+          and g.get("object") == "response" and g.get("status") == "completed"
+          and g.get("previous_response_id") == f2.get("id")
+          and g.get("instructions") == ins
+          and _resp_text(g) == _resp_text(f3) and g.get("store") is True,
+          "GET /v1/responses/{id}: the stored Response (output, instructions, "
+          "previous_response_id)", json.dumps({"st": st, "g": g})[:400])
+    st, items = _resp_http("GET", f"/v1/responses/{f3.get('id')}/input_items")
+    check(st == 200 and items.get("object") == "list"
+          and len(items.get("data") or []) == 1
+          and "Which city" in json.dumps(items.get("data")),
+          "GET input_items: the request's own input item",
+          json.dumps({"st": st, "items": items})[:300])
+    st, deleted = _resp_http("DELETE", f"/v1/responses/{f3.get('id')}")
+    st_g, _b = _resp_http("GET", f"/v1/responses/{f3.get('id')}")
+    check(st == 200 and deleted == {"id": f3.get("id"),
+                                    "object": "response.deleted",
+                                    "deleted": True} and st_g == 404,
+          "DELETE answers response.deleted and the response is then 404",
+          json.dumps({"delete": [st, deleted], "get": st_g}))
+    r4 = _resp_http_post({"model": "yamadori", "instructions": ins,
+                          "previous_response_id": f3.get("id"),
+                          "input": "Hello?", "max_output_tokens": 32,
+                          "reasoning": {"effort": "low"}})
+    check(r4[0] == 400 and _err(r4[1]).get("code") ==
+          "previous_response_not_found"
+          and _err(r4[1]).get("param") == "previous_response_id",
+          "responses: a previous_response_id that was deleted is 400 "
+          "previous_response_not_found", f"{r4[0]} {r4[1][:300]}")
+    n0 = _resp_call(dict(common, store=False, prompt_cache_key=ck + "-ns",
+                         input=[_rmsg("user", "Say OK.")],
+                         max_output_tokens=64))
+    fn = n0["final"] or {}
+    st_n, _b = _resp_http("GET", f"/v1/responses/{fn.get('id')}")
+    r5 = _resp_http_post({"model": "yamadori", "previous_response_id":
+                          fn.get("id"), "input": "again",
+                          "max_output_tokens": 32})
+    check(n0["status"] == 200 and fn.get("store") is False and st_n == 404
+          and r5[0] == 400
+          and _err(r5[1]).get("code") == "previous_response_not_found",
+          "responses: `store: false` is not stored (store false, GET 404) "
+          "and cannot be chained from", json.dumps({
+              "store": fn.get("store"), "get": st_n, "chain": r5[0]}))
+    # leave nothing behind: the test's own responses are deleted
+    for rid in (f1.get("id"), f2.get("id")):
+        _resp_http("DELETE", f"/v1/responses/{rid}")
+
+
 def test_responses_features():
     test_responses_usage_reasoning_and_no_key_sessions()
     test_responses_titles_and_side_calls()
@@ -3218,6 +3360,7 @@ def test_responses_features():
     test_responses_structured_output()
     test_responses_draw_and_look()
     test_responses_package_tools()
+    test_responses_stored_state()
 
 
 def _judge_resp_summary(tag: str, r: dict, prev_x: dict, shape: str,

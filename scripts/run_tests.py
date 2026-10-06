@@ -270,6 +270,8 @@ LIVE_WRITERS = (
     ("index/corpus.sqlite3*", "stack", "proxy (every request's turn)"),
     ("index/nebari.sqlite3*", "stack", "proxy (sessions, the ledger)"),
     ("index/rings.sqlite3*", "stack", "proxy (the work log)"),
+    ("index/responses.sqlite3*", "stack", "proxy (stored Responses: "
+                                          "previous_response_id, GET, DELETE)"),
     ("index/token_ledger.sqlite3*", "stack", "proxy (token accounting)"),
     ("index/concept_seed_last.json", "stack", "proxy (the seed it drew)"),
     ("index/slots_state.json", "stack", "proxy (slot pins)"),

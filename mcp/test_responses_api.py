@@ -74,6 +74,7 @@ sys.path.insert(0, HERE)
 _TMP = tempfile.mkdtemp(prefix="yamadori_test_responses_")
 for _k, _v in (("YAMADORI_CORPUS_DB", "corpus.sqlite3"),
                ("YAMADORI_NEBARI_DB", "nebari.sqlite3"),
+               ("YAMADORI_RESPONSES_DB", "responses.sqlite3"),
                ("RINGS_DB", "rings.sqlite3"),
                ("CODE_INDEX_DB", "code.sqlite3"),
                ("YAMADORI_SLOTS_STATE", "slots_state.json"),
@@ -96,8 +97,8 @@ import session_id  # noqa: E402
 import vision  # noqa: E402
 
 _tmp_root = os.path.abspath(tempfile.gettempdir())
-for _k in ("YAMADORI_CORPUS_DB", "YAMADORI_NEBARI_DB", "RINGS_DB",
-           "CODE_INDEX_DB", "YAMADORI_ACCOUNTS_DIR", "YAMADORI_MEDIA_DIR",
+for _k in ("YAMADORI_CORPUS_DB", "YAMADORI_NEBARI_DB",
+           "YAMADORI_RESPONSES_DB", "RINGS_DB", "CODE_INDEX_DB", "YAMADORI_ACCOUNTS_DIR", "YAMADORI_MEDIA_DIR",
            "YAMADORI_MEDIA_SECRET_FILE"):
     assert os.path.abspath(os.environ[_k]).startswith(_tmp_root), _k
 
@@ -1447,7 +1448,7 @@ def test_the_route():
     st, _h, d, _ = post(body)
     check(st == 200 and d.get("object") == "response"
           and d.get("id", "").startswith("resp_") and _text(d) == "Hi."
-          and d.get("model") == "yamadori" and d.get("store") is False
+          and d.get("model") == "yamadori" and d.get("store") is True
           and d.get("instructions") == "Route test."
           and isinstance(d.get("x_yamadori"), dict),
           "POST /v1/responses: 200, a Response object", json.dumps(d)[:300])
@@ -1470,11 +1471,12 @@ def test_the_route():
           "a failure before the first byte is a real HTTP status and the "
           "error object, not a 200 stream (E1)", f"{st} {json.dumps(d)[:200]}")
     st, _h, d, _ = post(dict(body, previous_response_id="resp_x"))
-    check(st == 400 and _is_error(d, "unsupported_parameter",
+    check(st == 400 and _is_error(d, "previous_response_not_found",
                                   "previous_response_id")
-          and "stateless" in d["error"]["message"],
-          "previous_response_id: 400 unsupported_parameter, saying why",
-          json.dumps(d)[:300])
+          and d["error"]["message"] ==
+          "Previous response with id 'resp_x' not found.",
+          "an unknown previous_response_id: 400 previous_response_not_found "
+          "in OpenAI's words", json.dumps(d)[:300])
     st, _h, d, _ = post(None, raw=b"{nope")
     check(st == 400 and _is_error(d, "invalid_json"), "bad JSON: 400",
           json.dumps(d)[:200])
@@ -2542,6 +2544,619 @@ def test_reasoning_off_and_modes_through_responses():
         R.REASONING_MODE = saved
 
 
+# ------------------------------------------------- stored responses ----
+# mcp/response_store.py; operator, 2026-10-06 ("Store, local, capped").
+import response_store as RS  # noqa: E402
+
+
+class PClient(RClient):
+    """A client that sends ONLY what is new plus `previous_response_id` (the
+    SDK's conversation-state pattern), and keeps beside it what a client that
+    resent its whole history would hold, so each request's chat messages can
+    be compared with that client's. `store` true is sent explicitly (an
+    absent one, OpenAI's default, is tested separately)."""
+
+    def __init__(self, tag: str, *, store: bool | None = True,
+                 send_key: bool = True, **kw):
+        super().__init__(tag, **kw)
+        self.store = store
+        self.send_key = send_key
+        self.prev: str | None = None
+        self.full: list[dict] = []          # the full-resend client's items
+        self.mismatch: list[str] = []
+
+    def body(self) -> dict:
+        b = super().body()
+        if self.store is None:
+            b.pop("store", None)
+        else:
+            b["store"] = self.store
+        if self.prev:
+            b["previous_response_id"] = self.prev
+            if not self.send_key:
+                b.pop("prompt_cache_key", None)
+        return b
+
+    def full_body(self, own: list) -> dict:
+        b = RClient.body(self)
+        b["input"] = copy.deepcopy(self.full + own)
+        b["store"] = False
+        return b
+
+    def chat_of(self, body: dict):
+        chat, ctx = R.to_chat(body, account=self.account)
+        chat.update(_account=self.account, _client_ip="127.0.0.1",
+                    _public_base=BASE, _session_token="",
+                    _features=json.dumps({"skills": True}))
+        return chat, ctx
+
+    def turn(self, script, user=None) -> dict:
+        if user is not None:
+            self.input.append({"type": "message", "role": "user",
+                               "content": [{"type": "input_text",
+                                            "text": user}]})
+        own = copy.deepcopy(self.input)
+        want = R.to_chat(self.full_body(own))[0]["messages"]
+        got = R.to_chat(self.body(), account=self.account)[0]["messages"]
+        same = json.dumps(want, sort_keys=True) == json.dumps(
+            got, sort_keys=True)
+        if not same:
+            self.mismatch.append(f"{json.dumps(want)[:200]} != "
+                                 f"{json.dumps(got)[:200]}")
+        r = RClient.turn(self, script)
+        kept = self.input[len(own):]
+        self.full += own + kept
+        self.input = []
+        self.prev = (r["resp"] or {}).get("id")
+        r["same"] = same
+        return r
+
+
+def _ok_chat(text: str = "Hi.") -> dict:
+    return {"choices": [{"index": 0, "message": {
+        "role": "assistant", "content": text}, "finish_reason": "stop"}],
+        "usage": {}}
+
+
+def test_previous_response_id_blocking_chain():
+    """A chain of 3 through previous_response_id with function_call_output
+    only: the messages are those of a full-resend client, the slot's prefix
+    is extended through the served template, one session throughout."""
+    T.slots.reset(n=4)
+    T.compaction.reset()
+    c = PClient("chain-b")
+    t1 = c.turn([T.reply("", reasoning="Plan: write it.", calls=[T.call(
+        "write_file", {"path": "a.py", "content": "x = 1"}, "pb-1")])],
+        user="Write a.py with x = 1.")
+    r1 = t1["resp"]
+    stored = (t1["x"].get("responses") or {}).get("stored") or {}
+    check(r1.get("store") is True and r1.get("previous_response_id") is None
+          and stored.get("stored") is True and stored.get("id") == r1["id"]
+          and stored.get("chained_from") is None and stored.get("items") == 3
+          and stored.get("bytes", 0) > 0 and RS.get(c.account, r1["id"]),
+          "turn 1: stored (store true), x_yamadori.responses.stored {id, "
+          "chained_from, items, bytes}", json.dumps(stored))
+    c.tool_output("pb-1", "wrote a.py")
+    t2 = c.turn([T.reply("", calls=[T.call(
+        "write_file", {"path": "b.py", "content": "y = 2"}, "pb-2")])])
+    r2 = t2["resp"]
+    check(t2["same"] and c.body()["previous_response_id"] == r2["id"]
+          and r2.get("previous_response_id") == r1["id"]
+          and ((t2["x"].get("responses") or {}).get("previous_response")
+               or {}).get("chain") == 1
+          and ((t2["x"].get("responses") or {}).get("stored") or {}).get(
+              "chained_from") == r1["id"],
+          "turn 2 (a function_call_output and previous_response_id, nothing "
+          "else): the chat messages are exactly a full-resend client's; the "
+          "response echoes previous_response_id", "; ".join(c.mismatch)[:300])
+    T._extends(t1, t2, "previous_response_id, blocking, turn 2")
+    c.tool_output("pb-2", "wrote b.py")
+    t3 = c.turn([T.reply("Both files are written.")])
+    T._extends(t2, t3, "previous_response_id, blocking, turn 3")
+    up = t3["gens"][0]["request"]["messages"]
+    check(t3["same"] and not c.mismatch
+          and ((t3["x"].get("responses") or {}).get("previous_response")
+               or {}).get("chain") == 2
+          and (t3["x"].get("session") or {}).get("id")
+          == (t1["x"].get("session") or {}).get("id")
+          and _text(t3["resp"]) == "Both files are written."
+          and [m["role"] for m in up] == ["system", "user", "assistant",
+                                          "tool", "assistant", "tool"],
+          "turn 3 (chain of 3): same messages as the full-resend client, one "
+          "session throughout, the model got the whole conversation",
+          json.dumps([m["role"] for m in up]))
+    check([r["id"] for r in RS.chain(c.account, t3["resp"]["id"])]
+          == [r1["id"], r2["id"], t3["resp"]["id"]],
+          "the store walks the chain root first")
+
+
+def test_previous_response_id_streamed_chain():
+    T.slots.reset(n=4)
+    T.compaction.reset()
+    c = PClient("chain-s", stream=True)
+    t1 = c.turn([T.reply("", reasoning="I will write the file first.",
+                         calls=[T.call("write_file", {
+                             "path": "s.py", "content": "s = 1"}, "ps-1")])],
+                user="Write s.py.")
+    final = check_stream(t1["events"], "chain, streamed, turn 1")
+    check(final.get("store") is True
+          and RS.get(c.account, final["id"]) is not None
+          and ((final.get("x_yamadori") or {}).get("responses") or {}).get(
+              "stored", {}).get("stored") is True,
+          "streamed: stored before the terminal event (a client that chains "
+          "the moment it sees response.completed finds it)",
+          json.dumps(final.get("store")))
+    c.tool_output("ps-1", "wrote s.py")
+    t2 = c.turn([T.reply("Done: s.py holds s = 1.")])
+    final2 = check_stream(t2["events"], "chain, streamed, turn 2")
+    T._extends(t1, t2, "previous_response_id, streamed, turn 2")
+    check(t2["same"] and final2.get("previous_response_id") == final["id"]
+          and _text(final2) == "Done: s.py holds s = 1."
+          and RS.get(c.account, final2["id"])["output"][-1]["type"]
+          == "message",
+          "streamed turn 2 chained: same messages as a full resend; the "
+          "final response is stored", "; ".join(c.mismatch)[:300])
+    t3 = c.turn([T.reply("Anything else? No.")], user="Thanks.")
+    check_stream(t3["events"], "chain, streamed, turn 3 (a user message)")
+    T._extends(t2, t3, "previous_response_id, streamed, turn 3")
+    check(t3["same"] and len(RS.chain(c.account, t3["resp"]["id"])) == 3,
+          "streamed chain of 3 with a plain user message on the last turn")
+
+
+def test_a_text_only_chain_and_the_session():
+    """No prompt_cache_key anywhere: the chain is one conversation (the
+    rebuilt history is what a full-resend client sends, so the answer record
+    finds it); a continuation with no key keeps the chain's key."""
+    T.slots.reset(n=4)
+    T.compaction.reset()
+    c = PClient("chain-text", cache_key=None)
+    t1 = c.turn([T.reply("It sweeps a profile around Y.")],
+                user="How does LatheGeometry work?")
+    t2 = c.turn([T.reply("Segments default to 12.")], user="And segments?")
+    s1, s2 = t1["x"].get("session") or {}, t2["x"].get("session") or {}
+    check(t2["same"] and s1.get("id") and s1.get("id") == s2.get("id")
+          and s2.get("source") == "answer_record",
+          "a text-only chain with no key is one conversation (the answer "
+          "record), as a full-resend client's", json.dumps([s1, s2]))
+    T._extends(t1, t2, "previous_response_id, text-only, turn 2")
+    k = PClient("chain-key", send_key=False)
+    k.turn([T.reply("Hi there.")], user="Hello.")
+    sent = k.body()
+    k2 = k.turn([T.reply("Fine.")], user="How are you?")
+    check("prompt_cache_key" not in sent
+          and k2["resp"].get("prompt_cache_key") == k.cache_key
+          and (k2["x"].get("session") or {}).get("source")
+          == "prompt_cache_key"
+          and (k2["x"].get("responses") or {}).get(
+              "prompt_cache_key_from_chain") is True,
+          "a continuation that sends no prompt_cache_key keeps the one its "
+          "chain was sent with", json.dumps([k2["resp"].get(
+              "prompt_cache_key"), k2["x"].get("session")]))
+
+
+def test_instructions_and_tools_are_not_carried_over():
+    """OpenAI: the previous response's instructions are not carried over;
+    the tools are the current request's."""
+    acct = "chain-instr"
+    body1 = {"model": "yamadori", "instructions": "OLD RULES.",
+             "input": "Hello", "tools": [FLAT_WRITE], "store": True}
+    _chat1, ctx1 = R.to_chat(body1, account=acct)
+    r1 = R.of_chat(_ok_chat(), ctx1)
+    body2 = {"model": "yamadori", "instructions": "NEW RULES.",
+             "input": "Again", "previous_response_id": r1["id"]}
+    chat2, _ctx2 = R.to_chat(body2, account=acct)
+    sysmsgs = [m for m in chat2["messages"] if m["role"] == "system"]
+    check(len(sysmsgs) == 1 and sysmsgs[0]["content"] == "NEW RULES."
+          and "OLD RULES." not in json.dumps(chat2["messages"])
+          and "tools" not in chat2
+          and [m["role"] for m in chat2["messages"]] == [
+              "system", "user", "assistant", "user"],
+          "instructions are the current request's only; the previous "
+          "response's tools do not come along",
+          json.dumps(chat2["messages"])[:300])
+    chat3, _ = R.to_chat(dict(body2, instructions=None), account=acct)
+    check(chat3["messages"][0]["role"] == "user",
+          "no instructions on the continuation: no system message (not the "
+          "old one)", json.dumps(chat3["messages"][0]))
+
+
+def test_store_false_and_the_default():
+    T.slots.reset(n=4)
+    T.compaction.reset()
+    c = PClient("nostore", store=False)
+    t1 = c.turn([T.reply("Hi.")], user="Hello.")
+    r1 = t1["resp"]
+    check(r1.get("store") is False and RS.get(c.account, r1["id"]) is None
+          and "stored" not in (t1["x"].get("responses") or {}),
+          "store: false -> not stored, the object says store false, no "
+          "x_yamadori.responses.stored", json.dumps(r1.get("store")))
+    e = _raises(R.to_chat, {"input": "again", "previous_response_id": r1["id"]},
+                account=c.account)
+    check(e is not None and e.status == 400 and e.code ==
+          "previous_response_not_found" and e.param == "previous_response_id"
+          and e.body()["error"]["type"] == "invalid_request_error"
+          and e.body()["error"]["message"] ==
+          f"Previous response with id '{r1['id']}' not found.",
+          "previous_response_id of a response stored with store:false: "
+          "OpenAI's 400 previous_response_not_found",
+          json.dumps(e and e.body()))
+    for label, body, want in (("absent", {"input": "x"}, True),
+                              ("true", {"input": "x", "store": True}, True),
+                              ("false", {"input": "x", "store": False},
+                               False)):
+        _chat, ctx = R.to_chat(body, account="chain-default")
+        r = R.of_chat(_ok_chat(), ctx)
+        check(r["store"] is want
+              and (RS.get("chain-default", r["id"]) is not None) is want,
+              f"store {label}: stored is {want} (OpenAI's default is true)")
+    _chat, ctx = R.to_chat({"input": "x"})
+    r = R.of_chat(_ok_chat(), ctx)
+    check(r["store"] is False and RS.get("", r["id"]) is None,
+          "no account: nothing is stored and the object says so")
+    e = _raises(R.to_chat, {"input": "x", "store": "yes"}, account="a")
+    check(e is not None and e.status == 400 and e.param == "store"
+          and e.code == "invalid_type", "store must be a boolean")
+    os.environ["YAMADORI_RESPONSE_STORE"] = "0"
+    try:
+        _chat, ctx = R.to_chat({"input": "x"}, account="chain-default")
+        r = R.of_chat(_ok_chat(), ctx)
+        e = _raises(R.to_chat, {"input": "x", "previous_response_id":
+                                r1["id"]}, account="chain-default")
+        check(r["store"] is False and e is not None and e.status == 400
+              and e.code == "unsupported_parameter"
+              and e.param == "previous_response_id",
+              "YAMADORI_RESPONSE_STORE=0: store false everywhere and "
+              "previous_response_id is 400 unsupported_parameter",
+              json.dumps(e and e.body()))
+    finally:
+        del os.environ["YAMADORI_RESPONSE_STORE"]
+    RS.forget_account("chain-default")
+
+
+def test_another_account_and_an_unknown_id_look_alike():
+    acct_a, acct_b = "chain-acct-a", "chain-acct-b"
+    _c, ctx = R.to_chat({"input": "my secret"}, account=acct_a)
+    r = R.of_chat(_ok_chat("Secret."), ctx)
+    nope = "resp_" + "0" * 32
+    other = _raises(R.to_chat, {"input": "x", "previous_response_id":
+                                r["id"]}, account=acct_b)
+    unknown = _raises(R.to_chat, {"input": "x", "previous_response_id":
+                                  nope}, account=acct_b)
+    check(other is not None and unknown is not None
+          and other.status == unknown.status == 400
+          and other.code == unknown.code == "previous_response_not_found"
+          and other.body()["error"]["message"].replace(r["id"], "ID")
+          == unknown.body()["error"]["message"].replace(nope, "ID")
+          and RS.get(acct_b, r["id"]) is None
+          and RS.input_items(acct_b, r["id"]) is None
+          and not RS.delete(acct_b, r["id"])
+          and RS.get(acct_a, r["id"]) is not None,
+          "another account's id is exactly as 'not found' as an unknown one "
+          "(read, input items, delete, chain); the owner still has it",
+          json.dumps([other and other.body(), unknown and unknown.body()]))
+    try:
+        RS.chain(acct_b, r["id"])
+        leaked = True
+    except RS.NotFound:
+        leaked = False
+    check(not leaked, "chain() of another account's id raises NotFound")
+    RS.forget_account(acct_a)
+
+
+def test_the_store_evicts_whole_chains_by_size_and_age():
+    saved = (RS.ACCOUNT_BYTES, RS.TOTAL_BYTES, RS.MAX_AGE)
+    pad = "x" * 1000
+
+    def mk(acct, rid, prev, now):
+        return RS.put(acct, rid, created=now, prev_id=prev, model="m",
+                      status="completed", now=now,
+                      input_items=[{"type": "message", "role": "user",
+                                    "content": pad}],
+                      output_items=[{"type": "message", "id": "m",
+                                     "role": "assistant", "content": [
+                                         {"type": "output_text",
+                                          "text": pad}]}],
+                      response={"id": rid, "object": "response",
+                                "status": "completed", "output": []})
+    try:
+        # prune() works on every account, so the other tests' rows go first
+        con = RS._db()
+        con.execute("DELETE FROM responses")
+        con.execute("DELETE FROM chains")
+        con.commit()
+        con.close()
+        one = mk("ev-a", "resp_pa", None, 1000.0)["bytes"]
+        RS.delete("ev-a", "resp_pa")
+        check(one > 2000, f"a response of ~2 kB measures {one} bytes")
+        t = 2000.0
+        for ch in "123":                 # three chains of three, oldest first
+            prev = None
+            for k in "abc":
+                rid = f"resp_{ch}{k}"
+                mk("ev-a", rid, prev, t)
+                prev, t = rid, t + 1
+        RS.MAX_AGE = 10 ** 9
+        RS.TOTAL_BYTES = 10 ** 9
+        RS.ACCOUNT_BYTES = one * 9 - 1          # one response too many
+        out = RS.prune(now=t)
+        gone = [f"resp_1{k}" for k in "abc"
+                if RS.get("ev-a", f"resp_1{k}") is not None]
+        kept = [f"resp_{ch}{k}" for ch in "23" for k in "abc"
+                if RS.get("ev-a", f"resp_{ch}{k}") is not None]
+        check(out["account_cap"] == 1 and not gone and len(kept) == 6,
+              "past the per-account cap the OLDEST WHOLE CHAIN goes (all "
+              "three responses of it), the others stay", json.dumps(out))
+        missing = None
+        try:
+            RS.history("ev-a", "resp_1c")
+        except RS.NotFound as ex:
+            missing = ex
+        check(missing is not None, "a continuation from an evicted chain is "
+              "not found")
+        RS.get("ev-a", "resp_2c")        # reading chain 2 makes 3 the oldest
+        RS.ACCOUNT_BYTES = one * 6 - 1
+        out = RS.prune(now=t + 1)
+        check(RS.get("ev-a", "resp_3a") is None
+              and RS.get("ev-a", "resp_2a") is not None
+              and out["account_cap"] == 1,
+              "least recently USED: reading a chain keeps it", json.dumps(out))
+        RS.ACCOUNT_BYTES = 10 ** 9       # the total cap, across accounts
+        for k, a in enumerate("abc"):
+            mk("ev-b", f"resp_b{a}", None, 5000.0 + k)
+        total = RS.stats()["bytes"]
+        RS.TOTAL_BYTES = total - one // 2
+        out = RS.prune(now=6000.0)
+        check(out["total_cap"] == 1 and RS.get("ev-b", "resp_ba") is None
+              and RS.get("ev-b", "resp_bb") is not None
+              and RS.get("ev-a", "resp_2a") is not None,
+              "past the total cap the least recently used chain goes, "
+              "whichever account", json.dumps(out))
+        RS.TOTAL_BYTES = 10 ** 9         # age
+        RS.MAX_AGE = 100.0
+        mk("ev-b", "resp_old", None, 7000.0)
+        out = RS.prune(now=7000.0 + 101)
+        check(out["aged"] >= 1 and RS.get("ev-b", "resp_old") is None
+              and RS.get("ev-a", "resp_2a") is not None,
+              "a chain unused for longer than the max age goes regardless "
+              "of the caps (one used just now stays)", json.dumps(out))
+        RS.ACCOUNT_BYTES = one - 1       # bigger than the cap: not stored
+        _c, ctx = R.to_chat({"input": pad}, account="ev-big")
+        r = R.of_chat(_ok_chat(pad), ctx)
+        st = ((r.get("x_yamadori") or {}).get("responses") or {}).get(
+            "stored") or {}
+        check(r["store"] is False and RS.get("ev-big", r["id"]) is None
+              and st.get("stored") is False and "cap" in st.get("reason", ""),
+              "a response larger than the per-account cap is not stored: the "
+              "object reports store false and the record says why",
+              json.dumps(st))
+    finally:
+        RS.ACCOUNT_BYTES, RS.TOTAL_BYTES, RS.MAX_AGE = saved
+        for a in ("ev-a", "ev-b", "ev-big"):
+            RS.forget_account(a)
+
+
+def test_pruning_is_a_background_thread_once_a_minute():
+    import threading
+    saved = RS._last_prune
+    try:
+        RS._last_prune = time.time()
+        n0 = threading.active_count()
+        RS.maybe_prune()
+        check(threading.active_count() == n0,
+              "maybe_prune within a minute of the last does nothing")
+        RS._last_prune = 0.0
+        RS.maybe_prune()
+        check(RS._last_prune > 0, "after a minute it runs (a daemon thread, "
+              "never on the request path)")
+    finally:
+        RS._last_prune = saved
+
+
+def test_output_items_and_images_in_the_store():
+    sha = images.store(tiny_png((7, 8, 9)), {"prompt": "stored image",
+                                             "size": "1024x1024"})
+    url = images.signed_url(sha, BASE)
+    _chat, ctx = R.to_chat({"input": "draw", "tools": [
+        {"type": "image_generation"}]}, account="img-acct")
+    resp = R.of_chat(_ok_chat(f"![stored image]({url})\n\nDrawn."), ctx)
+    ig = [o for o in resp["output"] if o["type"] == "image_generation_call"]
+    check(len(ig) == 1 and ig[0]["result"],
+          "the response carries the image as base64")
+    raw = RS.get("img-acct", resp["id"])
+    ig_stored = [o for o in raw["output"]
+                 if o["type"] == "image_generation_call"]
+    check(len(ig_stored) == 1 and ig_stored[0]["result"] is None
+          and "x_yamadori" not in raw,
+          "the stored copy leaves the base64 out (it is in the media store) "
+          "and keeps no x_yamadori diagnostics")
+    back = R.rehydrate_images(raw)
+    got = [o for o in back["output"] if o["type"] == "image_generation_call"]
+    check(got and got[0]["result"] == ig[0]["result"],
+          "GET puts the PNG back from the media store")
+    nxt, _ = R.to_chat({"input": "again", "previous_response_id": resp["id"]},
+                       account="img-acct")
+    check(ig[0]["result"][:20] not in json.dumps(nxt["messages"])
+          and nxt["messages"][1]["role"] == "assistant"
+          and "Drawn." in nxt["messages"][1]["content"],
+          "a continuation renders the turn's text, never the base64",
+          json.dumps(nxt["messages"])[:300])
+    RS.forget_account("img-acct")
+
+
+KEY2 = None
+
+
+def test_get_delete_and_input_items_through_the_route():
+    global KEY2
+    T.slots.reset(n=4)
+    KEY2 = KEY2 or accounts.create("responses-tests-2")
+    H2 = {"Authorization": f"Bearer {KEY2}"}
+    T._script[:] = [T.reply("Stored hello.", reasoning="Greeting.")]
+    st, _h, d1, _ = post({"model": "yamadori", "input": "Say hi.",
+                          "instructions": "Stored route.",
+                          "prompt_cache_key": "store-route-1",
+                          "reasoning": {"effort": "low"}})
+    rid = d1.get("id")
+    check(st == 200 and d1.get("store") is True and rid
+          and d1.get("previous_response_id") is None,
+          "POST with no `store`: stored (OpenAI's default), object says "
+          "store true", json.dumps(d1)[:200])
+    r = CLIENT.get(f"/v1/responses/{rid}", headers=H)
+    g = r.json()
+    check(r.status_code == 200 and g.get("id") == rid
+          and g.get("object") == "response" and g.get("status") == "completed"
+          and g.get("instructions") == "Stored route."
+          and _text(g) == "Stored hello." and g.get("store") is True
+          and g.get("usage") == d1.get("usage")
+          and [o["type"] for o in g["output"]] == [
+              o["type"] for o in d1["output"]]
+          and "x_yamadori" not in g
+          and all(k in g for k in RESPONSE_REQUIRED),
+          "GET /v1/responses/{id}: the stored Response object (output, "
+          "usage, instructions), the required fields", json.dumps(g)[:300])
+    r2 = CLIENT.get(f"/v1/responses/{rid}", headers=H2)
+    check(r2.status_code == 404 and _is_error(r2.json(), None)
+          and r2.json()["error"]["message"] ==
+          f"Response with id '{rid}' not found.",
+          "another account's key: 404, the same as an unknown id",
+          r2.text[:200])
+    check(CLIENT.get(f"/v1/responses/{rid}").status_code == 401
+          and CLIENT.delete(f"/v1/responses/{rid}").status_code == 401
+          and CLIENT.get(f"/v1/responses/{rid}/input_items"
+                         ).status_code == 401,
+          "no key: 401 on all three routes")
+    r = CLIENT.get(f"/v1/responses/{rid}?stream=true", headers=H)
+    check(r.status_code == 400 and _is_error(r.json(),
+                                             "unsupported_parameter",
+                                             "stream"),
+          "GET ?stream=true is not served (400 unsupported_parameter)")
+    # a chain through the route, blocking then streamed
+    T._script[:] = [T.reply("Second.")]
+    st, _h, d2, _ = post({"model": "yamadori", "input": "And again?",
+                          "previous_response_id": rid,
+                          "prompt_cache_key": "store-route-1",
+                          "instructions": "Stored route.",
+                          "reasoning": {"effort": "low"}})
+    roles = [m["role"] for m in T._gens[-1]["request"]["messages"]]
+    check(st == 200 and d2.get("previous_response_id") == rid
+          and _text(d2) == "Second."
+          and roles == ["system", "user", "assistant", "user"],
+          "POST with previous_response_id through the route: the model gets "
+          "the stored turn, then the new input", json.dumps(roles))
+    T._script[:] = [T.reply("Third, streamed.")]
+    st, _h, _d, ev = post({"model": "yamadori", "input": "Streamed?",
+                           "previous_response_id": d2["id"], "stream": True,
+                           "prompt_cache_key": "store-route-1",
+                           "instructions": "Stored route.",
+                           "reasoning": {"effort": "low"}}, stream=True)
+    fin = check_stream(ev, "stored route, streamed continuation") if ev else {}
+    check(st == 200 and fin.get("previous_response_id") == d2["id"]
+          and CLIENT.get(f"/v1/responses/{fin.get('id')}", headers=H
+                         ).status_code == 200
+          and len(T._gens[-1]["request"]["messages"]) == 6,
+          "streamed continuation through the route; its response is "
+          "retrievable at once")
+    # input items: this request's own items, order, limit, after
+    items = CLIENT.get(f"/v1/responses/{d2['id']}/input_items", headers=H
+                       ).json()
+    check(items.get("object") == "list" and len(items["data"]) == 1
+          and items["data"][0]["role"] == "user"
+          and items["data"][0]["id"].startswith("msg_")
+          and items["first_id"] == items["last_id"] == items["data"][0]["id"]
+          and items["has_more"] is False
+          and "And again?" in json.dumps(items["data"]),
+          "input_items: this request's own items only, with ids, OpenAI's "
+          "list shape", json.dumps(items)[:300])
+    T._script[:] = [T.reply("Five.")]
+    _st, _h, d5, _ = post({"model": "yamadori", "input": [
+        {"role": "user", "content": f"m{i}"} for i in range(5)],
+        "reasoning": {"effort": "low"}, "prompt_cache_key": "store-route-2"})
+    a = CLIENT.get(f"/v1/responses/{d5['id']}/input_items?order=asc&limit=2",
+                   headers=H).json()
+    b = CLIENT.get(f"/v1/responses/{d5['id']}/input_items?order=asc&limit=2"
+                   f"&after={a['last_id']}", headers=H).json()
+    dsc = CLIENT.get(f"/v1/responses/{d5['id']}/input_items", headers=H
+                     ).json()
+
+    def texts(x):
+        return [i["content"] for i in x["data"]]
+    check(texts(a) == ["m0", "m1"] and a["has_more"] is True
+          and texts(b) == ["m2", "m3"] and b["has_more"] is True
+          and texts(dsc) == ["m4", "m3", "m2", "m1", "m0"]
+          and dsc["has_more"] is False,
+          "input_items: order asc/desc (default desc), limit, after, "
+          "has_more", json.dumps([texts(a), texts(b), texts(dsc)]))
+    bad = CLIENT.get(f"/v1/responses/{d5['id']}/input_items?limit=0",
+                     headers=H)
+    check(bad.status_code == 400 and _is_error(bad.json(), "invalid_value",
+                                               "limit"),
+          "input_items: limit out of range is 400")
+    r = CLIENT.get(f"/v1/responses/{rid}/input_items", headers=H2)
+    check(r.status_code == 404, "input_items of another account's id: 404")
+    r = CLIENT.post(f"/v1/responses/{rid}", headers=H, json={})
+    check(r.status_code == 405 and "GET" in r.headers.get("allow", "")
+          and "DELETE" in r.headers.get("allow", ""),
+          "POST /v1/responses/{id}: 405, Allow lists GET and DELETE",
+          f"{r.status_code} {r.headers.get('allow')}")
+    # DELETE
+    r = CLIENT.delete(f"/v1/responses/{rid}", headers=H2)
+    still = CLIENT.get(f"/v1/responses/{rid}", headers=H).status_code
+    check(r.status_code == 404 and still == 200,
+          "DELETE of another account's id: 404, and it is still there",
+          f"{r.status_code} {still}")
+    r = CLIENT.delete(f"/v1/responses/{rid}", headers=H)
+    check(r.status_code == 200 and r.json() == {
+        "id": rid, "object": "response.deleted", "deleted": True},
+          "DELETE: {id, object: response.deleted, deleted: true}", r.text)
+    check(CLIENT.get(f"/v1/responses/{rid}", headers=H).status_code == 404
+          and CLIENT.delete(f"/v1/responses/{rid}", headers=H
+                            ).status_code == 404
+          and CLIENT.get(f"/v1/responses/{rid}/input_items", headers=H
+                         ).status_code == 404,
+          "after DELETE: GET, DELETE and input_items are 404")
+    st, _h, d, _ = post({"model": "yamadori", "input": "x",
+                         "previous_response_id": d2["id"]})
+    check(st == 400 and _is_error(d, "previous_response_not_found",
+                                  "previous_response_id")
+          and "earlier response" in d["error"]["message"],
+          "a continuation through a deleted ancestor is 400 "
+          "previous_response_not_found, saying the chain is broken",
+          json.dumps(d)[:300])
+    st, _h, d, _ = post({"model": "yamadori", "input": "x",
+                         "previous_response_id": "resp_nope"})
+    check(st == 400 and _is_error(d, "previous_response_not_found",
+                                  "previous_response_id")
+          and d["error"]["type"] == "invalid_request_error",
+          "unknown previous_response_id: 400 previous_response_not_found "
+          "(OpenAI's status, type and code)", json.dumps(d)[:300])
+    T._script[:] = [T.reply("Ephemeral.")]
+    st, _h, d, _ = post({"model": "yamadori", "input": "x", "store": False,
+                         "prompt_cache_key": "store-route-3",
+                         "reasoning": {"effort": "low"}})
+    check(st == 200 and d.get("store") is False
+          and CLIENT.get(f"/v1/responses/{d.get('id')}", headers=H
+                         ).status_code == 404,
+          "store:false through the route: nothing to GET")
+    st, _h, d, _ = post({"input": "x", "conversation": "conv_1"})
+    check(st == 400 and _is_error(d, "unsupported_parameter",
+                                  "conversation"),
+          "conversation is still refused (400 unsupported_parameter)")
+
+
+def test_nothing_that_learns_reads_the_store():
+    """corpus.py and skill_learn.py (and the rest of the learning paths) never
+    import the response store: a stored conversation is the account's own."""
+    import re as _re
+    pat = _re.compile(r"^\s*(import|from)\s+response_store\b", _re.M)
+    importers = sorted(
+        f for f in os.listdir(HERE) if f.endswith(".py")
+        and not f.startswith("test_")
+        and pat.search(open(os.path.join(HERE, f), encoding="utf-8").read()))
+    check(importers == ["responses_api.py", "server.py"],
+          "only responses_api.py and server.py import the response store; "
+          "the corpus and the learning paths never do", json.dumps(importers))
+
+
 def main() -> int:
     tests = (test_request_translation, test_request_errors,
              test_codex_request_replay,
@@ -2565,7 +3180,18 @@ def main() -> int:
              test_describing_an_image_through_responses,
              test_drawing_without_the_hosted_tool_through_responses,
              test_closing_the_responses_stream_cancels_the_turn,
-             test_reasoning_off_and_modes_through_responses)
+             test_reasoning_off_and_modes_through_responses,
+             test_previous_response_id_blocking_chain,
+             test_previous_response_id_streamed_chain,
+             test_a_text_only_chain_and_the_session,
+             test_instructions_and_tools_are_not_carried_over,
+             test_store_false_and_the_default,
+             test_another_account_and_an_unknown_id_look_alike,
+             test_the_store_evicts_whole_chains_by_size_and_age,
+             test_pruning_is_a_background_thread_once_a_minute,
+             test_output_items_and_images_in_the_store,
+             test_get_delete_and_input_items_through_the_route,
+             test_nothing_that_learns_reads_the_store)
     # a development aid: RESPONSES_TESTS_ONLY=substring,substring runs only
     # the tests whose names contain one of them (the full run is the gate)
     only = [s for s in os.environ.get("RESPONSES_TESTS_ONLY", "").split(",")

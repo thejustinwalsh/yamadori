@@ -16,23 +16,52 @@ which reads `proxy.stream_body`'s own chunks, so every stream promise --
 CHANNEL ORDER, IMAGES REACH THE CHAT, the E1 commit point, cancel on
 disconnect -- is the chat path's, unchanged).
 
-STATELESS. `store: false` is the only mode served: the conversation arrives
-whole in `input` every time, exactly like chat, so the ledger, slots and the
-session carriers work as they do for chat. `previous_response_id`,
-`conversation`, `background: true`, `prompt` (templates) and
-`item_reference` items are refused (400 `unsupported_parameter`); `store:
-true` is accepted and answered `store: false` (nothing is stored).
+STORED STATE (operator, 2026-10-06, AskUserQuestion, chosen "Store, local,
+capped": "Save each response's full input and output under its id, per account,
+on this machine only. Same size and age limits as the ledger (256 MB per
+account, 2 GB total, 30 days). previous_response_id rebuilds the conversation
+from it, and GET and DELETE /v1/responses/{id} work like OpenAI's. Applies when
+the client asks to store (OpenAI's default). This ends the rule that client
+messages are only hashed, for Responses requests."). Until then the module was
+stateless and refused previous_response_id -- a production trap, since OpenAI's
+`store` defaults to true and a client may send only the new input plus
+previous_response_id.
 
-  How state WOULD map, when it is built: a stored response is the turn the
-  ledger already records (`ledger_record_turn`: the delivered turn, keyed by
-  the conversation's chain key, its hidden hops expanded on replay). A
-  `previous_response_id` would name that row: resolving it means rebuilding
-  the chat messages up to and including that turn (the client's input items
-  of every earlier request are NOT in the ledger -- only hashes of them
-  are, by nebari's standing rule "Not kept: the caller's code"), so state
-  needs a new store of the caller's input items per response id, per
-  account, under the same size-based eviction. That is a decision about
-  keeping callers' content, which is the operator's, not this module's.
+  The store is mcp/response_store.py (schema, caps, eviction). Here:
+  - `store` absent or true (OpenAI's default) -> the response is stored when it
+    ends (`persist`: blocking, before the body is returned; streamed, before
+    the terminal event goes out, so a client that chains the moment it sees
+    `response.completed` finds it). `store: false` -> nothing is kept, as
+    before. The Response's `store` field reports the truth.
+  - `previous_response_id` -> the chain's stored input and output items come
+    FIRST, this request's `input` after them, and the same translation runs on
+    the whole list: the messages are exactly those of a client that resent its
+    history (`_messages(prefix=)`), so the ledger's chain keys, the sessions
+    and the slot's prompt cache work as they do for a full resend. Not carried
+    over: `instructions` (OpenAI: "When using along with previous_response_id,
+    the instructions from a previous response will not be carried over to the
+    next response") and `tools` -- both are the current request's. An id that
+    is not this account's, was stored with `store: false`, was deleted or
+    evicted is 400 `previous_response_not_found`, param `previous_response_id`,
+    "Previous response with id '<id>' not found." (OpenAI's status, type,
+    code and message: reported by clients of the live API, e.g.
+    github.com/dotnet/extensions/issues/7704,
+    github.com/microsoft/semantic-kernel/issues/13128; the platform docs
+    (developers.openai.com/api/docs/guides/conversation-state) do not print
+    the body). A continuation that sends no prompt_cache_key keeps the one the
+    previous response was sent with (an explicit id: the chain).
+  - Still refused (400 `unsupported_parameter`): `conversation` (needs the
+    Conversations API), `prompt` (templates stored at OpenAI), `background:
+    true`, and `item_reference` items: resolving one needs an index of every
+    stored item id and its own ordering rules, and no harness we serve
+    (Codex, Hermes, Pi, OpenCode) sends one -- previous_response_id covers the
+    stored-state need. `store: true` with no account or with
+    YAMADORI_RESPONSE_STORE=0 is answered `store: false`, and a
+    previous_response_id is then refused.
+  - A streamed request whose client hangs up before the terminal event is not
+    stored (its `response.created` said it would be); a `failed` or
+    `incomplete` response is stored like any other (GET shows it; a client
+    that chains from it gets what it was sent).
 
 THE MAPPING (request -> chat)
 
@@ -139,6 +168,7 @@ import urllib.parse
 import uuid
 
 import api_errors
+import response_store
 import system_roles
 
 REASONING_MODE = (os.environ.get("YAMADORI_RESPONSES_REASONING") or
@@ -156,12 +186,12 @@ HOSTED_IGNORED = frozenset({
     "tool_search"})
 IMAGE_TOOL = "image_generation"
 
-# Refused request fields: each needs state or a feature this server lacks.
+# Refused request fields: each needs a feature this server lacks.
+# (previous_response_id is served by the response store since 2026-10-06.)
 _STATEFUL = {
-    "previous_response_id": "this server is stateless (store: false); send "
-                            "the whole conversation in `input` every time",
-    "conversation": "this server keeps no conversations; send the whole "
-                    "conversation in `input` every time",
+    "conversation": "this server has no Conversations API; chain responses "
+                    "with previous_response_id, or send the whole "
+                    "conversation in `input`",
     "prompt": "prompt templates are stored server-side at OpenAI; send "
               "`instructions` and `input` instead",
 }
@@ -480,19 +510,28 @@ def _call_of(item: dict, where: str, custom: bool,
             "function": {"name": name, "arguments": args}}
 
 
-def _messages(body: dict, rec: dict,
-              flat_of: dict | None = None) -> list[dict]:
+def own_items(body: dict) -> list:
+    """This request's own input items: `input` as a list (a string is one
+    user message). Raises the 400 for a missing or mistyped `input`."""
     raw = body.get("input")
     if raw is None:
         raise _err("Missing required parameter: 'input'.", "input",
                    "missing_required_parameter")
     if isinstance(raw, str):
-        items = [{"type": "message", "role": "user", "content": raw}]
-    elif isinstance(raw, list):
-        items = raw
-    else:
-        raise _err("'input' must be a string or an array of input items.",
-                   "input", "invalid_type")
+        return [{"type": "message", "role": "user", "content": raw}]
+    if isinstance(raw, list):
+        return raw
+    raise _err("'input' must be a string or an array of input items.",
+               "input", "invalid_type")
+
+
+def _messages(body: dict, rec: dict, flat_of: dict | None = None,
+              prefix: list | None = None) -> list[dict]:
+    """The chat messages of `input`; `prefix` is a stored chain's items
+    (previous_response_id), translated first, as if the client had sent them."""
+    own = own_items(body)
+    prefix = prefix or []
+    items = prefix + own
     system: list[str] = []
     ins = body.get("instructions")
     if isinstance(ins, str):
@@ -524,7 +563,8 @@ def _messages(body: dict, rec: dict,
         return state["open"]
 
     for i, it in enumerate(items):
-        where = f"input[{i}]"
+        where = (f"input[{i - len(prefix)}]" if i >= len(prefix)
+                 else "previous_response_id")
         if not isinstance(it, dict):
             raise _err(f"{where} must be an object.", where, "invalid_type")
         kind = it.get("type") or ("message" if "role" in it else None)
@@ -586,8 +626,9 @@ def _messages(body: dict, rec: dict,
                                                 in_tool=True)})
         elif kind == "item_reference":
             raise api_errors.invalid(
-                f"{where} is an item_reference: this server is stateless "
-                f"(store: false) and holds no items; send the item itself.",
+                f"{where} is an item_reference: this server does not resolve "
+                f"item references; send the item itself, or chain "
+                f"responses with previous_response_id.",
                 param=where, code="unsupported_parameter")
         else:
             # A hosted call's record (web_search_call, image_generation_call
@@ -616,6 +657,14 @@ class Ctx:
 
     def __init__(self, body: dict, public_name: str):
         self.id = _new("resp")
+        # Stored state (response_store): who it is kept for (None: nothing is
+        # kept), whether THIS response will be, the response it chains from,
+        # and this request's own input items, as sent.
+        self.account: str | None = None
+        self.store_on = False
+        self.prev_id: str | None = None
+        self.input_items: list = []
+        self.cache_key: str | None = None   # the prompt_cache_key it ran with
         self.created_at = int(time.time())
         self.model = public_name
         self.body = body
@@ -636,13 +685,13 @@ class Ctx:
             "metadata": b.get("metadata") if isinstance(b.get("metadata"),
                                                         dict) else {},
             "parallel_tool_calls": b.get("parallel_tool_calls", True),
-            "previous_response_id": None,
-            "prompt_cache_key": b.get("prompt_cache_key"),
+            "previous_response_id": self.prev_id,
+            "prompt_cache_key": self.cache_key or b.get("prompt_cache_key"),
             "reasoning": {"effort": reasoning.get("effort"),
                           "summary": reasoning.get("summary")},
             "safety_identifier": b.get("safety_identifier"),
             "service_tier": "default",
-            "store": False,
+            "store": self.store_on,
             "temperature": b.get("temperature"),
             "text": {"format": text.get("format") or {"type": "text"},
                      "verbosity": text.get("verbosity")},
@@ -657,8 +706,23 @@ class Ctx:
         }
 
 
-def to_chat(body, public_name: str = "yamadori") -> tuple[dict, Ctx]:
+def previous_not_found(rid: str, broken: bool = False) -> api_errors.ApiError:
+    """OpenAI's error for a previous_response_id that names nothing: 400,
+    invalid_request_error, param previous_response_id, code
+    previous_response_not_found, "Previous response with id '<id>' not
+    found." (see the module doc for the sources)."""
+    msg = f"Previous response with id '{rid}' not found."
+    if broken:
+        msg += " An earlier response in its chain was deleted or evicted."
+    return api_errors.invalid(msg, param="previous_response_id",
+                              code="previous_response_not_found")
+
+
+def to_chat(body, public_name: str = "yamadori", account: str | None = None
+            ) -> tuple[dict, Ctx]:
     """A Responses request -> (the chat body `_run_turn` takes, Ctx).
+    `account` is who the response is stored for and whose stored responses
+    `previous_response_id` may name (None: no store, as before 2026-10-06).
     Raises api_errors.ApiError (400) for what cannot be served."""
     if not isinstance(body, dict):
         raise _err("The request body must be a JSON object.", None,
@@ -677,13 +741,42 @@ def to_chat(body, public_name: str = "yamadori") -> tuple[dict, Ctx]:
                    "from the model with tools attached, where the model "
                    "server refuses them. Leave out top_logprobs.",
                    "top_logprobs")
+    store = body.get("store")
+    if store is not None and not isinstance(store, bool):
+        raise _err("'store' must be a boolean.", "store", "invalid_type")
     ctx = Ctx(body, body.get("model") or public_name)
     rec = ctx.rec
-    if body.get("store"):
+    available = bool(account) and response_store.enabled()
+    # OpenAI's default is store: true.
+    ctx.store_on = available and store is not False
+    if available:
+        ctx.account = account
+    elif store:
         rec["store_requested"] = True
+    prev = body.get("previous_response_id")
+    history = None
+    if prev not in (None, ""):
+        if not isinstance(prev, str):
+            raise _err("'previous_response_id' must be a string.",
+                       "previous_response_id", "invalid_type")
+        if not available:
+            raise api_errors.invalid(
+                "'previous_response_id' is not supported: this server is not "
+                "storing responses (YAMADORI_RESPONSE_STORE=0); send the "
+                "whole conversation in `input`.",
+                param="previous_response_id", code="unsupported_parameter")
+        try:
+            history = response_store.history(account, prev)
+        except response_store.NotFound as e:
+            raise previous_not_found(e.rid, e.broken) from None
+        ctx.prev_id = prev
+        rec["previous_response"] = {"id": prev, "chain": history["chain"],
+                                    "items": len(history["items"])}
+    ctx.input_items = own_items(body)
     tools, custom, image, ns_of = _tools(body, rec)
     ctx.custom, ctx.image, ctx.ns_of = custom, image, ns_of
-    msgs = _messages(body, rec, {v: k for k, v in ns_of.items()})
+    msgs = _messages(body, rec, {v: k for k, v in ns_of.items()},
+                     prefix=history["items"] if history else None)
     chat: dict = {"model": body.get("model") or public_name,
                   "messages": msgs, "stream": bool(body.get("stream"))}
     if tools:
@@ -724,6 +817,13 @@ def to_chat(body, public_name: str = "yamadori") -> tuple[dict, Ctx]:
     for k in ("prompt_cache_key", "temperature", "top_p"):
         if body.get(k) is not None:
             chat[k] = body[k]
+    if (history and not chat.get("prompt_cache_key")
+            and history.get("prompt_cache_key")):
+        # A chain is one conversation, named by an explicit id (the previous
+        # response); its key goes on when the request sends none.
+        chat["prompt_cache_key"] = history["prompt_cache_key"]
+        rec["prompt_cache_key_from_chain"] = True
+    ctx.cache_key = chat.get("prompt_cache_key")
     if chat["stream"]:
         # The terminal event carries usage: always asked of the chat stream.
         chat["stream_options"] = {"include_usage": True}
@@ -890,6 +990,64 @@ def response_object(ctx: Ctx, *, status: str, output: list, usage=None,
     return d
 
 
+_MEDIA_URL = re.compile(r"/media/([0-9a-f]{64})\.png")
+
+
+def _elide_images(items: list) -> list:
+    """Copies of the output items without an image_generation_call's base64
+    `result` (the PNG sits in the media store, and the item's own signed link
+    names its sha, so GET can put it back while the media is there)."""
+    out = []
+    for it in items:
+        if (isinstance(it, dict) and it.get("type") == "image_generation_call"
+                and it.get("result")):
+            it = dict(it, result=None)
+        out.append(it)
+    return out
+
+
+def rehydrate_images(obj: dict) -> dict:
+    """GET: an image_generation_call whose `result` was left out of the store
+    gets its PNG back from the media store when it is still there."""
+    import images
+    out = []
+    for it in obj.get("output") or []:
+        if (isinstance(it, dict) and it.get("type") == "image_generation_call"
+                and not it.get("result")):
+            m = _MEDIA_URL.search(str((it.get("x_yamadori") or {}).get("url")
+                                      or ""))
+            png = images.png_bytes(m.group(1)) if m else None
+            if png:
+                it = dict(it, result=base64.b64encode(png).decode("ascii"))
+        out.append(it)
+    return dict(obj, output=out)
+
+
+def persist(ctx: Ctx, resp: dict) -> dict:
+    """Store the finished response (response_store) when this request is
+    stored, BEFORE it is returned or its terminal event goes out. Sets
+    `ctx.rec["stored"]` {id, chained_from, items, bytes} (the Response's
+    x_yamadori.responses holds that same dict, so it shows in it) and
+    reports the truth in `store`. Never raises."""
+    if not ctx.store_on or ctx.account is None:
+        return resp
+    info = response_store.put(
+        ctx.account, ctx.id, created=ctx.created_at, prev_id=ctx.prev_id,
+        model=ctx.model, status=resp.get("status") or "",
+        input_items=ctx.input_items,
+        output_items=_elide_images(resp.get("output") or []), response=resp)
+    ctx.rec["stored"] = {k: v for k, v in info.items() if k != "chain"}
+    if info.get("stored"):
+        print(f"responses: stored {ctx.id} (chained from "
+              f"{ctx.prev_id or 'none'}, {info.get('items')} items, "
+              f"{info.get('bytes')} bytes)", flush=True)
+    else:
+        resp["store"] = False
+        print(f"responses: {ctx.id} NOT stored: {info.get('reason')}",
+              flush=True)
+    return resp
+
+
 def of_chat(d: dict, ctx: Ctx) -> dict:
     """A blocking chat completion -> the Response object."""
     ch = (d.get("choices") or [{}])[0]
@@ -913,10 +1071,10 @@ def of_chat(d: dict, ctx: Ctx) -> dict:
     for c in calls:
         output.append(_call_item(c, ctx))
     status, inc = _status_of(ch.get("finish_reason"))
-    return response_object(ctx, status=status, output=output,
-                           usage=usage_of(d.get("usage")), incomplete=inc,
-                           error=DROPPED if status == "failed" else None,
-                           x=d.get("x_yamadori") or {})
+    return persist(ctx, response_object(
+        ctx, status=status, output=output, usage=usage_of(d.get("usage")),
+        incomplete=inc, error=DROPPED if status == "failed" else None,
+        x=d.get("x_yamadori") or {}))
 
 
 # -------------------------------------------------------------- stream -----
@@ -1175,11 +1333,10 @@ class Stream:
         self._close_reasoning(out)
         self._close_message(out, "completed" if status == "completed"
                             else "incomplete")
-        resp = response_object(self.ctx, status=status,
-                               output=list(self.output),
-                               usage=usage_of(self.usage), incomplete=inc,
-                               error=DROPPED if status == "failed" else None,
-                               x=self.x)
+        resp = persist(self.ctx, response_object(
+            self.ctx, status=status, output=list(self.output),
+            usage=usage_of(self.usage), incomplete=inc,
+            error=DROPPED if status == "failed" else None, x=self.x))
         self._ev(out, type={"completed": "response.completed",
                             "failed": "response.failed"}.get(
                                 status, "response.incomplete"),
@@ -1187,9 +1344,9 @@ class Stream:
         self.done = True
 
     def _failed(self, out: list, err: dict) -> None:
-        resp = response_object(self.ctx, status="failed",
-                               output=list(self.output),
-                               error=_failure_of(err), x=self.x or {})
+        resp = persist(self.ctx, response_object(
+            self.ctx, status="failed", output=list(self.output),
+            error=_failure_of(err), x=self.x or {}))
         self._ev(out, type="response.failed", response=resp)
         self.done = True
 

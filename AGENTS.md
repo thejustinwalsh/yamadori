@@ -511,7 +511,11 @@ and renders the slot's (#10), so the next request extends the slot.
 in code) and the model/ours attribution. `mcp/test_stray_markers.py`.
 
 Only what the proxy or the model produced is stored; the caller's messages
-are only hashed (nebari's standing rule: "Not kept: the caller's code").
+are only hashed (nebari's standing rule: "Not kept: the caller's code"),
+EXCEPT a Responses request that did not say `store: false`: its input and
+output items are kept under its response id in `mcp/response_store.py`, a
+separate store (operator, 2026-10-06; "The Responses API" below), never in
+this table.
 Every query names the account. Memory is a read-through LRU in front of the
 table (`YAMADORI_LEDGER_MEM_MB`, 64). Reasoning and hops follow
 `YAMADORI_LEDGER_PERSIST_REASONING` (default on; off, they are kept in
@@ -999,10 +1003,62 @@ touches the request or the wire must be checked in both
 (`mcp/test_responses_api.py` replays a Codex-shaped client through the
 served template). The rules that are Responses-only:
 
-- **Stateless.** `store: false` only; `previous_response_id`,
-  `conversation`, `background`, `prompt` and `item_reference` are 400
-  `unsupported_parameter`. The session is `prompt_cache_key` (Codex always
-  sends one), else the headers, else our id in the `call_id`s.
+- **Stored responses** (operator, 2026-10-06, AskUserQuestion, chosen "Store,
+  local, capped": "Save each response's full input and output under its id,
+  per account, on this machine only. Same size and age limits as the ledger
+  (256 MB per account, 2 GB total, 30 days). previous_response_id rebuilds the
+  conversation from it, and GET and DELETE /v1/responses/{id} work like
+  OpenAI's. Applies when the client asks to store (OpenAI's default). This ends
+  the rule that client messages are only hashed, for Responses requests.").
+  Before it the route was stateless and refused `previous_response_id`, a
+  production trap: OpenAI's `store` defaults to true and a client may send only
+  the new input plus `previous_response_id`. `mcp/response_store.py` (sqlite,
+  `index/responses.sqlite3`, `YAMADORI_RESPONSES_DB`; schema in its module
+  doc): per response id and account, the request's own input items, the output
+  items, the Response object less `output` and `x_yamadori`, the id it chained
+  from and its chain root, and its size; no key is stored. `store` absent or
+  true stores the response when it ends (blocking: before the body returns;
+  streamed: before the terminal event, so a client that chains the moment it
+  sees `response.completed` finds it; a stream the client abandons is not
+  stored); `store: false` stores nothing, as before; the object's `store`
+  field reports the truth (a response larger than the per-account cap is not
+  stored and says false). `previous_response_id` rebuilds the history -- the
+  chain's input then output items, root first, then this request's `input` --
+  and runs the one translation on it, so the chat messages, the ledger's keys,
+  the session (a continuation that sends no `prompt_cache_key` keeps the
+  chain's) and the slot's prompt cache are those of a client that resent
+  everything (`mcp/test_responses_api.py` compares the messages and runs the
+  served template). `instructions` and `tools` are NOT carried over (OpenAI:
+  "When using along with previous_response_id, the instructions from a
+  previous response will not be carried over to the next response"); an id
+  that is another account's, stored with `store: false`, deleted, evicted or
+  aged out is 400 `previous_response_not_found` (param `previous_response_id`,
+  "Previous response with id '<id>' not found."; OpenAI's status, type, code
+  and message as its clients report them, github.com/dotnet/extensions/issues/7704,
+  github.com/microsoft/semantic-kernel/issues/13128; the reference does not
+  print the body). `GET /v1/responses/{id}` returns the stored object (an
+  image's base64 is put back from the media store while it is there),
+  `DELETE` answers `{id, object: "response.deleted", deleted: true}` (the
+  response only; a chain through it is then "not found"),
+  `GET /v1/responses/{id}/input_items` lists that request's own input items
+  (`order` default desc, `limit` 1-100 default 20, `after`); another
+  account's id is 404 on all three, exactly as an unknown one
+  (`Response with id '<id>' not found.`), `?stream=true` on GET is 400. The
+  caps are the ledger's, separately metered (`YAMADORI_RESPONSES_ACCOUNT_MB`
+  256, `_TOTAL_MB` 2048, `_MAX_DAYS` 30, defaulting to `nebari.LEDGER_*`):
+  whole CHAINS evicted least recently used first, then by age, by a
+  background thread at most once a minute. `YAMADORI_RESPONSE_STORE=0` turns
+  the store off (every response `store: false`, `previous_response_id` 400).
+  Still 400 `unsupported_parameter`: `conversation`, `prompt`, `background:
+  true`, `item_reference` items (they would need an index of every item id; no
+  harness we serve sends one). Records: `x_yamadori.responses.stored` {id,
+  chained_from, items, bytes} and `previous_response` {id, chain, items}, a
+  log line per store and delete. Privacy: local, the account's own
+  conversation; `corpus.py` and the learning paths never import the store
+  (gated by `test_nothing_that_learns_reads_the_store`). The session is
+  `prompt_cache_key` (Codex always sends one), else the headers, else our id
+  in the `call_id`s. **Live: written 2026-10-06, not yet run**
+  (`test_live_stack.py --only responses_features`, `test_responses_stored_state`).
 - **Items -> messages, deterministically**: ONE system message
   (instructions + leading system/developer items; the template refuses a
   later one -- those become user messages); one assistant message per turn
