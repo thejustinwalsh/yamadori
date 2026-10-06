@@ -624,7 +624,9 @@ directory) served deep thinking's label rule 2 and went with it.
 `idle_clear` (`YAMADORI_IDLE_CLEAR`), `restore_reasoning`
 (`YAMADORI_RESTORE_REASONING`; "Past reasoning is restored", above),
 `mcp_tools` (`YAMADORI_MCP_TOOLS`; the MCP host's tools, medium and up, the
-surface row "main, where the MCP host serves"). Removed with the features
+surface row "main, where the MCP host serves"), `preread` and
+`preread_overlap` (`YAMADORI_PREREAD`, `YAMADORI_PREREAD_OVERLAP`; Flash-Next's
+expert-file pre-read, "Flash-Next's first prompt" below). Removed with the features
 they switched: `step_thinking`, `fixup_project_only`, `plan_tools`,
 `plan_budget` (2026-09-27, docs/CONSTANTS-AUDIT.md); `seed_frame`,
 `helped_needs_change`, `plan_prompt`, `deep_tool_hop`,
@@ -934,6 +936,35 @@ empty or error calls is a tool defect to fix, not a budget spent.
   ranked for 3 slots while bonsai served 209,920 cells on 1 slot, so ONE CONVERSATION was off). The fallback is
   returned uncached, and the next call asks again, at most once per `budget.RETRY_S` (5 s, the heartbeat) while
   the server is away, so a starting server is noticed within one beat.
+- **Flash-Next's first prompt: the expert file is PRE-READ into the OS file cache** (2026-10-06; `mcp/preread.py`,
+  wired in `max_mode.wait_ready`, tier-table row key `preread` on flash-next; `mcp/test_preread.py` 41 checks, offline
+  only -- **not yet run live**). Evidence (`bench/fn_first_prompt.py`, `bench/results/fn_first_prompt/20261006-a`, n=3 per
+  arm, n=1 for the idle arm, requests sent to llama-swap :11434, ~24.6K-token fresh prompts): the experts (IQ2_XS shard 1,
+  39.2 GB, mmapped, unpinned: `LLAMA_PIN_EXPERTS=0`) are demand-paged from disk during the first 8,192-token batch of the
+  first prompt after a load -- from a cold file cache 31.5-31.9 GB read at ~0.4 GB/s, batch 1 75-87 s against 16.2-16.9 s
+  warm, ttft 201-211 s. A sequential read of shard 1 with 16 MiB cached reads before the load took 17.0-17.4 s (2.3 GB/s),
+  left 42.5-44.3 GB available (evictable cache) and cut the prefill's disk reads to 1.6-3.8 GB and ttft to 83-103 s.
+  Shard 2 (26.8 GB, the n-gram table) is NOT read: both together (63.4 GB) exceed what the cache holds and push shard 1
+  out. An idle loaded server (~4 h, n=1) had its working set trimmed to 67 MB and its next prompt read 24.6 GB from disk
+  (ttft 99.6 s): the penalty also follows a long idle. WHAT THE PROXY DOES: (1) on a flash-next SWAP, a background thread
+  reads the file named by the `-m` of flash-next's llama-swap entry (config.yaml, macros expanded; never a path in code)
+  starting as the swap request goes out (`preread_overlap`, default; off = read, then load), and the request's prefill
+  waits for it under `card_wait`, so the stream's heartbeats keep flowing (`_TurnPump`); whether the overlap helps or
+  contends for the disk with the load is UNMEASURED, the live check measures both; (2) on a request for the LOADED
+  model, when the llama-server process's working set (psutil rss = Windows WorkingSetSize, the process found by the
+  model file in its command line) is below the file's size -- DERIVED, not chosen: the mapped experts must be resident
+  for the prefill not to hard-fault, and a working set smaller than the file cannot hold them (caveat, measured n=1:
+  after a full prompt on the trimmed server the working set was 39.1 GB, under the 39.23 GB file, and a read adds
+  nothing to the working set until the pages are touched, so the rule can fire on consecutive requests; a pure
+  continuation cannot be told from a first prompt before it is sent). One read at a time (a lock); a read in flight is
+  joined, never restarted; bounded by 900 s (`max_mode.LOAD_TIMEOUT_S`, llama-swap's health-check timeout), then the
+  request goes on (`timed_out`). No disk priority: the request waits for the read, the measured arms ran at normal
+  priority, and Windows' background thread mode would also lower the cached pages' memory priority. A missing file or
+  an unreadable working set records its reason and the request goes on. Recorded: `x_yamadori.preread` {why swap |
+  trimmed, model, file, file_bytes, bytes, ms, gb_per_s, overlapped, working_set_mb, joined, waited_ms, ok, timed_out,
+  error | skipped} and one log line. Switches (default ON): `YAMADORI_PREREAD` / X-Yamadori-Features `{"preread":
+  false}` and `YAMADORI_PREREAD_OVERLAP` / `{"preread_overlap": false}`. `python mcp/preread.py status` is a read-only
+  look at the file, its size and the server's working set.
 - **Usage** (U1/U2). `usage` is the FINAL main generation's (the last hop,
   or a fold-back continuation): `prompt_tokens` its prompt -- the context the
   conversation occupies, which Hermes compacts on; it was the SUM over hops --

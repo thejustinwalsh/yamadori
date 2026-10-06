@@ -1229,6 +1229,17 @@ BEHAVIOURS = {
     #                   the header turns it off; {"mcp_tools": true} forces it
     #                   on at any tier.
     "mcp_tools": ("YAMADORI_MCP_TOOLS", "mcp_tools"),
+    #   preread         THE EXPERT FILE'S PRE-READ (mcp/preread.py; AGENTS.md
+    #                   "Flash-Next's first prompt"): a model whose tier-table
+    #                   row says `preread` has its llama-server's mmapped
+    #                   expert file read into the OS file cache when it is
+    #                   swapped in and when its working set was trimmed.
+    #                   YAMADORI_PREREAD=0 or the header turns it off.
+    "preread": ("YAMADORI_PREREAD", None),
+    #   preread_overlap on: the read starts as the swap request goes out and
+    #                   overlaps the load; off: the read, then the load (the
+    #                   live check measures both; overlap is the default).
+    "preread_overlap": ("YAMADORI_PREREAD_OVERLAP", None),
 }
 # The switches that are OFF unless their variable (=1) or a header turns
 # them on; every other switch is on unless switched off. None since

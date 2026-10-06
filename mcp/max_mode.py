@@ -631,11 +631,17 @@ def release(lease: "Lease | None") -> None:
         lease.release()
 
 
-def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
+def wait_ready(model: str | None, poll_s: float = 0.5, features=None) -> dict:
     """Block until no request of ANOTHER main model is in flight (never cancelling it), then load `model` if it is
     not loaded (the swap), timed, and confirm no other main model stayed loaded. Honours the request's cancel; a
     waiter overtaken by a still higher tier is refused (ModelAtCapacity: it never ran). Returns
-    {waited_s, other_inflight_at_start, swap?}."""
+    {waited_s, other_inflight_at_start, swap?, preread?}.
+
+    THE PRE-READ (mcp/preread.py; a model whose tier-table row says `preread`, i.e. flash-next): its expert file is read
+    into the OS file cache at the swap -- started as the load request goes out (`preread_overlap`, the default) or
+    before it -- and, for a model already loaded, when the llama-server's working set is below the file's size. The
+    request waits for it under `card_wait` (heartbeats keep flowing) before its prompt is sent. `features`: the
+    request's X-Yamadori-Features (the switches `preread`, `preread_overlap`)."""
     global _switching_to, _last_swap
     out: dict = {"waited_s": 0.0, "other_inflight_at_start": 0}
     if not ENABLED or not is_main(model):
@@ -673,18 +679,39 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
     if out["other_inflight_at_start"]:
         _write_state()
     on = [m for m in MODELS if loaded(m)]
+    pl = None
+    if FULL:
+        try:
+            import preread
+            pl = preread.plan(model, TABLE, features)
+        except Exception as e:                                       # noqa: BLE001
+            out["preread"] = {"skipped": f"the pre-read could not be planned ({type(e).__name__}: {e})"[:200]}
     if FULL and model not in on:
         t1 = time.time()
         _card_wait(True)
         _swap_now_set({"to": model, "from": sorted(on), "phase": "loading", "since": t1})
+        pr = None
+        load_s = 0.0
         try:
+            if pl is not None and pl.get("skipped"):
+                out["preread"] = preread.skipped_record(pl, "swap", pl["skipped"])
+            elif pl is not None:
+                pr = _start_preread(pl, "swap", bool(pl["overlap"]))
+                if pr is not None and not pl["overlap"]:
+                    _join_preread(pr, poll_s)                            # read, then load
+            t_load = time.time()
             ok, how = _load(model)
+            load_s = time.time() - t_load
+            if pr is not None and pl["overlap"]:
+                _join_preread(pr, poll_s)                                # the prompt waits for the read
         finally:
             _card_wait(False)
             _swap_now_clear(model)
+        if pr is not None:
+            out["preread"] = _preread_record(pr)
         after = _fresh_running()
         left = sorted(m for m in MODELS if m != model and m in after)
-        out["swap"] = {"from": sorted(on), "to": model, "load_s": round(time.time() - t1, 1), "ok": ok,
+        out["swap"] = {"from": sorted(on), "to": model, "load_s": round(load_s, 1), "ok": ok,
                        "how": how, "left_loaded": left}
         _last_swap = dict(out["swap"], at=time.time())
         try:
@@ -694,8 +721,53 @@ def wait_ready(model: str | None, poll_s: float = 0.5) -> dict:
             pass
         print(f"  tier model swap: {sorted(on) or 'nothing'} -> {model} in {out['swap']['load_s']} s ({how})"
               + (f"; STILL LOADED: {left}" if left else ""), flush=True)
+    elif FULL and pl is not None and model in on:
+        # LOADED already: the working set rule (mcp/preread.py decide_trimmed)
+        if pl.get("skipped"):
+            out["preread"] = preread.skipped_record(pl, "trimmed", pl["skipped"])
+        else:
+            joined = preread.inflight(pl["path"])
+            d = {"read": True} if joined is not None else preread.decide_trimmed(pl)
+            if not d["read"]:
+                out["preread"] = preread.skipped_record(pl, "trimmed", d["skipped"], d)
+            else:
+                _card_wait(True)
+                try:
+                    pr = _start_preread(pl, "trimmed", False, d.get("ws"))
+                    if pr is not None:
+                        _join_preread(pr, poll_s)
+                finally:
+                    _card_wait(False)
+                if pr is not None:
+                    out["preread"] = _preread_record(pr)
     _card_wait(False)
     return out
+
+
+def _start_preread(pl: dict, why: str, overlapped: bool, ws: int | None = None):
+    """Start (or join) the model's pre-read: the handle, with the joined flag kept on it. A failure to start (the file
+    went away) is logged, never raised: the request goes on without the read."""
+    import preread
+    try:
+        h, joined = preread.start(pl, why, overlapped, ws)
+    except Exception as e:                                           # noqa: BLE001
+        print(f"  preread: not started ({type(e).__name__}: {e})", flush=True)
+        return None
+    h._joined, h._waited = joined, 0.0
+    return h
+
+
+def _join_preread(h, poll_s: float = 0.5) -> None:
+    """The request waits for the read (cancel honoured; bounded by preread.TIMEOUT_S) under the caller's card_wait."""
+    t = time.time()
+    try:
+        h.wait(check=cancel.check, poll=poll_s)
+    finally:
+        h._waited += time.time() - t
+
+
+def _preread_record(h) -> dict:
+    return h.record(getattr(h, "_joined", False), getattr(h, "_waited", 0.0))
 
 
 def _swap_now_set(rec: dict) -> None:

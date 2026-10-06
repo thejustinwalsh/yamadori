@@ -3546,6 +3546,9 @@ def _x_yamadori(payload: dict, *, hops: int) -> dict:
         # Max mode (mcp/max_mode.py): the main model that served this request and why; how long it waited for the
         # other model's work to drain. Absent when max mode is off.
         **({"capacity": payload["_capacity"]} if payload.get("_capacity") else {}),
+        # The pre-read of the model's expert file this request waited for, or why it did not (mcp/preread.py): why
+        # (swap | trimmed), file, bytes, ms, overlapped, working_set_mb, joined, waited_ms, ok.
+        **({"preread": payload["_preread"]} if payload.get("_preread") else {}),
         # One entry per tool call the proxy executed in THIS conversation's
         # loop (images, vision, the MCP lookups, the craft tool): name,
         # empty, error, chars.
@@ -4451,8 +4454,10 @@ def _run_turn(body: dict, streamed: bool):
     # model's work in flight has ended, and its first upstream call swaps the card.
     if body.get("_upstream_model"):
         max_mode.set_current(body["_upstream_model"])
-        waited = max_mode.wait_ready(body["_upstream_model"])
-        body = dict(body, _capacity=dict(body.get("_capacity") or {}, **waited))
+        waited = max_mode.wait_ready(body["_upstream_model"], features=body.get("_features"))
+        _pre = waited.pop("preread", None)           # x_yamadori.preread (mcp/preread.py), beside capacity
+        body = dict(body, _capacity=dict(body.get("_capacity") or {}, **waited),
+                    **({"_preread": _pre} if _pre else {}))
         if body["_upstream_model"] != max_mode.MAIN:
             # the decider's label priors (and its label check) are per model: read on this model once it serves
             import decide_turn

@@ -698,7 +698,8 @@ def test_the_tier_rows_after_the_removal():
           "the feature matrix's columns", str(tiers.FEATURE_COLUMNS))
     check(set(tiers.BEHAVIOURS) == {"work_log_reinject", "step_nudge",
                                     "slot_release", "idle_clear",
-                                    "restore_reasoning", "mcp_tools"}
+                                    "restore_reasoning", "mcp_tools", "preread",
+                                    "preread_overlap"}
           and tiers.OFF_BY_DEFAULT == frozenset(),
           "the switches left, none off by default", str(sorted(tiers.BEHAVIOURS)))
     check(tiers.from_header('{"auto_triggers": false, "deep_tool_hop": true, '

@@ -217,6 +217,11 @@ models:
     helpers:
       decider: bonsai-a4000
       side_calls: bonsai-a4000
+    # THE EXPERT FILE IS PRE-READ into the OS file cache (mcp/preread.py): the experts are mmapped and demand-paged
+    # (LLAMA_PIN_EXPERTS=0), so the first prompt after a load -- or after a long idle that trimmed the server's working
+    # set -- read 31.5-31.9 GB at ~0.4 GB/s (ttft 201-211 s cold vs 83-103 s after a sequential read of shard 1, 17 s;
+    # bench/fn_first_prompt.py, bench/results/fn_first_prompt/20261006-a, n=3 per arm). Shard 1 only.
+    preread: true
     window:
       ctx: 262144
       slots: 1

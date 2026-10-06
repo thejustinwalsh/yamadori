@@ -143,6 +143,11 @@ class Table:
         (max_mode.OWN_WORK; coordinator 2026-09-30)."""
         return bool(self.full and self.row(model).get("locked"))
 
+    def preread(self, model: str | None) -> bool:
+        """The model's expert file is read into the OS file cache before its first prompt (mcp/preread.py; the row key
+        `preread`). Only a table FILE declares it."""
+        return bool(self.full and self.row(model).get("preread"))
+
     def vision(self, model: str | None) -> bool | None:
         v = self.row(model).get("vision")
         return None if v is None else bool(v)
@@ -290,6 +295,7 @@ def describe() -> dict:
                        "class": v.get("class")}
         out["models"][m] = {"rank": t.rank(m), "tiers": t.tiers_of(m), "window": t.window(m),
                             "vision": t.vision(m), "locked": t.locked(m), "helpers": t.helpers(m),
+                            "preread": t.preread(m),
                             # THE OTHER CARD (mcp/slots.py): where a second conversation of this model's tiers runs
                             "other_card": t.row(m).get("other_card"), "profile": prof}
     return out

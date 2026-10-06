@@ -13,6 +13,15 @@ own tables, then the soak's first user task). Not through the proxy at :1234: th
 given none; the proxy adds heartbeats and a tool list, not prefill work. The prompts differ from the first token (a
 random header and a seeded permutation of the guideline table), so nothing is reused (usage reports cached tokens).
 
+THROUGH THE PROXY (2026-10-06, for the pre-read of mcp/preread.py): `run --proxy http://127.0.0.1:1234 --key-file PATH
+[--tier max] [--features JSON]` (e.g. --features {"preread_overlap": false}) sends each request to the proxy as the
+account the key names (model `yamadori`, reasoning_effort = the tier) instead of to llama-swap, so the proxy swaps
+flash-next in, pre-reads, and heartbeats; the request's x_yamadori.preread / capacity, the heartbeats counted and the
+longest silence between streamed chunks are recorded. The unload, the eviction and the working-set trim stay direct
+(llama-swap :11434, this machine). Arm `d` trims the loaded server's working set (psapi EmptyWorkingSet on the
+llama-server process found by its command line; with --evict the standby pages are pushed out of the file cache too)
+and then sends one request: the stand-in for a long idle.
+
 Records: DIR/requests.jsonl (one row a request), DIR/samples.jsonl (the sampler), DIR/serverlog.jsonl (the server's
 lines with the time they arrived), DIR/summary.txt (summarize).
 """
@@ -38,6 +47,8 @@ import harness_soak as hs                                                       
 
 SWAP = os.environ.get("YAMADORI_SWAP", "http://127.0.0.1:11434")
 MODEL = "flash-next"
+# Set by `run --proxy`: requests go to the proxy as an account (the key is read from a file, never printed or recorded).
+PROXY: dict = {"base": None, "key": None, "features": None, "tier": "max"}
 PS = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 
@@ -174,18 +185,30 @@ def one_request(label: str, system: str, user: str, tap: LogTap, rec_sink, timeo
                 prep: dict | None = None) -> dict:
     body = {"model": MODEL, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "stream": True, "stream_options": {"include_usage": True}, "max_tokens": 24, "reasoning_effort": "xhigh"}
+    hdrs = {"Content-Type": "application/json"}
+    base = SWAP
+    if PROXY["base"]:
+        base = PROXY["base"]
+        body.update({"model": "yamadori", "reasoning_effort": PROXY["tier"]})
+        hdrs["Authorization"] = "Bearer " + PROXY["key"]
+        if PROXY["features"]:
+            hdrs["X-Yamadori-Features"] = PROXY["features"]
     raw = json.dumps(body).encode()
     rec: dict = {"label": label, "body_bytes": len(raw), "mem_before": hs.mem_sample(), "prep": prep or {},
                  "running_before": [m["model"] for m in running()]}
     t_send = time.time()
     rec["t_send"] = round(t_send, 3)
-    c = _conn(SWAP, timeout)
+    c = _conn(base, timeout)
     t_head = t_first = None
     timings = usage = None
     n_delta = 0
     finish = None
+    t_chunk = t_send
+    max_silence = 0.0
+    n_beats = 0
+    xy: dict = {}
     try:
-        c.request("POST", "/v1/chat/completions", body=raw, headers={"Content-Type": "application/json"})
+        c.request("POST", "/v1/chat/completions", body=raw, headers=hdrs)
         r = c.getresponse()
         t_head = time.time()
         rec["status"] = r.status
@@ -210,6 +233,13 @@ def one_request(label: str, system: str, user: str, tap: LogTap, rec_sink, timeo
                         j = json.loads(s)
                     except ValueError:
                         continue
+                    now = time.time()
+                    max_silence = max(max_silence, now - t_chunk)
+                    t_chunk = now
+                    if j.get("x_yamadori"):
+                        xy.update({k: v for k, v in j["x_yamadori"].items() if k in ("preread", "capacity")})
+                    if any((ch.get("delta") == {} and not ch.get("finish_reason")) for ch in j.get("choices") or []):
+                        n_beats += 1
                     if j.get("timings"):
                         timings = j["timings"]
                     if j.get("usage"):
@@ -227,6 +257,9 @@ def one_request(label: str, system: str, user: str, tap: LogTap, rec_sink, timeo
     finally:
         c.close()
     t_end = time.time()
+    if PROXY["base"]:
+        rec.update({"via_proxy": True, "tier": PROXY["tier"], "features": PROXY["features"], "heartbeats": n_beats,
+                    "max_silence_s": round(max_silence, 2), "x_yamadori": xy})
     rec.update({"t_headers": round(t_head, 3) if t_head else None, "t_first_token": round(t_first, 3) if t_first else None,
                 "t_end": round(t_end, 3), "ttft_s": round(t_first - t_send, 2) if t_first else None,
                 "total_s": round(t_end - t_send, 2), "finish": finish, "n_deltas": n_delta, "usage": usage,
@@ -261,6 +294,42 @@ def read_files(paths: list[str], chunk: int = 16 << 20) -> dict:
     dt = time.time() - t0
     return {"t0": round(t0, 3), "t1": round(t0 + dt, 3), "s": round(dt, 2), "GB": round(n / 1e9, 2),
             "GBps": round(n / 1e9 / dt, 2), "mem_after": hs.mem_sample()}
+
+
+def server_pid(path: str = SHARD1) -> int | None:
+    """The llama-server whose command line carries the model file (llama-swap's /running names no pid)."""
+    import psutil
+    want = os.path.normcase(os.path.normpath(path))
+    for p in psutil.process_iter(["name", "cmdline"]):
+        if "llama-server" in (p.info.get("name") or "").lower() and any(
+                os.path.normcase(os.path.normpath(a)) == want for a in (p.info.get("cmdline") or [])):
+            return p.pid
+    return None
+
+
+def trim_working_set() -> dict:
+    """psapi EmptyWorkingSet on the llama-server process: Windows takes its pages out of the process's working set (what
+    a long idle did, 67 MB after ~4 h) -- the pages stay in the standby list unless something else needs the memory
+    (--evict reads other files through the cache to push them out). Returns the working set before and after."""
+    import ctypes
+    import psutil
+    pid = server_pid()
+    if pid is None:
+        raise RuntimeError("no llama-server process has the model file in its command line")
+    pr = psutil.Process(pid)
+    before = pr.memory_info().rss
+    k32, psapi = ctypes.windll.kernel32, ctypes.windll.psapi                       # type: ignore[attr-defined]
+    k32.OpenProcess.restype = ctypes.c_void_p
+    h = k32.OpenProcess(0x0100 | 0x0400, False, pid)                               # SET_QUOTA | QUERY_INFORMATION
+    if not h:
+        raise RuntimeError(f"OpenProcess({pid}) failed: {ctypes.GetLastError()}")
+    try:
+        ok = psapi.EmptyWorkingSet(ctypes.c_void_p(h))
+    finally:
+        k32.CloseHandle(ctypes.c_void_p(h))
+    time.sleep(1.0)
+    return {"pid": pid, "ws_before_mb": round(before / 1e6), "ws_after_mb": round(pr.memory_info().rss / 1e6),
+            "ok": bool(ok)}
 
 
 # ------------------------------------------------------------------------------------------------ the run
@@ -301,6 +370,12 @@ def cmd_run(a) -> int:
 
     arms = a.arms.split(",")
     seed = a.seed
+    if a.proxy:
+        key = (open(a.key_file, encoding="utf-8").read().strip() if a.key_file
+               else os.environ.get("YAMADORI_TEST_KEY", "").strip())
+        if not key:
+            raise SystemExit("--proxy needs --key-file PATH (or YAMADORI_TEST_KEY)")
+        PROXY.update(base=a.proxy, key=key, features=a.features, tier=a.tier)
     try:
         time.sleep(3.0)
         for rep in range(1, a.reps + 1):
@@ -335,6 +410,21 @@ def cmd_run(a) -> int:
             print("== arm c: fresh prompt on the loaded server (no unload)", flush=True)
             sysm, user = build_prompt(seed, a.target, a.cpt)
             one_request("c fresh prompt, server already loaded", sysm, user, tap, sink)
+        if "d" in arms:
+            for rep in range(1, a.reps + 1):
+                print(f"== arm d rep {rep}: a fresh prompt after the server's working set is trimmed", flush=True)
+                if not loaded():
+                    print("  flash-next is not loaded for arm d; skipping (run arm a first)", flush=True)
+                    break
+                prep = {"trim": trim_working_set()}
+                print(f"  trimmed: {prep['trim']}", flush=True)
+                if a.evict:
+                    prep["evict"] = read_files(EVICT)
+                    e = prep["evict"]
+                    print(f"  evicted: read {e['GB']} GB in {e['s']} s ({e['GBps']} GB/s)", flush=True)
+                sysm, user = build_prompt(seed, a.target, a.cpt)
+                seed += 1
+                one_request(f"d{rep} request after working-set trim{a.name}", sysm, user, tap, sink, prep=prep)
     finally:
         time.sleep(2.0)
         open(stop, "w").close()
@@ -482,6 +572,12 @@ def main() -> int:
     r.add_argument("--preread", action="store_true", help="after the unload (and the eviction), read IQ2_XS shard 1 front to "
                    "back into the file cache: the candidate fix")
     r.add_argument("--name", default="", help="text added to each label")
+    r.add_argument("--proxy", default=None, help="send the requests to the proxy (e.g. http://127.0.0.1:1234) as the "
+                   "account --key-file names, instead of to llama-swap")
+    r.add_argument("--key-file", default=None,
+                   help="the account key (read, never printed or recorded); else YAMADORI_TEST_KEY")
+    r.add_argument("--tier", default="max", help="reasoning_effort sent through the proxy (max -> flash-next)")
+    r.add_argument("--features", default=None, help="X-Yamadori-Features JSON, e.g. {\"preread_overlap\": false}")
     r.add_argument("--settle", type=float, default=2.0, help="seconds after the unload before the request")
     s = sp.add_parser("summarize")
     s.add_argument("dir")
