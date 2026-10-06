@@ -1017,6 +1017,9 @@ def test_reprove_lists_and_enqueues_exactly_the_prove_quarantines():
 
 def test_reprove_serves_a_flake_again_and_keeps_a_real_one_out():
     reset_store()
+    # Serving a skill again rebuilds the trigger index (the embedder): not
+    # offline.
+    skill_select.refresh_triggers = lambda *a, **k: {"offline": True}
     flake = _quarantined_by_one_sample("reprove-flake")
     real = _quarantined_by_one_sample("reprove-real")
     # `flake`'s WITH answers fail only on the seeds of the first sample (the
