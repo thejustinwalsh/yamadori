@@ -21,13 +21,12 @@ WHEN (mcp/max_mode.py wait_ready calls this; the request's heartbeats keep flowi
            waits for it before its prompt is sent (OVERLAP, the default: the read and the load share the disk -- whether
            that helps or contends is UNMEASURED), or the read runs first and the load follows (switch `preread_overlap`
            off). The cold load itself took 68-89 s, against 14-24 s after a pre-read (same bench).
-  trimmed  the model is loaded and the llama-server process's working set is below HALF the file's size (see decide_trimmed: the measured trimmed and warm working sets, and why half). Originally DERIVED, not
-           chosen: the experts must be resident in the process for the prefill not to hard-fault, and they are mapped
-           file pages; a working set under the file's size cannot hold them all. CAVEAT (measured, n=1): after a full
-           prompt on a trimmed server the working set was 39.1 GB, 0.1 GB UNDER the 39.23 GB file (other arms 39.6-44.4 GB
-           at the end); a reading does not add pages to the server's working set (they land in the cache's standby list
-           and enter it when touched), so the rule can fire again on the next request. The live check measures it.
-           The proxy cannot know prefix reuse before it sends, so the working set alone decides.
+  trimmed  the model is loaded and the llama-server process's working set is below HALF the file's size. The experts
+           are mapped file pages that must be resident for the prefill not to hard-fault; the measured working sets fall
+           in two groups -- trimmed 67 MB (4 h idle, n=1) and ~900 MB, warm 39.1-44.4 GB after a prompt (the warm 39.1 GB
+           is just UNDER the 39.23 GB file, so "below the file's size" would re-read on ordinary turns) -- and half the
+           file sits inside that gap (decide_trimmed). The proxy cannot know prefix reuse before it sends, so the working
+           set alone decides.
 
 ONE READ AT A TIME (`_read_lock`): a read in flight for the same file is JOINED, never restarted; a read of another file
 waits its turn. The read is bounded by max_mode.LOAD_TIMEOUT_S (llama-swap's own 900 s health-check timeout, the longest a
