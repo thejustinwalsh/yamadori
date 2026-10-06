@@ -26,7 +26,7 @@
     "src/api/powerSeries.ts": "e7dd6599b3f1e220c27d020c2bfc284905282e6858713c76408fc3774c70e3d0",
     "src/api/settings.ts": "3ead98b8c2be427a77fdf17fd309271da169c1eef4fbdd5858c0385854eb5e42",
     "src/api/skills.ts": "de307c8b3c94683d487c37d52d9a245c477777fe994d85227d394d54bb9f5786",
-    "src/api/stats.ts": "f986f3e2810471cef6b187540cca793c5a73f513ddb3a8a4c958ce3a20577679",
+    "src/api/stats.ts": "f373f6c7cb06ce755a29d7ff5b7a7ce345e2ea472192624ccc118d04d79db1ad",
     "src/api/tokens.ts": "ce7b0e3ea9d91ec257d4a909e14f669da7b3cf0e232e3f21e4ab9aca5e26bd30",
     "src/api/usePoll.ts": "48d037fa647548b1637b95940ea1ee54d54d8772a7bdec994256cb67ac8874ec",
     "src/bonsai/bark.ts": "4e0a9412bad531453dfd37b750ca2a128e5824cf1c58d34ad67cdc97b0c6b671",
@@ -58,7 +58,7 @@
     "src/screens/Jjava.tsx": "4ad5c2c69c23ca75b78c7ad1c3345614f5420bfd4a806af44909febbbbd53d84",
     "src/screens/Naedoko.tsx": "b9edbc96899f20a841d99aac5f93ed40c2ad441f4197396f20436e29541101bd",
     "src/screens/Onboarding.tsx": "5d7b47d1a2d7927d1da8ab8227677c70f94298dce2b3f61ade50a8ad183191b8",
-    "src/screens/Performance.tsx": "d4776ad2ff377089dccfef17a271806ad1a02a7138c1b4c9724adddefba5b26d",
+    "src/screens/Performance.tsx": "e993097f4efc81926b023b5446e7c3e0cf1c7f60322f408a4b6dda41cd9cb99a",
     "src/screens/Settings.tsx": "265d1106baaaf42d7ae4faae1fa7630be862c461715496ff32ea663ddf6c3f9c",
     "src/screens/SkillDetail.tsx": "3a60d8f007f5ff8b7e7cb9c05a2821397df6e3d1253f62efef9c1b7c8ca53534",
     "src/screens/Skills.tsx": "25a8ce0742e0153d332a915407e13466c01243c22026506ed15dfb7022476cb5",
@@ -82,7 +82,7 @@
     "src/ui/SignIn.tsx": "5f78791717445a4e3a1026b674fecd83e613e1a62f5dba49f06f924b77cf8031",
     "src/ui/StageTrack.tsx": "12f38657e1ab84658b1f9efcfb26daa4222045ee6dac890ab30bf9728cdd69b1",
     "src/ui/StateView.tsx": "c866cfaa47bf3cfe97afa4ef98d055424facf530fe0a5bc4717cae36af5723b6",
-    "src/ui/StatsParts.tsx": "b058bb84df4379d84f27a625f2cd38af87550bc7fd87654ad3db71c8f2349268",
+    "src/ui/StatsParts.tsx": "86b005dff99d4e8e3d466d6cb0d0f7841a662829bf08832b2e2d2346a0c28783",
     "src/ui/Strata.tsx": "8ad73ec5b2faac6f643e57e062ab4344c37319aeb0d1f20f425c78ebd849afbb",
     "src/ui/Table.tsx": "dcced1ee808917587641b5920b411c4173c67142f7a9317e7607ecc3cc72cad5",
     "src/ui/TokenPanels.tsx": "b091710374c63058f6d4c7c13689b5300cfb878fba8b6e7141bac7f75f0c62e0",
@@ -92,5 +92,5 @@
     "tsconfig.json": "b0da81e25eb6efaf84655dbb823c7fd10812c3c0028fc59a78b9b70ee5f2602f",
     "vite.config.ts": "34ecb87bafd5bf424a57971ceb5240870637ae85887e4861a9211e7a1c88a925"
   },
-  "aggregate": "5618c2a8545ffbae2092038879bd3e793becbbcff7577784b38e0fd2c72d3c9d"
+  "aggregate": "ac00e927a71230980bb69b4699d14f1a73ef6ccab4f6c2df885ed2caf657abf0"
 }
