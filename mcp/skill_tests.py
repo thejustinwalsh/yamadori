@@ -376,8 +376,10 @@ def generate(rule: dict, *, description: str = "",
         wrong = next((p for p in ("review", "plan", "refactor", "implement")
                       if p not in g["phases"]), None)
         if wrong:
+            # word boundary: "writing it" -> "writing the module" (a bare
+            # replace('it', ...) made "wrthe moduleing", 2026-10-07)
             should_not.append({"text": _with_cue(
-                f"{_PHASE_TEXT[wrong].replace('it', 'the module')}",
+                re.sub(r"\bit\b", "the module", _PHASE_TEXT[wrong]),
                 cue)})
     if noncode and len(should_not) < L.MIN_SHOULD_NOT:
         should_not.append({"text": "Write a small Python command-line tool "
