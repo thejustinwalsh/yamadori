@@ -545,11 +545,17 @@ def test_through_the_served_template():
                                                             or "")
                   for m in hop)
               and not (t2["d"]["choices"][0]["message"].get("tool_calls"))
-              and ((x2.get("craft") or {}).get("reads") or [{}])[0].get(
-                  "found") == "k_traits",
+              and (((x2.get("craft") or {}).get("reads") or [{}])[0].get(
+                  "found") == "k_traits"
+                   # the write just before it imported koota: the package
+                   # trigger already gave this craft's body, so the recall is
+                   # a REPEAT (2026-10-07): the do-not-repeat line
+                   or ((x2.get("craft") or {}).get("repeat") or [{}])[0].get(
+                       "craft") == "koota-traits-and-entities"),
               "[served] recall_craft ran as a hidden hop: its result is the "
-              "craft, the client never sees the call, x_yamadori.craft."
-              "reads records it", json.dumps(x2.get("craft"))[:300])
+              "craft (or, when the conversation already has it, the "
+              "do-not-repeat line), the client never sees the call, "
+              "x_yamadori.craft records it", json.dumps(x2.get("craft"))[:300])
         t3 = c.turn([T.reply("Thanks.")], user="Thanks, that works.")
         T._extends(t2, t3, "[served] the request after the recall_craft hop")
         msgs3 = t3["gens"][0]["request"]["messages"]

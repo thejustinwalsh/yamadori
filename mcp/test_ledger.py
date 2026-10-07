@@ -596,8 +596,12 @@ def _landed(t: dict) -> bool:
     req = (t["gens"][-1] if t.get("gens") else {}).get("request") or {}
     last = (req.get("messages") or [{}])[-1]
     first = (t["gens"][0]["request"] if t.get("gens") else {})
+    names = lambda r: [t["function"]["name"] for t in r.get("tools") or []]   # noqa: E731
     return last.get("content") == proxy.LANDING_PROMPT or (
-        bool(first.get("tools")) and not req.get("tools"))
+        bool(first.get("tools")) and not req.get("tools")) or (
+        # a landing that withdrew only OUR tools (2026-10-07): the tool list
+        # is no longer the one the client's next request renders
+        bool(first.get("tools")) and names(req) != names(first))
 
 
 def _full_extension(t: dict) -> bool:

@@ -71,6 +71,7 @@ import craft_query  # noqa: E402
 import decider_bonsai as D  # noqa: E402
 import mcp_host  # noqa: E402
 import package_skills as PS  # noqa: E402
+import proxy  # noqa: E402
 import skill_inject  # noqa: E402
 import skill_learn  # noqa: E402
 import skill_limits as L  # noqa: E402
@@ -133,9 +134,16 @@ DREI = sk("r3f-drei-pairing-8", "r3f", [
     ("DO", "Pair drei 11 with fiber 10.", "")])
 UNRELATED = sk("typescript-strict-1", "typescript", [
     ("DO", "Enable strict.", "")])
+UNRELATED2 = sk("typescript-satisfies-2", "typescript", [
+    ("DO", "Use satisfies to check a literal against its type.", "")])
+UNRELATED3 = sk("typescript-narrowing-3", "typescript", [
+    ("DO", "Narrow with in and discriminants.", "")])
+UNRELATED4 = sk("typescript-generics-4", "typescript", [
+    ("DO", "Constrain generics with extends.", "")])
 
 POOL = [KOOTA_LEAD, KOOTA_Q, KOOTA_R, KOOTA_BAD, KOOTA_DOUBT, MATH_LEAD,
-        MATH_PIT, R3F10, R3F9, R3F_ANY, DREI, UNRELATED]
+        MATH_PIT, R3F10, R3F9, R3F_ANY, DREI, UNRELATED, UNRELATED2,
+        UNRELATED3, UNRELATED4]
 VERDICT = {"koota-quarantined": "worse", "koota-queries-and-systems": "better",
            "math-hot-path-pitfalls": "tie"}
 skills.armed = lambda *a, **k: list(POOL)
@@ -1073,8 +1081,9 @@ def test_the_question_through_the_proxy():
 
 
 # ====================================== 7. the per-request craft cap ======
-CRAFT_NAMES = ["math-data-oriented-functions", "math-hot-path-pitfalls",
-               "koota-traits-and-entities", "koota-queries-and-systems"]
+# fifteen DISTINCT armed crafts (a craft already given is a repeat, which the
+# cap does not count: the cap's tests ask for different ones)
+CRAFT_NAMES = [s_["name"] for s_ in POOL if not s_["name"].startswith("math-")]  # (math: the lookups' sections give those bodies)
 
 
 def _craft_calls(n: int, tag: str) -> list[dict]:
@@ -1107,7 +1116,8 @@ def test_the_craft_cap():
         user="Build a voxel scene with pmndrs math.")
     last = t1["gens"][-1]
     got = _tool_msgs(last, "c")
-    ran = [g for g in got if g.startswith("Craft ")]
+    ran = [g for g in got if g.startswith("Craft ")
+           and "already given above" not in g]
     capped = [g for g in got if '"CRAFT_CAP"' in g]
     check(len(got) == 12 and len(ran) == limit and len(capped) == 12 - limit,
           f"12 craft calls in one request: the first {limit} run, the other "
@@ -1142,7 +1152,7 @@ def test_the_craft_cap():
     # the cap is per REQUEST: the next request may read crafts again
     c.tool_result("w1", "ok")
     t3 = c.turn([T.reply("", calls=[T.call(
-        "yama_recall_craft", {"name_or_topic": CRAFT_NAMES[0]}, "n1")]),
+        "yama_recall_craft", {"name_or_topic": CRAFT_NAMES[5]}, "n1")]),
         T.reply("Fine.")], user="One more thing about math.")
     g = _tool_msgs(t3["gens"][1], "n")
     check(len(g) == 1 and g[0].startswith("Craft ")
@@ -1400,6 +1410,252 @@ def test_the_magnet_fixes_through_the_proxy():
           json.dumps(st)[:200])
 
 
+# ============ 9. the operator's pagoda: repeats, and a landing that keeps
+# the client's tools ======================================================
+def _find(i: int) -> dict:
+    return T.call("yama_find_package", {"ecosystem": "npm",
+                                        "query": f"pkg {i}"}, f"f{i}")
+
+
+def _craft(name: str, cid: str) -> dict:
+    return T.call("yama_recall_craft", {"name_or_topic": name}, cid)
+
+
+def _pagoda_script(tail: list[dict]) -> list[dict]:
+    """The sequence of the operator's run (corpus events 16728-16778): hop 0 a
+    craft + four package lookups, hop 1 five version lookups, hop 2 a resolve
+    + five crafts (three run, two capped), hops 3-5 the SAME crafts again --
+    then `tail`."""
+    delivered = ["koota-queries-and-systems", "math-hot-path-pitfalls"]
+    return [
+        T.reply("", reasoning="Look it all up.", calls=[
+            _craft("koota-traits-and-entities", "a0")]
+            + [_find(i) for i in range(4)]),
+        T.reply("", calls=[T.call("yama_list_package_versions", {
+            "package": "math", "ecosystem": "npm"}, f"v{i}")
+            for i in range(5)]),
+        T.reply("", calls=[T.call("yama_resolve_packages", {
+            "packages": ["koota", "math"], "ecosystem": "npm"}, "rs0")]
+            + [_craft(delivered[0], "b0"), _craft(delivered[1], "b1"),
+               _craft("math-data-oriented-functions", "b2"),
+               _craft("koota-react-integration", "b3")]),
+        T.reply("", calls=[_craft(delivered[0], "c0"),
+                           _craft("koota-traits-and-entities", "c1")]),
+        T.reply("", calls=[_craft(delivered[1], "d0"),
+                           _craft(delivered[0], "d1")]),
+        T.reply("", calls=[_craft("koota-traits-and-entities", "e0")]),
+    ] + tail
+
+
+def _hop_results(gen: dict, ids: list[str]) -> dict[str, str]:
+    return {m["tool_call_id"]: m["content"]
+            for m in gen["request"]["messages"] if m.get("role") == "tool"
+            and m.get("tool_call_id") in ids}
+
+
+def test_the_pagoda_sequence():
+    import mcp_config
+    spec = json.loads(json.dumps(mcp_config.PACKAGELENS))
+    spec.update(id="packagelens", runtime="local",
+                command=[sys.executable, H.FAKE], call_timeout_s=10.0,
+                call_timeout_why="test fixture: the fake answers at once")
+    spec.pop("image", None)
+    T.slots.reset(n=4)
+    H.fresh_host(spec)
+    c = PConv("pagoda", "both", tools=[T.WRITE, TERMINAL])
+    t1 = c.turn(_pagoda_script([T.reply("", reasoning="Scaffold it.", calls=[
+        T.call("write_file", H.PKG, "w1")])]),
+        user="Build a voxel scene with koota and pmndrs math.")
+    last = t1["gens"][-1]
+    ids = ["a0", "b0", "b1", "b2", "b3", "c0", "c1", "d0", "d1", "e0"]
+    got = _hop_results(t1["gens"][-1], ids)
+    already = [k for k, v in got.items() if "already given above" in v]
+    capped = [k for k, v in got.items() if '"CRAFT_CAP"' in v]
+    ran = [k for k, v in got.items() if v.startswith("Craft ")
+           and "already given above" not in v]
+    check(sorted(ran) == ["a0", "b0", "b1"] and sorted(capped) == ["b2", "b3"]
+          and sorted(already) == ["c0", "c1", "d0", "d1", "e0"],
+          "the pagoda's sequence: three crafts run, the two past the cap are "
+          "capped, every re-ask of a craft already given gets the "
+          "do-not-repeat line", json.dumps({"ran": ran, "capped": capped,
+                                            "already": already}))
+    line = got[already[0]]
+    check(line.endswith("use it; continue with the task.")
+          and "already given above in this conversation" in line,
+          "the line: already given above in this conversation -- use it; "
+          "continue with the task", line)
+    tt = t1["x"].get("tool_turns") or {}
+    cr = t1["x"].get("craft") or {}
+    check(tt.get("turns") == 3 and tt.get("hit") is False
+          and "landed" not in tt and cr.get("capped") == 2
+          and len(cr.get("repeat") or []) == 5
+          and all(r["craft"] for r in cr["repeat"]),
+          "repeats count toward neither the cap nor a tool turn (turns 3: "
+          "the three package hops), nothing landed; x_yamadori.craft.repeat "
+          "lists them", json.dumps([tt, cr.get("capped"), cr.get("repeat")]))
+    check(not any(m.get("content") == proxy.LANDING_PROMPT for m in
+                  last["request"]["messages"])
+          and "write_file" in [x["function"]["name"] for x in
+                               last["request"].get("tools") or []]
+          and [x["function"]["name"] for x in t1["m"].get("tool_calls") or []]
+          == ["write_file"],
+          "the model ends with the client's tools in hand and writes: no "
+          "landing text, the client gets its call")
+    c.tool_result("w1", "wrote package.json")
+    t2 = c.turn([T.reply("Done.")])
+    check(_hop_results(t2["gens"][0], ids) == got
+          and T._extends(t1, t2, "[pagoda] the request after"),
+          "the ledger replays every hop result byte for byte (the crafts, "
+          "the cap, the repeat lines) and the slot extends")
+    # a later request: a craft already given is still a repeat (the
+    # conversation's, not the request's)
+    c.tool_result("w1", "ok")
+    t3 = c.turn([T.reply("", calls=[_craft("koota-traits-and-entities",
+                                           "z0")]), T.reply("Fine.")],
+                user="One more thing.")
+    check("already given above" in _hop_results(t3["gens"][1], ["z0"]).get(
+        "z0", "") and (t3["x"].get("craft") or {}).get("reads") == [],
+          "a later request: a craft the conversation already has is a "
+          "repeat, and no read ran")
+
+
+TERMINAL = {"type": "function", "function": {
+    "name": "terminal", "description": "run a command",
+    "parameters": {"type": "object", "properties": {
+        "command": {"type": "string"}}}}}
+
+
+def test_the_landing_keeps_the_clients_tools():
+    import mcp_config
+    spec = json.loads(json.dumps(mcp_config.PACKAGELENS))
+    spec.update(id="packagelens", runtime="local",
+                command=[sys.executable, H.FAKE], call_timeout_s=10.0,
+                call_timeout_why="test fixture: the fake answers at once")
+    spec.pop("image", None)
+    lim = tiers.tool_turn_limit(tiers.resolve({"reasoning_effort": "medium"}))
+    T.slots.reset(n=4)
+    H.fresh_host(spec)
+    c = PConv("land1", "both", tools=[T.WRITE, TERMINAL])
+    script = [T.reply("", reasoning="More lookups.", calls=[_find(i)])
+              for i in range(lim)]
+    script += [T.reply("", reasoning="Now the work.", calls=[T.call(
+        "terminal", {"command": "npm install"}, "t1")])]
+    t = c.turn(script, user="Build a voxel scene with koota and pmndrs math.")
+    last = t["gens"][-1]["request"]
+    tools = [x["function"]["name"] for x in last.get("tools") or []]
+    tt = t["x"].get("tool_turns") or {}
+    check(tt == {"limit": lim, "turns": lim, "hit": True,
+                 "landed": "ours_withdrawn"},
+          "the tool-turn cap lands with OUR tools withdrawn: recorded as "
+          "tool_turns.landed ours_withdrawn", json.dumps(tt))
+    check(tools == ["write_file", "terminal"]
+          and not any(m.get("content") == proxy.LANDING_PROMPT
+                      for m in last["messages"])
+          and last["messages"][-1]["role"] == "tool",
+          "the last generation has the CLIENT's tools only (ours are gone) "
+          "and no landing request: the conversation still ends on the tool "
+          "result", json.dumps(tools))
+    calls = t["m"].get("tool_calls") or []
+    check([x["function"]["name"] for x in calls] == ["terminal"]
+          and t["m"].get("content") in ("", None),
+          "the model continued with a client call, returned to the client "
+          "as usual", json.dumps(calls)[:200])
+    # a model that answers in text still has answered (unchanged)
+    T.slots.reset(n=4)
+    H.fresh_host(spec)
+    c2 = PConv("land2", "both", tools=[T.WRITE, TERMINAL])
+    script = [T.reply("", calls=[_find(i)]) for i in range(lim)]
+    script += [T.reply("Here is the answer.")]
+    t = c2.turn(script, user="Build a voxel scene with koota.")
+    check(t["m"].get("content") == "Here is the answer."
+          and not t["m"].get("tool_calls")
+          and (t["x"].get("tool_turns") or {}).get("landed")
+          == "ours_withdrawn",
+          "if the model still answers in text, that is its answer")
+    # no client tool: the landing is as before (tools withdrawn, text asked)
+    T.slots.reset(n=4)
+    H.fresh_host(spec)
+    c3 = PConv("land3", "both", tools=[])
+    script = [T.reply("", calls=[_find(i)]) for i in range(lim)]
+    script += [T.reply("Landed.")]
+    t = c3.turn(script, user="Build a voxel scene with koota.")
+    last = t["gens"][-1]["request"]
+    check(not last.get("tools")
+          and last["messages"][-1].get("content") == proxy.LANDING_PROMPT
+          and (t["x"].get("tool_turns") or {}).get("landed") is None,
+          "no client tools in the request: the landing is as it was (tools "
+          "withdrawn, the answer asked for)")
+
+
+def test_the_pagoda_over_responses():
+    import mcp_config
+
+    class PR(RT.RClient):
+        def chat_of(self, body):
+            chat, ctx_ = RT.R.to_chat(body)
+            chat.update(_account=self.account, _client_ip="127.0.0.1",
+                        _public_base=RT.BASE, _session_token="",
+                        _features=json.dumps({
+                            "skills": False, "package_skills": True,
+                            "package_skills_mode": "both"}))
+            return chat, ctx_
+    spec = json.loads(json.dumps(mcp_config.PACKAGELENS))
+    spec.update(id="packagelens", runtime="local",
+                command=[sys.executable, H.FAKE], call_timeout_s=10.0,
+                call_timeout_why="test fixture: the fake answers at once")
+    spec.pop("image", None)
+    H.fresh_host(spec)
+    lim = tiers.tool_turn_limit(tiers.resolve({"reasoning_effort": "medium"}))
+    ids = ["a0", "b0", "b1", "b2", "b3", "c0", "c1", "d0", "d1", "e0"]
+    for stream in (False, True):
+        label = "streamed" if stream else "blocking"
+        T.slots.reset(n=4)
+        T.compaction.reset()
+        c = PR(f"pg-{stream}", stream=stream, cache_key=f"pg-{stream}")
+        t1 = c.turn(_pagoda_script([T.reply("", calls=[T.call(
+            "write_file", H.PKG, "pw")])]),
+            user="Build a voxel scene with koota and pmndrs math.")
+        got = _hop_results(t1["gens"][-1], ids)
+        names = ([x["name"] for x in RT._items(t1["resp"], "function_call")]
+                 if not stream else
+                 [e["item"]["name"] for e in t1["events"]
+                  if e["type"] == "response.output_item.done"
+                  and e["item"].get("type") == "function_call"])
+        check(len([v for v in got.values() if "already given above" in v]) == 5
+              and len([v for v in got.values() if '"CRAFT_CAP"' in v]) == 2
+              and names == ["write_file"]
+              and (t1["x"].get("tool_turns") or {}).get("turns") == 3,
+              f"responses {label}: the pagoda sequence -- repeats, the cap, "
+              f"no landing, the client's write", json.dumps(
+                  t1["x"].get("tool_turns")))
+        c.tool_output("pw", "wrote package.json")
+        t2 = c.turn([T.reply("Done.")])
+        T._extends(t1, t2, f"responses {label}: after the pagoda turn")
+        check(_hop_results(t2["gens"][0], ids) == got,
+              f"responses {label}: replay byte for byte")
+        # the landing keeps the client's tools
+        T.slots.reset(n=4)
+        T.compaction.reset()
+        c = PR(f"pl-{stream}", stream=stream, cache_key=f"pl-{stream}",
+               tools=[RT.FLAT_WRITE])
+        script = [T.reply("", calls=[_find(i)]) for i in range(lim)]
+        script += [T.reply("", calls=[T.call("write_file", H.PKG, "pw")])]
+        t = c.turn(script, user="Build a voxel scene with koota.")
+        tl = [x["function"]["name"] for x in
+              t["gens"][-1]["request"].get("tools") or []]
+        names = ([x["name"] for x in RT._items(t["resp"], "function_call")]
+                 if not stream else
+                 [e["item"]["name"] for e in t["events"]
+                  if e["type"] == "response.output_item.done"
+                  and e["item"].get("type") == "function_call"])
+        check((t["x"].get("tool_turns") or {}).get("landed")
+              == "ours_withdrawn" and tl == ["write_file"]
+              and names == ["write_file"],
+              f"responses {label}: the landing withdraws only ours; the "
+              f"client's write_file is called", json.dumps(
+                  [t["x"].get("tool_turns"), tl, names]))
+
+
 # ================================================================== main ====
 def main() -> int:
     for fn in (test_the_inject_section, test_the_major_picks_the_skills,
@@ -1412,6 +1668,8 @@ def main() -> int:
                test_a_trigger_rides_the_tool_result_and_replays,
                test_the_question_path, test_the_question_through_the_proxy,
                test_the_craft_cap, test_the_craft_cap_over_responses,
+               test_the_pagoda_sequence, test_the_landing_keeps_the_clients_tools,
+               test_the_pagoda_over_responses,
                test_the_user_named_packages_boost_the_shortlist,
                test_the_state_leaves_the_goal_out,
                test_the_magnet_fixes_through_the_proxy):

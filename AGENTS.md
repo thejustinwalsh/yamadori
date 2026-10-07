@@ -1350,6 +1350,20 @@ in the section itself; every rule is deterministic.
   (`x_yamadori.tool_turns` counts the package tools); a model told "no" `tool_turn_limit` times in a request lands
   (the same limit; a loop of its own). The router's head says "one or two crafts are usually enough for a step"
   (craft/7). Tests: `mcp/test_package_skills.py` `test_the_craft_cap*` (chat, Responses, blocking, streamed).
+- **The landing keeps the client's tools; a repeated craft is not run** (2026-10-07, the operator's live pagoda
+  run, Hermes at tier high, corpus events 16728-16778: hops of lookups and crafts, the model re-asked the same crafts
+  and was capped each time, `tool_turn_cap` landed the request with EVERY tool withdrawn and the answer asked for,
+  the model wrote its next call as text, finish stop -- and Hermes read a text answer as the end of the task).
+  (1) When our hidden hops reach `tool_turn_limit` (or the capped-call limit) and the client sent tools, `_land`
+  withdraws only OUR tools (`yama_*`), keeps the client's and appends no landing text: the model continues with a
+  client call, returned as usual; `x_yamadori.tool_turns.landed` = `ours_withdrawn`; a text answer is still its
+  answer; with no client tool the landing is as before; the client's own request is never landed (C1). (2) A
+  `yama_recall_craft` for a craft this conversation already has in full (a craft read, or a package section or
+  trigger that gave its body; by name or as the craft a question resolves to) returns "Craft <name> was already
+  given above in this conversation -- use it; continue with the task." -- the one sanctioned do-not-repeat line --
+  and counts toward neither the per-request cap nor any landing count (`x_yamadori.craft.repeat`; a router row is
+  only a name, not given; a compaction resets it). Tests: `mcp/test_package_skills.py` `test_the_pagoda_sequence`
+  (the exact hops 0-5), `test_the_landing_keeps_the_clients_tools`, `test_the_pagoda_over_responses`.
 - **The magnet craft** (2026-10-07; `pkgskills2`: `koota-with-react-three-fiber` won 15 of 25 questions, generic
   ones included; it sat in the shortlist, 5th for the bare question "koota", and still won at p 0.73-0.78, so not
   the embedder, not position, not a broader description; 21 of 25 questions came before any package lookup, so the

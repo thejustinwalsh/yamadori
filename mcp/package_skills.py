@@ -418,7 +418,8 @@ def recall_line(s: dict) -> str:
 def _new_pkg() -> dict:
     return {"v": 1, "tick": 0, "tick_key": None, "compactions_seen": 0,
             "given": {}, "last": {}, "fired": {}, "sections": {},
-            "router_shown": {}, "recalled": {}, "turn_key": None, "outs": {}}
+            "router_shown": {}, "recalled": {}, "read": {},
+            "turn_key": None, "outs": {}}
 
 
 def pkg_state(st: dict) -> dict:
@@ -440,7 +441,7 @@ def begin_request(st: dict, key: str | None,
     if compactions is not None and int(compactions) > int(
             pk.get("compactions_seen") or 0):
         for k in ("given", "last", "fired", "sections", "router_shown",
-                  "recalled"):
+                  "recalled", "read"):
             pk[k] = {}
         pk["compactions_seen"] = int(compactions)
     if key is None or pk.get("tick_key") != key:
@@ -634,6 +635,26 @@ def decide(st: dict, packages: list[dict], ctx: dict, pool: list[dict]
     if key:
         pk["outs"][key] = {"text": out, "recs": recs}
     return out, recs, st
+
+
+def mark_craft_read(st: dict, craft_id: str) -> None:
+    """A craft was returned IN FULL to the model (yama_recall_craft)."""
+    pk = pkg_state(st)
+    pk["read"][craft_id] = int(pk.get("tick") or 0)
+
+
+def craft_given(st: dict, craft_id: str) -> str | None:
+    """How this conversation already has the craft's FULL text -- `read` (a
+    yama_recall_craft result) or `section` (a package-tool section gave its
+    body) -- or None. A router row is only a name: not given. A compaction
+    resets it (begin_request)."""
+    pk = pkg_state(st)
+    if craft_id in pk["read"]:
+        return "read"
+    for k, v in pk["given"].items():
+        if k.split("@", 1)[0] == craft_id and v.get("form") == "body":
+            return "section"
+    return None
 
 
 def note_craft_call(st: dict, craft: str | None, found: bool) -> tuple[dict | None, dict]:

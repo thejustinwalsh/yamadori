@@ -1006,7 +1006,38 @@ def _run_our_tool(name: str, args: dict, state: dict | None = None) -> str:
         # the situation, that a retry in a later step can succeed, and the
         # next step.
         import skill_match
+        import package_skills
+        import craft_query
+        import skills as _skills
         limit = int(skill_match.BODIES_PER_DECISION)
+        # A REPEATED CRAFT (coordinator, 2026-10-07; the operator's pagoda: a
+        # model re-asked the same crafts hop after hop): a craft this
+        # conversation already has in full -- by name or as the one a question
+        # resolves to -- gets the do-not-repeat line (AGENTS.md "Prompting
+        # this model": the one sanctioned prohibition) and counts toward
+        # neither the per-request cap nor any landing count.
+        def _repeat(cid: str, cname: str):
+            if not (cid and lineage):
+                return None
+            with skill_select_lock(account, lineage):
+                got = package_skills.craft_given(
+                    _skill_state(account, lineage), cid)
+            if not got:
+                return None
+            st.setdefault("_craft_repeats", []).append(
+                {"craft": cname, "given_via": got})
+            return (f"Craft {cname} was already given above in this "
+                    f"conversation -- use it; continue with the task.")
+        try:
+            q_in = str(args.get(skill_prompts.CRAFT_TOOL_ARG) or "").strip()
+            named = craft_query.is_name(q_in, _skills.armed()) if q_in \
+                else None
+        except Exception:                                        # noqa: BLE001
+            named = None
+        if named is not None:
+            line = _repeat(named["id"], named.get("name"))
+            if line:
+                return line
         if len(st.get("_craft_reads") or []) >= limit:
             st["_craft_capped"] = int(st.get("_craft_capped") or 0) + 1
             return cs.error_result(
@@ -1024,6 +1055,11 @@ def _run_our_tool(name: str, args: dict, state: dict | None = None) -> str:
         # the armed, proven crafts (mcp/craft_query.py).
         text, rec = skill_select.read_craft(
             args, ctx=_craft_ctx(st, account, lineage))
+        if rec.get("found") and rec.get("how") == "question":
+            line = _repeat(rec["found"], rec.get("name"))
+            if line:
+                _craft_call_records(rec, st, account, lineage)
+                return line
         st.setdefault("_craft_reads", []).append(rec)
         _craft_call_records(rec, st, account, lineage)
         if rec.get("found") and lineage:
@@ -1032,6 +1068,7 @@ def _run_our_tool(name: str, args: dict, state: dict | None = None) -> str:
                 sk.setdefault("given", {}).setdefault(rec["found"], {
                     "chars": int(sk.get("chars") or 0),
                     "req": int(sk.get("req") or 0), "via": "read"})
+                package_skills.mark_craft_read(sk, rec["found"])
                 _save_skill_state(account, lineage, sk)
         return text
 
@@ -3700,6 +3737,25 @@ def _land(payload: dict, convo: list[dict],
     """
     if why == "tool_turn_cap":
         cap = payload.get("_turn_cap") or {}
+        # THE LANDING WITHDRAWS ONLY OUR TOOLS (coordinator, 2026-10-07; the
+        # operator's pagoda: the tool-turn cap landed a Hermes request with
+        # EVERY tool withdrawn and the answer asked for, the model wrote its
+        # next call as text, finish stop, and Hermes read a text answer as
+        # the end of the task): when the client sent tools, ours (yama_*) are
+        # taken off the list, the client's stay, and no landing request is
+        # appended -- the model continues with a client call, returned to the
+        # client as usual. The client's own request is never landed (C1). With
+        # no client tool the landing is as before.
+        ours = set(payload.get("_ours") or [])
+        client = [t for t in payload.get("tools") or []
+                  if isinstance(t, dict) and (t.get("function") or {}).get(
+                      "name") not in ours and t.get("name") not in ours]
+        if client:
+            cap["landed"] = "ours_withdrawn"
+            print(f"  tool_turn_cap: {cap.get('limit')} tool turns reached; "
+                  "our tools withdrawn, the client's kept (no landing text)",
+                  flush=True)
+            return dict(payload, tools=client, messages=convo)
         print(f"  tool_turn_cap: {cap.get('limit')} tool turns reached; tools "
               "withdrawn for the landing", flush=True)
     elif why == "image_guard":
@@ -3829,7 +3885,10 @@ def _x_yamadori(payload: dict, *, hops: int) -> dict:
                              if isinstance(r, dict) and r.get("query")],
                       # calls past the per-request cap, not run
                       # (skill_match.BODIES_PER_DECISION)
-                      capped=int(payload.get("_craft_capped") or 0)),
+                      capped=int(payload.get("_craft_capped") or 0),
+                      # a craft the conversation already had: the
+                      # do-not-repeat line, not counted anywhere
+                      repeat=list(payload.get("_craft_repeats") or [])),
         # Tools of ours withheld for a conflict with the client's
         # (tool_conflicts): [{ours, because, client_tool}].
         "tools_withheld": list(payload.get("_tools_withheld") or []),
@@ -4875,6 +4934,8 @@ def _run_turn(body: dict, streamed: bool):
     state["_craft_reads"] = []
     payload["_craft_reads"] = state["_craft_reads"]
     state["_craft_capped"] = 0
+    state["_craft_repeats"] = []
+    payload["_craft_repeats"] = state["_craft_repeats"]
     # The package skills channel: this request's records (the trigger's from
     # prepare, then each tool section and craft follow-up) in one shared list.
     payload["_package_skills"] = list(payload.get("_package_skills") or [])
