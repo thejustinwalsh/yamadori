@@ -1297,7 +1297,8 @@ def row_of(sid: str, name: str, source_kind: str, source_url, ver: dict
     skill."""
     key = (sid, ver.get("version"), name,
            hashlib.sha1((ver.get("text") or "").encode("utf-8")).hexdigest(),
-           ver.get("package"), ver.get("package_version"))
+           ver.get("package"), ver.get("package_version"),
+           json.dumps((ver.get("validate") or {}).get("channels")))
     hit = _ROWS.get(key)
     if hit is not None:
         return dict(hit)
@@ -1367,6 +1368,27 @@ def _row_of(sid: str, name: str, source_kind: str, source_url, ver: dict
             "package_version": ver.get("package_version") or (
                 sk.get("yamadori") or {}).get("package_version"),
             "source_kind": source_kind, "source_url": source_url}
+
+
+def package_only_ids() -> list[str]:
+    """Every skill whose latest version carries the package-only flag, armed
+    yet or not (the promotion runs over them)."""
+    con = _db()
+    try:
+        rows = con.execute(
+            "SELECT s.id, v.validate FROM skills s JOIN skill_versions v ON "
+            "v.skill=s.id AND v.version=s.latest_version WHERE "
+            "v.validate LIKE '%\"channels\"%'").fetchall()
+    finally:
+        con.close()
+    out = []
+    for sid, val in rows:
+        try:
+            if json.loads(val or "{}").get("channels") == ["package"]:
+                out.append(sid)
+        except ValueError:
+            pass
+    return out
 
 
 def package_only(row: dict) -> bool:

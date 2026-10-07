@@ -759,6 +759,37 @@ one idle-gated backlog proof queued for the armed library, the newest
 versions first (`skill_prove.schedule_backlog`; `--estimate` reports the
 seconds per skill once proofs have run). Not yet run live.
 
+CHANNEL-SCOPED ELIGIBILITY (coordinator, 2026-10-07; operator: "Lets cook the
+features ... gather evidence"). The activation tests test the TEXT MATCHER
+(skill_classify / skill_select), which serves the per-turn selector and the
+matcher-based triggers; the package skills channel (mcp/package_skills.py)
+picks by the exact package and major the model looked up and never uses it.
+So a skill that only the activation tests object to -- the screen, licence,
+quote and faithfulness gates having passed, and the skill not operator-written
+or a lead -- is NOT quarantined when it has a package channel to ride (its
+area is a registry package's: koota, r3f, threejs, pmndrs_math, typegpu; a
+skill about React or TypeScript in general has none): validate records
+`validate.channels = ["package"]` with the failing cases and why
+(`validate.package_only`) and PROVE decides, under the repeat rule. One that
+passes is armed PACKAGE-ONLY: `skills.armed()` (every text-matched path) never
+lists it; `skills.armed(include_package_only=True)` (the package section, its
+between-turn triggers, yama_recall_craft by name or question) does. One PROVE
+finds worse stays quarantined. `skill_pipeline.admit_package_only(sid)` moves
+an already-quarantined one back to PROVE; `YAMADORI_SKILL_PACKAGE_ONLY=0`
+restores the old rule. `python mcp/skill_prove.py --promote-package-only`
+runs the activation tests again for every package-only skill and makes each
+one that passes a full skill (`skill_pipeline.promote_package_only`).
+
+THE MATCHER'S VERSION AND NEGATION GATES (mcp/skill_classify.py, 2026-10-07,
+from the activation cases of the gap-fill skills): a major version the
+request states ("React Three Fiber v9", "React 17", a pinned dependency)
+different from the one the skill is about (the one major its applies-when and
+trigger text name right after a framework) excludes it; a name right behind a
+negation ("no React", "without R3F", "no React, no React Three Fiber") is no
+evidence for it and rules out the skills gated on it, as does a "vanilla" /
+"plain" / "standalone" stack for the React and R3F layers; a request naming
+R3F meets a "needs React" gate. `mcp/test_matcher_gates.py`.
+
 The licence is established only from a verbatim quote (a SKILL.md's own
 `license:` line, a licence line in the source, a LICENSE file beside it) or
 the operator's statement (`POST /dash/api/skill/licence`); none found FAILS

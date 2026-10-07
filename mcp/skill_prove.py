@@ -1664,12 +1664,21 @@ if __name__ == "__main__":
     ap.add_argument("--release-reprove", action="store_true",
                     help="take the idle gate off the queued re-proofs and "
                     "order them by area (REPROVE_PRIORITY)")
+    ap.add_argument("--promote-package-only", action="store_true",
+                    help="run the activation tests again for every "
+                    "package-only skill and make each one that passes a "
+                    "full skill")
     ap.add_argument("--run-reprove-here", action="store_true",
                     help="run the queued re-proofs in THIS process on the "
                     "main card's model (run_reprove_here), highest priority "
                     "first")
     a = ap.parse_args()
-    if a.run_reprove_here:
+    if a.promote_package_only:
+        import skill_pipeline
+        rows = [skill_pipeline.promote_package_only(sid)
+                for sid in skills.package_only_ids()]
+        print(json.dumps(rows, indent=1))
+    elif a.run_reprove_here:
         print(json.dumps(run_reprove_here(a.limit), indent=1))
     elif a.release_reprove:
         print(json.dumps(release_reprove(), indent=1))

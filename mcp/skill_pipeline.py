@@ -1766,6 +1766,41 @@ def admit_package_only(sid: str) -> dict:
     return skills.reopen_at(sid, v, "prove", validate=val)
 
 
+def promote_package_only(sid: str) -> dict:
+    """Run a package-only skill's activation tests again (the matcher has
+    changed since: the version and negation gates, 2026-10-07) and, when they
+    now pass, make it a full skill: the `channels` flag goes, the record keeps
+    when and why. {skill, promoted, score, failures}. A skill that is not
+    package-only, or whose tests still fail, is left as it is."""
+    import skill_tests
+    s = skills.get(sid)
+    if s is None:
+        raise KeyError(f"no such skill: {sid}")
+    v = int(s.get("served_version") or s["latest_version"])
+    ver = skills.version(sid, v) or {}
+    val = dict(ver.get("validate") or {})
+    if val.get("channels") != ["package"]:
+        return {"skill": sid, "promoted": False, "why": "not package-only"}
+    pool = [x for x in skills.armed() if x["id"] != sid] + [
+        {"id": sid, "rule": ver.get("classify") or {}}]
+    act = skill_tests.run(ver.get("tests") or {}, ver.get("classify") or {},
+                          skill_id=sid, pool=pool)
+    out = {"skill": sid, "name": s.get("name"), "promoted": bool(
+        act["passed"]), "score": act["score"],
+        "failures": act["failures"][:4]}
+    if not act["passed"]:
+        return out
+    old = val.get("package_only") or {}
+    val.pop("channels", None)
+    val["activation"] = act
+    val["package_only"] = dict(old, promoted_at=time.time(), promoted_why=(
+        "the activation tests pass under the matcher's version and "
+        "negation gates"), was_failing=old.get("failures"))
+    skills.update_version(sid, v, validate=val)
+    skills._invalidate()
+    return out
+
+
 def _name_for(s: dict, parsed: dict, dist: dict, title: str) -> str:
     """The SKILL.md name a version is given: the name its creator asked for
     (skills.create's `name`, kept as meta.name_requested) wins over the

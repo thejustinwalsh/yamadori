@@ -102,6 +102,7 @@ def stage(name: str, *, state="quarantined",
                           "failures": FAILS}}
     if channels:
         val["channels"] = channels
+        val["package_only"] = {"why": "test", "failures": FAILS}
     skills.update_version(sid, 1, stage="validate", text=text,
                           text_sha256=skill_md.sha256(text), classify=rule,
                           validate=val, tests={"activation": {
@@ -258,6 +259,48 @@ def test_the_channels() -> None:
     check(po not in flat and full in flat,
           "[matcher] the between-turn trigger index never holds it (and "
           "does hold the full skill)", flat[:200])
+
+
+def test_promotion_when_the_matcher_clears_it() -> None:
+    import skill_tests
+    reset()
+    a = stage("koota-react-promo", state="armed", channels=["package"])
+    b = stage("koota-react-stays", state="armed", channels=["package"])
+    for sid in (a, b):
+        skills.arm(sid, 1)
+    skills._invalidate()
+    real = skill_tests.run
+
+    def fake(tests, rule, *, skill_id="", pool=None):
+        ok = skill_id == a
+        return {"passed": ok, "score": 1.0 if ok else 0.5, "n": 4,
+                "failures": [] if ok else ["should_not: 'x' -> inject"],
+                "cases": [], "embedding": "x"}
+    skill_tests.run = fake
+    try:
+        ra = P.promote_package_only(a)
+        rb = P.promote_package_only(b)
+        rn = P.promote_package_only(stage("koota-react-full2",
+                                          state="armed"))
+    finally:
+        skill_tests.run = real
+    va = skills.version(a, 1)["validate"]
+    check(ra["promoted"] and "channels" not in va
+          and va["package_only"]["promoted_at"]
+          and va["package_only"]["was_failing"] == FAILS
+          and a in [r["id"] for r in skills.armed()],
+          "[promote] a package-only skill whose activation tests now pass "
+          "becomes a full skill: the flag goes, the record keeps the old "
+          "failures and when, and armed() lists it", (ra, va.get(
+              "package_only")))
+    check(not rb["promoted"] and skills.package_only(next(
+        r for r in skills.armed(include_package_only=True)
+        if r["id"] == b)) and b not in [r["id"] for r in skills.armed()],
+          "[promote] one that still fails stays package-only", rb)
+    check(not rn["promoted"] and rn["why"] == "not package-only",
+          "[promote] a skill that was never package-only is left alone", rn)
+    ids = skills.package_only_ids()
+    check(ids == [b], "[promote] package_only_ids lists what is left", ids)
 
 
 def test_validate_branches() -> None:

@@ -1519,9 +1519,15 @@ def request_signals(messages: list[dict],
             if rx.search(p):
                 add(arts, aid, "fact", f"path {p[-60:]}")
     for t in VOCAB:
-        m = _WORDS[t.id].search(blob)
-        if m:
+        # A mention behind a negation ("no React", "without R3F", "instead
+        # of koota") is not evidence FOR the term (2026-10-07, from the
+        # activation cases of the gap-fill skills: "plain three.js (no
+        # React, no React Three Fiber)" selected the React skills).
+        for m in _WORDS[t.id].finditer(blob):
+            if _NEG_ADJ.search(blob[max(0, m.start() - 80):m.start()]):
+                continue
             add(terms, t.id, "word", f"word {m.group(0)!r}")
+            break
     # THE EXPLICIT ASK: named by the user in the current request's prose.
     # A SPECIFIC framework asked for is a FACT ("build it with koota"); a
     # language or a host framework (React) named in prose stays a WORD --
@@ -1630,6 +1636,11 @@ def request_signals(messages: list[dict],
             # words (the selector's category rounds drop them when a bare
             # word is all the evidence there is).
             "negated": sorted(negated_terms(_last_user_text(messages))),
+            # What the request RULES OUT (negated names, and the framework
+            # layers a "vanilla" / "plain" stack leaves out) and the major
+            # versions it STATES (match's two new gates).
+            "ruled_out": sorted(ruled_out(_last_user_text(messages))),
+            "versions": stated_versions(asked, blob),
             "tools": sorted(tool_names),
             "topic_text": topic_text, "fresh_text": "\n".join(fresh),
             "query": last[:2000], "embed_query": eq, "embed_from": efrom}
@@ -1843,6 +1854,124 @@ def negated_terms(text: str) -> set[str]:
     return out
 
 
+# A request that says it is "vanilla", "plain" or "standalone" X is a stack
+# without a framework layer on top: it rules out React and R3F as surely as
+# "no React" does ("plain HTML and JavaScript", "vanilla JavaScript",
+# "a standalone Three.js page"). The names are the stack words, not ours.
+_VANILLA = re.compile(
+    r"\b(?:vanilla|plain|pure|standalone)\s+(?:(?:html|css)\s*(?:,|and|\+|&)?"
+    r"\s*)*(?:three\.?js|javascript|js|typescript|ts|html|webgl|webgpu)\b",
+    re.I)
+# The framework layers a vanilla stack leaves out.
+_LAYERS = ("react", "r3f")
+# What a name IMPLIES for a gate: React Three Fiber is React ("needs React"
+# must hold for a request that names R3F).
+IMPLIES_FOR_GATES = {"react": ("r3f",)}
+
+
+# A negation that GOVERNS the name: right before it, or before a list it is in
+# ("no React", "without React or three.js", "no React, no R3F", "instead of
+# koota"). `_NEGATION` (negated_terms) reads any "not" earlier in the clause
+# ("a function is not memoised ... React" is no negation of React); a gate
+# that drops a skill must not.
+_NEG_ADJ = re.compile(
+    r"\b(?:without|no|instead of|rather than|avoid(?:ing)?|don'?t use|do not "
+    r"use|never use|not using|not use|except|excluding)\s+"
+    r"(?:(?:the|a|an|any|using|use|plain|vanilla|raw|my|our)\s+)?"
+    r"(?:[\w.+/@-]+(?:\s+[\w.+/@-]+){0,2}\s*(?:,|/|\bor\b|\band\b)\s*"
+    r"(?:(?:no|without)\s+)?)*$", re.I)
+
+
+def _adjacent_negated(prose: str) -> set[str]:
+    """The term ids every mention of which sits right behind a governing
+    negation (_NEG_ADJ)."""
+    out: set[str] = set()
+    for t in VOCAB:
+        ms = list(_WORDS[t.id].finditer(prose))
+        if ms and all(_NEG_ADJ.search(prose[max(0, m.start() - 80):m.start()])
+                      for m in ms):
+            out.add(t.id)
+    return out
+
+
+def ruled_out(text: str) -> set[str]:
+    """The term ids the request rules out: the names right behind a
+    negation (_adjacent_negated) and, for a "vanilla" / "plain" stack, the
+    framework layers it does not use -- unless the request plainly names
+    one."""
+    prose = user_prose(text)
+    out = _adjacent_negated(prose)
+    if prose.strip() and _VANILLA.search(prose):
+        asked = asked_terms(text)
+        for tid in _LAYERS:
+            if tid not in asked:
+                out.add(tid)
+    return out
+
+
+def _major(v) -> int | None:
+    m = re.match(r"\D*(\d+)", str(v or ""))
+    return int(m.group(1)) if m else None
+
+
+def stated_versions(asked: dict, blob: str) -> dict[str, int]:
+    """{term id: major} the request states: "R3F v10", "React 17" (asked_
+    terms' version) and a pinned dependency (package.json, a spec's pin
+    list). The user's words win over a pin."""
+    out: dict[str, int] = {}
+    for pkg, ver in _pinned(blob).items():
+        tid = _PKG_TO.get(pkg)
+        mj = _major(ver)
+        if tid and mj is not None:
+            out.setdefault(tid, mj)
+    for tid, e in (asked or {}).items():
+        mj = _major(e.get("version"))
+        if mj is not None:
+            out[tid] = mj
+    return out
+
+
+@functools.lru_cache(maxsize=8192)
+def _versions_in(text: str) -> tuple[tuple[str, int], ...]:
+    """((term id, major),) a text names ONE major for: "React Three Fiber
+    v10", "React 19" -- the version right after the name, as asked_terms
+    reads a request. A term with two different majors in the text is left
+    out (a skill that names v9 and v10 is about the move, not a version)."""
+    found: dict[str, set[int]] = {}
+    for t in VOCAB:
+        if t.kind != "framework":
+            continue
+        for m in _WORDS[t.id].finditer(text):
+            v = _ASK_VERSION.match(text[m.end():m.end() + 24])
+            mj = _major(v.group(1)) if v else None
+            if mj is not None:
+                found.setdefault(t.id, set()).add(mj)
+    return tuple((tid, next(iter(s))) for tid, s in sorted(found.items())
+                 if len(s) == 1)
+
+
+def rule_versions(rule: dict) -> dict[str, int]:
+    """The major version a skill is about, per framework: the rule's own
+    `versions` ({term id: major}) when it has them, else the one major its
+    "applies when" text and trigger texts name for a framework."""
+    got: dict[str, int] = {}
+    for tid, mj in ((rule or {}).get("versions") or {}).items():
+        mm = _major(mj)
+        if mm is not None:
+            got[tid] = mm
+    texts = [str((rule or {}).get("text") or "")]
+    texts += [str(t.get("text") or "") for t in (rule or {}).get(
+        "triggers") or [] if isinstance(t, dict)]
+    seen: dict[str, set[int]] = {}
+    for tx in texts:
+        for tid, mj in _versions_in(tx):
+            seen.setdefault(tid, set()).add(mj)
+    for tid, s in seen.items():
+        if len(s) == 1:
+            got.setdefault(tid, next(iter(s)))
+    return got
+
+
 def match(rule: dict, sig: dict) -> dict:
     """{score, strength, why} for one skill rule against one request.
 
@@ -1857,8 +1986,23 @@ def match(rule: dict, sig: dict) -> dict:
     terms, arts = sig.get("terms") or {}, sig.get("artifacts") or {}
     # GATES FIRST: each one the rule carries must hold, whatever the
     # primary key says.
+    # A NEGATED name or a "vanilla" stack rules out the skills gated on it
+    # ("no React" and a skill about React / R3F do not meet).
+    out_ids = set(sig.get("ruled_out") or [])
+    named = set(g["all_of"]) | set(applies_to(rule)["frameworks"])
+    gone = sorted(out_ids & named)
+    if gone:
+        return dict(none, gate=f"the request rules out {names(gone)[0]}")
+    # A VERSION the request states against the one the skill is about:
+    # "R3F v9" does not meet a v10 skill, "React 17" does not meet React 19.
+    sv = sig.get("versions") or {}
+    for tid, major in rule_versions(rule).items():
+        if tid in sv and sv[tid] != major:
+            return dict(none, gate=f"the request is {names([tid])[0]} "
+                        f"{sv[tid]}, the skill is {major}")
     for t in g["all_of"]:
-        if t not in terms and t not in arts:
+        if t not in terms and t not in arts and not any(
+                i in terms for i in IMPLIES_FOR_GATES.get(t, ())):
             return dict(none, gate=f"needs {names([t])[0]}")
     if g["phases"] and not set(g["phases"]) & set(sig.get("phases") or {}):
         return dict(none, gate=f"phase is not {'/'.join(g['phases'])}")
