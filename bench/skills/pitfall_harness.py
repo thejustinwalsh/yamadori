@@ -793,7 +793,14 @@ def library_skills(refs: list) -> tuple[list[dict], list[str]]:
     the names not armed, and a name whose `match` found no item)."""
     import skills
     import skill_select
-    by = {s.get("name"): s for s in skills.armed()}
+    by: dict = {}
+    for s in skills.armed():
+        # a skill is found by its name, the name its creator asked for (a
+        # served row's `alias`: the pipeline now keeps it, but a skill built
+        # before that carries the model's) or its id
+        for key in (s.get("name"), s.get("alias"), s.get("id")):
+            if key:
+                by.setdefault(key, s)
     got, missing = [], []
     for x in refs:
         name, match = _skill_ref(x)

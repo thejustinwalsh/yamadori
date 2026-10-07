@@ -624,11 +624,13 @@ def test_a_clean_source_arms_without_review():
           == "description",
           "classify: TypeScript, with triggers from the description",
           json.dumps(rule)[:300])
-    check(v["text"].startswith("---\nname: fake-skill\n")
+    # the name the caller asked for ("ts strictness") is the SKILL.md name,
+    # not the model's "fake-skill" (skill_pipeline._name_for, 2026-10-07)
+    check(v["text"].startswith("---\nname: ts-strictness\n")
           and skill_md.injection(v["text"]).startswith(
               "Fake Skill Title\n- DO: "),
-          "the stored skill is a SKILL.md; what is injected is title and "
-          "items", v["text"][:200])
+          "the stored skill is a SKILL.md under the requested name; what is "
+          "injected is title and items", v["text"][:200])
     check((v["licence"] or {}).get("spdx") == "MIT"
           and v["licence"]["quote"] == "license: MIT",
           "the licence stage quotes the source's own licence line",

@@ -407,6 +407,15 @@ def create(*, url: str | None = None, text: str | None = None,
     m = dict(meta or {})
     if goal:
         m["goal"] = str(goal)[:300]
+    if name and str(name).strip():
+        # THE NAME THE CALLER ASKED FOR (2026-10-07): the pipeline keeps it
+        # as the SKILL.md name (skill_pipeline._name_for) instead of the
+        # model's, and a lookup by it finds the skill under every spelling
+        # (`find`, the served row's `alias`). The pitfall cases, the gap
+        # lists and the dashboard name skills; a rename in the middle of the
+        # pipeline made them unfindable.
+        import skill_md
+        m["name_requested"] = skill_md.to_name(str(name))
     _insert(sid, nm, "frontier" if frontier else kind,
             "ingest" if vkind in ("url", "text") else vkind, PATHS[vkind],
             url=url, author=author, meta=m, watch=watch)
@@ -1189,11 +1198,25 @@ def listing(limit: int = 5000) -> list[dict]:
 
 
 def find(name: str) -> dict | None:
+    """A skill by its name, in any spelling the store has used for it: the
+    name column, its SKILL.md form (hyphens), or the name its creator asked
+    for (meta.name_requested)."""
+    import skill_md
     con = _db()
     try:
-        return _decode(con.execute("SELECT * FROM skills WHERE name=? "
-                                   "ORDER BY created LIMIT 1",
-                                   (name,)).fetchone(), _JSON_S)
+        row = con.execute("SELECT * FROM skills WHERE name=? "
+                          "ORDER BY created LIMIT 1", (name,)).fetchone()
+        if row is None:
+            want = skill_md.to_name(name)
+            for r in con.execute("SELECT * FROM skills ORDER BY created"):
+                try:
+                    req = json.loads(r["meta"] or "{}").get("name_requested")
+                except ValueError:
+                    req = None
+                if skill_md.to_name(r["name"]) == want or req == want:
+                    row = r
+                    break
+        return _decode(row, _JSON_S)
     finally:
         con.close()
 
@@ -1342,8 +1365,11 @@ def armed() -> list[dict]:
                    "validate": json.loads(r["validate"] or "{}"),
                    "package": sm.get("package"),
                    "package_version": sm.get("package_version")}
-            rows.append(row_of(r["id"], r["name"], r["source_kind"],
-                               r["source_url"], ver))
+            row = row_of(r["id"], r["name"], r["source_kind"],
+                         r["source_url"], ver)
+            if sm.get("name_requested") and                     sm["name_requested"] != row.get("name"):
+                row["alias"] = sm["name_requested"]
+            rows.append(row)
     finally:
         con.close()
     with _LOCK:

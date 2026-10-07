@@ -466,10 +466,19 @@ _LICENCE_LINE = re.compile(
     r"licen[cs]|copyright|all rights reserved|public domain|creative commons"
     r"|\bcc[- ]?by|\bcc0\b|spdx|redistribut", re.I)
 NO_DERIVATIVES = ("CC-BY-ND-4.0",)
+# A URL is an address, never a licence statement (2026-10-07: a react.dev page
+# whose HTML example plays `.../media/cc0-videos/flower.mp4` was recorded as
+# CC0-1.0, quote and all). Every URL, and every bare host/path, is blanked
+# from a line before the line is read for a licence; the quote stays the
+# line as it is in the source.
+_URLISH = re.compile(
+    r"(?:[a-z][a-z0-9+.-]*://|www\.)[^\s\"'<>)\]]*"
+    r"|[\w-]+(?:\.[\w-]+)+/[^\s\"'<>)\]]*", re.I)
 
 
 def licence_of(text: str) -> dict | None:
-    """{spdx, quote, where} from a verbatim line of the text, or None."""
+    """{spdx, quote, where} from a verbatim line of the text, or None. A URL
+    inside a line is not read: only the words around it."""
     import skill_md
     fm, _body = skill_md.split(text or "")
     for key in ("license", "licence"):
@@ -481,10 +490,11 @@ def licence_of(text: str) -> dict | None:
                         v.strip()[:80])
             return {"spdx": spdx, "quote": quote, "where": "frontmatter"}
     for line in (text or "").split("\n"):
-        if not _LICENCE_LINE.search(line):
+        scan = _URLISH.sub(" ", line)
+        if not _LICENCE_LINE.search(scan):
             continue
         for rx, sid in _SPDX:
-            if rx.search(line):
+            if rx.search(scan):
                 return {"spdx": sid, "quote": line.strip()[:600],
                         "where": "source"}
     return None
@@ -1578,6 +1588,16 @@ def _lead_activation(tests: dict, package: str) -> dict:
             "by": "skill_packages.detect (a lead is pushed, never matched)"}
 
 
+def _name_for(s: dict, parsed: dict, dist: dict, title: str) -> str:
+    """The SKILL.md name a version is given: the name its creator asked for
+    (skills.create's `name`, kept as meta.name_requested) wins over the
+    model's and the store's, so a skill built for a case or a list by name is
+    still found by it after the distil stage wrote its own."""
+    asked = ((s or {}).get("meta") or {}).get("name_requested")
+    return (asked or parsed.get("name") or dist.get("name")
+            or (s or {}).get("name") or title)
+
+
 def handle_validate(job: dict, ctx) -> dict:
     """Format, quotes, caps, the item screen, the ecosystem contract, and
     the activation tests. A failed test QUARANTINES; anything else that
@@ -1655,8 +1675,7 @@ def handle_validate(job: dict, ctx) -> dict:
         skills.fail(sid, v, "validate: " + res["why"], validate=rec)
         return {"failed": res["why"]}
     # The SKILL.md.
-    name = skills.set_name(sid, parsed.get("name") or dist.get("name")
-                           or s.get("name") or res["title"])
+    name = skills.set_name(sid, _name_for(s, parsed, dist, res["title"]))
     desc = " ".join(str(parsed.get("description") or "").split())
     if not desc:
         trig = next((x.get("text") for x in rule.get("triggers") or []
