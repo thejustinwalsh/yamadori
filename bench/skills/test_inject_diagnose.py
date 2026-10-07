@@ -61,7 +61,9 @@ def main() -> int:
                      "p": {"0": 0.6, "1": 0.1, "2": 0.1, "3": 0.2}}],
                     "disagreement": 0.5, "label_mass_min": 0.9}
                 its.append({"key": f"{cid}#{i}", "sha": f"sha{i}",
-                            "belief": p3, "decision_id": did, "probs": {}})
+                            "belief": p3, "decision_id": did, "probs": {},
+                            "parts": {"next": {"noul": p3}} if v == "a"
+                            else {}})
             runs.append({"case": cid, "variant": v, "kind": kind,
                          "group": "hermes", "items": its,
                          "stage3": {"noul": 0.9 if (v == "a" or k % 2) else
@@ -121,6 +123,12 @@ def main() -> int:
           "with its interval", s3["variants"]["a"]["cases"] == 6
           and "d_minus_a" in s3 and len(s3["d_minus_a"]["ci95"]) == 2,
           s3)
+    pv = a["parts_vs_level"]["next"]
+    check("a part is scored alone against each level (does NEXT alone read "
+          "AREA as NEEDED?)", pv["3_vs_1"] == 1.0 and pv["3_vs_0"] == 1.0
+          and "parts_vs_level" not in rep["variants"]["d"], pv)
+    check("stage 3 has a by-case interval per variant",
+          len(s3["variants"]["a"]["auroc_ci95_by_case"] or [0, 0]) == 2)
     ip = rep["item_prior"]
     check("the item prior table has overall, step and user scopes",
           set(ip) >= {"rows", "all", "step", "user"}, ip)

@@ -138,7 +138,7 @@ def stage2_rows(cases: dict, runs: list, truth: dict) -> list:
                 "tokens": (c.get("state_info") or {}).get("tokens") or 0,
                 "n_items": len(c["items"]), "idx": idx,
                 "skill": ci.get("skill") or "", "fact": ci.get("fact") or "",
-                "probs": it.get("probs") or {},
+                "probs": it.get("probs") or {}, "parts": it.get("parts") or {},
                 "decision_id": it.get("decision_id")})
     return rows
 
@@ -209,6 +209,29 @@ def variant_report(v: str, rows: list, dec: dict) -> dict:
         out["at_threshold"][scope] = {"base_rate": round(
             pos / len(rs), 3) if rs else None, **tab}
     out["readout"] = readout(rows, dec)
+    # a split variant's parts, each alone (f: NEXT and DONE; h: the pick and
+    # the fit): does NEXT alone still read AREA as NEEDED? "3_vs_1" near 0.5
+    # says it does
+    names = sorted({k for x in rows for k, p in x["parts"].items()
+                    if "noul" in p or "p" in p})
+    if names:
+        def pv(x, k):
+            p = x["parts"].get(k) or {}
+            return p.get("noul", p.get("p"))
+        out["parts_vs_level"] = {}
+        for k in names:
+            have = [x for x in rows if pv(x, k) is not None]
+            out["parts_vs_level"][k] = {
+                f"3_vs_{lvl}": (round(auroc(
+                    [pv(x, k) for x in have if x["lv"] == 3],
+                    [pv(x, k) for x in have if x["lv"] == lvl]) or 0.0, 3)
+                    if any(x["lv"] == lvl for x in have) and any(
+                        x["lv"] == 3 for x in have) else None)
+                for lvl in (0, 1, 2)}
+            out["parts_vs_level"][k]["mean_by_level"] = {
+                str(lvl): round(statistics.mean(
+                    pv(x, k) for x in have if x["lv"] == lvl), 3)
+                for lvl in range(4) if any(x["lv"] == lvl for x in have)}
     return out
 
 
@@ -274,9 +297,11 @@ def stage3(cases: dict, runs: list, truth: dict) -> dict:
     out = {"variants": {}}
     for v, cs in sorted(per.items()):
         rows = list(cs.values())
+        grp = {c: [dict(x)] for c, x in cs.items()}
         out["variants"][v] = {
             "cases": len(rows), "needed": sum(x["need"] for x in rows),
             "auroc": _a(rows, "noul"),
+            "auroc_ci95_by_case": boot_ci(grp, lambda rs: _a(rs, "noul")),
             "step": _a([x for x in rows if x["kind"] == "step"], "noul"),
             "user": _a([x for x in rows if x["kind"] == "user"], "noul"),
             "passed_share": round(sum(x["how"] == "passed" for x in rows)
