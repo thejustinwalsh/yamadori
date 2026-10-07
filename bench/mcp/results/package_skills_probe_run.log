@@ -1,83 +1,408 @@
-﻿[2026-10-07 01:25:20] script started; waiting for pid 18908
-[2026-10-07 01:36:50] pid 18908 has exited
-[2026-10-07 01:36:50] RUN attempt 1
+﻿[2026-10-07 01:50:02] script started; waiting for pid 0
+[2026-10-07 01:50:02] pid 0 has exited
+[2026-10-07 01:50:02] RUN attempt 1
 {
- "run_id": "pkgskills-control-lookup-pi-medium-1",
+ "run_id": "pkgskills2-control-lookup-pi-medium-1",
  "arm": "control",
- "outcome": "invalid",
+ "outcome": "ok",
  "why": null,
- "stop": "exited",
- "requests": 0,
- "package_tool_called": false,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
  "section_delivered": false,
  "recall_called": false,
  "question_calls": 0,
  "crafts_pulled": [],
- "invalid": [
-  "no request reached the relay"
- ]
+ "invalid": null
 }
 {
- "run_id": "pkgskills-inject-lookup-pi-medium-1",
+ "run_id": "pkgskills2-inject-lookup-pi-medium-1",
  "arm": "inject",
- "outcome": "invalid",
+ "outcome": "ok",
  "why": null,
- "stop": "exited",
- "requests": 0,
- "package_tool_called": false,
- "section_delivered": false,
- "recall_called": false,
- "question_calls": 0,
- "crafts_pulled": [],
- "invalid": [
-  "no request reached the relay"
- ]
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber"
+ ],
+ "invalid": null
 }
 {
- "run_id": "pkgskills-router-lookup-pi-medium-1",
+ "run_id": "pkgskills2-router-lookup-pi-medium-1",
  "arm": "router",
- "outcome": "invalid",
+ "outcome": "ok",
  "why": null,
- "stop": "exited",
- "requests": 0,
- "package_tool_called": false,
- "section_delivered": false,
- "recall_called": false,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
  "question_calls": 0,
- "crafts_pulled": [],
- "invalid": [
-  "no request reached the relay"
- ]
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "math-data-oriented-functions",
+  "math-noise-and-seeded-random",
+  "math-with-three-js",
+  "r3f-drei-pairing-8"
+ ],
+ "invalid": null
 }
 {
- "run_id": "pkgskills-both-lookup-pi-medium-1",
+ "run_id": "pkgskills2-both-lookup-pi-medium-1",
  "arm": "both",
- "outcome": "invalid",
+ "outcome": "ok",
  "why": null,
- "stop": "exited",
- "requests": 0,
- "package_tool_called": false,
- "section_delivered": false,
- "recall_called": false,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
  "question_calls": 0,
- "crafts_pulled": [],
- "invalid": [
-  "no request reached the relay"
- ]
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-with-react-three-fiber",
+  "math-noise-and-seeded-random",
+  "math-with-three-js"
+ ],
+ "invalid": null
 }
 {
- "run_id": "pkgskills-control-lookup-pi-medium-2",
+ "run_id": "pkgskills2-control-lookup-pi-medium-2",
  "arm": "control",
- "outcome": "invalid",
+ "outcome": "ok",
  "why": null,
- "stop": "exited",
- "requests": 0,
- "package_tool_called": false,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
  "section_delivered": false,
  "recall_called": false,
  "question_calls": 0,
  "crafts_pulled": [],
- "invalid": [
-  "no request reached the relay"
- ]
+ "invalid": null
 }
+{
+ "run_id": "pkgskills2-inject-lookup-pi-medium-2",
+ "arm": "inject",
+ "outcome": "ok",
+ "why": null,
+ "stop": "exited",
+ "requests": 1,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 4,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber",
+  "math-with-three-js"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-router-lookup-pi-medium-2",
+ "arm": "router",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 0,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "math-data-oriented-functions",
+  "math-hot-path-pitfalls",
+  "math-noise-and-seeded-random",
+  "math-with-three-js",
+  "r3f-drei-pairing-8"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-both-lookup-pi-medium-2",
+ "arm": "both",
+ "outcome": "ok",
+ "why": null,
+ "stop": "exited",
+ "requests": 1,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 8,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-control-lookup-pi-medium-3",
+ "arm": "control",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-inject-lookup-pi-medium-3",
+ "arm": "inject",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber",
+  "math-noise-and-seeded-random",
+  "math-with-three-js",
+  "r3f-frame-loop-10",
+  "r3f-useframe-1"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-router-lookup-pi-medium-3",
+ "arm": "router",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 3,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber",
+  "math-data-oriented-functions",
+  "math-hot-path-pitfalls",
+  "math-noise-and-seeded-random",
+  "math-with-three-js",
+  "r3f-drei-pairing-8"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-both-lookup-pi-medium-3",
+ "arm": "both",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-with-react-three-fiber",
+  "math-noise-and-seeded-random",
+  "math-with-three-js"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-control-lookup-pi-medium-4",
+ "arm": "control",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-inject-lookup-pi-medium-4",
+ "arm": "inject",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-with-react-three-fiber"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-router-lookup-pi-medium-4",
+ "arm": "router",
+ "outcome": "ok",
+ "why": null,
+ "stop": "exited",
+ "requests": 1,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 2,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber",
+  "r3f-drei-pairing-8",
+  "r3f-peer-deps-13"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-both-lookup-pi-medium-4",
+ "arm": "both",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-entity-lifetime",
+  "koota-react-integration",
+  "koota-with-react-three-fiber",
+  "math-data-oriented-functions",
+  "math-noise-and-seeded-random",
+  "math-with-three-js"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-control-lookup-pi-medium-5",
+ "arm": "control",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-inject-lookup-pi-medium-5",
+ "arm": "inject",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 0,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-with-react-three-fiber"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-router-lookup-pi-medium-5",
+ "arm": "router",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 15,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-app-setup",
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber",
+  "math-data-oriented-functions",
+  "math-hot-path-pitfalls",
+  "math-noise-and-seeded-random",
+  "math-with-three-js",
+  "r3f-drei-pairing-8"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills2-both-lookup-pi-medium-5",
+ "arm": "both",
+ "outcome": "ok",
+ "why": null,
+ "stop": "exited",
+ "requests": 1,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 2,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-queries-and-systems",
+  "koota-react-app-setup",
+  "koota-react-entity-lifetime",
+  "koota-with-react-three-fiber"
+ ],
+ "invalid": null
+}
+[2026-10-07 05:16:20] RUN exit=0
+[2026-10-07 05:16:21] report written; done

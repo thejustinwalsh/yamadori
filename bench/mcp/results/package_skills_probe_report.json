@@ -1,0 +1,94 @@
+﻿{
+ "control": {
+  "n_valid_trials": 5,
+  "package_tool_call_rate": 1.0,
+  "section_delivered_rate": 0.0,
+  "recall_call_rate": 0.0,
+  "recall_after_section_rate_of_trials_with_a_section": null,
+  "question_calls_total": 0,
+  "crafts_pulled": {},
+  "pitfall_rules": {}
+ },
+ "inject": {
+  "n_valid_trials": 5,
+  "package_tool_call_rate": 1.0,
+  "section_delivered_rate": 1.0,
+  "recall_call_rate": 1.0,
+  "recall_after_section_rate_of_trials_with_a_section": 1.0,
+  "question_calls_total": 7,
+  "crafts_pulled": {
+   "koota-with-react-three-fiber": 6,
+   "koota-frame-loop-systems": 6,
+   "koota-queries-and-systems": 4,
+   "koota-react-entity-lifetime": 4,
+   "koota-traits-and-entities": 3,
+   "koota-react-integration": 3,
+   "math-with-three-js": 2,
+   "math-noise-and-seeded-random": 1,
+   "r3f-useframe-1": 1,
+   "r3f-frame-loop-10": 1
+  },
+  "pitfall_rules": {
+   "applies": 29,
+   "pitfall_avoided": 25,
+   "good_used": 0,
+   "applies_pulled": 20,
+   "applies_delivered": 9
+  }
+ },
+ "router": {
+  "n_valid_trials": 5,
+  "package_tool_call_rate": 1.0,
+  "section_delivered_rate": 1.0,
+  "recall_call_rate": 1.0,
+  "recall_after_section_rate_of_trials_with_a_section": 1.0,
+  "question_calls_total": 6,
+  "crafts_pulled": {
+   "koota-traits-and-entities": 6,
+   "koota-react-integration": 5,
+   "koota-queries-and-systems": 5,
+   "koota-frame-loop-systems": 5,
+   "math-with-three-js": 5,
+   "r3f-drei-pairing-8": 5,
+   "koota-with-react-three-fiber": 5,
+   "math-data-oriented-functions": 4,
+   "math-noise-and-seeded-random": 4,
+   "math-hot-path-pitfalls": 3,
+   "koota-react-entity-lifetime": 2,
+   "r3f-peer-deps-13": 1
+  },
+  "pitfall_rules": {
+   "applies": 11,
+   "pitfall_avoided": 10,
+   "good_used": 0,
+   "applies_pulled": 11
+  }
+ },
+ "both": {
+  "n_valid_trials": 5,
+  "package_tool_call_rate": 1.0,
+  "section_delivered_rate": 1.0,
+  "recall_call_rate": 1.0,
+  "recall_after_section_rate_of_trials_with_a_section": 1.0,
+  "question_calls_total": 12,
+  "crafts_pulled": {
+   "koota-with-react-three-fiber": 10,
+   "koota-frame-loop-systems": 7,
+   "koota-queries-and-systems": 5,
+   "koota-react-entity-lifetime": 5,
+   "koota-react-integration": 4,
+   "math-noise-and-seeded-random": 3,
+   "math-with-three-js": 3,
+   "koota-traits-and-entities": 2,
+   "math-data-oriented-functions": 1,
+   "koota-react-app-setup": 1
+  },
+  "pitfall_rules": {
+   "applies": 12,
+   "pitfall_avoided": 11,
+   "good_used": 0,
+   "applies_pulled": 9,
+   "applies_delivered": 3
+  }
+ }
+}

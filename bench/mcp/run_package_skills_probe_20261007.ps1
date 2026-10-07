@@ -5,7 +5,7 @@
 # since 9398750). Key: .keys\live-test.key (never printed). A preflight refusal (exit 3:
 # GPU busy) is retried 5 times, 120 s apart, then the script stops. Detached (Start-Process);
 # logs to $Log.
-param([int]$WaitPid = 18908)
+param([int]$WaitPid = 18908, [string]$Tag = "pkgskills")
 $ErrorActionPreference = "Continue"
 $Root = "C:\Users\jwals\llama-stack"
 $Py = "C:\Users\jwals\textgen\installer_files\env\python.exe"
@@ -17,11 +17,11 @@ New-Item -ItemType Directory -Force $Out | Out-Null
 function Say($m) { "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m | Out-File -FilePath $Log -Append -Encoding utf8 }
 
 Say "script started; waiting for pid $WaitPid"
-while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 30 }
+while ($WaitPid -gt 0 -and (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue)) { Start-Sleep -Seconds 30 }
 Say "pid $WaitPid has exited"
 for ($i = 1; $i -le 6; $i++) {
     Say "RUN attempt $i"
-    & $Py "bench/mcp/package_skills_probe.py" --run --trials 5 --steps 15 --max-minutes 20 --tag pkgskills --key-file $Key 2>&1 | Out-File -FilePath $Log -Append -Encoding utf8
+    & $Py "bench/mcp/package_skills_probe.py" --run --trials 5 --steps 15 --max-minutes 20 --tag $Tag --key-file $Key 2>&1 | Out-File -FilePath $Log -Append -Encoding utf8
     $code = $LASTEXITCODE
     Say "RUN exit=$code"
     if ($code -ne 3) { break }
