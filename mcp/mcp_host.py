@@ -1120,6 +1120,34 @@ RENDER = {"search": render_search, "versions": render_versions,
           "readme": render_readme}
 
 
+def _found(render: str | None, d, args: dict) -> list[dict]:
+    """[{name, version}] the call's result is about, best first: the packages
+    a search returned (each with the version the registry lists), the package
+    whose versions or README were read (its `latest` tag's version; a README's
+    asked version when it is one), for the package skills
+    (mcp/package_skills.py; x_yamadori.mcp.calls[].found). No free text."""
+    if not isinstance(d, dict):
+        return []
+    out: list[dict] = []
+    if render == "search":
+        for g in d.get("results") or []:
+            for r in (g.get("results") or []) if isinstance(g, dict) else []:
+                if isinstance(r, dict) and r.get("name"):
+                    out.append({"name": str(r["name"]),
+                                "version": str(r.get("version") or "") or None})
+    elif render == "versions":
+        vs = [v for v in d.get("versions") or [] if isinstance(v, dict)]
+        latest = next((str(v.get("version")) for v in vs
+                       if "latest" in (v.get("tags") or [])), None)
+        out.append({"name": str(d.get("name") or (args or {}).get("package")),
+                    "version": latest})
+    elif render == "readme":
+        asked = str((args or {}).get("version") or "").strip()
+        out.append({"name": str(d.get("name") or (args or {}).get("package")),
+                    "version": asked if re.match(r"v?\d", asked) else None})
+    return out
+
+
 def _upstream_args(t: dict, args: dict) -> dict:
     out = {}
     for ours, theirs in (t.get("args") or {}).items():
@@ -1316,6 +1344,7 @@ def run_tool(name: str, args: dict, calls: list | None = None) -> str:
               "effect": "text that passes the screen is read"}]),
             error="QUARANTINED")
     rec["names"] = names
+    rec["found"] = _found(t.get("render"), d, args)
     return done(out, ok=True)
 
 
@@ -1399,6 +1428,8 @@ def run_resolve(name: str, spec: dict, t: dict, srv: "Server", args: dict,
     note = (f"\n[the screen removed {len(v['stripped'])} span(s): "
             f"{', '.join(rec['screen']['stripped'])}]" if v["stripped"] else "")
     rec["names"] = names
+    rec["found"] = [{"name": n, "version": v}
+                    for n, v in (rec.get("pins") or {}).items()]
     return done(f"SOURCE: the npm registry, resolved by npm's own resolver "
                 f"in {spec.get('title') or spec['id']}'s sandbox (registry "
                 f"data)\n{DATA_NOTE_RESOLVE}{note}\n\n{v['text']}", ok=True)

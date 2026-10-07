@@ -828,6 +828,207 @@ def rendering(case: dict, variant: str, model: str) -> dict:
     return r
 
 
+# ----------------------------------------------- THE TOOL-RESULT RENDERINGS --
+# Operator, 2026-10-06: "If the model uses some of our other tools or mcps
+# this may be a good point to skill up", and "if a model was told the tool to
+# call and given a few router like decisions maybe it would be inclined to
+# call the craft tool for more of the skill". The same prompt WITHOUT and
+# WITH the skill delivered the way the proxy delivers it in a package tool's
+# result (mcp/package_skills.py), two designs of the same channel -- a
+# comparison the operator asked for, not an on/off arm:
+#   tool_result_inject  the model "called" yama_find_package for the case's
+#                       packages; its result carries the package's lead skill
+#                       and strongest items (package_skills.decide, inject)
+#   tool_result_router  the result carries NO skill body: a decision-router
+#                       table, one row per armed, proven craft of the
+#                       package, and yama_recall_craft is on the tool list;
+#                       the model may call it (up to tiers.TOOL_TURNS hops,
+#                       the vendor demo's cap) and gets the craft in full
+# What rides is what the CHANNEL picks over the armed library (the packages
+# of the case, their lead and strongest crafts), not the case's own skill
+# list: each repeat records whether a case skill was among the crafts
+# delivered (`case_skills_delivered`) and which crafts the model recalled, so
+# a result is read conditional on delivery. A question to yama_recall_craft
+# is answered here by the nearest craft (the embedder's shortlist, no jjava:
+# the harness runs without the serving process's decider; the probe's
+# question arm measures the real path through the proxy), and said so.
+TOOL_RESULT_VARIANTS = ("tool_result_inject", "tool_result_router")
+_MODE_OF = {"tool_result_inject": "inject", "tool_result_router": "router"}
+
+
+def _found_for(case: dict) -> list[dict]:
+    import skill_packages
+    out = []
+    for pkg in case.get("packages") or []:
+        v = skill_packages.held_versions(pkg)
+        out.append({"name": pkg, "version": v[-1] if v else None})
+    return out
+
+
+def tool_result_delivery(case: dict, variant: str, model: str) -> dict:
+    """What the channel delivers for the case's packages: {section, result
+    (the lookup's result as the model reads it, the section appended),
+    found, delivered (craft names), case_skills_delivered, records}."""
+    import mcp_host
+    import package_skills as PS
+    import skills
+    found = _found_for(case)
+    mode = _MODE_OF[variant]
+    pool = skills.armed()
+    section, recs, _st = PS.decide({}, found, {
+        "mode": mode, "serving": model, "craft_tool": mode == "router",
+        "tool": "yama_find_package", "asked": {}, "key": None}, pool)
+    d = {"query": ", ".join(f["name"] for f in found),
+         "searchedEcosystems": ["npm"],
+         "results": [{"ecosystem": "npm", "total": len(found), "results": [
+             {"name": f["name"], "version": f["version"],
+              "description": ""} for f in found]}]}
+    body_text, _names = mcp_host.render_search(d, {"ecosystem": "npm"})
+    result = (f"SOURCE: the npm registry, through PackageLens (registry "
+              f"data)\n{mcp_host.DATA_NOTE}\n\n{body_text}")
+    delivered = [x["name"] for r in recs for x in r.get("skills") or []]
+    case_names = {_skill_ref(x)[0] for x in case.get("skills") or []}
+    return {"section": section, "result": result + section, "found": found,
+            "delivered": delivered,
+            "case_skills_delivered": sorted(case_names & set(delivered)),
+            "records": recs}
+
+
+def _tool_defs(router: bool) -> list[dict]:
+    import mcp_config
+    import skill_select
+    t = next(x for x in mcp_config.PACKAGELENS["tools"]
+             if x["name"] == "yama_find_package")
+    return [mcp_config.definition(t)] + (
+        [skill_select.READ_TOOL] if router else [])
+
+
+def _recall(args: dict, pool: list[dict], pkg: str | None) -> tuple[str, dict]:
+    """A yama_recall_craft call in the harness: a name is that craft
+    (skill_select.read_craft); a question is answered by the nearest craft
+    of the embedder's shortlist (no jjava here)."""
+    import craft_query
+    import skill_select
+    q = str((args or {}).get("name_or_topic") or "").strip()
+    text, rec = skill_select.read_craft(args, pool)
+    if rec.get("found"):
+        return text, {"arg": q[:200], "form": "name",
+                      "craft": rec.get("name")}
+    cand = craft_query.proven(pool)
+    top, _n = craft_query.shortlist(q, cand, {"package": pkg}) \
+        if cand else ([], {})
+    if not top:
+        return text, {"arg": q[:200], "form": "question", "craft": None}
+    s = top[0]
+    return (skill_select_text(s), {"arg": q[:200], "form": "question",
+                                   "craft": s.get("name"),
+                                   "resolved_by": "nearest, no jjava"})
+
+
+def skill_select_text(s: dict) -> str:
+    import skill_prompts as P
+    import skill_select
+    return (P.CRAFT_RESULT_HEAD.format(name=s.get("name")) + "\n\n"
+            + skill_select.injected_text(s))
+
+
+def tool_arm_generate(case: dict, variant: str, model: str, effort: str,
+                      seed: int, dl: dict) -> tuple[str | None, dict]:
+    """One repeat of a tool-result arm: the conversation (user prompt, the
+    model's find_package call, its result with the section), then the
+    model's turns until it answers -- a call of yama_recall_craft is run and
+    its result handed back. {finish_reason, completion_tokens,
+    reasoning_chars, s, hops, recalls}."""
+    import model as M
+    import skills
+    import tiers
+    router = variant == "tool_result_router"
+    pool = skills.armed()
+    call = {"id": "call_h1", "type": "function", "function": {
+        "name": "yama_find_package", "arguments": json.dumps({
+            "query": ", ".join(f["name"] for f in dl["found"]),
+            "ecosystem": "npm"})}}
+    msgs = [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": case["prompt"]},
+            {"role": "assistant", "content": "", "tool_calls": [call]},
+            {"role": "tool", "tool_call_id": "call_h1",
+             "content": dl["result"]}]
+    gen = {"hops": 0, "recalls": [], "completion_tokens": 0,
+           "reasoning_chars": 0, "s": 0.0}
+    pkg = (dl["found"][0]["name"] if dl["found"] else None)
+    for hop in range(max(int(tiers.TOOL_TURNS), 1)):
+        b = M.shape({"messages": msgs, "tools": _tool_defs(router),
+                     "max_tokens": tiers.A_MIN}, effort=effort,
+                    role="helper", step_cap=tiers.HELPER_THINKING)
+        b.pop("_share", None)
+        b["model"], b["seed"] = model, seed
+        t0 = time.time()
+        try:
+            d = M.post(b)
+        except Exception as e:                                   # noqa: BLE001
+            gen["why"] = f"not run: {type(e).__name__}: {e}"[:200]
+            return None, gen
+        gen["s"] = round(gen["s"] + time.time() - t0, 2)
+        gen["hops"] = hop + 1
+        ch = ((d.get("choices") or [{}])[0]) if isinstance(d, dict) else {}
+        msg = ch.get("message") or {}
+        gen["finish_reason"] = ch.get("finish_reason")
+        gen["completion_tokens"] += int((d.get("usage") or {}).get(
+            "completion_tokens") or 0)
+        gen["reasoning_chars"] += len(msg.get("reasoning_content") or "")
+        calls = msg.get("tool_calls") or []
+        if not calls:
+            if ch.get("finish_reason") == "length":
+                gen["why"] = "budget event: length"
+                return None, gen
+            return msg.get("content") or "", gen
+        msgs.append({"role": "assistant", "content": msg.get("content") or "",
+                     "reasoning_content": msg.get("reasoning_content") or "",
+                     "tool_calls": calls})
+        for c in calls:
+            fn = (c.get("function") or {}).get("name")
+            try:
+                args = json.loads((c.get("function") or {}).get(
+                    "arguments") or "{}")
+            except ValueError:
+                args = {}
+            if fn == "yama_recall_craft" and router:
+                text, rec = _recall(args, pool, pkg)
+                gen["recalls"].append(dict(rec, hop=hop + 1))
+            else:
+                text = ("This harness runs no other tool: answer with the "
+                        "code.")
+            msgs.append({"role": "tool", "tool_call_id": c.get("id"),
+                         "content": text})
+    gen["why"] = "the hop cap (tiers.TOOL_TURNS) ended the run"
+    return None, gen
+
+
+def run_tool_arm(case: dict, variant: str, model: str, effort: str,
+                 repeats: int) -> dict:
+    dl = tool_result_delivery(case, variant, model)
+    if not dl["section"]:
+        return {"not_run": "the channel delivers nothing for this case's "
+                "packages (no armed, proven craft: a GAP)"}
+    reps = []
+    for k in range(repeats):
+        seed = seed_of(case["id"], k)
+        ans, gen = tool_arm_generate(case, variant, model, effort, seed, dl)
+        chk = check_answer(case, ans) if ans is not None else None
+        reps.append({"seed": seed, "answered": ans is not None, "gen": gen,
+                     **(chk or {}),
+                     "types": types_ok(case, ans) if ans else None,
+                     "recalls": len(gen.get("recalls") or []),
+                     "answer_sha": hashlib.sha1((ans or "").encode(
+                         "utf-8")).hexdigest()[:12]})
+    return {"repeats": reps, "section_chars": len(dl["section"]),
+            "delivered": dl["delivered"],
+            "case_skills_delivered": dl["case_skills_delivered"],
+            "records": [{k: r.get(k) for k in ("package", "major", "mode",
+                                               "skills", "chars", "why")}
+                        for r in dl["records"]]}
+
+
 # ----------------------------------------------------------------- runs ----
 def seed_of(case_id: str, k: int) -> int:
     return int(hashlib.sha256(f"{case_id}#{k}".encode()).hexdigest()[:8],
@@ -1026,6 +1227,10 @@ def run_case(case: dict, model: str, effort: str, repeats: int,
     _rows, missing = library_skills(case.get("skills") or [])
     rec["skills_missing"] = missing
     for side in ("without",) + tuple(variants):
+        if side in TOOL_RESULT_VARIANTS:
+            rec["sides"][side] = run_tool_arm(case, side, model, effort,
+                                              repeats)
+            continue
         r = None if side == "without" else rendering(case, side, model)
         if r is not None and not (r.get("text") or r.get("prefill")):
             rec["sides"][side] = {"not_run": "no armed skill item to "
@@ -1102,6 +1307,13 @@ def report(recs: list[dict]) -> dict:
                           for x in reps) / max(len(reps), 1))}
             if s.get("not_run"):
                 row[v]["not_run"] = s["not_run"]
+            if v in TOOL_RESULT_VARIANTS and reps:
+                row[v]["recalls_mean"] = round(sum(
+                    x.get("recalls") or 0 for x in reps) / len(reps), 2)
+                row[v]["called_recall_in"] = sum(
+                    1 for x in reps if x.get("recalls"))
+                row[v]["case_skills_delivered"] = s.get(
+                    "case_skills_delivered")
         cases[r["case"]] = row
     # leave-one-case-out rendering choice
     better = worse = 0
@@ -1156,7 +1368,10 @@ def main(argv=None) -> int:
     ap.add_argument("--model")
     ap.add_argument("--effort", default="medium")
     ap.add_argument("--repeats", type=int, default=3)
-    ap.add_argument("--variants", default=",".join(VARIANTS))
+    ap.add_argument("--variants", default=",".join(VARIANTS),
+                    help="renderings to run beside `without`; the package-"
+                    "tool channel's two designs are tool_result_inject and "
+                    "tool_result_router (not in the default list)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--report", action="store_true")
     a = ap.parse_args(argv)
@@ -1194,7 +1409,8 @@ def main(argv=None) -> int:
             recs = [json.loads(ln) for ln in f if ln.strip()]
         print(json.dumps(report(recs), indent=1))
         return 0
-    variants = [v for v in a.variants.split(",") if v in VARIANTS]
+    variants = [v for v in a.variants.split(",")
+                if v in VARIANTS + TOOL_RESULT_VARIANTS]
     # THE PREFILL ARM needs the engine check (coordinator, 2026-09-29: "if
     # prefill_check fails (the think block doesn't stay open), drop the
     # first_person_prefill arm from the harness run and record why"):

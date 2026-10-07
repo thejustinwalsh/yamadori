@@ -699,9 +699,10 @@ def test_the_tier_rows_after_the_removal():
     check(set(tiers.BEHAVIOURS) == {"work_log_reinject", "step_nudge",
                                     "slot_release", "idle_clear",
                                     "restore_reasoning", "mcp_tools", "preread",
-                                    "preread_overlap"}
-          and tiers.OFF_BY_DEFAULT == frozenset(),
-          "the switches left, none off by default", str(sorted(tiers.BEHAVIOURS)))
+                                    "preread_overlap", "package_skills"}
+          and tiers.OFF_BY_DEFAULT == frozenset({"package_skills"}),
+          "the switches left; the package skills channel is off by default "
+          "until its probe passes", str(sorted(tiers.BEHAVIOURS)))
     check(tiers.from_header('{"auto_triggers": false, "deep_tool_hop": true, '
                             '"seed_frame": false, "verify_directive": false}')
           is None,

@@ -630,7 +630,9 @@ directory) served deep thinking's label rule 2 and went with it.
 `mcp_tools` (`YAMADORI_MCP_TOOLS`; the MCP host's tools, medium and up, the
 surface row "main, where the MCP host serves"), `preread` and
 `preread_overlap` (`YAMADORI_PREREAD`, `YAMADORI_PREREAD_OVERLAP`; Flash-Next's
-expert-file pre-read, "Flash-Next's first prompt" below). Removed with the features
+expert-file pre-read, "Flash-Next's first prompt" below), and `package_skills`
+(`YAMADORI_PACKAGE_SKILLS`, **OFF by default** until its probe passes; its
+rendering `package_skills_mode`: "The package skills channel" below). Removed with the features
 they switched: `step_thinking`, `fixup_project_only`, `plan_tools`,
 `plan_budget` (2026-09-27, docs/CONSTANTS-AUDIT.md); `seed_frame`,
 `helped_needs_change`, `plan_prompt`, `deep_tool_hop`,
@@ -1229,6 +1231,147 @@ live run, no TypeSafe SDK run yet**. The rules:
 - **SDK conformance, planned (a download: the operator's approval)**:
   `typesafe-sdk==0.7.2` and `@typesafe-ai/sdk@0.6.0` pointed at
   `<base>/jev` (docs/JEV-CONFORMANCE.md section 6).
+
+## The package skills channel (operator, 2026-10-06; built offline; **OFF until its probe passes**)
+
+The operator, verbatim: "Yes skills can not be selected from the first prompt
+alone, if nothing else I was thinking our skills need a way to trigger between
+turns, or our agent needs an mcp or tool call to get skill guidance from so the
+model is compelled to seal it out. If the model uses some of our other tools or
+mcps this may be a good point to skill up. Like didn't we add the package mcp
+that helps if find package versions and info, this is where skills probably hit
+harder, structured into a tool call our model wants to make." And: "Right
+package can even lean into discovery like it can tell the model you can call
+this tool for more expert advice on using the package ... research showed
+injection did work better than discovery, but I don't know that research
+measured discovery in the way I am proposing it". And: "a natural language
+query the model asks that is weighed against the skills". Evidence it rests on:
+`bench/mcp/results/lookup_probe.jsonl` (Pi, Bonsai, the pagoda prompt; the model
+called our package lookup before installing in 4/4 valid trials of the first
+tag) and the jjava injector's 2026-10-06 diagnosis (on-topic vs off-topic AUROC
+0.92, NEEDED vs same-area 0.63, 193 labelled cases, docs/JJAVA.md 9): choosing
+among ~500 skills from a first prompt fails; an exact package name out of a tool
+call is a FACT. `mcp/package_skills.py` (module docstring: every rule),
+`mcp/craft_query.py`; tests `mcp/test_package_skills.py` (97 checks),
+`bench/skills/test_package_skills_probe.py` (7), the pitfall harness's
+tool-result arms (`bench/skills/test_pitfall_harness.py`). **Nothing here has
+been run against a model.** No GPU, no decider, no request to :1234 is involved
+in the section itself; every rule is deterministic.
+
+- **The switch** `package_skills` (`tiers.BEHAVIOURS`, `tiers.OFF_BY_DEFAULT`:
+  **OFF by default**, THE TOOL RECIPE rule 7: "none is offered by default until its
+  probe passes"; `YAMADORI_PACKAGE_SKILLS=1` or `{"package_skills": true}`;
+  allowed where the tier's `mcp_tools` flag is set, medium and up) and its
+  rendering `package_skills_mode` = `inject` | `router` | `both` (header, else
+  `YAMADORI_PACKAGE_SKILLS_MODE`, else `inject`). It is independent of the
+  `skills` tier flag, which stays off; nothing here flips it. The operator turns
+  the switch on, with the probe's numbers.
+- **The section.** When `yama_find_package` / `yama_list_package_versions` /
+  `yama_read_package_readme` / `yama_resolve_packages` returns, the proxy appends
+  a clearly delimited section to that tool result, inside the hidden hop
+  (`proxy._run_turn`, after the result cap, so a long README never cuts it): the
+  ledger replays it with the hop byte for byte and the slot cache extends
+  (`mcp/test_package_skills.py` through the served template, chat and Responses,
+  blocking and streamed). The packages come from the call's record
+  (`x_yamadori.mcp.calls[].found`: name and version; `mcp_host._found`). Only
+  **armed** skills ride; a skill whose PROVE verdict is `worse`, `unproven` or
+  `not_run` never does (`package_skills.PROVE_EXCLUDED`); ranking: the verdict
+  (better, tie, no record), then the pitfall cases that name the skill
+  (`bench/skills/pitfalls/*.jsonl`), then name. A package's skills: its lead
+  (`skill_packages.canonical_skill`: `lead_for`, else the registry's canonical
+  row by major), skills whose metadata names it, and -- for the package that
+  names the area (`package_registry.area_package`) -- the area's skills; a skill
+  that names another major version is left out (`skill_select.skill_majors`);
+  the major is a resolved version, else the asked or pinned one
+  (`skill_packages.detect`, kept in the skill state), else a README's version,
+  else the registry's latest. Every item passes `skill_limits.doubt` (assured
+  voice). **Sizes are existing constants only**: at most `skill_inject.MAX_SKILLS`
+  (3) skills and the profile's `max_items` per package under
+  `skill_limits.SKILL_TOKENS_HARD` tokens; the router at most `INDEX_MAX` rows of
+  `INDEX_LINE_CHARS` under the same token cap; at most `MAX_SKILLS_PER_TURN`
+  skills in one call. The text is rendered in the serving model's profile
+  (`skill_inject.profile_for`, `skill_inject.render`). A skill is given once per
+  conversation per major version (state `pkg` in the ledger's `skills` row; the
+  selector's `given` is marked too); the same package later gets a recall line
+  (the craft's first DO and first DO NOT), never the identical line twice in a
+  row; a compaction resets it. A request that runs again gets the text it got
+  (`pkg.outs`, keyed by turn key and hop).
+- **Two renderings of one channel** (a comparison of delivery designs the
+  operator asked for, not an on/off arm): `inject` = the lead's body and the
+  strongest items of the others, the craft names and a pointer; `router` = NO
+  body, one decision-router table row per armed, proven craft ("when you are
+  about to <the craft's trigger, from its description> | call yama_recall_craft
+  with {"name_or_topic": "<craft>"}") under one positive line naming the tool and
+  the moment; `both` = the lead's body plus the table for the rest. `router` and
+  `both` need `yama_recall_craft` on main, otherwise the inject form (recorded,
+  `mode_note`). The wording is UNMEASURED.
+- **yama_recall_craft is offered with the MCP tools** where this channel is on,
+  even with the `skills` flag off (`proxy._package_craft_offer`: the first
+  request, kept like every offer; no craft index in the system text). Its
+  description (craft/6, a trigger-condition description: "Answers 'how is X done
+  well with <library>?' ...") and argument say it takes a craft's name or a
+  question.
+- **The question path** (`mcp/craft_query.py`, operator 2026-10-06; folded into
+  the existing tool, THE TOOL RECIPE rule 1). A name (exact, or less its numeric
+  id when one craft matches) is that craft as before. Anything else is a
+  question: (1) the resident embedder narrows the armed, proven crafts
+  (`skill_match.rank_all`, lexical relevance if it cannot answer) to
+  `skill_match.QUESTION_CANDIDATES`, the latest package-tool package's crafts
+  first; (2) ONE jjava choice over the shortlist **without a "none" option** (the
+  operator, "none is very tempting to call if your confidence is low"; SKILLS-
+  RESEARCH.md Part 4 item 2; both printed orders averaged), the state framed like
+  `skill_inject.framed_state` (the question, the session goal, the step's
+  evidence), each craft under its name; (3) ONE noul relevance gate on the best
+  craft ("The craft <name> answers the question: <question>", both orders).
+  The craft is returned in full unless the gate is confidently "no" **and a tuned
+  row exists** (`skill_inject.THRESHOLDS[model]["craft_query_gate"]`; there is
+  none: untuned, the best craft is always returned and the record says
+  `untuned`: no cut is invented); then, and when the shortlist is empty or jjava
+  cannot be asked, an honest NO_SUCH_CRAFT answer names the nearest crafts and
+  says the package README (`yama_read_package_readme`) may cover it. Records:
+  `x_yamadori.craft.query` {question (200 characters), shortlist, chosen, p,
+  gate_p, untuned, choice, gate, ms, package, retrieval}; a durable row per query
+  in the jobs database (`craft_queries`, `skill_learn.record_craft_query`: the
+  account's traffic class from `corpus.account_traffic`, never the account or key;
+  only `client` rows are ever learned from) -- labels for jjava (a question and
+  the craft that answered it; label the gate on "does the returned craft answer
+  it") and gap-fill evidence (`answered` 0: what the model asked that no craft
+  answered). The wording of both questions is UNMEASURED and the cut is untuned.
+- **Between-turn triggers** (`package_skills.step_triggers`, on the client's own
+  newest evidence, reusing `skill_select`'s `fresh_messages`, `evidence_view`,
+  `error_text`, `error_names` and `skill_packages.detect`; appended to the tool
+  result the request ends on, as the existing `skills` part of the ledger's
+  `inject` row, replayed byte for byte): `install` (an npm/pnpm/yarn/bun/pip
+  install command the model ran, a result line that echoes one after a shell
+  prompt, a dependency the model wrote into package.json), `import` (an import
+  of a registry package in code the model wrote), `new_area` (a first write
+  using a package's own symbol), `error` (an error whose own lines name the
+  package: a quoted registry module, or a topic of its skills). **Never** on a
+  package.json (or an install line in a README) the model only read. A package
+  already given brings nothing back on install/import/new_area; only an error
+  brings it back (the selector chart's recall events); each trigger fires once
+  per package and major.
+- **Records**: `x_yamadori.skills.package` = a list: one entry per section
+  {tool, package, version, major, major_from, mode, skills [{id, name, form: body
+  | recall | router}], chars, listed, why, left_out}, per trigger {trigger,
+  evidence, package, skills, ...}, and per `yama_recall_craft` call that follows
+  a section {event: recall_after_section, craft, listed_by_router, mode, package,
+  steps_later, question}; `x_yamadori.skills.package_switch` {on, source, mode,
+  mode_source}. "Steps" are the requests counted while the switch is on.
+- **The probe** (written, not run): `bench/mcp/package_skills_probe.py` (arms
+  control / inject / router / both, interleaved, the first `--steps` requests of
+  lookup_probe's Pi trial, not stopped at the install; records the package-tool
+  call rate, what rode, the craft calls by name and by question verbatim, what was
+  returned, and the pitfall rules on the files Pi wrote) and the pitfall
+  harness's `tool_result_inject` / `tool_result_router` renderings
+  (`bench/skills/pitfall_harness.py --variants tool_result_inject,tool_result_router`).
+  Commands and GPU estimates are in each script's `--help` / plan output.
+- **Open for the operator**: turning the switch on and at which mode (after the
+  probe); whether the question path's cut gets tuned (it needs labelled
+  questions: the durable log, then `bench/skills/inject_tune.py`'s procedure);
+  whether `yama_recall_craft`'s description change (craft/6) is accepted -- it
+  changes the tool list's text for every conversation that is offered the craft
+  tool, which with the `skills` flag off today is none.
 
 ## The A4000's room
 

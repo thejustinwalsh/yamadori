@@ -1167,6 +1167,8 @@ def from_header(value: str | None) -> dict | None:
                 "primary_hold_s": int}
     # The overthinking switches (BEHAVIOURS below), each forced either way.
     types_ok.update({k: bool for k in BEHAVIOURS})
+    # The package skills channel's rendering (mcp/package_skills.py MODES).
+    types_ok["package_skills_mode"] = str
     out = {k: v for k, v in d.items()
            if k in types_ok and isinstance(v, types_ok[k])
            and not (types_ok[k] is int and isinstance(v, bool))}
@@ -1229,6 +1231,20 @@ BEHAVIOURS = {
     #                   the header turns it off; {"mcp_tools": true} forces it
     #                   on at any tier.
     "mcp_tools": ("YAMADORI_MCP_TOOLS", "mcp_tools"),
+    #   package_skills  THE PACKAGE SKILLS CHANNEL (operator, 2026-10-06:
+    #                   "If the model uses some of our other tools or mcps
+    #                   this may be a good point to skill up"): the proven
+    #                   skills of a package ride in the result of the MCP
+    #                   package tool that named it, and evidence-based
+    #                   triggers between turns (mcp/package_skills.py).
+    #                   OFF BY DEFAULT until its probe passes (THE TOOL
+    #                   RECIPE rule 7; bench/mcp/lookup_probe.py arms
+    #                   package-*): YAMADORI_PACKAGE_SKILLS=1 or the header
+    #                   {"package_skills": true} turns it on; allowed where
+    #                   the tier's `mcp_tools` flag is set (medium and up).
+    #                   The rendering is `package_skills_mode` (inject |
+    #                   router | both; header or YAMADORI_PACKAGE_SKILLS_MODE).
+    "package_skills": ("YAMADORI_PACKAGE_SKILLS", "mcp_tools"),
     #   preread         THE EXPERT FILE'S PRE-READ (mcp/preread.py; AGENTS.md
     #                   "Flash-Next's first prompt"): a model whose tier-table
     #                   row says `preread` has its llama-server's mmapped
@@ -1244,7 +1260,7 @@ BEHAVIOURS = {
 # The switches that are OFF unless their variable (=1) or a header turns
 # them on; every other switch is on unless switched off. None since
 # deep_tool_hop went with deep thinking (2026-09-29).
-OFF_BY_DEFAULT: frozenset = frozenset()
+OFF_BY_DEFAULT: frozenset = frozenset({"package_skills"})
 
 
 def _env_on(var: str, default: bool = True) -> bool:

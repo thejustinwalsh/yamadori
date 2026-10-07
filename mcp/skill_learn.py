@@ -119,6 +119,22 @@ CREATE TABLE IF NOT EXISTS skill_triggers_learned(
     created     REAL NOT NULL,
     traffic     TEXT,
     PRIMARY KEY(skill, text));
+CREATE TABLE IF NOT EXISTS craft_queries(
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          REAL NOT NULL,
+    traffic     TEXT,
+    question    TEXT,
+    shortlist   TEXT NOT NULL DEFAULT '[]',
+    chosen      TEXT,
+    answered    INTEGER NOT NULL DEFAULT 0,
+    p           REAL,
+    gate_p      REAL,
+    reads       TEXT,
+    untuned     INTEGER NOT NULL DEFAULT 1,
+    package     TEXT,
+    retrieval   TEXT,
+    decision_id TEXT);
+CREATE INDEX IF NOT EXISTS craft_queries_ts ON craft_queries(ts);
 CREATE TABLE IF NOT EXISTS skill_selections(
     ts          REAL NOT NULL,
     skill       TEXT NOT NULL,
@@ -195,6 +211,39 @@ def traffic_of(account: str | None) -> str:
     except Exception:                                            # noqa: BLE001
         return "test"
     return t if t in TRAFFIC else "test"
+
+
+def record_craft_query(q: dict, account: str | None) -> None:
+    """One durable row per question the model asked yama_recall_craft
+    (mcp/craft_query.py): the question (its own words, up to
+    craft_query.LOG_QUESTION_CHARS), the shortlist's skill ids, what jjava
+    chose and how sure, the package the conversation was on, and the
+    account's TRAFFIC CLASS -- never the account or its key. These rows are
+    labels for jjava (a question and the craft that answered it) and the
+    evidence for gap-fill (`answered` 0: a question no craft answered). Only
+    `client` rows are ever learned from (traffic_of; a test account's are
+    marked `test` and skipped). Never raises."""
+    try:
+        con = _db()
+        try:
+            con.execute(
+                "INSERT INTO craft_queries(ts, traffic, question, shortlist, "
+                "chosen, answered, p, gate_p, untuned, package, retrieval, "
+                "decision_id, reads) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (time.time(), traffic_of(account),
+                 str(q.get("question_full") or q.get("question") or "")[:1000],
+                 json.dumps(q.get("shortlist") or []), q.get("chosen"),
+                 int(bool(q.get("answered"))), q.get("p"), q.get("gate_p"),
+                 int(bool(q.get("untuned", True))), q.get("package"),
+                 q.get("retrieval"),
+                 (q.get("choice") or {}).get("decision_id"),
+                 json.dumps({"choice": q.get("choice"),
+                             "gate": q.get("gate")})))
+        finally:
+            con.close()
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  craft query not logged: {type(e).__name__}: {e}",
+              flush=True)
 
 
 def _cls(traffic: str | None) -> str:

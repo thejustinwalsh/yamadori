@@ -995,11 +995,15 @@ def _run_our_tool(name: str, args: dict, state: dict | None = None) -> str:
         # it returned counts as GIVEN for the per-turn engine (a later need
         # gets a recall line, not the body again).
         import skill_select
-        text, rec = skill_select.read_craft(args)
-        st.setdefault("_craft_reads", []).append(rec)
+        account = st.get("_account") or ""
         lineage = session_lineage(st) if st else ""
+        # A name is that craft; anything else is a QUESTION, weighed against
+        # the armed, proven crafts (mcp/craft_query.py).
+        text, rec = skill_select.read_craft(
+            args, ctx=_craft_ctx(st, account, lineage))
+        st.setdefault("_craft_reads", []).append(rec)
+        _craft_call_records(rec, st, account, lineage)
         if rec.get("found") and lineage:
-            account = st.get("_account") or ""
             with skill_select_lock(account, lineage):
                 sk = _skill_state(account, lineage)
                 sk.setdefault("given", {}).setdefault(rec["found"], {
@@ -2214,9 +2218,20 @@ def prepare(body: dict) -> dict:
     tools_withheld: list[dict] = []
     mcp_rec: dict | None = None
     mcp_line = ""
+    # THE PACKAGE SKILLS CHANNEL (mcp/package_skills.py; switch
+    # `package_skills`, off until its probe passes): proven skills ride in
+    # the result of a package tool and on evidence between turns.
+    pkg_sw = _package_switch(tier) if not utility else {"on": False}
     if not utility:
         with skill_select_lock(account, lineage):
             sk_state = _skill_state(account, lineage)
+            # THE MCP TOOLS (mcp/mcp_host.py; switch `mcp_tools`): decided
+            # on the conversation's first request and kept by name, like the
+            # craft offer, so the tool list and the system line never change
+            # mid-conversation. (Decided before the craft offer: the package
+            # skills channel offers the craft tool where the MCP package
+            # tools are.)
+            mcp_rec = _mcp_offer(tier, sk_state, continuing)
             try:
                 craft_offer, sk_state = _craft_offer(
                     raw, sel, route, client_tools, account, sk_state,
@@ -2225,11 +2240,9 @@ def prepare(body: dict) -> dict:
                 craft_offer = {"tool": False, "index": "",
                                "why": f"the offer raised "
                                       f"{type(e).__name__}: {e}"[:200]}
-            # THE MCP TOOLS (mcp/mcp_host.py; switch `mcp_tools`): decided
-            # on the conversation's first request and kept by name, like the
-            # craft offer, so the tool list and the system line never change
-            # mid-conversation.
-            mcp_rec = _mcp_offer(tier, sk_state, continuing)
+            craft_offer = _package_craft_offer(
+                craft_offer, sk_state, pkg_sw, mcp_rec, inplace=inplace,
+                continuing=continuing)
             kept = list(sk_state.get("tools_withheld") or [])
             tools, ours = main_tools(
                 body.get("tools"), att,
@@ -2419,21 +2432,46 @@ def prepare(body: dict) -> dict:
                     and augmented[-1].get("role") == "tool")
     step_skills_on = (bool(sel.get("skills")) and bool(lineage)
                       and not utility and not inplace)
-    if ends_on_tool and step_skills_on:
+    pkg_on = (bool(pkg_sw.get("on")) and bool(lineage) and not utility
+              and not inplace)
+    package_recs: list[dict] = []
+    pkg_asked: dict = {}
+    if pkg_on:
+        pkg_asked = _package_tick(raw, account, lineage, keys[-1] if keys
+                                  else None)
+    if ends_on_tool and (step_skills_on or pkg_on):
         got = nebari.ledger_get(account, keys[-1], "inject")
         # A retryable decision on this tool result is decided again (see
         # RETRYABLE DECISIONS above); ledger_restore did not put it back.
         if got is None or (retry_key is not None and retry_key == keys[-1]):
             parts: list[str] = []
             meta: dict = {}
-            sk_text, skills_rec = _skills_step(
-                raw, sel, route, client_tools, account, lineage, keys[-1])
-            sk_text, n_scrub = scrub_markers(sk_text)
-            _note_scrub(scrub_note, "injection", n_scrub)
-            if sk_text:
-                sk_text = "\n" + sk_text
-                parts.append("skills")
-                meta["skills"] = _skills_meta(skills_rec)
+            sk_text = ""
+            if step_skills_on:
+                sk_text, skills_rec = _skills_step(
+                    raw, sel, route, client_tools, account, lineage,
+                    keys[-1])
+                sk_text, n_scrub = scrub_markers(sk_text)
+                _note_scrub(scrub_note, "injection", n_scrub)
+                if sk_text:
+                    sk_text = "\n" + sk_text
+                    parts.append("skills")
+                    meta["skills"] = _skills_meta(skills_rec)
+            # THE PACKAGE SKILLS' TRIGGERS (an install line, an import, a
+            # new area, an error naming a package): the package's lead
+            # skill, appended after the step's own, under the same part.
+            if pkg_on:
+                pk_text, package_recs = _package_step(
+                    raw, account, lineage, keys[-1], pkg_sw,
+                    serving=body.get("_upstream_model"),
+                    craft_tool=skill_prompts.CRAFT_TOOL_NAME in ours)
+                pk_text, n_scrub = scrub_markers(pk_text)
+                _note_scrub(scrub_note, "injection", n_scrub)
+                if pk_text:
+                    sk_text += pk_text
+                    if "skills" not in parts:
+                        parts.append("skills")
+                    meta["package"] = package_recs
             meta["parts"] = parts
             text, meta = nebari.ledger_decide(account, lineage, keys[-1],
                                               "inject", sk_text, meta)
@@ -2448,6 +2486,8 @@ def prepare(body: dict) -> dict:
                                   replayed=True, why="decided on the request "
                                   "this tool result arrived with; replayed "
                                   "from the ledger")
+            package_recs = [dict(r, replayed=True)
+                            for r in rmeta_t.get("package") or []]
 
     # The token budget is set inside tiers.apply by the one rule: the
     # client's max_tokens as the answer allowance, plus the thinking breaker.
@@ -2505,6 +2545,12 @@ def prepare(body: dict) -> dict:
     # x_yamadori.mcp: the switch, the offer (kept for the conversation), the
     # servers' states; the calls are added by the turn (_mcp_calls).
     out["_mcp"] = mcp_rec
+    # x_yamadori.skills.package: the switch and mode, what this request's
+    # trigger decided (the package tools' sections are added by the turn) and
+    # the versions the conversation asked for (the tool sections' majors).
+    out["_package_skills"] = package_recs
+    out["_pkg_switch"] = pkg_sw
+    out["_pkg_asked"] = pkg_asked
     out["_selection"] = sel
     out["_route"] = route
     out["model"] = internal            # what llama-swap actually routes on
@@ -2794,6 +2840,207 @@ def _mcp_offer(tier: dict, st: dict, continuing: bool) -> dict:
     st["mcp"] = rec
     return {"switch": {"on": on, "source": src}, "offered": rec["offered"],
             "kept": False, "why": rec["why"], "calls": []}
+
+
+def _package_switch(tier: dict) -> dict:
+    """{on, source, mode, mode_source}: the package skills channel's switch
+    (tiers.BEHAVIOURS `package_skills`, off by default) and its rendering."""
+    try:
+        import package_skills
+        return package_skills.switch(tier)
+    except Exception as e:                                       # noqa: BLE001
+        return {"on": False, "source": f"error: {type(e).__name__}"}
+
+
+def _package_craft_offer(craft_offer: dict, st: dict, sw: dict,
+                         mcp_rec: dict | None, *, inplace: bool,
+                         continuing: bool) -> dict:
+    """yama_recall_craft where a package-tool section names crafts, even with
+    the `skills` tier flag off: on the conversation's FIRST request, with the
+    MCP package tools, when the armed library holds a skill of a package the
+    registry knows. Kept for the conversation (the tool list never changes
+    mid-conversation: an earlier decision stands)."""
+    if not sw.get("on") or inplace or continuing or craft_offer.get("kept") \
+            or craft_offer.get("tool"):
+        return craft_offer
+    try:
+        import package_skills
+        import skills
+        offered = (mcp_rec or {}).get("offered") or []
+        if not any(n in offered for n in package_skills.TOOLS):
+            return craft_offer
+        if not package_skills.package_pool(skills.armed()):
+            return craft_offer
+    except Exception:                                            # noqa: BLE001
+        return craft_offer
+    offer = dict(craft_offer, tool=True,
+                 why="package_skills: a package tool's result names crafts")
+    st["offer"] = offer
+    return offer
+
+
+def _package_tick(raw: list, account: str, lineage: str,
+                  key: str | None) -> dict:
+    """Count this request (the unit "steps later" is in), apply a
+    compaction's reset, and remember the versions the conversation asked for
+    or pinned ({package: version}, skill_packages.detect over the newest
+    evidence, merged: a tool section's major comes from them). Returns the
+    merged map. Never raises."""
+    try:
+        import package_skills
+        import skill_packages
+        try:
+            now = {p: e.get("version") for p, e in skill_packages.detect(
+                _text_messages(raw)).items() if e.get("version")}
+        except Exception:                                        # noqa: BLE001
+            now = {}
+        with skill_select_lock(account, lineage):
+            st = _skill_state(account, lineage)
+            pk = package_skills.begin_request(
+                st, key, _compactions(account, lineage))
+            pk.setdefault("asked", {}).update(now)
+            _save_skill_state(account, lineage, st)
+            return dict(pk["asked"])
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  package skills tick failed: {type(e).__name__}: {e}",
+              flush=True)
+        return {}
+
+
+def _package_step(raw: list, account: str, lineage: str, key: str | None,
+                  sw: dict, *, serving: str | None, craft_tool: bool
+                  ) -> tuple[str, list[dict]]:
+    """The package skills' BETWEEN-TURN triggers on the newest evidence of
+    this agent step (package_skills.step_triggers: an install line, an
+    import, a first write into a package's area, an error that names it):
+    (the text to append to the tool result, the records). Silence and a
+    record's `why` on any failure."""
+    try:
+        import package_skills
+        import skills
+        pool = skills.armed()
+        trig = package_skills.step_triggers(_text_messages(raw), pool)
+        if not trig:
+            return "", []
+        texts: list[str] = []
+        recs: list[dict] = []
+        with skill_select_lock(account, lineage):
+            st = _skill_state(account, lineage)
+            asked = dict((st.get("pkg") or {}).get("asked") or {})
+            for t in trig:
+                a = dict(asked)
+                if t.get("version"):
+                    a[t["package"]] = t["version"]
+                ctx = {"mode": sw.get("mode"), "serving": serving,
+                       "craft_tool": craft_tool, "trigger": t["trigger"],
+                       "evidence": t["evidence"], "asked": a,
+                       "key": f"{key}|trigger:{t['trigger']}:{t['package']}",
+                       "compactions": _compactions(account, lineage)}
+                text, rs, st = package_skills.decide(
+                    st, [{"name": t["package"], "version": t.get("version")}],
+                    ctx, pool)
+                if text:
+                    texts.append(text)
+                recs += rs
+            _save_skill_state(account, lineage, st)
+        return "".join(texts), recs
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  package triggers unavailable: {type(e).__name__}: {e}",
+              flush=True)
+        return "", [{"why": f"raised {type(e).__name__}: {e}"[:200]}]
+
+
+def _package_tool_section(fn: str, args: dict, call_rec: dict | None,
+                          payload: dict, state: dict, hop_key: str
+                          ) -> tuple[str, list[dict]]:
+    """The section appended to a package tool's result (package_skills.
+    decide): the proven skills of the packages the result is about, in the
+    switch's rendering. Decided once per (request, hop): a request that runs
+    again gets the same text. ("", []) when the channel is off or nothing
+    rides."""
+    sw = payload.get("_pkg_switch") or {}
+    if not sw.get("on"):
+        return "", []
+    found = (call_rec or {}).get("found") or []
+    if not found or not (call_rec or {}).get("ok"):
+        return "", []
+    try:
+        import package_skills
+        import skills
+        account = state.get("_account") or ""
+        lineage = session_lineage(state)
+        if not lineage:
+            return "", []
+        pool = skills.armed()
+        tk = (payload.get("_ledger") or {}).get("turn_key") or ""
+        with skill_select_lock(account, lineage):
+            st = _skill_state(account, lineage)
+            asked = dict(payload.get("_pkg_asked") or {})
+            asked.update((st.get("pkg") or {}).get("asked") or {})
+            ctx = {"mode": sw.get("mode"), "serving": payload.get("model"),
+                   "craft_tool": skill_prompts.CRAFT_TOOL_NAME in set(
+                       payload.get("_ours") or []),
+                   "tool": fn, "args": args, "asked": asked,
+                   "key": f"{tk}|{hop_key}",
+                   "compactions": _compactions(account, lineage)}
+            text, recs, st = package_skills.decide(st, found, ctx, pool)
+            _save_skill_state(account, lineage, st)
+        return text, recs
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  package section unavailable: {type(e).__name__}: {e}",
+              flush=True)
+        return "", [{"tool": fn, "why": f"raised {type(e).__name__}: {e}"
+                     [:200]}]
+
+
+def _craft_ctx(st: dict, account: str, lineage: str) -> dict:
+    """What a QUESTION to yama_recall_craft is weighed with: the
+    conversation's messages (the goal and the step's evidence), the package
+    of its latest package-tool section (the boost), the account for the log."""
+    ctx = {"messages": list(st.get("_craft_msgs") or []), "account": account,
+           "lineage": lineage, "model": st.get("_craft_model")}
+    try:
+        if lineage:
+            sk = _skill_state(account, lineage)
+            secs = (sk.get("pkg") or {}).get("sections") or {}
+            if secs:
+                last = max(secs.values(), key=lambda x: x.get("tick", 0))
+                ctx["package"], ctx["major"] = last.get("package"), \
+                    last.get("major")
+    except Exception:                                            # noqa: BLE001
+        pass
+    return ctx
+
+
+def _craft_call_records(rec: dict, st: dict, account: str,
+                        lineage: str) -> None:
+    """After a yama_recall_craft call: the question's durable log row (its
+    traffic class, never the key) and the record of a call that FOLLOWS a
+    package section (x_yamadori.skills.package, event recall_after_section:
+    the craft, whether the router listed it, how many requests later)."""
+    q = rec.get("query")
+    if isinstance(q, dict):
+        try:
+            import skill_learn
+            skill_learn.record_craft_query(q, account or None)
+        except Exception:                                        # noqa: BLE001
+            pass
+        q.pop("question_full", None)
+    if not st.get("_pkg_on") or not lineage:
+        return
+    try:
+        import package_skills
+        with skill_select_lock(account, lineage):
+            sk = _skill_state(account, lineage)
+            r2, sk = package_skills.note_craft_call(
+                sk, rec.get("name"), bool(rec.get("found")))
+            if r2 is not None:
+                if isinstance(q, dict):
+                    r2["question"] = True
+                _save_skill_state(account, lineage, sk)
+                st.setdefault("_package_skills", []).append(r2)
+    except Exception:                                            # noqa: BLE001
+        pass
 
 
 def _craft_offer(raw: list, sel: dict, route: dict, client_tools, account: str,
@@ -3494,6 +3741,27 @@ def _tool_evidence(name: str, out: str) -> dict:
             "chars": len(out or "")}
 
 
+def package_skills_tools() -> tuple:
+    import package_skills
+    return package_skills.TOOLS
+
+
+def _skills_record(payload: dict):
+    """x_yamadori.skills, plus `package` (the package skills channel: the
+    switch and mode, then one record per section or trigger or recall that
+    followed one) where the channel is on or wrote anything."""
+    sk = payload.get("_skills")
+    recs = list(payload.get("_package_skills") or [])
+    sw = payload.get("_pkg_switch") or {}
+    if not recs and not sw.get("on"):
+        return sk
+    out = dict(sk or {})
+    out["package"] = recs
+    out["package_switch"] = {k: sw.get(k) for k in (
+        "on", "source", "mode", "mode_source")}
+    return out
+
+
 def _x_yamadori(payload: dict, *, hops: int) -> dict:
     """Every decision this request took, on the response, as data.
 
@@ -3514,13 +3782,19 @@ def _x_yamadori(payload: dict, *, hops: int) -> dict:
         "effort_sent": payload.get("reasoning_effort"),
         # Skills (mcp/skill_select.py): on, route_class, ids, versions,
         # names, chars, why, matched.
-        "skills": payload.get("_skills"),
+        "skills": _skills_record(payload),
         # The craft index and yama_recall_craft (skill_select PROGRESSIVE
         # DISCLOSURE): the offer kept for the conversation, and this
         # request's reads (name, version, how it was found -- never the
         # query's text).
         "craft": dict(payload.get("_craft") or {},
-                      reads=list(payload.get("_craft_reads") or [])),
+                      reads=list(payload.get("_craft_reads") or []),
+                      # the questions asked of yama_recall_craft this
+                      # request (mcp/craft_query.py): question, shortlist,
+                      # chosen, the choice's and the gate's reads, untuned
+                      query=[r["query"] for r in
+                             payload.get("_craft_reads") or []
+                             if isinstance(r, dict) and r.get("query")]),
         # Tools of ours withheld for a conflict with the client's
         # (tool_conflicts): [{ours, because, client_tool}].
         "tools_withheld": list(payload.get("_tools_withheld") or []),
@@ -4565,6 +4839,11 @@ def _run_turn(body: dict, streamed: bool):
     # yama_recall_craft's reads in THIS request (x_yamadori.craft.reads).
     state["_craft_reads"] = []
     payload["_craft_reads"] = state["_craft_reads"]
+    # The package skills channel: this request's records (the trigger's from
+    # prepare, then each tool section and craft follow-up) in one shared list.
+    payload["_package_skills"] = list(payload.get("_package_skills") or [])
+    state["_package_skills"] = payload["_package_skills"]
+    state["_pkg_on"] = bool((payload.get("_pkg_switch") or {}).get("on"))
     payload["_images"] = state.setdefault("_images", [])
     # yama_describe_image reads this request's attached images from the
     # session state, not the payload.
@@ -4798,6 +5077,9 @@ def _run_turn(body: dict, streamed: bool):
             # An image takes a minute or more, and so can looking at one: a
             # thread with heartbeats.
             n_img0 = len(payload["_images"])
+            if fn == skill_prompts.CRAFT_TOOL_NAME:
+                state["_craft_msgs"] = list(convo)
+                state["_craft_model"] = payload.get("model")
             status, res = yield from _in_thread(
                 lambda fn=fn, args=args: run_our_tool(fn, args, state))
             if fn == images.TOOL_NAME and status == "ok" and res:
@@ -4834,8 +5116,21 @@ def _run_turn(body: dict, streamed: bool):
             corpus.log_tool_result(turn, root, fn, res,
                                    (time.time() - t0) * 1000)
             payload["_tool_calls"].append(_tool_evidence(fn, res))
+            # THE PACKAGE SKILLS' SECTION (mcp/package_skills.py): the proven
+            # skills of the package this lookup returned, appended to its
+            # result -- inside the hidden hop, so the ledger replays it with
+            # the hop byte for byte. Added AFTER the result cap: a long README
+            # never cuts it.
+            section = ""
+            if fn in package_skills_tools() and status == "ok":
+                section, prs = _package_tool_section(
+                    fn, args, (state.get("_mcp_calls") or [None])[-1],
+                    payload, state, f"{hop}:{fn}:{c['id']}")
+                payload["_package_skills"].extend(prs)
+                section, _n = scrub_markers(section)
             tmsg = {"role": "tool", "tool_call_id": c["id"],
-                    "content": repeats.cap_tool_result(res, fn, args)}
+                    "content": repeats.cap_tool_result(res, fn, args)
+                    + section}
             convo.append(tmsg)
             hops_added.append(tmsg)
         if img is not None:

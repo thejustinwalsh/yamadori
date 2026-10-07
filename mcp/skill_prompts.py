@@ -552,7 +552,12 @@ def faithful_user(items: list[dict]) -> str:
 # what a craft is -- facts and proven patterns to act on -- instead of
 # "Suggestions, not requirements"; the WHEN recall line reads "when
 # <situation>:" instead of "be mindful when" (a hedge).
-CRAFT_VERSION = "craft/5"
+# craft/6 (operator, 2026-10-06: "the model asks the skills library a natural
+# language QUESTION through a tool, and jjava weighs it against the skills"):
+# yama_recall_craft takes a craft's name or a question (mcp/craft_query.py);
+# its description is the question it answers and the moments to call it,
+# including a package lookup that named a craft.
+CRAFT_VERSION = "craft/6"
 # The model-facing tool that reads one craft in full (a hidden hop, like
 # yama_think_deeply). The operator may rename it: this is the one constant.
 # The old name, `recall_craft`, is still read in stored ledger rows
@@ -589,20 +594,22 @@ CRAFT_INDEX_HEAD = (
 # The tool's description is a prompt (AGENTS.md "Tool descriptions are
 # prompts"): the question it answers, the contrast, the trigger phrasings.
 CRAFT_TOOL_DESCRIPTION = (
-    "Answers 'how is this done well?' for one craft from this service's "
+    "Answers 'how is X done well with <library>?' from this service's craft "
     "library: short, sourced moves for a library, API or kind of work. "
-    "Returns the craft in full. Call it INSTEAD of guessing a library's "
-    "pattern. Call it when: you are about to write code with a library the "
-    "craft list names; a line said 'Remember (craft ...)' and you want the "
-    "whole craft; you are unsure of the right pattern for a library or API; "
-    "an error comes from a library a craft covers. Pass the craft's name "
-    "from the list; a topic in a few words (e.g. 'koota queries') returns "
-    "the names of the crafts that match it, to call again by name. It "
-    "reads this service's craft library only, apart from anything your "
-    "harness keeps. A server tool: it runs on the Yamadori server and does "
-    "not touch your workspace.")
-CRAFT_ARG_DESCRIPTION = ("The craft's name from the craft list (a topic in "
-                         "a few words lists the matching names).")
+    "Returns the craft that answers, in full. Call it INSTEAD of guessing a "
+    "library's pattern. Call it when: you are about to write code with a "
+    "library the craft list or a package lookup names; a line said "
+    "'Remember (craft ...)' or a table listed a craft for your next step; "
+    "you are unsure of the right pattern for a library or API; an error "
+    "comes from a library a craft covers. Pass a craft's name, or ask a "
+    "question in a sentence (e.g. 'how do I update a trait every frame in "
+    "koota?'): the library picks the craft that answers it, or says that "
+    "none does and names the nearest. It reads this service's craft library "
+    "only, apart from anything your harness keeps. A server tool: it runs "
+    "on the Yamadori server and does not touch your workspace.")
+CRAFT_ARG_DESCRIPTION = ("A craft's name from the craft list, or a question "
+                         "in a sentence about how to do something well with "
+                         "a library.")
 CRAFT_RESULT_HEAD = "Craft {name} (this service's library):"
 CRAFT_UNKNOWN = "No craft is named {query!r}."
 # SERVER-TOOL RECALL (craft/3) RETIRED 2026-09-27 (operator, after pagoda-h5:
@@ -626,6 +633,12 @@ def craft_registry() -> list[dict]:
             ("arg_description", CRAFT_ARG_DESCRIPTION),
             ("result_head", CRAFT_RESULT_HEAD),
             ("unknown", CRAFT_UNKNOWN)]
+    # The package skills channel's own texts (mcp/package_skills.py): the
+    # router's head and columns and the pointer to the craft names.
+    import package_skills as _ps
+    rows += [("router_head", _ps.ROUTER_HEAD),
+             ("router_columns", _ps.ROUTER_COLUMNS),
+             ("pointer", _ps.POINTER)]
     return [{"name": n, "version": CRAFT_VERSION, "chars": len(s),
              "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest()[:16],
              "text": s} for n, s in rows]

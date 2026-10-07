@@ -41,6 +41,134 @@ def check(name, ok, detail=None):
         print("FAIL", name, "" if detail is None else str(detail)[:400])
 
 
+def tool_result_checks() -> None:
+    """THE TOOL-RESULT RENDERINGS (operator, 2026-10-06): the same prompt with
+    the skill delivered in a package tool's result, inject and router; a fake
+    armed library and a fake model, offline."""
+    import json
+    import skills
+    import package_skills as PS
+    import model as M
+
+    def mk(name, area, items, desc):
+        its = [{"form": f, "text": t, "situation": "", "quote": "q" * 30}
+               for f, t in items]
+        return {"id": "id-" + name, "name": name, "version": 1,
+                "description": desc, "title": name, "items": its,
+                "body": "# " + name + "\n" + "\n".join(
+                    f"- {f}: {t}" for f, t in items), "text": "",
+                "rule": {"applies_to": {"frameworks": [area]}, "topics": []},
+                "lead_for": None, "package": None, "tags": []}
+    lead = mk("koota-traits-and-entities", "koota", [
+        ("DO", "Signal an in-place array mutation with player.changed(Inventory).")],
+        "Use when writing koota traits.")
+    other = mk("koota-react-integration", "koota", [
+        ("DO", "Read traits in React with useTrait.")],
+        "Use when reading koota traits in React components.")
+    pool = [lead, other]
+    saved = (skills.armed, PS.PROVE_OF, M.post, M.shape,
+             H.skill_packages_held if hasattr(H, "skill_packages_held")
+             else None)
+    skills.armed = lambda: list(pool)
+    PS.PROVE_OF = lambda s: None
+    case = {"id": "koota-x", "area": "koota", "kind": "pitfall",
+            "prompt": "Write pickUp.", "packages": ["koota"],
+            "skills": [{"name": "koota-traits-and-entities"}],
+            "pitfall": ["koota_mutates_trait_unflagged"],
+            "good": ["koota_change_flagged"]}
+    sent: list[dict] = []
+    script: list[dict] = []
+
+    def fake_shape(body, **k):
+        return dict(body)
+
+    def fake_post(b):
+        sent.append(json.loads(json.dumps(b)))
+        return script.pop(0)
+
+    def resp(content="", calls=None):
+        m = {"content": content, "reasoning_content": "think"}
+        if calls:
+            m["tool_calls"] = calls
+        return {"choices": [{"message": m, "finish_reason": "tool_calls"
+                             if calls else "stop"}],
+                "usage": {"completion_tokens": 5}}
+    M.shape, M.post = fake_shape, fake_post
+    try:
+        check("the two renderings are accepted and are not in the default "
+              "variants", set(H.TOOL_RESULT_VARIANTS)
+              == {"tool_result_inject", "tool_result_router"}
+              and not set(H.TOOL_RESULT_VARIANTS) & set(H.VARIANTS))
+        di = H.tool_result_delivery(case, "tool_result_inject", "bonsai")
+        check("inject: the lookup result carries the lead skill's item, the "
+              "case's own skill is among the crafts delivered",
+              "player.changed(Inventory)" in di["result"]
+              and "koota-traits-and-entities"
+              in di["case_skills_delivered"]
+              and di["result"].startswith("SOURCE: the npm registry"),
+              di["result"][-300:])
+        dr = H.tool_result_delivery(case, "tool_result_router", "bonsai")
+        check("router: the result carries a table and NO skill body",
+              "yama_recall_craft" in dr["result"]
+              and "player.changed" not in dr["result"]
+              and "Read traits in React" not in dr["result"], dr["result"][-300:])
+        ans = "```ts\nplayer.changed(Inventory)\n```"
+        script[:] = [resp(ans)]
+        a1, g1 = H.tool_arm_generate(case, "tool_result_inject", "m",
+                                     "medium", 1, di)
+        tools1 = [t["function"]["name"] for t in sent[-1]["tools"]]
+        check("inject arm: one generation, the find_package call and its "
+              "result are in the conversation, no craft tool",
+              a1 == ans and g1["hops"] == 1 and g1["recalls"] == []
+              and tools1 == ["yama_find_package"]
+              and sent[-1]["messages"][-1]["role"] == "tool"
+              and sent[-1]["messages"][2]["tool_calls"][0]["function"][
+                  "name"] == "yama_find_package", tools1)
+        call = {"id": "c1", "type": "function", "function": {
+            "name": "yama_recall_craft",
+            "arguments": json.dumps({"name_or_topic":
+                                     "koota-react-integration"})}}
+        call2 = {"id": "c2", "type": "function", "function": {
+            "name": "yama_recall_craft",
+            "arguments": json.dumps({"name_or_topic": "how do I read a "
+                                     "trait in react?"})}}
+        script[:] = [resp("", [call]), resp("", [call2]), resp(ans)]
+        n0 = len(sent)
+        a2, g2 = H.tool_arm_generate(case, "tool_result_router", "m",
+                                     "medium", 1, dr)
+        tools2 = [t["function"]["name"] for t in sent[-1]["tools"]]
+        check("router arm: the craft tool is offered, a call by name returns "
+              "the craft in full, a question is answered by the nearest "
+              "craft (no jjava) and said so, the answer is the last turn",
+              a2 == ans and g2["hops"] == 3 and len(sent) - n0 == 3
+              and "yama_recall_craft" in tools2
+              and [r["form"] for r in g2["recalls"]] == ["name", "question"]
+              and g2["recalls"][0]["craft"] == "koota-react-integration"
+              and g2["recalls"][1].get("resolved_by")
+              and "Craft koota-react-integration" in sent[n0 + 1]["messages"][-1][
+                  "content"], json.dumps(g2["recalls"]))
+        arm = {"sides": {"without": {"repeats": [{
+            "answered": True, "pitfall": True, "good": False,
+            "types": None}]},
+            "tool_result_router": {"repeats": [{
+                "answered": True, "pitfall": False, "good": True,
+                "types": None, "recalls": 2, "gen": {}}],
+                "case_skills_delivered": ["koota-traits-and-entities"]}},
+            "case": "k", "skills_missing": []}
+        rep = H.report([arm])["cases"]["k"]["tool_result_router"]
+        check("the report carries recalls and delivery for the tool-result "
+              "arms", rep["recalls_mean"] == 2.0
+              and rep["called_recall_in"] == 1
+              and rep["case_skills_delivered"]
+              == ["koota-traits-and-entities"], rep)
+        pool[:] = []
+        out = H.run_tool_arm(case, "tool_result_inject", "m", "medium", 1)
+        check("no armed craft for the case's packages: not run, said so (a "
+              "GAP)", "not_run" in out, out)
+    finally:
+        skills.armed, PS.PROVE_OF, M.post, M.shape = saved[:4]
+
+
 def main() -> int:
     st = H.self_test()
     check("every case's rules separate its pitfall example from its good "
@@ -222,6 +350,7 @@ def main() -> int:
           and "\nfunction App()" in probe, probe)
     check("the harness system text asks for named files (setup cases)",
           re.search(r"file's name", H.SYSTEM) is not None)
+    tool_result_checks()
     ok = sum(1 for _n, v in CHECKS if v)
     print(f"{ok}/{len(CHECKS)} checks passed")
     return 0 if ok == len(CHECKS) else 1

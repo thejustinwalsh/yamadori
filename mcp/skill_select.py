@@ -3352,18 +3352,23 @@ def _norm_name(x: str) -> str:
     return re.sub(r"[\s_]+", "-", str(x or "").strip().lower())
 
 
-def read_craft(args: dict, armed: list[dict] | None = None
-               ) -> tuple[str, dict]:
+def read_craft(args: dict, armed: list[dict] | None = None,
+               ctx: dict | None = None) -> tuple[str, dict]:
     """(the tool result, its record) for recall_craft: the craft by NAME;
     anything else is a failure that names what IS there -- every craft whose
     trigger text shares a word with the query, closest first. No topic
     match by a relevance threshold (removed 2026-09-27,
-    docs/CONSTANTS-AUDIT.md "read_craft matching")."""
+    docs/CONSTANTS-AUDIT.md "read_craft matching").
+
+    With `ctx` (the proxy hands one over: mcp/craft_query.py) a query that is
+    not a craft's name (exact, or less its numeric id) is a QUESTION: the
+    embedder narrows the armed, proven crafts, jjava chooses one or "none",
+    and the record carries `query` (x_yamadori.craft.query)."""
     import skills
     pool = skills.armed() if armed is None else armed
     args = args if isinstance(args, dict) else {}
     q = str(args.get(P.CRAFT_TOOL_ARG) or args.get("name") or
-            args.get("topic") or args.get("craft") or "").strip()[:200]
+            args.get("topic") or args.get("craft") or "").strip()[:1000]
     if not q:
         return json.dumps({"tool": P.CRAFT_TOOL_NAME, "ok": False,
                            "error": "BAD_ARGUMENTS",
@@ -3378,6 +3383,15 @@ def read_craft(args: dict, armed: list[dict] | None = None
     by_name = {_norm_name(s.get("name") or ""): s for s in pool}
     s = by_name.get(nq)
     how = "name"
+    if s is None and ctx is not None:
+        import craft_query
+        s = craft_query.is_name(q, pool)
+        if s is None:
+            text, qrec = craft_query.answer(q, pool, ctx)
+            return text, {"query_chars": len(q), "found": qrec.get("chosen"),
+                          "name": qrec.get("name"),
+                          "version": qrec.get("version"), "how": "question",
+                          "query": qrec, "tokens": qrec.get("tokens")}
     if s is None:
         qs = stems(q) | {w for w in re.findall(r"[a-z0-9]+", q.lower())}
         ranked = sorted(((relevance(qs, x, pool)[0], x) for x in pool),
