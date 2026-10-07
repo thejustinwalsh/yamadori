@@ -344,3 +344,46 @@ a measured field, never borrowed).
   the engine finds no shared head and decodes both whole, correctly.
 - Not looked at: the main card (`bonsai`, `flash-next`, `mirai-s`: other engines; the patch is ours for `llama-bonsai2-ada`
   only; jjava's helper `bonsai-a4000` is the only reader this is built for).
+
+## 11. Deploy to bonsai-a4000 (2026-10-07, operator: "make sure one pass read is working, turned on and deployed with everything else")
+
+**Verified before any GPU run (CPU, the REAL model).** `bench/decider/batch_cpu_real.py` against a private CPU `llama-server`
+(this patch's build, `Ternary-Bonsai-2-27B-PTQ1_0.gguf`, `-ngl 0 -np 2 --kv-unified --decide-seqs 2 --jinja`): the render
+derivation (the served template through `/apply-template`, byte-for-byte on a second message set), the real tokenizer's boundary
+check (`/tokenize` and the engine's `verify_tokenization`) all passed; three questions (6 orders) answered in ONE
+`/decide-batch` request against 6 per-read requests: **0 of 3 argmax flips, largest |p| difference 4.9e-4** (TIE_BAND 0.0034),
+prefix 80 tokens, 303 tokens decoded, 51 saved by the shared question heads, 7 decode calls in 3 waves (89 s against 106 s
+sequential: CPU, not a speed figure). Also offline: the structure derives and verifies against the repo's real Bonsai template
+fixture (`mcp/fixtures/bonsai_chat_template.jinja`), splitting at `<|im_end|>\n | <|im_start|>user`.
+
+**W = 2.** One question (its two orders) per wave: the minimum that has one request per call and shares each question's
+head. Memory: prefix + 2 forks = 3 cells x 149.63 MiB = 448.9 MiB = 13,134 KV cells at 35,840 B (`bench/a4000_fit.py`, fit.json
+`bytes_per_cell`), rounded up to whole 1,024s = 13,312 cells: `-c` 141,312 -> **128,000**; the net VRAM change is +448.9 - 455.0 =
+-6 MiB, so the fit's 1,331 MiB headroom is kept (today: 12,854 MiB used on the A4000 beside embeddings, 3,313 free). W = 4 would
+cost 22.5k more cells of window to halve the waves (arithmetic: ~0.35 s of an 11 s K = 26 call); the first measurement
+(`timings.waves`, `decode_calls`, `blocks_ms`) says whether it pays.
+
+**The exact changes (the operator's restart; nothing here edited by the builder).**
+
+1. `config.yaml`: a new macro beside `server_nudge` (the main card and everything else keep the 80d2c60d binary):
+   `server_decide: "C:/Users/jwals/engines/llama-bonsai2-ada-cand0042/src/build/bin/llama-server.exe"`.
+2. `config.yaml` `bonsai-a4000` `cmd`: first line `${server_nudge}` -> `${server_decide}`; `-c 141312` -> `-c 128000`; add
+   `--decide-seqs 2` (after `--kv-unified`). Everything else unchanged (`-np 2 --kv-unified -b 1024 -ub 512`, the batch-invariant
+   env).
+3. `mcp/tier_models.yaml` `bonsai-a4000.window`: `ctx: 128000`, `main_cap: 124928` (= ctx - the 3,072-cell lane, as 141,312 ->
+   138,240), so the proxy budgets against what the server serves.
+4. `scripts/start-stack.bat` (the proxy and worker environment): `set "YAMADORI_DECIDER_BATCH=1"` -- ONLY after step 3 of the
+   measurement below passes (the code path is a no-op while unset and falls back per call if the endpoint is absent).
+5. `engines/manifest.yaml` is already updated (this commit): `shipped` = cand0042, 80d2c60d moved to `previous` (the main card and
+   the rest still run it); `build_engine.py --verify-only`: 7/7 match.
+
+**After the restart (the operator's "GPU go" on the A4000, the main card untouched).** The reader must be LOADED first (a request
+through the proxy loads it; never GET /upstream/<model> for an unloaded one). Then:
+
+    python bench/decider/batch_ab.py --run --gpu-go --sets jevbench          # identity + speed, K = 1, 231 items
+    python bench/decider/batch_ab.py --run --gpu-go --sets k --ks 2,5,10     # speed by K
+    python bench/decider/batch_ab.py --run --gpu-go --sets skill             # the labelled skill cases
+
+and the checks of section 8 steps 1, 2, 5, 6. PASS = zero `tokenization_ok` false; argmax flips no more than the sequential path's
+own repeat flips and every |p| difference inside TIE_BAND; batched faster at every K >= 2; slot 0's generation unchanged beside a
+burst. If identity holds, step 4 above.

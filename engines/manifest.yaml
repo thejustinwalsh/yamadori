@@ -650,27 +650,49 @@ engines:
       ctest_regex: ^(test-reasoning-budget|test-chat|test-decide-batch)$
     output: bin/llama-server.exe
     shipped:
-      # Built by scripts/build_engine.py from this entry (base + 0001-0033 + 0034-0041, no UI)
-      # into C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d. 0041: KV rank (docs/ENGINES.md "KV rank").
-      # DEPLOYED 2026-09-29 by bench/deploy_kv_rank.py: -np 3 --kv-unified, -c 349184, --kv-vram-cells 141824, --spec-draft-window 16384.
-      path: C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d/src/build/bin/llama-server.exe
-      build_tree: C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d/src/build
-      built: 2026-09-28T08:07:23-0400
-      built_with_patches: ["0001-0033 (bonsai-ada-surgery)", 0034-reasoning-budget-nudge.patch, 0035-cuda-fattn-vec-skip-masked-kv.patch, 0036-spec-draft-window-per-sequence.patch, 0037-tiered-kv-tail-by-pool-cells.patch, 0038-kv-cache-attention-spans-the-batch-sequences.patch, 0039-kv-cache-new-cells-go-to-the-lowest-free-cells.patch, 0040-kv-cache-promote-the-batch-sequences-to-the-lowest-cells.patch, 0041-kv-cache-a-slot-rank-decides-whose-cells-hold-the-vram-line.patch]
+      # Built 2026-10-07 02:26 by scripts/build_engine.py from this entry (base + 0001-0033 + 0034-0042, NO web UI) into
+      # C:/Users/jwals/engines/llama-bonsai2-ada-cand0042. Every check passed (34, CMakeCache identical to the original's, engine tests
+      # 3/3 incl. test-decide-batch). 0042: POST /decide-batch (docs/DECIDE-BATCH.md). ONLY `bonsai-a4000` runs it, with --decide-seqs;
+      # the main `bonsai` and everything else still run 80d2c60d (`previous`, kept while anything runs it).
+      path: C:/Users/jwals/engines/llama-bonsai2-ada-cand0042/src/build/bin/llama-server.exe
+      build_tree: C:/Users/jwals/engines/llama-bonsai2-ada-cand0042/src/build
+      built: 2026-10-07T02:26:42-0400
+      built_with_patches: ["0001-0033 (bonsai-ada-surgery)", 0034-reasoning-budget-nudge.patch, 0035-cuda-fattn-vec-skip-masked-kv.patch, 0036-spec-draft-window-per-sequence.patch, 0037-tiered-kv-tail-by-pool-cells.patch, 0038-kv-cache-attention-spans-the-batch-sequences.patch, 0039-kv-cache-new-cells-go-to-the-lowest-free-cells.patch, 0040-kv-cache-promote-the-batch-sequences-to-the-lowest-cells.patch, 0041-kv-cache-a-slot-rank-decides-whose-cells-hold-the-vram-line.patch, 0042-server-decide-batch.patch]
       files:
-        llama-server.exe:      {sha256: 0aea2925955a3fb82465f15d8efe3dd17721176abf4c5335d11b4b1075e1b2ee, size: 10240}
+        llama-server.exe:      {sha256: 937c6b6240a5462406202d8ef8e247b47eb5ebbc921dabb88b899fe05ebd6d79, size: 10240}
         cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
         cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
         cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
-        ggml-base.dll:         {sha256: a96e894a6e1c4fb3a817e7bdaeaf68c38675fefb0f153872e5165852b06b5a20, size: 664064}
-        ggml-cpu.dll:          {sha256: 0396deacae249eb6493d3c4132bdc3676a5a17b384d311af67d3eed2777e2b62, size: 964608}
-        ggml-cuda.dll:         {sha256: a0a3b4d946da768936c88029612f36ab386a65148ebe0b86c26f9567d65b5392, size: 111772160}
-        ggml.dll:              {sha256: b97431c30b6941913ef5653888892d76b8f48dde2f33906b8742b0ba63497933, size: 56832}
-        llama-common.dll:      {sha256: c45bbcf6f086806daad079877648b2931dbf6111eb23b9f181fbaf8c5cdef8ac, size: 8357376}
-        llama-server-impl.dll: {sha256: 9b10929152826a161a10fde0c8fc18942a3d1eb4d5bf2e3d122a2d2d92584737, size: 3198976}
-        llama.dll:             {sha256: 6c93c8d7bac4619e671542692f341463f5a7cf2d489db8cc04d65c0c14bf9a2b, size: 2576896}
-        mtmd.dll:              {sha256: 33bc70c636c90cbc817ab25f93f7846822a4955c507297a0f4ff3ac4eced96a0, size: 2324992}
+        ggml-base.dll:         {sha256: 9e4526ea9c4eaf91569c0c2cbaf62609df16cf51960f541f4e28d2d1d9dd1707, size: 664064}
+        ggml-cpu.dll:          {sha256: 2ec11c54f3dadda0528a987978059282bfddea365fee509a651a15a8f4778a52, size: 964608}
+        ggml-cuda.dll:         {sha256: 9794c9efb96a322b8b79cd56db5b0999af192fb006c713bec3990797cdb79ffd, size: 111777792}
+        ggml.dll:              {sha256: c98efca19385a11d3c4cbdac3f1bb4f1aec902a0fa9020ba4b4cd273e0d1fb41, size: 56832}
+        llama-common.dll:      {sha256: 34e15af3ffc430698daad4f179d78779c1105ead6818f562a7b9a62b5bf35f29, size: 8423424}
+        llama-server-impl.dll: {sha256: 3aea5d6a28bb35d35149266120bbcaa46494e725e0d9658ee780eb733998de61, size: 3229696}
+        llama.dll:             {sha256: 495ec0954e7ec7c8eb78b38815720be1af44238479c00a99e3121923c2477fd9, size: 2576896}
+        mtmd.dll:              {sha256: 8aa64f9cd3c3056e15ec76ba18b0e2d40068494bfc21851be624a9001e50bd36, size: 2324992}
     previous:
+      # REPLACED 2026-10-07 by llama-bonsai2-ada-cand0042 (0042) for bonsai-a4000 only; this build still runs `bonsai` and the rest.
+      # Built by scripts/build_engine.py from this entry (base + 0001-0033 + 0034-0041, no UI)
+      # into C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d. 0041: KV rank (docs/ENGINES.md "KV rank").
+      # DEPLOYED 2026-09-29 by bench/deploy_kv_rank.py: -np 3 --kv-unified, -c 349184, --kv-vram-cells 141824, --spec-draft-window 16384.
+      - path: C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d/src/build/bin/llama-server.exe
+        build_tree: C:/Users/jwals/engines/llama-bonsai2-ada-80d2c60d/src/build
+        built: 2026-09-28T08:07:23-0400
+        built_with_patches: ["0001-0033 (bonsai-ada-surgery)", 0034-reasoning-budget-nudge.patch, 0035-cuda-fattn-vec-skip-masked-kv.patch, 0036-spec-draft-window-per-sequence.patch, 0037-tiered-kv-tail-by-pool-cells.patch, 0038-kv-cache-attention-spans-the-batch-sequences.patch, 0039-kv-cache-new-cells-go-to-the-lowest-free-cells.patch, 0040-kv-cache-promote-the-batch-sequences-to-the-lowest-cells.patch, 0041-kv-cache-a-slot-rank-decides-whose-cells-hold-the-vram-line.patch]
+        files:
+          llama-server.exe:      {sha256: 0aea2925955a3fb82465f15d8efe3dd17721176abf4c5335d11b4b1075e1b2ee, size: 10240}
+          cublas64_12.dll:       {sha256: f3ca341456ca00d8780ce40bcec9fc8a61a6b0dfd799cba5bdc59adaaa82cab4, size: 113716224}
+          cublasLt64_12.dll:     {sha256: 6f7cb6c15cc81b5a18ac2d42bc20f2955c498e909dd87ab4bfdb73977e2c4d47, size: 674670592}
+          cudart64_12.dll:       {sha256: c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344, size: 573952}
+          ggml-base.dll:         {sha256: a96e894a6e1c4fb3a817e7bdaeaf68c38675fefb0f153872e5165852b06b5a20, size: 664064}
+          ggml-cpu.dll:          {sha256: 0396deacae249eb6493d3c4132bdc3676a5a17b384d311af67d3eed2777e2b62, size: 964608}
+          ggml-cuda.dll:         {sha256: a0a3b4d946da768936c88029612f36ab386a65148ebe0b86c26f9567d65b5392, size: 111772160}
+          ggml.dll:              {sha256: b97431c30b6941913ef5653888892d76b8f48dde2f33906b8742b0ba63497933, size: 56832}
+          llama-common.dll:      {sha256: c45bbcf6f086806daad079877648b2931dbf6111eb23b9f181fbaf8c5cdef8ac, size: 8357376}
+          llama-server-impl.dll: {sha256: 9b10929152826a161a10fde0c8fc18942a3d1eb4d5bf2e3d122a2d2d92584737, size: 3198976}
+          llama.dll:             {sha256: 6c93c8d7bac4619e671542692f341463f5a7cf2d489db8cc04d65c0c14bf9a2b, size: 2576896}
+          mtmd.dll:              {sha256: 33bc70c636c90cbc817ab25f93f7846822a4955c507297a0f4ff3ac4eced96a0, size: 2324992}
       # REPLACED 2026-09-29 by llama-bonsai2-ada-80d2c60d (0041, the three-slot KV layout; kept for rollback)
       # Built 2026-09-28 by scripts/build_engine.py from this entry (base + 0001-0033 +
       # 0034-0040, NO web UI) into C:/Users/jwals/engines/llama-bonsai2-ada-746c8af6. Every check
