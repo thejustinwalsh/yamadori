@@ -401,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-minutes", type=float)
     ap.add_argument("--arms", default=",".join(ARMS))
     ap.add_argument("--tag", default="pkgskills")
+    ap.add_argument("--tag-filter", help="with --report: only the rows of this run's tag")
     ap.add_argument("--key-file")
     a = ap.parse_args(argv)
     try:
@@ -408,7 +409,11 @@ def main(argv: list[str] | None = None) -> int:
     except (AttributeError, ValueError):
         pass
     if a.report:
-        print(json.dumps(report(LP._rows(RESULTS)), indent=1))
+        rows = LP._rows(RESULTS)
+        if a.tag_filter:
+            # rows of one run: their tag is "<tag>-<arm>"
+            rows = [r for r in rows if str(r.get("tag") or "").startswith(a.tag_filter + "-")]
+        print(json.dumps(report(rows), indent=1))
         return 0
     if not a.run:
         print(plan(a))

@@ -1,0 +1,46 @@
+{
+ "router": {
+  "n_valid_trials": 3,
+  "package_tool_call_rate": 1.0,
+  "section_delivered_rate": 1.0,
+  "recall_call_rate": 1.0,
+  "recall_after_section_rate_of_trials_with_a_section": 1.0,
+  "question_calls_total": 2,
+  "crafts_pulled": {
+   "koota-traits-and-entities": 3,
+   "koota-with-react-three-fiber": 2,
+   "koota-react-integration": 2,
+   "r3f-drei-pairing-8": 1,
+   "r3f-many-objects-instancing": 1,
+   "koota-frame-loop-systems": 1
+  },
+  "pitfall_rules": {
+   "applies": 40,
+   "pitfall_avoided": 34,
+   "good_used": 3,
+   "applies_pulled": 14,
+   "applies_delivered": 26
+  }
+ },
+ "both": {
+  "n_valid_trials": 2,
+  "package_tool_call_rate": 1.0,
+  "section_delivered_rate": 1.0,
+  "recall_call_rate": 1.0,
+  "recall_after_section_rate_of_trials_with_a_section": 1.0,
+  "question_calls_total": 2,
+  "crafts_pulled": {
+   "koota-with-react-three-fiber": 2,
+   "koota-react-app-setup": 2,
+   "math-noise-and-seeded-random": 1,
+   "koota-react-integration": 1
+  },
+  "pitfall_rules": {
+   "applies": 26,
+   "pitfall_avoided": 20,
+   "good_used": 7,
+   "applies_delivered": 18,
+   "applies_pulled": 8
+  }
+ }
+}

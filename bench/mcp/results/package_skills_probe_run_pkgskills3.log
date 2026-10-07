@@ -1,0 +1,94 @@
+﻿[2026-10-07 05:31:45] script started; waiting for pid 0
+[2026-10-07 05:31:45] pid 0 has exited
+[2026-10-07 05:31:45] RUN attempt 1
+{
+ "run_id": "pkgskills3-router-lookup-pi-medium-1",
+ "arm": "router",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 30,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-react-integration",
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills3-both-lookup-pi-medium-1",
+ "arm": "both",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_minutes",
+ "requests": 25,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-react-app-setup",
+  "koota-with-react-three-fiber",
+  "math-noise-and-seeded-random"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills3-router-lookup-pi-medium-2",
+ "arm": "router",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 30,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-traits-and-entities",
+  "koota-with-react-three-fiber",
+  "r3f-drei-pairing-8",
+  "r3f-many-objects-instancing"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills3-both-lookup-pi-medium-2",
+ "arm": "both",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 30,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 1,
+ "crafts_pulled": [
+  "koota-react-app-setup",
+  "koota-react-integration",
+  "koota-with-react-three-fiber"
+ ],
+ "invalid": null
+}
+{
+ "run_id": "pkgskills3-router-lookup-pi-medium-3",
+ "arm": "router",
+ "outcome": "ok",
+ "why": null,
+ "stop": "max_requests",
+ "requests": 30,
+ "package_tool_called": true,
+ "section_delivered": true,
+ "recall_called": true,
+ "question_calls": 0,
+ "crafts_pulled": [
+  "koota-frame-loop-systems",
+  "koota-react-integration",
+  "koota-traits-and-entities"
+ ],
+ "invalid": null
+}
