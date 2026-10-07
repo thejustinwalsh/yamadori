@@ -500,6 +500,120 @@ def licence_of(text: str) -> dict | None:
     return None
 
 
+# WHERE A REPOSITORY STATES ITS LICENCE (coordinator, 2026-10-07: react.dev
+# carries ONLY LICENSE-DOCS.md at its pinned commit, CC BY 4.0, and the stage
+# looked for LICENSE* alone, so three of its pages failed with "no licence").
+# For a source on GitHub the stage reads the repository's own licence files AT
+# THE PINNED REF the source URL names, in this order, and fills the licence
+# only from a verbatim quote of the file it reads (licence_of: its SPDX line
+# or the licence's own name sentence), recorded with that file's URL:
+#   1. a DOCS licence file, only when the source is a DOCUMENTATION page
+#      (THE RULE below);
+#   2. the general files: LICENSE*, LICENCE*, COPYING*.
+# A docs licence file is a statement about the docs, so it is never read for a
+# code path: a repository whose LICENSE-DOCS covers `docs/` says nothing about
+# `src/app.js`.
+DOCS_LICENCE_FILES = ("LICENSE-DOCS.md", "LICENSE-DOCS", "LICENSE-DOCS.txt",
+                      "LICENSE_DOCS.md", "LICENCE-DOCS.md", "LICENCE-DOCS",
+                      "LICENSE-DOCUMENTATION.md")
+GENERAL_LICENCE_FILES = ("LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE",
+                         "LICENCE.md", "LICENCE.txt", "COPYING",
+                         "COPYING.md", "COPYING.txt")
+# THE RULE that ties a docs licence file to a path: the path is a text or
+# markup document (DOC_EXTENSIONS) under a directory that holds documentation
+# (DOC_DIRS: any segment of the path, `src/content/...` included). A README
+# at the root, source code and data are not documentation pages. The lists
+# are the usual names of documentation trees (docs/, content/, website/, the
+# react.dev layout src/content/); a path outside them falls back to the
+# general files.
+DOC_EXTENSIONS = (".md", ".mdx", ".markdown", ".rst", ".adoc", ".txt",
+                  ".html", ".htm")
+DOC_DIRS = ("docs", "doc", "documentation", "content", "website", "wiki",
+            "guide", "guides", "manual", "handbook", "blog")
+MAX_LICENCE_FETCHES = 16
+
+
+def github_source(url: str) -> dict | None:
+    """{owner, repo, ref, path} for a GitHub-hosted source URL (raw, blob or
+    tree), else None."""
+    import urllib.parse
+    p = urllib.parse.urlsplit(url or "")
+    host = (p.hostname or "").lower()
+    parts = [x for x in p.path.split("/") if x]
+    if host == "raw.githubusercontent.com" and len(parts) >= 3:
+        return {"owner": parts[0], "repo": parts[1], "ref": parts[2],
+                "path": "/".join(parts[3:])}
+    if host == "github.com" and len(parts) >= 5 and parts[2] in (
+            "blob", "tree"):
+        return {"owner": parts[0], "repo": parts[1], "ref": parts[3],
+                "path": "/".join(parts[4:])}
+    return None
+
+
+def is_docs_path(path: str) -> bool:
+    segs = [x.lower() for x in (path or "").split("/") if x]
+    if not segs or not segs[-1].endswith(DOC_EXTENSIONS):
+        return False
+    return any(sg in DOC_DIRS for sg in segs[:-1])
+
+
+def licence_files_for(url: str) -> list[dict]:
+    """[{url, kind, rule}] in the order they are read: for a GitHub source,
+    the repository's licence files at the URL's ref (docs files first, only
+    for a documentation path); for any other host, worker.licence_candidates
+    as before."""
+    g = github_source(url)
+    if g is None:
+        import worker
+        return [{"url": u, "kind": "general",
+                 "rule": "the host's own LICENSE beside the page or at its "
+                         "root (worker.licence_candidates)"}
+                for u in worker.licence_candidates(url)]
+    base = (f"https://raw.githubusercontent.com/{g['owner']}/{g['repo']}/"
+            f"{g['ref']}/")
+    out: list[dict] = []
+    if is_docs_path(g["path"]):
+        out += [{"url": base + n, "kind": "docs",
+                 "rule": f"{g['path']} is a documentation page (a text or "
+                         "markup file under a docs directory), so the "
+                         "repository's docs licence file applies to it"}
+                for n in DOCS_LICENCE_FILES]
+    out += [{"url": base + n, "kind": "general",
+             "rule": "the repository's own licence file at the pinned ref"}
+            for n in GENERAL_LICENCE_FILES]
+    return out[:MAX_LICENCE_FETCHES]
+
+
+# CC BY asks for attribution (credit, the licence's link, a note of changes);
+# the provenance records what it asks for (attribution_of).
+_CC_URL = {"CC-BY-4.0": "https://creativecommons.org/licenses/by/4.0/",
+           "CC-BY-SA-4.0": "https://creativecommons.org/licenses/by-sa/4.0/",
+           "CC-BY-NC-4.0": "https://creativecommons.org/licenses/by-nc/4.0/"}
+
+
+def attribution_of(url: str, lic: dict) -> dict | None:
+    """What a CC BY licence asks the reuser to carry: who to credit (the
+    repository and the commit), the licence and its link, where the licence
+    text was read, and that the source was changed. None for a licence that
+    asks nothing of the kind."""
+    spdx = str((lic or {}).get("spdx") or "")
+    if not spdx.startswith("CC-BY"):
+        return None
+    g = github_source(url)
+    credit = (f"{g['owner']}/{g['repo']}" if g else str(url or "")[:120])
+    commit = g["ref"] if g and re.fullmatch(r"[0-9a-f]{40}", g["ref"]) \
+        else None
+    out = {"credit": credit, "source_url": url, "licence": spdx,
+           "licence_url": _CC_URL.get(spdx),
+           "licence_file": (lic or {}).get("where"),
+           "changes": "distilled into short DO / DO NOT lines; the source's "
+                      "wording is shortened and rearranged",
+           "no_endorsement": True}
+    if commit:
+        out["commit"] = commit
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def handle_licence(job: dict, ctx) -> dict:
     t = _target(job, "licence")
     if t is None:
@@ -527,8 +641,8 @@ def handle_licence(job: dict, ctx) -> dict:
         searched.append("the package's licence (found)")
     url = s.get("source_url") or ""
     if lic is None and url:
-        import worker
-        for cand in worker.licence_candidates(url)[:4]:
+        for cf in licence_files_for(url)[:MAX_LICENCE_FETCHES]:
+            cand = cf["url"]
             ctx.beat(f"looking for a licence at {cand}")
             try:
                 raw_l, _meta = fetch_source(cand)
@@ -538,7 +652,8 @@ def handle_licence(job: dict, ctx) -> dict:
             got = licence_of(raw_l.decode("utf-8", "replace"))
             searched.append(f"{cand} ({'found' if got else 'no licence line'})")
             if got:
-                lic = dict(got, where=cand)
+                lic = dict(got, where=cand, file_kind=cf["kind"],
+                           file_rule=cf["rule"])
                 break
     if lic is None and ver.get("origin") in ("ingest",) and not url:
         # Pasted by an operator: their material, their call. Recorded as
@@ -1474,6 +1589,9 @@ def _provenance(sid: str, ver: dict, s: dict) -> dict:
     if lic:
         prov["licence"] = {k: lic.get(k) for k in ("spdx", "quote", "where")
                            if lic.get(k)}
+        att = attribution_of(prov.get("url") or "", lic)
+        if att:
+            prov["attribution"] = att
     return {k: v for k, v in prov.items() if v not in (None, "", [], {})}
 
 
