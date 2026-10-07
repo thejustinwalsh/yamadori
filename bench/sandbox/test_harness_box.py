@@ -24,6 +24,9 @@ import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# argv checks never depend on this machine's docker context (run_tests.py sets the same via its
+# offline guard); test_wsl_engine forces the other engine itself
+os.environ.setdefault("YAMADORI_DOCKER_PATHS", "native")
 import harness_box as hb  # noqa: E402
 import sandbox_net as sn  # noqa: E402
 
@@ -481,8 +484,49 @@ def test_loadout_check() -> None:
           json.dumps({h: r["verdict"] for h, r in rows.items()})[:400])
 
 
+def test_wsl_engine():
+    """THE WSL ENGINE (docs/DOCKER-WSL.md, 2026-10-07): every bind mount is the
+    engine's own path (/mnt/c/...), and the gate's one forward points at the
+    Windows side of the WSL NAT, not at host.docker.internal; Docker Desktop's
+    argv is unchanged."""
+    saved = {k: os.environ.get(k) for k in ("YAMADORI_DOCKER_PATHS", "YAMADORI_DOCKER_HOST_IP")}
+    proj, home = "C:\\work\\proj", "C:\\work\\run\\home"
+    try:
+        os.environ["YAMADORI_DOCKER_PATHS"] = "native"
+        os.environ.pop("YAMADORI_DOCKER_HOST_IP", None)
+        native = hb.run_argv("pi", "t", proj, home, ["x"])
+        check(proj + ":" + hb.WORK in native and hb.target_host() == "host.docker.internal"
+              and hb.forwards(18234) == [(18234, "host.docker.internal", 18234, None)],
+              "Docker Desktop: the Windows paths and host.docker.internal, as before")
+        os.environ["YAMADORI_DOCKER_PATHS"] = "wsl"
+        os.environ["YAMADORI_DOCKER_HOST_IP"] = "172.29.32.1"
+        argv = hb.run_argv("pi", "t", proj, home, ["x"])
+        mounts = [argv[i + 1] for i, x in enumerate(argv) if x == "-v"]
+        check(mounts == ["/mnt/c/work/proj:" + hb.WORK, "/mnt/c/work/run/home:" + hb.HOME]
+              and not any(re.match(r"^[A-Za-z]:", m) for m in mounts),
+              "WSL engine: the project and the run home are mounted by their /mnt/c path", str(mounts))
+        side = hb.sidecar_argv("t")
+        sm = [side[i + 1] for i, x in enumerate(side) if x == "-v"]
+        check(len(sm) == 1 and sm[0].startswith("/mnt/c/") and sm[0].endswith(":/octo:ro"),
+              "WSL engine: the browser sidecar's /octo mount is a /mnt/c path", str(sm))
+        gate = sn.gate_argv("t", hb.forwards(18234), "yh")
+        check(hb.target_host() == "172.29.32.1"
+              and hb.forwards(18234) == [(18234, "172.29.32.1", 18234, None)]
+              and "18234:172.29.32.1:18234" in gate,
+              "WSL engine: the gate's ONE forward targets the Windows side of the WSL NAT")
+        check(all(f[3] is None for f in hb.forwards(18234)) and len(hb.forwards(18234)) == 1
+              and "-p" not in gate,
+              "...still one forward, kept inside the internal network (nothing published)")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def main() -> int:
-    for fn in (test_configs, test_write_home, test_argv, test_forward, test_run,
+    for fn in (test_configs, test_write_home, test_argv, test_forward, test_run, test_wsl_engine,
                test_build_refuses, test_image_pins, test_down_leftovers, test_loadout_check):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

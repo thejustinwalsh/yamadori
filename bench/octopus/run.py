@@ -417,10 +417,20 @@ def hermes_cmd(prompt_file: str, effort: str, budget: int, max_turns: int | None
     return cmd
 
 
+def relay_listen() -> str:
+    """The relay's listen address(es): loopback, and -- on the WSL engine
+    (docs/DOCKER-WSL.md), whose containers reach the Windows host only through
+    the WSL NAT address -- ALSO that one address (never 0.0.0.0: this box is
+    on ZeroTier). Docker Desktop: loopback only, as before."""
+    host = _hb().sandbox_net.host_target()
+    listen = f"127.0.0.1:{RELAY_PORT}"
+    return listen if host == _hb().sandbox_net.HOST_NAME else f"{listen},{host}:{RELAY_PORT}"
+
+
 def relay_cmd(out_path: str) -> list[str]:
     """The recording relay in front of :1234 (both harnesses)."""
     return [sys.executable, os.path.join(HERE, "relay.py"), "--listen",
-            f"127.0.0.1:{RELAY_PORT}", "--upstream", UPSTREAM, "--out", out_path]
+            relay_listen(), "--upstream", UPSTREAM, "--out", out_path]
 
 
 def run_prompt(run_id: str, prompt: str, effort: str, max_turns: int, budget: int,

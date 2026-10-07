@@ -178,6 +178,44 @@ def host_path(p: str) -> str:
     return f"/mnt/{m.group(1).lower()}/" + m.group(2).replace("\\", "/")
 
 
+HOST_NAME = "host.docker.internal"        # Docker Desktop's name for the Windows host
+_HOST_IP: dict = {}
+
+
+def host_target() -> str:
+    """The Windows host as a container on the engine's default bridge (the
+    gate) reaches it. Docker Desktop: `host.docker.internal`. A WSL engine has
+    no such name (docs/DOCKER-WSL.md): the host is the Windows side of the WSL
+    NAT, the Ubuntu VM's default gateway (the `vEthernet (WSL)` adapter,
+    172.29.32.1 on 2026-10-07; it can change when WSL restarts, so it is read
+    from the VM each run, cached for the process). `YAMADORI_DOCKER_HOST_IP`
+    decides it outright. Measured 2026-10-07 from a bridge container: that
+    address answers the host's 0.0.0.0:1234 (200) and a listener bound to it,
+    and not a 127.0.0.1-bound service (:11434, 000). Binding a relay to it
+    needs no firewall or networking-mode change."""
+    forced = os.environ.get("YAMADORI_DOCKER_HOST_IP", "").strip()
+    if forced:
+        return forced
+    if not _remote_engine():
+        return HOST_NAME
+    if "ip" not in _HOST_IP:
+        ip = None
+        try:
+            r = subprocess.run(["wsl", "-d", "Ubuntu", "-u", "root", "--exec", "ip", "-4",
+                                "route", "show", "default"], capture_output=True, text=True,
+                               timeout=30)
+            m = re.search(r"\bvia\s+(\d+\.\d+\.\d+\.\d+)", r.stdout or "")
+            ip = m.group(1) if m else None
+        except (OSError, subprocess.TimeoutExpired):
+            ip = None
+        if not ip:
+            raise RuntimeError("the Windows host's address as the WSL engine's containers reach it "
+                               "could not be read (wsl -d Ubuntu ip route); set "
+                               "YAMADORI_DOCKER_HOST_IP")
+        _HOST_IP["ip"] = ip
+    return _HOST_IP["ip"]
+
+
 def _docker(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess:
     return subprocess.run(["docker", *args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout)

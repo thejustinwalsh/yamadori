@@ -97,3 +97,24 @@ deleted. `systemctl is-system-running` -> `running`. Records: `/root/failed-unit
 Docker Desktop's backend crashed at start on a stale `%LOCALAPPDATA%\Docker\run\dockerInference` socket file
 (2026-09-24, "initializing Inference manager"); it was renamed to `dockerInference.stale-20261006` (from Ubuntu: a
 Windows socket reparse point cannot be renamed from Windows) so the export could run.
+
+## The harness box on this engine (2026-10-07)
+
+`bench/sandbox/harness_box.py` (and so `bench/mcp/lookup_probe.py`, `bench/mcp/package_skills_probe.py`, the pagoda
+Pi runs) now runs on the WSL engine:
+
+- **Bind mounts**: every `-v` source goes through `sandbox_net.host_path()` -- the harness's project and run home, the
+  browser sidecar's `/octo`, `verify`'s probe directory.
+- **The host from a container**: `host.docker.internal` does not exist here. `sandbox_net.host_target()` is the Windows
+  side of the WSL NAT, read each run from the VM's default route (`wsl -d Ubuntu ip route`; 172.29.32.1 on
+  2026-10-07; `YAMADORI_DOCKER_HOST_IP` decides it outright). Measured from a bridge container: it answers the host's
+  0.0.0.0-bound :1234 (200) and a listener bound to that address, and does NOT answer a 127.0.0.1-bound service
+  (:11434: 000). The gate's one forward is `egress:<port> -> <that address>:<port>`; the model's containers still
+  have only the internal network. `harness_box.py verify --target-port 1234` on this engine: every check true
+  (host unreachable directly, refused through the gate with a 403 for 172.29.32.1 and every other host address, the
+  registry/npm/git reachable, the forward answers 200, the other gate ports closed).
+- **The recording relay** (`bench/octopus/relay.py`) listens on `127.0.0.1:18234` AND on that same WSL-NAT address
+  (`--listen a:p,b:p`; `bench/octopus/run.py relay_listen`). Never 0.0.0.0 (ZeroTier). No `.wslconfig` networking mode
+  and no firewall rule was changed: the inbound connection from the WSL NAT to a listener on the vEthernet (WSL)
+  address is allowed as it is.
+- Not migrated still: `bench/octopus/{grade,toolset_arms}.py`, `bench/voxel/check.py` (their `-v` sites).

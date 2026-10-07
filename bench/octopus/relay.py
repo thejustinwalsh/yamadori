@@ -372,11 +372,19 @@ def main() -> int:
     ap.add_argument("--upstream", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    h, p = a.listen.rsplit(":", 1)
-    srv = ThreadingHTTPServer((h, int(p)), make_handler(a.upstream, a.out))
-    srv.daemon_threads = True
+    # --listen HOST:PORT[,HOST:PORT...]: the same relay on each address (the
+    # WSL engine's containers reach the host on the WSL NAT address only)
+    handler = make_handler(a.upstream, a.out)
+    servers = []
+    for one in a.listen.split(","):
+        h, p = one.strip().rsplit(":", 1)
+        srv = ThreadingHTTPServer((h, int(p)), handler)
+        srv.daemon_threads = True
+        servers.append(srv)
+    for srv in servers[1:]:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
     print(f"relay {a.listen} -> {a.upstream}, rows to {a.out}", flush=True)
-    srv.serve_forever()
+    servers[0].serve_forever()
     return 0
 
 

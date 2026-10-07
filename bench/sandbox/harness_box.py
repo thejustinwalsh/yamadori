@@ -461,9 +461,15 @@ def check_port(port: int) -> None:
                          f"(:1234) or a recording relay, never at {sorted(FORBIDDEN_PORTS)}")
 
 
+def target_host() -> str:
+    """The forward's target: `host.docker.internal` on Docker Desktop, the
+    Windows side of the WSL NAT on the WSL engine (sandbox_net.host_target)."""
+    return sandbox_net.host_target()
+
+
 def forwards(port: int) -> list[tuple[int, str, int, None]]:
     """The gate's one outward forward: egress:<port> -> the host's <port>."""
-    return [(port, TARGET_HOST, port, None)]
+    return [(port, target_host(), port, None)]
 
 
 def container_env(harness: str, loadout: str = DEFAULT_LOADOUT) -> dict:
@@ -490,7 +496,7 @@ def sidecar_argv(tag: str) -> list[str]:
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "1024",
             "--memory", "4g", "--cpus", "2",
             "-e", f"SIDECAR_PROXY={sandbox_net.PROXY_URL}",
-            "-v", f"{SIDECAR_DIR}:/octo:ro", "--entrypoint", "python3",
+            "-v", f"{sandbox_net.host_path(SIDECAR_DIR)}:/octo:ro", "--entrypoint", "python3",
             SIDECAR_IMAGE, "/octo/browser_sidecar.py"]
 
 
@@ -547,7 +553,8 @@ def run_argv(harness: str, tag: str, project: str, home: str, args: list[str],
             "--user", "1000:1000", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--pids-limit", "1024",
             "--memory", "8g", "--cpus", "4",
-            "-v", f"{project}:{WORK}", "-v", f"{home}:{HOME}", "-w", WORK]
+            "-v", f"{sandbox_net.host_path(project)}:{WORK}",
+            "-v", f"{sandbox_net.host_path(home)}:{HOME}", "-w", WORK]
     for k, v in container_env(harness, loadout).items():
         argv += ["-e", f"{k}={v}"]
     argv += ["-e", h["key_env"], image, h["bin"], *args]
@@ -647,7 +654,7 @@ def cmd_run(a) -> int:
     tag = a.tag or f"{a.harness}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
     rec: dict = {"harness": a.harness, "version": VERSIONS[a.harness], "image": a.image,
                  "image_id": image_id(a.image), "base_image": BASE_IMAGE,
-                 "tag": tag, "target": f"{TARGET_HOST}:{a.target_port}",
+                 "tag": tag, "target": f"{target_host()}:{a.target_port}",
                  "base_url": base_url(a.target_port), "written": written, "loadout": a.loadout,
                  "t0": time.time()}
     if a.harness == "codex":
@@ -696,7 +703,7 @@ CURL = r"""
 set +e
 p=$1
 echo "allowed  http://egress:$p/health -> $(curl -sS -m 8 -o /dev/null -w '%{http_code}' http://egress:$p/health 2>&1)"
-for t in host.docker.internal:11434 host.docker.internal:2019 192.168.65.254:11434 192.168.65.254:2019; do
+for t in host.docker.internal:11434 host.docker.internal:2019 192.168.65.254:11434 192.168.65.254:2019 $2:11434 $2:2019; do
   echo "direct   http://$t/ -> $(curl -sS -m 5 --noproxy '*' -o /dev/null -w '%{http_code}' http://$t/ 2>&1 | tr '\n' ' ')"
   echo "proxied  http://$t/ -> $(curl -sS -m 8 -o /dev/null -w '%{http_code}' http://$t/ 2>&1 | tr '\n' ' ')"
 done
@@ -731,6 +738,8 @@ def cmd_verify(a) -> int:
     image = a.image if built else sandbox_net.GATE_IMAGE
     tag = f"verify-{os.getpid()}"
     extra_deny = [f"{TARGET_HOST}:{port}", f"192.168.65.254:{port}"]
+    if target_host() != TARGET_HOST:
+        extra_deny.append(f"{target_host()}:{port}")
     curl_out: list[str] = []
 
     def runner(spec: dict) -> tuple[int, str]:
@@ -746,8 +755,8 @@ def cmd_verify(a) -> int:
                 f.write(CURL)
             base = ["run", "--rm", *sandbox_net.network_args(tag, "harness", PREFIX), *env_args,
                     "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt",
-                    "no-new-privileges", "-e", "HOME=/tmp", "-v", f"{d}:/p:ro"]
-            c = _docker([*base, "--entrypoint", "bash", image, "/p/curl.sh", str(port)], 300)
+                    "no-new-privileges", "-e", "HOME=/tmp", "-v", f"{sandbox_net.host_path(d)}:/p:ro"]
+            c = _docker([*base, "--entrypoint", "bash", image, "/p/curl.sh", str(port), target_host()], 300)
             curl_out.extend((c.stdout or "").splitlines())
             r = _docker([*base, "--entrypoint", "python3", image, "/p/probe.py",
                          json.dumps(spec)], 900)
@@ -784,7 +793,7 @@ def cmd_verify(a) -> int:
     res["verdict"]["ok"] = all(res["verdict"].values())
     print(f"image: {image}" + ("" if built else f"  (STAND-IN: {a.image} is not built; "
                                                  "the network checks do not depend on it)"))
-    print(f"forward: egress:{port} -> {TARGET_HOST}:{port} (the one non-global target)")
+    print(f"forward: egress:{port} -> {target_host()}:{port} (the one non-global target)")
     for ln in curl_out:
         print("curl " + ln)
     sandbox_net.report(res)
