@@ -24,7 +24,7 @@ def relative_to(self,*a,**k):
     return pathlib.PurePosixPath(r.as_posix())
 pathlib.PurePath.relative_to=relative_to
 from decision_index import constants as C
-from decision_index.suite.build import rebuild, freeze, release_v2, adapters_added, layout as lay
+from decision_index.suite.build import rebuild, freeze, release_v2, layout as lay
 lay.Layout.rel = lambda self, path: pathlib.Path(path).relative_to(self.root).as_posix()
 from decision_index.suite.build.layout import Layout
 from decision_index.suite.download import hub_file

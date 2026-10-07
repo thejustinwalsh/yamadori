@@ -1,5 +1,4 @@
 # Our driver (not part of the harness): fetch every pinned source of the 0.2.1 suite except HLE (gated on the Hub).
-import json, sys
 from decision_index.suite.build import acquire as acq, adapters_added
 from decision_index.suite.build.layout import Layout
 L = Layout("work")
