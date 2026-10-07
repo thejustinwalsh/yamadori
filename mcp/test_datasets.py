@@ -139,10 +139,11 @@ def test_missing_fields_are_named_with_a_reason():
           "and every question carries the reason it is being asked")
     check(all(x.get("what") for x in m),
           "and states what is wrong, not just which field")
-    lic = [x for x in m if x["field"] == "licence"]
-    check(lic and lic[0]["severity"] == "blocker",
-          "licence is a blocker, not a nice-to-have",
-          json.dumps(lic))
+    check(not [x for x in m if x["field"] == "licence"]
+          and "licence" not in datasets.REQUIRED,
+          "the licence is NOT a required answer: it is provenance only, "
+          "never a question that blocks (operator, 2026-10-07)",
+          json.dumps(m))
 
     part = dict(ANSWERS)
     part.pop("language")
@@ -153,19 +154,20 @@ def test_missing_fields_are_named_with_a_reason():
           json.dumps(datasets.missing(ANSWERS)))
 
 
-def test_unknown_is_not_an_answer():
+def test_the_licence_never_blocks_and_unknown_is_not_an_answer_elsewhere():
     for bad in ("unknown", "UNKNOWN", " ? ", "tbd", "n/a", "none", ""):
         spec = dict(ANSWERS, licence=bad)
-        m = [x for x in datasets.missing(spec) if x["field"] == "licence"]
-        check(len(m) == 1,
-              f"licence={bad!r} is still an unanswered licence",
-              json.dumps(datasets.missing(spec)))
-        if m and bad.strip():
-            check("not an answer" in m[0]["what"],
-                  f"and licence={bad!r} is refused as a non-answer, not as "
-                  f"an empty field", m[0]["what"])
+        check(datasets.missing(spec) == [],
+              f"licence={bad!r} blocks nothing: the licence is provenance "
+              "only", json.dumps(datasets.missing(spec)))
     check(datasets.missing(dict(ANSWERS, licence="MIT")) == [],
-          "a real licence answers the question")
+          "a real licence blocks nothing either")
+    # the OTHER required fields still reject a non-answer by value
+    m = datasets.missing(dict(ANSWERS, language="unknown"))
+    check([x["field"] for x in m] == ["language"]
+          and "not an answer" in m[0]["what"],
+          "\"unknown\" is still no answer for a field that is required",
+          json.dumps(m))
 
 
 def test_a_restricted_licence_is_surfaced_but_does_not_block():
@@ -182,35 +184,25 @@ def test_a_restricted_licence_is_surfaced_but_does_not_block():
           "and a clean dataset warns about nothing")
 
 
-def test_an_unknown_licence_cannot_advance_past_clarify():
-    ds = fresh(licence="unknown")
+def test_an_unknown_licence_does_not_hold_clarify():
+    ds = fresh(licence="")
     check(ds["stage"] == "clarify", "a new submission lands in clarify",
           ds["stage"])
-    before = datasets.job_counts(ds["id"])["total"]
-    raised = None
-    try:
-        datasets.advance(ds["id"])
-    except datasets.Blocked as e:
-        raised = e
-    check(raised is not None,
-          "advancing a dataset with an unknown licence raises Blocked")
-    if raised is not None:
-        check(any(r["field"] == "licence" for r in raised.reasons),
-              "and the refusal names the licence as the reason",
-              json.dumps(raised.reasons))
-    again = datasets.get(ds["id"])
-    check(again["stage"] == "clarify",
-          "the dataset is still in clarify afterwards", again["stage"])
-    check(datasets.job_counts(ds["id"])["total"] == before,
-          "and a refused transition enqueued nothing",
-          f"{before} -> {datasets.job_counts(ds['id'])['total']}")
-
-    # Answering it is what unblocks it -- that, and the fetch finishing.
-    datasets.answer(ds["id"], {"licence": "Apache-2.0"})
     settle(ds["id"])
     ds = datasets.advance(ds["id"])
     check(ds["stage"] == "extract",
-          "once the licence is established the dataset advances", ds["stage"])
+          "a dataset with no licence advances: the licence never blocks",
+          ds["stage"])
+    check(ds["licence"] == datasets.NOT_ESTABLISHED,
+          "and the licence is recorded as \"not established\", not left "
+          "blank and not guessed", ds["licence"])
+    ds2 = fresh(licence="AGPL-3.0-or-later")
+    settle(ds2["id"])
+    ds2 = datasets.advance(ds2["id"])
+    check(ds2["stage"] == "extract" and ds2["licence"] ==
+          "AGPL-3.0-or-later",
+          "a restricted licence advances too, recorded as given",
+          (ds2["stage"], ds2["licence"]))
 
 
 def test_stage_transitions_enqueue_the_right_lane():
@@ -539,9 +531,10 @@ def test_the_api_creates_answers_and_refuses_through_http_shapes():
         "/dash/api/dataset/answer",
         dict(ANSWERS, id=did, licence="unknown"))
     body = json.loads(hit[2])
-    check(body["ok"] and [m["field"] for m in body["missing"]] == ["licence"],
-          "answering all but the licence leaves exactly the licence open",
-          json.dumps([m["field"] for m in body["missing"]]))
+    check(body["ok"] and not body["missing"],
+          "answering everything but a licence leaves nothing open: the "
+          "licence is provenance only", json.dumps(
+              [m["field"] for m in body["missing"]]))
 
     hit = dash_data.handle_post("/dash/api/dataset/answer",
                                 {"id": did, "licence": "MIT"})
@@ -611,9 +604,9 @@ def test_the_page_shows_no_number_it_did_not_measure():
 def main() -> int:
     for fn in (test_the_fixture_is_not_the_real_database,
                test_missing_fields_are_named_with_a_reason,
-               test_unknown_is_not_an_answer,
+               test_the_licence_never_blocks_and_unknown_is_not_an_answer_elsewhere,
                test_a_restricted_licence_is_surfaced_but_does_not_block,
-               test_an_unknown_licence_cannot_advance_past_clarify,
+               test_an_unknown_licence_does_not_hold_clarify,
                test_stage_transitions_enqueue_the_right_lane,
                test_the_laya_kind_and_its_stages_are_gone,
                test_a_url_submission_enqueues_a_net_fetch_and_pasted_text_does_not,

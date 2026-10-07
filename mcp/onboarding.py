@@ -20,7 +20,7 @@ it does a dataset or a skill version.
 | stage | lane | queue | does |
 |---|---|---|---|
 | resolve | net | package.resolve | links -> package@version at a commit, the licence from a verbatim quote (package_resolve); N packages -> N-1 sibling onboardings in one group |
-| clarify | -- | -- | HUMAN only when no licence quote was found (the operator's statement, POST /dash/api/dataset/answer), or when the licence found is one datasets.RESTRICTED surfaces (held for a person) |
+| clarify | -- | -- | HUMAN only for a locator (never for a licence: the licence is provenance, recorded when a verbatim quote was found and as "not established" otherwise -- operator, 2026-10-07) |
 | index | gpu, IDLE | package.index | the tarball verified against dist.integrity, unpacked, indexed with embeddings (deps.fetch_verified, deps.index_package); skipped when already indexed, healthy and embedded |
 | vocab | cpu | package.vocab | the candidate vocabulary with the package; PROMOTED only when the standing detection labels do not get worse (operator decision 4), else HELD with the reason |
 | examples | net | package.examples | the package's example code at the commit, labelled by its own imports (package_examples) |
@@ -800,12 +800,10 @@ def blockers(ds: dict) -> list[dict]:
                                       "the vocab stage"})
         return out
     if stage == "clarify":
-        out = datasets.missing(ds)
-        if not package_of(did):
-            # No package: each skill's own licence stage establishes its
-            # licence; the onboarding asks only for a locator.
-            out = [m for m in out if m["field"] != "licence"]
-        return out
+        # The licence never blocks (operator, 2026-10-07): it is provenance,
+        # recorded when a verbatim quote was found and as "not established"
+        # otherwise; the onboarding asks only for a locator.
+        return [m for m in datasets.missing(ds) if m["field"] != "licence"]
     if stage == "skills":
         out = []
         for s in skills_of(did):
@@ -847,19 +845,10 @@ def blockers(ds: dict) -> list[dict]:
 
 
 def held_for_person(ds: dict) -> str | None:
-    """A licence the resolve found that datasets.RESTRICTED surfaces holds
-    the onboarding in clarify for a person (worker.handle_assist's rule)."""
-    if ds.get("stage") != "clarify":
-        return None
-    restricted = [w for w in datasets.warnings(ds) if w["kind"] == "licence"]
-    by_evidence = ((ds.get("assist") or {}).get("fields") or {}).get(
-        "licence", {}).get("provenance") == "evidence"
-    import worker
-    if restricted and by_evidence and worker.HOLD_RESTRICTED:
-        return (f"held in clarify: the licence resolve found carries a "
-                f"restriction ({restricted[0]['what']}); advancing is a "
-                "decision about serving it, and a person makes it "
-                "(POST /dash/api/dataset/advance)")
+    """Nothing holds an onboarding for its licence any more (operator,
+    2026-10-07: the licence is provenance only, "WE DONT NEED TO FUCKING
+    LICENSE TEXT THAT WE INJECT IT IS FAIR USE"). Kept for the callers that
+    ask; always None."""
     return None
 
 

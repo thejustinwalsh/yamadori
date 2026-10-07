@@ -163,9 +163,9 @@ BODY = r"""<main>
   <p class="lede">Add a source, answer the questions it raises, and watch it
   move through submitted &rarr; clarify &rarr; extract &rarr;
   index. Every stage is a durable job row in index/jobs.sqlite3; this page
-  enqueues them and never runs them. Licence is asked for and not guessed --
-  this repo has already had to flag an AGPL corpus and a manual that prohibits
-  redistribution. Review still writes straight back to
+  enqueues them and never runs them. Licence is recorded when a verbatim
+  statement is found and never guessed; it never blocks (operator,
+  2026-10-07: provenance only). Review still writes straight back to
   bench/recipes/*.jsonl.</p>
 </div>
 

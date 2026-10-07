@@ -595,11 +595,11 @@ def handle_index(job: dict, ctx: Context) -> dict:
 #
 # When nothing is left missing it advances the dataset itself -- so a
 # well-documented source goes fetch -> assist -> extract -> index with no
-# human -- EXCEPT when the licence it found is one datasets.RESTRICTED
-# surfaces (AGPL, no-redistribution, all rights reserved, ...). Serving rows
-# under such a licence is a decision about the rows, and nobody made it: the
-# dataset is HELD in clarify with the warning showing and the reason in
-# `assist.held`, and a person advances it. HOLD_RESTRICTED turns that off.
+# human. The LICENCE is provenance only (operator, 2026-10-07, verbatim: "WE
+# DONT NEED TO FUCKING LICENSE TEXT THAT WE INJECT IT IS FAIR USE WE ARE NOT
+# DISTRUBITING IT ANYTHING HERE WE ARE DOING IS FINE"): a licence the assist
+# quotes is recorded, a restricted one is a note (datasets.RESTRICTED), and
+# none found is recorded as "not established" -- nothing holds the dataset.
 # ---------------------------------------------------------------------------
 ASSIST_MAX_TOKENS = int(os.environ.get("YAMADORI_ASSIST_MAX_TOKENS", "1024"))
 ASSIST_HEAD_CHARS = 8000
@@ -609,7 +609,6 @@ LICENCE_FILE_CHARS = 6000
 LICENCE_FETCH_BYTES = 512 * 1024
 LICENCE_FETCH_TIMEOUT = 20
 LICENCE_NAMES = ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING")
-HOLD_RESTRICTED = os.environ.get("YAMADORI_ASSIST_HOLD_RESTRICTED", "1") != "0"
 # "MIT License" is 11 characters and a complete statement; below this a
 # "quote" is a word, and a word is in every document.
 MIN_LICENCE_QUOTE_CHARS = 8
@@ -853,6 +852,10 @@ def handle_assist(job: dict, ctx: Context) -> dict:
                            "fills clarifying answers"}
     open_fields = [m["field"] for m in datasets.missing(ds)
                    if m["field"] in datasets.ASSISTED]
+    if not str(ds.get("licence") or "").strip() and "licence" not in             open_fields:
+        # the licence is no longer a required answer, but it is still looked
+        # for (provenance: a verbatim quote, else "not established")
+        open_fields.append("licence")
     if not open_fields:
         return {"skipped": "every field the assist may fill was answered "
                            "before it ran"}
@@ -979,16 +982,8 @@ def handle_assist(job: dict, ctx: Context) -> dict:
     if ds["stage"] != "clarify" or result["missing"]:
         return result
     restricted = [w for w in datasets.warnings(ds) if w["kind"] == "licence"]
-    by_model = (ds.get("assist") or {}).get("fields", {}).get(
-        "licence", {}).get("provenance") == "evidence"
-    if restricted and by_model and HOLD_RESTRICTED:
-        held = (f"held in clarify: the licence the assist found carries a "
-                f"restriction ({restricted[0]['what']}). Every question is "
-                "answered; advancing is a decision about serving these rows, "
-                "and a person makes it.")
-        datasets.answer(ds["id"], {}, meta={"held": held})
-        result["held"] = held
-        return result
+    if restricted:
+        result["licence_note"] = restricted[0]["what"]      # a note only
     try:
         result["advanced_to"] = datasets.advance(ds["id"])["stage"]
     except datasets.Blocked as e:

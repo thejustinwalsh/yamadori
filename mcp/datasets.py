@@ -164,8 +164,9 @@ PACKAGE_ENQUEUE = {
 # attempt (jobs.defer): worker.run_one reads `idle` from the payload.
 PACKAGE_IDLE = frozenset({"index", "knn"})
 PACKAGE_JOINS = ("skills", "rebuild")
-# A package onboarding asks only what resolve could not establish: the
-# licence (a verbatim quote, or the operator's statement) and a locator.
+# A package onboarding asks only what resolve could not establish: a locator.
+# The licence is recorded (a verbatim quote, or "not established") and is
+# never a question (operator, 2026-10-07).
 PACKAGE_FIELDS = ("source_url", "licence")
 
 
@@ -224,12 +225,14 @@ FIELDS = (
         "name": "licence",
         "label": "LICENCE",
         "input": "text",
-        "required": True,
-        "severity": "blocker",
-        "why": "This repo has already had to flag an AGPL corpus and a manual "
-               "that prohibits redistribution. An unknown licence is a "
-               "BLOCKER, never a default: establishing it after the rows are "
-               "armed as skills is establishing it too late.",
+        "required": False,
+        "severity": "info",
+        "why": "PROVENANCE ONLY, never a gate (operator, 2026-10-07: \"WE "
+               "DONT NEED TO FUCKING LICENSE TEXT THAT WE INJECT IT IS FAIR "
+               "USE WE ARE NOT DISTRUBITING IT ANYTHING HERE WE ARE DOING IS "
+               "FINE\"). It is recorded when a verbatim statement is found "
+               "(or a person gives one), and otherwise as \"not "
+               "established\". It is never guessed and written as fact.",
     },
     {
         "name": "language",
@@ -257,17 +260,19 @@ FIELDS = (
 
 REQUIRED = tuple(f["name"] for f in FIELDS if f["required"])
 
-# Answers that are the absence of an answer wearing one. "unknown" in a licence
-# field is the exact failure this module exists to prevent, so it is rejected
-# by value rather than by emptiness.
+# The licence field's value when nothing was established (provenance only).
+NOT_ESTABLISHED = "not established"
+
+# Answers that are the absence of an answer wearing one, rejected by value
+# rather than by emptiness (the licence is no longer one of the required
+# fields: it never blocks).
 NON_ANSWERS = {"", "-", "?", "??", "n/a", "na", "none", "null", "nil",
                "unknown", "unsure", "dunno", "tbd", "tbc", "todo", "pending",
                "not sure", "no idea", "idk"}
 
-# Licences that are recorded and then SURFACED, because they constrain what may
-# be done with the rows. Matched as substrings of the lowered answer. This does
-# not block -- a local-only corpus under AGPL is legitimate -- but a page that
-# did not say so would be hiding the thing somebody has to decide about.
+# Licences that are recorded and then SURFACED as a note. Matched as
+# substrings of the lowered answer. A note never blocks and never holds a
+# dataset (operator, 2026-10-07: the licence is provenance only).
 RESTRICTED = (
     ("agpl", "AGPL: anything served from these rows carries the licence with "
              "it. This repo has flagged an AGPL corpus before."),
@@ -428,9 +433,9 @@ def warnings(spec: dict) -> list[dict]:
     """Facts about an ANSWERED dataset that somebody still has to decide about.
 
     Distinct from `missing`: these do not block. A restricted licence is a
-    constraint on what may be done with the rows, not a reason to refuse to
-    record them, and an unknown domain tag is a typo the gate will silently
-    drop.
+    note, recorded and shown, never a reason to refuse or hold anything (the
+    operator's decision of 2026-10-07), and an unknown domain tag is a typo
+    the gate will silently drop.
     """
     out: list[dict] = []
     lic = str(spec.get("licence") or "").strip().lower()
@@ -664,6 +669,8 @@ def field_states(ds: dict) -> list[dict]:
       proposed   filled by the assist from its own reading -- an inference
       operator   typed by a person (at submission, or since)
       needs_you  unanswered; `why`, `what` and `searched` say what is known
+      not_established  a field that is not required (the licence) and was
+                 not found: provenance only, never a question
 
     The rule lives here rather than in the page for the reason `missing()`
     does: a second caller must get the same answer. A provenance entry whose
@@ -687,6 +694,14 @@ def field_states(ds: dict) -> list[dict]:
             row["what"] = gaps[k]["what"]
             if gaps[k].get("searched"):
                 row["searched"] = gaps[k]["searched"]
+        elif not f["required"] and (_blank(value)
+                                    or str(value) == NOT_ESTABLISHED):
+            # PROVENANCE, not a question (the licence): nothing established
+            row["state"] = "not_established"
+            row["what"] = "nothing established; recorded as not established"
+            nf = ((ds.get("assist") or {}).get("not_found") or {}).get(k)
+            if nf:
+                row["searched"] = nf
         else:
             e = prov.get(k) or {}
             same = e.get("value") == value
@@ -800,6 +815,14 @@ def advance(dataset_id: str, *, to: str | None = None) -> dict:
     stop = blockers(ds)
     if stop:
         raise Blocked(ds["stage"], stop)
+    if ds["stage"] == "clarify" and not str(ds.get("licence") or "").strip():
+        # the licence is provenance: say that nothing was established
+        con = _db()
+        try:
+            con.execute("UPDATE datasets SET licence=? WHERE id=?",
+                        (NOT_ESTABLISHED, dataset_id))
+        finally:
+            con.close()
 
     _set_stage(dataset_id, target)
     ds = get(dataset_id)

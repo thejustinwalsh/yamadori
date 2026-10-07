@@ -8,14 +8,17 @@ WHAT THIS IS GATING
      host, character for character (the extract evidence rule), that is about
      licensing, and that contains the licence it names. A paraphrase, an
      absent quote, a quote naming a different licence -- each leaves the field
-     EMPTY, and missing() then says what was searched.
+     unfilled; the dataset records "not established" and says what was
+     searched.
   2. PROVENANCE. Every value the model supplied is stored with where it came
      from: `evidence` (quote + where found) or `proposed` (its reading). An
      operator's value is `operator` and is never overwritten by the model.
   3. UNATTENDED. A source that states its licence runs fetch -> assist ->
      extract -> index -> complete with no human action.
-  4. RESTRICTED LICENCES ARE SURFACED, and a model-found one HOLDS the dataset
-     in clarify rather than serving the rows on nobody's decision.
+  4. THE LICENCE NEVER BLOCKS (operator, 2026-10-07: "WE DONT NEED TO FUCKING
+     LICENSE TEXT THAT WE INJECT IT IS FAIR USE"). A restricted licence is
+     surfaced as a NOTE and holds nothing; a licence not found is recorded as
+     "not established" and the dataset advances.
   5. THE API carries it: field_states on both dataset endpoints, the minimal
      {url} / {text} submission, and the explicit re-ask.
 
@@ -312,7 +315,7 @@ def _needs_licence(ds: dict) -> dict | None:
                 None)
 
 
-def test_a_quote_that_is_not_in_the_source_leaves_the_licence_missing():
+def test_a_quote_that_is_not_in_the_source_leaves_the_licence_unestablished():
     REPLIES["/bare/page"] = reply(
         source_name="Bare Notes", language="python", domains=["tooling"],
         licence="Apache-2.0",
@@ -321,27 +324,27 @@ def test_a_quote_that_is_not_in_the_source_leaves_the_licence_missing():
     ds = url_dataset("/bare/page")
     drain()
     ds = datasets.get(ds["id"])
-    check(ds["licence"] == "",
-          "a licence whose quote is not in any fetched text is NOT stored",
-          repr(ds["licence"]))
-    m = _needs_licence(ds)
-    check(m is not None, "missing() asks the operator for it")
-    if m:
-        check("searched" in m and f"{BASE}/bare/page" in m["searched"]
-              and f"{BASE}/bare/LICENSE" in m["searched"]
-              and "HTTP 404" in m["searched"],
-              "and says what was searched: the page and each LICENSE tried",
-              m.get("searched", "")[:300])
-        check("failed verification" in m["what"]
-              and "not in any fetched text" in m["what"],
-              "and why the model's offer was discarded", m["what"][:300])
-    check(states(ds)["licence"]["state"] == "needs_you",
-          "the field is NEEDS YOU", states(ds)["licence"]["state"])
-    check(ds["stage"] == "clarify"
-          and not [j for j in jobs.listing(dataset=ds["id"])
-                   if j["queue"] == "dataset.extract"],
-          "and the dataset stays in clarify: nothing was extracted",
-          ds["stage"])
+    check(ds["licence"] == datasets.NOT_ESTABLISHED,
+          "a licence whose quote is not in any fetched text is NOT stored "
+          "as fact: the record says \"not established\"", repr(ds["licence"]))
+    check(_needs_licence(ds) is None,
+          "missing() does not ask for it: the licence is never a question")
+    nf = (ds["assist"].get("not_found") or {}).get("licence") or ""
+    check(f"{BASE}/bare/page" in " ".join((ds["assist"].get("searched")
+                                           or [{}])[0].get("where", "")
+                                          for _ in [0])
+          or "searched" in nf or "failed verification" in nf,
+          "what was searched and why the model's offer was discarded stay "
+          "on the record", nf[:300])
+    check("failed verification" in nf and "not in any fetched text" in nf,
+          "the model's offer was discarded, and why", nf[:300])
+    check(states(ds)["licence"]["state"] == "not_established",
+          "the field's state is NOT ESTABLISHED, not NEEDS YOU",
+          states(ds)["licence"]["state"])
+    check(ds["stage"] == "extract"
+          and [j for j in jobs.listing(dataset=ds["id"])
+               if j["queue"] == "dataset.extract"],
+          "and the dataset advanced: extract was enqueued", ds["stage"])
     check(states(ds)["source_name"]["state"] == "proposed",
           "while the fields it may propose are still proposed")
 
@@ -392,7 +395,7 @@ def test_an_absent_or_non_verbatim_quote_is_discarded_each_way():
           "assist read", json.dumps([ds["stage"], nf.get("source_name")]))
 
 
-def test_a_restricted_licence_is_surfaced_and_held():
+def test_a_restricted_licence_is_a_note_and_holds_nothing():
     REPLIES["/agpl/page"] = reply(
         source_name="Copyleft Manual", language="c", domains=["systems"],
         licence="GNU AGPL-3.0",
@@ -408,17 +411,14 @@ def test_a_restricted_licence_is_surfaced_and_held():
     w = datasets.warnings(ds)
     check(any(x["kind"] == "licence" and "AGPL" in x["what"] for x in w),
           "warnings() surfaces the restriction", json.dumps(w))
-    check(not datasets.missing(ds) and ds["stage"] == "clarify",
-          "every question is answered, yet the dataset is HELD in clarify",
-          ds["stage"])
-    check("held in clarify" in (ds["assist"].get("held") or ""),
-          "and the hold says why", str(ds["assist"].get("held"))[:200])
-    check(not [j for j in jobs.listing(dataset=ds["id"])
-               if j["queue"] == "dataset.extract"],
-          "nothing was extracted on nobody's decision")
-    ds = datasets.advance(ds["id"])
-    check(ds["stage"] == "extract",
-          "a person advancing it is not blocked: the hold is not a gate")
+    check(not datasets.missing(ds) and ds["stage"] == "extract"
+          and not (ds["assist"].get("held") or ""),
+          "every question is answered and the dataset ADVANCED: nothing "
+          "holds it (the licence is provenance only)", (ds["stage"],
+                                                        ds["assist"]))
+    check([j for j in jobs.listing(dataset=ds["id"])
+           if j["queue"] == "dataset.extract"],
+          "extract was enqueued")
 
 
 def test_an_operator_answer_is_never_overwritten_and_overrides_are_kept():
@@ -514,7 +514,7 @@ def test_the_api_carries_provenance_and_takes_the_minimal_submission():
     d = json.loads(body)
     fs = {r["field"]: r["state"] for r in d.get("field_states", [])}
     check(code == 200 and fs.get("source_name") == "proposed"
-          and fs.get("licence") == "needs_you" and d.get("assist_jobs")
+          and fs.get("licence") == "not_established" and d.get("assist_jobs")
           and "searched" in d.get("assist", {}),
           "GET /dash/api/datasets/{id} carries field_states, the assist "
           "record and the assist job", json.dumps(fs))
@@ -561,9 +561,9 @@ def main() -> int:
     for fn in (test_the_fixture_is_isolated,
                test_a_verbatim_footer_quote_fills_the_licence_and_runs_unattended,
                test_a_licence_file_on_the_same_host_is_read_and_quoted,
-               test_a_quote_that_is_not_in_the_source_leaves_the_licence_missing,
+               test_a_quote_that_is_not_in_the_source_leaves_the_licence_unestablished,
                test_an_absent_or_non_verbatim_quote_is_discarded_each_way,
-               test_a_restricted_licence_is_surfaced_and_held,
+               test_a_restricted_licence_is_a_note_and_holds_nothing,
                test_an_operator_answer_is_never_overwritten_and_overrides_are_kept,
                test_a_failed_model_call_stores_nothing,
                test_licence_file_locations,

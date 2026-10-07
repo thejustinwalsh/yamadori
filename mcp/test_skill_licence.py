@@ -215,12 +215,18 @@ def test_license_docs_does_not_cover_a_code_path() -> None:
     out, asked, sid = _licence_run(
         CODE_PAGE, {BASE + "LICENSE-DOCS.md": LICENSE_DOCS})
     ver = skills.version(sid, 1)
-    check(out.get("failed") == "no licence" and ver["state"] == "failed"
-          and not any("DOCS" in u for u in asked)
-          and "no licence could be established" in (ver["reason"] or ""),
+    check(out.get("licence") == P.NOT_ESTABLISHED
+          and ver["state"] == "running"
+          and ver["licence"]["status"] == P.NOT_ESTABLISHED
+          and not any("DOCS" in u for u in asked),
           "[code] a code path of the same repo does NOT take the docs "
-          "licence: LICENSE-DOCS.md is never asked for, the stage fails "
-          "with the operator's remedy", (out, asked[:3]))
+          "licence: LICENSE-DOCS.md is never asked for, the licence is "
+          "recorded as not established, and the stage PASSES (it never "
+          "blocks)", (out, asked[:3]))
+    prov = P._provenance(sid, ver, skills.get(sid))
+    check(prov["licence"] == {"status": P.NOT_ESTABLISHED}
+          and "attribution" not in prov,
+          "[code] the provenance says not established", prov.get("licence"))
     check(any(u.endswith("/COPYING") for u in asked)
           and any(u.endswith("/LICENCE") for u in asked),
           "[code] LICENCE* and COPYING* were looked for", asked)
@@ -237,10 +243,41 @@ def test_a_general_file_and_never_a_guess() -> None:
     out2, asked2, sid2 = _licence_run(
         DOCS_PAGE, {BASE + "LICENSE-DOCS.md": "Our docs are made by a team "
                     "and may be read by anyone.\n"})
-    check(out2.get("failed") == "no licence"
-          and skills.version(sid2, 1)["state"] == "failed",
+    check(out2.get("licence") == P.NOT_ESTABLISHED
+          and skills.version(sid2, 1)["state"] == "running"
+          and not skills.version(sid2, 1)["licence"].get("spdx"),
           "[guess] a licence file with no licence line fills nothing: the "
-          "licence is never guessed", out2)
+          "licence is never guessed, and the stage still passes", out2)
+
+
+def test_the_licence_never_blocks() -> None:
+    """Operator, 2026-10-07: "WE DONT NEED TO FUCKING LICENSE TEXT THAT WE
+    INJECT IT IS FAIR USE WE ARE NOT DISTRUBITING IT ANYTHING HERE WE ARE
+    DOING IS FINE"."""
+    out, _asked, sid = _licence_run(
+        DOCS_PAGE, {BASE + "LICENSE-DOCS.md": "Attribution-NoDerivatives "
+                    "4.0 International\n\nCreative Commons "
+                    "Attribution-NoDerivatives 4.0 International Public "
+                    "License\n"})
+    ver = skills.version(sid, 1)
+    check(out.get("licence") == "CC-BY-ND-4.0" and ver["state"] == "running"
+          and "restricts derivatives" in ver["licence"].get("note", ""),
+          "[never] a no-derivatives licence is RECORDED with a note and "
+          "passes: it no longer fails the version", (out, ver["state"],
+                                                     ver["licence"]))
+    out2, _a2, sid2 = _licence_run(DOCS_PAGE, {})
+    v2 = skills.version(sid2, 1)
+    check(out2.get("licence") == P.NOT_ESTABLISHED and v2["state"] ==
+          "running" and not v2.get("reason"),
+          "[never] no licence anywhere: recorded as not established, the "
+          "version keeps running (no failure, no remedy)", (out2, v2[
+              "state"], v2.get("reason")))
+    out3, _a3, sid3 = _licence_run(
+        DOCS_PAGE, {BASE + "LICENSE": "Copyright (c) 2026 Acme. All rights "
+                    "reserved.\n"})
+    v3 = skills.version(sid3, 1)
+    check(v3["state"] == "running", "[never] \"all rights reserved\" "
+          "passes too", (out3, v3["state"]))
 
 
 def main() -> int:

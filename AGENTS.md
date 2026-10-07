@@ -1571,8 +1571,15 @@ learning was scheduled by deep_learn, which is gone.
   durable queue. The lane limit is global across processes
   (`{gpu: 1, cpu: 4, net: 4}`). `mcp/worker.py` claims and runs the jobs.
   There is no review stage: review is optional and happens after the fact on
-  the dashboard. The `clarify` stage is model-assisted. A licence is filled only
-  from a verified verbatim quote, and a guessed licence is never proposed.
+  the dashboard. The `clarify` stage is model-assisted. **THE LICENCE NEVER
+  BLOCKS** (operator, 2026-10-07, verbatim: "WE DONT NEED TO FUCKING LICENSE TEXT THAT WE INJECT IT IS FAIR USE WE ARE NOT DISTRUBITING IT ANYTHING HERE WE ARE DOING IS FINE"): it is
+  PROVENANCE ONLY -- recorded from a verified verbatim quote when one is
+  found and as `not established` otherwise, a restricted one a NOTE
+  (`datasets.warnings`); no quarantine, failure, clarify question, operator
+  remedy or hold for a missing or restricted licence, in the datasets, the
+  package onboarding or the skills pipeline. A guessed licence is still never
+  written as fact. A CC BY licence's attribution rides in the provenance
+  (`skill_pipeline.attribution_of`).
   A job may WAIT without spending an attempt (`jobs.defer`: back to
   `queued` with `not_before`; `claim()` skips it until then; 2026-09-27): a
   job whose payload says `"idle": true` is checked by `worker.run_one`
@@ -1598,8 +1605,8 @@ learning was scheduled by deep_learn, which is gone.
   PyPI / GitHub links -> package@version at a commit, each choice with its
   rule; the licence from verbatim quotes: `mcp/package_resolve.py`, GET only
   through `mcp/package_net.py`, unauthenticated GitHub with the server's own
-  rate-limit reset honoured) -> `clarify` (a person only when no quote was
-  found, or a restricted licence) -> `index` (gpu, idle: the tarball
+  rate-limit reset honoured) -> `clarify` (a person only for a locator;
+  never for a licence) -> `index` (gpu, idle: the tarball
   verified against `dist.integrity` and `dist.unpackedSize`,
   `deps.fetch_verified`) -> `vocab` (`mcp/package_registry.py`: the
   candidate vocabulary is PROMOTED only if the standing detection labels do

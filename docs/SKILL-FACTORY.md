@@ -790,11 +790,17 @@ evidence for it and rules out the skills gated on it, as does a "vanilla" /
 "plain" / "standalone" stack for the React and R3F layers; a request naming
 R3F meets a "needs React" gate. `mcp/test_matcher_gates.py`.
 
-The licence is established only from a verbatim quote (a SKILL.md's own
-`license:` line, a licence line in the source, a LICENSE file beside it) or
-the operator's statement (`POST /dash/api/skill/licence`); none found FAILS
-the licence stage with the remedy; a no-derivatives licence fails outright.
-A pasted text with no licence line is recorded as `operator-supplied`.
+THE LICENCE NEVER BLOCKS (operator, 2026-10-07, verbatim: "WE DONT NEED TO FUCKING LICENSE TEXT THAT WE INJECT IT IS FAIR USE WE ARE NOT DISTRUBITING IT ANYTHING HERE WE ARE DOING IS FINE"). The licence stage RECORDS what it finds, from
+a verbatim quote only (a SKILL.md's own `license:` line, a licence line in the
+source, the repository's own licence file at the pinned ref -- LICENSE-DOCS*
+for a documentation page, then LICENSE*, LICENCE*, COPYING* -- or the
+operator's statement, `POST /dash/api/skill/licence`) and otherwise records
+`not established`; it ALWAYS passes. No quarantine, no failure, no operator
+remedy, no clarify question: a missing, restricted or no-derivatives licence
+is provenance (a no-derivatives one carries a note). A licence is still never
+guessed and written as fact, and a CC BY licence's attribution block is
+optional provenance. A pasted text with no licence line is recorded as
+`operator-supplied`.
 The ~39 skills MIGRATED from the recipe corpus with an `unknown` or absent
 licence STAY ARMED (operator, 2026-09-26: "Keep the skills armed"): they
 were already served as hints, and the licence is still never guessed --
@@ -1103,8 +1109,9 @@ unchanged.
 
 The licence answer and a re-run of an errored stage job are the datasets
 API's (`POST /dash/api/dataset/answer`, `/dash/api/dataset/rerun`); a clarify
-held for a restricted licence is advanced by a person
-(`/dash/api/dataset/advance`). No answer carries a filesystem path.
+is never held for a licence (provenance only,
+2026-10-07); `/dash/api/dataset/advance` advances one that waits for a
+locator. No answer carries a filesystem path.
 
 ## x_yamadori.skills (every response)
 

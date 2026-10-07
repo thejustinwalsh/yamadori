@@ -22,9 +22,9 @@ worker (worker.run / run_one) and the real datasets rules.
   5. RESOLVE. Links, pins, the major and latest rules, gitHead, a GitHub
      repository link, siblings for two packages, the licence from verbatim
      quotes, the first resolution pins, replace vs alongside.
-  6. CLARIFY. A quoted licence passes with no human; none holds; the
-     operator's answer + the sweep advance it; a restricted licence holds
-     for a person.
+  6. CLARIFY. The licence NEVER blocks (operator, 2026-10-07): a quoted one
+     is recorded and passes with no human; a restricted one is a note and
+     holds nothing; none found is recorded as "not established" and passes.
   7. INDEX. The tarball verified against dist.integrity (a mismatch and an
      unpackedSize overrun are refused, unpacked nothing); LICENSE extracted;
      an indexed, healthy, embedded package is skipped.
@@ -599,8 +599,9 @@ def test_kind():
         "knn", "sources", "skills", "retire", "rebuild", "evaluate",
         "complete"), "[kind] the stage order of the design")
     miss = [m["field"] for m in datasets.missing({"kind": "package"})]
-    check(miss == ["source_url", "licence"],
-          "[kind] a package asks only for the locator and the licence", miss)
+    check(miss == ["source_url"],
+          "[kind] a package asks only for the locator: never for a licence",
+          miss)
     check(datasets.next_stage({"kind": "package", "stage": "vocab"})
           == "examples" and datasets.next_stage(
               {"kind": "recipes", "stage": "extract"}) == "index",
@@ -756,16 +757,13 @@ def test_clarify():
     did = ds["id"]
     drain()
     d = ds_of(did)
-    check(d["stage"] == "clarify" and d["licence"] == "AGPL-3.0"
-          and "held" in (onboarding.held_for_person(d) or ""),
-          "[clarify] an AGPL licence found by evidence holds for a person "
-          "(datasets.RESTRICTED)", {k: d.get(k) for k in ("stage", "licence")})
-    onboarding.sweep()
-    check(stage(did) == "clarify", "[clarify] the sweep does not walk past "
-          "a hold")
-    datasets.advance(did)
-    check(stage(did) == "index", "[clarify] a person advances it")
-    # No licence at all: holds with the question.
+    check(d["stage"] != "clarify" and d["licence"] == "AGPL-3.0"
+          and onboarding.held_for_person(d) is None
+          and any(w["kind"] == "licence" for w in datasets.warnings(d)),
+          "[clarify] an AGPL licence found by evidence is recorded and shown "
+          "as a note; nothing holds the onboarding for a person",
+          {k: d.get(k) for k in ("stage", "licence")})
+    # No licence at all: recorded as "not established", passes.
     PACKUMENTS["nolic"] = packument("nolic", {"1.0.0": None}, "1.0.0",
                                     "acme/nolic")
     PACKUMENTS["nolic"]["versions"]["1.0.0"].pop("license")
@@ -774,13 +772,11 @@ def test_clarify():
     IDLE.update(on=False, why="busy")
     drain()
     d = ds_of(did2)
-    b = onboarding.blockers(d)
-    check(d["stage"] == "clarify" and [x["field"] for x in b] == ["licence"],
-          "[clarify] no quote: held at clarify with the licence question", b)
-    datasets.answer(did2, {"licence": "MIT"})
-    onboarding.sweep()
-    check(stage(did2) == "index", "[clarify] the operator's answer + the "
-          "sweep advance it", stage(did2))
+    check(d["stage"] == "index" and d["licence"] == datasets.NOT_ESTABLISHED
+          and not onboarding.blockers(dict(d, stage="clarify")),
+          "[clarify] no quote: the licence is recorded as \"not "
+          "established\" and the onboarding passes clarify with no human",
+          {k: d.get(k) for k in ("stage", "licence")})
     IDLE.update(on=True)
     return did2
 

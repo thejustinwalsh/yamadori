@@ -564,8 +564,13 @@ def enqueue(sid: str, v: int, stage: str) -> str:
     queue, lane = JOBS[stage]
     payload = {"skill": sid, "version": int(v), "stage": stage}
     m = (get(sid) or {}).get("meta") or {}
+    # A version put back through the pipeline by an operator or an agent
+    # (rerun, reopen_at) is IDLE-GATED on every gpu stage it runs: a re-run
+    # never competes with a live run (coordinator, 2026-10-07).
+    gated = bool(((version(sid, v) or {}).get("meta") or {}).get("idle_gated"))
     if lane == "gpu" and (stage == "prove" or m.get("onboarding")
-                          or m.get("rebuild") or m.get("replacement")):
+                          or m.get("rebuild") or m.get("replacement")
+                          or gated):
         # An onboarding's skill model stages wait for an idle stack like its
         # other gpu stages (worker.run_one; docs/PACKAGE-ONBOARDING.md 3.2);
         # so does every PROVE (operator, 2026-09-28: "Run it as idle-gated
@@ -891,8 +896,13 @@ def reopen_at(sid: str, v: int, stage: str, **fields) -> dict:
         raise ValueError(f"{stage!r} is not on v{v}'s path")
 
     def fn(con):
-        sets = ["state='running'", "stage=?", "reason=NULL", "updated=?"]
-        args = [stage, time.time()]
+        vm = json.loads(con.execute(
+            "SELECT meta FROM skill_versions WHERE skill=? AND version=?",
+            (sid, int(v))).fetchone()["meta"] or "{}")
+        vm["idle_gated"] = True
+        sets = ["state='running'", "stage=?", "reason=NULL", "updated=?",
+                "meta=?"]
+        args = [stage, time.time(), json.dumps(vm)]
         for k, val in fields.items():
             sets.append(f"{k}=?")
             args.append(json.dumps(val) if k in _JSON_V else val)
@@ -923,6 +933,7 @@ def rerun(sid: str, stage: str, *, author: str = "operator") -> dict:
                        .fetchone()["meta"] or "{}")
         m.setdefault("reruns", []).append({"stage": stage, "by": author,
                                            "at": time.time()})
+        m["idle_gated"] = True
         con.execute("UPDATE skill_versions SET state='running', stage=?, "
                     "reason=NULL, meta=?, updated=? WHERE skill=? AND "
                     "version=?", (stage, json.dumps(m), time.time(), sid, v))

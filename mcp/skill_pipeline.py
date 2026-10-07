@@ -432,13 +432,16 @@ def ask_model(system: str, user: str, *, max_tokens: int,
 
 
 # ---------------------------------------------------------------------------
-# Licences. Established only from a verbatim quote: a SKILL.md's own
-# `license:` line, a licence statement in the source, a LICENSE file next
-# to it (same host; a GitHub repo's raw LICENSE), or the operator's own
-# statement (skills.set_licence). A guessed licence is worse than none
-# (datasets.py): a source whose licence nobody established FAILS at this
-# stage with the remedy, and a no-derivatives licence fails outright --
-# distilling it may be the prohibited act.
+# Licences are PROVENANCE, never a gate (operator, 2026-10-07, verbatim: "WE
+# DONT NEED TO FUCKING LICENSE TEXT THAT WE INJECT IT IS FAIR USE WE ARE NOT
+# DISTRUBITING IT ANYTHING HERE WE ARE DOING IS FINE"). The stage records what
+# it finds -- from a verbatim quote only: a SKILL.md's own `license:` line, a
+# licence statement in the source, the repository's own licence file at the
+# pinned ref, or the operator's statement (skills.set_licence) -- and where it
+# found nothing it records "not established". It always passes: no
+# quarantine, no failure, no operator remedy, whatever the licence is (a
+# restrictive or no-derivatives one included). A licence is never GUESSED and
+# written as fact: that rule stays, for what is recorded.
 # ---------------------------------------------------------------------------
 SPDX = (
     (r"\bMIT\b(?: License)?", "MIT"),
@@ -465,7 +468,8 @@ _SPDX = [(re.compile(p, re.I), sid) for p, sid in SPDX]
 _LICENCE_LINE = re.compile(
     r"licen[cs]|copyright|all rights reserved|public domain|creative commons"
     r"|\bcc[- ]?by|\bcc0\b|spdx|redistribut", re.I)
-NO_DERIVATIVES = ("CC-BY-ND-4.0",)
+NO_DERIVATIVES = ("CC-BY-ND-4.0",)      # recorded as a note, never a block
+NOT_ESTABLISHED = "not established"
 # A URL is an address, never a licence statement (2026-10-07: a react.dev page
 # whose HTML example plays `.../media/cc0-videos/flower.mp4` was recorded as
 # CC0-1.0, quote and all). Every URL, and every bare host/path, is blanked
@@ -660,20 +664,14 @@ def handle_licence(job: dict, ctx) -> dict:
         # such, never as a licence the text grants.
         lic = {"spdx": "operator-supplied", "quote": None,
                "where": "pasted by an operator; the text states no licence"}
-    rec = dict(lic or {}, searched=searched)
+    rec = dict(lic or {"status": NOT_ESTABLISHED}, searched=searched)
+    if lic is not None and lic.get("spdx") in NO_DERIVATIVES:
+        rec["note"] = (f"{lic['spdx']} restricts derivatives; recorded, not "
+                       "enforced (the operator's fair-use decision, "
+                       "2026-10-07)")
     skills.update_version(sid, v, licence=rec)
     if lic is None:
-        skills.fail(sid, v, "licence: no licence could be established from "
-                    "a verbatim quote (searched " + "; ".join(searched)[:300]
-                    + "). Remedy (operator): POST /dash/api/skill/licence "
-                    "{id, licence, quote}, then re-run the licence stage")
-        return {"failed": "no licence"}
-    if lic.get("spdx") in NO_DERIVATIVES and lic.get("where") != "operator":
-        skills.fail(sid, v, f"licence: {lic['spdx']} forbids derivatives; "
-                    "distilling it may be the prohibited act. Remedy "
-                    "(operator): state a licence that allows it, or drop "
-                    "the source")
-        return {"failed": "no-derivatives"}
+        return {"licence": NOT_ESTABLISHED, "searched": len(searched)}
     return {"licence": lic.get("spdx"), "where": lic.get("where")}
 
 
@@ -1586,12 +1584,15 @@ def _provenance(sid: str, ver: dict, s: dict) -> dict:
             ef = (prev.get("meta") or {}).get("edited_from")
             prev = skills.version(sid, ef) if ef else None
         lic = (prev or {}).get("licence") or {}
-    if lic:
+    if lic and lic.get("spdx"):
         prov["licence"] = {k: lic.get(k) for k in ("spdx", "quote", "where")
                            if lic.get(k)}
         att = attribution_of(prov.get("url") or "", lic)
         if att:
             prov["attribution"] = att
+    elif prov.get("kind") not in ("authored", "migration", "dataset"):
+        # nothing was established: say so (provenance only, never a gate)
+        prov["licence"] = {"status": NOT_ESTABLISHED}
     return {k: v for k, v in prov.items() if v not in (None, "", [], {})}
 
 

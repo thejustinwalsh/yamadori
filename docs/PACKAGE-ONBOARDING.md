@@ -49,9 +49,9 @@ found):
   `skill_learn.IDLE_MINUTES` (15) and names its source: operator,
   2026-09-27, "keep ours (no external evidence)" -- the bonsai-ada-surgery
   repository, read first at his request, has no idle scheduler.
-- **A restricted licence holds clarify for a person**, as the dataset assist
-  does (`onboarding.held_for_person`, `worker.HOLD_RESTRICTED`); the design
-  only said it is surfaced.
+- **A restricted licence holds nothing** (operator, 2026-10-07, verbatim: "WE DONT NEED TO FUCKING LICENSE TEXT THAT WE INJECT IT IS FAIR USE WE ARE NOT DISTRUBITING IT ANYTHING HERE WE ARE DOING IS FINE"). It is surfaced as a note (`datasets.warnings`); the hold
+  (`onboarding.held_for_person`, `worker.HOLD_RESTRICTED`) this decision first
+  carried was REMOVED.
 - **The old version leaves the held set at `retire`**, through the same
   promotion floor (a REPLACE keeps serving the old vocabulary until then).
 - **The `parent` column** is not used: no stage job spawns a job of the
@@ -119,7 +119,8 @@ dataset or a skill version is advanced today. There is no new orchestrator.
 
 `mcp/datasets.py` already is "the corpus pipeline as data: what a dataset is,
 and where each one has got to": a row with the operator's `prompt`, a
-`source_url`, a `licence` that is a BLOCKER when unknown, a `stage`, `counts`
+`source_url`, a `licence` (provenance only since 2026-10-07: never a
+blocker), a `stage`, `counts`
 only a worker writes, and the rule that **a stage is left only when its job is
 `done`** (`blockers()`), that **`errored` is not `done`**, and that re-running
 an errored job is an explicit act (`rerun()`). `worker.advance_after()` moves
@@ -138,7 +139,7 @@ submitted -> resolve -> clarify -> index -> vocab -> examples -> knn
 | stage | lane | job queue | kind of work | what it waits on |
 |---|---|---|---|---|
 | resolve | net | `package.resolve` | deterministic | its job |
-| clarify | -- | (none) | HUMAN only when no licence quote was found | `missing()` for kind package: the licence |
+| clarify | -- | (none) | HUMAN only for a locator; never for a licence (provenance only, 2026-10-07) | `missing()` for kind package: the locator |
 | index | gpu, idle | `package.index` | deterministic (embedder) | its job |
 | vocab | cpu | `package.vocab` | deterministic | its job |
 | examples | net | `package.examples` | deterministic | its job |
@@ -256,13 +257,13 @@ The licence is established the way the skills pipeline establishes it, never
 proposed: `skill_pipeline.licence_of` over the tarball's `LICENSE` file (after
 2.4's extraction fix) and the manifest's own `"license": "MIT"` line, each
 kept as a quote with where it came from; a GitHub-only repo reads `LICENSE`
-at the commit (`worker.licence_candidates`). No quote: the dataset holds at
-`clarify` with the existing remedy (the operator's statement through
-`POST /dash/api/dataset/answer`, recorded with provenance `operator`).
+at the commit (`worker.licence_candidates`). No quote: the licence is
+recorded as `not established` and the onboarding passes `clarify` with no
+human. THE LICENCE NEVER BLOCKS (operator, 2026-10-07, verbatim: "WE DONT NEED TO FUCKING LICENSE TEXT THAT WE INJECT IT IS FAIR USE WE ARE NOT DISTRUBITING IT ANYTHING HERE WE ARE DOING IS FINE"); an operator's statement through `POST /dash/api/dataset/answer` is
+still recorded (provenance `operator`) when given, never asked for.
 `datasets.warnings()` surfaces an AGPL, non-commercial, no-derivatives or
-all-rights-reserved licence exactly as for any dataset; the skills
-pipeline's own licence stage still fails a no-derivatives source for
-distillation. Examples in a SEPARATE repository need their own quote from
+all-rights-reserved licence as a NOTE; the skills pipeline's licence stage
+records it and passes. Examples in a SEPARATE repository need their own quote from
 that repository; without one they are recorded "unlicensed: not indexed".
 
 ### 2.3 Fetching: GET only
@@ -854,9 +855,10 @@ No number below is ours to invent (memory "no invented numbers").
   `skill_screen.screen_fetched` (`code_search.screen_package_result`).
 - GET only, fixed headers, robots.txt for pages, commit-pinned URLs; the only
   credential is the optional GitHub token, sent only to `api.github.com`.
-- Licences from verbatim quotes only; an unknown licence holds the onboarding
-  at clarify; restricted licences are surfaced by `datasets.warnings()`; a
-  no-derivatives source fails distillation in the skills pipeline.
+- Licences are recorded from verbatim quotes only and never guessed; they
+  NEVER block (operator, 2026-10-07): an unknown one is `not established`,
+  restricted ones are notes from `datasets.warnings()`, and no licence fails
+  distillation.
 - Every write is recorded with its author (`accounts.identify`'s account id),
   as the skill factory already records submissions and edits.
 - Nothing names a package, alias, version, licence or label by model: those
