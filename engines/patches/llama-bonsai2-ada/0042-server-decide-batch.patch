@@ -1,0 +1,1719 @@
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Wed, 07 Oct 2026 12:00:00 -0400
+Subject: [PATCH] server: POST /decide-batch reads many blocks over one shared prefix in one pass
+
+jjava (mcp/decider_bonsai.py) reads each question in two option orders, each
+read one HTTP request on the cached state: ~0.26 s of fixed cost per read
+beside ~2.3 ms per processed token (Decision Index run, 2026-10-06, 86-row
+fit). This reads ALL of a call's blocks in one request.
+
+common/decide-batch.{h,cpp}: the prefix (the shared state) is decoded once on
+a sequence of its own and kept between calls on request; every block runs on
+a scratch sequence forked from it with llama_memory_seq_cp (attention KV:
+shared cells, nothing copied; recurrent state: copy-on-write at the fork's
+first token), so the blocks never see each other and each logits row is what
+a lone request for prefix + block reads. The blocks of a wave go through
+llama_decode together, in lock step slices, longest first. A group's blocks
+(the two orders of one question) are decoded from their longest common
+TOKEN prefix once and forked from there: sharing skips only identical
+tokens, so it cannot change a row. A group larger than the forks is cut into
+chunks. Scratch sequences are freed after every wave and again at the start of
+every call; a failure (or a throwing row reader) leaves nothing behind (forks
+freed, resident prefix dropped).
+
+server: --decide-seqs N reserves N fork sequences and the prefix sequence
+beside the slots (n_seq_max = n_parallel + 1 + N; one recurrent cell each,
+~150 MiB for the 27B; needs --kv-unified, else the endpoint stays off), and
+raises n_outputs_max to hold their rows. POST /decide-batch {prefix, groups,
+token_ids, top_logprobs, keep_prefix, verify_tokenization, release} runs as a
+task on the loop thread between decodes (declined while a decode yields, so
+nothing else touches the context), tokenizes (strings, or token arrays as
+/completion takes them), and answers each block's natural-log softmax over
+the whole vocabulary: the top N and the exact value of every requested id.
+Errors: 501 without --decide-seqs, 400 for a malformed body / a token outside
+the vocabulary, 503 when the unified
+pool has no free cells. /props reports decide_batch.{seqs,prefix_seq}.
+
+tests/test-decide-batch.cpp (static CPU tree, a tiny random hybrid qwen35:
+linear-attention layers carrying recurrent state beside full attention):
+rows equal a cold single-sequence decode of prefix + block (largest
+difference 2.4e-4 in log-probability, float32 order-of-sum noise; a wrong
+fork moves a row by 0.76 or more, and two deliberate mutations of the fork
+logic fail 18 and 6 of 140 checks), group order and duplicates change nothing,
+shared heads are detected and decoded once, the prefix is reused when
+resident or extended and reset otherwise, scratch sequences and the slots'
+own sequences are left exactly as found, a failure leaves nothing behind.
+
+Origin: ours. The mechanism (slots continuing one shared prompt through
+llama_memory_seq_cp) is the one ggml-org/llama.cpp's server uses for its
+decision models (server_decision_group_tasks / copy_prompt_to, PR #29818 and
+#29831, MIT, as this tree). docs/DECIDE-BATCH.md.
+---
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index ef76fff..5e21386 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -71,6 +71,8 @@ add_library(${TARGET}
+     console.h
+     debug.cpp
+     debug.h
++    decide-batch.cpp
++    decide-batch.h
+     download.cpp
+     download.h
+     fit.cpp
+diff --git a/common/arg.cpp b/common/arg.cpp
+index 128130f..8ef2881 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -2569,6 +2569,18 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+             }
+         ).set_env("LLAMA_ARG_N_PARALLEL"));
+     }
++    add_opt(common_arg(
++        {"--decide-seqs"}, "N",
++        string_format("scratch sequences for POST /decide-batch: N leaves are decoded together; the prefix and the N forks "
++                      "each take one recurrent cell beside the slots, so memory grows by (N + 1) recurrent states "
++                      "(default: %d = endpoint off; needs --kv-unified)", params.n_decide_seqs),
++        [](common_params & params, int value) {
++            if (value < 0) {
++                throw std::invalid_argument("error: invalid value for --decide-seqs\n");
++            }
++            params.n_decide_seqs = value;
++        }
++    ).set_env("LLAMA_ARG_DECIDE_SEQS").set_examples({LLAMA_EXAMPLE_SERVER}));
+     add_opt(common_arg(
+         {"-ns", "--sequences"}, "N",
+         string_format("number of sequences to decode (default: %d)", params.n_sequences),
+diff --git a/common/common.cpp b/common/common.cpp
+index eb91804..498522c 100644
+--- a/common/common.cpp
++++ b/common/common.cpp
+@@ -1717,7 +1717,8 @@ struct llama_context_params common_context_params_to_llama(const common_params &
+     auto cparams = llama_context_default_params();
+ 
+     cparams.n_ctx             = params.n_ctx;
+-    cparams.n_seq_max         = params.n_parallel;
++    // /decide-batch: the prefix sequence and its forks sit beside the slots (common/decide-batch.h)
++    cparams.n_seq_max         = params.n_decide_seqs > 0 ? params.n_parallel + 1 + params.n_decide_seqs : params.n_parallel;
+     cparams.n_rs_seq          = params.speculative.need_n_rs_seq();
+     // recurrent/hybrid memory keeps the last n_rs_seq + 1 tokens of a sequence inside one micro-batch, so the window has to fit or we keep the checkpoint path
+     // llama_context clamps the micro-batch to min(n_batch, n_ubatch), and n_batch to n_ctx, so the check uses the effective size and not the requested one
+diff --git a/common/common.h b/common/common.h
+index b07306f..79b5259 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -464,6 +464,7 @@ struct common_params {
+     int32_t n_keep                =     0; // number of tokens to keep from initial prompt
+     int32_t n_chunks              =    -1; // max number of chunks to process (-1 = unlimited)
+     int32_t n_parallel            =     1; // number of parallel sequences to decode
++    int32_t n_decide_seqs         =     0; // scratch sequences for the server's /decide-batch (0 = off; needs --kv-unified)
+     int32_t n_sequences           =     1; // number of sequences to decode
+     int32_t n_outputs_max         =     0; // max outputs in a batch (0 = n_batch)
+     int32_t n_outputs_max_per_seq =     1; // max outputs per sequence
+diff --git a/common/decide-batch.cpp b/common/decide-batch.cpp
+new file mode 100644
+index 0000000..e49e59a
+--- /dev/null
++++ b/common/decide-batch.cpp
+@@ -0,0 +1,381 @@
++#include "decide-batch.h"
++
++#include "common.h"
++#include "log.h"
++
++#include <algorithm>
++#include <chrono>
++#include <cstdio>
++
++namespace {
++
++int64_t now_us() {
++    return std::chrono::duration_cast<std::chrono::microseconds>(
++        std::chrono::steady_clock::now().time_since_epoch()).count();
++}
++
++size_t common_len(const common_decide_tokens & a, const common_decide_tokens & b) {
++    const size_t n = std::min(a.size(), b.size());
++    size_t i = 0;
++    while (i < n && a[i] == b[i]) {
++        i++;
++    }
++    return i;
++}
++
++// one run of tokens on one sequence; tag >= 0 reads the logits row of the LAST token and reports it as `tag`
++struct item {
++    llama_seq_id        seq;
++    const llama_token * tok;
++    int32_t             n;
++    llama_pos           pos0;
++    int64_t             tag;
++};
++
++struct failure {
++    std::string code;
++    std::string text;
++};
++
++// Decodes `items` (seq ids ascending, longest run first, so the finished sequences of a staircase are a suffix
++// and the ubatch splitter keeps consecutive ids together) in lock step: every call carries the same slice of
++// every unfinished item, at most n_batch tokens in all. Returns false and fills `fail` on a decode error.
++bool run_items(llama_context * ctx, std::vector<item> items,
++               const std::function<void(int64_t, const float *)> & on_row,
++               int32_t & n_calls, int32_t & n_tokens, failure & fail) {
++    const int32_t n_batch = std::max<int32_t>(1, (int32_t) llama_n_batch(ctx));
++    std::vector<int32_t> done(items.size(), 0);
++
++    llama_batch batch = llama_batch_init(n_batch, 0, 1);
++    bool ok = true;
++
++    while (ok) {
++        int32_t n_active = 0;
++        for (size_t i = 0; i < items.size(); i++) {
++            if (done[i] < items[i].n) {
++                n_active++;
++            }
++        }
++        if (n_active == 0) {
++            break;
++        }
++
++        const int32_t slice = std::max<int32_t>(1, n_batch / n_active);
++
++        common_batch_clear(batch);
++        std::vector<std::pair<int32_t, size_t>> rows; // (batch index, item) of every finished item with an output
++        for (size_t i = 0; i < items.size(); i++) {
++            const int32_t left = items[i].n - done[i];
++            if (left <= 0) {
++                continue;
++            }
++            const int32_t take = std::min(slice, left);
++            for (int32_t t = 0; t < take; t++) {
++                const bool last = done[i] + t + 1 == items[i].n;
++                const bool want = last && items[i].tag >= 0;
++                if (want) {
++                    rows.emplace_back(batch.n_tokens, i);
++                }
++                common_batch_add(batch, items[i].tok[done[i] + t], items[i].pos0 + done[i] + t, { items[i].seq }, want);
++            }
++            done[i] += take;
++            n_tokens += take;
++        }
++
++        const int32_t ret = llama_decode(ctx, batch);
++        n_calls++;
++        if (ret != 0) {
++            fail.code = ret == 1 ? "no_cells" : "decode_failed";
++            fail.text = ret == 1 ? "no free cells in the KV pool for this batch (llama_decode returned 1)"
++                                 : "llama_decode failed (" + std::to_string(ret) + ")";
++            ok = false;
++            break;
++        }
++
++        for (const auto & [idx, i] : rows) {
++            const float * logits = llama_get_logits_ith(ctx, idx);
++            if (logits == nullptr) {
++                fail.code = "decode_failed";
++                fail.text = "no logits for an output row";
++                ok = false;
++                break;
++            }
++            try {
++                on_row(items[i].tag, logits);
++            } catch (const std::exception & e) {
++                fail.code = "internal";
++                fail.text = std::string("reading a row failed: ") + e.what();
++                ok = false;
++                break;
++            }
++        }
++    }
++
++    llama_batch_free(batch);
++    return ok;
++}
++
++struct leaf {
++    size_t              g;
++    size_t              b;
++    const llama_token * own;
++    int32_t             n_own;
++    llama_seq_id        seq;
++};
++
++struct group_plan {
++    size_t              g;
++    std::vector<size_t> idx;  // which blocks of the group (at most n_forks of them)
++    int32_t shared = 0;       // L
++    int32_t n_leaves = 0;
++    int32_t key_own = 0;      // own length of leaf 0 (the sort key)
++};
++
++} // namespace
++
++void common_decide_release(llama_context * ctx, common_decide_state & state, const common_decide_config & cfg) {
++    if (state.valid || !state.tokens.empty()) {
++        llama_memory_seq_rm(llama_get_memory(ctx), cfg.seq_prefix, -1, -1);
++    }
++    state.tokens.clear();
++    state.valid = false;
++}
++
++bool common_decide_run(
++        llama_context              * ctx,
++        common_decide_state        & state,
++        const common_decide_config & cfg,
++        const common_decide_input  & in,
++        const common_decide_logits_cb & cb,
++        common_decide_output       & out) {
++    out = common_decide_output();
++    llama_memory_t mem = llama_get_memory(ctx);
++
++    auto fail_with = [&](const std::string & code, const std::string & text) {
++        out.error_code = code;
++        out.error      = text;
++        return false;
++    };
++
++    // ---- validate (nothing is touched before this passes)
++    if (cfg.n_forks < 1) {
++        return fail_with("invalid_request", "n_forks must be >= 1");
++    }
++    if ((int64_t) cfg.seq_first + cfg.n_forks > (int64_t) llama_n_seq_max(ctx) ||
++        cfg.seq_prefix < 0 || cfg.seq_prefix >= cfg.seq_first) {
++        return fail_with("invalid_request", "the context has too few sequences for the prefix and forks: n_seq_max = " +
++                         std::to_string(llama_n_seq_max(ctx)) + ", needs " + std::to_string(cfg.seq_first + cfg.n_forks));
++    }
++    if (in.prefix.empty()) {
++        return fail_with("invalid_request", "the prefix has no tokens");
++    }
++    out.blocks.resize(in.groups.size());
++    for (size_t g = 0; g < in.groups.size(); g++) {
++        out.blocks[g].resize(in.groups[g].size());
++        for (const auto & blk : in.groups[g]) {
++            if (blk.empty()) {
++                return fail_with("invalid_request", "a block has no tokens");
++            }
++        }
++    }
++
++    const int32_t n_prefix = (int32_t) in.prefix.size();
++    out.prefix_tokens = n_prefix;
++
++    failure fl;
++
++    // every failure path ends here: forks freed, prefix dropped
++    auto cleanup_fail = [&]() {
++        for (int32_t i = 0; i < cfg.n_forks; i++) {
++            llama_memory_seq_rm(mem, cfg.seq_first + i, -1, -1);
++        }
++        common_decide_release(ctx, state, cfg);
++        out.prefix_resident = false;
++        out.error_code = fl.code;
++        out.error      = fl.text;
++        return false;
++    };
++
++    // a clean start: no scratch sequence holds anything (a call that died half way cannot leave stale cells that a fork
++    // would then inherit)
++    for (int32_t i = 0; i < cfg.n_forks; i++) {
++        llama_memory_seq_rm(mem, cfg.seq_first + i, -1, -1);
++    }
++
++    // ---- the prefix: reuse what is resident when it is this prefix or one this prefix extends
++    const int64_t t0 = now_us();
++    {
++        size_t start = 0;
++        if (state.valid && state.tokens.size() <= in.prefix.size() &&
++            common_len(state.tokens, in.prefix) == state.tokens.size() &&
++            llama_memory_seq_pos_max(mem, cfg.seq_prefix) == (llama_pos) state.tokens.size() - 1) {
++            start = state.tokens.size();
++        } else {
++            common_decide_release(ctx, state, cfg);
++        }
++        out.prefix_reused = (int32_t) start;
++
++        if (start < in.prefix.size()) {
++            item it{ cfg.seq_prefix, in.prefix.data() + start, (int32_t) (in.prefix.size() - start), (llama_pos) start, -1 };
++            int32_t calls = 0, toks = 0;
++            if (!run_items(ctx, { it }, nullptr, calls, toks, fl)) {
++                return cleanup_fail();
++            }
++            out.prefix_processed = toks;
++            out.n_decode_calls  += calls;
++        }
++        state.tokens = in.prefix;
++        state.valid  = true;
++    }
++    out.t_prefix_us = now_us() - t0;
++
++    // ---- plan: each group's shared head (the longest common token prefix, every block keeping >= 1 token); a group
++    //      with more blocks than forks is cut into chunks of n_forks, each chunk sharing its own head
++    std::vector<group_plan> plans;
++    for (size_t g = 0; g < in.groups.size(); g++) {
++        const auto & blocks = in.groups[g];
++        for (size_t c = 0; c < blocks.size(); c += (size_t) cfg.n_forks) {
++            group_plan p;
++            p.g = g;
++            for (size_t b = c; b < std::min(blocks.size(), c + (size_t) cfg.n_forks); b++) {
++                p.idx.push_back(b);
++            }
++            p.n_leaves = (int32_t) p.idx.size();
++            if (p.idx.size() >= 2) {
++                size_t l = blocks[p.idx[0]].size();
++                size_t min_len = l;
++                for (size_t k = 1; k < p.idx.size(); k++) {
++                    l = std::min(l, common_len(blocks[p.idx[0]], blocks[p.idx[k]]));
++                    min_len = std::min(min_len, blocks[p.idx[k]].size());
++                }
++                p.shared = (int32_t) std::min(l, min_len - 1);
++            }
++            p.key_own = (int32_t) blocks[p.idx[0]].size() - p.shared;
++
++            for (size_t k = 0; k < p.idx.size(); k++) {
++                auto & bi = out.blocks[g][p.idx[k]];
++                bi.n_tokens    = (int32_t) blocks[p.idx[k]].size();
++                bi.n_shared    = p.shared;
++                bi.n_processed = (int32_t) blocks[p.idx[k]].size() - p.shared + (k == 0 ? p.shared : 0);
++            }
++            out.n_tokens_shared_saved += p.shared * (p.n_leaves - 1);
++            plans.push_back(std::move(p));
++        }
++    }
++    // shared heads first (their stage needs consecutive ids), longest first inside each class
++    std::stable_sort(plans.begin(), plans.end(), [](const group_plan & a, const group_plan & b) {
++        if ((a.shared > 0) != (b.shared > 0)) {
++            return a.shared > 0;
++        }
++        if (a.shared != b.shared) {
++            return a.shared > b.shared;
++        }
++        return a.key_own > b.key_own;
++    });
++
++    // ---- waves of groups whose leaves fit the forks
++    size_t i_plan = 0;
++    while (i_plan < plans.size()) {
++        std::vector<group_plan> wave;
++        int32_t n_leaves = 0;
++        while (i_plan < plans.size() && n_leaves + plans[i_plan].n_leaves <= cfg.n_forks) {
++            n_leaves += plans[i_plan].n_leaves;
++            wave.push_back(plans[i_plan++]);
++        }
++        out.n_waves++;
++
++        // ids: leaf-index-major, so the heads (leaf 0 of every group) are consecutive
++        std::vector<std::vector<llama_seq_id>> ids(wave.size());
++        llama_seq_id next = cfg.seq_first;
++        {
++            int32_t max_leaves = 0;
++            for (size_t w = 0; w < wave.size(); w++) {
++                max_leaves = std::max(max_leaves, wave[w].n_leaves);
++                ids[w].assign(wave[w].n_leaves, -1);
++            }
++            for (int32_t j = 0; j < max_leaves; j++) {
++                for (size_t w = 0; w < wave.size(); w++) {
++                    if (j < wave[w].n_leaves) {
++                        ids[w][j] = next++;
++                    }
++                }
++            }
++        }
++
++        const llama_pos pos_block = n_prefix;
++
++        // stage A: the shared heads, one sequence per group, forked from the prefix
++        const int64_t ta = now_us();
++        {
++            std::vector<item> heads;
++            for (size_t w = 0; w < wave.size(); w++) {
++                if (wave[w].shared == 0) {
++                    continue;
++                }
++                llama_memory_seq_cp(mem, cfg.seq_prefix, ids[w][0], -1, -1);
++                heads.push_back({ ids[w][0], in.groups[wave[w].g][wave[w].idx[0]].data(), wave[w].shared, pos_block, -1 });
++            }
++            if (!heads.empty()) {
++                int32_t calls = 0, toks = 0;
++                if (!run_items(ctx, heads, nullptr, calls, toks, fl)) {
++                    return cleanup_fail();
++                }
++                out.n_decode_calls   += calls;
++                out.n_tokens_decoded += toks;
++            }
++        }
++        out.t_shared_us += now_us() - ta;
++
++        // fork the leaves: from the head after its shared decode, else straight from the prefix
++        const int64_t tb = now_us();
++        std::vector<leaf> leaves;
++        for (size_t w = 0; w < wave.size(); w++) {
++            const size_t g = wave[w].g;
++            for (int32_t j = 0; j < wave[w].n_leaves; j++) {
++                if (wave[w].shared > 0) {
++                    if (j > 0) {
++                        llama_memory_seq_cp(mem, ids[w][0], ids[w][j], -1, -1);
++                    }
++                } else {
++                    llama_memory_seq_cp(mem, cfg.seq_prefix, ids[w][j], -1, -1);
++                }
++                const size_t b = wave[w].idx[j];
++                const auto & blk = in.groups[g][b];
++                leaves.push_back({ g, b, blk.data() + wave[w].shared,
++                                   (int32_t) blk.size() - wave[w].shared, ids[w][j] });
++            }
++        }
++        std::sort(leaves.begin(), leaves.end(), [](const leaf & a, const leaf & b) { return a.seq < b.seq; });
++
++        // stage B: every leaf's own tokens, read at the last one
++        {
++            std::vector<item> items;
++            for (size_t k = 0; k < leaves.size(); k++) {
++                items.push_back({ leaves[k].seq, leaves[k].own, leaves[k].n_own,
++                                  (llama_pos) (pos_block + (int32_t) (in.groups[leaves[k].g][leaves[k].b].size() - leaves[k].n_own)),
++                                  (int64_t) k });
++            }
++            int32_t calls = 0, toks = 0;
++            const bool ok = run_items(ctx, items, [&](int64_t tag, const float * logits) {
++                cb(leaves[(size_t) tag].g, leaves[(size_t) tag].b, logits);
++            }, calls, toks, fl);
++            out.n_decode_calls   += calls;
++            out.n_tokens_decoded += toks;
++            if (!ok) {
++                return cleanup_fail();
++            }
++        }
++        out.t_blocks_us += now_us() - tb;
++
++        // free the wave (only the ids it used: each seq_rm scans every cell of the pool)
++        for (llama_seq_id id = cfg.seq_first; id < next; id++) {
++            llama_memory_seq_rm(mem, id, -1, -1);
++        }
++    }
++
++    if (!in.keep_prefix) {
++        common_decide_release(ctx, state, cfg);
++    }
++    out.prefix_resident = state.valid;
++    return true;
++}
+diff --git a/common/decide-batch.h b/common/decide-batch.h
+new file mode 100644
+index 0000000..5abfec6
+--- /dev/null
++++ b/common/decide-batch.h
+@@ -0,0 +1,101 @@
++#pragma once
++
++// DECIDE BATCH: read the next-token distribution at the end of MANY short blocks that all continue ONE shared
++// prefix, in a handful of llama_decode calls, on scratch sequences.
++//
++//   prefix  the shared state (decoded once on its own sequence, kept between calls on request)
++//   groups  each a list of blocks (token vectors) that continue the prefix; the blocks of a group are decoded
++//           from their longest COMMON TOKEN PREFIX once and forked from there (a hint: sharing only ever
++//           skips tokens that are identical, so it cannot change a result). A group with more blocks than forks is
++//           cut into chunks of n_forks, each sharing its own head
++//
++// Every block runs on a sequence of its own, forked from the prefix's with llama_memory_seq_cp (attention KV:
++// the cells are shared, nothing is copied; recurrent state: copy-on-write at the fork's first token), so the
++// blocks never see each other and each logits row is what a lone request for prefix + block would read. The
++// blocks of a wave go through llama_decode together (one ubatch group per wave stage); the scratch sequences
++// are freed after every wave and the unified pool holds only the prefix between calls.
++//
++// Needs n_seq_max >= seq_first + n_forks (the server's --decide-seqs reserves them), and a unified KV cache
++// (every sequence draws on one pool of cells).
++//
++// Origin: ours (2026-10-07; docs/DECIDE-BATCH.md). The mechanism -- N slots continuing one shared prompt by
++// llama_memory_seq_cp -- is the one ggml-org/llama.cpp's server uses for its decision models
++// (server_decision_group_tasks / copy_prompt_to, PR #29818 / #29831, MIT, as this tree).
++
++#include "llama.h"
++
++#include <cstdint>
++#include <functional>
++#include <string>
++#include <vector>
++
++using common_decide_tokens = std::vector<llama_token>;
++
++struct common_decide_config {
++    llama_seq_id seq_prefix = 0;  // holds the prefix's state between calls
++    llama_seq_id seq_first  = 1;  // first scratch (fork) sequence id; ids seq_first .. seq_first + n_forks - 1
++    int32_t      n_forks    = 1;  // W: leaves decoded together in one wave (each needs its own recurrent cell)
++};
++
++// the resident prefix: persists between calls on the caller's side, never owns anything but its token list
++struct common_decide_state {
++    common_decide_tokens tokens;   // what sits in seq_prefix, positions [0, tokens.size())
++    bool                 valid = false;
++};
++
++struct common_decide_input {
++    common_decide_tokens                           prefix;
++    std::vector<std::vector<common_decide_tokens>> groups;   // groups[g][b]: block b of group g
++    bool                                           keep_prefix = false;
++};
++
++struct common_decide_block_info {
++    int32_t n_tokens    = 0;   // the block's own length
++    int32_t n_shared    = 0;   // of which decoded once for its group (a leaf's n_tokens - n_shared are its own)
++    int32_t n_processed = 0;   // tokens decoded for this block (n_shared counts for the group's first block only)
++};
++
++struct common_decide_output {
++    int32_t prefix_tokens    = 0;
++    int32_t prefix_reused    = 0;   // tokens already resident
++    int32_t prefix_processed = 0;
++    bool    prefix_resident  = false;  // after the call
++
++    int32_t n_waves          = 0;
++    int32_t n_decode_calls   = 0;
++    int32_t n_tokens_decoded = 0;      // blocks only (the prefix is prefix_processed)
++    int32_t n_tokens_shared_saved = 0; // tokens a group did not decode again
++
++    int64_t t_prefix_us = 0;
++    int64_t t_shared_us = 0;
++    int64_t t_blocks_us = 0;
++
++    std::vector<std::vector<common_decide_block_info>> blocks;   // same nesting as the input
++
++    // set on failure: a short code and the situation
++    std::string error_code;     // "invalid_request" | "no_cells" | "decode_failed" | "memory_failed"
++    std::string error;
++};
++
++// called once per block, as soon as the decode that produced its row has returned; `logits` (n_vocab floats)
++// is valid only during the call
++using common_decide_logits_cb = std::function<void(size_t group, size_t block, const float * logits)>;
++
++// Runs the batch. true on success. On failure `out.error*` say why and nothing is left behind: every scratch
++// sequence is freed and the resident prefix is dropped (state.valid false).
++bool common_decide_run(
++        llama_context              * ctx,
++        common_decide_state        & state,
++        const common_decide_config & cfg,
++        const common_decide_input  & in,
++        const common_decide_logits_cb & cb,
++        common_decide_output       & out);
++
++// frees the resident prefix (a no-op when there is none)
++void common_decide_release(llama_context * ctx, common_decide_state & state, const common_decide_config & cfg);
++
++// the n_seq_max a context must be created with so that cfg fits beside `n_slots` sequences: slots take ids
++// [0, n_slots), the prefix n_slots, the forks the next n_forks
++inline int32_t common_decide_n_seq_max(int32_t n_slots, int32_t n_forks) {
++    return n_forks > 0 ? n_slots + 1 + n_forks : n_slots;
++}
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 89c1b8c..8098fd4 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -220,6 +220,7 @@ if (NOT WIN32 OR NOT BUILD_SHARED_LIBS)
+     # llama_build_and_test(test-double-float.cpp) # SLOW
+ 
+     llama_build_and_test(test-llama-archs.cpp)
++    llama_build_and_test(test-decide-batch.cpp)
+ 
+     set(MODEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/test-models/")
+     file(MAKE_DIRECTORY "${MODEL_DIR}")
+diff --git a/tests/test-decide-batch.cpp b/tests/test-decide-batch.cpp
+new file mode 100644
+index 0000000..f7ad1c9
+--- /dev/null
++++ b/tests/test-decide-batch.cpp
+@@ -0,0 +1,676 @@
++// common/decide-batch.cpp on a tiny random HYBRID model (qwen35: linear-attention layers carrying a recurrent
++// state beside full-attention layers), CPU backend. What the engine patch promises:
++//
++//   - a block read through the batch equals the same prompt (prefix + block) decoded alone on a fresh sequence
++//   - blocks never see each other (any group order, duplicates, waves of any size give the same rows)
++//   - a group's shared head (longest common token prefix) is decoded once and changes nothing
++//   - the prefix is reused when it is the resident one or an extension of it, reset otherwise
++//   - every scratch sequence is freed after a call; the slots' sequences are untouched
++//   - a failure (too many blocks, no cells) leaves nothing behind
++//
++// Built in the static CPU test tree (it includes src/ internals, as test-llama-archs does).
++
++#include "common.h"
++#include "decide-batch.h"
++#include "log.h"
++#include "ggml-backend.h"
++#include "ggml.h"
++#include "gguf.h"
++#include "ggml-cpp.h"
++#include "llama.h"
++#include "llama-cpp.h"
++
++#include "../src/llama-arch.h"
++#include "../src/llama-model-saver.h"
++
++#include <cinttypes>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <map>
++#include <random>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++static int n_checks = 0;
++static int n_failed = 0;
++
++#define CHECK(cond, ...) do { \
++    n_checks++; \
++    if (!(cond)) { \
++        n_failed++; \
++        fprintf(stderr, "FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond); \
++        fprintf(stderr, __VA_ARGS__); \
++        fprintf(stderr, "\n"); \
++    } \
++} while (0)
++
++static constexpr uint32_t N_VOCAB = 128;
++
++static void set_tensor_data(struct ggml_tensor * tensor, void * userdata) {
++    size_t seed = *(const size_t *) userdata;
++    std::hash<std::string> hasher;
++    seed ^= hasher(tensor->name);
++    std::mt19937 gen(seed);
++    // test-llama-archs' 1e-2 everywhere (norm weights too) makes every layer's contribution vanish: a row then
++    // ignores its context and a wrong fork would pass unseen. Norm weights near 1 and projections of std 0.1 let
++    // the attention and recurrent layers matter; the sensitivity check in main() proves it.
++    const bool is_norm = strstr(tensor->name, "norm") != nullptr;
++    std::normal_distribution<float> dis(is_norm ? 1.0f : 0.0f, is_norm ? 0.05f : 0.1f);
++
++    const int64_t ne = ggml_nelements(tensor);
++    if (tensor->type == GGML_TYPE_F32) {
++        std::vector<float> tmp(ne);
++        for (int64_t i = 0; i < ne; i++) {
++            tmp[i] = dis(gen);
++        }
++        ggml_backend_tensor_set(tensor, tmp.data(), 0, ggml_nbytes(tensor));
++    } else if (tensor->type == GGML_TYPE_F16) {
++        std::vector<ggml_fp16_t> tmp(ne);
++        for (int64_t i = 0; i < ne; i++) {
++            tmp[i] = ggml_fp32_to_fp16(dis(gen));
++        }
++        ggml_backend_tensor_set(tensor, tmp.data(), 0, ggml_nbytes(tensor));
++    } else {
++        GGML_ABORT("fatal error");
++    }
++}
++
++// the qwen35 fixture of test-llama-archs.cpp (dense), four layers: linear, attention, linear, attention
++static gguf_context_ptr get_gguf_ctx() {
++    const llm_arch arch = LLM_ARCH_QWEN35;
++    gguf_context_ptr ret(gguf_init_empty());
++    llama_model_saver ms(arch, ret.get());
++    const uint32_t n_ctx = 1024;
++
++    const uint32_t n_vocab = N_VOCAB;
++    const uint32_t n_embd  = 256;
++    const uint32_t n_head  = 2;
++    const uint32_t n_ff    = 384;
++    const uint32_t n_layer = 4;
++    const uint32_t n_head_kv = n_head;
++    const uint32_t n_embd_head = n_embd / n_head;
++
++    ms.add_kv(LLM_KV_GENERAL_ARCHITECTURE,      llm_arch_name(arch));
++    ms.add_kv(LLM_KV_VOCAB_SIZE,                n_vocab);
++    ms.add_kv(LLM_KV_CONTEXT_LENGTH,            n_ctx);
++    ms.add_kv(LLM_KV_EMBEDDING_LENGTH,          n_embd);
++    ms.add_kv(LLM_KV_FEATURES_LENGTH,           n_embd);
++    ms.add_kv(LLM_KV_BLOCK_COUNT,               n_layer);
++    ms.add_kv(LLM_KV_LEADING_DENSE_BLOCK_COUNT, uint32_t(1));
++    ms.add_kv(LLM_KV_FEED_FORWARD_LENGTH,       n_ff);
++    ms.add_kv(LLM_KV_USE_PARALLEL_RESIDUAL,     false);
++    ms.add_kv(LLM_KV_LOGIT_SCALE,               1.0f);
++    ms.add_kv(LLM_KV_TIME_MIX_EXTRA_DIM,        uint32_t(64));
++    ms.add_kv(LLM_KV_TIME_DECAY_EXTRA_DIM,      uint32_t(128));
++    ms.add_kv(LLM_KV_FULL_ATTENTION_INTERVAL,   uint32_t(2));
++    ms.add_kv(LLM_KV_ATTENTION_HEAD_COUNT,      n_head);
++    ms.add_kv(LLM_KV_ATTENTION_HEAD_COUNT_KV,   n_head_kv);
++    ms.add_kv(LLM_KV_ATTENTION_MAX_ALIBI_BIAS,  8.0f);
++    ms.add_kv(LLM_KV_ATTENTION_CLAMP_KQV,              1.0f);
++    ms.add_kv(LLM_KV_ATTENTION_LAYERNORM_EPS,          1e-5f);
++    ms.add_kv(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,      1e-5f);
++    ms.add_kv(LLM_KV_ATTENTION_GROUPNORM_EPS,          1e-5f);
++    ms.add_kv(LLM_KV_ATTENTION_GROUPNORM_GROUPS,       uint32_t(8));
++    ms.add_kv(LLM_KV_ATTENTION_Q_LORA_RANK,            uint32_t(512));
++    ms.add_kv(LLM_KV_ATTENTION_KV_LORA_RANK,           uint32_t(512));
++    ms.add_kv(LLM_KV_ATTENTION_RELATIVE_BUCKETS_COUNT, uint32_t(8));
++    ms.add_kv(LLM_KV_ATTENTION_SLIDING_WINDOW,         n_ctx/8);
++    ms.add_kv(LLM_KV_ATTENTION_SLIDING_WINDOW_PATTERN, uint32_t(2));
++    ms.add_kv(LLM_KV_ATTENTION_INDEXER_HEAD_COUNT,     uint32_t(1));
++    ms.add_kv(LLM_KV_ATTENTION_INDEXER_KEY_LENGTH,     uint32_t(64));
++    ms.add_kv(LLM_KV_ATTENTION_INDEXER_TOP_K,          uint32_t(8));
++    ms.add_kv(LLM_KV_ATTENTION_INDEXER_BLOCK_SIZE,     uint32_t(4));
++    ms.add_kv(LLM_KV_ATTENTION_INDEXER_LOCAL_BLOCKS,   uint32_t(1));
++    ms.add_kv(LLM_KV_ROPE_DIMENSION_SECTIONS, std::vector<uint32_t>({n_embd_head/4, n_embd_head/4, n_embd_head/4, n_embd_head/4}));
++    // a real (if toy) SPM vocabulary, so a llama-server can load the saved model and print pieces
++    // (the server smoke test, bench/decide_batch_server_smoke.py); token ids are all it is ever sent
++    {
++        std::vector<std::string> pieces;
++        std::vector<float>       scores;
++        std::vector<int32_t>     types;
++        pieces.push_back("<unk>"); scores.push_back(0.0f); types.push_back(2);
++        pieces.push_back("<s>");   scores.push_back(0.0f); types.push_back(3);
++        pieces.push_back("</s>");  scores.push_back(0.0f); types.push_back(3);
++        for (uint32_t i = 3; i < n_vocab; i++) {
++            pieces.push_back("w" + std::to_string(i));
++            scores.push_back(-(float) i);
++            types.push_back(1);
++        }
++        ms.add_kv(LLM_KV_TOKENIZER_MODEL,    "llama");
++        ms.add_kv(LLM_KV_TOKENIZER_LIST,     pieces);
++        ms.add_kv(LLM_KV_TOKENIZER_SCORES,   scores);
++        ms.add_kv(LLM_KV_TOKENIZER_TOKEN_TYPE, types);
++        ms.add_kv(LLM_KV_TOKENIZER_UNK_ID,   uint32_t(0));
++        ms.add_kv(LLM_KV_TOKENIZER_BOS_ID,   uint32_t(1));
++        ms.add_kv(LLM_KV_TOKENIZER_EOS_ID,   uint32_t(2));
++        ms.add_kv(LLM_KV_TOKENIZER_ADD_BOS,  false);
++        ms.add_kv(LLM_KV_TOKENIZER_ADD_EOS,  false);
++    }
++    ms.add_kv(LLM_KV_POSNET_EMBEDDING_LENGTH,   n_embd);
++    ms.add_kv(LLM_KV_POSNET_BLOCK_COUNT,        n_layer);
++    ms.add_kv(LLM_KV_CONVNEXT_EMBEDDING_LENGTH, n_embd);
++    ms.add_kv(LLM_KV_CONVNEXT_BLOCK_COUNT,      n_layer);
++    ms.add_kv(LLM_KV_XIELU_ALPHA_N,             1.0f);
++    ms.add_kv(LLM_KV_XIELU_ALPHA_P,             1.0f);
++    ms.add_kv(LLM_KV_XIELU_BETA,                1.0f);
++    ms.add_kv(LLM_KV_XIELU_EPS,                 1.0e-7f);
++    ms.add_kv(LLM_KV_SSM_INNER_SIZE,            uint32_t(256));
++    ms.add_kv(LLM_KV_SSM_CONV_KERNEL,           uint32_t(4));
++    ms.add_kv(LLM_KV_SSM_STATE_SIZE,            uint32_t(128));
++    ms.add_kv(LLM_KV_SSM_TIME_STEP_RANK,        n_head);
++    ms.add_kv(LLM_KV_SSM_GROUP_COUNT,           uint32_t(2));
++    ms.add_kv(LLM_KV_KDA_HEAD_DIM,              uint32_t(128));
++    ms.add_kv(LLM_KV_KDA_SAFE_GATE,             true);
++    ms.add_kv(LLM_KV_KDA_GATE_LOWER_BOUND,      -5.0f);
++    ms.add_kv(LLM_KV_WKV_HEAD_SIZE,             n_embd/n_head);
++    ms.add_kv(LLM_KV_SHORTCONV_L_CACHE,         uint32_t(3));
++    ms.add_kv(LLM_KV_RESIDUAL_SCALE,            3.5565588200778455f);
++    ms.add_kv(LLM_KV_ATTN_RES_BLOCK_SIZE,       uint32_t(12));
++    ms.add_kv(LLM_KV_ACTIVATION_SITU_BETA,      4.0f);
++    ms.add_kv(LLM_KV_ACTIVATION_SITU_LINEAR_BETA, 25.0f);
++
++    for (uint32_t il = 0; il < n_layer; il++) {
++        ggml_tensor t;
++        memset(&t, 0, sizeof(ggml_tensor));
++        t.type = GGML_TYPE_F16;
++        ggml_format_name(&t, "conv%" PRIu32 "d.weight", il);
++        gguf_add_tensor(ms.gguf_ctx, &t);
++        ggml_format_name(&t, "posnet.%" PRIu32 ".conv1.weight", il);
++        gguf_add_tensor(ms.gguf_ctx, &t);
++        ggml_format_name(&t, "posnet.%" PRIu32 ".conv2.weight", il);
++        gguf_add_tensor(ms.gguf_ctx, &t);
++        ggml_format_name(&t, "convnext.%" PRIu32 ".dw.weight", il);
++        gguf_add_tensor(ms.gguf_ctx, &t);
++    }
++    return ret;
++}
++
++static bool silent_progress(float, void *) { return true; }
++
++using tokens_t = std::vector<llama_token>;
++
++static tokens_t rnd_tokens(std::mt19937 & gen, size_t n) {
++    std::uniform_int_distribution<int> d(0, N_VOCAB - 1);
++    tokens_t t;
++    for (size_t i = 0; i < n; i++) {
++        t.push_back(d(gen));
++    }
++    return t;
++}
++
++static tokens_t cat(const tokens_t & a, const tokens_t & b) {
++    tokens_t r = a;
++    r.insert(r.end(), b.begin(), b.end());
++    return r;
++}
++
++struct fixture {
++    gguf_context_ptr gguf;
++    llama_model_ptr  model;
++    llama_context_ptr ref;     // the reference: one sequence, nothing shared
++    size_t seed;
++
++    llama_context_ptr make_ctx(uint32_t n_seq_max, uint32_t n_ctx, uint32_t n_batch, uint32_t n_ubatch) const {
++        llama_context_params cp = llama_context_default_params();
++        cp.n_ctx           = n_ctx;
++        cp.n_batch         = n_batch;
++        cp.n_ubatch        = n_ubatch;
++        cp.n_seq_max       = n_seq_max;
++        cp.kv_unified      = true;
++        cp.n_threads       = 4;
++        cp.n_threads_batch = 4;
++        llama_context_ptr c(llama_init_from_model(model.get(), cp));
++        if (!c) {
++            throw std::runtime_error("failed to create the context");
++        }
++        return c;
++    }
++
++    explicit fixture(size_t seed_) : seed(seed_) {
++        gguf = get_gguf_ctx();
++        llama_model_params mp = llama_model_default_params();
++        mp.progress_callback = silent_progress;
++        std::vector<ggml_backend_dev_t> devs = { nullptr };   // CPU only
++        mp.devices = devs.data();
++        size_t tmp = seed;
++        model.reset(llama_model_init_from_user(gguf.get(), set_tensor_data, &tmp, mp));
++        if (!model) {
++            throw std::runtime_error("failed to create the model");
++        }
++        ref = make_ctx(1, 1024, 512, 512);
++    }
++
++    // the logits row at the last token of `prompt`, decoded cold on one sequence
++    std::vector<float> reference(const tokens_t & prompt) {
++        llama_memory_clear(llama_get_memory(ref.get()), true);
++        llama_batch batch = llama_batch_init((int32_t) prompt.size(), 0, 1);
++        for (size_t i = 0; i < prompt.size(); i++) {
++            common_batch_add(batch, prompt[i], (llama_pos) i, { 0 }, i + 1 == prompt.size());
++        }
++        const int ret = llama_decode(ref.get(), batch);
++        llama_batch_free(batch);
++        if (ret != 0) {
++            throw std::runtime_error("reference decode failed");
++        }
++        const float * l = llama_get_logits_ith(ref.get(), (int32_t) prompt.size() - 1);
++        return std::vector<float>(l, l + N_VOCAB);
++    }
++};
++
++static std::vector<float> log_softmax(const std::vector<float> & l) {
++    float m = l[0];
++    for (float v : l) {
++        m = std::max(m, v);
++    }
++    double s = 0.0;
++    for (float v : l) {
++        s += std::exp((double) v - m);
++    }
++    const double lse = m + std::log(s);
++    std::vector<float> r(l.size());
++    for (size_t i = 0; i < l.size(); i++) {
++        r[i] = (float) (l[i] - lse);
++    }
++    return r;
++}
++
++static double max_abs(const std::vector<float> & a, const std::vector<float> & b) {
++    double d = 0.0;
++    for (size_t i = 0; i < a.size(); i++) {
++        d = std::max(d, (double) std::fabs(a[i] - b[i]));
++    }
++    return d;
++}
++
++static size_t argmax(const std::vector<float> & a) {
++    size_t k = 0;
++    for (size_t i = 1; i < a.size(); i++) {
++        if (a[i] > a[k]) {
++            k = i;
++        }
++    }
++    return k;
++}
++
++using rows_t = std::map<std::pair<size_t, size_t>, std::vector<float>>;
++
++struct run_result {
++    bool ok = false;
++    common_decide_output out;
++    rows_t rows;
++};
++
++static run_result run(llama_context * ctx, common_decide_state & st, const common_decide_config & cfg,
++                      const tokens_t & prefix, const std::vector<std::vector<tokens_t>> & groups, bool keep) {
++    run_result r;
++    common_decide_input in;
++    in.prefix = prefix;
++    in.groups = groups;
++    in.keep_prefix = keep;
++    r.ok = common_decide_run(ctx, st, cfg, in, [&](size_t g, size_t b, const float * l) {
++        r.rows[{g, b}] = std::vector<float>(l, l + N_VOCAB);
++    }, r.out);
++    return r;
++}
++
++static bool all_free(llama_context * ctx, const common_decide_config & cfg, bool prefix_free) {
++    llama_memory_t mem = llama_get_memory(ctx);
++    for (int32_t i = 0; i < cfg.n_forks; i++) {
++        if (llama_memory_seq_pos_max(mem, cfg.seq_first + i) != -1) {
++            return false;
++        }
++    }
++    return !prefix_free || llama_memory_seq_pos_max(mem, cfg.seq_prefix) == -1;
++}
++
++static double g_worst = 0.0;   // the largest log-softmax difference against the reference over the whole run
++
++static void compare_rows(fixture & fx, const char * what, const run_result & r, const tokens_t & prefix,
++                         const std::vector<std::vector<tokens_t>> & groups, double tol) {
++    double worst = 0.0;
++    bool top_same = true;
++    size_t n = 0;
++    for (size_t g = 0; g < groups.size(); g++) {
++        for (size_t b = 0; b < groups[g].size(); b++) {
++            auto it = r.rows.find({g, b});
++            CHECK(it != r.rows.end(), "%s: no row for block %zu/%zu", what, g, b);
++            if (it == r.rows.end()) {
++                continue;
++            }
++            const auto ref = log_softmax(fx.reference(cat(prefix, groups[g][b])));
++            const auto got = log_softmax(it->second);
++            worst = std::max(worst, max_abs(ref, got));
++            top_same = top_same && argmax(ref) == argmax(got);
++            n++;
++        }
++    }
++    g_worst = std::max(g_worst, worst);
++    CHECK(worst <= tol, "%s: max |log-softmax difference| = %.3e over %zu blocks (tolerance %.1e)", what, worst, n, tol);
++    CHECK(top_same, "%s: an argmax differs from the reference", what);
++    printf("  %-44s %3zu blocks, max |dlogp| vs cold single-sequence = %.3e\n", what, n, worst);
++}
++
++int main(int argc, char ** argv) {
++    common_init();
++    llama_log_set([](ggml_log_level level, const char * text, void *) {
++        if (level >= GGML_LOG_LEVEL_ERROR) {
++            fputs(text, stderr);
++        }
++    }, nullptr);
++
++    try {
++        const size_t seed = 20261007;
++        fixture fx(seed);
++
++        // --save PATH: write this fixture model (tokenizer "no_vocab": token ids only) for the server smoke test
++        // (bench/decide_batch_server_smoke.py)
++        for (int i = 1; i + 1 < argc; i++) {
++            if (strcmp(argv[i], "--save") == 0) {
++                llama_model_save_to_file(fx.model.get(), argv[i + 1]);
++                printf("saved %s\n", argv[i + 1]);
++                return 0;
++            }
++        }
++        std::mt19937 gen((uint32_t) seed);
++
++        const int32_t n_slots = 2;
++        // The reference decodes prefix + block in ONE 512-token ubatch; the batch decodes 2-16 tokens a sequence per
++        // ubatch, so float32 sums run in another order: 1.3e-4 .. 2.4e-4 measured (15 of 16 comparisons, one exactly 0).
++        // A wrong state moves a row by 0.76 or more (sensitivity check below), 3,000x the tolerance.
++        const double  tol     = 5e-4;
++
++        // ---- a context with W forks beside two slots; small ubatch so every stage spans several
++        auto make = [&](int32_t W, uint32_t n_ctx = 1024) {
++            return fx.make_ctx((uint32_t) common_decide_n_seq_max(n_slots, W), n_ctx, 64, 16);
++        };
++        common_decide_config cfg8;
++        cfg8.seq_prefix = n_slots;
++        cfg8.seq_first  = n_slots + 1;
++        cfg8.n_forks    = 8;
++        auto cfg_for = [&](int32_t W) {
++            common_decide_config c;
++            c.seq_prefix = n_slots;
++            c.seq_first  = n_slots + 1;
++            c.n_forks    = W;
++            return c;
++        };
++
++        CHECK(common_decide_n_seq_max(2, 8) == 11 && common_decide_n_seq_max(2, 0) == 2, "n_seq_max arithmetic");
++
++        const tokens_t prefix = rnd_tokens(gen, 57);
++
++        // ---- 0. the test can see: the rows depend on the blocks AND on the prefix state (so a wrong fork shows)
++        {
++            const tokens_t b1 = rnd_tokens(gen, 12), b2 = rnd_tokens(gen, 12);
++            const auto r1 = log_softmax(fx.reference(cat(prefix, b1)));
++            const auto r2 = log_softmax(fx.reference(cat(prefix, b2)));
++            const auto r0 = log_softmax(fx.reference(b1));              // the same block with no prefix at all
++            const tokens_t prefix2 = rnd_tokens(gen, 57);
++            const auto rp = log_softmax(fx.reference(cat(prefix2, b1)));
++            const double d_blocks = max_abs(r1, r2), d_prefix = max_abs(r1, r0), d_prefix2 = max_abs(r1, rp);
++            printf("  sensitivity: different blocks %.3e, no prefix %.3e, another prefix %.3e (tolerance %.0e)\n", d_blocks, d_prefix, d_prefix2, tol);
++            CHECK(d_blocks > 100 * tol && d_prefix > 100 * tol && d_prefix2 > 100 * tol, "the fixture's rows are too flat to tell a wrong state from a right one");
++        }
++
++        // ---- 1. flat groups, blocks of different lengths, one wave
++        {
++            auto ctx = make(8);
++            common_decide_state st;
++            std::vector<std::vector<tokens_t>> groups;
++            for (size_t len : { 9u, 31u, 17u, 4u, 22u, 13u }) {
++                groups.push_back({ rnd_tokens(gen, len) });
++            }
++            auto r = run(ctx.get(), st, cfg8, prefix, groups, false);
++            CHECK(r.ok, "flat run: %s", r.out.error.c_str());
++            compare_rows(fx, "flat, one wave, mixed lengths", r, prefix, groups, tol);
++            CHECK(r.out.n_waves == 1, "one wave, got %d", r.out.n_waves);
++            CHECK(r.out.prefix_processed == 57 && r.out.prefix_reused == 0, "cold prefix: %d/%d", r.out.prefix_processed, r.out.prefix_reused);
++            int total = 0;
++            for (auto & g : groups) {
++                total += (int) g[0].size();
++            }
++            CHECK(r.out.n_tokens_decoded == total, "decoded %d of %d block tokens", r.out.n_tokens_decoded, total);
++            CHECK(all_free(ctx.get(), cfg8, true), "every scratch sequence and the prefix are free after the call");
++            CHECK(llama_memory_cells_used_max_p1(llama_get_memory(ctx.get())) == 0, "the unified pool holds no cell after the call: %u", llama_memory_cells_used_max_p1(llama_get_memory(ctx.get())));
++            CHECK(!r.out.prefix_resident && !st.valid, "prefix not resident without keep_prefix");
++        }
++
++        // ---- 2. groups with a shared head: the two "orders" of a question
++        {
++            auto ctx = make(8);
++            common_decide_state st;
++            std::vector<std::vector<tokens_t>> groups;
++            for (size_t q = 0; q < 3; q++) {
++                const tokens_t head = rnd_tokens(gen, 20 + 7 * q);
++                groups.push_back({ cat(head, rnd_tokens(gen, 6 + q)), cat(head, rnd_tokens(gen, 8 + q)) });
++            }
++            auto r = run(ctx.get(), st, cfg8, prefix, groups, false);
++            CHECK(r.ok, "grouped run: %s", r.out.error.c_str());
++            compare_rows(fx, "groups of two sharing a head", r, prefix, groups, tol);
++            // shared = the longest common token prefix of the pair (random tails can agree by chance)
++            int saved = 0;
++            for (size_t g = 0; g < groups.size(); g++) {
++                size_t l = 0;
++                const size_t m = std::min(groups[g][0].size(), groups[g][1].size()) - 1;
++                while (l < m && groups[g][0][l] == groups[g][1][l]) {
++                    l++;
++                }
++                CHECK(r.out.blocks[g][0].n_shared == (int) l && r.out.blocks[g][1].n_shared == (int) l,
++                      "group %zu shares %d, expected %zu", g, r.out.blocks[g][0].n_shared, l);
++                saved += (int) l;
++            }
++            CHECK(r.out.n_tokens_shared_saved == saved, "saved %d, expected %d", r.out.n_tokens_shared_saved, saved);
++            int flat = 0;
++            for (auto & g : groups) {
++                flat += (int) (g[0].size() + g[1].size());
++            }
++            CHECK(r.out.n_tokens_decoded == flat - saved, "decoded %d, expected %d", r.out.n_tokens_decoded, flat - saved);
++            CHECK(all_free(ctx.get(), cfg8, true), "free after grouped run");
++        }
++
++        // ---- 3. waves: W = 3 over groups of 1, 2 and 3 blocks (the fork budget caps a wave)
++        {
++            auto ctx = make(3);
++            common_decide_state st;
++            std::vector<std::vector<tokens_t>> groups;
++            const tokens_t head = rnd_tokens(gen, 15);
++            groups.push_back({ rnd_tokens(gen, 11) });
++            groups.push_back({ cat(head, rnd_tokens(gen, 5)), cat(head, rnd_tokens(gen, 7)) });
++            groups.push_back({ cat(head, rnd_tokens(gen, 3)), cat(head, rnd_tokens(gen, 9)), cat(head, rnd_tokens(gen, 4)) });
++            groups.push_back({ rnd_tokens(gen, 19) });
++            groups.push_back({ rnd_tokens(gen, 6), rnd_tokens(gen, 6) });
++            auto r = run(ctx.get(), st, cfg_for(3), prefix, groups, false);
++            CHECK(r.ok, "waves: %s", r.out.error.c_str());
++            compare_rows(fx, "W=3, groups of 1/2/3/1/2 (several waves)", r, prefix, groups, tol);
++            CHECK(r.out.n_waves >= 3, "waves = %d", r.out.n_waves);
++            CHECK(all_free(ctx.get(), cfg_for(3), true), "free after waves");
++        }
++
++        // ---- 4. W = 1: each block alone (the degenerate, sequential-in-the-engine case)
++        {
++            auto ctx = make(1);
++            common_decide_state st;
++            std::vector<std::vector<tokens_t>> groups = { { rnd_tokens(gen, 8) }, { rnd_tokens(gen, 14) }, { rnd_tokens(gen, 5) } };
++            auto r = run(ctx.get(), st, cfg_for(1), prefix, groups, false);
++            CHECK(r.ok, "W=1: %s", r.out.error.c_str());
++            compare_rows(fx, "W=1", r, prefix, groups, tol);
++            CHECK(r.out.n_waves == 3, "W=1 waves = %d", r.out.n_waves);
++            // the two orders of a question at W=1: one block a wave, no sharing, the same rows
++            const tokens_t headq = rnd_tokens(gen, 11);
++            std::vector<std::vector<tokens_t>> pairs = { { cat(headq, rnd_tokens(gen, 5)), cat(headq, rnd_tokens(gen, 7)) } };
++            auto r2 = run(ctx.get(), st, cfg_for(1), prefix, pairs, false);
++            CHECK(r2.ok && r2.out.n_waves == 2 && r2.out.blocks[0][0].n_shared == 0, "W=1 on a pair: waves %d", r2.out.n_waves);
++            compare_rows(fx, "W=1, a group of two (no sharing)", r2, prefix, pairs, tol);
++        }
++
++        // ---- 5. isolation: any order of the groups, and a duplicated block, give the same rows
++        {
++            auto ctx = make(8);
++            common_decide_state st;
++            std::vector<std::vector<tokens_t>> groups = { { rnd_tokens(gen, 10) }, { rnd_tokens(gen, 25) },
++                                                          { rnd_tokens(gen, 10) }, { rnd_tokens(gen, 3) } };
++            auto a = run(ctx.get(), st, cfg8, prefix, groups, false);
++            std::vector<std::vector<tokens_t>> rev(groups.rbegin(), groups.rend());
++            auto b = run(ctx.get(), st, cfg8, prefix, rev, false);
++            CHECK(a.ok && b.ok, "isolation runs");
++            double worst = 0.0;
++            for (size_t g = 0; g < groups.size(); g++) {
++                worst = std::max(worst, max_abs(log_softmax(a.rows[{g, 0}]), log_softmax(b.rows[{groups.size() - 1 - g, 0}])));
++            }
++            CHECK(worst <= tol, "group order changed a row by %.3e", worst);
++            printf("  %-44s max |dlogp| between orders = %.3e\n", "isolation: reversed group order", worst);
++            g_worst = std::max(g_worst, worst);
++
++            std::vector<std::vector<tokens_t>> dup = { { groups[0][0] }, { groups[0][0] }, { groups[1][0] } };
++            auto c = run(ctx.get(), st, cfg8, prefix, dup, false);
++            CHECK(c.ok, "duplicate run: %s", c.out.error.c_str());
++            CHECK(max_abs(log_softmax(c.rows[{0, 0}]), log_softmax(c.rows[{1, 0}])) <= tol, "identical blocks differ");
++            compare_rows(fx, "duplicated block", c, prefix, dup, tol);
++
++            // two blocks that differ only in the LAST token share all but one token; each keeps its own last token
++            tokens_t t1 = rnd_tokens(gen, 12);
++            tokens_t t2 = t1;
++            t2.back() = (t2.back() + 1) % N_VOCAB;
++            std::vector<std::vector<tokens_t>> near = { { t1, t2 } };
++            auto d = run(ctx.get(), st, cfg8, prefix, near, false);
++            CHECK(d.ok, "near-identical pair: %s", d.out.error.c_str());
++            CHECK(d.out.blocks[0][0].n_shared == 11, "shared head %d, expected 11", d.out.blocks[0][0].n_shared);
++            compare_rows(fx, "pair differing in the last token only", d, prefix, near, tol);
++            // identical blocks: every one keeps >= 1 own token
++            std::vector<std::vector<tokens_t>> same = { { t1, t1 } };
++            auto e = run(ctx.get(), st, cfg8, prefix, same, false);
++            CHECK(e.ok && e.out.blocks[0][0].n_shared == 11, "identical pair shares all but the last token");
++            compare_rows(fx, "identical pair", e, prefix, same, tol);
++        }
++
++        // ---- 6. prefix reuse: resident, extension, mismatch
++        {
++            auto ctx = make(4);
++            common_decide_state st;
++            std::vector<std::vector<tokens_t>> groups = { { rnd_tokens(gen, 7) }, { rnd_tokens(gen, 12) } };
++            auto a = run(ctx.get(), st, cfg_for(4), prefix, groups, true);
++            CHECK(a.ok && a.out.prefix_resident && st.valid, "kept");
++            CHECK(llama_memory_seq_pos_max(llama_get_memory(ctx.get()), n_slots) == (llama_pos) prefix.size() - 1, "the prefix sequence holds the prefix");
++            CHECK(all_free(ctx.get(), cfg_for(4), false), "forks free while the prefix is kept");
++            CHECK(llama_memory_cells_used_max_p1(llama_get_memory(ctx.get())) == prefix.size(), "only the prefix's cells stay in the pool: %u", llama_memory_cells_used_max_p1(llama_get_memory(ctx.get())));
++
++            auto b = run(ctx.get(), st, cfg_for(4), prefix, groups, true);
++            CHECK(b.ok && b.out.prefix_reused == 57 && b.out.prefix_processed == 0, "resident prefix reused whole: reused %d processed %d", b.out.prefix_reused, b.out.prefix_processed);
++            CHECK(max_abs(log_softmax(a.rows[{0, 0}]), log_softmax(b.rows[{0, 0}])) <= tol, "a reused prefix gave another row");
++            compare_rows(fx, "second call, resident prefix", b, prefix, groups, tol);
++
++            const tokens_t ext = cat(prefix, rnd_tokens(gen, 10));
++            auto c = run(ctx.get(), st, cfg_for(4), ext, groups, true);
++            CHECK(c.ok && c.out.prefix_reused == 57 && c.out.prefix_processed == 10, "extension: reused %d processed %d", c.out.prefix_reused, c.out.prefix_processed);
++            compare_rows(fx, "extended prefix (continues the resident state)", c, ext, groups, tol);
++
++            tokens_t other = ext;
++            other[30] = (other[30] + 1) % N_VOCAB;                       // diverges inside the resident prefix
++            auto d = run(ctx.get(), st, cfg_for(4), other, groups, true);
++            CHECK(d.ok && d.out.prefix_reused == 0 && d.out.prefix_processed == (int) other.size(), "mismatch resets: reused %d processed %d", d.out.prefix_reused, d.out.prefix_processed);
++            compare_rows(fx, "a different prefix (reset)", d, other, groups, tol);
++
++            tokens_t shorter(other.begin(), other.begin() + 40);         // a prefix of the resident one is not reusable (recurrent state cannot roll back)
++            auto e = run(ctx.get(), st, cfg_for(4), shorter, groups, false);
++            CHECK(e.ok && e.out.prefix_reused == 0, "a shorter prefix is reset, reused %d", e.out.prefix_reused);
++            compare_rows(fx, "a shorter prefix (reset)", e, shorter, groups, tol);
++            CHECK(all_free(ctx.get(), cfg_for(4), true) && !st.valid, "released at the end");
++
++            // the prefix sequence is cleared out from under us (another part of the server cleared memory)
++            auto f1 = run(ctx.get(), st, cfg_for(4), prefix, groups, true);
++            llama_memory_clear(llama_get_memory(ctx.get()), true);
++            auto f2 = run(ctx.get(), st, cfg_for(4), prefix, groups, false);
++            CHECK(f1.ok && f2.ok && f2.out.prefix_reused == 0, "a cleared pool is noticed: reused %d", f2.out.prefix_reused);
++            compare_rows(fx, "after the pool was cleared", f2, prefix, groups, tol);
++
++            common_decide_state st2;
++            auto g1 = run(ctx.get(), st2, cfg_for(4), prefix, groups, true);
++            common_decide_release(ctx.get(), st2, cfg_for(4));
++            CHECK(g1.ok && !st2.valid && all_free(ctx.get(), cfg_for(4), true), "release frees the prefix");
++            CHECK(llama_memory_cells_used_max_p1(llama_get_memory(ctx.get())) == 0, "and its cells");
++        }
++
++        // ---- 7. the slots' own sequences are untouched
++        {
++            auto ctx = make(4);
++            common_decide_state st;
++            const tokens_t a_tokens = rnd_tokens(gen, 20);
++            llama_memory_t mem = llama_get_memory(ctx.get());
++            {
++                llama_batch batch = llama_batch_init(32, 0, 1);
++                for (size_t i = 0; i < a_tokens.size(); i++) {
++                    common_batch_add(batch, a_tokens[i], (llama_pos) i, { 0 }, false);
++                }
++                CHECK(llama_decode(ctx.get(), batch) == 0, "slot 0 prompt");
++                common_batch_clear(batch);
++                for (size_t i = 0; i < 12; i++) {
++                    common_batch_add(batch, a_tokens[i] , (llama_pos) i, { 1 }, false);
++                }
++                CHECK(llama_decode(ctx.get(), batch) == 0, "slot 1 prompt");
++                llama_batch_free(batch);
++            }
++            std::vector<std::vector<tokens_t>> groups = { { rnd_tokens(gen, 9), rnd_tokens(gen, 9) }, { rnd_tokens(gen, 15) } };
++            auto r = run(ctx.get(), st, cfg_for(4), prefix, groups, false);
++            CHECK(r.ok, "batch beside live slots: %s", r.out.error.c_str());
++            compare_rows(fx, "batch beside two live slots", r, prefix, groups, tol);
++            CHECK(llama_memory_seq_pos_max(mem, 0) == 19 && llama_memory_seq_pos_max(mem, 1) == 11, "slot positions unchanged");
++
++            // slot 0 continues: its next row equals the same prompt decoded cold
++            const llama_token next = 5;
++            llama_batch batch = llama_batch_init(1, 0, 1);
++            common_batch_add(batch, next, 20, { 0 }, true);
++            CHECK(llama_decode(ctx.get(), batch) == 0, "slot 0 continues");
++            const float * l = llama_get_logits_ith(ctx.get(), 0);
++            const std::vector<float> got(l, l + N_VOCAB);
++            llama_batch_free(batch);
++            const auto want = fx.reference(cat(a_tokens, { next }));
++            const double d = max_abs(log_softmax(got), log_softmax(want));
++            CHECK(d <= tol, "slot 0's next row moved by %.3e after a batch", d);
++            printf("  %-44s slot 0 next-token row vs cold = %.3e\n", "slots untouched", d);
++            g_worst = std::max(g_worst, d);
++        }
++
++        // ---- 8. refusals and failures leave nothing behind
++        {
++            auto ctx = make(2);
++            common_decide_state st;
++            std::vector<std::vector<tokens_t>> three = { { rnd_tokens(gen, 4), rnd_tokens(gen, 4), rnd_tokens(gen, 4) } };
++            const tokens_t head3 = rnd_tokens(gen, 9);
++            three = { { cat(head3, rnd_tokens(gen, 4)), cat(head3, rnd_tokens(gen, 6)), cat(head3, rnd_tokens(gen, 5)) } };
++            auto a = run(ctx.get(), st, cfg_for(2), prefix, three, false);
++            CHECK(a.ok, "3 blocks in a group with 2 forks are split in chunks: %s", a.out.error.c_str());
++            compare_rows(fx, "a group larger than the forks (chunks of 2 + 1)", a, prefix, three, tol);
++            CHECK(a.out.n_waves == 2, "chunks of 2 and 1 are two waves, got %d", a.out.n_waves);
++            CHECK(all_free(ctx.get(), cfg_for(2), true), "free after the split group");
++
++            std::vector<std::vector<tokens_t>> empty_block = { { tokens_t() } };
++            auto b = run(ctx.get(), st, cfg_for(2), prefix, empty_block, false);
++            CHECK(!b.ok && b.out.error_code == "invalid_request", "an empty block is refused");
++            auto c = run(ctx.get(), st, cfg_for(2), tokens_t(), { { rnd_tokens(gen, 3) } }, false);
++            CHECK(!c.ok && c.out.error_code == "invalid_request", "an empty prefix is refused");
++            auto d = run(ctx.get(), st, cfg_for(5), prefix, { { rnd_tokens(gen, 3) } }, false);
++            CHECK(!d.ok && d.out.error_code == "invalid_request", "forks beyond n_seq_max are refused");
++
++            // no cells: a pool of 192 cells holds a 57-token prefix and 3 small blocks but not 3 x 120 tokens
++            auto small = fx.make_ctx((uint32_t) common_decide_n_seq_max(n_slots, 3), 192, 64, 16);
++            std::vector<std::vector<tokens_t>> big = { { rnd_tokens(gen, 120) }, { rnd_tokens(gen, 120) }, { rnd_tokens(gen, 120) } };
++            auto e = run(small.get(), st, cfg_for(3), prefix, big, true);
++            CHECK(!e.ok && e.out.error_code == "no_cells", "pool full: %s %s", e.out.error_code.c_str(), e.out.error.c_str());
++            CHECK(all_free(small.get(), cfg_for(3), true) && !st.valid, "everything freed after the failure");
++            // and the context still works afterwards
++            std::vector<std::vector<tokens_t>> ok_groups = { { rnd_tokens(gen, 10) }, { rnd_tokens(gen, 10) } };
++            auto f = run(small.get(), st, cfg_for(3), prefix, ok_groups, false);
++            CHECK(f.ok, "the context works after a failure: %s", f.out.error.c_str());
++            compare_rows(fx, "after a failed call", f, prefix, ok_groups, tol);
++        }
++
++        printf("test-decide-batch: worst |dlogp| against a cold single sequence over the run = %.3e\n", g_worst);
++        printf("test-decide-batch: %d checks, %d failed\n", n_checks, n_failed);
++        return n_failed == 0 ? 0 : 1;
++    } catch (const std::exception & err) {
++        fprintf(stderr, "encountered runtime error: %s\n", err.what());
++        return -1;
++    }
++}
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 71fc89a..707f951 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "build-info.h"
+ #include "common.h"
++#include "decide-batch.h"
+ #include "fit.h"
+ #include "llama.h"
+ #include "log.h"
+@@ -875,6 +876,11 @@ private:
+ 
+     server_batch batch;
+ 
++    // POST /decide-batch (common/decide-batch.h): the prefix sequence and its forks sit beside the slots
++    common_decide_state  decide_state;
++    common_decide_config decide_cfg;
++    bool                 decide_on = false;
++
+     llama_model   * model_dft = nullptr;
+     llama_context * ctx_dft   = nullptr;
+ 
+@@ -1011,6 +1017,11 @@ private:
+         const auto output_limits = server_output_limits(params_base);
+         params_base.n_outputs_max = output_limits.total;
+         params_base.n_outputs_max_per_seq = output_limits.per_seq;
++        if (params_base.n_decide_seqs > 0) {
++            // /decide-batch reads up to n_decide_seqs rows in one decode, and the context wants a row for every
++            // sequence it carries (llama_context::output_reserve)
++            params_base.n_outputs_max = std::max(params_base.n_outputs_max, params_base.n_parallel + 1 + params_base.n_decide_seqs);
++        }
+ 
+         const bool has_mmproj = !params.mmproj.path.empty();
+         const bool has_draft = params.speculative.has_dft();
+@@ -1308,6 +1319,17 @@ private:
+             slot.reset();
+         }
+ 
++        decide_state = common_decide_state();
++        decide_cfg.seq_prefix = params_base.n_parallel;
++        decide_cfg.seq_first  = params_base.n_parallel + 1;
++        decide_cfg.n_forks    = params_base.n_decide_seqs;
++        decide_on = params_base.n_decide_seqs > 0 && params_base.kv_unified &&
++                    (int32_t) llama_n_seq_max(ctx_tgt) >= decide_cfg.seq_first + decide_cfg.n_forks;
++        if (decide_on) {
++            SRV_INF("/decide-batch on: prefix sequence %d, %d fork sequences from %d\n",
++                    decide_cfg.seq_prefix, decide_cfg.n_forks, decide_cfg.seq_first);
++        }
++
+         {
+             const char * LLAMA_TRACE = getenv("LLAMA_TRACE");
+             trace = LLAMA_TRACE ? atoi(LLAMA_TRACE) : 0;
+@@ -2350,6 +2372,225 @@ private:
+                 cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024);
+     }
+ 
++    // POST /decide-batch: runs on the loop thread, between decodes, so nothing else touches the context.
++    // Everything the engine does is common_decide_run (common/decide-batch.h); this is the wire: tokenize,
++    // read the logits row of each block into a log-softmax, answer.
++    void handle_decide_batch(server_task && task) {
++        const json & req = task.decide_req;
++
++        if (!decide_on || ctx_tgt == nullptr) {
++            send_error(task, "this server was not started with --decide-seqs N (N >= 1) and --kv-unified", ERROR_TYPE_NOT_SUPPORTED);
++            return;
++        }
++
++        try {
++            auto res = std::make_unique<server_task_result_decide_batch>();
++            res->id = task.id;
++
++            if (json_value(req, "release", false)) {
++                common_decide_release(ctx_tgt, decide_state, decide_cfg);
++                res->data = json{{"released", true}};
++                queue_results.send(std::move(res));
++                return;
++            }
++
++            // `prefix` and every block: a string (tokenized here, parse_special) or an array of token ids / strings
++            // (as /completion takes a prompt)
++            const auto is_text = [](const json & v) { return v.is_string() || v.is_array(); };
++            if (!req.contains("prefix") || !is_text(req.at("prefix")) || !req.contains("groups") || !req.at("groups").is_array()) {
++                send_error(task, "decide-batch needs a `prefix` (string or token array) and an array `groups` of arrays of blocks", ERROR_TYPE_INVALID_REQUEST);
++                return;
++            }
++
++            const int32_t top_n = std::clamp<int32_t>(json_value(req, "top_logprobs", 20), 0, 100);
++            const bool keep   = json_value(req, "keep_prefix", false);
++            const bool verify = json_value(req, "verify_tokenization", false);
++
++            std::vector<llama_token> ids;
++            if (req.contains("token_ids")) {
++                if (!req.at("token_ids").is_array() || req.at("token_ids").size() > 256) {
++                    send_error(task, "`token_ids` must be an array of at most 256 token ids", ERROR_TYPE_INVALID_REQUEST);
++                    return;
++                }
++                const int32_t n_vocab = llama_vocab_n_tokens(vocab);
++                for (const auto & v : req.at("token_ids")) {
++                    const int64_t id = v.is_number_integer() ? v.get<int64_t>() : -1;
++                    if (id < 0 || id >= n_vocab) {
++                        send_error(task, "`token_ids` holds an id outside the vocabulary", ERROR_TYPE_INVALID_REQUEST);
++                        return;
++                    }
++                    ids.push_back((llama_token) id);
++                }
++            }
++
++            const int32_t n_vocab_in = llama_vocab_n_tokens(vocab);
++            const auto in_vocab = [&](const llama_tokens & t) {
++                return std::all_of(t.begin(), t.end(), [&](llama_token v) { return v >= 0 && v < n_vocab_in; });
++            };
++
++            common_decide_input in;
++            in.keep_prefix = keep;
++            in.prefix = tokenize_mixed(vocab, req.at("prefix"), true, true);
++            if (!in_vocab(in.prefix)) {
++                send_error(task, "the prefix holds a token id outside the vocabulary", ERROR_TYPE_INVALID_REQUEST);
++                return;
++            }
++
++            std::vector<std::vector<std::string>> texts;
++            for (const auto & g : req.at("groups")) {
++                if (!g.is_array()) {
++                    send_error(task, "each group must be an array of strings", ERROR_TYPE_INVALID_REQUEST);
++                    return;
++                }
++                std::vector<common_decide_tokens> blocks;
++                std::vector<std::string> txt;
++                for (const auto & b : g) {
++                    if (!is_text(b)) {
++                        send_error(task, "each block must be a string or a token array", ERROR_TYPE_INVALID_REQUEST);
++                        return;
++                    }
++                    blocks.push_back(tokenize_mixed(vocab, b, false, true));
++                    if (!in_vocab(blocks.back())) {
++                        send_error(task, "a block holds a token id outside the vocabulary", ERROR_TYPE_INVALID_REQUEST);
++                        return;
++                    }
++                    txt.push_back(b.is_string() ? b.get<std::string>() : std::string());
++                }
++                in.groups.push_back(std::move(blocks));
++                texts.push_back(std::move(txt));
++            }
++
++            // per block: the whole-text tokenization equals prefix + block tokens (the boundary check)
++            // (only for text: a token array has no boundary to check; those report null)
++            std::vector<std::vector<int>> tok_ok(in.groups.size());   // 1 ok, 0 mismatch, -1 not checkable
++            if (verify) {
++                const bool prefix_is_text = req.at("prefix").is_string();
++                const std::string prefix_text = prefix_is_text ? req.at("prefix").get<std::string>() : std::string();
++                for (size_t g = 0; g < in.groups.size(); g++) {
++                    for (size_t b = 0; b < in.groups[g].size(); b++) {
++                        if (!prefix_is_text || !req.at("groups")[g][b].is_string()) {
++                            tok_ok[g].push_back(-1);
++                            continue;
++                        }
++                        llama_tokens whole = tokenize_mixed(vocab, json(prefix_text + texts[g][b]), true, true);
++                        llama_tokens cat   = in.prefix;
++                        cat.insert(cat.end(), in.groups[g][b].begin(), in.groups[g][b].end());
++                        tok_ok[g].push_back(whole == cat ? 1 : 0);
++                    }
++                }
++            }
++
++            const int32_t n_vocab = llama_vocab_n_tokens(vocab);
++            std::vector<std::vector<json>> rows(in.groups.size());
++            for (size_t g = 0; g < in.groups.size(); g++) {
++                rows[g].resize(in.groups[g].size());
++            }
++
++            std::vector<std::pair<float, llama_token>> cand;
++            auto on_logits = [&](size_t g, size_t b, const float * logits) {
++                // natural-log softmax over the whole vocabulary, as /v1/chat/completions' top_logprobs reads it
++                float max_l = logits[0];
++                for (int32_t i = 1; i < n_vocab; i++) {
++                    max_l = std::max(max_l, logits[i]);
++                }
++                // float exp (~1e-7 relative each) into a double sum: the normaliser over a 250k vocabulary stays
++                // within float rounding of the double one, at a fraction of the cost per row
++                double sum = 0.0;
++                for (int32_t i = 0; i < n_vocab; i++) {
++                    sum += (double) std::exp(logits[i] - max_l);
++                }
++                const double lse = (double) max_l + std::log(sum);
++
++                json top = json::array();
++                if (top_n > 0) {
++                    cand.clear();
++                    cand.reserve(n_vocab);
++                    for (int32_t i = 0; i < n_vocab; i++) {
++                        cand.emplace_back(logits[i], (llama_token) i);
++                    }
++                    const size_t n = std::min<size_t>(top_n, cand.size());
++                    const auto better = [](const auto & a, const auto & c) { return a.first > c.first || (a.first == c.first && a.second < c.second); };
++                    if (n < cand.size()) {
++                        std::nth_element(cand.begin(), cand.begin() + n, cand.end(), better);
++                    }
++                    std::sort(cand.begin(), cand.begin() + n, better);
++                    for (size_t i = 0; i < n; i++) {
++                        const std::string piece = common_token_to_piece(vocab, cand[i].second);
++                        json e = {{"id", cand[i].second}, {"logprob", (double) cand[i].first - lse}};
++                        if (is_valid_utf8(piece)) {
++                            e["token"] = piece;
++                        } else {
++                            e["token"] = "";
++                            json bytes = json::array();
++                            for (unsigned char c : piece) {
++                                bytes.push_back((int) c);
++                            }
++                            e["bytes"] = bytes;
++                        }
++                        top.push_back(std::move(e));
++                    }
++                }
++                json lp = json::object();
++                for (llama_token id : ids) {
++                    lp[std::to_string(id)] = (double) logits[id] - lse;
++                }
++                rows[g][b] = json{{"top_logprobs", std::move(top)}, {"logprobs", std::move(lp)}};
++            };
++
++            common_decide_output out;
++            if (!common_decide_run(ctx_tgt, decide_state, decide_cfg, in, on_logits, out)) {
++                const bool cells = out.error_code == "no_cells";
++                send_error(task, "decide-batch: " + out.error,
++                           out.error_code == "invalid_request" ? ERROR_TYPE_INVALID_REQUEST
++                           : cells ? ERROR_TYPE_UNAVAILABLE : ERROR_TYPE_SERVER);
++                return;
++            }
++
++            json groups = json::array();
++            for (size_t g = 0; g < in.groups.size(); g++) {
++                json gj = json::array();
++                for (size_t b = 0; b < in.groups[g].size(); b++) {
++                    json r = std::move(rows[g][b]);
++                    const auto & bi = out.blocks[g][b];
++                    r["tokens"]    = bi.n_tokens;
++                    r["shared"]    = bi.n_shared;
++                    r["processed"] = bi.n_processed;
++                    if (verify) {
++                        r["tokenization_ok"] = tok_ok[g][b] < 0 ? json(nullptr) : json(tok_ok[g][b] == 1);
++                    }
++                    gj.push_back(std::move(r));
++                }
++                groups.push_back(std::move(gj));
++            }
++
++            res->data = json{
++                {"prefix", {
++                    {"tokens",    out.prefix_tokens},
++                    {"reused",    out.prefix_reused},
++                    {"processed", out.prefix_processed},
++                    {"resident",  out.prefix_resident},
++                }},
++                {"groups", std::move(groups)},
++                {"timings", {
++                    {"total_ms",  (out.t_prefix_us + out.t_shared_us + out.t_blocks_us) / 1000.0},
++                    {"prefix_ms", out.t_prefix_us / 1000.0},
++                    {"shared_ms", out.t_shared_us / 1000.0},
++                    {"blocks_ms", out.t_blocks_us / 1000.0},
++                    {"waves",     out.n_waves},
++                    {"decode_calls", out.n_decode_calls},
++                    {"processed_tokens", out.prefix_processed + out.n_tokens_decoded},
++                    {"shared_tokens_saved", out.n_tokens_shared_saved},
++                }},
++                {"seqs", {{"prefix", decide_cfg.seq_prefix}, {"first", decide_cfg.seq_first}, {"forks", decide_cfg.n_forks}}},
++            };
++            queue_results.send(std::move(res));
++        } catch (const std::exception & e) {
++            // the resident prefix may be half-decoded: drop it
++            common_decide_release(ctx_tgt, decide_state, decide_cfg);
++            send_error(task, std::string("decide-batch: ") + e.what(), ERROR_TYPE_SERVER);
++        }
++    }
++
+     // returns false to decline the task, it is offered again after the decode is done
+     bool process_single_task(server_task && task, bool is_yielding) {
+         // while yielding, an encode / decode is running and only reading the server state is safe
+@@ -2477,6 +2718,10 @@ private:
+                 {
+                     // do nothing
+                 } break;
++            case SERVER_TASK_TYPE_DECIDE_BATCH:
++                {
++                    handle_decide_batch(std::move(task));
++                } break;
+             case SERVER_TASK_TYPE_METRICS:
+                 {
+                     int n_processing_slots = 0;
+@@ -4620,6 +4865,7 @@ static json get_res_props(const server_context_meta & meta, const common_params
+     json props = {
+         { "default_generation_settings", default_generation_settings_for_props },
+         { "total_slots",                 params.n_parallel },
++        { "decide_batch",                json {{"seqs", params.n_decide_seqs}, {"prefix_seq", params.n_parallel}} },
+         { "kv_vram_cells",               params.n_kv_vram_cells },
+         { "model_alias",                 meta.model_name },
+         { "model_ftype",                 meta.model_ftype },
+@@ -5078,6 +5324,39 @@ void server_routes::init_routes() {
+         return res;
+     };
+ 
++    // POST /decide-batch: many short blocks over one shared prefix, read in one pass (docs/DECIDE-BATCH.md)
++    this->post_decide_batch = [this](const server_http_req & req) {
++        auto res = create_response();
++        json body;
++        try {
++            body = json::parse(req.body);
++        } catch (const std::exception & e) {
++            res->error(format_error_response(std::string("invalid JSON: ") + e.what(), ERROR_TYPE_INVALID_REQUEST));
++            return res;
++        }
++        if (!body.is_object()) {
++            res->error(format_error_response("the body must be a JSON object", ERROR_TYPE_INVALID_REQUEST));
++            return res;
++        }
++        {
++            server_task task(SERVER_TASK_TYPE_DECIDE_BATCH);
++            task.id = res->rd.get_new_id();
++            task.decide_req = std::move(body);
++            res->rd.post_task(std::move(task));
++        }
++        auto result = res->rd.next(req.should_stop);
++        if (!result) {
++            // connection was closed
++            return res;
++        }
++        if (result->is_error()) {
++            res->error(result->to_json());
++            return res;
++        }
++        res->ok(result->to_json());
++        return res;
++    };
++
+     this->get_models = [this](const server_http_req &) {
+         auto res = create_response(true);
+         // note: do NOT use ctx_server here, this endpoint must be accessible during sleep
+diff --git a/tools/server/server-context.h b/tools/server/server-context.h
+index 5d464b8..444d2e7 100644
+--- a/tools/server/server-context.h
++++ b/tools/server/server-context.h
+@@ -146,6 +146,7 @@ struct server_routes {
+     server_http_context::handler_t post_anthropic_messages;
+     server_http_context::handler_t post_anthropic_count_tokens;
+     server_http_context::handler_t post_apply_template;
++    server_http_context::handler_t post_decide_batch;
+     server_http_context::handler_t get_models;
+     server_http_context::handler_t post_tokenize;
+     server_http_context::handler_t post_detokenize;
+diff --git a/tools/server/server-task.h b/tools/server/server-task.h
+index 3ab8bf3..06fa45b 100644
+--- a/tools/server/server-task.h
++++ b/tools/server/server-task.h
+@@ -27,6 +27,7 @@ enum server_task_type {
+     SERVER_TASK_TYPE_SLOT_ERASE,
+     SERVER_TASK_TYPE_GET_LORA,
+     SERVER_TASK_TYPE_SET_LORA,
++    SERVER_TASK_TYPE_DECIDE_BATCH,   // POST /decide-batch (common/decide-batch.h)
+ };
+ 
+ // TODO: change this to more generic "response_format" to replace the "format_response_*" in server-common
+@@ -178,6 +179,9 @@ struct server_task {
+     // used by SERVER_TASK_TYPE_SET_LORA
+     std::map<int, float> set_lora; // mapping adapter ID -> scale
+ 
++    // used by SERVER_TASK_TYPE_DECIDE_BATCH: the request body (parsed and run on the loop thread)
++    json decide_req;
++
+     server_task() = default;
+ 
+     server_task(server_task_type type) : type(type) {}
+@@ -532,6 +536,12 @@ struct server_task_result_slot_save_load : server_task_result {
+     virtual json to_json() override;
+ };
+ 
++struct server_task_result_decide_batch : server_task_result {
++    json data;
++
++    virtual json to_json() override { return data; }
++};
++
+ struct server_task_result_slot_erase : server_task_result {
+     size_t n_erased;
+ 
+diff --git a/tools/server/server.cpp b/tools/server/server.cpp
+index 5fe2729..bd394bf 100644
+--- a/tools/server/server.cpp
++++ b/tools/server/server.cpp
+@@ -155,6 +155,11 @@ int llama_server(common_params & params, int argc, char ** argv) {
+             params.n_parallel = 4;
+             params.kv_unified = true;
+         }
++
++        if (params.n_decide_seqs > 0 && !params.kv_unified) {
++            SRV_WRN("%s", "--decide-seqs needs --kv-unified (every sequence draws on one pool of cells): /decide-batch is disabled\n");
++            params.n_decide_seqs = 0;
++        }
+     }
+ 
+     // for consistency between server router mode and single-model mode, we set the same model name as alias
+@@ -213,6 +218,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
+         routes.post_tokenize               = models_routes->proxy_post;
+         routes.post_detokenize             = models_routes->proxy_post;
+         routes.post_apply_template         = models_routes->proxy_post;
++        routes.post_decide_batch           = models_routes->proxy_post;
+         routes.post_chat_completions_tok   = models_routes->proxy_post;
+         routes.post_responses_tok_oai      = models_routes->proxy_post;
+         routes.get_lora_adapters           = models_routes->proxy_get;
+@@ -260,6 +266,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
+     ctx_http.post("/tokenize",                 ex_wrapper(routes.post_tokenize));
+     ctx_http.post("/detokenize",               ex_wrapper(routes.post_detokenize));
+     ctx_http.post("/apply-template",           ex_wrapper(routes.post_apply_template));
++    ctx_http.post("/decide-batch",             ex_wrapper(routes.post_decide_batch));
+     // token counting
+     ctx_http.post("/chat/completions/input_tokens",    ex_wrapper(routes.post_chat_completions_tok));
+     ctx_http.post("/v1/chat/completions/input_tokens", ex_wrapper(routes.post_chat_completions_tok));

@@ -9,6 +9,7 @@
 
 #include "build-info.h"
 #include "common.h"
+#include "decide-batch.h"
 #include "fit.h"
 #include "llama.h"
 #include "log.h"
@@ -875,6 +876,11 @@ private:
 
     server_batch batch;
 
+    // POST /decide-batch (common/decide-batch.h): the prefix sequence and its forks sit beside the slots
+    common_decide_state  decide_state;
+    common_decide_config decide_cfg;
+    bool                 decide_on = false;
+
     llama_model   * model_dft = nullptr;
     llama_context * ctx_dft   = nullptr;
 
@@ -1011,6 +1017,11 @@ private:
         const auto output_limits = server_output_limits(params_base);
         params_base.n_outputs_max = output_limits.total;
         params_base.n_outputs_max_per_seq = output_limits.per_seq;
+        if (params_base.n_decide_seqs > 0) {
+            // /decide-batch reads up to n_decide_seqs rows in one decode, and the context wants a row for every
+            // sequence it carries (llama_context::output_reserve)
+            params_base.n_outputs_max = std::max(params_base.n_outputs_max, params_base.n_parallel + 1 + params_base.n_decide_seqs);
+        }
 
         const bool has_mmproj = !params.mmproj.path.empty();
         const bool has_draft = params.speculative.has_dft();
@@ -1306,6 +1317,17 @@ private:
             };
 
             slot.reset();
+        }
+
+        decide_state = common_decide_state();
+        decide_cfg.seq_prefix = params_base.n_parallel;
+        decide_cfg.seq_first  = params_base.n_parallel + 1;
+        decide_cfg.n_forks    = params_base.n_decide_seqs;
+        decide_on = params_base.n_decide_seqs > 0 && params_base.kv_unified &&
+                    (int32_t) llama_n_seq_max(ctx_tgt) >= decide_cfg.seq_first + decide_cfg.n_forks;
+        if (decide_on) {
+            SRV_INF("/decide-batch on: prefix sequence %d, %d fork sequences from %d\n",
+                    decide_cfg.seq_prefix, decide_cfg.n_forks, decide_cfg.seq_first);
         }
 
         {
@@ -2350,6 +2372,225 @@ private:
                 cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024);
     }
 
+    // POST /decide-batch: runs on the loop thread, between decodes, so nothing else touches the context.
+    // Everything the engine does is common_decide_run (common/decide-batch.h); this is the wire: tokenize,
+    // read the logits row of each block into a log-softmax, answer.
+    void handle_decide_batch(server_task && task) {
+        const json & req = task.decide_req;
+
+        if (!decide_on || ctx_tgt == nullptr) {
+            send_error(task, "this server was not started with --decide-seqs N (N >= 1) and --kv-unified", ERROR_TYPE_NOT_SUPPORTED);
+            return;
+        }
+
+        try {
+            auto res = std::make_unique<server_task_result_decide_batch>();
+            res->id = task.id;
+
+            if (json_value(req, "release", false)) {
+                common_decide_release(ctx_tgt, decide_state, decide_cfg);
+                res->data = json{{"released", true}};
+                queue_results.send(std::move(res));
+                return;
+            }
+
+            // `prefix` and every block: a string (tokenized here, parse_special) or an array of token ids / strings
+            // (as /completion takes a prompt)
+            const auto is_text = [](const json & v) { return v.is_string() || v.is_array(); };
+            if (!req.contains("prefix") || !is_text(req.at("prefix")) || !req.contains("groups") || !req.at("groups").is_array()) {
+                send_error(task, "decide-batch needs a `prefix` (string or token array) and an array `groups` of arrays of blocks", ERROR_TYPE_INVALID_REQUEST);
+                return;
+            }
+
+            const int32_t top_n = std::clamp<int32_t>(json_value(req, "top_logprobs", 20), 0, 100);
+            const bool keep   = json_value(req, "keep_prefix", false);
+            const bool verify = json_value(req, "verify_tokenization", false);
+
+            std::vector<llama_token> ids;
+            if (req.contains("token_ids")) {
+                if (!req.at("token_ids").is_array() || req.at("token_ids").size() > 256) {
+                    send_error(task, "`token_ids` must be an array of at most 256 token ids", ERROR_TYPE_INVALID_REQUEST);
+                    return;
+                }
+                const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+                for (const auto & v : req.at("token_ids")) {
+                    const int64_t id = v.is_number_integer() ? v.get<int64_t>() : -1;
+                    if (id < 0 || id >= n_vocab) {
+                        send_error(task, "`token_ids` holds an id outside the vocabulary", ERROR_TYPE_INVALID_REQUEST);
+                        return;
+                    }
+                    ids.push_back((llama_token) id);
+                }
+            }
+
+            const int32_t n_vocab_in = llama_vocab_n_tokens(vocab);
+            const auto in_vocab = [&](const llama_tokens & t) {
+                return std::all_of(t.begin(), t.end(), [&](llama_token v) { return v >= 0 && v < n_vocab_in; });
+            };
+
+            common_decide_input in;
+            in.keep_prefix = keep;
+            in.prefix = tokenize_mixed(vocab, req.at("prefix"), true, true);
+            if (!in_vocab(in.prefix)) {
+                send_error(task, "the prefix holds a token id outside the vocabulary", ERROR_TYPE_INVALID_REQUEST);
+                return;
+            }
+
+            std::vector<std::vector<std::string>> texts;
+            for (const auto & g : req.at("groups")) {
+                if (!g.is_array()) {
+                    send_error(task, "each group must be an array of strings", ERROR_TYPE_INVALID_REQUEST);
+                    return;
+                }
+                std::vector<common_decide_tokens> blocks;
+                std::vector<std::string> txt;
+                for (const auto & b : g) {
+                    if (!is_text(b)) {
+                        send_error(task, "each block must be a string or a token array", ERROR_TYPE_INVALID_REQUEST);
+                        return;
+                    }
+                    blocks.push_back(tokenize_mixed(vocab, b, false, true));
+                    if (!in_vocab(blocks.back())) {
+                        send_error(task, "a block holds a token id outside the vocabulary", ERROR_TYPE_INVALID_REQUEST);
+                        return;
+                    }
+                    txt.push_back(b.is_string() ? b.get<std::string>() : std::string());
+                }
+                in.groups.push_back(std::move(blocks));
+                texts.push_back(std::move(txt));
+            }
+
+            // per block: the whole-text tokenization equals prefix + block tokens (the boundary check)
+            // (only for text: a token array has no boundary to check; those report null)
+            std::vector<std::vector<int>> tok_ok(in.groups.size());   // 1 ok, 0 mismatch, -1 not checkable
+            if (verify) {
+                const bool prefix_is_text = req.at("prefix").is_string();
+                const std::string prefix_text = prefix_is_text ? req.at("prefix").get<std::string>() : std::string();
+                for (size_t g = 0; g < in.groups.size(); g++) {
+                    for (size_t b = 0; b < in.groups[g].size(); b++) {
+                        if (!prefix_is_text || !req.at("groups")[g][b].is_string()) {
+                            tok_ok[g].push_back(-1);
+                            continue;
+                        }
+                        llama_tokens whole = tokenize_mixed(vocab, json(prefix_text + texts[g][b]), true, true);
+                        llama_tokens cat   = in.prefix;
+                        cat.insert(cat.end(), in.groups[g][b].begin(), in.groups[g][b].end());
+                        tok_ok[g].push_back(whole == cat ? 1 : 0);
+                    }
+                }
+            }
+
+            const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+            std::vector<std::vector<json>> rows(in.groups.size());
+            for (size_t g = 0; g < in.groups.size(); g++) {
+                rows[g].resize(in.groups[g].size());
+            }
+
+            std::vector<std::pair<float, llama_token>> cand;
+            auto on_logits = [&](size_t g, size_t b, const float * logits) {
+                // natural-log softmax over the whole vocabulary, as /v1/chat/completions' top_logprobs reads it
+                float max_l = logits[0];
+                for (int32_t i = 1; i < n_vocab; i++) {
+                    max_l = std::max(max_l, logits[i]);
+                }
+                // float exp (~1e-7 relative each) into a double sum: the normaliser over a 250k vocabulary stays
+                // within float rounding of the double one, at a fraction of the cost per row
+                double sum = 0.0;
+                for (int32_t i = 0; i < n_vocab; i++) {
+                    sum += (double) std::exp(logits[i] - max_l);
+                }
+                const double lse = (double) max_l + std::log(sum);
+
+                json top = json::array();
+                if (top_n > 0) {
+                    cand.clear();
+                    cand.reserve(n_vocab);
+                    for (int32_t i = 0; i < n_vocab; i++) {
+                        cand.emplace_back(logits[i], (llama_token) i);
+                    }
+                    const size_t n = std::min<size_t>(top_n, cand.size());
+                    const auto better = [](const auto & a, const auto & c) { return a.first > c.first || (a.first == c.first && a.second < c.second); };
+                    if (n < cand.size()) {
+                        std::nth_element(cand.begin(), cand.begin() + n, cand.end(), better);
+                    }
+                    std::sort(cand.begin(), cand.begin() + n, better);
+                    for (size_t i = 0; i < n; i++) {
+                        const std::string piece = common_token_to_piece(vocab, cand[i].second);
+                        json e = {{"id", cand[i].second}, {"logprob", (double) cand[i].first - lse}};
+                        if (is_valid_utf8(piece)) {
+                            e["token"] = piece;
+                        } else {
+                            e["token"] = "";
+                            json bytes = json::array();
+                            for (unsigned char c : piece) {
+                                bytes.push_back((int) c);
+                            }
+                            e["bytes"] = bytes;
+                        }
+                        top.push_back(std::move(e));
+                    }
+                }
+                json lp = json::object();
+                for (llama_token id : ids) {
+                    lp[std::to_string(id)] = (double) logits[id] - lse;
+                }
+                rows[g][b] = json{{"top_logprobs", std::move(top)}, {"logprobs", std::move(lp)}};
+            };
+
+            common_decide_output out;
+            if (!common_decide_run(ctx_tgt, decide_state, decide_cfg, in, on_logits, out)) {
+                const bool cells = out.error_code == "no_cells";
+                send_error(task, "decide-batch: " + out.error,
+                           out.error_code == "invalid_request" ? ERROR_TYPE_INVALID_REQUEST
+                           : cells ? ERROR_TYPE_UNAVAILABLE : ERROR_TYPE_SERVER);
+                return;
+            }
+
+            json groups = json::array();
+            for (size_t g = 0; g < in.groups.size(); g++) {
+                json gj = json::array();
+                for (size_t b = 0; b < in.groups[g].size(); b++) {
+                    json r = std::move(rows[g][b]);
+                    const auto & bi = out.blocks[g][b];
+                    r["tokens"]    = bi.n_tokens;
+                    r["shared"]    = bi.n_shared;
+                    r["processed"] = bi.n_processed;
+                    if (verify) {
+                        r["tokenization_ok"] = tok_ok[g][b] < 0 ? json(nullptr) : json(tok_ok[g][b] == 1);
+                    }
+                    gj.push_back(std::move(r));
+                }
+                groups.push_back(std::move(gj));
+            }
+
+            res->data = json{
+                {"prefix", {
+                    {"tokens",    out.prefix_tokens},
+                    {"reused",    out.prefix_reused},
+                    {"processed", out.prefix_processed},
+                    {"resident",  out.prefix_resident},
+                }},
+                {"groups", std::move(groups)},
+                {"timings", {
+                    {"total_ms",  (out.t_prefix_us + out.t_shared_us + out.t_blocks_us) / 1000.0},
+                    {"prefix_ms", out.t_prefix_us / 1000.0},
+                    {"shared_ms", out.t_shared_us / 1000.0},
+                    {"blocks_ms", out.t_blocks_us / 1000.0},
+                    {"waves",     out.n_waves},
+                    {"decode_calls", out.n_decode_calls},
+                    {"processed_tokens", out.prefix_processed + out.n_tokens_decoded},
+                    {"shared_tokens_saved", out.n_tokens_shared_saved},
+                }},
+                {"seqs", {{"prefix", decide_cfg.seq_prefix}, {"first", decide_cfg.seq_first}, {"forks", decide_cfg.n_forks}}},
+            };
+            queue_results.send(std::move(res));
+        } catch (const std::exception & e) {
+            // the resident prefix may be half-decoded: drop it
+            common_decide_release(ctx_tgt, decide_state, decide_cfg);
+            send_error(task, std::string("decide-batch: ") + e.what(), ERROR_TYPE_SERVER);
+        }
+    }
+
     // returns false to decline the task, it is offered again after the decode is done
     bool process_single_task(server_task && task, bool is_yielding) {
         // while yielding, an encode / decode is running and only reading the server state is safe
@@ -2476,6 +2717,10 @@ private:
             case SERVER_TASK_TYPE_NEXT_RESPONSE:
                 {
                     // do nothing
+                } break;
+            case SERVER_TASK_TYPE_DECIDE_BATCH:
+                {
+                    handle_decide_batch(std::move(task));
                 } break;
             case SERVER_TASK_TYPE_METRICS:
                 {
@@ -4620,6 +4865,7 @@ static json get_res_props(const server_context_meta & meta, const common_params 
     json props = {
         { "default_generation_settings", default_generation_settings_for_props },
         { "total_slots",                 params.n_parallel },
+        { "decide_batch",                json {{"seqs", params.n_decide_seqs}, {"prefix_seq", params.n_parallel}} },
         { "kv_vram_cells",               params.n_kv_vram_cells },
         { "model_alias",                 meta.model_name },
         { "model_ftype",                 meta.model_ftype },
@@ -5075,6 +5321,39 @@ void server_routes::init_routes() {
             meta->chat_params,
             files);
         res->ok({{ "prompt", std::move(data.at("prompt")) }});
+        return res;
+    };
+
+    // POST /decide-batch: many short blocks over one shared prefix, read in one pass (docs/DECIDE-BATCH.md)
+    this->post_decide_batch = [this](const server_http_req & req) {
+        auto res = create_response();
+        json body;
+        try {
+            body = json::parse(req.body);
+        } catch (const std::exception & e) {
+            res->error(format_error_response(std::string("invalid JSON: ") + e.what(), ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+        if (!body.is_object()) {
+            res->error(format_error_response("the body must be a JSON object", ERROR_TYPE_INVALID_REQUEST));
+            return res;
+        }
+        {
+            server_task task(SERVER_TASK_TYPE_DECIDE_BATCH);
+            task.id = res->rd.get_new_id();
+            task.decide_req = std::move(body);
+            res->rd.post_task(std::move(task));
+        }
+        auto result = res->rd.next(req.should_stop);
+        if (!result) {
+            // connection was closed
+            return res;
+        }
+        if (result->is_error()) {
+            res->error(result->to_json());
+            return res;
+        }
+        res->ok(result->to_json());
         return res;
     };
 

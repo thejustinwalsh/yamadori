@@ -2570,6 +2570,18 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         ).set_env("LLAMA_ARG_N_PARALLEL"));
     }
     add_opt(common_arg(
+        {"--decide-seqs"}, "N",
+        string_format("scratch sequences for POST /decide-batch: N leaves are decoded together; the prefix and the N forks "
+                      "each take one recurrent cell beside the slots, so memory grows by (N + 1) recurrent states "
+                      "(default: %d = endpoint off; needs --kv-unified)", params.n_decide_seqs),
+        [](common_params & params, int value) {
+            if (value < 0) {
+                throw std::invalid_argument("error: invalid value for --decide-seqs\n");
+            }
+            params.n_decide_seqs = value;
+        }
+    ).set_env("LLAMA_ARG_DECIDE_SEQS").set_examples({LLAMA_EXAMPLE_SERVER}));
+    add_opt(common_arg(
         {"-ns", "--sequences"}, "N",
         string_format("number of sequences to decode (default: %d)", params.n_sequences),
         [](common_params & params, int value) {

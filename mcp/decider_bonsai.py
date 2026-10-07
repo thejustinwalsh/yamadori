@@ -647,12 +647,22 @@ def ask_one(state: str, q: dict, *, slot: int | None, post=None,
                 or k >= cap:
             break
         k = min(k * GROWTH, cap)
+    return _ask_result(q, ids, r, content[0].get("top_logprobs") or [], reads,
+                       k, d.get("usage") or {}, t0)
+
+
+def _ask_result(q: dict, ids: dict, r: dict, top: list, reads: list, k: int,
+                usage: dict, t0: float) -> dict:
+    """ask_one's answer from the last read's label readout `r`
+    (read_labels over `top`), every read made (`reads`: {k, ms, prompt_n,
+    cache_n, prompt_ms}), the K it ended on and the last response's `usage`.
+    Shared with the batched path (mcp/decider_batch.py), whose one engine
+    call supplies the same numbers."""
     total = sum(r["raw"].values())
     probs = ({lab: v / total for lab, v in r["raw"].items()} if total > 0
              else {lab: 1.0 / len(r["raw"]) for lab in r["raw"]})
     ans = max(probs.items(), key=lambda kv: kv[1])[0]
     first = reads[0]
-    usage = d.get("usage") or {}
     return {"question": q["question"], "kind": q["kind"],
             "labels": q["labels"], "answer": ans,
             "probs": {k_: round(v, 6) for k_, v in probs.items()},
@@ -660,9 +670,7 @@ def ask_one(state: str, q: dict, *, slot: int | None, post=None,
             "exact": not r["missing"], "unread": r["missing"],
             "labels_unread": r["labels_unread"],
             "unread_bound": r["unread_bound"], "k": k, "reads": len(reads),
-            "case_variants": case_variants(
-                content[0].get("top_logprobs") or [], ids,
-                q.get("words") or ()),
+            "case_variants": case_variants(top, ids, q.get("words") or ()),
             # every HTTP read of this question (a K re-read included): what
             # the Jev API's usage counts (mcp/jev_api.py USAGE)
             "read_log": [{"k": x["k"], "prompt_n": x.get("prompt_n"),
@@ -901,6 +909,15 @@ TYPES = ("choice", "score", "noul")
 NOUL_KEYS = ("true", "false")
 NOUL_TEXTS = ("yes", "no")
 PRIORS = (None, "content_free")
+
+
+def batch_on() -> bool:
+    """BATCHED READS (mcp/decider_batch.py; docs/DECIDE-BATCH.md): every
+    question of a call in one engine request. YAMADORI_DECIDER_BATCH=1|on;
+    DEFAULT OFF -- off, nothing in this module, jev_api or decide_turn
+    changes. Read at call time."""
+    return os.environ.get("YAMADORI_DECIDER_BATCH", "").strip().lower() in (
+        "1", "on")
 
 
 def model_name() -> str:
@@ -1498,42 +1515,61 @@ def read(state: str, q: dict, *, slot: int | None, post=None,
         a = ask_one(state, c, slot=slot, post=post, upstream=upstream,
                     timeout=timeout, cache=cache,
                     msgs=render(c) if render else None)
-        raw = meaning_probs(a, c)
-        p = temper(raw, temp["value"])            # THE TEMPERATURE (T = 1:
-        prior = prior_for(c) if use_prior else None   # unchanged)
-        if prior:
-            p = contextual(p, prior)
-        z = sum(p.get(k, 0.0) for k in allowed)
-        p = {k: ((p.get(k, 0.0) / z if z > 0 else 1.0 / len(allowed))
-                 if k in allowed else 0.0) for k in keys}
-        cv = a.get("case_variants") or {}
-        wm = cv.get("word") or {}
-        per.append({"printed": [keys[i] for i in c["order"]], "probs": p,
-                    # the order's label distribution as read, before the
-                    # temperature, the prior and the exclusion (readout_of)
-                    "raw": {k: round(float(raw.get(k, 0.0)), 6)
-                            for k in keys},
-                    "label_mass": a.get("label_mass"),
-                    # case_variants: where the rest of the top K went
-                    "variant_mass": cv.get("variant_mass"),
-                    "word_mass": ({"true" if w == NOUL_TEXTS[0] else
-                                   "false": v for w, v in wm.items()}
-                                  if q["type"] == "noul" and cv.get(
-                                      "available") else None),
-                    "by_spelling": cv.get("by_spelling"),
-                    "exact": a.get("exact"),
-                    "prompt_tokens": a.get("prompt_tokens"),
-                    "processed_tokens": a.get("processed_tokens"),
-                    "cached_tokens": a.get("cached_tokens"),
-                    # all of this order's HTTP reads (K re-reads included)
-                    "http_reads": a.get("reads"),
-                    "processed_all": (
-                        sum(int(x.get("prompt_n") or 0)
-                            for x in a.get("read_log") or [])
-                        if all(x.get("prompt_n") is not None
-                               for x in a.get("read_log") or [])
-                        else None),
-                    "ms": a.get("total_ms")})
+        per.append(_order_record(q, c, a, keys=keys, allowed=allowed,
+                                 temp=temp, prior_for=prior_for,
+                                 use_prior=use_prior))
+    return _assemble(q, per, keys=keys, ex=ex, allowed=allowed, temp=temp,
+                     use_prior=use_prior,
+                     regime="cached" if cache else "cold", t0=t0)
+
+
+def _order_record(q: dict, c: dict, a: dict, *, keys: list, allowed: list,
+                  temp: dict, prior_for, use_prior: bool) -> dict:
+    """One printed order's record (`per` of read()) from its ask_one answer
+    `a`: the distribution as read, tempered, prior-divided, the exclusion
+    applied. Shared with the batched path (mcp/decider_batch.py)."""
+    raw = meaning_probs(a, c)
+    p = temper(raw, temp["value"])                # THE TEMPERATURE (T = 1:
+    prior = prior_for(c) if use_prior else None   # unchanged)
+    if prior:
+        p = contextual(p, prior)
+    z = sum(p.get(k, 0.0) for k in allowed)
+    p = {k: ((p.get(k, 0.0) / z if z > 0 else 1.0 / len(allowed))
+             if k in allowed else 0.0) for k in keys}
+    cv = a.get("case_variants") or {}
+    wm = cv.get("word") or {}
+    return {"printed": [keys[i] for i in c["order"]], "probs": p,
+            # the order's label distribution as read, before the
+            # temperature, the prior and the exclusion (readout_of)
+            "raw": {k: round(float(raw.get(k, 0.0)), 6)
+                    for k in keys},
+            "label_mass": a.get("label_mass"),
+            # case_variants: where the rest of the top K went
+            "variant_mass": cv.get("variant_mass"),
+            "word_mass": ({"true" if w == NOUL_TEXTS[0] else
+                           "false": v for w, v in wm.items()}
+                          if q["type"] == "noul" and cv.get(
+                              "available") else None),
+            "by_spelling": cv.get("by_spelling"),
+            "exact": a.get("exact"),
+            "prompt_tokens": a.get("prompt_tokens"),
+            "processed_tokens": a.get("processed_tokens"),
+            "cached_tokens": a.get("cached_tokens"),
+            # all of this order's HTTP reads (K re-reads included)
+            "http_reads": a.get("reads"),
+            "processed_all": (
+                sum(int(x.get("prompt_n") or 0)
+                    for x in a.get("read_log") or [])
+                if all(x.get("prompt_n") is not None
+                       for x in a.get("read_log") or [])
+                else None),
+            "ms": a.get("total_ms")}
+
+
+def _assemble(q: dict, per: list, *, keys: list, ex: list, allowed: list,
+              temp: dict, use_prior: bool, regime: str, t0: float) -> dict:
+    """read()'s answer from its orders' records. Shared with the batched
+    path (mcp/decider_batch.py)."""
     avg = {k: sum(o["probs"][k] for o in per) / len(per) for k in keys}
     band = tie_band_of()
     dec = decision({k: avg[k] for k in allowed}, band["value"])
@@ -1562,7 +1598,7 @@ def read(state: str, q: dict, *, slot: int | None, post=None,
                                   if o["word_mass"] is not None),
                                  default=None),
             "temperature": temp,
-            "read_regime": "cached" if cache else "cold",
+            "read_regime": regime,
             "score_labels": (score_label_kind(q) if q["type"] == "score"
                              else None),
             "excluded": ex, "prior": q.get("prior") if use_prior else None,
@@ -1614,10 +1650,18 @@ def _decide_typed(state: str, questions: list[dict], *, keep_slot: bool,
         slot, how = grant.get("slot"), grant.get("how")
     answers: dict = {}
     try:
-        for q in qs:
-            answers[q["name"]] = read(state, q, slot=slot, post=post,
-                                      upstream=upstream, timeout=timeout,
-                                      cache=cache)
+        if batch_on():     # ONE engine request for every question (below off)
+            import decider_batch as B
+            with B.burst(state, upstream=upstream) as b:
+                for q, a in zip(qs, b.read_many(
+                        state, qs, keep_prefix=False, slot=slot, post=post,
+                        upstream=upstream, timeout=timeout, cache=cache)):
+                    answers[q["name"]] = a
+        else:
+            for q in qs:
+                answers[q["name"]] = read(state, q, slot=slot, post=post,
+                                          upstream=upstream, timeout=timeout,
+                                          cache=cache)
     finally:
         if grant is not None:
             slots.release(grant)
@@ -1626,10 +1670,14 @@ def _decide_typed(state: str, questions: list[dict], *, keep_slot: bool,
                if grant is not None and slots.lane_kept()
                else release(slot))
     d = [a["diagnostics"] for a in answers.values()]
-    return {"model": model_name(), "answers": answers,
-            "usage": {"input_tokens": sum(x["prompt_tokens"] for x in d),
-                      "output_tokens": sum(x["reads"] for x in d)},
-            "model_profile": profile_status(),
-            "template": TEMPLATE_VERSION, "readout": READOUT_VERSION,
-            "slot": slot, "how": how, "release": rel,
-            "batch_ms": round((time.time() - t0) * 1000, 1)}
+    out = {"model": model_name(), "answers": answers,
+           "usage": {"input_tokens": sum(x["prompt_tokens"] for x in d),
+                     "output_tokens": sum(x["reads"] for x in d)},
+           "model_profile": profile_status(),
+           "template": TEMPLATE_VERSION, "readout": READOUT_VERSION,
+           "slot": slot, "how": how, "release": rel,
+           "batch_ms": round((time.time() - t0) * 1000, 1)}
+    if batch_on():          # which way each question was read (batched path)
+        out["read_path"] = sorted({x.get("read_path") or "sequential"
+                                   for x in d})
+    return out

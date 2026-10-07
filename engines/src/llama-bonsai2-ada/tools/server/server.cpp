@@ -155,6 +155,11 @@ int llama_server(common_params & params, int argc, char ** argv) {
             params.n_parallel = 4;
             params.kv_unified = true;
         }
+
+        if (params.n_decide_seqs > 0 && !params.kv_unified) {
+            SRV_WRN("%s", "--decide-seqs needs --kv-unified (every sequence draws on one pool of cells): /decide-batch is disabled\n");
+            params.n_decide_seqs = 0;
+        }
     }
 
     // for consistency between server router mode and single-model mode, we set the same model name as alias
@@ -213,6 +218,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
         routes.post_tokenize               = models_routes->proxy_post;
         routes.post_detokenize             = models_routes->proxy_post;
         routes.post_apply_template         = models_routes->proxy_post;
+        routes.post_decide_batch           = models_routes->proxy_post;
         routes.post_chat_completions_tok   = models_routes->proxy_post;
         routes.post_responses_tok_oai      = models_routes->proxy_post;
         routes.get_lora_adapters           = models_routes->proxy_get;
@@ -260,6 +266,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
     ctx_http.post("/tokenize",                 ex_wrapper(routes.post_tokenize));
     ctx_http.post("/detokenize",               ex_wrapper(routes.post_detokenize));
     ctx_http.post("/apply-template",           ex_wrapper(routes.post_apply_template));
+    ctx_http.post("/decide-batch",             ex_wrapper(routes.post_decide_batch));
     // token counting
     ctx_http.post("/chat/completions/input_tokens",    ex_wrapper(routes.post_chat_completions_tok));
     ctx_http.post("/v1/chat/completions/input_tokens", ex_wrapper(routes.post_chat_completions_tok));

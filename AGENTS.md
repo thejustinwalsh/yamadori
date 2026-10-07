@@ -1217,6 +1217,7 @@ live run, no TypeSafe SDK run yet**. The rules:
   question's two reads, 577 ms (`bench/decider/bonsai_decider.py`); `x_yamadori.queue` records the wait. Offline
   only (`mcp/test_jev_api.py` 191 checks, `mcp/test_jev_sdk.py` 106 with both SDKs, 2026-10-02); not run live. A
   call holds a `max_mode.Lease` on its model while it runs.
+  BATCHED READS (operator, 2026-10-07: "we cant do that with ours too, this is a model hack somehow to make it faster?"; BUILT OFFLINE, NOT RUN ON A GPU): all of a call's questions in ONE engine request over a shared cached state (engine patch 0042 `POST /decide-batch`, unshipped; `mcp/decider_batch.py`, `YAMADORI_DECIDER_BATCH` default off); Clef's speed is a trained joint head and does not carry over: docs/DECIDE-BATCH.md has the design, the arithmetic (at most x1.24 on JevBench's public items as a whole, ~3x for a many-question call on a small or resident state) and the measurement plan that waits for "GPU go".
 - **Usage**, counted from the reads (decider_bonsai's per-read timings):
   `input_tokens` = the first read's cached prefix + every read's processed
   tokens; `output_tokens` = the reads (one token each).

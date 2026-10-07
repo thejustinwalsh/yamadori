@@ -669,22 +669,97 @@ def answer(spec: dict, plan: dict, state: str, slot) -> tuple[dict, dict,
     if plan["kind"] == "single":
         a = D.read(state, plan["q"], slot=slot)
         return _jev_answer(spec, a), a["diagnostics"], _orders(a)
-    keys, spans = spec["keys"], plan["spans"]
     stage1, orders, rounds = [], [], []
     for j, q in enumerate(plan["stage1"]):
         a = D.read(state, q, slot=slot)
         stage1.append(a)
         orders += _orders(a)
-        rounds.append({"stage": 1, "chunk": j, "options": len(q["keys"]),
-                       "span": list(spans[j]), "winner": a["choice"],
-                       "confidence": a["confidence"],
-                       "diagnostics": a["diagnostics"]})
+        rounds.append(_stage1_round(plan, j, q, a))
     winners = [a["choice"] for a in stage1]
-    qf = D.q_choice(f"{spec['id']}#final", spec["text"],
-                    [plan["texts"][keys.index(w)] for w in winners],
-                    keys=winners)
+    qf = _final_question(spec, plan, winners)
     af = D.read(state, qf, slot=slot)
     orders += _orders(af)
+    return _compose(spec, plan, stage1, af, orders, rounds)
+
+
+def _stage1_round(plan: dict, j: int, q: dict, a: dict) -> dict:
+    """The record of stage 1's chunk `j` (its question `q`, its answer `a`)."""
+    return {"stage": 1, "chunk": j, "options": len(q["keys"]),
+            "span": list(plan["spans"][j]), "winner": a["choice"],
+            "confidence": a["confidence"], "diagnostics": a["diagnostics"]}
+
+
+def answers_batched(specs: list[dict], plans: list[dict], state: str,
+                    slot, *, post=None, upstream=None
+                    ) -> list[tuple[dict, dict, list[dict]]]:
+    """answer() for every plan of a call, in ONE batched engine request
+    (mcp/decider_batch.py): every `single` plan's question and every two-stage
+    plan's stage-1 chunks together, the prefix kept resident when a two-stage
+    plan follows; then the final read of every two-stage plan in a second
+    request on the resident prefix, which frees it. One (answer, diagnostics,
+    order records) per plan, in plan order -- what [answer(...)] gives."""
+    import decider_batch as B
+    first, where = [], []
+    for spec, plan in zip(specs, plans):
+        if plan["kind"] == "single":
+            first.append(plan["q"])
+            where.append((spec["id"], None))
+        elif plan["kind"] == "rounds":
+            for j, q in enumerate(plan["stage1"]):
+                first.append(q)
+                where.append((spec["id"], j))
+    has_rounds = any(p["kind"] == "rounds" for p in plans)
+    kw = {"slot": slot, "post": post, "upstream": upstream}
+    got: dict = {}
+    finals: dict = {}
+    with B.burst(state, upstream=upstream) as b:
+        if first:
+            for key, a in zip(where, b.read_many(state, first,
+                                                 keep_prefix=has_rounds, **kw)):
+                got[key] = a
+        todo = []
+        for spec, plan in zip(specs, plans):
+            if plan["kind"] == "rounds":
+                winners = [got[(spec["id"], j)]["choice"]
+                           for j in range(len(plan["stage1"]))]
+                todo.append((spec["id"], _final_question(spec, plan, winners)))
+        if todo:
+            for (sid, _q), a in zip(todo, b.read_many(
+                    state, [q for _s, q in todo], keep_prefix=False, **kw)):
+                finals[sid] = a
+    out = []
+    for spec, plan in zip(specs, plans):
+        if plan["kind"] == "trivial":
+            out.append(answer(spec, plan, state, slot))
+        elif plan["kind"] == "single":
+            a = got[(spec["id"], None)]
+            out.append((_jev_answer(spec, a), a["diagnostics"], _orders(a)))
+        else:
+            stage1 = [got[(spec["id"], j)] for j in range(len(plan["stage1"]))]
+            orders, rounds = [], []
+            for j, (q, a) in enumerate(zip(plan["stage1"], stage1)):
+                orders += _orders(a)
+                rounds.append(_stage1_round(plan, j, q, a))
+            af = finals[spec["id"]]
+            orders += _orders(af)
+            out.append(_compose(spec, plan, stage1, af, orders, rounds))
+    return out
+
+
+def _final_question(spec: dict, plan: dict, winners: list) -> dict:
+    """The two-stage choice's second read: the chunk winners."""
+    keys = spec["keys"]
+    return D.q_choice(f"{spec['id']}#final", spec["text"],
+                      [plan["texts"][keys.index(w)] for w in winners],
+                      keys=winners)
+
+
+def _compose(spec: dict, plan: dict, stage1: list, af: dict, orders: list,
+             rounds: list) -> tuple[dict, dict, list[dict]]:
+    """The two-stage answer from its stage-1 chunk answers and the final
+    read `af` (`orders` and `rounds` carry stage 1's records)."""
+    keys, spans = spec["keys"], plan["spans"]
+    winners = [a["choice"] for a in stage1]
     rounds.append({"stage": 2, "options": len(winners), "winners": winners,
                    "choice": af["choice"], "confidence": af["confidence"],
                    "diagnostics": af["diagnostics"]})
@@ -935,14 +1010,27 @@ def _run(state_text: str, specs: list[dict], plans: list[dict], model: str,
     diags: dict = {}
     orders: list[dict] = []
     try:
-        for spec, plan in zip(specs, plans):
+        if D.batch_on():
+            # BATCHED READS (mcp/decider_batch.py): every plan's questions in
+            # one engine request (a two-stage plan's final read in a second,
+            # on the resident prefix)
             try:
-                a, dg, od = answer(spec, plan, state_text, slot)
+                got = answers_batched(specs, plans, state_text, slot)
             except (D.DeciderUnavailable, mm.ModelAtCapacity) as e:
                 raise _unavailable(e) from e
-            answers[spec["id"]] = a
-            diags[spec["id"]] = dg
-            orders += od
+            for spec, (a, dg, od) in zip(specs, got):
+                answers[spec["id"]] = a
+                diags[spec["id"]] = dg
+                orders += od
+        else:
+            for spec, plan in zip(specs, plans):
+                try:
+                    a, dg, od = answer(spec, plan, state_text, slot)
+                except (D.DeciderUnavailable, mm.ModelAtCapacity) as e:
+                    raise _unavailable(e) from e
+                answers[spec["id"]] = a
+                diags[spec["id"]] = dg
+                orders += od
     finally:
         slots.release(grant)
         lane["release"] = (slots.lane_kept_note(slot, "jev call", log=[])
@@ -974,4 +1062,28 @@ def _run(state_text: str, specs: list[dict], plans: list[dict], model: str,
                "note": "questions were read one after another on one cached "
                        "state (Jev evaluates them in parallel)",
                "ms": round((time.time() - t0) * 1000, 1)}}
+    if D.batch_on():
+        paths = _read_paths(diags)
+        out["x_yamadori"]["batch"] = {"on": True, "read_paths": paths}
+        if "batch" in paths:
+            out["x_yamadori"].update(
+                parallel=True, note="questions were read in batched engine "
+                "requests: the state prefix once, each question's blocks on "
+                "their own sequence (decider_batch)")
     return 200, out
+
+
+def _read_paths(diags: dict) -> list[str]:
+    """Which way each read was made ("batch" | "sequential"), from the
+    answers' diagnostics (a two-stage answer's are in its rounds)."""
+    seen: set = set()
+    for dg in diags.values():
+        if not isinstance(dg, dict):
+            continue
+        if "read_path" in dg:
+            seen.add(dg["read_path"])
+        for r in dg.get("rounds") or []:
+            p = (r.get("diagnostics") or {}).get("read_path")
+            if p:
+                seen.add(p)
+    return sorted(seen)

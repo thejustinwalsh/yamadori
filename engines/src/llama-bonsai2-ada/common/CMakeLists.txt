@@ -71,6 +71,8 @@ add_library(${TARGET}
     console.h
     debug.cpp
     debug.h
+    decide-batch.cpp
+    decide-batch.h
     download.cpp
     download.h
     fit.cpp

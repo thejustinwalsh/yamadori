@@ -564,6 +564,18 @@ engines:
         # first, even running; exchanges take the lowest rank first. The
         # batch's rank groups plan highest first. /props reports
         # `kv_vram_cells`. LLAMA_KV_RANK=0 = 0040 exactly. NOT RUN ON A GPU.
+      - file: 0042-server-decide-batch.patch
+        sha256: 6338bd58a82938ecd5eea225d1a8311d46dc103302b4acd20d058ff8140036ef
+        # OURS (2026-10-07; docs/DECIDE-BATCH.md), UNSHIPPED: no deployed binary has it (`shipped` stays 80d2c60d,
+        # `built_with_patches` there ends at 0041) and config.yaml does not pass --decide-seqs. POST /decide-batch:
+        # jjava's reads of a call (each question in two option orders) in ONE request. common/decide-batch.{h,cpp}:
+        # the shared prefix decoded once on a sequence of its own, every block on a scratch sequence forked from it
+        # (llama_memory_seq_cp), the blocks of a wave through llama_decode together, a group's longest common token
+        # head decoded once; --decide-seqs N reserves the sequences (one recurrent cell each, ~150 MiB for the
+        # 27B: bench/results/a4000/20260930-attempt1 server logs, 149.6 MiB a cell) and needs --kv-unified.
+        # The mechanism is ggml-org/llama.cpp's own for its decision models (server_decision_group_tasks,
+        # PR #29818 / #29831, MIT). Tests: tests/test-decide-batch.cpp (CPU, tiny hybrid qwen35) in this entry's
+        # `tests`, and bench/decide_batch_server_smoke.py (a real llama-server on the CPU). NOT RUN ON A GPU.
     vendor:
       # Written by `python scripts/build_engine.py vendor llama-bonsai2-ada`;
       # `check` verifies the tree against it offline. Do not edit.
@@ -572,13 +584,13 @@ engines:
       repo: https://github.com/PrismML-Eng/llama.cpp
       commit: adfffbe41b2cabcd51fff326ab045662265062bb
       upstream_tree: f701dae3247ff1ba55db24d1fd83dff0cd2edff8
-      patches: 41
-      patches_digest: 0a47208086dd7b350b9a535fef9ccecdfdd19a8d7eb28ea8e27c1cdaa40ba308
-      patched_tree: c2d6044baf1a1568f69cb16c3c566305eaaceab2
+      patches: 42
+      patches_digest: dc344fbde7710c8bc675bd60680c06c6d0a767b6491fbd9cc315be9f3e6dc331
+      patched_tree: 2f9da6ed2ddc9bc45db51817c23d0d7fcfff0796
       base_tree: 339bad835c77c724415bf4ef471bebd288d9d104
-      tree: e682d374328c84508561c1da784ee2af5a0ddaf7
-      files: 3334
-      bytes: 50809793
+      tree: 003c0cb2b1f0b05ea2aa9408b102529696ab3123
+      files: 3337
+      bytes: 50879926
       excluded_files: 230
       excluded_bytes: 116854999
       executable_files: 123
@@ -629,13 +641,13 @@ engines:
     targets: [llama-server]
     post_build_copies: *cuda_dlls
     tests:
-      # As llama-bonsai2: 0034's own tests, in a static CPU tree.
+      # As llama-bonsai2: 0034's own tests, plus 0042's (test-decide-batch: a tiny hybrid qwen35 on the CPU), in a static CPU tree.
       configure_extra:
         - -DGGML_CUDA=OFF
         - -DBUILD_SHARED_LIBS=OFF
         - -DLLAMA_BUILD_TESTS=ON
-      targets: [test-reasoning-budget, test-chat]
-      ctest_regex: ^(test-reasoning-budget|test-chat)$
+      targets: [test-reasoning-budget, test-chat, test-decide-batch]
+      ctest_regex: ^(test-reasoning-budget|test-chat|test-decide-batch)$
     output: bin/llama-server.exe
     shipped:
       # Built by scripts/build_engine.py from this entry (base + 0001-0033 + 0034-0041, no UI)

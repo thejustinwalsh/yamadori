@@ -1179,6 +1179,16 @@ gpu_room ESTIMATES) - headroom 1,331 = ~9,945 MiB; less the weights 6,093 MiB an
 bonsai-vision row's assumption) leaves ~1,850-2,850 MiB of KV = ~52K-80K cells at 36,992 B. Until it is deployed a
 second conversation is refused as above.
 
+### Decide batch: `0042` (2026-10-07, BUILT OFFLINE, UNSHIPPED)
+
+`engines/patches/llama-bonsai2-ada/0042-server-decide-batch.patch`: `POST /decide-batch` for jjava's reads
+(common/decide-batch.{h,cpp}, `--decide-seqs N`). The shared prefix is decoded once, each block on a scratch sequence forked
+with `llama_memory_seq_cp`, the blocks of a wave through one `llama_decode`. One recurrent cell (149.6 MiB for the 27B) per fork
+plus the prefix, so memory grows by (N + 1) cells; needs `--kv-unified`. Tests: `tests/test-decide-batch.cpp` (CPU, tiny hybrid
+qwen35; in this entry's `tests`), `bench/decide_batch_server_smoke.py` (a real llama-server on the CPU). Design, wire, arithmetic and
+the GPU measurement plan: docs/DECIDE-BATCH.md. Candidate: `python scripts/build_engine.py build llama-bonsai2-ada --jobs 8 --out
+C:/Users/jwals/engines/llama-bonsai2-ada-cand0042`; `shipped` is still `80d2c60d`.
+
 ## Strata's MoE work, ported: `llama-upstream-moe` (2026-09-28, CPU only)
 
 Operator, 2026-09-28: "the whole [point] is that we get some of the

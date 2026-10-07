@@ -637,6 +637,10 @@ class Turn:
         self.slot = self.grant.get("slot")
 
     def close(self) -> None:
+        b = getattr(self, "_burst", None)
+        if b is not None:                  # the batched reads' resident prefix
+            self._burst = None
+            self.batch_release = b.release()
         if self.grant is None:
             return
         import slots
@@ -727,6 +731,21 @@ class Turn:
         DeciderUnavailable."""
         self._open()
         out = []
+        if D.batch_on():
+            # BATCHED READS (mcp/decider_batch.py): every question of this
+            # call in ONE engine request, the prefix kept resident for the
+            # Turn's next call and freed at close(). A question that needs the
+            # content-free prior keeps the old loop (its prior is read BEFORE
+            # the state is placed, question by question).
+            qs = [D.typed(q) for q in questions]
+            if not any(q.get("prior") == "content_free" and CONTEXTUAL
+                       for q in qs):
+                rs = self._batch().read_many(
+                    self.state or D.NEUTRAL_STATE, qs, slot=self.slot,
+                    post=self._post, upstream=self._upstream, render=render,
+                    exclude=exclude)
+                return [self._after_read(q, r, rules, extra)
+                        for q, r in zip(qs, rs)]
         for q in questions:
             q = D.typed(q)
             pre = [c for c in D.rendered_orders(q)] \
@@ -737,19 +756,32 @@ class Turn:
                        post=self._post, upstream=self._upstream,
                        render=render, exclude=exclude,
                        prior_for=self._typed_cf if pre else None)
-            r["tier"] = tier(r)
-            rule = (rules or {}).get(q["name"])
-            f = flat(r)
-            r["decision_id"] = self._log_decision(f, rule, extra)
-            f["decision_id"] = r["decision_id"]
-            self.ms_questions += f["ms"]
-            self.answers.append({k: f[k] for k in (
-                "name", "type", "answer", "argmax", "tie", "tier",
-                "confidence", "noul", "score", "probs", "disagreement",
-                "argmax_agree", "label_mass_min", "prior", "reads",
-                "readout", "decision_id", "ms")})
-            out.append(r)
+            out.append(self._after_read(q, r, rules, extra))
         return out
+
+    def _after_read(self, q: dict, r: dict, rules, extra) -> dict:
+        """One typed read's answer: its tier, the decision logged, the Turn's
+        record."""
+        r["tier"] = tier(r)
+        rule = (rules or {}).get(q["name"])
+        f = flat(r)
+        r["decision_id"] = self._log_decision(f, rule, extra)
+        f["decision_id"] = r["decision_id"]
+        self.ms_questions += f["ms"]
+        self.answers.append({k: f[k] for k in (
+            "name", "type", "answer", "argmax", "tie", "tier",
+            "confidence", "noul", "score", "probs", "disagreement",
+            "argmax_agree", "label_mass_min", "prior", "reads",
+            "readout", "decision_id", "ms")})
+        return r
+
+    def _batch(self):
+        """This Turn's burst of batched reads (decider_batch): its calls keep
+        the state's prefix resident, close() frees it."""
+        if getattr(self, "_burst", None) is None:
+            import decider_batch as B
+            self._burst = B.burst(self.state, upstream=self._upstream)
+        return self._burst
 
     def _typed_cf(self, c: dict) -> dict | None:
         """The content-free read of one printed order (typed keys), once per

@@ -598,6 +598,17 @@ precision clears its target (0.409 high, 0.266 medium, operator-accepted
 2026-09-29), as for every question set; separation is reported first, and a
 variant whose by-case interval includes 0.5 is not tuned.
 
+## 10. Batched reads: every question of a call in one engine pass (2026-10-07, BUILT OFFLINE, NOT RUN ON A GPU)
+
+Operator, 2026-10-07: "we cant do that with ours too, this is a model hack somehow to make it faster?" (Clef reading every
+question of a call in one forward pass). Clef's speed comes from a trained joint head over one sequence; it does not carry to
+a next-token readout. What does: one engine request instead of two reads per question, the shared state decoded once, each
+question's two orders on forked sequences of that state in one `llama_decode` batch (a shared question head decoded once),
+answers identical up to batch noise. docs/DECIDE-BATCH.md has the design, the wire, the tests, the arithmetic (at most x1.24
+on the JevBench public items as a whole, ~3x for a many-question call on a small or resident state) and the measurement plan
+(waits for "GPU go"). Engine patch `0042-server-decide-batch.patch` (unshipped), `mcp/decider_batch.py` behind
+`YAMADORI_DECIDER_BATCH` (default off).
+
 ## Sources
 
 **TypeSafe documentation** (docs.typesafe.ai, read 2026-09-29; vendor):
