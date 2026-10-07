@@ -1284,6 +1284,44 @@ def test_redecide_quarantined_serves_it_again_and_reprove_picks_up_the_rest():
           "a parse-only one are not", [r["name"] for r in rows])
 
 
+def test_types_are_not_run_against_a_version_older_than_the_skill():
+    held = {"react": ["19.2.8"], "typescript": ["5.9.2"]}
+    saved = P.HELD_VERSIONS
+    P.HELD_VERSIONS = lambda n: list(held.get(n, []))
+    try:
+        why = P.types_skip([{"form": "DO", "text": "React 19.3+: pass a ref "
+                             "directly to <Fragment> to get a FragmentInstance."}])
+        check(why and "19.3" in why and "19.2.8" in why,
+              "[derive/2] 'React 19.3+' against a held react 19.2.8: no types "
+              "check", why)
+        check(P.types_skip([{"form": "DO", "text": "React 19.2+: use "
+                             "useEffectEvent."}]) is None
+              and P.types_skip([{"form": "DO", "text": "Zod 4.1+ "
+                                 "does x"}]) is None
+              and P.types_skip([{"form": "DO", "text": "no version here"}])
+              is None,
+              "[derive/2] a version the stack holds, or a package it holds "
+              "none of, keeps the types check")
+        reset_store()
+        sid = make_skill("future-api", items=[
+            {"form": "DO", "situation": "", "quote": "", "ref": "",
+             "text": "React 19.3+: pass a ref to <Fragment> for a "
+                     "FragmentInstance, called with `observeUsing`."}])
+        calls = []
+        P.TYPE_CHECKER = lambda code, lang, pk: calls.append(1) or {
+            "ran": True, "ok": False, "errors": ["TS2305"]}
+        with with_fakes(FakeChat(GOOD_TS, GOOD_TS)):
+            rec = P.prove(sid, 1, skills.version(sid, 1))
+        kinds = [c["kind"] for p in rec["probes"] for c in p["checks"]]
+        check("types" not in kinds and not calls
+              and any("types" == d.get("kind") for d in rec["dropped"])
+              and rec.get("derive") == P.DERIVE,
+              "[derive/2] prove() drops the types check, records why, and "
+              "stamps the derivation", (kinds, rec["dropped"][-1:]))
+    finally:
+        P.HELD_VERSIONS = saved
+
+
 def main() -> int:
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -1194,6 +1194,41 @@ def decide(probes: list[dict]) -> dict:
                       "answers off, then re-run the pipeline from tests"}
 
 
+# A skill that says "React 19.3+" is about an API the held package may not have
+# yet: a type check against the held version then fails the CORRECT answer
+# (measured 2026-10-07: react-dev-blog-react-19-3-fragment-refs-1, "Module
+# 'react' has no exported member 'FragmentInstance'" on both probes, 2 of 2
+# runs, against the held react 19.2.x).
+_MIN_VERSION = re.compile(r"\b([A-Za-z][\w.-]*)\s+v?(\d+(?:\.\d+)+)\+")
+# HELD_VERSIONS(package) -> ["19.2.8", ...]; None: typecheck.held_versions.
+HELD_VERSIONS = None
+
+
+def _vtuple(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+
+
+def types_skip(items: list[dict]) -> str | None:
+    """Why the types check cannot judge this skill, or None: an item states a
+    minimum version ("React 19.3+") above the newest the stack holds."""
+    held_fn = HELD_VERSIONS
+    if held_fn is None:
+        import typecheck
+        held_fn = typecheck.held_versions
+    for it in items:
+        for name, ver in _MIN_VERSION.findall(str(it.get("text") or "")):
+            held = [h for h in (held_fn(name.lower()) or [])
+                    if re.match(r"\d", h)]
+            if not held:
+                continue
+            newest = max(held, key=_vtuple)
+            if _vtuple(ver) > _vtuple(newest):
+                return (f"an item is about {name} {ver}+ and the newest held "
+                        f"{name.lower()} is {newest}: a types check against "
+                        "it would fail the right answer (derive/2)")
+    return None
+
+
 def redecide(ver: dict) -> dict | None:
     """The version's STORED prove record read again with derive/2's first
     correction, which needs no generation: a `present` check that came out
@@ -1289,6 +1324,12 @@ def prove(sid: str, v: int, ver: dict, *, mode: str = "pipeline",
                    remedy="(pipeline) re-run validate", seconds=0.0)
         return rec
     d = derive(sid, ver, use_model=use_model)
+    skip_types = types_skip(_items(ver))
+    if skip_types:
+        for p in d["probes"]:
+            p["checks"] = [c for c in p["checks"] if c["kind"] != "types"]
+        d["dropped"].append({"stage": "check", "kind": "types",
+                             "why": skip_types})
     rec.update(dropped=d["dropped"], model=d["model"])
     if not d["probes"]:
         # Nothing to prove it with: UNPROVEN (operator, 2026-09-28: a proof
