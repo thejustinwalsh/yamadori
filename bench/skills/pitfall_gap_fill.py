@@ -121,8 +121,39 @@ def main(argv=None) -> int:
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--model", default="bonsai")
+    ap.add_argument("--retry", metavar="NAME[,NAME]",
+                    help="re-run the EXISTING skills of these entries "
+                    "(quarantined or failed) through the worker's pipeline "
+                    "from --from-stage, with the pinned-source cleaning "
+                    "step on (mcp/skill_clean.py); creates nothing")
+    ap.add_argument("--from-stage", default="fetch",
+                    help="with --retry: the stage to run again from "
+                    "(fetch for a screen quarantine; tests for an "
+                    "activation-test one)")
     a = ap.parse_args(argv)
     entries = load(a.area)
+    if a.retry:
+        import skills
+        want = {x.strip() for x in a.retry.split(",") if x.strip()}
+        bad = [r for r in check(entries) if not r["ok"]
+               and r["name"] in want]
+        if bad:
+            print("REFUSED: gap entries fail --check:", json.dumps(bad))
+            return 2
+        for s in entries:
+            if s["name"] not in want:
+                continue
+            row = skills.find(s["name"])
+            if row is None or row.get("status") == "armed":
+                print(json.dumps({"name": s["name"],
+                                  "skipped": "no such skill, or armed"}))
+                continue
+            skills.update_meta(row["id"], fetch_clean={
+                "pinned_sha256": _manifest_sha(s["file"])})
+            skills.rerun(row["id"], a.from_stage, author="pitfall_gap_fill")
+            print(json.dumps({"name": s["name"], "id": row["id"],
+                              "rerun_from": a.from_stage}), flush=True)
+        return 0
     if a.check:
         res = check(entries)
         print(json.dumps(res, indent=1))
@@ -148,7 +179,11 @@ def main(argv=None) -> int:
                             author="pitfall_gap_fill",
                             meta={"gap_fill": {"area": s["area"],
                                                "cases": s["cases"],
-                                               "pinned": s["file"]}},
+                                               "pinned": s["file"]},
+                                  # the cleaning step, bound to the pinned
+                                  # file's sha256 (mcp/skill_clean.py)
+                                  "fetch_clean": {"pinned_sha256":
+                                                  _manifest_sha(s["file"])}},
                             enqueue_first=False)
         stages = skill_pipeline.run_inline(rec["id"], 1, model=True,
                                            max_steps=30)

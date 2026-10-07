@@ -593,9 +593,26 @@ def handle_fetch(job: dict, ctx) -> dict:
     except Refused as e:
         skills.fail(sid, v, f"fetch refused: {e}")
         return {"refused": str(e)}
+    # THE CLEANING STEP (mcp/skill_clean.py): badge images and HTML comments
+    # out of a PINNED source, before it is screened or distilled. Only for a
+    # skill whose meta names the pin (`fetch_clean`), and only for bytes that
+    # hash to it; every other source reaches the screen as it arrived.
+    cfg = (s.get("meta") or {}).get("fetch_clean")
+    cleaned = None
+    if cfg:
+        import skill_clean
+        raw, cleaned = skill_clean.apply(raw, meta, cfg)
+        meta = dict(meta, clean=cleaned)
+        if cleaned.get("applied"):
+            meta["charset"] = "utf-8"
     rec = skills.store_source(sid, v, raw, meta)
-    return {"bytes": rec["bytes"], "sha256": rec["sha256"],
-            "robots": meta["robots"]["why"]}
+    out = {"bytes": rec["bytes"], "sha256": rec["sha256"],
+           "robots": meta["robots"]["why"]}
+    if cleaned:
+        out["clean"] = {k: cleaned.get(k) for k in (
+            "applied", "removed", "hosts", "why", "raw_bytes",
+            "cleaned_bytes") if cleaned.get(k) is not None}
+    return out
 
 
 MAX_SOURCE_CHARS = CHUNK_CHARS * MAX_CHUNKS
@@ -619,7 +636,15 @@ def handle_screen(job: dict, ctx) -> dict:
         return {"failed": "too long"}
     ctx.beat(f"screening {len(text):,} characters")
     res = skill_screen.screen(raw, text, kind)
-    skills.update_version(sid, v, screen={"deterministic": res})
+    screen_rec: dict = {"deterministic": res}
+    cl = ((_ver.get("fetched") or {}).get("clean") or {})
+    if cl:
+        # what the fetch removed before this screen ran (skill_clean): the
+        # screen above saw the cleaned text, every rule at full strength
+        screen_rec["cleaning"] = {k: cl.get(k) for k in (
+            "v", "applied", "removed", "hosts", "comment_words", "why",
+            "raw_sha256", "cleaned_sha256") if cl.get(k) is not None}
+    skills.update_version(sid, v, screen=screen_rec)
     if not res["ok"]:
         skills.quarantine(sid, v, "screen: " + skill_screen.summary(res))
         return {"quarantined": len(res["quarantine"])}
