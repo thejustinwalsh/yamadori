@@ -5039,9 +5039,11 @@ def _run_turn(body: dict, streamed: bool):
             last = context_full(payload, convo)
         if not last and hop and (cap["turns"] >= cap["limit"]
                                  or int(state.get("_craft_capped") or 0)
+                                 + len(state.get("_craft_repeats") or [])
                                  >= cap["limit"]):
-            # (a model told "no more crafts this request" that many times has
-            # a loop of its own: the same limit bounds it)
+            # (a model told "no more crafts this request", or "that craft is
+            # already given", that many times has a loop of its own: the same
+            # limit bounds it; the landing keeps the client's tools)
             cap["hit"] = True
             payload = _land(payload, convo, "tool_turn_cap")
             last = landed = True

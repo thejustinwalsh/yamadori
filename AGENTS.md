@@ -1361,7 +1361,7 @@ in the section itself; every rule is deterministic.
   `yama_recall_craft` for a craft this conversation already has in full (a craft read, or a package section or
   trigger that gave its body; by name or as the craft a question resolves to) returns "Craft <name> was already
   given above in this conversation -- use it; continue with the task." -- the one sanctioned do-not-repeat line --
-  and counts toward neither the per-request cap nor any landing count (`x_yamadori.craft.repeat`; a router row is
+  and counts toward the per-request cap not at all but toward the flood limit (tool_turn_limit, with the capped calls: a model re-asking lands, keeping the client's tools) (`x_yamadori.craft.repeat`; a router row is
   only a name, not given; a compaction resets it). Tests: `mcp/test_package_skills.py` `test_the_pagoda_sequence`
   (the exact hops 0-5), `test_the_landing_keeps_the_clients_tools`, `test_the_pagoda_over_responses`.
 - **The magnet craft** (2026-10-07; `pkgskills2`: `koota-with-react-three-fiber` won 15 of 25 questions, generic

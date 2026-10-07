@@ -1587,6 +1587,46 @@ def test_the_landing_keeps_the_clients_tools():
           "withdrawn, the answer asked for)")
 
 
+def test_a_craft_asked_again_and_again_lands():
+    """A model re-asking the same craft is a loop of its own: the repeats
+    count toward the same limit the capped calls use, and the landing keeps
+    the client's tools."""
+    lim = tiers.tool_turn_limit(tiers.resolve({"reasoning_effort": "medium"}))
+    T.slots.reset(n=4)
+    H.fresh_host()
+    c = PConv("again", "both", tools=[T.WRITE, TERMINAL])
+    name = CRAFT_NAMES[0]
+    script = [T.reply("", calls=[_craft(name, "r0")])]
+    script += [T.reply("", calls=[_craft(name, f"r{i}")])
+               for i in range(1, 16)]
+    script.insert(1 + lim, T.reply("", calls=[T.call(
+        "write_file", H.PKG, "w1")]))
+    t = c.turn(script, user="Build a voxel scene with koota.")
+    cr = t["x"].get("craft") or {}
+    tt = t["x"].get("tool_turns") or {}
+    last = t["gens"][-1]["request"]
+    check(len(cr.get("repeat") or []) == lim and cr.get("capped") == 0
+          and len((cr.get("reads") or [])) == 1
+          and tt.get("hit") is True and tt.get("landed") == "ours_withdrawn"
+          and tt.get("turns") == 0,
+          f"the same craft asked {1 + 15} times: the first is read, {lim} "
+          f"repeats reach the limit and the request lands (craft hops are "
+          f"not tool turns)", json.dumps([tt, cr.get("repeat"), cr.get(
+              "capped")])[:300])
+    check([x["function"]["name"] for x in last.get("tools") or []]
+          == ["write_file", "terminal"]
+          and not any(m.get("content") == proxy.LANDING_PROMPT
+                      for m in last["messages"])
+          and [x["function"]["name"] for x in
+               t["m"].get("tool_calls") or []] == ["write_file"]
+          and len(T._script) == 15 - lim,
+          "the landing generation has the CLIENT's tools only and no landing "
+          "text; the model's next move is its own client call, and the "
+          f"remaining {15 - lim} re-asks were never made",
+          json.dumps([[x["function"]["name"] for x in last.get("tools")
+                       or []], len(T._script)]))
+
+
 def test_the_pagoda_over_responses():
     import mcp_config
 
@@ -1670,6 +1710,7 @@ def main() -> int:
                test_the_craft_cap, test_the_craft_cap_over_responses,
                test_the_pagoda_sequence, test_the_landing_keeps_the_clients_tools,
                test_the_pagoda_over_responses,
+               test_a_craft_asked_again_and_again_lands,
                test_the_user_named_packages_boost_the_shortlist,
                test_the_state_leaves_the_goal_out,
                test_the_magnet_fixes_through_the_proxy):
