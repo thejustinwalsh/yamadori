@@ -1323,7 +1323,10 @@ in the section itself; every rule is deterministic.
   RESEARCH.md Part 4 item 2; both printed orders averaged), the state framed like
   `skill_inject.framed_state` (the question, the session goal, the step's
   evidence), each craft under its name; (3) ONE noul relevance gate on the best
-  craft ("The craft <name> answers the question: <question>", both orders).
+  craft (since 2026-10-07 the measured variant g noul, `skill_inject.FIT_Q` -- "The assistant's next code or command
+  would be more correct with this fact in front of it." -- shown as `CRAFT: <name>` / `FACT: <its trigger text>`,
+  relevance AUROC 0.915 [0.888, 0.944] on 201 labelled cases, docs/JJAVA.md 9; the question is in the state; both
+  orders; craft/8).
   The craft is returned in full unless the gate is confidently "no" **and a tuned
   row exists** (`skill_inject.THRESHOLDS[model]["craft_query_gate"]`; there is
   none: untuned, the best craft is always returned and the record says
@@ -1347,6 +1350,18 @@ in the section itself; every rule is deterministic.
   (`x_yamadori.tool_turns` counts the package tools); a model told "no" `tool_turn_limit` times in a request lands
   (the same limit; a loop of its own). The router's head says "one or two crafts are usually enough for a step"
   (craft/7). Tests: `mcp/test_package_skills.py` `test_the_craft_cap*` (chat, Responses, blocking, streamed).
+- **The magnet craft** (2026-10-07; `pkgskills2`: `koota-with-react-three-fiber` won 15 of 25 questions, generic
+  ones included; it sat in the shortlist, 5th for the bare question "koota", and still won at p 0.73-0.78, so not
+  the embedder, not position, not a broader description; 21 of 25 questions came before any package lookup, so the
+  section boost never applied). Two fixes, **offline until the operator restarts** (branch `magnet-fixes`):
+  (a) the shortlist is boosted by the packages the USER named (`package_skills.user_named`: the registry's terms
+  in the user's own prose via `skill_classify.asked_terms`, never a pasted manifest, a "without", a context
+  mention, a harness notice or our own injected block), after the latest section's package and before the rest;
+  (b) the choice's and the gate's state is the question plus the step's evidence WITHOUT the session goal
+  (`craft_query.state_text`; the model's first move reads only its question, the opening turn being the goal);
+  `x_yamadori.craft.query.state` says `goal_in_state` false, the goal's length and sha1, and the durable log row
+  (`craft_queries.reads.state.goal_full`) holds the goal for labelling. Unmeasured: whether the generic questions
+  then pick the right craft (the ablation needs the A4000).
 - **Between-turn triggers** (`package_skills.step_triggers`, on the client's own
   newest evidence, reusing `skill_select`'s `fresh_messages`, `evidence_view`,
   `error_text`, `error_names` and `skill_packages.detect`; appended to the tool

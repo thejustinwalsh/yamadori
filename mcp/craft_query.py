@@ -16,16 +16,23 @@ TOOL RECIPE rule 1: no new tool; its argument is `name_or_topic`):
          new index; lexical relevance when the embedder cannot answer) and the
          top skill_match.QUESTION_CANDIDATES go on, the crafts of the
          conversation's latest package-tool package first when there is one
-         (package_skills' section state);
+         (package_skills' section state), then those of the packages the USER
+         named in their own words (package_skills.user_named: the model's
+         first move is often a question, before any lookup);
       2. DECIDE. ONE typed choice over that shortlist, WITHOUT a "none of
          these" option, read in both printed orders and averaged
          (decider_bonsai.read: the mc_avg form) -- the shortlist is already
          relevant, so the choice only ranks it (operator, 2026-10-06: "none is
          very tempting to call if your confidence is low"; SKILLS-RESEARCH.md
          Part 4 item 2) -- then ONE noul relevance gate on the best craft ("The
-         craft <name> answers the question: <question>", both orders). The
-         state is framed like skill_inject.framed_state: the model's question,
-         the session's goal, the step's evidence; each craft shown under its
+         craft <name> would make the answer more correct": skill_inject.FIT_Q, the
+         measured variant g, both orders). The
+         state is framed like skill_inject.framed_state: the model's question
+         and the step's evidence -- WITHOUT the session goal (coordinator,
+         2026-10-07: the probe pkgskills2's magnet craft won 15 of 25
+         questions, generic ones included, and the likely cause is a goal that
+         names r3f, Koota and a voxel scene in every read; the goal is out of
+         these two reads only, recorded in `state`); each craft shown under its
          name (the 2026-10-06 diagnosis, docs/JJAVA.md 9: jjava separates
          on-topic from off-topic at AUROC 0.92 -- the model's question
          already asserts the need);
@@ -72,7 +79,17 @@ LOG_QUESTION_CHARS = 1000       # what the durable log keeps (a model's own word
 # question arms) has read it on each model.
 QUESTION_Q = ("Which craft answers the assistant's question about how to do "
               "this well?")
-GATE_Q = "The craft {name} answers the question: {question}"
+# THE GATE'S FORM (coordinator, 2026-10-07): the rework agent's variant g noul,
+# skill_inject.FIT_Q -- "The assistant's next code or command would be more
+# correct with this fact in front of it." -- the item shown under its craft
+# name (skill_inject.q_fit / item_block: "CRAFT: <name>\nFACT: <the craft's
+# trigger text>"); relevance AUROC 0.915 [0.888, 0.944] on 201 labelled cases
+# (docs/JJAVA.md 9, bench/skills/inject/results/diagnose_20261006.json). It
+# replaced "The craft <name> answers the question: <question>" (never
+# measured). The question is in the state (state_text), so the read is
+# "would this craft make the answer to THIS question more correct". Both
+# orders, untuned, recorded.
+GATE_VARIANT = "craft"
 QUESTION_HEAD = "THE ASSISTANT'S QUESTION TO THE CRAFT LIBRARY:"
 
 
@@ -128,34 +145,72 @@ def shortlist(question: str, pool: list[dict], ctx: dict
         how = "lexical"
     else:
         score, how = cos, "embedding"
-    in_pkg: set[str] = set()
+    # THE PACKAGE BOOST, in two tiers (2026-10-07; the probe pkgskills2: the
+    # model's first move was a craft question, before any package lookup, so
+    # the boost never applied to 21 of 25): the package of the conversation's
+    # latest package-tool section first, then the packages the USER named in
+    # their own words (ctx["named"], package_skills.user_named: the registry's
+    # terms, never a pasted manifest), then the rest by the embedder.
+    import package_skills as PS
+    tiers_: list[tuple[str, str, int | None]] = []
     pkg = ctx.get("package")
     if pkg:
-        import package_skills as PS
-        el = PS.eligible(pkg, ctx.get("major"), pool)
-        in_pkg = {s["id"] for s in ([el["lead"]] if el["lead"] else [])
-                  + el["others"]}
-    ranked = sorted(pool, key=lambda s: (s["id"] not in in_pkg,
+        tiers_.append(("section", pkg, ctx.get("major")))
+    for np_, nm in ctx.get("named") or []:
+        if np_ != pkg:
+            tiers_.append(("named", np_, nm))
+    rank_of: dict[str, int] = {}
+    for k, (_kind, p_, m_) in enumerate(tiers_):
+        el = PS.eligible(p_, m_, pool)
+        for s in ([el["lead"]] if el["lead"] else []) + el["others"]:
+            rank_of.setdefault(s["id"], k)
+    ranked = sorted(pool, key=lambda s: (rank_of.get(s["id"], len(tiers_)),
                                          -float(score.get(s["id"], -1.0)),
                                          s["name"]))
     top = ranked[:skill_match.QUESTION_CANDIDATES]
+    in_top = {s["id"] for s in top}
     return top, {"retrieval": how, "package": pkg,
-                 "package_boosted": sorted(in_pkg & {s["id"] for s in top})[:8],
+                 "named": [[p_, m_] for _k, p_, m_ in tiers_
+                           if _k == "named"],
+                 "package_boosted": sorted(
+                     i for i in rank_of if i in in_top)[:8],
                  "embedding_ok": cos is not None}
 
 
-def state_text(question: str, ctx: dict) -> tuple[str, dict]:
-    """The question, then the session's goal and the step's evidence framed
-    as skill_inject.framed_state frames them."""
+def state_text(question: str, ctx: dict) -> tuple[str, dict, dict]:
+    """(the state both of jjava's reads see, decide_turn's state info, the
+    state's record): the model's QUESTION and the current step's evidence,
+    framed as skill_inject.framed_state frames it -- WITHOUT the session goal
+    (coordinator, 2026-10-07: the probe pkgskills2's magnet craft won 15 of 25
+    questions, the generic ones included, and the likely cause is a goal that
+    names r3f, Koota and a voxel scene in every read; the goal stays out of
+    these two reads only). When the request is the user's opening turn (the
+    model asked before any step) that turn IS the goal: nothing but the
+    question is read. The record says the goal was kept out, how long it is
+    and its sha1; the goal itself (cut to skill_inject.GOAL_CHARS) goes only
+    to the durable log (`goal_full`), where a later read can be labelled with
+    it."""
     import decide_turn
+    import hashlib
     import skill_inject
     msgs = [m for m in ctx.get("messages") or [] if isinstance(m, dict)]
     try:
         st, info = decide_turn.state_of(msgs)
     except Exception:                                            # noqa: BLE001
         st, info = "", {"kind": "step"}
-    framed = skill_inject.framed_state(skill_inject.goal_of(msgs), st, info)
-    return f"{QUESTION_HEAD}\n{question.strip()}\n\n{framed}", info
+    goal = skill_inject.goal_of(msgs)
+    first = info.get("kind") == "user" and not info.get("previous_assistant")
+    body = "" if first else skill_inject.framed_state("", st, info)
+    text = f"{QUESTION_HEAD}\n{question.strip()}" + (
+        f"\n\n{body}" if body else "")
+    return text, info, {
+        "goal_in_state": False, "goal_chars": len(goal),
+        "goal_sha1": hashlib.sha1(goal.encode("utf-8")).hexdigest()[:16]
+        if goal else None,
+        "evidence": "none (the opening turn is the goal)" if first else
+        ("the newest user message" if info.get("kind") == "user"
+         else "the step"),
+        "goal_full": goal}
 
 
 def _option(s: dict) -> str:
@@ -200,7 +255,9 @@ def ask(question: str, top: list[dict], ctx: dict) -> dict:
     import skill_inject
     out: dict = {"chosen": None, "best": None, "p": None, "gate_p": None,
                  "untuned": True, "tier": "untuned"}
-    state, info = state_text(question, ctx)
+    state, info, srec = state_text(question, ctx)
+    out["state"] = {k: v for k, v in srec.items() if k != "goal_full"}
+    out["_goal_full"] = srec.get("goal_full")
     opts = [_option(s) for s in top]
     keys = [s["id"] for s in top]
     try:
@@ -223,9 +280,10 @@ def ask(question: str, top: list[dict], ctx: dict) -> dict:
                                                          )[:6]},
                                  decision_id=a.get("decision_id"))
             out["best"], out["p"] = s, round(probs.get(best, 0.0), 6)
-            g = turn.decide([D.q_noul(
-                QSET_GATE, GATE_Q.format(name=s["name"],
-                                         question=question.strip()))])[0]
+            import package_skills as PS
+            g = turn.decide([skill_inject.q_fit(
+                {"key": s["id"], "name": s["name"],
+                 "fact": PS.trigger_text(s)}, GATE_VARIANT)])[0]
     except D.DeciderUnavailable as e:
         out["failure"] = e.facts()
         return out
@@ -296,9 +354,11 @@ def answer(question: str, pool: list[dict], ctx: dict
             return no_answer(q, top, rec, ctx), rec
         got = ask(q, top, ctx)
         for k in ("p", "gate_p", "untuned", "tier", "choice", "gate",
-                  "failure"):
+                  "failure", "state"):
             if k in got:
                 rec[k] = got[k]
+        if got.get("_goal_full") is not None:
+            rec["goal_full"] = got["_goal_full"]
         s = got.get("chosen")
         if got.get("best") is not None:
             rec["best"] = got["best"]["id"]

@@ -560,7 +560,10 @@ def faithful_user(items: list[dict]) -> str:
 # craft/7 (2026-10-07, after the probe pkgskills2): the router's head says
 # "one or two crafts are usually enough for a step" (a positive line); the
 # per-request cap on craft reads (proxy._run_our_tool) is the bound.
-CRAFT_VERSION = "craft/7"
+# craft/8 (2026-10-07): the craft question's relevance gate is the measured
+# variant g noul (skill_inject.FIT_Q) shown with its craft name; both typed
+# questions are pinned rows (query_choice, query_gate).
+CRAFT_VERSION = "craft/8"
 # The model-facing tool that reads one craft in full (a hidden hop, like
 # yama_think_deeply). The operator may rename it: this is the one constant.
 # The old name, `recall_craft`, is still read in stored ledger rows
@@ -642,6 +645,10 @@ def craft_registry() -> list[dict]:
     rows += [("router_head", _ps.ROUTER_HEAD),
              ("router_columns", _ps.ROUTER_COLUMNS),
              ("pointer", _ps.POINTER)]
+    # The craft question path's two typed questions (mcp/craft_query.py).
+    import craft_query as _cq
+    import skill_inject as _si
+    rows += [("query_choice", _cq.QUESTION_Q), ("query_gate", _si.FIT_Q)]
     return [{"name": n, "version": CRAFT_VERSION, "chars": len(s),
              "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest()[:16],
              "text": s} for n, s in rows]
