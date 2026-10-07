@@ -1323,7 +1323,10 @@ in the section itself; every rule is deterministic.
   RESEARCH.md Part 4 item 2; both printed orders averaged), the state framed like
   `skill_inject.framed_state` (the question, the session goal, the step's
   evidence), each craft under its name; (3) ONE noul relevance gate on the best
-  craft ("The craft <name> answers the question: <question>", both orders).
+  craft (since 2026-10-07 the measured variant g noul, `skill_inject.FIT_Q` -- "The assistant's next code or command
+  would be more correct with this fact in front of it." -- shown as `CRAFT: <name>` / `FACT: <its trigger text>`,
+  relevance AUROC 0.915 [0.888, 0.944] on 201 labelled cases, docs/JJAVA.md 9; the question is in the state; both
+  orders; craft/8).
   The craft is returned in full unless the gate is confidently "no" **and a tuned
   row exists** (`skill_inject.THRESHOLDS[model]["craft_query_gate"]`; there is
   none: untuned, the best craft is always returned and the record says

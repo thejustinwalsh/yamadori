@@ -25,7 +25,8 @@ TOOL RECIPE rule 1: no new tool; its argument is `name_or_topic`):
          relevant, so the choice only ranks it (operator, 2026-10-06: "none is
          very tempting to call if your confidence is low"; SKILLS-RESEARCH.md
          Part 4 item 2) -- then ONE noul relevance gate on the best craft ("The
-         craft <name> answers the question: <question>", both orders). The
+         craft <name> would make the answer more correct": skill_inject.FIT_Q, the
+         measured variant g, both orders). The
          state is framed like skill_inject.framed_state: the model's question
          and the step's evidence -- WITHOUT the session goal (coordinator,
          2026-10-07: the probe pkgskills2's magnet craft won 15 of 25
@@ -78,7 +79,17 @@ LOG_QUESTION_CHARS = 1000       # what the durable log keeps (a model's own word
 # question arms) has read it on each model.
 QUESTION_Q = ("Which craft answers the assistant's question about how to do "
               "this well?")
-GATE_Q = "The craft {name} answers the question: {question}"
+# THE GATE'S FORM (coordinator, 2026-10-07): the rework agent's variant g noul,
+# skill_inject.FIT_Q -- "The assistant's next code or command would be more
+# correct with this fact in front of it." -- the item shown under its craft
+# name (skill_inject.q_fit / item_block: "CRAFT: <name>\nFACT: <the craft's
+# trigger text>"); relevance AUROC 0.915 [0.888, 0.944] on 201 labelled cases
+# (docs/JJAVA.md 9, bench/skills/inject/results/diagnose_20261006.json). It
+# replaced "The craft <name> answers the question: <question>" (never
+# measured). The question is in the state (state_text), so the read is
+# "would this craft make the answer to THIS question more correct". Both
+# orders, untuned, recorded.
+GATE_VARIANT = "craft"
 QUESTION_HEAD = "THE ASSISTANT'S QUESTION TO THE CRAFT LIBRARY:"
 
 
@@ -269,9 +280,10 @@ def ask(question: str, top: list[dict], ctx: dict) -> dict:
                                                          )[:6]},
                                  decision_id=a.get("decision_id"))
             out["best"], out["p"] = s, round(probs.get(best, 0.0), 6)
-            g = turn.decide([D.q_noul(
-                QSET_GATE, GATE_Q.format(name=s["name"],
-                                         question=question.strip()))])[0]
+            import package_skills as PS
+            g = turn.decide([skill_inject.q_fit(
+                {"key": s["id"], "name": s["name"],
+                 "fact": PS.trigger_text(s)}, GATE_VARIANT)])[0]
     except D.DeciderUnavailable as e:
         out["failure"] = e.facts()
         return out

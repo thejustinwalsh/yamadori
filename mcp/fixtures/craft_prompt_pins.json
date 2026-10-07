@@ -1,58 +1,66 @@
 {
  "arg_description": {
   "sha256": "3d45dc9287ae5f15",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "header": {
   "sha256": "e1ba2165a2cf4c8b",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "index_head": {
   "sha256": "e780abbf3d1ebc0e",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "pointer": {
   "sha256": "7e3148cdaddd887d",
-  "version": "craft/7"
+  "version": "craft/8"
+ },
+ "query_choice": {
+  "sha256": "453c0fe412d53358",
+  "version": "craft/8"
+ },
+ "query_gate": {
+  "sha256": "1a5c18dc34fcd827",
+  "version": "craft/8"
  },
  "recall_do": {
   "sha256": "728bbe4ef0f409ca",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "recall_not": {
   "sha256": "ea7bcbe03fd4eb50",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "recall_when": {
   "sha256": "32209c26761c7560",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "result_head": {
   "sha256": "4dfddc3c1deaf39a",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "router_columns": {
   "sha256": "378989df152ba30b",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "router_head": {
   "sha256": "ec5736808eea7491",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "tool_arg": {
   "sha256": "60553553b7b21341",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "tool_description": {
   "sha256": "61ae817ff781c4a8",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "tool_name": {
   "sha256": "d3fc607d6cd48138",
-  "version": "craft/7"
+  "version": "craft/8"
  },
  "unknown": {
   "sha256": "bb54651bc96f1b4b",
-  "version": "craft/7"
+  "version": "craft/8"
  }
 }

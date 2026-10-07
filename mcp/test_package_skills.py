@@ -908,8 +908,8 @@ def test_the_question_path():
           and qs[0]["none"] is None,
           "ONE choice over the shortlist WITHOUT a 'none' option, then ONE "
           "noul relevance gate", json.dumps([x["type"] for x in qs]))
-    check(qs[1]["text"].startswith("The craft koota-queries-and-systems "
-                                   "answers the question: how do I iterate")
+    check(qs[1]["text"].startswith(skill_inject.FIT_Q + "\n\nCRAFT: "
+                                   "koota-queries-and-systems\nFACT: ")
           and all("[koota-" in o or "[math-" in o or "[r3f-" in o
                   or "[typescript-" in o for o in qs[0]["options"]),
           "the gate asks about the craft by name; the choice shows each "
