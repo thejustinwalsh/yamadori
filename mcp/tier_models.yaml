@@ -281,11 +281,12 @@ models:
     # --a4000-fit writes it here (the same values). An internal job routed here is budgeted against it and refused,
     # with its sizes, when it cannot fit (tiers.window_model_of, model.fit_window).
     window:
-      ctx: 141312
+      ctx: 128000
       slots: 2
-      main_cap: 138240
+      main_cap: 124928
       source: >-
-        measured: bench/a4000_fit.py (jjava + side calls as its load), written by tier models (bench/deploy_tier_models.py)
+        measured: bench/a4000_fit.py (jjava + side calls as its load), written by tier models (bench/deploy_tier_models.py);
+        less 13,312 cells for --decide-seqs 2 since 2026-10-07 (docs/DECIDE-BATCH.md); main_cap = ctx - the 3,072-cell lane
     vision: false
     profile:
       job_caps:

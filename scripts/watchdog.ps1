@@ -91,7 +91,7 @@ $Services = @(
        Exe = $py; Args = @("$root\mcp\server.py"); Log = "$root\logs\proxy.log"
        Match = 'mcp[\\/]server\.py'
        # layout v3 (bench/deploy_layout_v3.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1' }
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1'; YAMADORI_DECIDER_BATCH = '1' }
        # max mode (bench/deploy_flash_next.py)
        EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
        # tier models (bench/deploy_tier_models.py)
@@ -111,7 +111,7 @@ $Services = @(
        Exe = $py; Args = @("$root\mcp\tools_api.py"); Log = "$root\logs\tools-api.log"
        Match = 'tools_api\.py'
        # layout v3 (bench/deploy_layout_v3.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1' }
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1'; YAMADORI_DECIDER_BATCH = '1' }
        # max mode (bench/deploy_flash_next.py)
        EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
        # tier models (bench/deploy_tier_models.py)
@@ -130,7 +130,7 @@ $Services = @(
        Exe = $py; Args = @("$root\mcp\worker.py"); Log = "$root\logs\worker.log"
        Match = 'mcp[\\/]worker\.py'
        # layout v3 (bench/deploy_layout_v3.py)
-       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1' }
+       Env2 = @{ YAMADORI_MAIN_CAP = '209920'; YAMADORI_LANE_TOKENS = '0'; YAMADORI_SLOTS = '1'; YAMADORI_DECIDER_BATCH = '1' }
        # max mode (bench/deploy_flash_next.py)
        EnvMax = @{ YAMADORI_MAX_MODEL = 'flash-next' }
        # tier models (bench/deploy_tier_models.py)
