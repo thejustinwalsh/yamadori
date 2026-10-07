@@ -1966,7 +1966,7 @@ def test_the_concept_seed_through_responses():
     Responses conversation, replays byte for byte, and is reported in
     x_yamadori.session.seed; medium carries none."""
     import concept_seed
-    for effort, want in (("high", True), ("medium", False)):
+    for effort, want in (("high", True), ("minimal", False)):   # the seed: low and up (2026-10-06)
         T.slots.reset(n=4)
         T.compaction.reset()
         c = RClient(f"seed-{effort}", effort=effort,

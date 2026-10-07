@@ -528,10 +528,11 @@ def test_thinking_is_off_only_at_minimal():
           "low: thinking on at medium, told to the template",
           json.dumps({k: lo.get(k) for k in ("chat_template_kwargs",
                       "reasoning_effort")}))
-    check(not any(tiers.TIERS[n][k] for n in ("minimal", "low")
-                  for k in ("skills", "seed", "mcp_tools")),
-          "low and minimal: none of our augmentation (skills, the seed, the "
-          "MCP tools)")
+    check(not any(tiers.TIERS["minimal"][k] for k in ("skills", "seed", "mcp_tools"))
+          and not any(tiers.TIERS["low"][k] for k in ("skills", "mcp_tools")),
+          "minimal: none of our augmentation; low: no skills, no MCP tools")
+    check(all(tiers.TIERS[n]["seed"] for n in ("low", "medium", "high", "xhigh", "max")),
+          "the concept seed at low and up (operator 2026-10-06: a requirement, low and up)")
     t = tiers.resolve({"reasoning_effort": "low"}, overrides={"thinks": False})
     body = tiers.apply({"reasoning_effort": "low"}, t)
     check(body["enable_thinking"] is False and "reasoning_effort" not in body,
@@ -688,8 +689,8 @@ def test_the_tier_rows_after_the_removal():
           "every tier row is thinks, effort, skills, seed, mcp_tools, why",
           json.dumps({n: sorted(k ^ want) for n, k in keys.items()}))
     check([n for n in tiers.ORDER if tiers.TIERS[n]["seed"]]
-          == ["high", "xhigh", "max"],
-          "the concept seed at high, xhigh and max")
+          == ["low", "medium", "high", "xhigh", "max"],
+          "the concept seed at low and up (operator 2026-10-06)")
     check([n for n in tiers.ORDER if tiers.TIERS[n]["mcp_tools"]]
           == ["medium", "high", "xhigh", "max"],
           "the MCP tools at medium and up")
@@ -700,8 +701,8 @@ def test_the_tier_rows_after_the_removal():
                                     "slot_release", "idle_clear",
                                     "restore_reasoning", "mcp_tools", "preread",
                                     "preread_overlap", "package_skills"}
-          and tiers.OFF_BY_DEFAULT == frozenset({"package_skills"}),
-          "the switches left; the package skills channel is off by default "
+          and tiers.OFF_BY_DEFAULT == frozenset(),
+          "the switches left; the package skills channel is ON by default (operator 2026-10-06) "
           "until its probe passes", str(sorted(tiers.BEHAVIOURS)))
     check(tiers.from_header('{"auto_triggers": false, "deep_tool_hop": true, '
                             '"seed_frame": false, "verify_directive": false}')

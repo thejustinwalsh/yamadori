@@ -96,7 +96,9 @@ import package_registry  # noqa: E402
 import skill_limits as L  # noqa: E402
 
 MODES = ("inject", "router", "both")
-DEFAULT_MODE = "inject"
+# "both" (the lead skill's body + the router table for the rest): the default the operator turned on with the
+# channel (2026-10-06, "turn them on and run the job you need to gather evidence"); the probe compares the three.
+DEFAULT_MODE = "both"
 MODE_ENV = "YAMADORI_PACKAGE_SKILLS_MODE"
 # The tools whose result carries a section: the MCP package tools.
 TOOLS = ("yama_find_package", "yama_list_package_versions",

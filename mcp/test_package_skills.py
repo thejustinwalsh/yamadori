@@ -371,9 +371,9 @@ def test_the_both_rendering():
 def test_the_switch():
     t = tiers.resolve({"reasoning_effort": "medium"})
     sw = PS.switch(t)
-    check(sw == {"on": False, "source": "default", "mode": "inject",
+    check(sw == {"on": True, "source": "default", "mode": "both",
                  "mode_source": "default"},
-          "off by default (the probe has not passed), mode inject",
+          "ON by default (operator 2026-10-06), mode both",
           json.dumps(sw))
     os.environ["YAMADORI_PACKAGE_SKILLS"] = "1"
     os.environ["YAMADORI_PACKAGE_SKILLS_MODE"] = "router"
@@ -397,13 +397,13 @@ def test_the_switch():
     bad = PS.switch(tiers.resolve(
         {"reasoning_effort": "medium"},
         overrides=tiers.from_header('{"package_skills_mode": "nonsense"}')))
-    check(bad["mode"] == "inject" and "unknown mode" in bad["mode_source"],
+    check(bad["mode"] == PS.DEFAULT_MODE and "unknown mode" in bad["mode_source"],
           "an unknown mode is ignored, and says so", json.dumps(bad))
     check("package_skills" in tiers.BEHAVIOURS
-          and "package_skills" in tiers.OFF_BY_DEFAULT
+          and "package_skills" not in tiers.OFF_BY_DEFAULT
           and tiers.behaviours(tiers.resolve({"reasoning_effort": "high"}))[
-              "package_skills"] == {"on": False, "source": "default"},
-          "listed with the other switches (x_yamadori.progress), off")
+              "package_skills"] == {"on": True, "source": "default"},
+          "listed with the other switches (x_yamadori.progress), on")
 
 
 # ============================================================ 4. triggers ====
@@ -648,7 +648,7 @@ def test_through_the_served_template():
           "…and that request extends the slot too")
     # the switch off: nothing rides
     T.slots.reset(n=4)
-    off = H.Conv("off", features={"skills": False})
+    off = H.Conv("off", features={"skills": False, "package_skills": False})
     t = off.turn([T.reply("", calls=[T.call("yama_find_package", {
         "query": "pmndrs math", "ecosystem": "npm"}, "o1")]),
         T.reply("ok")], user="Build with pmndrs math.")
@@ -657,7 +657,7 @@ def test_through_the_served_template():
                  t["gens"][0]["request"]["tools"]]
     check(P.CRAFT_HEADER not in ho and "yama_recall_craft" not in names_off
           and "package" not in (t["x"].get("skills") or {}),
-          "the switch off (the default): no section, no craft tool, no "
+          "the switch off: no section, no craft tool, no "
           "record")
 
 

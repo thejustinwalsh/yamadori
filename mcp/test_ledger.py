@@ -1062,7 +1062,7 @@ def test_a_retryable_decision_is_decided_again():
                       "chars": len(GOOD), "ids": ["p1"], "versions": [1],
                       "why": "attached 1"}
     proxy._skills_tail = skills
-    feats = {"skills": True}
+    feats = {"skills": True, "seed": False}  # the seed (low and up since 2026-10-06) is its own test
     try:
         # 1. The embedder is down: nothing attached, recorded RETRYABLE. On
         #    a turn AFTER the opening: a retried opening is a new
@@ -2399,7 +2399,7 @@ def test_the_concept_seed_rides_the_first_user_turn():
           and (x3.get("session") or {}).get("seed") == seed,
           "[seed] an in-place compaction of the conversation reports the same "
           "seed", json.dumps(x3.get("session")))
-    for effort, f, why in (("medium", feats, "tier medium"),
+    for effort, f, why in (("minimal", feats, "tier minimal"),
                            ("xhigh", dict(feats, seed=False),
                             'X-Yamadori-Features {"seed": false}')):
         slots.reset(n=4)

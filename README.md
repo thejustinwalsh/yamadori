@@ -141,8 +141,8 @@ model's context; the skills code stays.
 | `reasoning_effort` | thinking | skills | MCP tools | images | concept seed | adds |
 |---|---|---|---|---|---|---|
 | `minimal` | off | – | – | yes | – | the fastest answer: no thinking, nothing of ours (least injection-resistant) |
-| `low` | on | – | – | yes | – | nothing: the model as it ships, the benchmark baseline |
-| `medium` | on | – | yes | yes | – | the MCP host's package lookups (skills: off, 2026-09-29) |
+| `low` | on | – | – | yes | yes | the concept seed only: the model's own thinking plus the seed (2026-10-06) |
+| `medium` | on | – | yes | yes | yes | the MCP host's package lookups and the concept seed |
 | `high` | on | – | yes | yes | yes | a concept seed on the conversation's first user turn |
 | `xhigh` | on | – | yes | yes | yes | the same as `high`: the effort-matched pair to `max` |
 | `max` | on | – | yes | yes | yes | everything, with the longest thinking (slowest) |

@@ -885,7 +885,7 @@ def test_a_text_parts_user_turn_gets_its_injection():
     try:
         c = Client("medium", key="pis1")
         c.tools = PI_TOOLS
-        body_feats = {"skills": True}
+        body_feats = {"skills": True, "seed": False}   # the seed has its own test (test_ledger)
         c.body_feats = body_feats
         c.msgs.append({"role": "user", "content": [
             {"type": "text", "text": "Fix the export in js/audio.js so "

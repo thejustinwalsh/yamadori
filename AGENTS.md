@@ -1430,8 +1430,8 @@ live** (SELF-IMPROVEMENT-LOG #16).
   | `reasoning_effort` | thinking sent | skills | MCP tools | images | concept seed | adds |
   |---|---|---|---|---|---|---|
   | `minimal` | off | – | – | yes | – | thinking off, the vendor's instruct sampling, nothing of ours (fastest; least injection-resistant) |
-  | `low` | medium | – | – | yes | – | nothing: the model as it ships, the benchmark baseline |
-  | `medium` | medium | – | yes | yes | – | the MCP host's package lookups (skills: off at every tier, 2026-09-29) |
+  | `low` | medium | – | – | yes | yes | the concept seed only (operator 2026-10-06: a requirement, low and up) |
+  | `medium` | medium | – | yes | yes | yes | the MCP host's package lookups and the concept seed |
   | `high` | medium | – | yes | yes | yes | a concept seed on the conversation's first user turn |
   | `xhigh` | medium | – | yes | yes | yes | everything `max` has, at medium thinking: the effort-matched pair to `max` |
   | `max` | xhigh | – | yes | yes | yes | everything, at xhigh thinking |

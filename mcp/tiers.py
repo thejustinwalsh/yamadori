@@ -156,8 +156,10 @@ TIERS = {
     #     OFF exfiltrated 5/5, ON (temp 1.0) 0/5. The least injection-resistant
     #     tier; never the one for an agent reading untrusted input.
     #
-    # `low` is the model AS IT SHIPS -- its own thinking at medium, none of
-    # our augmentation (skills, the MCP tools, the seed). It is the
+    # `low` is the model with its own thinking at medium and, since 2026-10-06,
+    # the concept seed (operator: "That is a requirement for yamadori, that
+    # must be present"; chosen tiers: low and up) -- no skills, no MCP tools.
+    # `minimal` stays the bare tier. Before the seed it was the
     # honest benchmark baseline (it used to be `minimal`, with thinking on at
     # low effort; switching thinking OFF would cripple the thing we compare
     # against, and any arm beating it would bank thinking-beats-no-thinking).
@@ -169,17 +171,18 @@ TIERS = {
     },
     "low": {
         "thinks": True, "effort": "medium",
-        "skills": False, "seed": False,
+        "skills": False, "seed": True,
         "mcp_tools": False,
-        "why": "the model as it ships -- its own thinking, none of "
-               "our augmentation. The benchmark baseline.",
+        "why": "the model with its own thinking and the concept seed on the "
+               "conversation's first user turn (operator, 2026-10-06: the seed "
+               "is a requirement, low and up)",
     },
     "medium": {
         "thinks": True, "effort": "medium",
-        "skills": False, "seed": False,
+        "skills": False, "seed": True,
         "mcp_tools": True,
-        "why": "the MCP host's package lookups (skills: off at every tier "
-               "since 2026-09-29)",
+        "why": "the MCP host's package lookups and a concept seed on the "
+               "conversation's first user turn",
     },
     # Medium effort, not xhigh (operator, 2026-09-23): xhigh thinking is
     # confined to `max`. Same evidence as the `xhigh` tier note below.
@@ -1237,11 +1240,13 @@ BEHAVIOURS = {
     #                   skills of a package ride in the result of the MCP
     #                   package tool that named it, and evidence-based
     #                   triggers between turns (mcp/package_skills.py).
-    #                   OFF BY DEFAULT until its probe passes (THE TOOL
-    #                   RECIPE rule 7; bench/mcp/lookup_probe.py arms
-    #                   package-*): YAMADORI_PACKAGE_SKILLS=1 or the header
-    #                   {"package_skills": true} turns it on; allowed where
-    #                   the tier's `mcp_tools` flag is set (medium and up).
+    #                   ON BY DEFAULT (operator, 2026-10-06: "Lets cook the
+    #                   features turn them on and run the job you need to
+    #                   gather evidence" -- on while its probe runs,
+    #                   bench/mcp/package_skills_probe.py); YAMADORI_PACKAGE_SKILLS=0
+    #                   or the header {"package_skills": false} turns it off;
+    #                   allowed where the tier's `mcp_tools` flag is set
+    #                   (medium and up).
     #                   The rendering is `package_skills_mode` (inject |
     #                   router | both; header or YAMADORI_PACKAGE_SKILLS_MODE).
     "package_skills": ("YAMADORI_PACKAGE_SKILLS", "mcp_tools"),
@@ -1259,8 +1264,8 @@ BEHAVIOURS = {
 }
 # The switches that are OFF unless their variable (=1) or a header turns
 # them on; every other switch is on unless switched off. None since
-# deep_tool_hop went with deep thinking (2026-09-29).
-OFF_BY_DEFAULT: frozenset = frozenset({"package_skills"})
+# package_skills was turned on (operator, 2026-10-06).
+OFF_BY_DEFAULT: frozenset = frozenset()
 
 
 def _env_on(var: str, default: bool = True) -> bool:
