@@ -1565,7 +1565,7 @@ def backlog(limit: int | None = None) -> tuple[list[dict], dict]:
     (new and changed skills first: the operator's order)."""
     live = _live_jobs()
     rows, skipped = [], {"proved": 0, "live_job": 0}
-    for s in skills.armed():
+    for s in skills.armed(include_package_only=True):
         ver = skills.version(s["id"], s["version"]) or {}
         r = record_of(ver)
         if r.get("verdict") in PROVED and \

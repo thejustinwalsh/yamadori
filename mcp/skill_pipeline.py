@@ -1706,6 +1706,66 @@ def _lead_activation(tests: dict, package: str) -> dict:
             "by": "skill_packages.detect (a lead is pushed, never matched)"}
 
 
+# A skill the activation tests did not clear but the package channel can use
+# (see handle_validate). On unless YAMADORI_SKILL_PACKAGE_ONLY=0.
+PACKAGE_ONLY = os.environ.get("YAMADORI_SKILL_PACKAGE_ONLY", "1") != "0"
+
+
+def package_only(act: dict) -> dict:
+    """The validate record's fields for a package-only version: the channel
+    list, and why (the failing activation cases, the score)."""
+    return {"channels": ["package"],
+            "package_only": {
+                "why": "the activation tests (the text matcher's) did not "
+                       "clear it; the package skills channel never uses the "
+                       "matcher",
+                "failures": list(act.get("failures") or [])[:12],
+                "score": act.get("score"), "n": act.get("n"),
+                "at": time.time()}}
+
+
+def _package_relevant(s: dict, rule: dict, name: str) -> bool:
+    """Is there a package channel this skill could ride? The registry knows
+    the skill's area (koota, r3f, threejs, pmndrs_math, typegpu), names it as
+    a package's canonical skill, or the skill's meta names its package. A
+    skill about React or TypeScript in general has no package section to
+    ride, so being package-only would serve it nowhere: it is quarantined as
+    before."""
+    try:
+        import package_skills
+        meta = (s or {}).get("meta") or {}
+        return bool(package_skills.package_pool([{
+            "name": name, "rule": rule, "lead_for": None,
+            "package": meta.get("package")}]))
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+def admit_package_only(sid: str) -> dict:
+    """Move a skill the ACTIVATION TESTS quarantined (and only they) on to
+    PROVE as package-only: the latest version must be quarantined with an
+    `activation tests:` reason and have its SKILL.md (so the screen, licence,
+    faithfulness and quote checks have all passed: validate quarantines only
+    after them). Raises ValueError otherwise."""
+    s = skills.get(sid)
+    if s is None:
+        raise KeyError(f"no such skill: {sid}")
+    v = int(s["latest_version"])
+    ver = skills.version(sid, v) or {}
+    if ver.get("state") != "quarantined" or not str(
+            ver.get("reason") or "").startswith("activation tests:") \
+            or not (ver.get("text") or "").strip():
+        raise ValueError(f"v{v} of {sid} is not quarantined by the "
+                         "activation tests alone")
+    if not _package_relevant(s, ver.get("classify") or {}, s.get("name")):
+        raise ValueError(f"{sid} has no package channel to ride (its area is "
+                         "not a registry package's): it stays quarantined")
+    val = dict(ver.get("validate") or {})
+    act = val.get("activation") or {}
+    val.update(package_only(act))
+    return skills.reopen_at(sid, v, "prove", validate=val)
+
+
 def _name_for(s: dict, parsed: dict, dist: dict, title: str) -> str:
     """The SKILL.md name a version is given: the name its creator asked for
     (skills.create's `name`, kept as meta.name_requested) wins over the
@@ -1866,6 +1926,18 @@ def handle_validate(job: dict, ctx) -> dict:
     if not act["passed"]:
         skills.update_version(sid, v, text=text,
                               text_sha256=skill_md.sha256(text))
+        if PACKAGE_ONLY and not parsed.get("lead") and not operator                 and _package_relevant(s, rule, name):
+            # CHANNEL-SCOPED ELIGIBILITY (coordinator, 2026-10-07): the
+            # activation tests test the TEXT MATCHER, which the package
+            # skills channel never uses (it picks by the exact package and
+            # major the model looked up). Everything before this point --
+            # the screen, the licence, the faithfulness check, the quotes --
+            # has passed. The version goes on to PROVE flagged package-only;
+            # a version that fails PROVE is quarantined as any other.
+            rec.update(package_only(act))
+            skills.update_version(sid, v, validate=rec)
+            return {"package_only": True, "score": act["score"],
+                    "failures": len(act["failures"])}
         skills.quarantine(sid, v, "activation tests: "
                           + "; ".join(act["failures"][:4]), validate=rec)
         return {"quarantined": "activation tests", "score": act["score"]}

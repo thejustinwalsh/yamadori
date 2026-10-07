@@ -3365,7 +3365,10 @@ def read_craft(args: dict, armed: list[dict] | None = None,
     embedder narrows the armed, proven crafts, jjava chooses one or "none",
     and the record carries `query` (x_yamadori.craft.query)."""
     import skills
-    pool = skills.armed() if armed is None else armed
+    # yama_recall_craft answers by name or question over every armed craft,
+    # a package-only one included (the model asked for it)
+    pool = skills.armed(include_package_only=True) if armed is None \
+        else armed
     args = args if isinstance(args, dict) else {}
     q = str(args.get(P.CRAFT_TOOL_ARG) or args.get("name") or
             args.get("topic") or args.get("craft") or "").strip()[:1000]

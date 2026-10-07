@@ -138,7 +138,7 @@ POOL = [KOOTA_LEAD, KOOTA_Q, KOOTA_R, KOOTA_BAD, KOOTA_DOUBT, MATH_LEAD,
         MATH_PIT, R3F10, R3F9, R3F_ANY, DREI, UNRELATED]
 VERDICT = {"koota-quarantined": "worse", "koota-queries-and-systems": "better",
            "math-hot-path-pitfalls": "tie"}
-skills.armed = lambda: list(POOL)
+skills.armed = lambda *a, **k: list(POOL)
 PS.PROVE_OF = lambda s: VERDICT.get(s["name"])
 KOOTA_LEAD_ITEM = "Spawn entities with world.spawn(Trait(...))."
 

@@ -794,7 +794,7 @@ def library_skills(refs: list) -> tuple[list[dict], list[str]]:
     import skills
     import skill_select
     by: dict = {}
-    for s in skills.armed():
+    for s in skills.armed(include_package_only=True):
         # a skill is found by its name, the name its creator asked for (a
         # served row's `alias`: the pipeline now keeps it, but a skill built
         # before that carries the model's) or its id

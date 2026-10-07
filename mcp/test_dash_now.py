@@ -88,7 +88,7 @@ def test_skills_view():
     import skills
     real = skills.counts, skills.armed
     skills.counts = lambda: {"armed": 3, "quarantined": 1, "pipeline": 0}
-    skills.armed = lambda: [
+    skills.armed = lambda *a, **k: [
         {"id": "a", "category": {"framework": ["r3f"], "language": ["typescript"], "domain": ["gpu"]}},
         {"id": "b", "category": {"framework": ["react", "r3f"], "language": ["typescript"]}},
         {"id": "c", "category": {"language": ["rust"], "situation": ["error_output"]}},

@@ -69,7 +69,7 @@ def tool_result_checks() -> None:
     saved = (skills.armed, PS.PROVE_OF, M.post, M.shape,
              H.skill_packages_held if hasattr(H, "skill_packages_held")
              else None)
-    skills.armed = lambda: list(pool)
+    skills.armed = lambda *a, **k: list(pool)
     PS.PROVE_OF = lambda s: None
     case = {"id": "koota-x", "area": "koota", "kind": "pitfall",
             "prompt": "Write pickUp.", "packages": ["koota"],

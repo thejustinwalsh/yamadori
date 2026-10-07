@@ -2869,7 +2869,8 @@ def _package_craft_offer(craft_offer: dict, st: dict, sw: dict,
         offered = (mcp_rec or {}).get("offered") or []
         if not any(n in offered for n in package_skills.TOOLS):
             return craft_offer
-        if not package_skills.package_pool(skills.armed()):
+        if not package_skills.package_pool(
+                skills.armed(include_package_only=True)):
             return craft_offer
     except Exception:                                            # noqa: BLE001
         return craft_offer
@@ -2918,7 +2919,7 @@ def _package_step(raw: list, account: str, lineage: str, key: str | None,
     try:
         import package_skills
         import skills
-        pool = skills.armed()
+        pool = skills.armed(include_package_only=True)
         trig = package_skills.step_triggers(_text_messages(raw), pool)
         if not trig:
             return "", []
@@ -2971,7 +2972,7 @@ def _package_tool_section(fn: str, args: dict, call_rec: dict | None,
         lineage = session_lineage(state)
         if not lineage:
             return "", []
-        pool = skills.armed()
+        pool = skills.armed(include_package_only=True)
         tk = (payload.get("_ledger") or {}).get("turn_key") or ""
         with skill_select_lock(account, lineage):
             st = _skill_state(account, lineage)

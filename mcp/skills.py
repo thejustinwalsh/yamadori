@@ -879,6 +879,30 @@ def quarantine_skill(sid: str, *, reason: str, author: str = "operator"
     return get(sid)
 
 
+def reopen_at(sid: str, v: int, stage: str, **fields) -> dict:
+    """Put a QUARANTINED version back to running at `stage` with `fields`
+    stored, and enqueue that stage: the one door for a version a later rule
+    clears for a stage it had not reached (package-only: validate's activation
+    tests quarantined it, PROVE is still to run)."""
+    ver = version(sid, v)
+    if ver is None or ver["state"] != "quarantined":
+        raise ValueError(f"v{v} of {sid} is not quarantined")
+    if stage not in (ver.get("path") or []):
+        raise ValueError(f"{stage!r} is not on v{v}'s path")
+
+    def fn(con):
+        sets = ["state='running'", "stage=?", "reason=NULL", "updated=?"]
+        args = [stage, time.time()]
+        for k, val in fields.items():
+            sets.append(f"{k}=?")
+            args.append(json.dumps(val) if k in _JSON_V else val)
+        con.execute(f"UPDATE skill_versions SET {','.join(sets)} WHERE "
+                    "skill=? AND version=?", args + [sid, int(v)])
+    _with(sid, fn)
+    enqueue(sid, v, stage)
+    return get(sid)
+
+
 def rerun(sid: str, stage: str, *, author: str = "operator") -> dict:
     """Run the LATEST version again from `stage` (which must be on its
     path): after a licence was supplied, the tests were edited, or a stage
@@ -1328,6 +1352,12 @@ def _row_of(sid: str, name: str, source_kind: str, source_url, ver: dict
             # The package this skill LEADS (decompose/3): what the package
             # is and its core pattern, for mcp/skill_packages.py.
             "lead_for": (sk.get("yamadori") or {}).get("lead_for"),
+            # CHANNEL-SCOPED ELIGIBILITY (coordinator, 2026-10-07): None =
+            # every channel; ["package"] = a skill the activation tests (the
+            # text matcher's) did not clear but PROVE did: the package
+            # skills channel and yama_recall_craft may serve it, no text-
+            # matched path may (armed() leaves it out unless asked).
+            "channels": val.get("channels") or None,
             # The package (npm name) and version the skill is about, when a
             # package onboarding made it (meta.package, meta.package_version;
             # docs/PACKAGE-ONBOARDING.md 4.3): the selector's asked-major
@@ -1339,8 +1369,26 @@ def _row_of(sid: str, name: str, source_kind: str, source_url, ver: dict
             "source_kind": source_kind, "source_url": source_url}
 
 
-def armed() -> list[dict]:
-    """Every enabled skill with a served version: what selection reads."""
+def package_only(row: dict) -> bool:
+    """A served row only the package channels may use (see `channels`)."""
+    ch = (row or {}).get("channels")
+    return bool(ch) and "text" not in ch
+
+
+def armed(include_package_only: bool = False) -> list[dict]:
+    """Every enabled skill with a served version: what selection reads. A
+    PACKAGE-ONLY skill (validate.channels == ["package"]) is left out: every
+    text-matched path (the per-turn selector, the between-turn triggers, the
+    craft index, the activation pools) calls this and never sees it. The
+    package skills channel and yama_recall_craft ask for it with
+    `include_package_only=True`."""
+    rows = _armed_all()
+    if include_package_only:
+        return rows
+    return [r for r in rows if not package_only(r)]
+
+
+def _armed_all() -> list[dict]:
     now = time.time()
     db = os.path.abspath(jobs.DB)
     with _LOCK:

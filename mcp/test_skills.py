@@ -640,6 +640,72 @@ def test_a_clean_source_arms_without_review():
           "armed() serves it at once")
 
 
+def _failing_activation(real):
+    def run(*a, **k):
+        act = dict(real(*a, **k))
+        act.update(passed=False, score=0.5,
+                   failures=["should_not: 'a near miss the matcher cannot "
+                             "tell apart' -> inject"])
+        return act
+    return run
+
+
+def test_a_failed_activation_goes_on_to_prove_as_package_only():
+    import skill_tests
+    real = skill_tests.run
+    saved_flag = skill_pipeline.PACKAGE_ONLY
+    saved_rel = skill_pipeline._package_relevant
+    skill_tests.run = _failing_activation(real)
+    skill_pipeline._package_relevant = lambda *a, **k: True
+    try:
+        reset_db()
+        s = skills.create(text=read(os.path.join(FIX, "clean_typescript.md")),
+                          name="ts strictness", frontier=False)
+        drain()
+        s = skills.get(s["id"])
+        v = skills.version(s["id"], 1)
+        ran = [q for q, st in _jobs_of(s["id"]) if st == "done"]
+        check(s["status"] == "armed" and v["validate"]["channels"] ==
+              ["package"] and v["validate"]["package_only"]["failures"]
+              and "skill.prove" in ran and "skill.arm" in ran,
+              "a skill only the activation tests object to goes on to PROVE "
+              "and arms PACKAGE-ONLY, the failing cases recorded",
+              (s["status"], s["reason"], ran))
+        check(skills.armed() == []
+              and [r["id"] for r in skills.armed(include_package_only=True)]
+              == [s["id"]],
+              "armed() (the matcher's pool) does not list it; the package "
+              "channels' pool does")
+        reset_db()
+        skill_pipeline.PACKAGE_ONLY = False
+        s2 = skills.create(text=read(os.path.join(FIX,
+                                                   "clean_typescript.md")),
+                           name="ts strictness", frontier=False)
+        drain()
+        s2 = skills.get(s2["id"])
+        check(s2["status"] == "quarantined"
+              and (s2["reason"] or "").startswith("activation tests:"),
+              "YAMADORI_SKILL_PACKAGE_ONLY=0 keeps the old rule: the "
+              "activation tests quarantine", (s2["status"], s2["reason"]))
+        reset_db()
+        skill_pipeline.PACKAGE_ONLY = True
+        skill_pipeline._package_relevant = saved_rel
+        s3 = skills.create(text=read(os.path.join(FIX,
+                                                   "clean_typescript.md")),
+                           name="ts strictness", frontier=False)
+        drain()
+        s3 = skills.get(s3["id"])
+        check(s3["status"] == "quarantined"
+              and (s3["reason"] or "").startswith("activation tests:"),
+              "a skill with no package channel to ride (TypeScript, React in "
+              "general) is quarantined as before", (s3["status"],
+                                                    s3["reason"]))
+    finally:
+        skill_tests.run = real
+        skill_pipeline.PACKAGE_ONLY = saved_flag
+        skill_pipeline._package_relevant = saved_rel
+
+
 def test_a_failed_screen_quarantines_never_arms_and_says_why():
     reset_db()
     s = skills.create(text=read(os.path.join(FIX, "malicious",
@@ -1460,7 +1526,7 @@ def test_the_embedding_query_reads_the_recent_evidence():
     # The sticky cache: the same short turn over different evidence is a
     # different request.
     saved_armed = skills.armed
-    skills.armed = lambda: [KOOTA_Q]
+    skills.armed = lambda *a, **k: [KOOTA_Q]
     try:
         sel = {"skills": True}
         body = {"route": {"class": "prose"}}
@@ -1779,6 +1845,7 @@ def main() -> int:
         test_the_golden_reply_validates_to_the_golden_skill,
         test_validator_rules,
         test_a_clean_source_arms_without_review,
+        test_a_failed_activation_goes_on_to_prove_as_package_only,
         test_a_failed_screen_quarantines_never_arms_and_says_why,
         test_a_url_source_obeys_robots_and_refuses_scripts,
         test_a_changed_source_is_a_new_version,

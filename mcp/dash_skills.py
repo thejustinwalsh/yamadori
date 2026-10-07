@@ -159,7 +159,7 @@ def size_of(text: str | None = None, *, body: str | None = None,
 def _sizes(rows: list[dict]) -> None:
     """Attach `size` to each summary row: from the served cache for an
     armed skill, else parsed from its newest text (a few rows)."""
-    served = {r["id"]: r for r in skills.armed()}
+    served = {r["id"]: r for r in skills.armed(include_package_only=True)}
     for row in rows:
         r = served.get(row["id"])
         if r is not None and r.get("version") == row.get("text_version"):

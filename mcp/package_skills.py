@@ -806,4 +806,4 @@ def step_triggers(msgs: list[dict], pool: list[dict] | None = None
 
 def _armed() -> list[dict]:
     import skills
-    return skills.armed()
+    return skills.armed(include_package_only=True)
