@@ -438,11 +438,254 @@ def test_select_wiring() -> None:
         skill_match.plan_turn = orig_plan
 
 
+# ----------------------------------------------- the 2026-10-06 variants ---
+VITEMS = [
+    {"key": "k1#0", "name": "koota-queries", "fact": "Query entities with "
+     "`world.query(Position, Velocity)` and iterate with `forEach`."},
+    {"key": "k1#1", "name": "koota-queries", "fact": "Do not: Store entity "
+     "references across frames; hold the `Entity` id instead."},
+    {"key": "r1#0", "name": "r3f-frame-loop", "fact": "Mutate refs inside "
+     "`useFrame` instead of setting React state every frame."},
+    {"key": "m1#0", "name": "math-noise", "fact": "Seed noise with "
+     "`createNoise2D(seed)` for repeatable terrain."},
+]
+
+
+def vturn(fake, state="STATE", kind="step"):
+    return T.Turn([], state=state, state_info={"kind": kind}, post=fake,
+                  upstream=upstream, count=len, on=True, key="conv",
+                  request="req1")
+
+
+def fact_of_q(q):
+    return q.split("FACT: ", 1)[1].split("\n")[0]
+
+
+def vwant(rules):
+    """A fake's want(): `rules` {statement: words that make it true}; a
+    noul is answered yes when a word is in the question's fact."""
+    def want(state, q, opts):
+        for stmt, words in rules.items():
+            if q.startswith("QUESTION: " + stmt):
+                f = fact_of_q(q)
+                return "yes" if any(w in f for w in words) else "no"
+        return None
+    return want
+
+
+def test_served_set_is_untouched() -> None:
+    check("the served question set is variant a: ITEM_Q / ITEM_LEVELS, "
+          "version inject-q/1", I.SERVED_VARIANT == "a"
+          and I.QUESTION_VERSION == "inject-q/1"
+          and I.ITEM_Q.startswith("How does this fact bear on")
+          and len(I.ITEM_LEVELS) == 4 and I.NEED_LEVEL == "3")
+    I.THRESHOLDS.clear()
+    fake = Fake(level_for({"world.query": 3}))
+    run_turn(user("koota query"), fake, [KOOTA])
+    qs = [b["messages"][2]["content"] for b in fake.bodies]
+    new = (I.NEXT_Q, I.DONE_Q, I.FIT_Q, I.PICK_Q)
+    check("gate() asks only the served Score and the stage-3 noul: none of "
+          "the new variants' statements is ever sent",
+          qs and not any(n in q for n in new for q in qs), qs[:1])
+
+
+def test_framed_state() -> None:
+    goal = "Build  a pagoda\nscene with r3f."
+    st = "Assistant called terminal: ls\nResult of terminal: a.ts"
+    f = I.framed_state(goal, st, {"kind": "step", "cut": False})
+    check("framed state, a step: the goal first, then the latest step, the "
+          "parts named, the state kept whole",
+          f == (I.GOAL_HEAD + "\nBuild a pagoda scene with r3f.\n\n"
+                + I.STEP_HEAD + "\n" + st), f)
+    f1 = I.framed_state(goal, "Build a pagoda scene with r3f.",
+                        {"kind": "user", "previous_assistant": None})
+    check("framed state, a first user turn: the message is the goal and is "
+          "said ONCE (variant d said it twice)",
+          f1.count("pagoda") == 1 and f1.startswith(I.OPENING_HEAD)
+          and I.GOAL_HEAD not in f1, f1)
+    f2 = I.framed_state(goal, "Assistant (previous turn): ok\n\nUser: next",
+                        {"kind": "user", "previous_assistant": {"tokens": 3}})
+    check("framed state, a later user turn: the goal, then the newest message",
+          f2.startswith(I.GOAL_HEAD) and I.USER_HEAD in f2
+          and f2.endswith("User: next"), f2)
+    check("framed state: no goal, no goal block",
+          I.GOAL_HEAD not in I.framed_state("", st, {"kind": "step"}))
+    long_goal = "g" * 5000
+    check("framed state: the goal is cut to GOAL_CHARS",
+          len(I.framed_state(long_goal, st, {"kind": "step"}))
+          <= I.GOAL_CHARS + len(st) + 200)
+    cut = ("H" * 3000) + "\n\n[... middle left out ...]\n\n" + ("T" * 3000)
+    fc = I.framed_state(goal, cut, {"kind": "step", "cut": True})
+    check("framed state of a CUT state is never longer than the cut state: "
+          "the frame's room comes off the head, the middle marker and the "
+          "tail stay", len(fc) <= len(cut) and fc.endswith("T" * 3000)
+          and "[... middle left out ...]" in fc and fc.startswith(
+              I.GOAL_HEAD), (len(fc), len(cut)))
+    pre = len(I.framed_state(goal, "", {"kind": "step"}))
+    fm = I.framed_state(goal, st, {"kind": "step"}, max_chars=pre + 20)
+    check("framed state: max_chars is respected (the head of the state "
+          "gives way, the frame itself is never cut)",
+          len(fm) == pre + 20 and fm.endswith("a.ts")
+          and fm.startswith(I.GOAL_HEAD), fm)
+    check("goal_of: the first user message, folded and cut",
+          I.goal_of([{"role": "system", "content": "s"},
+                     {"role": "user", "content": "do  this\nthing"},
+                     {"role": "user", "content": "later"}]) == "do this thing"
+          and I.goal_of([]) == "")
+
+
+def test_variant_questions() -> None:
+    it = VITEMS[0]
+    n, d, g = I.q_next(it), I.q_done(it), I.q_fit(it)
+    check("f/g questions are NOULS naming the craft and the fact, one "
+          "statement each", all(q["type"] == "noul" for q in (n, d, g))
+          and n["text"].startswith(I.NEXT_Q) and d["text"].startswith(
+              I.DONE_Q) and g["text"].startswith(I.FIT_Q)
+          and all("CRAFT: koota-queries\nFACT: " + it["fact"] in q["text"]
+                  for q in (n, d, g)), [n, d, g])
+    check("each variant's questions are their own question sets "
+          "(thresholds and temperatures are keyed by the name's family)",
+          n["name"].split(":")[0] == "skill_item_f_next"
+          and d["name"].split(":")[0] == "skill_item_f_done"
+          and g["name"].split(":")[0] == "skill_item_g"
+          and I.q_fit(it, "h")["name"].split(":")[0] == "skill_item_h"
+          and n["name"].endswith(":k1#0"))
+    check("the statements are positive single judgments: no negation "
+          "(TS jaggedness 4; variant c's 'does not yet' read worst)",
+          all(" not " not in " " + s.lower() + " "
+              and " no " not in " " + s.lower() + " "
+              for s in (I.NEXT_Q, I.DONE_Q, I.FIT_Q)))
+    ni = {"key": "x#0", "fact": "Bare fact."}
+    check("an item with no craft name is asked without the CRAFT line",
+          "CRAFT" not in I.q_next(ni)["text"]
+          and I.q_next(ni)["text"].endswith("FACT: Bare fact."))
+    q, listed = I.q_pick(VITEMS)
+    check("pick: one CHOICE over the facts keyed by item key, 'none' last "
+          "in the list and in the MIDDLE of both printed orders",
+          q["type"] == "choice" and q["keys"][-1] == I.NONE_KEY
+          and q["keys"][:-1] == [x["key"] for x in VITEMS]
+          and q["options"][-1] == I.PICK_NONE and q["none"] == 4
+          and q["options"][0].startswith("[koota-queries] Query")
+          and [x["key"] for x in listed] == [x["key"] for x in VITEMS], q)
+    orders = D.two_orders(len(q["keys"]), q["none"])
+    check("pick: neither order prints 'none' first or last",
+          all(0 < o.index(4) < len(o) - 1 for o in orders), orders)
+    many = [{"key": f"s#{i}", "name": "s", "fact": f"fact {i}"}
+            for i in range(30)]
+    q30, l30 = I.q_pick(many)
+    check("pick: at most PICK_MAX facts are listed (a letter each, none "
+          "included: 26 options)", len(l30) == I.PICK_MAX == 25
+          and len(q30["options"]) == 26 and q30["keys"][-1] == "none")
+    check("planned questions: f two an item, g one, h a pick and PICK_TOP "
+          "fits",
+          len(I.planned_questions("f", VITEMS)) == 8
+          and len(I.planned_questions("g", VITEMS)) == 4
+          and len(I.planned_questions("h", VITEMS)) == 1 + I.PICK_TOP
+          and len(I.planned_questions("h", VITEMS[:2])) == 3)
+    try:
+        I.planned_questions("z", VITEMS)
+        bad = False
+    except ValueError:
+        bad = True
+    check("an unknown variant is refused", bad)
+
+
+def test_item_beliefs() -> None:
+    I.THRESHOLDS.clear()
+    # f: NEXT yes for world.query and useFrame; DONE yes for useFrame
+    fake = Fake(vwant({I.NEXT_Q: ("world.query", "useFrame"),
+                       I.DONE_Q: ("useFrame",)}))
+    with vturn(fake) as t:
+        rows, meta = I.item_beliefs("f", VITEMS, t)
+    b = {r["key"]: r for r in rows}
+    check("f: need = P(next) x (1 - P(done)) in code, two nouls an item "
+          "(2 reads each)", len(fake.bodies) == 2 * 8
+          and abs(b["k1#0"]["belief"] - 0.81) < 1e-4
+          and abs(b["r1#0"]["belief"] - 0.09) < 1e-4
+          and abs(b["m1#0"]["belief"] - 0.09) < 1e-4, b)
+    check("f: passes only when NEXT is yes and DONE is no",
+          [r["pass"] for r in rows] == [True, False, False, False]
+          and b["k1#0"]["parts"]["next"]["noul"] > 0.5
+          and b["k1#0"]["parts"]["done"]["noul"] < 0.5
+          and all(r["decision_id"] for r in rows), rows[0])
+    qs = [x["messages"][2]["content"] for x in fake.bodies]
+    check("f: the same state is read for every question (placed once), the "
+          "questions after it", len({x["messages"][1]["content"]
+                                     for x in fake.bodies}) == 1
+          and sum(I.NEXT_Q in q for q in qs) == 8
+          and sum(I.DONE_Q in q for q in qs) == 8)
+    # g
+    fake = Fake(vwant({I.FIT_Q: ("world.query", "createNoise2D")}))
+    with vturn(fake) as t:
+        rows, _ = I.item_beliefs("g", VITEMS, t)
+    check("g: one noul an item; belief = P(true); passes on yes",
+          len(fake.bodies) == 2 * 4
+          and [round(r["belief"], 2) for r in rows] == [0.9, 0.1, 0.1, 0.9]
+          and [r["pass"] for r in rows] == [True, False, False, True], rows)
+
+    # h: the pick favours r1#0; fits yes for useFrame and createNoise2D
+    def hwant(state, q, opts):
+        if q.startswith("QUESTION: " + I.PICK_Q):
+            return next(o for o in opts if "useFrame" in o)
+        if q.startswith("QUESTION: " + I.FIT_Q):
+            f = fact_of_q(q)
+            return "yes" if "useFrame" in f or "createNoise2D" in f else "no"
+        return None
+    fake = Fake(hwant)
+    with vturn(fake) as t:
+        rows, meta = I.item_beliefs("h", VITEMS, t)
+    b = {r["key"]: r for r in rows}
+    check("h: ONE pick over all facts, then fits for the PICK_TOP it "
+          "ranked first (2 reads each)", len(fake.bodies) == 2 * (1 + 3)
+          and meta["pick"]["top"] == ["r1#0", "k1#0", "k1#1"], meta)
+    check("h: need = P(fit) x (1 - P(none)); the fact the pick left out of "
+          "its top goes in with belief 0 however a fit would read",
+          abs(b["r1#0"]["belief"] - 0.9 * (1 - meta["pick"]["none"])) < 1e-4
+          and b["m1#0"]["belief"] == 0.0 and not b["m1#0"]["pass"]
+          and b["m1#0"]["parts"]["pick"]["in_top"] is False
+          and b["r1#0"]["pass"] and not b["k1#0"]["pass"], b)
+    check("h: every row names a decision of its case (inject_tune.loro "
+          "groups rows by it)", all(r["decision_id"] for r in rows)
+          and b["m1#0"]["decision_id"] == meta["pick"]["decision_id"])
+    pq = [x["messages"][2]["content"] for x in fake.bodies][:2]
+    for q in pq:
+        opts = [ln.split(". ", 1)[1] for ln in q.split(
+            "OPTIONS:\n")[1].split("\n\n")[0].splitlines()]
+        check("h: the pick prints 'none' in the middle of the options in "
+              "each order", opts[2] == I.PICK_NONE and len(opts) == 5, opts)
+    # none favoured: every belief scaled down by the none mass
+    fake = Fake(lambda s, q, o: (I.PICK_NONE if q.startswith(
+        "QUESTION: " + I.PICK_Q) else "yes" if q.startswith(
+            "QUESTION: " + I.FIT_Q) else None))
+    with vturn(fake) as t:
+        rows, meta = I.item_beliefs("h", VITEMS, t)
+    check("h: when the pick says none, a yes fit is scaled by 1 - P(none): "
+          "the case-level 'nothing here is needed'",
+          meta["pick"]["none"] > 0.85
+          and all(r["belief"] < 0.1 for r in rows), rows)
+    fake = Fake(lambda s, q, o: None)
+    with vturn(fake) as t:
+        r0, m0 = I.item_beliefs("h", [], t)
+        r1, _ = I.item_beliefs("g", [], t)
+        r2, _ = I.item_beliefs("f", [], t)
+    check("no items -> no question is sent", r0 == [] and r1 == []
+          and r2 == [] and not fake.bodies)
+    try:
+        with vturn(Fake(lambda s, q, o: None)) as t:
+            I.item_beliefs("z", VITEMS, t)
+        bad = False
+    except ValueError:
+        bad = True
+    check("an unknown variant is refused by item_beliefs", bad)
+
+
 def main() -> int:
     D.release = lambda slot, why="": {"released": True, "slot": slot}
     for fn in (test_items, test_gate, test_tiers, test_room_and_render,
                test_profiles, test_profile_follows_the_serving_model_not_the_reader,
-               test_no_decider, test_select_wiring):
+               test_no_decider, test_select_wiring,
+               test_served_set_is_untouched, test_framed_state,
+               test_variant_questions, test_item_beliefs):
         try:
             fn()
         except Exception:                                        # noqa: BLE001

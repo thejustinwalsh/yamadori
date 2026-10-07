@@ -457,6 +457,336 @@ def gate(items: list[dict], turn, model: str) -> dict:
     return rec
 
 
+# ================================================ QUESTION-SET VARIANTS ====
+# THE REWORK OF 2026-10-06 (operator: "I want skills and the decision maker
+# doing their damn jobs"; standing rule 2026-09-29: "no easy bails" -- a
+# question that will not separate is rewritten and re-measured, never
+# replaced by a default). WHAT THE MEASUREMENT SAID, and what each variant
+# is built against (bench/skills/inject/results, reader bonsai-a4000, 193
+# labelled cases, 1,338 labelled items, rubric truth, variant a as served;
+# every number below is that run's, n=1 run, the reads repeat to SD 0.002;
+# bench/skills/inject_diagnose.py reproduces each one, docs/JJAVA.md 9
+# writes it up):
+#
+#   D1  The reader sees RELEVANCE and not NEED. AUROC for NEEDED against OFF
+#       is 0.924, against AREA (the rubric's level 1, 64% of all items) 0.631,
+#       against DONE (level 2) 0.581; mean P(top level) by true level 0 / 1 /
+#       2 / 3 is 0.24 / 0.62 / 0.67 / 0.73. No variant a-e separates NEEDED
+#       from AREA above 0.63. On steps recall at P >= 0.5 is 0.99 and
+#       precision 0.18 (base rate 0.12): "the material involves this
+#       library" and "the next action needs this fact" read as the same thing.
+#   D2  The Score's levels are two judgments in one (is it about the code at
+#       hand / is it already done) in long multi-clause texts, and the reader
+#       cannot use them: argmax lands on level 1 or 2 in 6.4% of reads (order
+#       1) and 4.4% (order 2) though 68% of items ARE level 1 or 2; the two
+#       orders disagree by TV 0.34 on average (argmax agrees 64%) and level 3
+#       wins 83% of order-2 reads, where it is printed first, against 49% of
+#       order-1 reads, where it is printed last. A Noul (a lettered yes /
+#       no) is stable by comparison (variant c: TV 0.055, argmax agrees 84%)
+#       -- but c's statement joined two conditions with a negation ("... and
+#       the material does NOT yet show it ...") and separated worst (AUROC
+#       0.554). TS jaggedness 1, 4 and "Keep each Score question to one
+#       dimension": split, combine in code (docs/JJAVA.md 4.1).
+#   D3  The generic process skill dominates the false yeses: on steps 215 of
+#       the 343 non-needed items scoring above 0.7 (63%) belong to
+#       fix-located-defect-first, which is 315 of the 978 step rows (33
+#       needed, AUROC 0.562, mean belief of its AREA items 0.82). The rubric
+#       calls a generic good-practice fact at most AREA unless the material
+#       shows the specific mistake; the reader was not asked about the
+#       mistake.
+#   D4  Within a case the reader does not rank: in the 80 cases with a needed
+#       item the highest-belief item is needed 30% of the time, a random item
+#       31%. Absolute reads of seven items each, case by case, never compare
+#       the items -- a CHOICE does (TS skill_suggestion: a choice over every
+#       candidate with an explicit none, then a "fits" noul on the top 3:
+#       wrong loads 16.8% -> 7.3%, docs/JJAVA.md 5.1).
+#   D5  The labellers saw each fact under its craft's name ("[koota-traits-
+#       and-entities] ..."), the reader the bare fact; a DO item such as
+#       "pass the out argument first" does not say which library it is about.
+#   D6  The session's goal helps the gate (stage 3, goal first: AUROC 0.771
+#       against 0.667, paired by-case bootstrap +0.104, 95% CI 0.048-0.167)
+#       and not stage 2 (variant d 0.675 against a 0.687, CI -0.022 to
+#       -0.003 on the same bootstrap). Variant d repeats the opening request
+#       inside itself on a first user turn; framed_state names the parts
+#       once.
+#   D7  Variant e's readout is invalid, not weak: the labels hold 1.4% of the
+#       next-token distribution (letters: 94%; level 2 reads exactly 0.0 on 83
+#       of 1,338 items), so the answer is a renormalised remainder -- the
+#       digit labels do not land on the answer token in this template. Not a
+#       finding about the question.
+#   D8  What the label set can and cannot say: the 29 user-turn cases are 11
+#       distinct states; the pagoda request alone is 16 cases (3 states),
+#       287 of the 360 user items and 84 of the 93 needed ones, so every
+#       user-turn number is about a handful of prompts and leave-one-run-out
+#       puts the same prompt in train and test. The steps are 164 distinct
+#       states (978 items). User turns: AUROC 0.58, steps 0.80.
+#
+# THE VARIANTS (each on the FRAMED STATE below; typed questions only: noul /
+# choice, no generation; every one answers in two orders like the served
+# set):
+#   f  SPLIT. Two single-judgment nouls per item, combined in CODE:
+#        NEXT  "The assistant is about to write or run something that this
+#               fact covers."          (separates NEEDED from AREA: D1)
+#        DONE  "The material already shows the assistant doing what this
+#               fact says."            (separates NEEDED from DONE: D1)
+#      need = P(NEXT) x (1 - P(DONE)); passes when P(NEXT) >= 0.5 and
+#      P(DONE) < 0.5. 2 questions an item. [TS jaggedness 1, 4; TS score;
+#      docs/JJAVA.md 4.1; DECIDER-RESEARCH 2.2: a lettered yes/no is
+#      the stable readout, reflex ECE 0.104 -> 0.046 with it]
+#   g  FIT. One noul per item, the rubric's own closing test as a statement
+#      about THIS fact: "The assistant's next code or command would be more
+#      correct with this fact in front of it." (stage 3's statement, singular
+#      -- the wording whose goal-first read separated best, D6). 1 question an
+#      item. It asks about the consequence (a mistake avoided), not the
+#      topic: D3.
+#   h  PICK THEN FIT. The two stages of TS skill_suggestion: ONE choice per
+#      case over all its candidate facts with a "none" option in the middle
+#      of both orders (PICK_Q), then g's noul on the PICK_TOP = 3 facts the
+#      choice ranked first (the cookbook re-reads "the top 3"); a fact the
+#      choice did not rank in the top 3 never goes in (belief 0). need =
+#      P(FIT) x (1 - P(none)). Relative reads compare the items (D4) and the
+#      none mass is the case-level "nothing here is needed". About 1 + 3
+#      questions a case instead of one an item.
+# THE ITEM IS SHOWN WITH ITS CRAFT'S NAME (D5), exactly what the labellers
+# saw. UNMEASURED WORDING for all of them until bench/skills/inject_decide.py
+# --variants f,g,h has read them; nothing here changes the served set
+# (SERVED_VARIANT "a": ITEM_Q / ITEM_LEVELS above, byte for byte), and
+# gate() does not call these -- adopting a measured variant also needs the
+# Turn's state built with framed_state, which is skill_select's Turn
+# construction, left alone until the measurement says which one.
+SERVED_VARIANT = "a"
+NEW_VARIANTS = ("f", "g", "h")
+NEXT_Q = ("The assistant is about to write or run something that this fact "
+          "covers.")
+DONE_Q = ("The material already shows the assistant doing what this fact "
+          "says.")
+FIT_Q = ("The assistant's next code or command would be more correct with "
+         "this fact in front of it.")
+PICK_Q = ("Which of these facts would most change the assistant's next code "
+          "or command?")
+PICK_NONE = "None of these facts would change it."
+NONE_KEY = "none"
+PICK_TOP = 3      # TS skill_suggestion: the top 3 of the choice are re-read
+PICK_MAX = 25     # a single-token letter each, A..Z, less the "none" option
+QSET_PICK = "skill_pick"
+GOAL_CHARS = 600  # the label set's TASK_HEAD (bench/skills/inject_labels.py)
+GOAL_HEAD = "SESSION GOAL (the user's opening request):"
+OPENING_HEAD = "THE USER'S OPENING REQUEST (the session goal):"
+USER_HEAD = "THE USER'S NEWEST MESSAGE:"
+STEP_HEAD = "THE ASSISTANT'S LATEST STEP (what it did and what came back):"
+
+
+def goal_of(messages: list[dict]) -> str:
+    """The session's goal: the first user message, whitespace folded, cut to
+    GOAL_CHARS (the text the label set's `task` holds)."""
+    import decide_turn
+    um = next((m for m in messages or [] if isinstance(m, dict)
+               and m.get("role") == "user"), None)
+    return " ".join(decide_turn._text(um).split())[:GOAL_CHARS] if um else ""
+
+
+def framed_state(goal: str, state: str, info: dict | None = None,
+                 max_chars: int | None = None) -> str:
+    """The state with its parts NAMED (TS state: "each part of the state has
+    a descriptive name"; docs/JJAVA.md 4.2) and the session's goal first:
+    the goal, then the user's newest message or the assistant's latest step.
+    On a first user turn the message IS the goal and is said once (variant d
+    said it twice). `info` is decide_turn.state_of's: kind, cut,
+    previous_assistant. The frame never makes a state longer than the lane
+    budgeted: when the state was already cut (info.cut) or `max_chars` is
+    given, the excess comes off the HEAD of the state, the way the head+tail
+    cut already shortens it."""
+    info = info or {}
+    kind = info.get("kind") or "step"
+    goal = " ".join(str(goal or "").split())[:GOAL_CHARS]
+    first = kind == "user" and not info.get("previous_assistant")
+    head = (OPENING_HEAD if first else USER_HEAD) if kind == "user" \
+        else STEP_HEAD
+    pre = (f"{GOAL_HEAD}\n{goal}\n\n" if goal and not first else "") \
+        + head + "\n"
+    limit = max_chars if max_chars is not None else (
+        len(state) if info.get("cut") else None)
+    body = str(state or "")
+    if limit is not None and len(pre) + len(body) > limit:
+        body = body[min(len(pre) + len(body) - limit, len(body)):]
+    return pre + body
+
+
+def fact_of(it: dict) -> str:
+    """The item's fact as the questions state it: the case's own `fact` text
+    (the label set), else fact_text of a skill item."""
+    return it["fact"] if it.get("fact") else fact_text(it)
+
+
+def craft_of(it: dict) -> str:
+    """The craft the item belongs to, by the name the labellers saw."""
+    return str(it.get("name") or it.get("craft") or "").strip()
+
+
+def item_block(it: dict) -> str:
+    c = craft_of(it)
+    return (f"CRAFT: {c}\n" if c else "") + f"FACT: {fact_of(it)}"
+
+
+def q_next(it: dict) -> dict:
+    import decider_bonsai as D
+    return D.q_noul(f"{QSET_ITEM}_f_next:{it['key']}",
+                    f"{NEXT_Q}\n\n{item_block(it)}")
+
+
+def q_done(it: dict) -> dict:
+    import decider_bonsai as D
+    return D.q_noul(f"{QSET_ITEM}_f_done:{it['key']}",
+                    f"{DONE_Q}\n\n{item_block(it)}")
+
+
+def q_fit(it: dict, variant: str = "g") -> dict:
+    import decider_bonsai as D
+    return D.q_noul(f"{QSET_ITEM}_{variant}:{it['key']}",
+                    f"{FIT_Q}\n\n{item_block(it)}")
+
+
+def pick_option(it: dict) -> str:
+    c = craft_of(it)
+    return f"[{c}] {fact_of(it)}" if c else fact_of(it)
+
+
+def q_pick(items: list[dict]) -> tuple[dict, list[dict]]:
+    """(the PICK choice, the items it lists): the facts as options keyed by
+    their item keys, "none" last in the list and moved to the middle of both
+    printed orders (decider_bonsai.two_orders). At most PICK_MAX facts (a
+    single-token letter each; the candidates are at most MAX_SKILLS x
+    skill_limits.MAX_ITEMS = 18 today)."""
+    import decider_bonsai as D
+    use = list(items)[:PICK_MAX]
+    opts = [pick_option(it) for it in use] + [PICK_NONE]
+    return D.q_choice(f"{QSET_PICK}_h", PICK_Q, opts,
+                      keys=[it["key"] for it in use] + [NONE_KEY],
+                      none=len(opts) - 1), use
+
+
+def planned_questions(variant: str, items: list[dict]) -> list[dict]:
+    """The typed questions a variant asks over `items` (h: the choice and a
+    fit for the first PICK_TOP items, standing in for the ones it will rank
+    first -- the real count is the same, the texts differ). For a dry run
+    and the cost estimate; sends nothing."""
+    if variant == "f":
+        return [q_next(it) for it in items] + [q_done(it) for it in items]
+    if variant == "g":
+        return [q_fit(it) for it in items]
+    if variant == "h":
+        return [q_pick(items)[0]] + [q_fit(it, "h")
+                                     for it in items[:PICK_TOP]]
+    raise ValueError(f"variant {variant!r} is not one of {NEW_VARIANTS}")
+
+
+def _noul(a: dict) -> float:
+    return float(a.get("noul") or 0.0)
+
+
+def _tie(a: dict) -> bool:
+    return bool((a.get("diagnostics") or {}).get("tie"))
+
+
+def _part(a: dict) -> dict:
+    d = a.get("diagnostics") or {}
+    return {"noul": round(_noul(a), 6), "tie": _tie(a),
+            "disagreement": d.get("disagreement"),
+            "decision_id": a.get("decision_id")}
+
+
+def item_beliefs(variant: str, items: list[dict], turn) -> tuple[list[dict],
+                                                                  dict]:
+    """Stage 2 for a new variant: ([{key, belief, pass, tie, disagreement,
+    decision_id, probs, parts}] in `items`' order, meta). `belief` is what
+    inject_tune.py tunes on; `pass` is the untuned argmax rule (every noul
+    part on its side of 0.5, none tied). Raises DeciderUnavailable like
+    turn.decide."""
+    n = len(items)
+    rows: list[dict] = []
+    meta: dict = {}
+    if variant == "f":
+        ans = turn.decide([q_next(it) for it in items]
+                          + [q_done(it) for it in items]) if items else []
+        for it, a, b in zip(items, ans[:n], ans[n:]):
+            nx, dn = _noul(a), _noul(b)
+            tie = _tie(a) or _tie(b)
+            rows.append({
+                "key": it["key"], "belief": round(nx * (1.0 - dn), 6),
+                "pass": bool(nx >= 0.5 and dn < 0.5 and not tie),
+                "tie": tie, "probs": {"next": round(nx, 6),
+                                      "done": round(dn, 6)},
+                "disagreement": max(
+                    (x["diagnostics"] or {}).get("disagreement") or 0.0
+                    for x in (a, b)),
+                "decision_id": a.get("decision_id"),
+                "parts": {"next": _part(a), "done": _part(b)}})
+        return rows, meta
+    if variant == "g":
+        ans = turn.decide([q_fit(it) for it in items]) if items else []
+        for it, a in zip(items, ans):
+            p = _noul(a)
+            rows.append({
+                "key": it["key"], "belief": round(p, 6),
+                "pass": bool(p >= 0.5 and not _tie(a)), "tie": _tie(a),
+                "probs": {"true": round(p, 6)},
+                "disagreement": (a.get("diagnostics") or {}).get(
+                    "disagreement"),
+                "decision_id": a.get("decision_id"),
+                "parts": {"fit": _part(a)}})
+        return rows, meta
+    if variant != "h":
+        raise ValueError(f"variant {variant!r} is not one of {NEW_VARIANTS}")
+    if not items:
+        return rows, meta
+    q, listed = q_pick(items)
+    pk = turn.decide([q])[0]
+    probs = {k: float(v) for k, v in (pk.get("probabilities") or {}).items()}
+    p_none = probs.get(NONE_KEY, 0.0)
+    ranked = sorted((it["key"] for it in listed),
+                    key=lambda k: (-probs.get(k, 0.0), k))
+    top = ranked[:PICK_TOP]
+    by = {it["key"]: it for it in items}
+    fits = turn.decide([q_fit(by[k], "h") for k in top]) if top else []
+    fit_of = dict(zip(top, fits))
+    meta = {"pick": {"none": round(p_none, 6), "top": top,
+                     "probs": {k: round(v, 6) for k, v in probs.items()},
+                     "tie": _tie(pk),
+                     "disagreement": (pk.get("diagnostics") or {}).get(
+                         "disagreement"),
+                     "decision_id": pk.get("decision_id"),
+                     "listed": len(listed), "of": n}}
+    for it in items:
+        k = it["key"]
+        a = fit_of.get(k)
+        if a is None:
+            rows.append({"key": k, "belief": 0.0, "pass": False,
+                         "tie": False, "disagreement": None,
+                         "probs": {"pick": round(probs.get(k, 0.0), 6),
+                                   "none": round(p_none, 6)},
+                         # the case's pick: every row of a case names a
+                         # decision of that case (inject_tune.loro groups
+                         # the rows by it)
+                         "decision_id": pk.get("decision_id"),
+                         "parts": {"pick": {"p": round(probs.get(k, 0.0), 6),
+                                            "in_top": False}}})
+            continue
+        p = _noul(a)
+        rows.append({
+            "key": k, "belief": round(p * (1.0 - p_none), 6),
+            "pass": bool(p >= 0.5 and not _tie(a)), "tie": _tie(a),
+            "probs": {"true": round(p, 6),
+                      "pick": round(probs.get(k, 0.0), 6),
+                      "none": round(p_none, 6)},
+            "disagreement": (a.get("diagnostics") or {}).get(
+                "disagreement"),
+            "decision_id": a.get("decision_id"),
+            "parts": {"fit": _part(a),
+                      "pick": {"p": round(probs.get(k, 0.0), 6),
+                               "in_top": True}}})
+    return rows, meta
+
+
 # --------------------------------------------------------------- compose ---
 def compose(items: list[dict], chosen: list[str], profile: dict
             ) -> list[dict]:

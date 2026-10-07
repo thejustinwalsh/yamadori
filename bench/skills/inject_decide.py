@@ -34,6 +34,28 @@ bails"). All are read in one window so a rewrite needs no second one:
      two items of highest belief (labelled `forced`, so stage 3 has
      decisions on every case to tune on).
 
+THE REWORK OF 2026-10-06 (mcp/skill_inject.py QUESTION-SET VARIANTS: the
+diagnosis of the a-e run, D1-D8, and why each is built as it is) adds three,
+all read on the FRAMED STATE (skill_inject.framed_state: the session goal,
+then the user's message or the assistant's latest step, the parts named) and
+with each item shown under its craft's name:
+
+  f  SPLIT: a NEXT noul and a DONE noul per item, need = P(next) x
+     (1 - P(done))
+  g  FIT: one noul per item, "the next code or command would be more correct
+     with this fact in front of it"
+  h  PICK THEN FIT: one choice per case over its facts with a "none" option,
+     then g's noul on the top 3 the choice ranked; need = P(fit) x
+     (1 - P(none))
+
+They are NOT in the default `--variants` (the served five stay the default,
+and --skip-done keeps resuming that run):
+
+    python bench/skills/inject_decide.py --cases CASES --model bonsai-a4000 \
+        --variants f,g,h --skip-done
+    python bench/skills/inject_decide.py --cases CASES --model bonsai-a4000 \
+        --variants f,g,h --estimate        # offline: GPU minutes, sends nothing
+
 WHAT IS WRITTEN (never conversation text): the decisions log (decide_turn
 DECISIONS, pointed at bench/skills/inject/results/decisions_<model>.jsonl
 before import) and one row per case and variant in
@@ -56,7 +78,9 @@ RESULTS = os.path.join(HERE, "inject", "results")
 sys.path.insert(0, os.path.join(ROOT, "mcp"))
 
 RUN_VERSION = "inject-decide/1"
-VARIANTS = ("a", "b", "c", "d", "e")
+SERVED_VARIANTS = ("a", "b", "c", "d", "e")   # the default run
+NEW_VARIANTS = ("f", "g", "h")                # skill_inject.NEW_VARIANTS
+VARIANTS = SERVED_VARIANTS + NEW_VARIANTS
 LEVELS_B = [
     "It is about a library, API or task that the material does not "
     "involve.",
@@ -78,9 +102,18 @@ def running(upstream: str) -> list[str]:
             if isinstance(x, dict)]
 
 
+def as_items(case_items: list[dict]) -> list[dict]:
+    """A case's items as skill_inject's question builders read them: the
+    craft's NAME (what the labellers saw beside each fact) and the fact."""
+    return [{"key": it["key"], "sha": it.get("sha"), "name": it.get("skill"),
+             "fact": it["fact"]} for it in case_items]
+
+
 def questions(variant: str, items: list[dict]) -> list[dict]:
     import decider_bonsai as D
     import skill_inject as I
+    if variant in NEW_VARIANTS:
+        return I.planned_questions(variant, as_items(items))
     out = []
     for it in items:
         name = f"{I.QSET_ITEM}{'' if variant == 'a' else '_' + variant}:" \
@@ -116,15 +149,30 @@ def passes(variant: str, a: dict) -> bool:
     return bool(p) and max(p, key=p.get) == str(len(p) - 1)
 
 
-def run_case(c: dict, variants, model: str) -> list[dict]:
+def run_case(c: dict, variants, model: str, post=None, upstream=None
+             ) -> list[dict]:
+    """One case's rows: the served variants on the plain state (d on the goal
+    state, as before), the new ones on the framed state -- one Turn (one
+    state placement) per state. `post` / `upstream` are the decider's doors
+    (None: the real ones; a test passes a fake)."""
     rows = []
-    groups = [("base", [v for v in variants if v != "d"]),
-              ("goal", [v for v in variants if v == "d"])]
+    groups = [("base", [v for v in variants if v in ("a", "b", "c", "e")]),
+              ("goal", [v for v in variants if v == "d"]),
+              ("frame", [v for v in variants if v in NEW_VARIANTS])]
     for which, vs in groups:
         if vs:
-            rows += _run_state(c, vs, model, goal_state(c) if which ==
-                               "goal" else c["state"])
+            state = (goal_state(c) if which == "goal" else
+                     frame_state(c) if which == "frame" else c["state"])
+            rows += _run_state(c, vs, model, state, post, upstream)
     return rows
+
+
+def frame_state(c: dict) -> str:
+    """The new variants' STATE: skill_inject.framed_state over the case's
+    own goal (`task`) and state, in the size the case's state was cut to."""
+    import skill_inject as I
+    return I.framed_state(c.get("task"), c["state"], dict(
+        c.get("state_info") or {}, kind=c["kind"]))
 
 
 def goal_state(c: dict) -> str:
@@ -140,30 +188,48 @@ def goal_state(c: dict) -> str:
     return goal + "\n\nNOW:\n" + st
 
 
-def _run_state(c: dict, variants, model: str, state: str) -> list[dict]:
+def _run_state(c: dict, variants, model: str, state: str, post=None,
+               upstream=None) -> list[dict]:
     import decide_turn as T
     import decider_bonsai as D
     import skill_inject as I
     rows = []
     with T.Turn([], state=state, state_info=dict(
             c.get("state_info") or {}, kind=c["kind"]), on=True,
-            key=f"inject:{c['case']}", request=c["case"]) as t:
+            key=f"inject:{c['case']}", request=c["case"], post=post,
+            upstream=upstream) as t:
         for v in variants:
             t0 = time.time()
-            ans = t.decide(questions(v, c["items"]))
-            items = []
-            for it, a in zip(c["items"], ans):
-                items.append({
-                    "key": it["key"], "sha": it["sha"],
-                    "belief": round(belief(v, a), 6),
-                    "score": a.get("score"), "confidence": a.get("confidence"),
-                    "argmax": (a.get("diagnostics") or {}).get("argmax"),
-                    "pass": passes(v, a), "tie": bool((a.get("diagnostics")
-                                                       or {}).get("tie")),
-                    "disagreement": (a.get("diagnostics") or {})
-                    .get("disagreement"), "decision_id": a.get("decision_id"),
-                    "probs": (a.get("probabilities") if v != "c" else
-                              {"true": a["noul"]})})
+            extra = {}
+            if v in NEW_VARIANTS:
+                got, meta = I.item_beliefs(v, as_items(c["items"]), t)
+                items = [{"key": it["key"], "sha": it["sha"],
+                          "belief": r["belief"], "score": None,
+                          "confidence": None, "argmax": None,
+                          "pass": r["pass"], "tie": r["tie"],
+                          "disagreement": r["disagreement"],
+                          "decision_id": r["decision_id"],
+                          "probs": r["probs"], "parts": r["parts"]}
+                         for it, r in zip(c["items"], got)]
+                if meta.get("pick"):
+                    extra["pick"] = meta["pick"]
+            else:
+                ans = t.decide(questions(v, c["items"]))
+                items = []
+                for it, a in zip(c["items"], ans):
+                    items.append({
+                        "key": it["key"], "sha": it["sha"],
+                        "belief": round(belief(v, a), 6),
+                        "score": a.get("score"),
+                        "confidence": a.get("confidence"),
+                        "argmax": (a.get("diagnostics") or {}).get("argmax"),
+                        "pass": passes(v, a),
+                        "tie": bool((a.get("diagnostics") or {}).get("tie")),
+                        "disagreement": (a.get("diagnostics") or {})
+                        .get("disagreement"),
+                        "decision_id": a.get("decision_id"),
+                        "probs": (a.get("probabilities") if v != "c" else
+                                  {"true": a["noul"]})})
             ranked = sorted(items, key=lambda r: (-r["belief"], r["key"]))
             short = [r for r in ranked if r["pass"]]
             how = "passed"
@@ -185,15 +251,190 @@ def _run_state(c: dict, variants, model: str, state: str) -> list[dict]:
                                     "tie": bool((a3.get("diagnostics") or {})
                                                 .get("tie")),
                                     "decision_id": a3.get("decision_id")},
-                         "ms": round((time.time() - t0) * 1000, 1)})
+                         "ms": round((time.time() - t0) * 1000, 1), **extra})
     return rows
+
+
+# ------------------------------------------------------------- estimate ---
+# THE GPU TIME OF A RUN, FROM THE LAST ONE (offline; docs/JJAVA.md 9). Two
+# straight lines fitted to the decisions the 2026-10-06 run logged (variants
+# a-e, a decision = one question's two reads): the tokens the server
+# PROCESSED for a question against the characters of its two printed orders
+# (the state is cached, so a question costs its own suffix), and its
+# milliseconds against those tokens. A state's placement (the first question
+# of a Turn) is fitted apart, from the first question of each served Turn.
+# Stage 3 costs the run's own mean. The fit is checked against the run it was
+# fitted on (`check`: predicted against the recorded minutes of a-e).
+def _linfit(xs: list, ys: list) -> dict:
+    n = len(xs)
+    if n < 3:
+        return {"intercept": 0.0, "slope": 0.0, "r2": None, "n": n}
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    slope = sxy / sxx if sxx else 0.0
+    icpt = my - slope * mx
+    ss_tot = sum((y - my) ** 2 for y in ys)
+    ss_res = sum((y - (icpt + slope * x)) ** 2 for x, y in zip(xs, ys))
+    return {"intercept": icpt, "slope": slope,
+            "r2": round(1 - ss_res / ss_tot, 4) if ss_tot else None, "n": n}
+
+
+def _chars(q: dict) -> int:
+    import decider_bonsai as D
+    return sum(len(D.question_text(c)) for c in D.rendered_orders(q))
+
+
+def _decisions(path: str) -> dict:
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    r = json.loads(ln)
+                except ValueError:
+                    continue
+                if r.get("row") == "decision" and r.get("processed_tokens") \
+                        is not None:
+                    out[r["id"]] = (float(r["processed_tokens"]),
+                                    float(r.get("ms") or 0.0))
+    except OSError:
+        pass
+    return out
+
+
+def calibrate(all_cases: list[dict], model: str, results: str | None = None,
+              only: set | None = None) -> dict | None:
+    """The fitted rate. `only`: fit on the rows of these cases alone (the
+    hold-out check fits on one half and predicts the other)."""
+    results = results or RESULTS
+    run = os.path.join(results, f"run_{model}.jsonl")
+    dec = _decisions(os.path.join(results, f"decisions_{model}.jsonl"))
+    if not dec or not os.path.exists(run):
+        return None
+    by = {c["case"]: c for c in all_cases}
+    tok_pts, ms_pts, firsts, s3, measured = [], [], [], [], 0.0
+    seen: set = set()
+    case_ms: dict = {}
+    with open(run, encoding="utf-8") as f:
+        for ln in f:
+            r = json.loads(ln)
+            c = by.get(r["case"])
+            if c is None or r["variant"] not in SERVED_VARIANTS or (
+                    only is not None and r["case"] not in only):
+                continue
+            measured += float(r.get("ms") or 0.0)
+            case_ms[r["case"]] = case_ms.get(r["case"], 0.0) + float(
+                r.get("ms") or 0.0)
+            seen.add(r["case"])
+            qs = questions(r["variant"], c["items"])
+            for i, (q, it) in enumerate(zip(qs, r["items"])):
+                d = dec.get(it.get("decision_id"))
+                if d is None:
+                    continue
+                if i == 0 and r["variant"] in ("a", "d"):
+                    firsts.append((c["state_info"].get("tokens") or 0,
+                                   d[1], _chars(q), d[0]))
+                else:
+                    tok_pts.append((_chars(q), d[0]))
+                    ms_pts.append((d[0], d[1]))
+            d3 = dec.get((r.get("stage3") or {}).get("decision_id"))
+            if d3 is not None:
+                s3.append(d3[1])
+    if not tok_pts:
+        return None
+    tk = _linfit([x for x, _ in tok_pts], [y for _, y in tok_pts])
+    mf = _linfit([x for x, _ in ms_pts], [y for _, y in ms_pts])
+    # a state's placement: what the first question cost beyond a question of
+    # its own size, against the state's tokens
+    extra = [(st, ms - (mf["intercept"] + mf["slope"] * (
+        tk["intercept"] + tk["slope"] * ch))) for st, ms, ch, _t in firsts]
+    pl = _linfit([x for x, _ in extra], [y for _, y in extra])
+    return {"tokens_vs_chars": tk, "ms_vs_tokens": mf, "placement": pl,
+            "stage3_ms": round(sum(s3) / len(s3), 1) if s3 else None,
+            "recorded_minutes_a_to_e": round(measured / 60000, 1),
+            "cases_run": sorted(seen), "case_ms": case_ms}
+
+
+def _question_ms(cal: dict, q: dict) -> float:
+    tok = cal["tokens_vs_chars"]["intercept"] + \
+        cal["tokens_vs_chars"]["slope"] * _chars(q)
+    return cal["ms_vs_tokens"]["intercept"] + cal["ms_vs_tokens"]["slope"] \
+        * max(tok, 0.0)
+
+
+def estimate(all_cases: list[dict], pending: list[dict], variants: list[str],
+             model: str, results: str | None = None) -> dict:
+    cal = calibrate(all_cases, model, results)
+    if cal is None:
+        return {"error": f"no run_{model}.jsonl / decisions_{model}.jsonl to "
+                "fit the rate from"}
+    place = lambda c: max(0.0, cal["placement"]["intercept"] + cal[          # noqa: E731
+        "placement"]["slope"] * (c["state_info"].get("tokens") or 0))
+    s3 = cal["stage3_ms"] or 0.0
+    ran = set(cal.pop("cases_run"))
+    out = {"model": model, "cases": len(pending), "calibration": cal,
+           "variants": {}}
+    groups = {"base": [v for v in variants if v in ("a", "b", "c", "e")],
+              "goal": [v for v in variants if v == "d"],
+              "frame": [v for v in variants if v in NEW_VARIANTS]}
+    total = 0.0
+    for g, vs in groups.items():
+        if not vs:
+            continue
+        gp = sum(place(c) for c in pending) / 60000
+        out.setdefault("state_placement_minutes", {})[g] = round(gp, 1)
+        total += gp
+        for v in vs:
+            nq, qm = 0, 0.0
+            for c in pending:
+                for q in questions(v, c["items"]):
+                    nq += 1
+                    qm += _question_ms(cal, q)
+            m = (qm + s3 * len(pending)) / 60000
+            out["variants"][v] = {
+                "questions": nq + len(pending), "stage2_questions": nq,
+                "minutes": round(m, 1),
+                "rows": len(pending),
+                "rows_per_minute": round(len(pending) / m, 2) if m else None}
+            total += m
+    out["total_minutes"] = round(total, 1)
+    # THE CHECK: fitted on one half of the run's cases, it predicts the
+    # RECORDED minutes of the other half (halves by the case id's parity),
+    # both ways round -- the minutes the run actually took, never the fit's own
+    def predicted(c_, cal_) -> float:
+        place_ = max(0.0, cal_["placement"]["intercept"] + cal_["placement"][
+            "slope"] * (c_["state_info"].get("tokens") or 0))
+        return (sum(_question_ms(cal_, q) for v in SERVED_VARIANTS
+                    for q in questions(v, c_["items"]))
+                + (cal_["stage3_ms"] or 0.0) * len(SERVED_VARIANTS)
+                + 2 * place_)
+    chk = []
+    for half in (0, 1):
+        fit_on = {c for c in ran if int(c, 16) % 2 != half}
+        test_on = {c for c in ran if int(c, 16) % 2 == half}
+        ch = calibrate(all_cases, model, results, only=fit_on)
+        if ch is None:
+            continue
+        by = {c["case"]: c for c in all_cases}
+        pred = sum(predicted(by[c], ch) for c in test_on) / 60000
+        rec = sum(cal["case_ms"][c] for c in test_on) / 60000
+        chk.append({"fit_cases": len(fit_on), "test_cases": len(test_on),
+                    "predicted_minutes": round(pred, 1),
+                    "recorded_minutes": round(rec, 1),
+                    "error": round(pred / rec - 1, 3) if rec else None})
+    out["check_held_out_halves"] = chk
+    cal.pop("case_ms", None)
+    return out
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--cases", required=True)
     ap.add_argument("--model", required=True)
-    ap.add_argument("--variants", default=",".join(VARIANTS))
+    ap.add_argument("--variants", default=",".join(SERVED_VARIANTS),
+                    help="comma list of " + ",".join(VARIANTS) + "; the new "
+                    "variants f,g,h are not in the default")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--only-labelled", action="store_true",
                     help="only cases bench/skills/inject/labels.jsonl labels")
@@ -203,6 +444,10 @@ def main(argv=None) -> int:
                     "a run that was stopped)")
     ap.add_argument("--dry-run", action="store_true",
                     help="build every question, send nothing")
+    ap.add_argument("--estimate", action="store_true",
+                    help="OFFLINE: the GPU minutes the requested variants "
+                    "would take, from the rate of the run already in "
+                    "run_<model>.jsonl and its decisions log; sends nothing")
     a = ap.parse_args(argv)
     os.makedirs(RESULTS, exist_ok=True)
     os.environ["YAMADORI_DECIDER_DECISIONS"] = os.path.join(
@@ -215,7 +460,10 @@ def main(argv=None) -> int:
     if a.only_labelled:
         sys.path.insert(0, HERE)
         import inject_labels
-        lab = {k[0] for k in inject_labels.labels("A")}
+        # the cases inject_tune scores: the rubric truth is pass A plus the
+        # blind pass B (labels("A") alone left out the 8 cases only B read,
+        # 34 items, in the 2026-10-06 run)
+        lab = {k[0] for k in inject_labels.truth("rubric")}
         cases = [c for c in cases if c["case"] in lab]
     if a.skip_done:
         have: dict = {}
@@ -230,6 +478,12 @@ def main(argv=None) -> int:
         cases = [c for c in cases if not set(variants) <= have.get(
             c["case"], set())]
     cases = cases[:a.limit] if a.limit else cases
+    if a.estimate:
+        with open(a.cases, encoding="utf-8") as f:
+            everything = [json.loads(ln) for ln in f if ln.strip()]
+        print(json.dumps(estimate(everything, cases, variants, a.model),
+                         indent=1))
+        return 0
     if a.dry_run:
         n = sum(len(questions(v, c["items"])) + 1 for c in cases
                 for v in variants)

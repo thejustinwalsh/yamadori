@@ -519,6 +519,85 @@ as before. In cold mode the lane still holds the state, but each question
 re-reads it (`cache_prompt` false), which is the cost the operator
 accepted.
 
+## 9. The injector's questions, reworked (2026-10-06)
+
+Operator, 2026-10-06: "I want skills and the decision maker doing their damn
+jobs"; standing rule (2026-09-29): "no easy bails" -- a question that will
+not separate is rewritten and measured again, never replaced by a default.
+The 2026-10-06 window (reader `bonsai-a4000`, 193 labelled cases, 1,338
+labelled items, rubric truth, variants a-e, n=1 run; the reads repeat to SD
+0.002) found stage 2 unusable as asked (AUROC 0.687, by-case 95% CI
+0.643-0.740; precision 0.198 at its default against a base rate of 0.152,
+`inject_tune`) while
+the same reader scores JevBench at Calibration 82.87 (ECE 0.056): the reader
+decides, the framing is the suspect. This section is the diagnosis, the
+three question sets built against it (`mcp/skill_inject.py` QUESTION-SET
+VARIANTS), and the commands that measure them. Every number below is a field
+of `python bench/skills/inject_diagnose.py --cases CASES --model
+bonsai-a4000` (offline, 2 s; `bench/skills/test_inject_diagnose.py`).
+
+### 9.1 What the run says
+
+| | finding (variant a, as served) | evidence |
+|---|---|---|
+| D1 | The reader sees RELEVANCE, not NEED. NEEDED against OFF AUROC 0.924, against AREA (level 1, 64% of items) 0.631, against DONE (level 2) 0.581. Mean P(top level) by true level 0/1/2/3 = 0.24 / 0.62 / 0.67 / 0.73. No variant a-e separates NEEDED from AREA above 0.63. On steps recall at P >= 0.5 is 0.99, precision 0.18 (base 0.12). | `variants.a.vs_level`, `mean_belief_by_level`, `at_threshold` |
+| D2 | The Score is the wrong instrument: its levels join two judgments in long clauses; the reader almost never answers a middle level (argmax level 1 or 2 in 6.4% / 4.4% of reads in the two orders; 68% of items ARE level 1 or 2) and the orders disagree (mean total variation 0.34, argmax agrees 64%; level 3 wins 83% of order-2 reads where it is printed first, 49% of order-1 reads where it is last). A noul reads stably (variant c: TV 0.055) but c's statement carried two conditions and a negation and separated worst (0.554). | `variants.*.readout` |
+| D3 | A generic process skill makes the false yeses: on steps 215 of the 343 non-needed items above 0.7 belong to `fix-located-defect-first` (315 of 978 step rows, AUROC 0.562, mean belief of its AREA items 0.82). The rubric calls a generic good-practice fact AREA unless the material shows the specific mistake. | `by_skill_step`, `step_false_yes_above_0.7` |
+| D4 | The reader does not rank within a case: in the 80 cases with a needed item the top-belief item is needed 30% of the time, a random item 31%. Within (case, skill) groups pairwise AUROC 0.67; 109 of 271 groups are mixed, so a per-skill gate cannot do the job. | `within_case` |
+| D5 | The labellers saw each fact under its craft's name; the reader saw the bare fact. | `inject_labels.sheet` |
+| D6 | The session goal helps the gate and not stage 2: stage-3 AUROC 0.771 (d) against 0.667 (a), paired by-case bootstrap +0.104 (95% 0.048-0.167); stage 2 d 0.675 against a 0.687. Variant d says the opening request twice on a first user turn. | `stage3` |
+| D7 | Variant e's readout is broken, not weak: the digit labels hold 1.4% of the next-token distribution (letters 94%). Not a finding about the question. | `variants.e.readout.label_mass_min_mean` |
+| D8 | The label set is thinner than its n: the 29 user-turn cases are 11 distinct states; the pagoda request is 16 cases (3 states), 287 of 360 user items and 84 of the 93 needed. User AUROC 0.58, steps 0.80. Leave-one-run-out puts the same prompt in train and test. 8 cases only the blind pass B read (34 steps items) were left out of the run by `--only-labelled` (fixed: it follows the rubric truth). | `label_set`, `by_kind` |
+
+Also measured and set aside: state length (confounded with the kind: inside
+steps AUROC 0.78 under 250 tokens, 0.80 over), the form of the item (DO / WHEN
+/ DO NOT: 0.82-0.83 on steps), the position of a step in its run (0.88, 0.78,
+0.69, 0.82 by quartile), recency; and a per-item centring (belief minus the
+item's belief in other states): steps 0.79 -> 0.73, users 0.58 -> 0.89 on one
+repeated prompt -- not a fix, and not trustworthy at that n (D8).
+
+### 9.2 The three question sets
+
+All three read the FRAMED STATE (`skill_inject.framed_state`: the session goal
+first, then the user's message or the assistant's latest step, the parts
+named, TS state; a first user turn says its request once) and show each fact
+under its craft's name (D5). All are typed (noul, choice), read in two orders,
+with no generation. None is wired into `gate()`: adopting a measured one also
+needs the Turn's state built with `framed_state` (`skill_select`'s Turn
+construction), which waits for the measurement.
+
+| | questions | combined in code | against | research |
+|---|---|---|---|---|
+| **f split** | NEXT "The assistant is about to write or run something that this fact covers." and DONE "The material already shows the assistant doing what this fact says." (a noul each, 2 an item) | need = P(NEXT) x (1 - P(DONE)); passes when NEXT >= 0.5 and DONE < 0.5 | D1, D2 (NEXT is the AREA/NEEDED line, DONE the DONE/NEEDED line, one judgment each) | TS jaggedness 1, 4; TS score "one dimension"; 4.1 above; DECIDER-RESEARCH 2.2 (lettered yes/no pair: ECE 0.104 -> 0.046) |
+| **g fit** | "The assistant's next code or command would be more correct with this fact in front of it." (a noul an item) | belief = P(true) | D1, D3, D6 (the consequence, not the topic: the rubric's own closing test, and stage 3's statement, the wording whose goal-first read separated best) | rubric rule "shared keywords are not relevance"; TS jaggedness 1 |
+| **h pick, then fit** | one CHOICE per case over its facts, "none" in the middle of both orders, then g's noul on the PICK_TOP = 3 the choice ranked first; about 1 + 3 questions a case | need = P(fit) x (1 - P(none)); a fact outside the top 3 has belief 0 | D4 (relative reads compare the items; the none mass is "nothing here is needed") | TS skill_suggestion (choice over all candidates with an explicit none, "fits" nouls on the top 3: wrong loads 16.8% -> 7.3%, needless 9.8% -> 4.0%); 5.1 above; DECIDER-RESEARCH 2.8 (average probabilities, escalate on low confidence) |
+
+What would count against each, on the same run: f -- NEXT alone reproduces
+the area bias (3 vs AREA below 0.63; the `parts` of each row are logged, so
+NEXT alone and DONE alone are scored without a second window); g -- the
+generic process skill still reads high (`by_skill_step`); h -- the pick's top
+item is needed no more often than a random one (`within_case`) or its none
+mass does not track the 113 cases with nothing needed.
+
+### 9.3 Measuring them
+
+```
+# one GPU consumer; bonsai-a4000 loaded and idle (inject_decide refuses otherwise)
+python bench/skills/inject_decide.py --cases CASES --model bonsai-a4000 --variants f,g,h --only-labelled --estimate    # offline
+python bench/skills/inject_decide.py --cases CASES --model bonsai-a4000 --variants f,g,h --only-labelled --skip-done    # 201 cases
+python bench/skills/inject_decide.py --cases CASES --model bonsai-a4000 --variants a,b,c,d,e --only-labelled --skip-done # the 8 B-only cases, so all 8 variants share cases
+python bench/skills/inject_diagnose.py --cases CASES --model bonsai-a4000                                              # offline
+python bench/skills/inject_tune.py --model bonsai-a4000 --loro                                                         # offline; the existing ship rule
+```
+
+`--estimate` fits the run's own rate (tokens against characters, milliseconds
+against tokens, a state's placement, stage 3) on the decisions the last run
+logged and predicts the held-out half of that run within 1.3% (both
+directions). A tier ships only where the lower Wilson bound of its held-out
+precision clears its target (0.409 high, 0.266 medium, operator-accepted
+2026-09-29), as for every question set; separation is reported first, and a
+variant whose by-case interval includes 0.5 is not tuned.
+
 ## Sources
 
 **TypeSafe documentation** (docs.typesafe.ai, read 2026-09-29; vendor):
