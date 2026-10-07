@@ -3461,11 +3461,15 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
         client_max, tiers.estimate_prompt_tokens({"messages": out["messages"],
                                                   "tools": out.get("tools")}),
         helper_active=admission.helper_active())
-    fields = compaction.prefix_fields(src, comp["answer"],
+    fields = compaction.prefix_fields(src, comp["answer_cap"],
                                       comp["thinking_tokens"])
     rec["thinking"] = fields.pop("_thinking")
     thinks = bool(fields["enable_thinking"])
     if not thinks:
+        # no thinking: the room the thinking would have had is answer room
+        comp["answer_cap"] += comp["thinking_tokens"]
+        comp["answer_record"]["cap"] = comp["answer_cap"]
+        fields["max_tokens"] = comp["answer_cap"]
         for k in ("reasoning_effort", "reasoning_budget_tokens",
                   "reasoning_budget_message", "reasoning_budget_nudge",
                   "reasoning_budget_nudge_at"):

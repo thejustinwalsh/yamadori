@@ -862,7 +862,15 @@ empty or error calls is a tool defect to fix, not a budget spent.
   ceiling is gone). It never waits for the helper lane: its window is the
   pool less a running second brain's share (`admission.helper_active`),
   falling back to the main share when it does not fit. The advertised window
-  stays the main share. **Not yet run live.** The mapping cannot be replayed
+  stays the main share. **THE TARGET IS NOT THE CAP (2026-10-07; the operator's pagoda: ten of Hermes'
+  summaries finished `length` -- "answer 6000", "answer 9120", summaries of 18K-30K characters -- and Hermes
+  DISCARDS a cut summary, so the conversation never shrank).** `compaction.answer` is the TARGET, what the model is
+  told (the client's figure, floored at the budget); `answer_cap` is what `max_tokens` carries: the window less the
+  prompt less the thinking, the thinking being capped like a step of the client's loop (`AGENT_STEP_THINKING`) instead
+  of taking everything the target left; never below the target. `x_yamadori.compaction.answer_record {target, cap,
+  why}`. The same for `as_sent` (no identity), in place and flattened (one `_serve_compaction` path); with thinking off
+  the thinking room is answer room. `mcp/test_utility.py` `test_a_summary_past_the_clients_target_is_not_cut`.
+  **Not yet run live.** The mapping cannot be replayed
   from the corpus, which keeps 2,000 characters of each request (11 of its 12
   Hermes compactions are the iterative form, all preamble in that head).
 - **A `finish_reason: length` is a budget event, never an answer.**

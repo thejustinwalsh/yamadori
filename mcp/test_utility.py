@@ -786,10 +786,15 @@ def test_a_hermes_session_replayed():
           == "summarise_conversation", "compaction: a utility call")
     check(len(sent) == 1 and proxy.LANDING_PROMPT not in text_of(up),
           "compaction: sent as the client wrote it -- no 'stop searching' landing")
-    check(int(up.get("max_tokens") or 0) == tiers.COMPACTION_BUDGET
-          and d["x_yamadori"]["compaction"]["answer"] == tiers.COMPACTION_BUDGET,
-          "compaction: a client that set no limit gets the compaction budget "
-          "(5,120), not the 2,048 floor that would cut the summary",
+    cx = d["x_yamadori"]["compaction"]
+    check(cx["answer"] == tiers.COMPACTION_BUDGET
+          and int(up.get("max_tokens") or 0) == cx["answer_cap"]
+          and cx["answer_cap"] > tiers.COMPACTION_BUDGET
+          and cx["answer_record"]["target"] == tiers.COMPACTION_BUDGET
+          and cx["answer_record"]["cap"] == cx["answer_cap"],
+          "compaction: a client that set no limit is told the compaction "
+          "budget (5,120) as the target; the summary may run to what the "
+          "window leaves (thinking is off here), never cut at the target",
           str(up.get("max_tokens")))
     check(d["x_yamadori"]["utility_kind"] == "compaction",
           "compaction: x_yamadori.utility_kind says so",
@@ -1587,8 +1592,11 @@ def test_the_compaction_budget():
           "defaults: budget 5,120; compaction thinking is what its window "
           "leaves (COMPACTION_THINKING removed, CONSTANTS-AUDIT)", str(B))
     r = cb(None, 20000, 0, SHARES_256K)
-    check(r["thinking_tokens"] == r["window"] - 20000 - r["answer"],
-          "compaction thinking = window - prompt - answer",
+    check(r["thinking_tokens"] == tiers.AGENT_STEP_THINKING
+          and r["answer_cap"] == r["window"] - 20000 - r["thinking_tokens"]
+          and r["answer_cap"] > r["answer"] == 5120,
+          "compaction thinking is capped like a step of the client's loop; "
+          "the summary's cap is window - prompt - thinking, above the target",
           json.dumps(r))
     b = budget.budgets(262144)
     check(b["main"] == 163840 and b["helper"] == 98304,
@@ -1625,6 +1633,46 @@ def test_the_compaction_budget():
           json.dumps(r))
 
 
+def test_a_summary_past_the_clients_target_is_not_cut():
+    """The operator's pagoda (2026-10-07): ten of Hermes' summaries finished
+    `length` at the proxy's allowance ("answer 6000", "answer 9120"), and
+    Hermes DISCARDS a cut summary. The client's target (Hermes' "Target ~N
+    tokens", or max_tokens) is what the model is told, never the cap: the cap
+    is what the window leaves after the prompt and the thinking."""
+    cb = tiers.compaction_budget
+    shares = {"main": 138240, "helper": 71680, "pool": 209920,
+              "capped": True}
+    for target in (6000, 9120):
+        r = cb(target, 180103, 0, shares)
+        room = r["window"] - 180103
+        check(r["answer"] == target
+              and r["thinking_tokens"] == tiers.AGENT_STEP_THINKING
+              and r["answer_cap"] == room - r["thinking_tokens"]
+              and r["answer_cap"] > 2 * target,
+              f"Target ~{target}: told {target}, may run to "
+              f"{room - r['thinking_tokens']} (the window less the prompt "
+              f"and the thinking)", json.dumps(r)[:300])
+        summary = 11000     # a 30K-character summary, ~11K tokens
+        check(summary > target and summary <= r["answer_cap"],
+              f"a summary of {summary} tokens, past the {target}-token "
+              f"target, fits the cap: it finishes `stop`, not `length`")
+        check(r["answer_record"]["target"] == target
+              and r["answer_record"]["cap"] == r["answer_cap"]
+              and "never cut by the target" in r["answer_record"]["why"],
+              "x_yamadori.compaction.answer_record {target, cap, why}")
+    # thin room: the cap is never below the target, and the record says so
+    r = cb(9120, 205000, 0, shares)
+    check(r["answer_cap"] >= r["answer"] and not r["fits"],
+          "no room to spare: the cap is the target at least",
+          json.dumps(r)[:300])
+    # a client that sent max_tokens is read the same way: a target
+    r = cb(1000, 100000, 0, shares)
+    check(r["answer"] == tiers.COMPACTION_BUDGET
+          and r["answer_cap"] > tiers.COMPACTION_BUDGET,
+          "a small client max_tokens is floored at the budget as the target "
+          "and is not the cap either")
+
+
 def test_the_budget_draws_on_the_spare_pool_without_waiting():
     """Through the proxy at the 262,144 pool: a compaction too long for the
     main share alone takes its summary room from the idle helper share, and
@@ -1649,8 +1697,9 @@ def test_the_budget_draws_on_the_spare_pool_without_waiting():
         d = proxy.complete(dict(body))
         c = d["x_yamadori"]["compaction"]
         check(c["helper_active"] == 0 and c["fits"] and c["draws_on_spare"]
-              and c["window"] == 262144 and _seen[0]["max_tokens"] == 5120,
-              "helper idle: the full 5,120, drawn on the spare share",
+              and c["window"] == 262144
+              and _seen[0]["max_tokens"] == c["answer_cap"] > 5120,
+              "helper idle: told 5,120, may run to what the spare share leaves",
               json.dumps(c))
 
         with admission.helper_lane(timeout=1, what="test") as got:
@@ -1910,7 +1959,8 @@ def test_an_in_place_compaction_reuses_the_conversation():
           and (up.get("chat_template_kwargs") or {}).get("enable_thinking") is True
           and up.get("reasoning_effort") == "medium"
           and up.get("reasoning_budget_tokens") == c["thinking_tokens"]
-          and up.get("max_tokens") == 5120 + c["thinking_tokens"]
+          and up.get("max_tokens") == c["answer_cap"] + c["thinking_tokens"]
+          and c["answer"] == 5120 < c["answer_cap"]
           and c["thinking"].startswith("on")
           and up.get("temperature") == 1.0,
           "tool_choice none, thinking at the conversation's own effort "
@@ -2009,10 +2059,15 @@ def test_a_hermes_compaction_is_rewritten_onto_the_conversation():
     check(up.get("id_slot") == slot and x["cache"]["reused"] == 9950,
           "on the conversation's slot", json.dumps(x["cache"]))
     check(up.get("tool_choice") == "none" and up.get("enable_thinking") is True
-          and up.get("max_tokens") == 8192 + c["thinking_tokens"]
-          and c["answer"] == 8192 and c["target_tokens"] == 8192,
+          and up.get("max_tokens") == c["answer_cap"] + c["thinking_tokens"]
+          and c["answer"] == 8192 and c["target_tokens"] == 8192
+          and c["answer_cap"] > 8192
+          and c["answer_record"]["target"] == 8192
+          and c["answer_record"]["cap"] == c["answer_cap"]
+          and "never cut by the target" in c["answer_record"]["why"],
           "tool_choice none, thinking at the conversation's effort, and "
-          "Hermes' own 'Target ~8,192 tokens' as the answer allowance",
+          "Hermes' own 'Target ~8,192 tokens' as the TARGET (told), the cap "
+          "being what the window leaves after the prompt and the thinking",
           json.dumps({k: up.get(k) for k in ("tool_choice", "enable_thinking",
                                              "max_tokens")}))
     msg = d["choices"][0]["message"]
@@ -2419,6 +2474,7 @@ def main() -> int:
                test_compaction_affinity,
                test_compaction_affinity_through_the_proxy,
                test_the_compaction_budget,
+               test_a_summary_past_the_clients_target_is_not_cut,
                test_the_budget_draws_on_the_spare_pool_without_waiting,
                test_the_advertised_window_is_the_main_share,
                test_an_in_place_compaction_reuses_the_conversation,

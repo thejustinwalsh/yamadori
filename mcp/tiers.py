@@ -802,7 +802,23 @@ def compaction_budget(client_max_tokens, prompt_tokens: int,
     rec = {"budget": b, "cap": cap, "client_max_tokens": client or None,
            "prompt_estimate": prompt, "main_share": s["main"],
            "pool": s["pool"], "helper_active": active, "window": window}
+    # THE TARGET IS NOT THE CAP (coordinator, 2026-10-07; the operator's
+    # pagoda: ten of Hermes' summaries finished `length`, cut at the proxy's
+    # allowance -- "answer 6000", "answer 9120", summaries of 18K-30K
+    # characters -- and Hermes DISCARDS a cut summary, so the conversation
+    # never shrank). `answer` stays the TARGET: the client's figure (floored
+    # at the budget), what the model was told. The most the summary may run to
+    # (`answer_cap`, what max_tokens carries) is what the compaction's window
+    # leaves after the prompt and its THINKING, the thinking being capped like
+    # a step of the client's loop (AGENT_STEP_THINKING, "this model
+    # overthinks") instead of taking everything the target left, which had
+    # eaten the answer room. Never below the target.
+    def split(room: int) -> tuple[int, int]:
+        think = max(min(AGENT_STEP_THINKING, room - answer), MIN_THINKING)
+        return think, max(room - think, answer)
+
     if prompt + answer <= window:
+        think, acap = split(window - prompt)
         rec.update(answer=answer, fits=True,
                    room=("the main cap: nothing runs past the VRAM line"
                          if s.get("capped") else
@@ -810,15 +826,26 @@ def compaction_budget(client_max_tokens, prompt_tokens: int,
                          if not active else
                          "pool less the running second brain's share"),
                    draws_on_spare=prompt + answer > s["main"])
-        rec["thinking_tokens"] = max(window - prompt - answer, MIN_THINKING)
+        rec["thinking_tokens"] = think
+        rec["answer_cap"] = acap
     else:
         rec.update(answer=max(min(answer, s["main"] - prompt), A_MIN),
                    fits=False, draws_on_spare=False,
                    room=(f"main share: prompt ~{prompt} + answer {answer} "
                          f"exceed the {window}-token window"
                          + (" with a second brain running" if active else "")))
-        rec["thinking_tokens"] = max(s["main"] - prompt - rec["answer"],
-                              MIN_THINKING)
+        answer = rec["answer"]
+        think, acap = split(s["main"] - prompt)
+        rec["thinking_tokens"] = think
+        rec["answer_cap"] = acap
+    # x_yamadori.compaction.answer_record {target, cap, why}
+    rec["answer_record"] = {
+        "target": rec["answer"], "cap": rec["answer_cap"],
+        "why": (f"told {rec['answer']} (the client's target"
+                + (f" {client}" if client else "") + f", at least the "
+                f"{b} budget); the summary may run to what the window "
+                f"leaves after the prompt and {rec['thinking_tokens']} "
+                f"tokens of thinking -- it is never cut by the target")}
     return rec
 
 
