@@ -997,6 +997,29 @@ def _run_our_tool(name: str, args: dict, state: dict | None = None) -> str:
         import skill_select
         account = st.get("_account") or ""
         lineage = session_lineage(st) if st else ""
+        # THE PER-REQUEST CAP (operator/coordinator, 2026-10-07; the probe
+        # pkgskills2: a model spent all ten hidden hops of its first request
+        # on lookups and craft calls, hit the tool-turn cap and landed with
+        # no work done -- 4 of 15 trials with the channel on, 0 of 5 without):
+        # at most skill_match.BODIES_PER_DECISION (3; SkillsBench 2602.12670v4)
+        # crafts are read in one request. A call past it is NOT run: it gets
+        # the situation, that a retry in a later step can succeed, and the
+        # next step.
+        import skill_match
+        limit = int(skill_match.BODIES_PER_DECISION)
+        if len(st.get("_craft_reads") or []) >= limit:
+            st["_craft_capped"] = int(st.get("_craft_capped") or 0) + 1
+            return cs.error_result(
+                name, "CRAFT_CAP",
+                f"This turn already has {limit} crafts from "
+                f"{skill_prompts.CRAFT_TOOL_NAME}; no more are read in one "
+                f"request.", True,
+                remedies=[{"fixable_by": "agent",
+                           "action": "continue with the task using the crafts "
+                                     "you have; call "
+                                     f"{skill_prompts.CRAFT_TOOL_NAME} again in "
+                                     "a later step if a new question comes up",
+                           "effect": "a craft is read in the next request"}])
         # A name is that craft; anything else is a QUESTION, weighed against
         # the armed, proven crafts (mcp/craft_query.py).
         text, rec = skill_select.read_craft(
@@ -3795,7 +3818,10 @@ def _x_yamadori(payload: dict, *, hops: int) -> dict:
                       # chosen, the choice's and the gate's reads, untuned
                       query=[r["query"] for r in
                              payload.get("_craft_reads") or []
-                             if isinstance(r, dict) and r.get("query")]),
+                             if isinstance(r, dict) and r.get("query")],
+                      # calls past the per-request cap, not run
+                      # (skill_match.BODIES_PER_DECISION)
+                      capped=int(payload.get("_craft_capped") or 0)),
         # Tools of ours withheld for a conflict with the client's
         # (tool_conflicts): [{ours, because, client_tool}].
         "tools_withheld": list(payload.get("_tools_withheld") or []),
@@ -4840,6 +4866,7 @@ def _run_turn(body: dict, streamed: bool):
     # yama_recall_craft's reads in THIS request (x_yamadori.craft.reads).
     state["_craft_reads"] = []
     payload["_craft_reads"] = state["_craft_reads"]
+    state["_craft_capped"] = 0
     # The package skills channel: this request's records (the trigger's from
     # prepare, then each tool section and craft follow-up) in one shared list.
     payload["_package_skills"] = list(payload.get("_package_skills") or [])
@@ -4941,7 +4968,11 @@ def _run_turn(body: dict, streamed: bool):
             last = False
         else:
             last = context_full(payload, convo)
-        if not last and hop and cap["turns"] >= cap["limit"]:
+        if not last and hop and (cap["turns"] >= cap["limit"]
+                                 or int(state.get("_craft_capped") or 0)
+                                 >= cap["limit"]):
+            # (a model told "no more crafts this request" that many times has
+            # a loop of its own: the same limit bounds it)
             cap["hit"] = True
             payload = _land(payload, convo, "tool_turn_cap")
             last = landed = True
@@ -5064,6 +5095,11 @@ def _run_turn(body: dict, streamed: bool):
                 hop_msg["content"] = pc + hop_msg["content"]
         convo.append(hop_msg)
         hops_added.append(hop_msg)
+        # A hop whose only calls were crafts is not a tool turn: a craft that
+        # RAN is bounded by the per-request craft cap (_run_our_tool), a call
+        # past it by its own count (state["_craft_capped"]) against the same
+        # limit. A package tool or an image tool counts as before.
+        hop_counts = False
         for c in calls:
             # An old name of ours (copied from a replayed hop) runs as its
             # `yama_*` tool; the call itself stays as the model wrote it.
@@ -5083,6 +5119,9 @@ def _run_turn(body: dict, streamed: bool):
                 state["_craft_model"] = payload.get("model")
             status, res = yield from _in_thread(
                 lambda fn=fn, args=args: run_our_tool(fn, args, state))
+            payload["_craft_capped"] = int(state.get("_craft_capped") or 0)
+            if not (fn == skill_prompts.CRAFT_TOOL_NAME and status == "ok"):
+                hop_counts = True
             if fn == images.TOOL_NAME and status == "ok" and res:
                 # IMAGES REACH THE CHAT: the picture goes to the client
                 # now, as content; the model reads that it is shown.
@@ -5163,7 +5202,8 @@ def _run_turn(body: dict, streamed: bool):
                 f"argument was image data ({img['kind']}); "
                 + ("asking for the answer`\n" if img_land
                    else "asking for a file path`\n"))
-        cap["turns"] += 1
+        if hop_counts or img is not None:
+            cap["turns"] += 1
         payload["messages"] = convo
         prefill = None
 

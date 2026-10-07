@@ -1338,6 +1338,15 @@ in the section itself; every rule is deterministic.
   the craft that answered it; label the gate on "does the returned craft answer
   it") and gap-fill evidence (`answered` 0: what the model asked that no craft
   answered). The wording of both questions is UNMEASURED and the cut is untuned.
+- **The craft cap** (2026-10-07; the probe `pkgskills2`, `bench/mcp/results/package_skills_probe.jsonl`:
+  with the channel on, 4 of 15 trials spent all ten hidden hops of request 1 on lookups and craft calls, hit
+  `tool_turn_limit` and landed with no work done; control 0 of 5). At most `skill_match.BODIES_PER_DECISION` (3,
+  SkillsBench 2602.12670v4) crafts are read in one request (`proxy._run_our_tool`); a call past it is NOT run and
+  returns `CRAFT_CAP` (the situation, `retryable` true, the next step: continue with the task, call it again in a
+  later step) -- `x_yamadori.craft.capped`. A hop whose only calls are crafts is not a tool turn
+  (`x_yamadori.tool_turns` counts the package tools); a model told "no" `tool_turn_limit` times in a request lands
+  (the same limit; a loop of its own). The router's head says "one or two crafts are usually enough for a step"
+  (craft/7). Tests: `mcp/test_package_skills.py` `test_the_craft_cap*` (chat, Responses, blocking, streamed).
 - **Between-turn triggers** (`package_skills.step_triggers`, on the client's own
   newest evidence, reusing `skill_select`'s `fresh_messages`, `evidence_view`,
   `error_text`, `error_names` and `skill_packages.detect`; appended to the tool

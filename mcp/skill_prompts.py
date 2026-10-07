@@ -557,7 +557,10 @@ def faithful_user(items: list[dict]) -> str:
 # yama_recall_craft takes a craft's name or a question (mcp/craft_query.py);
 # its description is the question it answers and the moments to call it,
 # including a package lookup that named a craft.
-CRAFT_VERSION = "craft/6"
+# craft/7 (2026-10-07, after the probe pkgskills2): the router's head says
+# "one or two crafts are usually enough for a step" (a positive line); the
+# per-request cap on craft reads (proxy._run_our_tool) is the bound.
+CRAFT_VERSION = "craft/7"
 # The model-facing tool that reads one craft in full (a hidden hop, like
 # yama_think_deeply). The operator may rename it: this is the one constant.
 # The old name, `recall_craft`, is still read in stored ledger rows

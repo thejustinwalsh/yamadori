@@ -303,7 +303,8 @@ def test_the_router_rendering():
     check(text.startswith("\n---\nCraft for koota 0 from this service's "
                           "library: when the work reaches one of these, call "
                           "yama_recall_craft with the craft's name to read it "
-                          "in full.\n\n| when you are about to | call "
+                          "in full; one or two crafts are usually enough for "
+                          "a step.\n\n| when you are about to | call "
                           "yama_recall_craft with |\n|---|---|\n"),
           "the router: one positive head naming the tool and the moment, "
           "then the table", text[:260])
@@ -1069,6 +1070,172 @@ def test_the_question_through_the_proxy():
           "extends")
 
 
+# ====================================== 7. the per-request craft cap ======
+CRAFT_NAMES = ["math-data-oriented-functions", "math-hot-path-pitfalls",
+               "koota-traits-and-entities", "koota-queries-and-systems"]
+
+
+def _craft_calls(n: int, tag: str) -> list[dict]:
+    return [T.call("yama_recall_craft",
+                   {"name_or_topic": CRAFT_NAMES[i % len(CRAFT_NAMES)]},
+                   f"{tag}{i}") for i in range(n)]
+
+
+def _tool_msgs(gen: dict, tag: str) -> list[str]:
+    return [m["content"] for m in gen["request"]["messages"]
+            if m.get("role") == "tool"
+            and re.fullmatch(re.escape(tag) + r"\d+",
+                             str(m.get("tool_call_id", "")))]
+
+
+def test_the_craft_cap():
+    import skill_match
+    limit = skill_match.BODIES_PER_DECISION
+    T.slots.reset(n=4)
+    H.fresh_host()
+    c = PConv("cap1", "both")
+    # request 1: a package lookup, TWELVE craft calls in one generation, then
+    # the model's own write -- the probe's failure (4 of 15 skill-arm trials)
+    t1 = c.turn([T.reply("", reasoning="Look it up.", calls=[T.call(
+        "yama_find_package", {"ecosystem": "npm", "query": "pmndrs math"},
+        "p0")]),
+        T.reply("", reasoning="Read everything.", calls=_craft_calls(12, "c")),
+        T.reply("", reasoning="Now write it.", calls=[T.call(
+            "write_file", H.PKG, "w1")])],
+        user="Build a voxel scene with pmndrs math.")
+    last = t1["gens"][-1]
+    got = _tool_msgs(last, "c")
+    ran = [g for g in got if g.startswith("Craft ")]
+    capped = [g for g in got if '"CRAFT_CAP"' in g]
+    check(len(got) == 12 and len(ran) == limit and len(capped) == 12 - limit,
+          f"12 craft calls in one request: the first {limit} run, the other "
+          f"{12 - limit} are capped (skill_match.BODIES_PER_DECISION)",
+          f"{len(ran)} ran, {len(capped)} capped")
+    d = json.loads(capped[0])
+    check(d["ok"] is False and d["retryable"] is True
+          and f"already has {limit} crafts" in d["reason"]
+          and "continue with the task" in d["remedies"][0]["action"]
+          and "later step" in d["remedies"][0]["action"]
+          and d["remedies"][0]["fixable_by"] == "agent",
+          "a capped call: the situation, retryable as a fact, and the next "
+          "step (Failure returns carry the next step)", capped[0][:300])
+    tt = t1["x"].get("tool_turns") or {}
+    check(tt.get("turns") == 1 and tt.get("hit") is False
+          and (t1["x"].get("craft") or {}).get("capped") == 12 - limit,
+          "craft calls do not count toward tool_turns (only the package "
+          "lookup did); x_yamadori.craft.capped says how many were not run",
+          json.dumps([tt, (t1["x"].get("craft") or {}).get("capped")]))
+    calls = t1["m"].get("tool_calls") or []
+    check([x["function"]["name"] for x in calls] == ["write_file"],
+          "the client's own tool call still flows after the cap", json.dumps(
+              calls)[:200])
+    c.tool_result("w1", "wrote package.json")
+    t2 = c.turn([T.reply("Done.")])
+    check(T._extends(t1, t2, "[cap] the request after a capped turn"),
+          "the request after the capped turn EXTENDS what the slot holds")
+    replay = _tool_msgs(t2["gens"][0], "c")
+    check(replay == got,
+          "the ledger replays the crafts and the capped results byte for "
+          "byte", f"{len(replay)} vs {len(got)}")
+    # the cap is per REQUEST: the next request may read crafts again
+    c.tool_result("w1", "ok")
+    t3 = c.turn([T.reply("", calls=[T.call(
+        "yama_recall_craft", {"name_or_topic": CRAFT_NAMES[0]}, "n1")]),
+        T.reply("Fine.")], user="One more thing about math.")
+    g = _tool_msgs(t3["gens"][1], "n")
+    check(len(g) == 1 and g[0].startswith("Craft ")
+          and (t3["x"].get("craft") or {}).get("capped") == 0,
+          "a later request reads a craft again (the cap is per request)",
+          json.dumps(g)[:120])
+    # twelve SINGLE-call hops: still three run, nine capped, no landing
+    T.slots.reset(n=4)
+    H.fresh_host()
+    c2 = PConv("cap2", "both")
+    script = [T.reply("", calls=[T.call("yama_find_package", {
+        "ecosystem": "npm", "query": "pmndrs math"}, "p0")])]
+    script += [T.reply("", calls=[x]) for x in _craft_calls(12, "c")]
+    script += [T.reply("", calls=[T.call("write_file", H.PKG, "w1")])]
+    t = c2.turn(script, user="Build a voxel scene with pmndrs math.")
+    g = _tool_msgs(t["gens"][-1], "c")
+    tt = t["x"].get("tool_turns") or {}
+    check(len([x for x in g if x.startswith("Craft ")]) == limit
+          and len([x for x in g if '"CRAFT_CAP"' in x]) == 12 - limit
+          and tt.get("turns") == 1 and tt.get("hit") is False
+          and [x["function"]["name"] for x in
+               t["m"].get("tool_calls") or []] == ["write_file"],
+          "twelve single-call craft hops: three run, nine capped, the tool "
+          "turns are not exhausted and the client's write flows",
+          json.dumps(tt))
+    # a flood past the tool-turn limit of capped calls LANDS (a loop of its own)
+    T.slots.reset(n=4)
+    H.fresh_host()
+    c3 = PConv("cap3", "both")
+    lim = tiers.tool_turn_limit(tiers.resolve({"reasoning_effort": "medium"}))
+    script = [T.reply("", calls=[T.call("yama_find_package", {
+        "ecosystem": "npm", "query": "pmndrs math"}, "p0")])]
+    script += [T.reply("", calls=[x]) for x in
+               _craft_calls(lim + limit + 2, "c")]
+    script += [T.reply("Landed.")] * 3
+    t = c3.turn(script, user="Build a voxel scene with pmndrs math.")
+    tt = t["x"].get("tool_turns") or {}
+    check(tt.get("hit") is True and (t["x"].get("craft") or {}).get(
+        "capped") >= lim and not t["m"].get("tool_calls"),
+          f"{lim} capped calls end the loop: it LANDS (tools withdrawn, an "
+          "answer), recorded in tool_turns.hit", json.dumps(tt))
+
+
+def test_the_craft_cap_over_responses():
+    import mcp_config
+
+    class PR(RT.RClient):
+        def chat_of(self, body):
+            chat, ctx_ = RT.R.to_chat(body)
+            chat.update(_account=self.account, _client_ip="127.0.0.1",
+                        _public_base=RT.BASE, _session_token="",
+                        _features=json.dumps({
+                            "skills": False, "package_skills": True,
+                            "package_skills_mode": "both"}))
+            return chat, ctx_
+    import skill_match
+    limit = skill_match.BODIES_PER_DECISION
+    spec = json.loads(json.dumps(mcp_config.PACKAGELENS))
+    spec.update(id="packagelens", runtime="local",
+                command=[sys.executable, H.FAKE], call_timeout_s=10.0,
+                call_timeout_why="test fixture: the fake answers at once")
+    spec.pop("image", None)
+    H.fresh_host(spec)
+    for stream in (False, True):
+        T.slots.reset(n=4)
+        T.compaction.reset()
+        c = PR(f"cap-{stream}", stream=stream, cache_key=f"cap-{stream}")
+        t1 = c.turn([T.reply("", calls=[T.call("yama_find_package", {
+            "ecosystem": "npm", "query": "pmndrs math"}, "p0")]),
+            T.reply("", calls=_craft_calls(12, "c")),
+            T.reply("", calls=[T.call("write_file", H.PKG, "pr2")])],
+            user="Build a voxel scene with pmndrs math.")
+        label = "streamed" if stream else "blocking"
+        got = _tool_msgs(t1["gens"][-1], "c")
+        tt = t1["x"].get("tool_turns") or {}
+        names = ([x["name"] for x in RT._items(t1["resp"], "function_call")]
+                 if not stream else
+                 [e["item"]["name"] for e in t1["events"]
+                  if e["type"] == "response.output_item.done"
+                  and e["item"].get("type") == "function_call"])
+        check(len([g for g in got if g.startswith("Craft ")]) == limit
+              and len([g for g in got if '"CRAFT_CAP"' in g]) == 12 - limit
+              and tt.get("turns") == 1 and tt.get("hit") is False
+              and names == ["write_file"]
+              and (t1["x"].get("craft") or {}).get("capped") == 12 - limit,
+              f"responses {label}: 12 craft calls run 3 and cap 9, the tool "
+              f"turns are not exhausted, the client's write flows",
+              json.dumps(tt))
+        c.tool_output("pr2", "wrote package.json")
+        t2 = c.turn([T.reply("Done.")])
+        T._extends(t1, t2, f"responses {label}: after the capped turn")
+        check(_tool_msgs(t2["gens"][0], "c") == got,
+              f"responses {label}: the capped turn replays byte for byte")
+
+
 # ================================================================== main ====
 def main() -> int:
     for fn in (test_the_inject_section, test_the_major_picks_the_skills,
@@ -1079,7 +1246,8 @@ def main() -> int:
                test_streamed_is_blocking_with_a_section,
                test_the_section_over_responses,
                test_a_trigger_rides_the_tool_result_and_replays,
-               test_the_question_path, test_the_question_through_the_proxy):
+               test_the_question_path, test_the_question_through_the_proxy,
+               test_the_craft_cap, test_the_craft_cap_over_responses):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

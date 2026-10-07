@@ -116,7 +116,8 @@ NO_RECORD_RANK = 2
 # RECIPE rule 4) ---------------------------------------------------------
 ROUTER_HEAD = ("Craft for {package}{major} from this service's library: when "
                "the work reaches one of these, call {tool} with the craft's "
-               "name to read it in full.")
+               "name to read it in full; one or two crafts are usually "
+               "enough for a step.")
 ROUTER_COLUMNS = "| when you are about to | call " + CRAFT_TOOL + " with |\n|---|---|"
 POINTER = ("Crafts for {package}{major}: {names}. {tool} returns any of them "
            "in full.")
