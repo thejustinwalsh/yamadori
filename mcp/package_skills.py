@@ -660,6 +660,43 @@ def note_craft_call(st: dict, craft: str | None, found: bool) -> tuple[dict | No
 
 
 # ----------------------------------------------------------------- pool -----
+def user_named(messages: list[dict]) -> list[tuple[str, int | None]]:
+    """[(package, major)] the USER named in their own words, in the order
+    they first appear across the conversation's user turns: the registry's
+    terms (skill_classify.asked_terms: "r3f v10", "Koota", "pmndrs math",
+    "@react-three/drei"), never a pasted manifest or a fenced block
+    (user_prose), never a harness notice, never a name behind "without" or a
+    context mention ("my React page"). Our own injected text is stripped
+    first (skill_select._strip_ours). The version written after the name is
+    the major. Used to boost a craft question's shortlist before any package
+    lookup (craft_query.shortlist)."""
+    import skill_classify
+    import skill_packages
+    import skill_select
+    term_pkg = dict(skill_packages.TERM_PACKAGE)
+    out: list[tuple[str, int | None]] = []
+    seen: set[str] = set()
+    for m in messages or []:
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        text = skill_select._strip_ours(skill_select._text(m))
+        if not text.strip():
+            continue
+        for term, e in skill_classify.asked_terms(text).items():
+            if e.get("mode") != "choice":
+                continue
+            pkg = term_pkg.get(term)
+            form = str(e.get("form") or "")
+            if term == "threejs" and skill_packages._TSL_FORM.match(form):
+                pkg = skill_packages.TSL
+            if term == "r3f" and form.lower().startswith("@react-three/"):
+                pkg = skill_packages.package_of_specifier(form) or pkg
+            if pkg and pkg not in seen:
+                seen.add(pkg)
+                out.append((pkg, _major_of(e.get("version"))))
+    return out
+
+
 def package_pool(pool: list[dict]) -> bool:
     """Does the armed library hold any skill of a package the registry
     knows? (the craft tool is offered with the MCP tools only then)"""

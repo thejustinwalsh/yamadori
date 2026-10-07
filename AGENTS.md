@@ -1347,6 +1347,18 @@ in the section itself; every rule is deterministic.
   (`x_yamadori.tool_turns` counts the package tools); a model told "no" `tool_turn_limit` times in a request lands
   (the same limit; a loop of its own). The router's head says "one or two crafts are usually enough for a step"
   (craft/7). Tests: `mcp/test_package_skills.py` `test_the_craft_cap*` (chat, Responses, blocking, streamed).
+- **The magnet craft** (2026-10-07; `pkgskills2`: `koota-with-react-three-fiber` won 15 of 25 questions, generic
+  ones included; it sat in the shortlist, 5th for the bare question "koota", and still won at p 0.73-0.78, so not
+  the embedder, not position, not a broader description; 21 of 25 questions came before any package lookup, so the
+  section boost never applied). Two fixes, **offline until the operator restarts** (branch `magnet-fixes`):
+  (a) the shortlist is boosted by the packages the USER named (`package_skills.user_named`: the registry's terms
+  in the user's own prose via `skill_classify.asked_terms`, never a pasted manifest, a "without", a context
+  mention, a harness notice or our own injected block), after the latest section's package and before the rest;
+  (b) the choice's and the gate's state is the question plus the step's evidence WITHOUT the session goal
+  (`craft_query.state_text`; the model's first move reads only its question, the opening turn being the goal);
+  `x_yamadori.craft.query.state` says `goal_in_state` false, the goal's length and sha1, and the durable log row
+  (`craft_queries.reads.state.goal_full`) holds the goal for labelling. Unmeasured: whether the generic questions
+  then pick the right craft (the ablation needs the A4000).
 - **Between-turn triggers** (`package_skills.step_triggers`, on the client's own
   newest evidence, reusing `skill_select`'s `fresh_messages`, `evidence_view`,
   `error_text`, `error_names` and `skill_packages.detect`; appended to the tool

@@ -916,10 +916,12 @@ def test_the_question_path():
           "craft under its name", qs[1]["text"][:120])
     st = FakeTurn.log[0]["state"]
     check(st.startswith(craft_query.QUESTION_HEAD + "\nhow do I iterate")
+          and skill_inject.STEP_HEAD in st
           and skill_inject.GOAL_HEAD not in st
-          or "OPENING REQUEST" in st or "NEWEST" in st or "LATEST STEP" in st,
-          "the state is framed: the question, then the goal and the step's "
-          "evidence like skill_inject.framed_state", st[:260])
+          and "Build a game with koota and make it fast" not in st
+          and "src/ a.ts" in st,
+          "the state is the question and the step's evidence, framed like "
+          "skill_inject.framed_state, WITHOUT the session goal", st[:300])
     check(q["untuned"] is True and q["tier"] == "untuned"
           and q["chosen"] == "id-koota-queries-and-systems"
           and 0.7 < q["p"] < 0.9 and abs(q["gate_p"] - 0.9) < 1e-6
@@ -1236,6 +1238,168 @@ def test_the_craft_cap_over_responses():
               f"responses {label}: the capped turn replays byte for byte")
 
 
+# ============================================== 8. the two magnet fixes ======
+GOAL_PROMPT = ("Build it with r3f (react-three-fiber) v10 and Koota and "
+               "pmndrs math. A voxel game with physics.")
+
+
+def test_the_user_named_packages_boost_the_shortlist():
+    um = PS.user_named
+    got = um([{"role": "user", "content": GOAL_PROMPT}])
+    pk = dict(got)
+    check(pk.get("@react-three/fiber") == 10 and "koota" in pk
+          and "math" in pk and [p for p, _ in got][0] == "@react-three/fiber",
+          "user_named: the registry's terms in the user's own prose, in "
+          "order, with the version written after the name",
+          json.dumps(got))
+    check(um([{"role": "user", "content": "Here is my package.json:\n```json\n"
+               '{"dependencies": {"koota": "0.6.6"}}\n```\n'}]) == [],
+          "a pasted manifest names nothing")
+    check(um([{"role": "user", "content": "Build a scene without koota."}])
+          == [], "a name behind 'without' names nothing")
+    check(um([{"role": "assistant", "content": GOAL_PROMPT},
+              {"role": "tool", "content": "koota"},
+              {"role": "system", "content": "koota"}]) == [],
+          "only the user's turns count (not the assistant's, a tool result "
+          "or the system text)")
+    check(um([{"role": "user", "content": "[IMPORTANT: Background process "
+               "finished: koota build]"}]) == [],
+          "a harness notice asks for nothing")
+    check(um([{"role": "user", "content": GOAL_PROMPT + "\n---\n"
+               + P.CRAFT_HEADER + "\n\n# koota-x\n- DO: use pmndrs math"}])
+          and "math" in dict(um([{"role": "user", "content": GOAL_PROMPT}])),
+          "our own injected block is stripped before it is read")
+    _embed_pool()
+    # a question that is lexically about MATH, from a user who named koota:
+    # with no section yet (the model asked before any lookup) the user's
+    # package comes first
+    ctx_ = _qctx(package=None, major=None, named=[("koota", None)],
+                 messages=[{"role": "user", "content": "Build a game with "
+                            "koota."}])
+    top, rec = craft_query.shortlist("vec3 add hot path allocation math",
+                                     craft_query.proven(POOL), ctx_)
+    ids = [s["id"] for s in top]
+    check(ids[0].startswith("id-koota") and rec["named"] == [["koota", None]]
+          and rec["package"] is None and rec["package_boosted"],
+          "no section yet: the packages the user NAMED come first in the "
+          "shortlist", json.dumps(ids[:4]))
+    ctx_ = _qctx(package="math", major=0, named=[("koota", None)],
+                 messages=ctx_["messages"])
+    top, rec = craft_query.shortlist("vec3 add hot path allocation math",
+                                     craft_query.proven(POOL), ctx_)
+    ids = [s["id"] for s in top]
+    check(ids[0].startswith("id-math") and ids.index("id-koota-queries-and-"
+                                                      "systems") > ids.index(
+        "id-math-hot-path-pitfalls"),
+          "the latest package-tool section's package first, then the named "
+          "one, then the rest", json.dumps(ids[:6]))
+    ctx_ = _qctx(package=None, major=None, named=[],
+                 messages=ctx_["messages"])
+    top, rec = craft_query.shortlist("vec3 add hot path allocation math",
+                                     craft_query.proven(POOL), ctx_)
+    check(rec["package_boosted"] == [] and rec["named"] == [],
+          "nothing named, nothing boosted")
+
+
+def test_the_state_leaves_the_goal_out():
+    goal = GOAL_PROMPT
+    step = [{"role": "user", "content": goal},
+            {"role": "assistant", "content": "", "tool_calls": [_call(
+                "g1", "terminal", {"command": "ls src"})]},
+            {"role": "tool", "tool_call_id": "g1", "content": "src/ a.ts"}]
+    text, info, srec = craft_query.state_text("how do I add a system?",
+                                              {"messages": step})
+    check(text.startswith(craft_query.QUESTION_HEAD
+                          + "\nhow do I add a system?")
+          and skill_inject.STEP_HEAD in text and "src/ a.ts" in text
+          and "voxel game" not in text and skill_inject.GOAL_HEAD not in text
+          and srec["goal_in_state"] is False
+          and srec["goal_chars"] == len(goal)
+          and srec["goal_full"] == goal and srec["evidence"] == "the step"
+          and len(srec["goal_sha1"]) == 16,
+          "a step: the question and the step's evidence; the goal is not in "
+          "the text, and is recorded (its length and sha1; the text for the "
+          "log)", text[:300])
+    text, info, srec = craft_query.state_text("koota", {"messages": step[:1]})
+    check(text == craft_query.QUESTION_HEAD + "\nkoota"
+          and "voxel" not in text and srec["goal_in_state"] is False
+          and "opening turn" in srec["evidence"],
+          "the model's FIRST move (the opening turn is the goal): nothing "
+          "but the question is read", text)
+    later = step + [{"role": "assistant", "content": "Done with that."},
+                    {"role": "user", "content": "Now add enemies that chase "
+                     "the player."}]
+    text, info, srec = craft_query.state_text("how do chasers move?",
+                                              {"messages": later})
+    check("Now add enemies" in text and "voxel game" not in text
+          and srec["evidence"] == "the newest user message",
+          "a later user turn is the newest message (not the goal): kept",
+          text[:300])
+    # both of jjava's reads see this state, and the record carries it
+    _embed_pool()
+    FakeTurn.log = []
+    FakeTurn.choice = {"id-koota-queries-and-systems": 0.8}
+    FakeTurn.gate = 0.9
+    text, rec = skill_select.read_craft(
+        {"name_or_topic": "how do I iterate koota entities each frame in a "
+                          "system?"}, POOL,
+        ctx=_qctx(messages=step, named=[("koota", None)], package=None,
+                  major=None))
+    q = rec["query"]
+    check(len(FakeTurn.log) == 2
+          and all("voxel game" not in x["state"] and "STEP" in x["state"]
+                  for x in FakeTurn.log)
+          and q["state"]["goal_in_state"] is False
+          and q["state"]["goal_chars"] == len(goal)
+          and "goal_full" in q and q["goal_full"] == goal
+          and q["named"] == [["koota", None]],
+          "the choice and the gate both read the goal-free state; the record "
+          "says so (x_yamadori.craft.query.state) and carries the named "
+          "packages", json.dumps(q.get("state")))
+
+
+def test_the_magnet_fixes_through_the_proxy():
+    """A craft question as the model's FIRST move (before any lookup), with
+    the user's opening request naming a package: the shortlist is boosted to
+    it, the reads see no goal, the durable log holds the goal."""
+    _embed_pool()
+    craft_query.make_turn = lambda m, st, i, c: FakeTurn(m, st, i, c)
+    FakeTurn.choice = {"id-math-hot-path-pitfalls": 0.9}
+    FakeTurn.gate = 0.9
+    FakeTurn.log = []
+    T.slots.reset(n=4)
+    H.fresh_host()
+    c = PConv("mg1", "router")
+    t1 = c.turn([T.reply("", reasoning="Ask first.", calls=[T.call(
+        "yama_recall_craft", {"name_or_topic": "how do I avoid allocating "
+                              "vectors in updateEach?"}, "q1")]),
+        T.reply("Done.")],
+        user="Make a scene with pmndrs math. Keep it fast.")
+    cq = (t1["x"].get("craft") or {}).get("query") or []
+    check(len(cq) == 1 and cq[0]["package"] is None
+          and cq[0]["named"] and cq[0]["named"][0][0] == "math"
+          and cq[0]["shortlist"][0].startswith("id-math")
+          and cq[0]["state"]["goal_in_state"] is False
+          and "goal_full" not in cq[0],
+          "the first move was a question: no section yet, the user's "
+          "package (math) boosts the shortlist, the record says the goal "
+          "was left out and does not carry its text", json.dumps(cq)[:400])
+    check(len(FakeTurn.log) == 2
+          and all("Make a scene" not in x["state"] for x in FakeTurn.log),
+          "the opening request is not in what jjava read")
+    con = skill_learn._db()
+    try:
+        rows = [dict(r) for r in con.execute(
+            "SELECT reads FROM craft_queries ORDER BY id DESC LIMIT 1")]
+    finally:
+        con.close()
+    st = json.loads(rows[0]["reads"])["state"]
+    check(st["goal_in_state"] is False and st["goal_full"].startswith(
+        "Make a scene with pmndrs math"),
+          "the durable log row holds the goal for labelling",
+          json.dumps(st)[:200])
+
+
 # ================================================================== main ====
 def main() -> int:
     for fn in (test_the_inject_section, test_the_major_picks_the_skills,
@@ -1247,7 +1411,10 @@ def main() -> int:
                test_the_section_over_responses,
                test_a_trigger_rides_the_tool_result_and_replays,
                test_the_question_path, test_the_question_through_the_proxy,
-               test_the_craft_cap, test_the_craft_cap_over_responses):
+               test_the_craft_cap, test_the_craft_cap_over_responses,
+               test_the_user_named_packages_boost_the_shortlist,
+               test_the_state_leaves_the_goal_out,
+               test_the_magnet_fixes_through_the_proxy):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

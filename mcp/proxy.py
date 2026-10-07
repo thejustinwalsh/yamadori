@@ -3023,6 +3023,13 @@ def _craft_ctx(st: dict, account: str, lineage: str) -> dict:
     of its latest package-tool section (the boost), the account for the log."""
     ctx = {"messages": list(st.get("_craft_msgs") or []), "account": account,
            "lineage": lineage, "model": st.get("_craft_model")}
+    # the packages the USER named in their own words boost the shortlist
+    # before any package lookup (package_skills.user_named)
+    try:
+        import package_skills
+        ctx["named"] = package_skills.user_named(ctx["messages"])
+    except Exception:                                            # noqa: BLE001
+        ctx["named"] = []
     try:
         if lineage:
             sk = _skill_state(account, lineage)
@@ -3050,6 +3057,7 @@ def _craft_call_records(rec: dict, st: dict, account: str,
         except Exception:                                        # noqa: BLE001
             pass
         q.pop("question_full", None)
+        q.pop("goal_full", None)
     if not st.get("_pkg_on") or not lineage:
         return
     try:

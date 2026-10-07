@@ -238,7 +238,11 @@ def record_craft_query(q: dict, account: str | None) -> None:
                  q.get("retrieval"),
                  (q.get("choice") or {}).get("decision_id"),
                  json.dumps({"choice": q.get("choice"),
-                             "gate": q.get("gate")})))
+                             "gate": q.get("gate"),
+                             # the state the reads saw: the goal was kept
+                             # out of them; it is here for labelling
+                             "state": dict(q.get("state") or {},
+                                           goal_full=q.get("goal_full"))})))
         finally:
             con.close()
     except Exception as e:                                       # noqa: BLE001
