@@ -734,7 +734,7 @@ def handle_fetch(job: dict, ctx) -> dict:
     if cleaned:
         out["clean"] = {k: cleaned.get(k) for k in (
             "applied", "removed", "hosts", "why", "raw_bytes",
-            "cleaned_bytes") if cleaned.get(k) is not None}
+            "cleaned_bytes", "section") if cleaned.get(k) is not None}
     return out
 
 
@@ -766,7 +766,8 @@ def handle_screen(job: dict, ctx) -> dict:
         # screen above saw the cleaned text, every rule at full strength
         screen_rec["cleaning"] = {k: cl.get(k) for k in (
             "v", "applied", "removed", "hosts", "comment_words", "why",
-            "raw_sha256", "cleaned_sha256") if cl.get(k) is not None}
+            "raw_sha256", "cleaned_sha256", "section")
+            if cl.get(k) is not None}
     skills.update_version(sid, v, screen=screen_rec)
     if not res["ok"]:
         skills.quarantine(sid, v, "screen: " + skill_screen.summary(res))

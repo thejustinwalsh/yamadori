@@ -148,7 +148,8 @@ def clean(text: str) -> tuple[str, dict]:
 
 def apply(raw: bytes, meta: dict, cfg) -> tuple[bytes, dict]:
     """(bytes to store, the `clean` record for the fetched record). `cfg` is
-    the skill's meta `fetch_clean`: {"pinned_sha256": hex}. Cleans only bytes
+    the skill's meta `fetch_clean`: {"pinned_sha256": hex, "lines": [first,
+    last]?} (`lines`: keep only that section of the pinned file). Cleans only bytes
     that hash to the pin; anything else is returned untouched with the reason
     (the screen then sees the source exactly as it arrived)."""
     sha = hashlib.sha256(raw).hexdigest()
@@ -163,11 +164,36 @@ def apply(raw: bytes, meta: dict, cfg) -> tuple[bytes, dict]:
                             "was pinned, so it is screened as it arrived"}
     text = raw.decode((meta or {}).get("charset") or "utf-8",
                       errors="replace")
+    section = None
+    lines = cfg.get("lines") if isinstance(cfg, dict) else None
+    if lines:
+        # A PINNED SECTION (2026-10-07): the skill is about one part of a
+        # large page, and the rest holds text the model screen reads as
+        # directed at an AI (tsl_compute_shaders: three.js's TSL Guide.md,
+        # 296,257 bytes, whose "> IA: ..." notes the model screen
+        # quarantined; the compute section, lines 2364-2640, has none).
+        # Same pin, same screen: `lines` [first, last] (1-based, inclusive)
+        # of the file whose sha256 is pinned, so the narrowing is the same
+        # bytes every time; the screen and the distil read only the section.
+        parts = text.split("\n")
+        try:
+            a, b = int(lines[0]), int(lines[1])
+        except (TypeError, ValueError, IndexError):
+            return raw, {"v": VERSION, "applied": False, "raw_sha256": sha,
+                         "why": "fetch_clean.lines must be [first, last]"}
+        if not 1 <= a <= b <= len(parts):
+            return raw, {"v": VERSION, "applied": False, "raw_sha256": sha,
+                         "why": f"fetch_clean.lines {a}-{b} is outside the "
+                                f"pinned file's {len(parts)} lines"}
+        text = "\n".join(parts[a - 1:b])
+        section = {"lines": [a, b], "of": len(parts)}
     cleaned, rec = clean(text)
     out = cleaned.encode("utf-8")
     rec.update(applied=True, raw_sha256=sha, raw_bytes=len(raw),
                cleaned_sha256=hashlib.sha256(out).hexdigest(),
                cleaned_bytes=len(out), pinned_sha256=str(pin).lower())
+    if section:
+        rec["section"] = section
     return out, rec
 
 
