@@ -1,0 +1,44 @@
+{
+ "tie_band": 0.0034,
+ "sets": {
+  "jevbench": {
+   "calls": 10,
+   "k": [
+    1
+   ],
+   "questions": 10,
+   "seq_s_per_call": {
+    "median": 1.0173,
+    "p90": 1.30311
+   },
+   "batch_s_per_call": {
+    "median": 0.4008,
+    "p90": 0.42604
+   },
+   "seq_s_per_question": 1.0173,
+   "batch_s_per_question": 0.4008,
+   "speedup_total": 2.7811130022177526,
+   "speedup_median": 2.960174175939559,
+   "argmax_differs": 0,
+   "max_abs_p": 5.400000000000001e-05,
+   "max_abs_p_over_tie_band": 0.015882352941176476,
+   "tie_flips": 0,
+   "batch_fallbacks": 0,
+   "failed_calls": 0
+  }
+ },
+ "version": "batch-ab/1",
+ "target": {
+  "model": "bonsai-a4000",
+  "mode": "llama-swap",
+  "base": "http://127.0.0.1:11434/upstream/bonsai-a4000",
+  "slot": 1,
+  "model_path": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+  "build": "b10743-adfffbe41",
+  "total_slots": 2,
+  "n_ctx": 128000
+ },
+ "seconds": 15.3,
+ "calls": 10,
+ "failed": 0
+}
