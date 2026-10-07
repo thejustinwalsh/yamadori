@@ -167,6 +167,34 @@ REPEATS = 1
 # (`reprove_backlog`) selects quarantines whose record lacks it.
 RULE = "repeat/1"
 
+# THE CHECK DERIVATION (2026-10-07). A `present` / `absent` check is only as
+# good as the literal it was derived from. Measured on the local library
+# (index/jobs.sqlite3, read 2026-10-07; 13 skills PROVE quarantined under
+# repeat/1, 22 present/absent checks in the 56 prove-worse records): five of the
+# 13 were quarantined by a `present` or `absent` check whose literal the
+# item names in order NOT to use it, or whose spelling the skill's own advice
+# changes, i.e. the skill WORKED and the check read it as worse --
+#   react-dev-form-component-form-action-prop  present e.preventDefault, from
+#       "you need no onSubmit handler or e.preventDefault()"
+#   sudheerj-...-event-handling-6   present <div>, from "Prefer fragments over
+#       wrapping children in a container `<div>`"
+#   web-gpu-use-transition-24       present useMemo, from "useMemo only for
+#       calculations that are noticeably slow"
+#   sudheerj-...-react-context-15   present React.createContext (WITH wrote
+#       the same API as `createContext`)
+#   r3f-v10-setup-21                absent instanceof, from "removing the
+#       instanceof casts v9 needed" (the answer says so in a comment)
+# Three structural corrections, none a threshold (docs/PROTOCOL.md): (1) a
+# present check is not derived from a literal every mention of which is an
+# item's own "avoid / limit it" (`avoided`); (2) `React.x` / `THREE.x` is the
+# same API as the bare imported name (`literal_pattern`, present checks);
+# (3) present / absent look at the answer's CODE, comments excluded
+# (`strip_comments`): a comment that says "no instanceof needed" is not the
+# answer using it. `DERIVE` is stamped on every record these decided;
+# `redecide` re-reads an older record with the first rule, which needs no
+# generation.
+DERIVE = "derive/2"
+
 # ---------------------------------------------------------------------------
 # Injectables. Tests replace them; the defaults are the stack's.
 # ---------------------------------------------------------------------------
@@ -434,12 +462,118 @@ def _code_literal(span: str) -> bool:
                                               s))
 
 
-def literal_pattern(lit: str) -> str:
+# A namespace the platform's own examples write either way: `React.createContext`
+# and `import { createContext } from "react"` are the one API (derive/2).
+_NAMESPACES = ("React", "THREE")
+_NS_LITERAL = re.compile(r"^(" + "|".join(_NAMESPACES) +
+                         r")\.([A-Za-z_$][\w$]*)$")
+
+# A clause (no . ; : ! ? or newline) that tells the reader NOT to use, or to
+# use less of, what it names -- the cue BEFORE the literal ("no X", "instead
+# of X", "prefer A over X", "without X"), or right AFTER it ("X only for ...",
+# "X are main-thread only").
+_AVOID_BEFORE = re.compile(
+    r"\b(?:no|not|never|without|instead of|rather than|over|avoid(?:ing)?|"
+    r"don'?t|do not|stop|drop(?:ping)?|replac(?:e|es|ed|ing)|remov(?:e|es|ed|"
+    r"ing)|skip|omit|cannot|can'?t|neither|nor|deprecated)\b", re.I)
+# A positive verb after the cue makes the literal the thing to use again
+# ("do not X, use Y").
+_USE_VERB = re.compile(
+    r"\b(?:use|uses|using|call|calls|pass|set|prefer|add|wrap|write|create|"
+    r"import|return|read|reach for|switch to|move to)\b", re.I)
+_LIMIT_AFTER = re.compile(
+    r"^[^.;:!?\n]{0,40}?\b(?:only|not|never|cannot|can'?t|deprecated|"
+    r"removed|unnecessary|redundant)\b", re.I)
+
+
+def _clause_start(text: str, at: int) -> int:
+    return max(text.rfind(c, 0, at) for c in ".;:!?\n") + 1
+
+
+def avoided_at(text: str, start: int, end: int) -> bool:
+    """Is the mention at text[start:end] one the item makes in order not to
+    use it (or to use it less)? See _AVOID_BEFORE."""
+    before = text[_clause_start(text, start):start]
+    cues = list(_AVOID_BEFORE.finditer(before))
+    if cues and not _USE_VERB.search(before[cues[-1].end():]):
+        return True
+    return bool(_LIMIT_AFTER.match(text[end:end + 60]))
+
+
+def avoided(literal_rx: str, texts: list[str]) -> bool:
+    """True when the literal is mentioned in `texts` and EVERY mention is
+    avoided_at: the items name it only to steer away from it, so a check that
+    the answer contains it measures the opposite of the skill."""
+    try:
+        rx = re.compile(literal_rx)
+    except re.error:
+        return False
+    seen = 0
+    for t in texts:
+        for m in rx.finditer(t or ""):
+            seen += 1
+            if not avoided_at(t, m.start(), m.end()):
+                return False
+    return seen > 0
+
+
+def strip_comments(code: str, lang: str | None) -> str:
+    """The code with its comments blanked (// and /* */ for the C-family and
+    JS/TS, # for Python), string literals left alone. A scanner, not a parser:
+    enough to tell code from a note beside it."""
+    lang = (lang or "").lower()
+    hash_c = lang in ("python", "py")
+    slash_c = lang in ("typescript", "tsx", "javascript", "jsx", "ts", "js",
+                       "rust", "c", "cpp", "zig", "wgsl", "glsl", "")
+    if not (hash_c or slash_c) or not code:
+        return code or ""
+    out, i, n, q = [], 0, len(code), None
+    while i < n:
+        ch = code[i]
+        if q:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(code[i + 1])
+                i += 2
+                continue
+            if ch == q:
+                q = None
+            i += 1
+            continue
+        if ch in "\"'`":
+            q = ch
+            out.append(ch)
+            i += 1
+            continue
+        if slash_c and code.startswith("//", i):
+            j = code.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if slash_c and code.startswith("/*", i):
+            j = code.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+            continue
+        if hash_c and ch == "#":
+            j = code.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def literal_pattern(lit: str, kind: str | None = None) -> str:
     """The regex for a literal: skill_classify._topic_rx's for a code-shaped
     name (a call stays a call), else the escaped text with any run of
-    whitespace as \\s+ and identifier boundaries at word ends."""
+    whitespace as \\s+ and identifier boundaries at word ends. A `present`
+    check on `React.x` / `THREE.x` also takes the bare imported name (derive/2)."""
     import skill_classify as C
     s = lit.strip()
+    m = _NS_LITERAL.match(s)
+    if m and kind == "present":
+        return (r"(?<![\w$])(?:" + re.escape(m.group(1)) + r"\.)?"
+                + re.escape(m.group(2)) + r"(?![\w$])")
     if C.code_shaped(s):
         return C._topic_rx(s).pattern
     core = r"\s+".join(re.escape(p) for p in s.split())
@@ -474,7 +608,14 @@ def floor_checks(items: list[dict], topics: list[str]
                             "both name it; the checks would contradict"})
             continue
         kind = next(iter(row["kinds"]))
-        checks.append({"kind": kind, "pattern": literal_pattern(lit),
+        if kind == "present" and avoided(
+                literal_pattern(lit), [str(items[n - 1].get("text") or "")
+                                       for n in row["items"]]):
+            dropped.append({"literal": lit, "why": "the item names it to "
+                            "avoid or limit it (derive/2): a present check "
+                            "would measure the opposite of the skill"})
+            continue
+        checks.append({"kind": kind, "pattern": literal_pattern(lit, kind),
                        "literal": lit, "item": row["items"][0],
                        "from": "items", "judge": "code"})
     return checks, dropped
@@ -600,6 +741,10 @@ def verify_proposals(got: dict, probes: list[dict], items: list[dict],
             why = ("kind must be present or absent"
                    if kind not in ("present", "absent")
                    else verify_pattern(pat, blob))
+            if not why and kind == "present" and avoided(
+                    pat, [str(it.get("text") or "") for it in items]):
+                why = ("every item that names it does so to avoid or limit "
+                       "it (derive/2)")
             if why:
                 refused.append({"case": idx + 1, "pattern": str(pat)[:120],
                                 "why": why})
@@ -699,6 +844,9 @@ def run_check(chk: dict, answer: str, lang: str | None,
     blocks = code_blocks(answer, lang)
     code = "\n".join(b["code"] for b in blocks) if blocks else (
         "" if lang else (answer or ""))
+    # present / absent read the code WITHOUT its comments (derive/2)
+    body = "\n".join(strip_comments(b["code"], b["parse_as"])
+                     for b in blocks) if blocks else code
     kind = chk["kind"]
     if kind == "parse":
         import code_check
@@ -729,7 +877,7 @@ def run_check(chk: dict, answer: str, lang: str | None,
                                      str(errs[0] if errs else "type errors")
                                      [:200])
     if kind in ("present", "absent"):
-        m = re.search(chk["pattern"], code)
+        m = re.search(chk["pattern"], body)
         if kind == "present":
             return bool(m), (f"found {m.group(0)[:60]!r}" if m else
                              "not in the answer's code")
@@ -1046,6 +1194,85 @@ def decide(probes: list[dict]) -> dict:
                       "answers off, then re-run the pipeline from tests"}
 
 
+def redecide(ver: dict) -> dict | None:
+    """The version's STORED prove record read again with derive/2's first
+    correction, which needs no generation: a `present` check that came out
+    worse, whose literal every item names only to avoid or limit it
+    (`avoided`), measured the opposite of the skill and is set aside (`same`,
+    marked `invalid`). The record's verdict is decided again over what is
+    left (`decide`). None when no check is set aside. The record that comes
+    back carries `redecided` {by, from, invalid}; it is the caller's to
+    store (`redecide_quarantined`)."""
+    import copy
+    rec = record_of(ver)
+    if not rec.get("probes"):
+        return None
+    texts = [str(it.get("text") or "") for it in _items(ver)]
+    probes = copy.deepcopy(rec["probes"])
+    invalid = []
+    for n, p in enumerate(probes, 1):
+        for c in p.get("checks") or []:
+            if c.get("pair") != PAIR_WORSE or c.get("kind") != "present" \
+                    or not c.get("pattern"):
+                continue
+            if avoided(str(c["pattern"]), texts):
+                invalid.append({"probe": n, "check": c.get("id"),
+                                "pattern": c.get("pattern"),
+                                "item": c.get("item"),
+                                "runs": c.get("runs")})
+                c["pair"] = PAIR_SAME
+                c["invalid"] = ("derive/2: every item that names it does so "
+                                "to avoid or limit it")
+                c.pop("confirmed", None)
+    if not invalid:
+        return None
+    new = dict(rec)
+    new.update(decide(probes))
+    new["probes"] = probes
+    new["redecided"] = {"by": DERIVE, "at": time.time(), "invalid": invalid,
+                        "from": {k: rec.get(k) for k in
+                                 ("verdict", "rule", "derive", "at")}}
+    return new
+
+
+def redecide_quarantined(*, apply: bool = False) -> dict:
+    """Every skill PROVE quarantined (its latest version) whose stored record
+    `redecide` changes. {rows: [{skill, name, was, now, invalid}], applied}.
+    With `apply`, a skill whose verdict is no longer `worse` is served again
+    (skills.rearm, the record stored); nothing is generated, so it needs no
+    idle stack. A verdict that is still worse, or unproven, stays
+    quarantined with the new record stored only when `apply`."""
+    rows, applied = [], []
+    con = skills._db()
+    try:
+        ids = [r["id"] for r in con.execute(
+            "SELECT id FROM skills WHERE status='quarantined' ORDER BY id")]
+    finally:
+        con.close()
+    for sid in ids:
+        s = skills.get(sid)
+        v = int((s or {}).get("latest_version") or 0)
+        ver = skills.version(sid, v)
+        if not ver or ver.get("state") != "quarantined" or not str(
+                ver.get("reason") or "").startswith("prove:") \
+                or not (ver.get("text") or "").strip() \
+                or not s.get("enabled", True) \
+                or s.get("status") == "archived":
+            continue
+        new = redecide(ver)
+        if new is None:
+            continue
+        row = {"skill": sid, "name": s.get("name"),
+               "was": record_of(ver).get("verdict"), "now": new["verdict"],
+               "invalid": [(x["probe"], x["check"], x["pattern"])
+                           for x in new["redecided"]["invalid"]]}
+        rows.append(row)
+        if apply and new["verdict"] in ("better", "tie"):
+            skills.rearm(sid, v, **_fields(sid, v, new))
+            applied.append(sid)
+    return {"rows": rows, "applied": applied}
+
+
 def prove(sid: str, v: int, ver: dict, *, mode: str = "pipeline",
           beat=None, use_model: bool | None = None) -> dict:
     """Run the whole proof for one version. Returns the record."""
@@ -1077,7 +1304,7 @@ def prove(sid: str, v: int, ver: dict, *, mode: str = "pipeline",
     _PIN.update(pin_of(sid, ver, pk))
     rec["type_pin"] = dict(_PIN)
     rec.update(rule=RULE if REPEATS >= 1 else "one-sample",
-               repeats=REPEATS)
+               repeats=REPEATS, derive=DERIVE)
     probes = [run_probe(sid, v, p, row, pk, beat) for p in d["probes"]]
     # THE REPEAT RULE: a flagged check is run again before it counts.
     confirm(sid, v, d["probes"], probes, row, pk, beat)
@@ -1265,7 +1492,15 @@ def _reprove_ok(s: dict | None, ver: dict | None, v: int,
     if not s.get("enabled", True) or s.get("status") == "archived":
         return "the skill is disabled or archived"
     rec = record_of(ver)
-    if rec.get("rule") == RULE:
+    if rec.get("rule") == RULE and rec.get("derive") != DERIVE and any(
+            c.get("pair") == PAIR_WORSE and c.get("kind") in (
+                "present", "absent")
+            for p in rec.get("probes") or [] for c in p.get("checks") or []):
+        # decided by the repeat rule, but a present / absent check that
+        # came out worse was derived before derive/2 (DERIVE): a proof
+        # under today's derivation may differ, so it is a target again
+        pass
+    elif rec.get("rule") == RULE:
         return f"already decided by {RULE}"
     ok = ("worse", "unproven") if include_unproven else ("worse",)
     if rec.get("verdict") not in ok:
@@ -1664,6 +1899,13 @@ if __name__ == "__main__":
     ap.add_argument("--release-reprove", action="store_true",
                     help="take the idle gate off the queued re-proofs and "
                     "order them by area (REPROVE_PRIORITY)")
+    ap.add_argument("--redecide", action="store_true",
+                    help="read the quarantined skills' STORED records again "
+                    "with derive/2's first correction (no generation); "
+                    "lists what would change, --apply serves the skills "
+                    "whose verdict is no longer worse")
+    ap.add_argument("--apply", action="store_true",
+                    help="with --redecide: serve those skills again")
     ap.add_argument("--promote-package-only", action="store_true",
                     help="run the activation tests again for every "
                     "package-only skill and make each one that passes a "
@@ -1673,7 +1915,10 @@ if __name__ == "__main__":
                     "main card's model (run_reprove_here), highest priority "
                     "first")
     a = ap.parse_args()
-    if a.promote_package_only:
+    if a.redecide:
+        print(json.dumps(redecide_quarantined(apply=a.apply), indent=1,
+                         default=str))
+    elif a.promote_package_only:
         import skill_pipeline
         rows = [skill_pipeline.promote_package_only(sid)
                 for sid in skills.package_only_ids()]

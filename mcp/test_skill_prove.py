@@ -34,6 +34,10 @@ pipeline." What this gates:
      without, failed with) is run again on fresh seeds, the same on both
      sides, and quarantines only if worse in a strict majority of its runs;
      only a probe with a flag is repeated.
+ 11. DERIVE/2 (2026-10-07): a present check is not derived from a literal the
+     items name to avoid or limit it, `React.x` is the bare name too, present
+     and absent read code without its comments, and a stored record is
+     decided again without the checks the items contradict.
  10. THE RE-PROVE: a skill PROVE quarantined under the one-sample rule is
      listed, enqueued idle-gated on the gpu lane, and either served again
      (the worse result did not repeat) or kept quarantined (it did); the
@@ -1068,6 +1072,216 @@ def test_reprove_leaves_an_unproven_one_quarantined():
           and "unproven" in (s["reason"] or ""),
           "[reprove] a re-proof no check decided leaves it quarantined "
           "(never armed)", (out, s["status"]))
+
+
+# ===========================================================================
+# 11. derive/2 (2026-10-07): checks that read the skill as worse when it
+# worked. Every string below is an item or a record from the live library
+# (index/jobs.sqlite3, read 2026-10-07).
+# ===========================================================================
+FORM_ITEM = ("React 19+: pass a function to <form action={fn}>; on submit "
+             "React calls it with the form's FormData inside a Transition, "
+             "so you need no onSubmit handler or e.preventDefault().")
+DIV_ITEM = ("Prefer fragments over wrapping children in a container `<div>` "
+            "to avoid adding an extra DOM node.")
+MEMO_ITEM = ("useMemo only for calculations that are noticeably slow with "
+             "rarely-changing deps. Measure with console.time.")
+CTX_ITEM = ("Pass a defaultValue to React.createContext so you can test "
+            "components in isolation without wrapping them in a Provider.")
+USE_ITEM = ("Do not call it on every render, use `useCallback` for the "
+            "handler instead.")
+
+
+def test_avoided_reads_the_clause_not_the_item():
+    check(P.avoided(P.literal_pattern("e.preventDefault"), [FORM_ITEM]),
+          "[derive/2] 'you need no onSubmit handler or e.preventDefault()' "
+          "names it to avoid it")
+    check(P.avoided(P.literal_pattern("<div>"), [DIV_ITEM]),
+          "[derive/2] 'Prefer fragments over ... `<div>`' names it to avoid "
+          "it")
+    check(P.avoided(P.literal_pattern("useMemo"), [MEMO_ITEM]),
+          "[derive/2] 'useMemo only for ...' limits it")
+    check(not P.avoided(P.literal_pattern("React.createContext"), [CTX_ITEM]),
+          "[derive/2] 'Pass a defaultValue to React.createContext' is a use "
+          "(the later 'without' comes after the name)")
+    check(not P.avoided(P.literal_pattern("useCallback"), [USE_ITEM]),
+          "[derive/2] 'Do not X, use `useCallback`': the positive verb after "
+          "the cue makes it a use again")
+    check(not P.avoided(P.literal_pattern("useMemo"), [
+        MEMO_ITEM, "Use `useMemo` for the sorted list."]),
+          "[derive/2] one positive mention in any item keeps the check")
+    check(not P.avoided(P.literal_pattern("nowhere"), [FORM_ITEM]),
+          "[derive/2] a literal no item names is not 'avoided'")
+
+
+def test_strip_comments_and_the_checks_that_read_code():
+    ts = ("const a = 'x // not a comment';\n// removing the instanceof "
+          "casts\nconst b = 1; /* instanceof */ const c = 2;")
+    got = P.strip_comments(ts, "typescript")
+    check("instanceof" not in got and "not a comment" in got
+          and "const c = 2" in got,
+          "[derive/2] comments are blanked, a // inside a string is kept",
+          got)
+    py = P.strip_comments("a = 1  # x\nb = '#y'", "python")
+    check("# x" not in py and "'#y'" in py,
+          "[derive/2] python's # comments go, a # in a string stays", py)
+    ans = "```tsx\n// no instanceof casts needed\nconst a = 1;\n```"
+    ok, why = P.run_check({"kind": "absent", "pattern": r"instanceof"}, ans,
+                          "tsx", [])
+    check(ok and "not in the answer's code" in why,
+          "[derive/2] an absent check is not failed by a COMMENT that names "
+          "the thing", (ok, why))
+    ans2 = "```tsx\nif (x instanceof Mesh) {}\n```"
+    ok2, _ = P.run_check({"kind": "absent", "pattern": r"instanceof"}, ans2,
+                         "tsx", [])
+    check(not ok2, "[derive/2] ... and is still failed by the code using it")
+    ok3, _ = P.run_check({"kind": "present", "pattern": r"useMemo"},
+                         "```tsx\n// useMemo\n```", "tsx", [])
+    check(not ok3, "[derive/2] a present check is not satisfied by a "
+          "comment either")
+
+
+def test_a_namespaced_literal_is_the_same_api_bare():
+    pat = P.literal_pattern("React.createContext", "present")
+    check(re.search(pat, "const C = React.createContext(1)")
+          and re.search(pat, "import { createContext } from 'react';\n"
+                        "const C = createContext(1);")
+          and not re.search(pat, "const C = myCreateContext(1)"),
+          "[derive/2] a present check on React.createContext also takes the "
+          "bare createContext, not a longer name")
+    check(not re.search(P.literal_pattern("React.createContext", "absent"),
+                        "const C = createContext(1);"),
+          "[derive/2] an absent check keeps the exact spelling")
+
+
+def test_floor_checks_do_not_derive_present_from_an_avoided_literal():
+    items = [{"form": "DO", "text": FORM_ITEM},
+             {"form": "DO", "text": "Use `useActionState` with the form's "
+                                    "action prop."},
+             {"form": "DO", "text": DIV_ITEM},
+             {"form": "DO NOT", "text": "wrap the fields in `<section>`."}]
+    # the literals the rule's topics name, as the live records' did
+    checks, dropped = P.floor_checks(items, ["e.preventDefault"])
+    pats = {(c["kind"], c.get("literal")) for c in checks}
+    check(("present", "useActionState") in pats
+          and ("absent", "<section>") in pats
+          and not any(lit in ("e.preventDefault", "<div>")
+                      for _k, lit in pats),
+          "[derive/2] the floor keeps the literals the items use and drops "
+          "the ones they steer away from", sorted(pats, key=str))
+    check(any(d.get("literal") == "e.preventDefault"
+              and "avoid or limit" in d["why"] for d in dropped),
+          "[derive/2] the dropped literal is recorded with why", dropped)
+    c2, _d = P.floor_checks([{"form": "DO", "text": CTX_ITEM}],
+                            ["React.createContext"])
+    check(any(c["literal"] == "React.createContext"
+              and "createContext" in c["pattern"]
+              and "React" in c["pattern"] for c in c2),
+          "[derive/2] React.createContext's present check takes either "
+          "spelling", c2)
+
+
+def test_a_proposed_present_check_on_an_avoided_literal_is_refused():
+    items = [{"form": "DO", "text": FORM_ITEM}]
+    got = {"probes": [{"case": 1, "checks": [
+        {"kind": "present", "pattern": r"e\.preventDefault", "item": 1},
+        {"kind": "absent", "pattern": r"e\.preventDefault", "item": 1}]}]}
+    probes = [{"language": "tsx", "task": "t", "case": 1}]
+    out, refused = P.verify_proposals(got, probes, items, [])
+    kinds = [c["kind"] for c in out.get(0, {}).get("checks", [])]
+    check(kinds == ["absent"] and any("avoid or limit" in r["why"]
+                                      for r in refused),
+          "[derive/2] the model's present check on 'no e.preventDefault' is "
+          "refused, its absent check stands", (kinds, refused))
+
+
+def _worse_record(pattern: str, item: int, *, parse_worse=False) -> dict:
+    checks = [
+        {"id": "parse1", "kind": "parse", "pair": "worse" if parse_worse
+         else "same", "without": True, "with": not parse_worse,
+         "why_without": "1 block(s) parse", "why_with": "x"},
+        {"id": "present2", "kind": "present", "pattern": pattern,
+         "item": item, "from": "items", "pair": "worse", "without": True,
+         "with": False, "why_without": "found",
+         "why_with": "not in the answer's code", "confirmed": True,
+         "runs": {"pairs": ["worse", "worse"], "worse": 2, "of": 2}},
+        {"id": "present3", "kind": "present", "pattern": r"useActionState",
+         "item": 2, "from": "items", "pair": "better", "without": False,
+         "with": True, "why_without": "n", "why_with": "found"}]
+    return {"verdict": "worse", "rule": P.RULE, "repeats": 1, "at": 1.0,
+            "probes": [{"case": 1, "checks": checks}]}
+
+
+def test_redecide_sets_an_invalid_present_check_aside():
+    items = [{"form": "DO", "text": FORM_ITEM},
+             {"form": "DO", "text": "Use `useActionState` with the form's "
+                                    "action prop."}]
+    ver = {"validate": {"items": items},
+           "prove": _worse_record(r"(?<![\w$])e\.preventDefault(?![\w$])", 1)}
+    new = P.redecide(ver)
+    check(new and new["verdict"] == "better"
+          and new["redecided"]["by"] == P.DERIVE
+          and new["redecided"]["from"]["verdict"] == "worse"
+          and new["probes"][0]["checks"][1]["invalid"],
+          "[derive/2] the stored record is decided again without the check "
+          "the item contradicts: worse -> better, the old verdict kept",
+          new and {k: new.get(k) for k in ("verdict", "redecided")})
+    ver2 = {"validate": {"items": items}, "prove": _worse_record(
+        r"(?<![\w$])e\.preventDefault(?![\w$])", 1, parse_worse=True)}
+    new2 = P.redecide(ver2)
+    check(new2 and new2["verdict"] == "worse",
+          "[derive/2] a skill whose OTHER check is worse stays worse",
+          new2 and new2["verdict"])
+    ver3 = {"validate": {"items": items}, "prove": _worse_record(
+        r"(?<![\w$])useActionState(?![\w$])", 2)}
+    check(P.redecide(ver3) is None,
+          "[derive/2] a worse present check on a literal the items USE is "
+          "left alone")
+
+
+def test_redecide_quarantined_serves_it_again_and_reprove_picks_up_the_rest():
+    reset_store()
+    items = [{"form": "DO", "situation": "", "quote": "", "ref": "",
+              "text": FORM_ITEM},
+             {"form": "DO", "situation": "", "quote": "", "ref": "",
+              "text": "Use `useActionState` with the form's action prop."}]
+    sid = make_skill("redecide-form", items=items)
+    rec = _worse_record(r"(?<![\w$])e\.preventDefault(?![\w$])", 1)
+    skills.quarantine(sid, 1, "prove: a check that passed without it failed "
+                      "with it", prove=rec)
+    dry = P.redecide_quarantined()
+    check(len(dry["rows"]) == 1 and dry["rows"][0]["now"] == "better"
+          and not dry["applied"]
+          and skills.get(sid)["status"] == "quarantined",
+          "[derive/2] a dry run lists what would change and changes "
+          "nothing", dry)
+    got = P.redecide_quarantined(apply=True)
+    s = skills.get(sid)
+    stored = P.record_of(skills.version(sid, 1))
+    check(got["applied"] == [sid] and s["status"] == "armed"
+          and stored.get("redecided", {}).get("by") == P.DERIVE
+          and stored["verdict"] == "better",
+          "[derive/2] applied: served again, the new record stored with the "
+          "old verdict", (s["status"], stored.get("verdict")))
+    # reprove targets: a repeat/1 record whose worse check was derived before
+    # derive/2 is a target again; one stamped derive/2 is not
+    reset_store()
+    a = make_skill("abs-old", items=items)
+    r1 = {"verdict": "worse", "rule": P.RULE, "probes": [{"case": 1, "checks": [
+        {"id": "absent1", "kind": "absent", "pattern": "instanceof",
+         "pair": "worse", "confirmed": True}]}]}
+    skills.quarantine(a, 1, "prove: x", prove=r1)
+    b = make_skill("abs-new", items=items)
+    skills.quarantine(b, 1, "prove: x", prove=dict(r1, derive=P.DERIVE))
+    c = make_skill("parse-old", items=items)
+    skills.quarantine(c, 1, "prove: x", prove=dict(r1, probes=[{
+        "case": 1, "checks": [{"id": "parse1", "kind": "parse",
+                               "pair": "worse"}]}]))
+    rows, _ = P.reprove_targets()
+    check([r["skill"] for r in rows] == [a],
+          "[derive/2] a repeat/1 record with a worse present/absent check "
+          "from before derive/2 is a re-prove target; a derive/2 record and "
+          "a parse-only one are not", [r["name"] for r in rows])
 
 
 def main() -> int:
