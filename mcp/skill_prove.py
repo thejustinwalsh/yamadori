@@ -1242,11 +1242,22 @@ def redecide(ver: dict) -> dict | None:
     rec = record_of(ver)
     if not rec.get("probes"):
         return None
-    texts = [str(it.get("text") or "") for it in _items(ver)]
+    items = _items(ver)
+    texts = [str(it.get("text") or "") for it in items]
+    skip_types = types_skip(items)
     probes = copy.deepcopy(rec["probes"])
     invalid = []
     for n, p in enumerate(probes, 1):
         for c in p.get("checks") or []:
+            if c.get("pair") == PAIR_WORSE and c.get("kind") == "types" \
+                    and skip_types:
+                invalid.append({"probe": n, "check": c.get("id"),
+                                "kind": "types", "why": skip_types,
+                                "runs": c.get("runs")})
+                c["pair"] = PAIR_SAME
+                c["invalid"] = "derive/2: " + skip_types
+                c.pop("confirmed", None)
+                continue
             if c.get("pair") != PAIR_WORSE or c.get("kind") != "present" \
                     or not c.get("pattern"):
                 continue
@@ -1299,7 +1310,8 @@ def redecide_quarantined(*, apply: bool = False) -> dict:
             continue
         row = {"skill": sid, "name": s.get("name"),
                "was": record_of(ver).get("verdict"), "now": new["verdict"],
-               "invalid": [(x["probe"], x["check"], x["pattern"])
+               "invalid": [(x["probe"], x["check"], x.get("pattern")
+                            or x.get("kind"))
                            for x in new["redecided"]["invalid"]]}
         rows.append(row)
         if apply and new["verdict"] in ("better", "tie"):
@@ -1534,8 +1546,9 @@ def _reprove_ok(s: dict | None, ver: dict | None, v: int,
         return "the skill is disabled or archived"
     rec = record_of(ver)
     if rec.get("rule") == RULE and rec.get("derive") != DERIVE and any(
-            c.get("pair") == PAIR_WORSE and c.get("kind") in (
-                "present", "absent")
+            c.get("pair") == PAIR_WORSE and (c.get("kind") in (
+                "present", "absent") or (c.get("kind") == "types"
+                                         and types_skip(_items(ver))))
             for p in rec.get("probes") or [] for c in p.get("checks") or []):
         # decided by the repeat rule, but a present / absent check that
         # came out worse was derived before derive/2 (DERIVE): a proof

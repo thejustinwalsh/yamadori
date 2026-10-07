@@ -1313,6 +1313,20 @@ def test_types_are_not_run_against_a_version_older_than_the_skill():
         with with_fakes(FakeChat(GOOD_TS, GOOD_TS)):
             rec = P.prove(sid, 1, skills.version(sid, 1))
         kinds = [c["kind"] for p in rec["probes"] for c in p["checks"]]
+        # the stored record of such a skill: its only worse check is `types`
+        rec_t = {"verdict": "worse", "rule": P.RULE, "probes": [{"case": 1,
+                 "checks": [{"id": "types2", "kind": "types",
+                             "pair": "worse", "confirmed": True},
+                            {"id": "present3", "kind": "present",
+                             "pattern": "observeUsing", "pair": "better"}]}]}
+        new_t = P.redecide({"validate": {"items": [
+            {"form": "DO", "text": "React 19.3+: call `observeUsing`."}]},
+            "prove": rec_t})
+        check(new_t and new_t["verdict"] == "better"
+              and new_t["redecided"]["invalid"][0]["kind"] == "types",
+              "[derive/2] a stored record whose only worse check is a types "
+              "check against a version older than the skill is decided "
+              "again without it", new_t and new_t["verdict"])
         check("types" not in kinds and not calls
               and any("types" == d.get("kind") for d in rec["dropped"])
               and rec.get("derive") == P.DERIVE,
