@@ -1,0 +1,83 @@
+﻿[2026-10-07 01:25:20] script started; waiting for pid 18908
+[2026-10-07 01:36:50] pid 18908 has exited
+[2026-10-07 01:36:50] RUN attempt 1
+{
+ "run_id": "pkgskills-control-lookup-pi-medium-1",
+ "arm": "control",
+ "outcome": "invalid",
+ "why": null,
+ "stop": "exited",
+ "requests": 0,
+ "package_tool_called": false,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": [
+  "no request reached the relay"
+ ]
+}
+{
+ "run_id": "pkgskills-inject-lookup-pi-medium-1",
+ "arm": "inject",
+ "outcome": "invalid",
+ "why": null,
+ "stop": "exited",
+ "requests": 0,
+ "package_tool_called": false,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": [
+  "no request reached the relay"
+ ]
+}
+{
+ "run_id": "pkgskills-router-lookup-pi-medium-1",
+ "arm": "router",
+ "outcome": "invalid",
+ "why": null,
+ "stop": "exited",
+ "requests": 0,
+ "package_tool_called": false,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": [
+  "no request reached the relay"
+ ]
+}
+{
+ "run_id": "pkgskills-both-lookup-pi-medium-1",
+ "arm": "both",
+ "outcome": "invalid",
+ "why": null,
+ "stop": "exited",
+ "requests": 0,
+ "package_tool_called": false,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": [
+  "no request reached the relay"
+ ]
+}
+{
+ "run_id": "pkgskills-control-lookup-pi-medium-2",
+ "arm": "control",
+ "outcome": "invalid",
+ "why": null,
+ "stop": "exited",
+ "requests": 0,
+ "package_tool_called": false,
+ "section_delivered": false,
+ "recall_called": false,
+ "question_calls": 0,
+ "crafts_pulled": [],
+ "invalid": [
+  "no request reached the relay"
+ ]
+}
