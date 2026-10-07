@@ -824,16 +824,41 @@ def derive(sid: str, ver: dict, *, use_model: bool | None = None
 # ---------------------------------------------------------------------------
 # 2. Checks, by code.
 # ---------------------------------------------------------------------------
+# A fenced block that is a note, not code (derive/2): the model quotes the
+# craft it was given ("- DO: Import only the specific members ..." first line:
+# fe-handbook-system-design-ui-components-e-g, 2 of 2 runs) or draws an
+# arrow diagram in a code fence ("traversal  ->  per-object ...", with the
+# arrow as a character: threejs-llms-full-tsl-compute-shader-lifecycle-2, 2
+# of 2 runs). Neither is the answer's code, and a syntax error in it is not
+# the answer's. An arrow block that also has code syntax ({ } ; =) is code.
+_CRAFT_FIRST_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:DO NOT|DO|WHEN)\b[:\s]")
+_ARROW_CHARS = re.compile("[→←↔⇒⇐↦─│"
+                          "┌┐└┘├┤┬┴"
+                          "┼]")
+_CODE_SYNTAX = re.compile(r"[{};=]|=>")
+
+
+def prose_block(code: str) -> str | None:
+    """Why a fenced block's body is a note and not code, or None."""
+    lines = [ln for ln in (code or "").splitlines() if ln.strip()]
+    if lines and _CRAFT_FIRST_LINE.match(lines[0]):
+        return "a quoted craft item"
+    if _ARROW_CHARS.search(code or "") and not _CODE_SYNTAX.search(code or ""):
+        return "an arrow diagram"
+    return None
+
+
 def code_blocks(answer: str, lang: str | None) -> list[dict]:
     """The answer's fenced code blocks, each with the language it parses
     as: its own tag when that is a code language, the probe's when it is
-    untagged; other tags (bash, json, text) are not code of the answer."""
+    untagged; other tags (bash, json, text) are not code of the answer; a
+    block that is a note (`prose_block`) is not code either."""
     import code_check
     out = []
     for b in code_check.fenced_blocks(answer or ""):
         tag = (b.get("lang") or "").strip()
         bl = _norm_lang(tag) if tag else lang
-        if bl:
+        if bl and not (b.get("closed") and prose_block(b.get("code"))):
             out.append(dict(b, parse_as=bl))
     return out
 
@@ -1525,6 +1550,17 @@ def handle_prove(job: dict, ctx, *, inline: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 # The re-prove: versions quarantined as worse by the one-sample rule.
 # ---------------------------------------------------------------------------
+def _echo_parse(c: dict) -> bool:
+    """Is this stored parse failure the first line of a block that is a note
+    (prose_block): a quoted craft item or an arrow diagram?"""
+    m = re.search(r"block line 1: unexpected '(.*)", str(c.get("why_with")
+                                                         or ""))
+    if not m:
+        return False
+    return bool(_CRAFT_FIRST_LINE.match(m.group(1))
+                or _ARROW_CHARS.search(m.group(1)))
+
+
 def _reprove_ok(s: dict | None, ver: dict | None, v: int,
                 include_unproven: bool = False) -> str | None:
     """Why a version is NOT a re-prove target (None: it is). A target is the
@@ -1548,11 +1584,12 @@ def _reprove_ok(s: dict | None, ver: dict | None, v: int,
     if rec.get("rule") == RULE and rec.get("derive") != DERIVE and any(
             c.get("pair") == PAIR_WORSE and (c.get("kind") in (
                 "present", "absent") or (c.get("kind") == "types"
-                                         and types_skip(_items(ver))))
+                                         and types_skip(_items(ver)))
+                or (c.get("kind") == "parse" and _echo_parse(c)))
             for p in rec.get("probes") or [] for c in p.get("checks") or []):
-        # decided by the repeat rule, but a present / absent check that
-        # came out worse was derived before derive/2 (DERIVE): a proof
-        # under today's derivation may differ, so it is a target again
+        # decided by the repeat rule, but a worse check was derived or read
+        # before derive/2 (DERIVE): a proof under today's rules may differ,
+        # so it is a target again
         pass
     elif rec.get("rule") == RULE:
         return f"already decided by {RULE}"

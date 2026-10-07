@@ -1284,6 +1284,54 @@ def test_redecide_quarantined_serves_it_again_and_reprove_picks_up_the_rest():
           "a parse-only one are not", [r["name"] for r in rows])
 
 
+def test_a_block_that_is_a_note_is_not_code():
+    craft = "```tsx\n- DO: Import only the specific members you use.\n```"
+    diagram = ("```typescript\ntraversal  →  per-object update\n"
+               "render  →  draw\n```")
+    real = "```tsx\nexport const a = 1;\n```"
+    check(P.prose_block("- DO: Import only the specific members") ==
+          "a quoted craft item"
+          and P.prose_block("a  →  b") == "an arrow diagram"
+          and P.prose_block("const a = 1; // → arrow in code") is None
+          and P.prose_block("import foo from 'foo'") is None,
+          "[derive/2] a block whose first line quotes a craft item, or that "
+          "is an arrow diagram with no code syntax, is a note; code with an "
+          "arrow in a comment is code")
+    ok, why = P.run_check({"kind": "parse"}, craft + "\n" + real, "tsx", [])
+    ok2, why2 = P.run_check({"kind": "parse"}, diagram + "\n" + real, "tsx",
+                            [])
+    check(ok and ok2 and "1 block(s)" in why and "1 block(s)" in why2,
+          "[derive/2] parse judges the answer's code, not the note beside "
+          "it (the two live shapes: fe-handbook ... and threejs-llms-full "
+          "...)", (why, why2))
+    ok3, why3 = P.run_check({"kind": "parse"},
+                            "```tsx\nexport const a = ;\n```", "tsx", [])
+    unclosed = "```tsx\n- DO: x\n"
+    ok4, why4 = P.run_check({"kind": "parse"}, unclosed, "tsx", [])
+    check(not ok3 and not ok4 and "not closed" in why4,
+          "[derive/2] a real syntax error still fails, and an unclosed "
+          "fence is still a truncated reply", (why3, why4))
+    reset_store()
+    items = [{"form": "DO", "situation": "", "quote": "", "ref": "",
+              "text": "Import only the specific members you use."}]
+    sid = make_skill("echo-parse", items=items)
+    rec = {"verdict": "worse", "rule": P.RULE, "probes": [{"case": 1,
+           "checks": [{"id": "parse1", "kind": "parse", "pair": "worse",
+                       "why_with": "tsx syntax error, block line 1: "
+                       "unexpected '- DO: Import only the spec'"}]}]}
+    skills.quarantine(sid, 1, "prove: x", prove=rec)
+    other = make_skill("real-parse", items=items)
+    skills.quarantine(other, 1, "prove: x", prove=dict(rec, probes=[{
+        "case": 1, "checks": [{"id": "parse1", "kind": "parse",
+                               "pair": "worse", "why_with": "tsx syntax "
+                               "error, block line 9: unexpected '}'"}]}]))
+    rows, _ = P.reprove_targets()
+    check([r["skill"] for r in rows] == [sid],
+          "[derive/2] a repeat/1 parse failure at the first line of a note "
+          "block is a re-prove target; a real syntax error is not",
+          [r["name"] for r in rows])
+
+
 def test_types_are_not_run_against_a_version_older_than_the_skill():
     held = {"react": ["19.2.8"], "typescript": ["5.9.2"]}
     saved = P.HELD_VERSIONS
