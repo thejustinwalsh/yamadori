@@ -54,9 +54,10 @@ def main() -> int:
           and "20 trials" in text and "h of an exclusive GPU" in text
           and "nothing was run" in text, text[:300])
     f = {a: PP.arm_features(a) for a in PP.ARMS}
-    base = dict(f["control"])
+    base = {k: v for k, v in f["control"].items()
+            if not k.startswith("package_skills")}
     check("the arms differ only in the package_skills switch and mode",
-          "package_skills" not in f["control"]
+          f["control"]["package_skills"] is False
           and all({k: v for k, v in f[a].items() if not k.startswith(
               "package_skills")} == base for a in ("inject", "router", "both"))
           and [f[a]["package_skills_mode"] for a in ("inject", "router",

@@ -114,8 +114,10 @@ S_FIXED = 30      # box start-up and teardown per trial (an estimate: the 1-requ
 
 def arm_features(arm: str) -> dict:
     f = dict(LP.FEATURES)
+    # The channel is ON by default since 2026-10-06 (commit 9398750), so every
+    # arm FORCES its own setting: the control sends package_skills false.
+    f["package_skills"] = arm != "control"
     if arm != "control":
-        f["package_skills"] = True
         f["package_skills_mode"] = arm
     return f
 
