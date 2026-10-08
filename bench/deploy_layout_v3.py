@@ -112,8 +112,11 @@ def envs_for(n: int) -> dict:
     # YAMADORI_SLOTS (2026-10-02): the served slot count, DECLARED -- a live /props read loses the race when a tier
     # swap takes the main model off the card seconds after a restart (mcp/slots.py reads it; mcp/budget.py takes
     # an unread pool from YAMADORI_MAIN_CAP + the lane)
+    # YAMADORI_DECIDER_BATCH (operator 2026-10-07, "You can set YAMADORI_DECIDER_BATCH please"): jjava's one-pass reads
+    # on bonsai-a4000 (docs/DECIDE-BATCH.md) -- part of the layout's environment so a redeploy never drops it from the
+    # watchdog's restart env
     return {"YAMADORI_MAIN_CAP": str(n - lane_of()), "YAMADORI_LANE_TOKENS": str(lane_of()),
-            "YAMADORI_SLOTS": str(NP)}
+            "YAMADORI_SLOTS": str(NP), "YAMADORI_DECIDER_BATCH": "1"}
 
 
 def tier_deployed(cfg: str, bat: str) -> list[str]:
