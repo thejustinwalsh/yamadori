@@ -81,6 +81,7 @@ import image_input  # noqa: E402
 import api_errors  # noqa: E402
 import progress  # noqa: E402
 import mcp_host  # noqa: E402
+import codemode  # noqa: E402
 
 # The defaults ARE the configuration. llama-swap listens on 11434 and the
 # proxy takes 1234, because 1234 is the port every OpenAI client is already
@@ -751,6 +752,11 @@ TOOL_OVERLAPS: tuple[tuple[str, tuple[str, ...], str], ...] = (
                         "text_to_image", "generate_images",
                         images.LEGACY_TOOL_NAME),
      "the client generates images itself (Codex's hosted image_generation)"),
+    # THE SERVER TOOLBOX is the fallback for harnesses WITHOUT a code mode of
+    # their own (operator, 2026-10-08): Pi's `codemode` (codemode.HARNESS_TOOLS,
+    # the one list of names) withholds it. Read by _codemode_decide through
+    # tool_conflicts, recorded in x_yamadori.tools_withheld.
+    (codemode.TOOL_NAME, codemode.HARNESS_TOOLS, codemode.HARNESS_OVERLAP_WHY),
 )
 # Decided NOT to overlap (kept on main):
 #   yama_describe_image vs Codex view_image -- view_image ATTACHES a local image
@@ -843,7 +849,7 @@ def main_tools(client_tools: list | None, att: dict | None = None,
 # the MCP-backed tools (mcp_host; every name a configured server backs, read
 # at import).
 OUR_NAMES = ({images.TOOL_NAME, vision.TOOL_NAME,
-              skill_prompts.CRAFT_TOOL_NAME}
+              skill_prompts.CRAFT_TOOL_NAME, codemode.TOOL_NAME}
              | mcp_host.mcp_config.all_tool_names())
 
 # THE `yama_*` RENAME (operator, 2026-09-27): every tool the proxy adds to
@@ -1081,6 +1087,312 @@ def _run_our_tool(name: str, args: dict, state: dict | None = None) -> str:
         remedies=[{"fixable_by": "agent",
                    "action": "call one of the tools offered in this request",
                    "effect": "the call runs"}])
+
+
+# ------------------------------------------------------- THE SERVER TOOLBOX --
+# yama_compose_tools (mcp/codemode.py, docs/CODEMODE.md): discovery + composition. The library is the registry and
+# the sandbox; THIS is the bridge to the proxy's own tools and the accounting.
+
+
+def _codemode_apply(tier: dict, st: dict, continuing: bool, tools: list,
+                    ours: set, client_tools: list | None, craft_offer: dict,
+                    pkg_sw: dict, mcp_rec: dict | None, raw: list
+                    ) -> tuple[list, set, dict]:
+    # (a client that brings its own code mode, or a tool named like ours,
+    # withholds the toolbox: tool_conflicts; the decision and what it
+    # withheld are kept like every offer, rec["withheld"])
+    """The conversation's toolbox, decided on its FIRST request and kept RENDERED in the skill state
+    (`st["codemode"]`: the tool's definition included), like the MCP offer: the tool list and the system block
+    never change mid-conversation, so the slot's cache extends. Returns (the tool list, the names of ours, the
+    record: x_yamadori.codemode before the turn's runs). Mode `only` hides the lookups the toolbox replaces
+    (they stay runnable by name: `ours` keeps them)."""
+    sw = codemode.switch(tier)
+    rec: dict = {"switch": {k: sw.get(k) for k in ("on", "source", "mode", "mode_source")},
+                 "offered": False}
+    got = st.get("codemode")
+    if isinstance(got, dict) and "on" in got:
+        dec, kept = got, True
+    elif continuing:
+        dec, kept = {"on": False, "why": "the conversation started without a toolbox offer"}, False
+        st["codemode"] = dec
+    elif not sw["on"]:
+        dec, kept = {"on": False, "why": f"switch codemode off ({sw['source']})"}, False
+        st["codemode"] = dec
+    else:
+        dec, kept = _codemode_decide(sw, tools, ours, client_tools, craft_offer, pkg_sw, mcp_rec, raw), False
+        st["codemode"] = dec
+    rec.update(kept=kept, why=dec.get("why"), withheld=list(dec.get("withheld") or []))
+    if not dec.get("on"):
+        return tools, ours, rec
+    hidden = [n for n in dec.get("hidden") or []]
+    if hidden:
+        tools = [t for t in tools if (t.get("function") or {}).get("name") not in hidden]
+    # The definition is kept as TEXT: the skill state is re-serialised with sorted keys, which would reorder the
+    # tool's keys (and its parameters') in the rendered prompt and break the slot's prefix.
+    tools = list(tools) + [json.loads(dec["definition"])]
+    ours = set(ours) | {codemode.TOOL_NAME}
+    rec.update(offered=True, mode=dec.get("mode"), names=list(dec.get("names") or []), hidden=hidden,
+               decider=bool(dec.get("decider")),
+               **{k: (dec.get("record") or {}).get(k) for k in
+                  ("budget_tokens", "tokens", "declared", "left_out")})
+    return tools, ours, rec
+
+
+def _codemode_decide(sw: dict, tools: list, ours: set, client_tools: list | None, craft_offer: dict,
+                     pkg_sw: dict, mcp_rec: dict | None, raw: list) -> dict:
+    """The decision itself (first request): the toolbox over what was offered on main, rendered once."""
+    try:
+        names = sorted(n for n in ours if n != codemode.TOOL_NAME)
+        # The client's own code mode, or a tool of the same name, withholds the toolbox: the same comparison
+        # every tool of ours gets (tool_conflicts -> TOOL_OVERLAPS).
+        _keep, held = tool_conflicts([{"type": "function", "function": {"name": codemode.TOOL_NAME}}],
+                                     client_tools)
+        if held:
+            w = held[0]
+            why = (f"the client has a tool named {w['client_tool']}" if w["because"] == "same name"
+                   else f"{w['because']} ({w['client_tool']})")
+            return {"on": False, "why": why, "withheld": held}
+        try:
+            import jev_api
+            decider = bool(jev_api.enabled()[0])
+        except Exception:                                        # noqa: BLE001
+            decider = False
+        ok, how = codemode.available()
+        if not ok:
+            return {"on": False, "why": f"the sandbox is not available: {how}"}
+        import codemode_sandbox
+        codemode_sandbox.warm()          # compile the WASI module in the background: the first script pays nothing
+        tb = codemode.build_toolbox(names, decider=decider)
+        if not tb.fns:
+            return {"on": False, "why": "no server function is offered on this request"}
+        # What `only` hides: the MCP-backed lookups, and the craft tool unless something else calls it by name
+        # (the craft index, or a package-skills section that tells the model to call it).
+        keep_craft = bool(craft_offer.get("index")) or bool(pkg_sw.get("on"))
+        covered = [f["name"] for f in tb.fns if f["kind"] == "mcp" or (f["kind"] == "craft" and not keep_craft)]
+        covered_defs = [t for t in tools if (t.get("function") or {}).get("name") in covered]
+        budget = codemode.budget_for(covered_defs,
+                                     "x" * int((mcp_rec or {}).get("line_chars") or 0) if covered else "")
+        first = next((message_text.text_of(m, "") for m in raw
+                      if isinstance(m, dict) and m.get("role") == "user"), "")
+        defn, drec = codemode.tool_definition(tb, rank_query=first[:2000], budget_tokens=budget)
+        return {"on": True, "mode": sw["mode"], "names": tb.names(), "decider": decider,
+                "hidden": covered if sw["mode"] == "only" else [], "definition": json.dumps(defn),
+                "record": drec,
+                "why": f"{len(tb.fns)} functions, mode {sw['mode']}"}
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  codemode offer failed: {type(e).__name__}: {e}", flush=True)
+        return {"on": False, "why": f"the offer raised {type(e).__name__}: {e}"[:200]}
+
+
+def _codemode_record(payload: dict) -> dict | None:
+    """x_yamadori.codemode: the offer's record plus this request's scripts."""
+    rec = payload.get("_codemode")
+    if rec is None:
+        return None
+    runs = list(payload.get("_codemode_runs") or [])
+    return dict(rec, runs=len(runs),
+                calls=[c for r in runs for c in r.get("calls") or []],
+                wall_ms=sum(int(r.get("wall_ms") or 0) for r in runs),
+                output_chars=sum(int(r.get("output_chars") or 0) for r in runs),
+                failed=any(r.get("failed") for r in runs),
+                reasons=[r.get("reason") for r in runs],
+                heads=[r.get("script_head") for r in runs],
+                instantiate_ms=[r.get("instantiate_ms") for r in runs],
+                searches=sum(int(r.get("searches") or 0) for r in runs),
+                describes=sum(int(r.get("describes") or 0) for r in runs),
+                discovery=[d for r in runs for d in r.get("discovery") or []][:40])
+
+
+def _tool_result_of(text: str, data=None) -> dict:
+    """A tool's text as the script reads it: {ok, text, data?, error?}. A failure envelope (the house shape:
+    ok false, error, reason, retryable, remedies) becomes `error` and its `text` says the reason and the next step."""
+    s = (text or "").lstrip()
+    if s.startswith("{"):
+        try:
+            d = json.loads(s)
+        except ValueError:
+            d = None
+        if isinstance(d, dict) and d.get("ok") is False:
+            rem = d.get("remedies") or []
+            nxt = "; ".join(str(r.get("action")) for r in rem if isinstance(r, dict) and r.get("action"))
+            reason = str(d.get("reason") or d.get("error") or "the call failed")
+            out = {"ok": False, "text": f"{reason} {nxt}".strip(),
+                   "error": {"code": str(d.get("error") or "ERROR"), "reason": reason,
+                             "retryable": bool(d.get("retryable")), "next": nxt}}
+            if d.get("near"):
+                out["data"] = {"near": d["near"]}
+            return out
+    out = {"ok": True, "text": text}
+    if data:
+        out["data"] = data
+    return out
+
+
+_DECIDE_TYPE = {"yama_decide_noul": "noul", "yama_decide_choice": "choice", "yama_decide_score": "score"}
+
+
+def _compose_decide(name: str, args: dict, account: str) -> dict:
+    """yama_decide_*: one typed question to jjava through the Jev API's own entry (its limits, its queue, batched
+    reads when YAMADORI_DECIDER_BATCH is on). A ToolResult."""
+    import jev_api
+    kind = _DECIDE_TYPE[name]
+    state_text, question = args.get("state"), args.get("question")
+    if not isinstance(state_text, str) or not isinstance(question, str) or not question.strip():
+        return codemode.error_result("BAD_ARGUMENTS", f"{name} needs `state` (the text) and `question` (strings).",
+                                     False, "call it with both.")
+    q: dict = {"type": kind, "instructions": question}
+    if kind == "noul" and isinstance(args.get("criteria"), dict):
+        q["criteria"] = args["criteria"]
+    elif kind == "choice":
+        opts = args.get("options")
+        if isinstance(opts, list):
+            opts = {str(o): str(o) for o in opts}
+        if not isinstance(opts, dict) or not opts:
+            return codemode.error_result("BAD_ARGUMENTS", "yama_decide_choice needs `options`: { key: meaning }.",
+                                         False, "call it with at least one option.")
+        q["criteria"] = opts
+    elif kind == "score":
+        if not isinstance(args.get("levels"), list):
+            return codemode.error_result("BAD_ARGUMENTS", "yama_decide_score needs `levels`: 2 to 10 strings.",
+                                         False, "call it with the levels, lowest first.")
+        q["criteria"] = args["levels"]
+    body = {"state": state_text, "model": "jjava-latest", "questions": {"q": q}}
+    status, out, headers = jev_api.systemone(body, account or None, route="/codemode/decide")
+    if status == 200:
+        a = (out.get("answers") or {}).get("q") or {}
+        data = {k: a[k] for k in ("noul", "choice", "score", "probabilities", "confidence") if k in a}
+        if kind == "noul":
+            data = {"p_true": a.get("noul")}
+        return {"ok": True, "text": json.dumps(data), "data": data}
+    detail = out.get("detail")
+    if isinstance(detail, list):
+        detail = "; ".join(f"{'.'.join(map(str, d.get('loc') or []))}: {d.get('msg')}" for d in detail[:4]
+                           if isinstance(d, dict))
+    retry = (headers or {}).get("Retry-After")
+    retryable = status in (429, 503, 529)
+    return codemode.error_result(
+        f"JJAVA_{status}", f"jjava did not answer ({status}): {str(detail)[:240]}", retryable,
+        (f"call it again in about {retry} s." if retry else
+         ("call it again." if retryable else "fix the arguments named and call it again.")))
+
+
+def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_key: str) -> str:
+    """yama_compose_tools: run the model's script in the sandbox (mcp/codemode.py) with our tools bridged.
+
+    One call is ONE hidden hop however many inner calls it makes: bounded by the script's wall limit (the slowest
+    exposed function's own bound) and by the request's call budget (tiers.tool_turn_limit, across all its scripts).
+    Package-skill sections are computed AFTER the run, in the order the calls were issued, and handed to the loop
+    in state["_compose_section"] (appended after the output cap, exactly where an individual package tool's
+    goes); an image drawn inside is queued in state["_compose_images"] for the loop to show."""
+    tool = codemode.TOOL_NAME
+    script = args.get("script") if isinstance(args, dict) else None
+    if not isinstance(script, str) or not script.strip():
+        return cs.error_result(tool, "BAD_ARGUMENTS", "`script` is empty: it must be JavaScript text.", True,
+                               remedies=[{"fixable_by": "agent",
+                                          "action": "call it with {\"script\": \"return await tools.all()\"}",
+                                          "effect": "the script runs"}])
+    cm = payload.get("_codemode") or {}
+    tb = codemode.build_toolbox(list(cm.get("names") or []), decider=bool(cm.get("decider")))
+    if not tb.fns:
+        return cs.error_result(tool, "NO_TOOLBOX", "No server function is available to this conversation now.",
+                               False, remedies=[{"fixable_by": "operator",
+                                                 "action": "check GET /dash/api/mcp and the decider",
+                                                 "effect": "the functions return"}])
+    ceiling = tb.bound_s() or codemode.DECIDE_BOUND_S
+    timeout_s = ceiling
+    tm = args.get("timeout_ms")
+    if isinstance(tm, (int, float)) and not isinstance(tm, bool) and tm > 0:
+        timeout_s = min(ceiling, tm / 1000.0)
+    limit = tiers.tool_turn_limit(payload.get("_tier"))
+    used = int(state.get("_compose_calls") or 0)
+    max_calls = max(limit - used, 0)
+    account = state.get("_account") or ""
+    tok = cancel.current()
+    lock, craft_lock = threading.Lock(), threading.Lock()
+    issued: dict[int, tuple] = {}
+    ours = set(payload.get("_ours") or [])
+    state["_craft_msgs"] = list(convo)
+    state["_craft_model"] = payload.get("model")
+    external = {"n": 0}
+
+    def bridge(name: str, a: dict, seq: int) -> dict:
+        f = tb.by_name[name]
+        kind = f["kind"]
+        with cancel.bound(tok):
+            if kind == "mcp":
+                recs: list = []
+                text = mcp_host.run_tool(name, a, recs)
+                rec = recs[0] if recs else {}
+                with lock:
+                    state.setdefault("_mcp_calls", []).append(rec)
+                    issued[seq] = (name, a, rec)
+                    external["n"] += 1
+                res = _tool_result_of(text, {"names": rec.get("names") or []} if rec.get("names") else None)
+            elif kind == "decide":
+                text, res = "", _compose_decide(name, a, account)
+            elif kind == "craft":
+                with craft_lock:
+                    text = run_our_tool(name, a, state)
+                res = _tool_result_of(text)
+            elif kind == "vision":
+                text = run_our_tool(name, a, state)
+                res = _tool_result_of(text)
+                try:
+                    d = json.loads(text)
+                    if res["ok"] and isinstance(d, dict) and d.get("answer"):
+                        res["text"], res["data"] = d["answer"], {"image": d.get("image")}
+                except ValueError:
+                    pass
+            else:                                                # images
+                n0 = len(state.setdefault("_images", []))
+                text = run_our_tool(name, a, state)
+                res = _tool_result_of(text)
+                shown = images.shown_on_main(text, looks=vision.TOOL_NAME in ours) if res["ok"] else None
+                if shown:
+                    res["text"], md, url = shown
+                    res["data"] = {"url": url}
+                    new = state["_images"][n0:]
+                    with lock:
+                        state["_compose_images"].append((md, url, new[-1] if new else {"ok": True}))
+            payload["_tool_calls"].append(_tool_evidence(name, text or res.get("text") or ""))
+            return res
+
+    out = codemode.run(script, tb, bridge, timeout_s=timeout_s, max_calls=max_calls,
+                       cancelled=cancel.cancelled)
+    state["_compose_calls"] = used + int(out.get("dispatched") or 0)
+    # The final output, screened again when fetched text went through it (the script may have recombined it).
+    quarantined = None
+    if external["n"] and (out["items"] or out["console"]):
+        import skill_screen
+        joined = "\n".join(out["items"] + out["console"])
+        v = skill_screen.screen_fetched(joined, joined, "text")
+        if not v["ok"]:
+            quarantined = v
+        elif v["stripped"]:
+            out["items"], out["console"] = [v["text"] + f"\n[the screen removed {len(v['stripped'])} span(s)]"], []
+    # Package skills sections: after the run, in the order the calls were issued.
+    section = ""
+    if (payload.get("_pkg_switch") or {}).get("on") and quarantined is None:
+        for seq in sorted(issued):
+            nm, a, rec = issued[seq]
+            if rec.get("ok") and nm in package_skills_tools():
+                sec, prs = _package_tool_section(nm, a, rec, payload, state, f"{hop_key}:{seq}")
+                payload["_package_skills"].extend(prs)
+                section += scrub_markers(sec)[0]
+    state["_compose_section"] = section
+    text = codemode.format_result(out) if quarantined is None else cs.error_result(
+        tool, "QUARANTINED", f"The script's output failed the exploit screen ({quarantined['why']}); it was not "
+        "passed on.", False, remedies=[{"fixable_by": "agent", "action": "print a smaller part of the result",
+                                        "effect": "text that passes the screen is read"}])
+    state["_compose_runs"].append({
+        "calls": [{"tool": c["tool"], "ms": c["ms"], "ok": c["ok"]}
+                  for c in sorted(out["calls"], key=lambda c: c["seq"])],
+        "wall_ms": out["wall_ms"], "output_chars": out["output_chars"], "failed": not out["ok"],
+        "reason": out["reason"], "searches": out["searches"], "describes": out["describes"],
+        "discovery": out["discovery"], "script_chars": len(script), "instantiate_ms": out.get("instantiate_ms"),
+        "script_head": " ".join(script.split())[:120], "timeout_s": round(timeout_s, 1),
+        "max_calls": max_calls, "dispatched": out.get("dispatched")})
+    return text
 
 
 def resolve_repo(messages, client_ip: str = ""):
@@ -2278,6 +2590,7 @@ def prepare(body: dict) -> dict:
     tools_withheld: list[dict] = []
     mcp_rec: dict | None = None
     mcp_line = ""
+    codemode_rec: dict = {"offered": False}
     # THE PACKAGE SKILLS CHANNEL (mcp/package_skills.py; switch
     # `package_skills`, off until its probe passes): proven skills ride in
     # the result of a package tool and on evidence between turns.
@@ -2310,19 +2623,43 @@ def prepare(body: dict) -> dict:
                 craft=bool(craft_offer.get("tool")),
                 withheld=tools_withheld, keep_withheld=kept,
                 mcp=mcp_host.definitions(mcp_rec["offered"]))
+            # THE SERVER TOOLBOX (mcp/codemode.py; switch `codemode`, off
+            # until its probe passes): decided on the conversation's first
+            # request and kept RENDERED, so the tool list never changes.
+            tools, ours, codemode_rec = _codemode_apply(
+                tier, sk_state, continuing, tools, ours, body.get("tools"),
+                craft_offer, pkg_sw, mcp_rec, raw)
             if not continuing:
                 sk_state["tools_withheld"] = sorted(
                     {w["ours"] for w in tools_withheld})
             _save_skill_state(account, lineage, sk_state)
+        # (recorded after the state above: the toolbox is not a candidate main_tools keeps by name)
+        tools_withheld.extend(codemode_rec.get("withheld") or [])
         # The one system line where they are offered (a conflict with the
-        # client's tools withholds a tool, and the line names only the rest).
-        mcp_rec["on_main"] = [n for n in mcp_rec["offered"] if n in ours]
+        # client's tools withholds a tool, and the line names only the rest;
+        # the toolbox's `only` mode hides the lookups it replaces).
+        hidden = set(codemode_rec.get("hidden") or [])
+        mcp_rec["on_main"] = [n for n in mcp_rec["offered"]
+                              if n in ours and n not in hidden]
         mcp_line = mcp_host.line_for(mcp_rec["on_main"])
         mcp_rec["line_chars"] = len(mcp_line)
+        if codemode_rec.get("offered"):
+            mcp_line += codemode.SYSTEM_LINE
     if mcp_line:
         augmented = add_system_tail(augmented, mcp_line)
     if craft_offer.get("index"):
         augmented = add_system_tail(augmented, craft_offer["index"])
+    if not utility:
+        # What OUR additions cost this request's prompt (the proxy's high estimate, ~3 characters a token): our
+        # tools in the list and our system lines. x_yamadori.codemode.ours -- the probe's "prompt tokens our
+        # additions cost" (bench/mcp/codemode_probe.py), recorded whether or not the toolbox is on.
+        mine = [t for t in tools if ((t.get("function") or {}).get("name") or "").startswith("yama_")]
+        sys_chars = len(mcp_line) + len(craft_offer.get("index") or "")
+        codemode_rec["ours"] = {
+            "tools": [t["function"]["name"] for t in mine],
+            "tool_tokens": sum(codemode.tokens_of(json.dumps(t)) for t in mine),
+            "system_tokens": sys_chars // 3,
+            "tokens": sum(codemode.tokens_of(json.dumps(t)) for t in mine) + sys_chars // 3}
 
     # THE PER-TURN INJECTION, decided ONCE per user turn and replayed from
     # the ledger ever after (ledger_restore put it back above). Decided on
@@ -2605,6 +2942,9 @@ def prepare(body: dict) -> dict:
     # x_yamadori.mcp: the switch, the offer (kept for the conversation), the
     # servers' states; the calls are added by the turn (_mcp_calls).
     out["_mcp"] = mcp_rec
+    # x_yamadori.codemode: the switch, the offer (kept for the conversation)
+    # and, with the turn's runs, what the scripts did (_codemode_record).
+    out["_codemode"] = codemode_rec if codemode_rec.get("switch") else None
     # x_yamadori.skills.package: the switch and mode, what this request's
     # trigger decided (the package tools' sections are added by the turn) and
     # the versions the conversation asked for (the tool sections' majors).
@@ -3963,6 +4303,11 @@ def _x_yamadori(payload: dict, *, hops: int) -> dict:
         "mcp": (dict(payload["_mcp"],
                      calls=list(payload.get("_mcp_calls") or []))
                 if payload.get("_mcp") is not None else None),
+        # The server toolbox (mcp/codemode.py): the switch and mode, the
+        # offer (declared / left out, tokens against the budget), and this
+        # request's scripts: calls[{tool, ms, ok}], wall_ms, output_chars,
+        # failed, searches, describes. Never the script's text.
+        "codemode": _codemode_record(payload),
         # The images this request carried and what became of each: id,
         # source, format, bytes, error. Never the bytes.
         "attachments": list(payload.get("_attachments") or []),
@@ -5004,6 +5349,13 @@ def _run_turn(body: dict, streamed: bool):
     # The MCP-backed tools' calls in THIS request (x_yamadori.mcp.calls).
     state["_mcp_calls"] = []
     payload["_mcp_calls"] = state["_mcp_calls"]
+    # The server toolbox's scripts in THIS request (x_yamadori.codemode) and
+    # the inner server calls they have used (bounded by the tool-turn limit).
+    state["_compose_runs"] = []
+    payload["_codemode_runs"] = state["_compose_runs"]
+    state["_compose_calls"] = 0
+    state["_compose_images"] = []
+    state["_compose_section"] = ""
     payload["_tool_calls"] = []
     turn = corpus.new_turn()
     # the dashboard's history (mcp/stats_store.py): this request's corpus turn
@@ -5242,8 +5594,15 @@ def _run_turn(body: dict, streamed: bool):
             if fn == skill_prompts.CRAFT_TOOL_NAME:
                 state["_craft_msgs"] = list(convo)
                 state["_craft_model"] = payload.get("model")
-            status, res = yield from _in_thread(
-                lambda fn=fn, args=args: run_our_tool(fn, args, state))
+            if fn == codemode.TOOL_NAME:
+                # THE SERVER TOOLBOX: one hidden hop, however many inner calls.
+                status, res = yield from _in_thread(
+                    lambda args=args, payload=payload, hop=hop, cid=c["id"]:
+                    run_compose_tools(args, state, payload, list(convo),
+                                      f"{hop}:{cid}"))
+            else:
+                status, res = yield from _in_thread(
+                    lambda fn=fn, args=args: run_our_tool(fn, args, state))
             payload["_craft_capped"] = int(state.get("_craft_capped") or 0)
             if not (fn == skill_prompts.CRAFT_TOOL_NAME and status == "ok"):
                 hop_counts = True
@@ -5266,6 +5625,18 @@ def _run_turn(body: dict, streamed: bool):
                         "at": "stream" if streamed else "answer_start",
                         "order": len(out.images)}
                     shown_images.append((url, rec))
+            elif fn == codemode.TOOL_NAME and status == "ok":
+                # A picture drawn inside a script is shown the moment the
+                # script returns, as yama_generate_image's is.
+                for md, url, irec in list(state.get("_compose_images") or []):
+                    yield from out.image(md + "\n\n", url)
+                    irec["emitted"] = {
+                        "ms": round((time.time() - t_start) * 1000),
+                        "after_hop": hop, "before_hop": hop + 1,
+                        "at": "stream" if streamed else "answer_start",
+                        "order": len(out.images)}
+                    shown_images.append((url, irec))
+                state["_compose_images"] = []
             elif fn == vision.TOOL_NAME and status == "ok" and res:
                 # One screened line of what the vision model saw: a
                 # heartbeat once content has started (CHANNEL ORDER).
@@ -5293,6 +5664,10 @@ def _run_turn(body: dict, streamed: bool):
                     payload, state, f"{hop}:{fn}:{c['id']}")
                 payload["_package_skills"].extend(prs)
                 section, _n = scrub_markers(section)
+            elif fn == codemode.TOOL_NAME and status == "ok":
+                # (already scrubbed; computed after the run, in call order)
+                section = state.get("_compose_section") or ""
+                state["_compose_section"] = ""
             tmsg = {"role": "tool", "tool_call_id": c["id"],
                     "content": repeats.cap_tool_result(res, fn, args)
                     + section}

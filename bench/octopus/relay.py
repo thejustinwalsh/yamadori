@@ -51,6 +51,9 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Headers the relay ADDS to every request it forwards (--inject-header NAME=VALUE, repeatable): how a probe sends
+# X-Yamadori-Features through a harness that has no setting for it (Hermes; Pi has its own provider headers).
+INJECT_HEADERS: dict[str, str] = {}
 HOP = {"connection", "keep-alive", "proxy-connection", "transfer-encoding", "te",
        "trailer", "upgrade", "content-length", "host"}
 
@@ -254,6 +257,7 @@ def make_handler(upstream: str, out_path: str):
                 row["request"] = _shape(body)
             headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
             headers["Host"] = f"{host}:{port}"
+            headers.update(INJECT_HEADERS)
             if body:
                 headers["Content-Length"] = str(len(body))
             col = None
@@ -371,7 +375,12 @@ def main() -> int:
     ap.add_argument("--listen", default="127.0.0.1:18234")
     ap.add_argument("--upstream", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--inject-header", action="append", default=[], metavar="NAME=VALUE",
+                    help="add this header to every forwarded request (repeatable)")
     a = ap.parse_args()
+    for kv in a.inject_header:
+        k, _, v = kv.partition("=")
+        INJECT_HEADERS[k.strip()] = v
     # --listen HOST:PORT[,HOST:PORT...]: the same relay on each address (the
     # WSL engine's containers reach the host on the WSL NAT address only)
     handler = make_handler(a.upstream, a.out)

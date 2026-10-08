@@ -313,6 +313,12 @@ def prepared(fx: dict, chat: dict, effort: str | None = None,
         # skills path forces it on, as a benchmark header does.
         feats = json.loads(hdr.get("x-yamadori-features") or "{}")
         body["_features"] = json.dumps(dict(feats, skills=True))
+    if ((fx.get("expect") or {}).get("tools") or {}).get("codemode"):
+        # The server toolbox is off by default (tiers.OFF_BY_DEFAULT, until its probe passes); the fixtures that
+        # check its overlap with a harness's own code mode force it on, in mode `only` (the mode that hides tools)
+        feats = json.loads(hdr.get("x-yamadori-features") or "{}")
+        body["_features"] = json.dumps(dict(json.loads(body.get("_features") or "{}"), **feats, codemode=True,
+                                            codemode_mode="only"))
     skill_select._STICKY.clear()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -575,9 +581,19 @@ def c_tools(fx, want, cx):
     want_held = set((want or {}).get("withheld") or [])
     got_held = {w["ours"] for w in held}
     ok = not dup and not over and named and want_held <= got_held
+    # THE SERVER TOOLBOX beside a harness's own code mode (operator, 2026-10-08): withheld where the client has one
+    # (and then nothing is hidden behind it), offered where it has none.
+    cm = out.get("_codemode") or {}
+    offered = set((want or {}).get("offered") or [])
+    not_offered = set((want or {}).get("not_offered") or [])
+    if offered or not_offered:
+        ok = ok and offered <= set(names) and not (not_offered & set(names))
+        if not_offered:
+            ok = (ok and cm.get("offered") is False and not cm.get("hidden")
+                  and "the client brings its own code mode" in str(cm.get("why")))
     return ok, (f"ours={sorted(out.get('_ours') or [])} withheld="
                 f"{[(w['ours'], w.get('client_tool')) for w in held]} "
-                f"dup={dup} overlap={over}")
+                f"dup={dup} overlap={over} codemode={cm.get('offered')}:{cm.get('why')}")
 
 
 CHECKS = {"accepted": c_accepted, "route": c_route, "utility": c_utility,

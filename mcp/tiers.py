@@ -1199,6 +1199,8 @@ def from_header(value: str | None) -> dict | None:
     types_ok.update({k: bool for k in BEHAVIOURS})
     # The package skills channel's rendering (mcp/package_skills.py MODES).
     types_ok["package_skills_mode"] = str
+    # The server toolbox's mode (mcp/codemode.py MODES: on | only).
+    types_ok["codemode_mode"] = str
     out = {k: v for k, v in d.items()
            if k in types_ok and isinstance(v, types_ok[k])
            and not (types_ok[k] is int and isinstance(v, bool))}
@@ -1277,6 +1279,20 @@ BEHAVIOURS = {
     #                   The rendering is `package_skills_mode` (inject |
     #                   router | both; header or YAMADORI_PACKAGE_SKILLS_MODE).
     "package_skills": ("YAMADORI_PACKAGE_SKILLS", "mcp_tools"),
+    #   codemode        THE SERVER TOOLBOX (operator, 2026-10-07: "we should
+    #                   make codemode in our server"; docs/CODEMODE.md): the
+    #                   one tool `yama_compose_tools` -- the model finds the
+    #                   server's tools (tools.search / describe / namespaces
+    #                   / all) and calls several together from a QuickJS
+    #                   script. OFF BY DEFAULT until its probe passes (THE
+    #                   TOOL RECIPE rule 7; bench/mcp/codemode_probe.py):
+    #                   YAMADORI_CODEMODE=1 or the header {"codemode": true}
+    #                   turns it on; allowed where the tier's `mcp_tools`
+    #                   flag is set (medium and up), a header forces it at
+    #                   any tier. The mode is `codemode_mode` (on | only;
+    #                   header or YAMADORI_CODEMODE_MODE): `only` hides the
+    #                   individual lookups it replaces.
+    "codemode": ("YAMADORI_CODEMODE", "mcp_tools"),
     #   preread         THE EXPERT FILE'S PRE-READ (mcp/preread.py; AGENTS.md
     #                   "Flash-Next's first prompt"): a model whose tier-table
     #                   row says `preread` has its llama-server's mmapped
@@ -1290,9 +1306,10 @@ BEHAVIOURS = {
     "preread_overlap": ("YAMADORI_PREREAD_OVERLAP", None),
 }
 # The switches that are OFF unless their variable (=1) or a header turns
-# them on; every other switch is on unless switched off. None since
-# package_skills was turned on (operator, 2026-10-06).
-OFF_BY_DEFAULT: frozenset = frozenset()
+# them on; every other switch is on unless switched off. `codemode` only
+# (package_skills was turned on, operator 2026-10-06; THE TOOL RECIPE rule 7:
+# the toolbox ships only after its probe).
+OFF_BY_DEFAULT: frozenset = frozenset({"codemode"})
 
 
 def _env_on(var: str, default: bool = True) -> bool:

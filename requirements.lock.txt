@@ -180,6 +180,7 @@ tzlocal==5.4.4
 urllib3==2.8.0
 uvicorn==0.53.0
 wandb==0.30.0
+wasmtime==49.0.0
 websockets==11.0.3
 Werkzeug==3.1.8
 xformers @ https://download.pytorch.org/whl/cu128/xformers-0.0.33-cp39-abi3-win_amd64.whl#sha256=d5635ceac32c8216744a18fb328c0eafdcdb45aaab3de415edf9b1caf6fa9dcc

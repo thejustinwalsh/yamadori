@@ -164,7 +164,7 @@ def describe_call(name: str, args: dict) -> str:
     # `package`: the MCP-backed package lookups (mcp/mcp_host.py);
     # `packages`: yama_resolve_packages (mcp/npm_resolve.py).
     for key in ("symbol", "pattern", "query", "path", "check", "prompt",
-                "package", "packages"):
+                "package", "packages", "script"):
         if args.get(key):
             return f"{name} {json.dumps(args[key])[:80]}"
     return name

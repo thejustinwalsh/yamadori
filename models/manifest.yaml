@@ -999,6 +999,25 @@ runtimes:
     lock: requirements.lock.txt
     freeze: pip
 
+  - id: codemode-wasi
+    role: "the server toolbox's sandbox (mcp/codemode_sandbox.py, mcp/codemode.py, docs/CODEMODE.md): quickjs-ng's own WASI build of qjs (qjs-wasi.wasm, release v0.17.0) run under wasmtime (wasmtime-py 49.0.0), in-process, with a WASI shim that grants nothing. Operator-approved downloads 2026-10-08 (\"Yes download the wasi and quickjs stuff we need to build our codemode sandbox\"). Replaces the native quickjs-ng binding of 2026-10-07 (removed from the lock)"
+    check: files
+    severity: warn
+    doc: docs/CODEMODE.md
+    # THE MODULE: https://github.com/quickjs-ng/quickjs/releases/download/v0.17.0/qjs-wasi.wasm (1,569,050 bytes),
+    # the release's own artifact, unmodified; sha256 42a732a676ec2d93488c19411e0fad283bf72658fdad746f089914b523c783b1
+    # is also the digest GitHub lists for the asset (verified 2026-10-08). `python mcp/codemode_sandbox.py fetch`
+    # re-obtains it (refuses any other sha256). bin/ is not committed. The release also ships qjs-wasi-reactor.wasm
+    # (sha256 1a4e0bce82f2faed14f5e2620174e3daf33e161bad75ce955ceeaca1f7c82572): NOT used -- it exports only
+    # qjs_init / qjs_init_argv / qjs_get_context / qjs_destroy and allocation, no eval, so a host cannot run a
+    # script in it; the command module with the host's own stdin/stdout shim is how the sandbox is driven.
+    # THE RUNTIME: PyPI wasmtime 49.0.0, wheel wasmtime-49.0.0-py3-none-win_amd64.whl, sha256
+    # 46a4e4220fd1bee45ad9c29a73cadad54373dad840eff104726490527bc7ef89 (8.3 MB; pinned in requirements.lock.txt,
+    # stack-python above). The module's 23 imports are all wasi_snapshot_preview1; mcp/test_codemode.py checks the
+    # module against exactly the shim's list.
+    files:
+      - {path: "C:/Users/jwals/llama-stack/bin/qjs-wasi.wasm", sha256: 42a732a676ec2d93488c19411e0fad283bf72658fdad746f089914b523c783b1}
+
   - id: laya-python
     role: ".venv-laya (Laya's torch env). RETIRED with Laya; the lock is kept to re-run old Laya results"
     status: retired

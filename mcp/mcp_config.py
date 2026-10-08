@@ -23,6 +23,10 @@ ONE SERVER (a row of `servers`):
                 "local": `command` (an argv), no container -- the offline
                 suites' fake server; refused unless YAMADORI_MCP_ALLOW_LOCAL=1
                 (a config file must not be a way to run a host command)
+  namespace     (optional) the group the server toolbox lists its tools under
+                (mcp/codemode.py `tools.namespaces()`, `tools.search(q,
+                {namespace})`); default the id. `namespace_description`: one
+                sentence for that listing
   package       what it is (name@version), for the record
   pinned        where its reproducibility record lives (models/manifest.yaml)
   call_timeout_s / call_timeout_why
@@ -151,6 +155,13 @@ _SERVER_TOOL = ("A server tool: it runs on the Yamadori server and does not "
 PACKAGELENS = {
     "id": "packagelens",
     "title": "PackageLens",
+    # The server toolbox groups its tools under this name (mcp/codemode.py;
+    # default: the id). A server added through the dashboard is discoverable
+    # there with no prompt change.
+    "namespace": "packages",
+    "namespace_description": ("Package registries (npm, PyPI, crates, ...): find a package by words, list its "
+                              "versions, read its README, resolve versions that install together. Hosted by the "
+                              "proxy through PackageLens."),
     "enabled": True,
     "runtime": "docker",
     "package": "packagelens-mcp@0.1.11",
