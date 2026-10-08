@@ -62,11 +62,12 @@ REM tier models (bench/deploy_tier_models.py)
 set "YAMADORI_TIER_MODELS=mcp\tier_models.yaml"
 REM max mode (bench/deploy_flash_next.py)
 set "YAMADORI_MAX_MODEL=flash-next"
+REM jjava one-pass reads (operator 2026-10-07; docs/DECIDE-BATCH.md)
+set "YAMADORI_DECIDER_BATCH=1"
 REM layout v3 (bench/deploy_layout_v3.py)
-set "YAMADORI_MAIN_CAP=209920"
+set "YAMADORI_MAIN_CAP=215040"
 set "YAMADORI_LANE_TOKENS=0"
 set "YAMADORI_SLOTS=1"
-REM jjava one-pass reads (operator 2026-10-07; docs/DECIDE-BATCH.md)
 set "YAMADORI_DECIDER_BATCH=1"
 start "" /B "%PY%" "%CD%\mcp\tools_api.py" >> "logs\tools-api.log" 2>&1
 
