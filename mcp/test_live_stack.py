@@ -780,12 +780,13 @@ def test_the_first_turn_carries_the_concept_seed():
     status, d, dt = chat([{"role": "system", "content":
                            f"[session {_nonce()}]"},
                           {"role": "user", "content": q}],
-                         reasoning_effort="medium")
+                         reasoning_effort="minimal")
     x = _x(d)
     inj = (x.get("ledger") or {}).get("inject") or {}
+    # the seed is on at low and up (operator 2026-10-06); minimal stays the bare tier
     check(status == 200 and not (x.get("session") or {}).get("seed")
           and "seed" not in (inj.get("parts") or []),
-          f"medium: no concept seed ({dt:.0f}s)",
+          f"minimal: no concept seed ({dt:.0f}s)",
           json.dumps({"status": status, "session": x.get("session"),
                       "inject": inj})[:400])
 
@@ -3004,12 +3005,12 @@ def test_responses_titles_and_side_calls():
 
 
 def test_responses_seed_and_window():
-    """The concept seed at `high` and none at `medium` (the first user turn of
+    """The concept seed at `medium` (low and up since 2026-10-06) and none at `minimal` (the first user turn of
     a Responses conversation), and a prompt past the window refused HTTP 400
     context_length_exceeded BEFORE any byte, blocking and streamed -- the
     answer Codex and Copilot compact on."""
     q = "Name one data structure for fast prefix lookups on strings, in one word."
-    for effort, want in (("high", True), ("medium", False)):
+    for effort, want in (("medium", True), ("minimal", False)):   # the seed: low and up (operator 2026-10-06)
         r = _resp_call({"model": "yamadori", "instructions":
                         f"[session {_nonce()}]", "input": [_rmsg("user", q)],
                         "reasoning": {"effort": effort}, "max_output_tokens": 300,
