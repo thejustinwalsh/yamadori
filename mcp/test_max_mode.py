@@ -1155,7 +1155,7 @@ def test_internal_work_leaves_a_locked_card():
 
 def test_helper_window_and_fit():
     """A JOB ROUTED TO bonsai-a4000 IS BUDGETED AGAINST ITS OWN WINDOW (coordinator, 2026-09-30): the table's fitted
-    141,312 (main cap 138,240), not the main line; an oversize job is refused with its sizes BEFORE anything is sent
+    128,000 (main cap 124,928; the fitted 141,312 less the batched-reads cells), not the main line; an oversize job is refused with its sizes BEFORE anything is sent
     (model.WindowExceeded), never cut off mid-generation; and a job claimed for the A4000 never reaches the main card
     (max_mode.check_scope)."""
     import budget
@@ -1167,32 +1167,34 @@ def test_helper_window_and_fit():
     saved_open = urllib.request.urlopen
     try:
         w = budget.model_window("bonsai-a4000") or {}
-        check(w.get("ctx") == 141312 and w.get("main_cap") == 138240,
-              "the table carries bonsai-a4000's fitted window (bench/a4000_fit.py)", w)
+        # the fitted 141,312 less 13,312 cells for --decide-seqs 2 since 2026-10-07 (docs/DECIDE-BATCH.md)
+        check(w.get("ctx") == 128000 and w.get("main_cap") == 124928,
+              "the table carries bonsai-a4000's window (bench/a4000_fit.py's fit less the batched-reads cells)", w)
+        CAP = w.get("main_cap") or 124928
         check(tiers.window_model_of("bonsai-a4000") == "bonsai-a4000" and tiers.window_model_of("bonsai") is None
               and tiers.window_model_of("yamadori") is None,
               "only a helper server's own window replaces the request's (a main model's follows it as before)")
         big = "word " * 60000                                         # ~100K tokens by the high estimate
         shaped = model.shape({"messages": [{"role": "user", "content": big}]}, "medium", role="helper")
         est = tiers.estimate_prompt_tokens(shaped)
-        check(shaped.get("model") == "bonsai-a4000" and shaped["max_tokens"] + est <= 138240,
-              "a locked card's job is shaped for bonsai-a4000: prompt + max_tokens within its 138,240 cap",
+        check(shaped.get("model") == "bonsai-a4000" and shaped["max_tokens"] + est <= CAP,
+              "a locked card's job is shaped for bonsai-a4000: prompt + max_tokens within its cap",
               {"model": shaped.get("model"), "max_tokens": shaped.get("max_tokens"), "prompt_est": est})
         sent: list = []
         urllib.request.urlopen = lambda req, *a, **k: sent.append(req) or (_ for _ in ()).throw(OSError("x"))
-        huge = "word " * 90000                                        # ~150K tokens by the estimate: past 138,240
+        huge = "word " * 90000                                        # ~150K tokens by the estimate: past the cap
         try:
             model.post(model.shape({"messages": [{"role": "user", "content": huge}]}, "medium"))
             check(False, "an oversize job is refused")
         except model.WindowExceeded as e:
-            check(e.model == "bonsai-a4000" and e.window == 138240 and e.prompt > 138240 - e.floor and not sent
+            check(e.model == "bonsai-a4000" and e.window == CAP and e.prompt > CAP - e.floor and not sent
                   and "retryable: no" in str(e),
                   "an oversize job is refused before anything is sent, with its sizes (prompt, floor, window)",
                   str(e)[:300])
         send = {"model": "bonsai-a4000", "messages": [{"role": "user", "content": big}], "max_tokens": 200000,
                 "reasoning_budget_tokens": 190000}
         rec = model.fit_window(send)
-        check(rec and send["max_tokens"] + tiers.estimate_prompt_tokens(send) <= 138240
+        check(rec and send["max_tokens"] + tiers.estimate_prompt_tokens(send) <= CAP
               and send["reasoning_budget_tokens"] <= send["max_tokens"] - tiers.A_MIN,
               "a request that fits has max_tokens and its thinking cut to what the window leaves", rec)
         check(model.fit_window({"model": "bonsai", "messages": [], "max_tokens": 10**6}) is None,
