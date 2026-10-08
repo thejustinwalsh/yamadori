@@ -873,6 +873,46 @@ empty or error calls is a tool defect to fix, not a budget spent.
   **Not yet run live.** The mapping cannot be replayed
   from the corpus, which keeps 2,000 characters of each request (11 of its 12
   Hermes compactions are the iterative form, all preamble in that head).
+  **THE MAPPING'S FAILURE (operator, 2026-10-07: "Why is there summary
+  discrepancy? We should fix.")**: the pagoda run's 20 Hermes compactions
+  (tier high, Bonsai, 12:00-17:36) mapped 4 times and went up as sent 16:
+  13 "the span's first turn is not in the stored conversation", 2 "the
+  span's last turn ...", 1 "no stored conversation" (a proxy restart: the
+  store is in memory). Each as-sent run was cold, thinking off, and on the
+  locked card's one slot (the conversation's own cache gone: "pinned 203553
+  reused 0" right after); 13 of the summaries then finished `length`
+  (fixed 2026-10-07, 97b529f) and Hermes discarded them. Hermes' REAL
+  compressor was driven offline (`bench/harness_shapes/hermes/
+  drive_compressor.py`, fixture `mcp/fixtures/hermes_compactions.json`, the
+  install at ee5ee84a) and the old matcher failed the same ways, 480 of 480
+  compactions mapping now (`mcp/test_compaction_map.py`): (1) Hermes folds
+  its summary into a row of the kept tail and restates the unfinished request
+  ("[STILL IN PROGRESS ...] <the task>") on it, then unwraps that row at the
+  next compaction -- the unwrapped text is the FIRST record and the stored
+  message is the carrier, which does not begin with it (one request and a
+  long tool loop, the pagoda: ok, ok, then first-turn failures every time,
+  the log's exact pattern; the previous summary's "User asked: '[STILL IN
+  PROGRESS ...] Continue'" is that row); (2) the search was greedy -- a
+  record with no id ("Continue", an assistant turn with no text) took the
+  first stored turn that began alike, skipped the tool results between, and
+  failed every record after it ("last turn"), or put the span on the wrong
+  turns. NOW (`mcp/compaction.py`): tool results are placed by id and an
+  assistant turn by the call its result answers (ANCHORS); the other records
+  are matched between the anchors, a run before the first anchor tight
+  against it; a carrier is read on the pieces Hermes wraps (`heads`); turns
+  NEWER than the stored conversation (the client appended a tool result the
+  model has not read) go into the instruction as text, only when the last
+  record that maps is the stored conversation's last message. A mapping is
+  still exact: the first and every interior record must be found, a
+  non-match goes up as sent. Why it did not map is recorded:
+  `x_yamadori.compaction.unmapped` {which_turn, why, unmatched[{record, role,
+  id, text, cause, nearest}], best_partial_match{matched, total,
+  stored_messages}, conversation, tried}, one proxy.log line, and
+  `logs/compaction_trace.jsonl` (YAMADORI_COMPACTION_TRACE; both sides' shapes:
+  roles, ids, lengths, first 40 characters). **Not yet run live.** What is
+  NOT shown: the 13 real transcripts (not kept), so which carrier shape each
+  failure took is inferred from Hermes' source and the log's pattern; the
+  trace answers it next time.
 - **A `finish_reason: length` is a budget event, never an answer.**
   `model.BudgetEvent`. To the client it is `finish_reason: "length"` with
   the content that was generated -- the "[no answer: ... token limit ...]"

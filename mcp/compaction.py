@@ -37,9 +37,11 @@ the answer as generated, then one user turn with the client's instruction.
              turn (`in_place`). When its history is the stored conversation's
              history, the stored prompt replaces it (`splice_in_place`).
   flattened  Hermes' shape (`parse_flattened`). Its records are mapped onto
-             the stored prompt by text (`map_records`), and the flattened copy
-             is replaced by a reference to that span (`instruction_for`) --
-             if the copy stayed, it would be prefilled again and nothing saved.
+             the stored prompt by tool-call id and by text (`map_records`:
+             anchors, carriers, THE MAPPING'S FAILURE below), and the
+             flattened copy is replaced by a reference to that span
+             (`instruction_for`) -- if the copy stayed, it would be prefilled
+             again and nothing saved.
 
 Either way it falls back to the request as sent, and says why, when nothing
 stored matches: a restart, another account, an evicted entry, a history that
@@ -240,9 +242,14 @@ def parse_flattened(text: str) -> dict | None:
         role, rid = label.lower(), None
         if label.startswith("TOOL RESULT"):
             role, rid = "tool", label[len("TOOL RESULT"):].strip() or None
+        raw = block[h.start():hits[i + 1].start() if i + 1 < len(hits)
+                    else len(block)].strip("\n")
         if role == "assistant":
             body = body.split("\n[Tool calls:\n", 1)[0]
-        records.append({"role": role, "id": rid, "text": body})
+        # `raw`: the record as the harness wrote it (label, tool calls and
+        # all), for the turns carried into the instruction as text when the
+        # stored conversation does not hold them (instruction_for).
+        records.append({"role": role, "id": rid, "text": body, "raw": raw})
     t = _TARGET.search(text[end:])
     iterative = m.group(0).startswith("NEW TURNS")
     previous = None
@@ -345,9 +352,12 @@ def parse_transcript(text: str) -> dict | None:
         body = block[h.end():hits[i + 1].start() if i + 1 < len(hits)
                      else len(block)]
         label = h.group(1)
+        raw = block[h.start():hits[i + 1].start() if i + 1 < len(hits)
+                    else len(block)].strip("\n")
         if label == "User":
             body = _ATTACHED_LINE.sub("", body)
-            records.append({"role": "user", "id": None, "text": body})
+            records.append({"role": "user", "id": None, "text": body,
+                            "raw": raw})
         elif label.startswith("Assistant"):
             # One assistant MESSAGE: its thinking, text and calls fold into
             # one record (a message's records are consecutive).
@@ -355,8 +365,9 @@ def parse_transcript(text: str) -> dict | None:
             if last is None or last["role"] != "assistant" or (
                     label == "Assistant" and last.get("_text_done")):
                 last = {"role": "assistant", "id": None, "text": "",
-                        "calls": []}
+                        "calls": [], "raw": ""}
                 records.append(last)
+            last["raw"] = (last["raw"] + "\n" + raw) if last["raw"] else raw
             if label == "Assistant":
                 last["text"] = (last["text"] + "\n" + body) if last["text"] \
                     else body
@@ -364,7 +375,8 @@ def parse_transcript(text: str) -> dict | None:
                 last["calls"] += _call_names(label, body)
                 last["_text_done"] = True
         elif label in ("Tool result", "Tool error"):
-            records.append({"role": "tool", "id": None, "text": body})
+            records.append({"role": "tool", "id": None, "text": body,
+                            "raw": raw})
         # System update / Synthetic context / Shell: OpenCode's own records,
         # nothing the chat history holds as a message of its own.
     for r in records:
@@ -422,52 +434,366 @@ def _norm(s: str) -> str:
     return " ".join(session_id.strip(s or "").split())
 
 
-def _same(record: dict, msg: dict) -> bool:
-    if record["role"] != msg.get("role"):
-        return False
-    if record["role"] == "tool" and record.get("id"):
-        return record["id"] == msg.get("tool_call_id")
-    if record.get("calls") is not None:
-        # Pi's and OpenCode's records name an assistant's calls: the stored
-        # turn must make the same calls, in order.
-        names = [(c.get("function") or {}).get("name")
-                 for c in (msg.get("tool_calls") or []) if isinstance(c, dict)]
-        if names != record["calls"]:
+# ----------------------------------------------------- Hermes' carriers ----
+#
+# THE MAPPING'S FAILURE, FOUND 2026-10-07 (operator: "Why is there summary
+# discrepancy? We should fix."). The pagoda run's 20 Hermes compactions: 4
+# mapped, 16 went up as sent -- 13 "the span's first turn is not in the
+# stored conversation", 2 "the span's last turn ...", 1 "no stored
+# conversation" (the proxy had restarted: this store is in memory). Hermes
+# (agent/context_compressor.py, the install at ee5ee84a, 2026-09-24) was
+# driven offline on a synthetic agentic transcript, its real compressor with
+# a stub summariser (bench/harness_shapes/hermes/drive_compressor.py, the
+# fixture mcp/fixtures/hermes_compactions.json), and the OLD matcher failed
+# the same two ways:
+#
+#   1. A COMPACTION'S CARRIER IS EDITED IN PLACE. When the summary row cannot
+#      alternate roles Hermes folds it into the first row of the kept tail
+#      (_merge_summary_into_tail_row): header + the row's old text + a
+#      delimiter + the summary + an end marker, or, for a request it keeps
+#      live, the summary + the end marker + the row's old text; and a
+#      restated unfinished request ("[STILL IN PROGRESS ...]", or a user's
+#      "Continue") is merged after the end marker (_reappend_inflight_user_
+#      task). At the NEXT compaction Hermes unwraps the carrier back to the
+#      row's old text (_strip_context_summary_handoff_message) and that is
+#      the FIRST record of the transcript. The stored message is the carrier
+#      as the client sent it, which does not BEGIN with that text: "first
+#      turn not in the stored conversation", every time, until a compaction
+#      whose carrier was a standalone summary or a tool row.
+#   2. THE SEARCH WAS GREEDY. A record without an id (a user turn, an
+#      assistant's text, very often EMPTY) took the first stored message
+#      after the cursor that began with it, so "Continue" matched the LAST of
+#      several "Continue" turns, the cursor jumped past the tool results
+#      between, and every record after it failed: "the span's last turn is
+#      not in the stored conversation" or "only 8 of 30 turns map".
+#
+# The records with an id (a tool result: [TOOL RESULT <tool_call_id>]) are
+# ANCHORS, and an assistant's turn is placed by the call ids its tool results
+# carry; a record without one is matched only BETWEEN the anchors around it.
+# A carrier is matched on the pieces Hermes wraps (HEADS). A transcript may
+# END with turns newer than the stored conversation (the compaction fires
+# after the client appended a tool result the model has not read yet): those
+# trailing records are carried into the instruction as text, only when the
+# last record that maps is the stored conversation's own last message.
+# Leading and interior records still must all map -- a mapping stays exact.
+
+# Hermes' wrappers of a compaction carrier (agent/context_compressor.py
+# _MERGED_PRIOR_CONTEXT_HEADER, _MERGED_SUMMARY_DELIMITER,
+# _SUMMARY_END_MARKER). A carrier whose wrappers are not these is not
+# unwrapped, and the unmapped record says so (explain).
+CARRIER_HEADER = "[PRIOR CONTEXT — for reference only; not a new message]"
+CARRIER_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
+CARRIER_END = ("--- END OF CONTEXT SUMMARY — respond to the message "
+               "below, not the summary above ---")
+# How much of a stored message's text is read to build its heads: enough that
+# MATCH_CHARS normalised characters survive any whitespace collapse.
+HEAD_SCAN = 4 * MATCH_CHARS
+
+
+def heads(raw: str) -> list[str]:
+    """The normalised texts a stored message can BEGIN with, as far as a
+    transcript record is concerned: its own text, and -- when it is a
+    Hermes compaction carrier -- the row's old text before the delimiter
+    (header out) and the text after the end marker."""
+    raw = raw or ""
+    out = [_norm(raw[:HEAD_SCAN])]
+    if CARRIER_DELIMITER in raw:
+        prior = raw.split(CARRIER_DELIMITER, 1)[0].strip()
+        if prior.startswith(CARRIER_HEADER):
+            prior = prior[len(CARRIER_HEADER):]
+        out.append(_norm(prior[:HEAD_SCAN]))
+    if CARRIER_END in raw:
+        after = raw.split(CARRIER_END, 1)[1]
+        out.append(_norm(after[:HEAD_SCAN]))
+    return out
+
+
+class View:
+    """A stored conversation, indexed once for a mapping: the tool results by
+    id, the assistant turns by the call ids they made, and each message's
+    heads on demand."""
+
+    def __init__(self, stored: list[dict]):
+        self.msgs = [m if isinstance(m, dict) else {} for m in stored]
+        self.tool_at: dict[str, int] = {}
+        self.call_at: dict[str, int] = {}
+        for i, m in enumerate(self.msgs):
+            if m.get("role") == "tool" and m.get("tool_call_id"):
+                self.tool_at.setdefault(m["tool_call_id"], i)
+            elif m.get("role") == "assistant":
+                for c in m.get("tool_calls") or []:
+                    if isinstance(c, dict) and c.get("id"):
+                        self.call_at.setdefault(c["id"], i)
+        self._heads: dict[int, list[str]] = {}
+
+    def heads(self, i: int) -> list[str]:
+        if i not in self._heads:
+            self._heads[i] = heads(_text(self.msgs[i]))
+        return self._heads[i]
+
+    def same(self, record: dict, i: int) -> bool:
+        """Does record `record` begin stored message `i`?"""
+        msg = self.msgs[i]
+        if record["role"] != msg.get("role"):
             return False
-    a = _norm(record["text"].split("\n...[truncated]...\n", 1)[0])[:MATCH_CHARS]
-    b = _norm(_text(msg))
-    if not a:
-        return not b
-    # The stored copy may carry what the proxy added AFTER the client's
-    # text (a hint on a user turn), never before it.
-    return b.startswith(a)
+        if record["role"] == "tool" and record.get("id"):
+            return record["id"] == msg.get("tool_call_id")
+        if record.get("calls") is not None:
+            # Pi's and OpenCode's records name an assistant's calls: the
+            # stored turn must make the same calls, in order.
+            names = [(c.get("function") or {}).get("name")
+                     for c in (msg.get("tool_calls") or [])
+                     if isinstance(c, dict)]
+            if names != record["calls"]:
+                return False
+        a = _norm(record["text"].split("\n...[truncated]...\n", 1)[0]
+                  )[:MATCH_CHARS]
+        hs = self.heads(i)
+        if not a:
+            return not hs[0]
+        # The stored copy may carry what the proxy added AFTER the client's
+        # text (a hint on a user turn), never before it.
+        return any(h.startswith(a) for h in hs)
 
 
-def map_records(records: list[dict], stored: list[dict]) -> dict:
-    """Map flattened records onto stored messages, in order. {mapped, first,
-    last, matched, total, why}; `first`/`last` index `stored`."""
-    j, idx = 0, []
-    for r in records:
-        k = next((i for i in range(j, len(stored)) if _same(r, stored[i])), None)
-        if k is None:
-            idx.append(None)
+def _same(record: dict, msg: dict) -> bool:
+    return View([msg]).same(record, 0)
+
+
+def align(records: list[dict], view: View) -> list[int | None]:
+    """The stored index of each record, or None. In order.
+
+    ANCHORS first: a tool result is placed by its id, and an assistant turn
+    by the call its tool result answers (the call ids are the conversation's
+    own, unique, and survive everything Hermes does to a row's text). The
+    records between anchors are then matched on their text between the
+    stored turns the anchors fix: a run BEFORE the first anchor backwards
+    from it (so it sits tight against it, not at the first turn of the
+    stored conversation that happens to begin alike), any other run forwards
+    from the anchor before it. A transcript with no ids at all (Pi's,
+    OpenCode's) is one run, matched forwards."""
+    n, m = len(records), len(view.msgs)
+    idx: list[int | None] = [None] * n
+    last = -1
+    for i, r in enumerate(records):
+        k = None
+        if r["role"] == "tool" and r.get("id"):
+            k = view.tool_at.get(r["id"])
+        elif (r["role"] == "assistant" and i + 1 < n
+              and records[i + 1]["role"] == "tool"):
+            k = view.call_at.get(records[i + 1].get("id"))
+        if k is not None and k > last:
+            idx[i] = last = k
+
+    def by_id(r: dict) -> bool:
+        return r["role"] == "tool" and bool(r.get("id"))
+
+    i = 0
+    while i < n:
+        if idx[i] is not None:
+            i += 1
             continue
-        idx.append(k)
-        j = k + 1
+        a = i
+        while i < n and idx[i] is None:
+            i += 1
+        p = idx[a - 1] if a > 0 else -1
+        q = idx[i] if i < n else m
+        if p < 0 and q < m:
+            hi = q - 1
+            for t in range(i - 1, a - 1, -1):
+                if by_id(records[t]):
+                    continue
+                k = next((c for c in range(hi, -1, -1)
+                          if view.same(records[t], c)), None)
+                if k is not None:
+                    idx[t], hi = k, k - 1
+        else:
+            lo = p + 1
+            for t in range(a, i):
+                if by_id(records[t]):
+                    continue
+                k = next((c for c in range(lo, q)
+                          if view.same(records[t], c)), None)
+                if k is not None:
+                    idx[t], lo = k, k + 1
+    return idx
+
+
+def _verdict(records: list[dict], idx: list[int | None],
+             view: View) -> dict:
+    """What an alignment amounts to: {mapped, why, which, matched, total,
+    first, last, trailing, covered}. `trailing`: records after the last one
+    that maps, allowed only when that one is the stored conversation's own
+    last message and none of them is a turn the stored conversation holds
+    (they are newer than anything stored)."""
+    m = len(view.msgs)
     got = [i for i in idx if i is not None]
-    out = {"matched": len(got), "total": len(records),
-           "first": idx[0] if idx else None, "last": idx[-1] if idx else None}
+    n = len(records)
+    out = {"matched": len(got), "total": n, "first": idx[0] if idx else None,
+           "last": None, "trailing": 0, "covered": 0, "which": None}
     if not records:
         return dict(out, mapped=False, why="no records in the transcript")
-    if idx[0] is None or idx[-1] is None:
-        return dict(out, mapped=False,
-                    why=("the span's " + ("first" if idx[0] is None else "last")
-                         + " turn is not in the stored conversation"))
-    if len(got) < MIN_MAPPED * len(records):
-        return dict(out, mapped=False,
-                    why=f"only {len(got)} of {len(records)} turns map "
+    if idx[0] is None:
+        return dict(out, mapped=False, which="first",
+                    why="the span's first turn is not in the stored "
+                        "conversation")
+    last = max(i for i, k in enumerate(idx) if k is not None)
+    out.update(last=idx[last], trailing=n - 1 - last, covered=last + 1)
+    stray = next((i for i, r in enumerate(records)
+                  if idx[i] is None and r["role"] == "tool" and r.get("id")
+                  and r["id"] in view.tool_at), None)
+    if stray is not None:
+        return dict(out, mapped=False, which="interior",
+                    why=f"turn {stray} of the span is in the stored "
+                        "conversation, out of order")
+    if out["trailing"] and idx[last] != m - 1:
+        return dict(out, mapped=False, which="last",
+                    why="the span's last turn is not in the stored "
+                        "conversation")
+    if len(got) < MIN_MAPPED * (last + 1):
+        return dict(out, mapped=False, which="interior",
+                    why=f"only {len(got)} of {last + 1} turns map "
                         f"(needs {MIN_MAPPED:.0%})")
-    return dict(out, mapped=True, why=f"{len(got)} of {len(records)} turns map")
+    why = f"{len(got)} of {n} turns map"
+    if out["trailing"]:
+        why += (f"; the last {out['trailing']} are newer than the stored "
+                "conversation and go in as text")
+    return dict(out, mapped=True, why=why)
+
+
+def map_records(records: list[dict], stored: list[dict],
+                view: View | None = None) -> dict:
+    """Map flattened records onto stored messages, in order. {mapped, first,
+    last, matched, total, trailing, why, which, idx}; `first`/`last` index
+    `stored`; `idx` is each record's stored index (None: not found)."""
+    view = view or View(stored)
+    idx = align(records, view)
+    return dict(_verdict(records, idx, view), idx=idx)
+
+
+def _head(s: str, n: int = 60) -> str:
+    return _norm(s)[:n]
+
+
+def explain(records: list[dict], stored: list[dict], mapping: dict,
+            client: list[dict] | None = None, view: View | None = None,
+            limit: int = 3) -> dict:
+    """Why a mapping failed, for x_yamadori.compaction.unmapped and the
+    trace: {which_turn, why, unmatched: [{record, role, id, text, cause,
+    nearest}], best_partial_match: {matched, total, stored_messages, first,
+    last}}. `cause` says what was seen: an id that is not in the stored
+    conversation, an id before the cursor, text found only elsewhere in the
+    conversation or only in the client's own form of it (the proxy changed
+    it), or nothing that begins like it (`nearest`: the stored message of
+    that role sharing the longest start, with how many characters)."""
+    view = view or View(stored)
+    idx = mapping.get("idx") or [None] * len(records)
+    cview = View(client) if client else None
+    rows = []
+    for i, r in enumerate(records):
+        if idx[i] is not None:
+            continue
+        row = {"record": i, "role": r["role"], "id": r.get("id"),
+               "text": _head(r["text"])}
+        if r["role"] == "tool" and r.get("id"):
+            at = view.tool_at.get(r["id"])
+            row["cause"] = ("its id is not in the stored conversation"
+                            if at is None else
+                            f"its id is stored turn {at}, behind a turn that "
+                            "mapped later")
+        else:
+            hit = next((q for q in range(len(view.msgs)) if view.same(r, q)),
+                       None)
+            if hit is not None:
+                row["cause"] = (f"begins stored turn {hit}, outside the "
+                                "anchors around it")
+            elif cview and any(cview.same(r, q)
+                               for q in range(len(cview.msgs))):
+                row["cause"] = ("begins a turn of the client's own form of "
+                                "the conversation but no stored one (the "
+                                "proxy changed its start)")
+            else:
+                a = _norm(r["text"].split("\n...[truncated]...\n", 1)[0]
+                          )[:MATCH_CHARS]
+                best = (0, None)
+                for q, msg in enumerate(view.msgs):
+                    if msg.get("role") != r["role"]:
+                        continue
+                    for h in view.heads(q):
+                        c = 0
+                        for x, y in zip(a, h):
+                            if x != y:
+                                break
+                            c += 1
+                        if c > best[0]:
+                            best = (c, q)
+                row["cause"] = "no stored turn of that role begins with it"
+                if best[1] is not None:
+                    row["nearest"] = {"stored": best[1], "common": best[0],
+                                      "text": _head(_text(view.msgs[best[1]]))}
+        rows.append(row)
+    return {"which_turn": mapping.get("which"), "why": mapping.get("why"),
+            "unmatched": rows[:limit], "unmatched_count": len(rows),
+            "best_partial_match": {
+                "matched": mapping.get("matched"),
+                "total": mapping.get("total"),
+                "stored_messages": len(view.msgs),
+                "first": mapping.get("first"), "last": mapping.get("last")}}
+
+
+# ------------------------------------------------------------ the trace ----
+
+def trace_path() -> str:
+    return os.environ.get("YAMADORI_COMPACTION_TRACE") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs",
+        "compaction_trace.jsonl")
+
+
+def trace(entry: dict) -> None:
+    """One line per flattened compaction that did not map: what the
+    transcript held and what was stored, structurally -- roles, ids, lengths
+    and the first characters of each turn, never more (the corpus keeps 2,000
+    characters of a request, which is how the pagoda run's failures could
+    not be read, 2026-10-07). Best effort; YAMADORI_COMPACTION_TRACE=off
+    turns it off."""
+    import json
+    p = trace_path()
+    if p.lower() == "off":
+        return
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def digest(msgs: list[dict], n: int = 40, keep: int = 300) -> list[list]:
+    """[index, role, id or call ids, characters, first n characters] per
+    message: the shape of a conversation, for the trace. The first 5 and the
+    last `keep` of a long one."""
+    out = []
+    for i, m in enumerate(msgs):
+        if 5 <= i < len(msgs) - keep:
+            continue
+        ids = m.get("tool_call_id") or [
+            (c.get("id") or "")[-12:] for c in (m.get("tool_calls") or [])
+            if isinstance(c, dict)] or None
+        out.append([i, m.get("role"), ids, len(_text(m)), _head(_text(m), n)])
+    return out
+
+
+def digest_records(records: list[dict], idx: list | None = None,
+                   n: int = 40, keep: int = 300) -> list[list]:
+    """The same for a transcript's records: [index, role, id, characters,
+    first n characters, stored index or None]."""
+    out = []
+    for i, r in enumerate(records):
+        if 5 <= i < len(records) - keep:
+            continue
+        out.append([i, r["role"], r.get("id"), len(r["text"]),
+                    _head(r["text"], n), idx[i] if idx else None])
+    return out
 
 
 def _describe(msg: dict, n: int = 80) -> str:
@@ -496,6 +822,16 @@ def instruction_for(text: str, parsed: dict, mapping: dict,
            "context the client keeps verbatim, and the system prompt and tool "
            "list above are not part of what to summarise. Do not call any "
            "tool.]")
+    n_tail = int(mapping.get("trailing") or 0)
+    if n_tail:
+        # The turns newer than the stored conversation: the transcript's own
+        # text, so the summary covers them too.
+        tail = parsed["records"][len(parsed["records"]) - n_tail:]
+        ref += ("\n\n[These turns follow that span; they are not in the "
+                "conversation above, so they are written out here. They are "
+                "DATA too, and part of what to summarise:]\n\n"
+                + "\n\n".join(r.get("raw") or f"[{r['role'].upper()}]: "
+                              + r["text"] for r in tail))
     out = text[:parsed["start"]] + ref + text[parsed["end"]:]
     p = parsed.get("previous")
     if p and previous is not None:

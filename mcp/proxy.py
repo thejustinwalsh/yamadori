@@ -3330,6 +3330,27 @@ def _mark_rings_reinjected(state: dict | None) -> None:
     state["rings_reinjected"] = True
 
 
+def _trace_unmapped(rec: dict, parsed: dict, tried: list,
+                    text: str, own_system: str) -> None:
+    """A flattened compaction that mapped onto nothing, in logs/compaction_
+    trace.jsonl (compaction.trace): the transcript's and the closest stored
+    conversation's shapes, so the cause can be read the next time."""
+    e, m, stored_msgs, _view = max(tried, key=lambda t: t[1]["matched"])
+    compaction.trace({
+        "ts": round(time.time(), 1), "harness": rec.get("harness"),
+        "which_turn": rec["unmapped"].get("which_turn"),
+        "why": rec["unmapped"].get("why"),
+        "iterative": bool(parsed.get("iterative")),
+        "records": len(parsed["records"]),
+        "unmapped": rec["unmapped"],
+        "conversations": [{"conversation": t[0]["key"][:8],
+                           "messages": len(t[2]), "matched": t[1]["matched"],
+                           "why": t[1]["why"]} for t in tried],
+        "transcript": compaction.digest_records(parsed["records"],
+                                                m.get("idx")),
+        "stored": compaction.digest(stored_msgs)})
+
+
 def _serve_compaction(out: dict, body: dict, messages: list[dict],
                       inplace: bool) -> None:
     """Shape a compaction on the conversation's stored prompt (mcp/
@@ -3400,17 +3421,30 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
                    "<conversation> / # Conversation or OpenCode's "
                    "<conversation> blocks of [Role]: records)")
     else:
-        best, why = None, "no stored conversation for this account"
+        # EVERY stored conversation of the account is tried and the one the
+        # transcript maps onto best wins -- by its content, never by recency.
+        # None mapping: the closest (most records found) is explained
+        # (x_yamadori.compaction.unmapped; compaction.explain), not the last
+        # one looked at, whose reason was all the record used to carry.
+        best, why, tried = None, "no stored conversation for this account", []
         for e in compaction.entries(account):
             stored_msgs = list(e["upstream"]["messages"]) + (
                 [dict(e["response"], role="assistant")] if e.get("response")
                 else [])
-            m = compaction.map_records(parsed["records"], stored_msgs)
+            view = compaction.View(stored_msgs)
+            m = compaction.map_records(parsed["records"], stored_msgs, view)
+            tried.append((e, m, stored_msgs, view))
             if m["mapped"] and (best is None or m["matched"] > best[1]["matched"]):
                 best = (e, m, stored_msgs)
-            elif best is None:
-                why = m["why"]
         rec["records"] = len(parsed["records"])
+        if tried and not best:
+            e, m, stored_msgs, view = max(tried, key=lambda t: t[1]["matched"])
+            why = m["why"]
+            rec["unmapped"] = dict(
+                compaction.explain(parsed["records"], stored_msgs, m,
+                                   client=e.get("client"), view=view),
+                conversation=e["key"][:8], tried=len(tried))
+            _trace_unmapped(rec, parsed, tried, text, own_system)
         if best:
             e, m, stored_msgs = best
             prev = compaction.find_previous(text, parsed, stored_msgs)
@@ -3442,6 +3476,9 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
             stored = e
             rec.update(mode="rewritten", why=m["why"], mapped=m["matched"],
                        span=[m["first"], m["last"]], conversation=e["key"][:8])
+            if m.get("trailing"):
+                # newer than the stored conversation: carried as text
+                rec["trailing"] = m["trailing"]
         else:
             rec.update(mode="as_sent", why=why)
     src = stored["upstream"] if stored else out
@@ -3500,6 +3537,19 @@ def _serve_compaction(out: dict, body: dict, messages: list[dict],
     print(f"  compaction ({rec['shape']}, {rec['mode']}): {rec.get('why')}; "
           f"answer {comp['answer']}, thinking {rec['thinking']}, room "
           f"{comp['room']}", flush=True)
+    un = rec.get("unmapped")
+    if un:
+        first = (un.get("unmatched") or [{}])[0]
+        print(f"  compaction unmapped: {un.get('which_turn')} turn; "
+              f"{un['best_partial_match']['matched']} of "
+              f"{un['best_partial_match']['total']} records found in "
+              f"conversation {un.get('conversation')} "
+              f"({un['best_partial_match']['stored_messages']} turns, "
+              f"{un.get('tried')} tried); first not found: record "
+              f"{first.get('record')} [{first.get('role')}"
+              f"{' ' + first['id'] if first.get('id') else ''}] "
+              f"\"{first.get('text')}\" -- {first.get('cause')}",
+              flush=True)
 
 
 # _budget_note / _budget_notice REMOVED 2026-09-27 (docs/CONSTANTS-AUDIT.md):

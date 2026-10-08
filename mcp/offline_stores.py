@@ -65,6 +65,9 @@ STORES = {
     "YAMADORI_DECIDER_LOG": "decider_disagreements.jsonl",
     "YAMADORI_DECIDER_DECISIONS": "decider_decisions.jsonl",
     "YAMADORI_DECIDER_LABELS": "decider_labels.jsonl",
+    # a flattened compaction that mapped onto nothing (mcp/compaction.py
+    # trace): its shape and the stored conversation's, one line each
+    "YAMADORI_COMPACTION_TRACE": "compaction_trace.jsonl",
 }
 # NOT moved (read as fixtures; the guard refuses a write to them): the held
 # packages and index/packages/registry_history.json,
