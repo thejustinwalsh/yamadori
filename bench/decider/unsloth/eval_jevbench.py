@@ -57,7 +57,7 @@ def collect(args) -> int:
     for fn, tier in splits.items():
         for t in tasks.load_jsonl(os.path.join(CLONE, "datasets", "public", fn)):
             items.append((tier, t))
-    model, tok = FastDecisionModel.from_pretrained(args.ckpt, max_seq_length=4096, load_in_4bit=True)
+    model, tok = FastDecisionModel.from_pretrained(args.ckpt, max_seq_length=4096, load_in_4bit=not args.no_4bit)
     FastDecisionModel.for_inference(model)
     os.makedirs(args.out, exist_ok=True)
     t00 = time.time()
@@ -110,6 +110,7 @@ def main() -> int:
     ap.add_argument("--ckpt")
     ap.add_argument("--out")
     ap.add_argument("--summarize")
+    ap.add_argument("--no-4bit", action="store_true", help="load the checkpoint in 16-bit instead of bnb NF4")
     a = ap.parse_args()
     if a.summarize:
         return summarize(a.summarize)

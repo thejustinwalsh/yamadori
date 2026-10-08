@@ -28,11 +28,12 @@ def main() -> int:
     ap.add_argument("--items", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--with-skill-name", action="store_true")
+    ap.add_argument("--no-4bit", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--max-seq", type=int, default=4096)
     a = ap.parse_args()
     from unsloth import FastDecisionModel
-    model, tok = FastDecisionModel.from_pretrained(a.ckpt, max_seq_length=a.max_seq, load_in_4bit=True)
+    model, tok = FastDecisionModel.from_pretrained(a.ckpt, max_seq_length=a.max_seq, load_in_4bit=not a.no_4bit)
     FastDecisionModel.for_inference(model)
     rows = [json.loads(l) for l in open(a.items, encoding="utf-8") if l.strip()]
     if a.limit:
