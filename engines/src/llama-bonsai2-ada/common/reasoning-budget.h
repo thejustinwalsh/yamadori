@@ -76,6 +76,10 @@ common_reasoning_budget_state common_reasoning_budget_get_state(const struct lla
 // was recorded. Cleared when a new start sequence re-arms the sampler.
 const llama_tokens * common_reasoning_budget_get_end_match(const struct llama_sampler * smpl);
 
+// Tokens accepted inside reasoning blocks so far, and whether the budget ran out (end sequence forced by the
+// budget, not by common_reasoning_budget_force). Both are 0 / false for a null sampler.
+void common_reasoning_budget_get_report(const struct llama_sampler * smpl, int32_t * n_reasoning, bool * exhausted);
+
 // Manually transition the reasoning budget sampler into the FORCING state.
 // Allowed from COUNTING and from NUDGING (the nudge is abandoned).
 // Returns true if the transition occurred.

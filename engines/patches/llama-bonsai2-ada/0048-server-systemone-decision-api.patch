@@ -1,0 +1,2077 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Thu, 8 Oct 2026 00:43:47 -0400
+Subject: [PATCH] server: POST /v1/systemone, the System One decision API
+ (openjev, lev, kev), from ggml-org #29818
+
+Ported from ggml-org/llama.cpp PR 29818 (a4cb4c61fd, merged 2026-10-02, MIT) onto this tree, so ONE llama-server can serve
+the Bonsai chat model and a decision model: a "decision model" is a plain model plus "<arch>.decision.*" GGUF metadata,
+answered in one forward pass per question, no token generated.
+
+Taken: server_decision_context (tools/server/server-decision.{h,cpp}: parse the questions and the state, render the
+"systemone" chat template, tokenize, read the scores, calibrate with the model's temperatures, format the answer), the
+task type SERVER_TASK_TYPE_DECISION with its result, the route and the shared prompt prefix between the questions of a
+request (n_tokens_shared, the child slots continue from the parent's state), common_get_decision_type() and the
+embedding mode for models that read the embeddings output (kev), qwen35's optional cls_out projection (lev/kev heads),
+the converters (conversion/lev.py: Lev and Kev, which are LoRA adapters merged into the Qwen3.5 base; OpenJevModel in
+conversion/qwen.py), the hparams-loader hook and jinja_str_or_json() in conversion/base.py, the Decision keys and
+DecisionType in gguf-py, the server README section.
+
+Adapted to this tree (older than the PR's base): the server still has llama_batch (no common_batch / llama_batch_ext), so
+send_decision() reads the outputs from the llama_batch view; handle_media() keeps its accept_base64_uri argument and is
+made non-static; this tree has no mtmd_helper_init_opt, fill_task() drops that argument; the cache reuse of a decision
+task never goes past the first position whose embeddings are read.
+
+Not taken: the laya and mmBERT models (the modern-bert decision head in src/models/modern-bert.cpp, the mmBERT pre-tokenizer
+in llama-vocab, conversion/bert.py), the nimble model (PR 29844), the Python server tests (they download a Laya slice),
+the HOWTO document.
+
+Own checks: the server and test-reasoning-budget build; the real run of this API is in the next patch (clef), which uses
+the same route. NOT RUN ON A GPU, and no openjev/lev/kev GGUF was available offline.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/common.cpp                |  43 ++
+ common/common.h                  |  12 +
+ conversion/__init__.py           |   5 +
+ conversion/base.py               |  17 +-
+ conversion/lev.py                | 205 ++++++++++
+ conversion/qwen.py               |  59 ++-
+ conversion/qwen3vl.py            |   2 +-
+ gguf-py/gguf/constants.py        |  16 +
+ gguf-py/gguf/gguf_writer.py      |  12 +
+ src/models/qwen35.cpp            |  14 +
+ tools/server/CMakeLists.txt      |   2 +
+ tools/server/README.md           | 134 ++++++
+ tools/server/server-common.cpp   |   2 +-
+ tools/server/server-common.h     |   8 +
+ tools/server/server-context.cpp  | 212 ++++++++++
+ tools/server/server-context.h    |   1 +
+ tools/server/server-decision.cpp | 680 +++++++++++++++++++++++++++++++
+ tools/server/server-decision.h   | 112 +++++
+ tools/server/server-task.cpp     |  11 +
+ tools/server/server-task.h       |  35 ++
+ tools/server/server.cpp          |   2 +
+ 21 files changed, 1576 insertions(+), 8 deletions(-)
+ create mode 100644 conversion/lev.py
+ create mode 100644 tools/server/server-decision.cpp
+ create mode 100644 tools/server/server-decision.h
+
+diff --git a/common/common.cpp b/common/common.cpp
+index 498522c..82d9c7f 100644
+--- a/common/common.cpp
++++ b/common/common.cpp
+@@ -1287,6 +1287,34 @@ struct common_init_result::impl {
+     std::vector<llama_sampler_seq_config> samplers_seq_config;
+ };
+ 
++static const std::map<common_decision_type, std::string> COMMON_DECISION_TYPE_NAMES = {
++    { COMMON_DECISION_TYPE_OPENJEV, "openjev" },
++    { COMMON_DECISION_TYPE_LEV,     "lev"     },
++    { COMMON_DECISION_TYPE_KEV,     "kev"     },
++    { COMMON_DECISION_TYPE_LAYA,    "laya"    },
++};
++
++static common_decision_type common_decision_type_from_string(const std::string & str) {
++    for (const auto & pair : COMMON_DECISION_TYPE_NAMES) {
++        if (pair.second == str) {
++            return pair.first;
++        }
++    }
++    return COMMON_DECISION_TYPE_UNKNOWN;
++}
++
++common_decision_type common_get_decision_type(const struct llama_model * model) {
++    char buf[64];
++    if (llama_model_meta_val_str(model, "general.architecture", buf, sizeof(buf)) < 0) {
++        return COMMON_DECISION_TYPE_NONE;
++    }
++    const std::string key = std::string(buf) + ".decision.type";
++    if (llama_model_meta_val_str(model, key.c_str(), buf, sizeof(buf)) < 0) {
++        return COMMON_DECISION_TYPE_NONE;
++    }
++    return common_decision_type_from_string(buf);
++}
++
+ common_init_result::common_init_result(common_params & params, bool model_only) :
+     pimpl(new impl{}) {
+     auto mparams = common_model_params_to_llama(params);
+@@ -1337,6 +1365,21 @@ common_init_result::common_init_result(common_params & params, bool model_only)
+ 
+     const llama_vocab * vocab = llama_model_get_vocab(model);
+ 
++    // this decision model returns a score for each token via the embeddings output
++    // TODO: maybe improve this in the future
++    const auto decision_type = common_get_decision_type(model);
++    if (decision_type == COMMON_DECISION_TYPE_LAYA || decision_type == COMMON_DECISION_TYPE_KEV) {
++        params.embedding    = true;
++        params.pooling_type = LLAMA_POOLING_TYPE_NONE;
++
++        cparams.embeddings            = true;
++        cparams.pooling_type          = LLAMA_POOLING_TYPE_NONE;
++        cparams.n_outputs_max         = cparams.n_batch;
++        cparams.n_outputs_max_per_seq = 1;
++
++        LOG_INF("%s", "decision model reads the embeddings output, enabling embedding mode\n");
++    }
++
+     // load and optionally apply lora adapters
+     for (auto & la : params.lora_adapters) {
+         llama_adapter_lora_ptr lora;
+diff --git a/common/common.h b/common/common.h
+index 79b5259..dd2bf5b 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -941,6 +941,18 @@ bool tty_can_use_colors();
+ 
+ struct common_sampler;
+ 
++// typed decision models, see "<arch>.decision.type" in the model metadata
++enum common_decision_type {
++    COMMON_DECISION_TYPE_NONE,    // not a decision model
++    COMMON_DECISION_TYPE_OPENJEV, // logits of one label token per option, read at the last prompt token
++    COMMON_DECISION_TYPE_LEV,     // same as openjev, noul is read from a rating scale
++    COMMON_DECISION_TYPE_KEV,     // dot product of the hidden states of the last token and of one end token per option
++    COMMON_DECISION_TYPE_LAYA,    // score of one marker token per option, read from the embeddings output
++    COMMON_DECISION_TYPE_UNKNOWN, // a decision model of a type that is not supported
++};
++
++common_decision_type common_get_decision_type(const struct llama_model * model);
++
+ // note: defines the model, context, samplers, ets. lifetimes
+ struct common_init_result {
+     common_init_result(common_params & params, bool model_only = false);
+diff --git a/conversion/__init__.py b/conversion/__init__.py
+index 96557d6..8070355 100644
+--- a/conversion/__init__.py
++++ b/conversion/__init__.py
+@@ -151,6 +151,8 @@ TEXT_MODEL_MAP: dict[str, str] = {
+     "LLaDAMoEModelLM": "llada",
+     "LLaDAModelLM": "llada",
+     "LLaMAForCausalLM": "llama",
++    "KevModel": "lev",
++    "LevModel": "lev",
+     "Lfm25AudioTokenizer": "lfm2",
+     "Lfm2BidirectionalModel": "lfm2",
+     "Lfm2ForCausalLM": "lfm2",
+@@ -188,6 +190,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
+     "Mistral3ForConditionalGeneration": "mistral3",
+     "MistralForCausalLM": "llama",
+     "MixtralForCausalLM": "llama",
++    "ModernBertDecisionModel": "bert",
+     "ModernBertForMaskedLM": "bert",
+     "ModernBertForSequenceClassification": "bert",
+     "ModernBertModel": "bert",
+@@ -206,6 +209,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
+     "MuseGlimmerAssistantModel": "muse_glimmer",
+     "MuseGlimmerForConditionalGeneration": "muse_glimmer",
+     "OpenELMForCausalLM": "openelm",
++    "OpenJevModel": "qwen",
+     "OrionForCausalLM": "orion",
+     "PLMForCausalLM": "plm",
+     "PLaMo2ForCausalLM": "plamo",
+@@ -337,6 +341,7 @@ MMPROJ_MODEL_MAP: dict[str, str] = {
+     "Qwen3TTSForConditionalGeneration": "qwen3tts",
+     "Qwen3VLForConditionalGeneration": "qwen3vl",
+     "Qwen3VLMoeForConditionalGeneration": "qwen3vl",
++    "OpenJevModel": "qwen3vl",
+     "Qwen3_5ForConditionalGeneration": "qwen3vl",
+     "Qwen3_5MoeForConditionalGeneration": "qwen3vl",
+     "RADIOModel": "nemotron",
+diff --git a/conversion/base.py b/conversion/base.py
+index 895c000..2fa44c5 100644
+--- a/conversion/base.py
++++ b/conversion/base.py
+@@ -1259,22 +1259,24 @@ class ModelBase:
+         return inner
+ 
+     @staticmethod
+-    def load_hparams(dir_model: Path, is_mistral_format: bool):
++    def load_hparams(dir_model: Path, is_mistral_format: bool, guess: bool = True):
+         if is_mistral_format:
+             with open(dir_model / "params.json", "r", encoding="utf-8") as f:
+                 config = json.load(f)
+             return config
+ 
++        # checkpoints with a non-HF layout are matched by their own loader
++        # models with a HF layout can also register a hparams loader to switch to a custom class
++        config = ModelBase.load_hparams_guess(dir_model) if guess and dir_model.is_dir() else None
++        if config is not None:
++            return config
++
+         try:
+             # for security reason, we don't allow loading remote code by default
+             # if a model need remote code, we will fallback to config.json
+             config = AutoConfig.from_pretrained(dir_model, trust_remote_code=False).to_dict()
+         except Exception as e:
+             logger.warning(f"Failed to load model config from {dir_model}: {e}")
+-            if not (dir_model / "config.json").is_file():
+-                config = ModelBase.load_hparams_guess(dir_model)
+-                if config is not None:
+-                    return config
+             logger.warning("Trying to load config.json instead")
+             with open(dir_model / "config.json", "r", encoding="utf-8") as f:
+                 config = json.load(f)
+@@ -2848,6 +2850,11 @@ else:
+     LazyTorchTensor._dtype_str_map["F8_E8M0"] = torch.uint8
+ 
+ 
++def jinja_str_or_json(name: str) -> str:
++    # jinja expression that renders a variable as-is if it is a string, as JSON otherwise
++    return "{{ " + name + " if " + name + " is string else " + name + " | tojson }}"
++
++
+ def get_model_architecture(hparams: dict[str, Any], model_type: ModelType) -> str:
+     # TODO @ngxson : this won't work correctly if the model has both audio & vision encoders
+     # maybe we should fallback to text model's arch in that case, since not many models have both
+diff --git a/conversion/lev.py b/conversion/lev.py
+new file mode 100644
+index 0000000..b10421c
+--- /dev/null
++++ b/conversion/lev.py
+@@ -0,0 +1,205 @@
++from __future__ import annotations
++
++import json
++
++from pathlib import Path
++from typing import Any, Iterable, TYPE_CHECKING
++
++import torch
++
++if TYPE_CHECKING:
++    from torch import Tensor
++
++from .base import LazyTorchTensor, ModelBase, gguf, jinja_str_or_json, logger
++from .qwen import Qwen3_5TextModel
++
++
++def _decision_lora_base(dir_model: Path) -> tuple[str, str | None]:
++    # the base model of a LoRA adapter: (repo id, revision)
++    with open(dir_model / "adapter_config.json", encoding="utf-8") as f:
++        lora_config = json.load(f)
++    revision = lora_config.get("revision")
++    if revision is None and (dir_model / "training_config.json").is_file():
++        with open(dir_model / "training_config.json", encoding="utf-8") as f:
++            revision = json.load(f).get("base_revision")
++    return lora_config["base_model_name_or_path"], revision
++
++
++def _load_decision_lora_hparams(dir_model: Path, arch: str) -> dict[str, Any]:
++    from huggingface_hub import hf_hub_download
++    repo_id, revision = _decision_lora_base(dir_model)
++    with open(hf_hub_download(repo_id, "config.json", revision=revision), encoding="utf-8") as f:
++        hparams = json.load(f)
++    hparams["architectures"] = [arch]
++    return hparams
++
++
++class _DecisionLoraMixin:
++    # decision model released as a LoRA adapter: the base model is downloaded and the adapter is merged into it
++    no_mtp = True
++
++    def __init__(self, dir_model: Path, *args, **kwargs):
++        from huggingface_hub import snapshot_download
++        from safetensors.torch import load_file
++
++        repo_id, revision = _decision_lora_base(dir_model)
++        logger.info(f"gguf: downloading the base model {repo_id}")
++        dir_base = Path(snapshot_download(repo_id, revision=revision, allow_patterns=["*.json", "*.jinja", "*.safetensors"]))
++        super().__init__(dir_base, *args, **kwargs)  # ty: ignore[too-many-positional-arguments]
++        self.dir_adapter = dir_model
++        self.dir_model_card = dir_model
++
++        with open(dir_model / "adapter_config.json", encoding="utf-8") as f:
++            lora_config = json.load(f)
++        # only a plain LoRA can be merged as scale * B @ A
++        assert lora_config["peft_type"] == "LORA"
++        assert lora_config.get("bias", "none") == "none"
++        assert not lora_config.get("use_dora") and not lora_config.get("use_rslora") and not lora_config.get("lora_bias")
++        assert not lora_config.get("rank_pattern") and not lora_config.get("alpha_pattern")
++        assert not lora_config.get("modules_to_save")
++        self.lora_scale = lora_config["lora_alpha"] / lora_config["r"]
++
++        # "layers.0.mlp.up_proj.weight" -> {"A": tensor, "B": tensor}
++        self.lora: dict[str, dict[str, Tensor]] = {}
++        for name, tensor in load_file(dir_model / "adapter_model.safetensors").items():
++            base_name, _, part = name[name.index("layers."):].partition(".lora_")
++            assert part in ("A.weight", "B.weight"), f"unexpected LoRA tensor: {name}"
++            self.lora.setdefault(base_name + ".weight", {})[part[0]] = tensor.float()
++        self.lora_merged: set[str] = set()
++
++    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
++        lora = self.lora.get(name[name.index("layers."):]) if "layers." in name else None
++        if lora is not None:
++            assert set(lora) == {"A", "B"} and data_torch.shape == (lora["B"].shape[0], lora["A"].shape[1])
++            delta = self.lora_scale * (lora["B"] @ lora["A"])
++            data_torch = data_torch.float() + LazyTorchTensor.from_eager(delta)
++            self.lora_merged.add(name[name.index("layers."):])
++        yield from super().modify_tensors(data_torch, name, bid)  # ty: ignore[unresolved-attribute]
++
++    def prepare_tensors(self):
++        super().prepare_tensors()  # ty: ignore[unresolved-attribute]
++        if len(self.lora_merged) != len(self.lora):
++            raise ValueError(f"only {len(self.lora_merged)} of {len(self.lora)} LoRA tensors were merged into the base model")
++
++
++@ModelBase.register_hparams_loader(lambda dir_model: (dir_model / "lev_release.json").is_file())
++def _load_lev_hparams(dir_model: Path) -> dict[str, Any]:
++    logger.info("gguf: detected Lev checkpoint")
++    return _load_decision_lora_hparams(dir_model, "LevModel")
++
++
++@ModelBase.register("LevModel")
++@ModelBase.example("interfaze-ai/lev")
++class LevModel(_DecisionLoraMixin, Qwen3_5TextModel):
++    model_arch = gguf.MODEL_ARCH.QWEN35
++
++    # TODO: the head for large option sets (mode B, mode_b_head.pt) is not converted, only the label readout is supported
++    # TODO: a description that is not text is given as JSON without the escaping of non-ASCII characters used in training
++
++    # prompt follows packages/lev/src/lev/prompt.py of https://github.com/Abhinavexists/lev (chat style, state first)
++    _SYSTEM_PROMPT = (
++        "You are a System One decision model. You read the Evidence and answer each "
++        "Criterion by choosing exactly one of the listed options. You never explain. "
++        "You answer with the single option label only."
++    )
++
++    def set_vocab(self):
++        super().set_vocab()
++        self.gguf_writer.add_chat_template([{"name": "systemone", "template": self._systemone_template()}])
++
++    def _systemone_template(self) -> str:
++        description = jinja_str_or_json("o.description")
++        options = (
++            "{{ '# Options\\n' }}{% for o in options %}{{ o.label }}. "
++            "{% if type == 'score' %}(level {{ o.key }} of {{ options | length - 1 }}) " + description
++            + "{% else %}{{ o.key }}{% if o.description %}: " + description + "{% endif %}{% endif %}"
++            "{{ '\\n' }}{% endfor %}"
++            "{{ '\\nRespond with only the letter of ' }}"
++            "{% if type == 'score' %}the level that best matches.{% else %}the best option.{% endif %}"
++        )
++        # noul is answered on a rating scale, its 2 options are only used for their description
++        scale = "{{ '# Scale\\n0 = certainly no ... 8 = certainly yes\\n' }}"
++        for key, name in (("true", "yes"), ("false", "no")):
++            scale += (
++                "{% for o in options %}{% if o.key == '" + key + "' and o.description %}"
++                + name + ": " + description + "{{ '\\n' }}{% endif %}{% endfor %}"
++            )
++        scale += "{{ '\\nRespond with only a digit from 0 to 8.' }}"
++        return (
++            "<|im_start|>system\n" + self._SYSTEM_PROMPT + "<|im_end|>\n"
++            "<|im_start|>user\n# Evidence\n" + jinja_str_or_json("state") + "\n\n# Criterion\n"
++            "{% if instructions %}" + jinja_str_or_json("instructions") + "{% else %}{{ id }}{% endif %}"
++            "{{ '\\n\\n' }}{% if type == 'noul' %}" + scale + "{% else %}" + options + "{% endif %}"
++            "{{ '\\n<|im_end|>\\n<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n' }}"
++        )
++
++    def set_gguf_parameters(self):
++        super().set_gguf_parameters()
++        self.gguf_writer.add_decision_type(gguf.DecisionType.LEV)
++        with open(self.dir_adapter / "calibration.json", encoding="utf-8") as f:
++            temperatures = json.load(f)["temperatures"]
++        # "choice:A:small" -> "choice.small", only the label readout (mode A) is supported
++        for name, value in temperatures.items():
++            qtype, mode, *band = name.split(":")
++            if mode == "A":
++                self.gguf_writer.add_decision_temperature(".".join([qtype] + band), value)
++
++
++def _is_kev_checkpoint(dir_model: Path) -> bool:
++    # a LoRA adapter with the pointer head and the config of the kev training code
++    if not all((dir_model / name).is_file() for name in ("adapter_config.json", "head.pt", "training_config.json")):
++        return False
++    with open(dir_model / "training_config.json", encoding="utf-8") as f:
++        return "head_dim" in json.load(f).get("args", {})
++
++
++@ModelBase.register_hparams_loader(_is_kev_checkpoint)
++def _load_kev_hparams(dir_model: Path) -> dict[str, Any]:
++    logger.info("gguf: detected Kev checkpoint")
++    return _load_decision_lora_hparams(dir_model, "KevModel")
++
++
++@ModelBase.register("KevModel")
++@ModelBase.example("jaredpalmer/kev-4b")
++class KevModel(_DecisionLoraMixin, Qwen3_5TextModel):
++    model_arch = gguf.MODEL_ARCH.QWEN35
++
++    # TODO: the server needs a question and its options in one batch, the state can be in previous batches
++    # note: no plan to support date_facts (kev/api.py), its regex matching is fragile, a more generic impl is needed
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        self.head = torch.load(self.dir_adapter / "head.pt", map_location="cpu", weights_only=True)
++        assert set(self.head["head"]) == {"q.weight", "q.bias", "k.weight", "k.bias"}
++        assert self.head["head"]["q.weight"].shape[0] == self.head["head_dim"]
++
++    def set_vocab(self):
++        super().set_vocab()
++        self.gguf_writer.add_chat_template([{"name": "systemone", "template": self._systemone_template()}])
++
++    def _systemone_template(self) -> str:
++        # prompt follows kev/model.py and kev/api.py of https://github.com/jaredpalmer/kev
++        # state, instructions and descriptions are given as text
++        name = "{% if type != 'noul' %}{{ o.key }}{% elif o.key == 'true' %}yes{% else %}no{% endif %}"
++        option = (
++            "{% if type == 'score' %}{% if o.description %}{{ o.description }}{% endif %}"
++            "{% else %}" + name + "{% if o.description %}: {{ o.description }}{% endif %}{% endif %}"
++        )
++        return (
++            "<|fim_prefix|>{{ state }}<|fim_middle|>{{ instructions }}"
++            "{% for o in options %}<|box_start|>" + option + "<|box_end|>{% endfor %}<|fim_suffix|>"
++        )
++
++    def set_gguf_parameters(self):
++        super().set_gguf_parameters()
++        self.gguf_writer.add_decision_type(gguf.DecisionType.KEV)
++        self.gguf_writer.add_embedding_length_out(2 * self.head["head_dim"])
++        for name in ("choice", "score", "noul"):
++            self.gguf_writer.add_decision_temperature(name, self.head["temperature"])
++
++    def generate_extra_tensors(self) -> Iterable[tuple[str, Tensor]]:
++        yield from super().generate_extra_tensors()
++        # pointer head: the output of a token is [q | k]
++        head = self.head["head"]
++        yield "classifier.out_proj.weight", torch.cat([head["q.weight"], head["k.weight"]], dim=0)
++        yield "classifier.out_proj.bias",   torch.cat([head["q.bias"],   head["k.bias"]],   dim=0)
+diff --git a/conversion/qwen.py b/conversion/qwen.py
+index e0c3197..7769043 100644
+--- a/conversion/qwen.py
++++ b/conversion/qwen.py
+@@ -2,6 +2,7 @@ from __future__ import annotations
+ 
+ import json
+ 
++from pathlib import Path
+ from typing import Any, Callable, Iterable, TYPE_CHECKING
+ 
+ import numpy as np
+@@ -10,7 +11,7 @@ import torch
+ if TYPE_CHECKING:
+     from torch import Tensor
+ 
+-from .base import LazyTorchTensor, ModelBase, TextModel, gguf, logger
++from .base import LazyTorchTensor, ModelBase, TextModel, gguf, jinja_str_or_json, logger
+ 
+ 
+ @ModelBase.register("QWenLMHeadModel")
+@@ -653,6 +654,62 @@ class Qwen3_5TextModel(_Qwen35MRopeMixin, _LinearAttentionVReorderBase):
+     model_arch = gguf.MODEL_ARCH.QWEN35
+ 
+ 
++def _is_openjev_checkpoint(dir_model: Path) -> bool:
++    return (dir_model / "helper" / "shim.py").is_file() and (dir_model / "config.json").is_file()
++
++
++@ModelBase.register_hparams_loader(_is_openjev_checkpoint)
++def _load_openjev_hparams(dir_model: Path) -> dict[str, Any]:
++    logger.info("gguf: detected OpenJev checkpoint")
++    hparams = ModelBase.load_hparams(dir_model, False, guess=False)
++    hparams["architectures"] = ["OpenJevModel"]
++    return hparams
++
++
++@ModelBase.register("OpenJevModel")
++@ModelBase.example("openjev/openjev")
++class OpenJevModel(Qwen3_5TextModel):
++    model_arch = gguf.MODEL_ARCH.QWEN35
++    no_mtp = True  # the checkpoint has no MTP head
++
++    # prompt and calibration follow helper/shim.py of the model repo (text lane)
++    _LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
++    _TEMPERATURE = 0.85
++    _TEMPERATURE_NOUL = 1.829074  # applied on top of _TEMPERATURE
++
++    def set_vocab(self):
++        super().set_vocab()
++        self.gguf_writer.add_chat_template([{"name": "systemone", "template": self._systemone_template()}])
++
++    def _systemone_template(self) -> str:
++        description = jinja_str_or_json("o.description")
++        option = (
++            "{% if type != 'noul' %}{{ o.key }}: {% if o.description %}" + description + "{% endif %}"
++            "{% elif o.key == 'true' %}yes: {% if o.description %}" + description + "{% else %}The statement is true.{% endif %}"
++            "{% else %}no: {% if o.description %}" + description + "{% else %}The statement is false.{% endif %}{% endif %}"
++        )
++        # TODO: only the layout with one image is known (image first), the one with several images is not verified
++        images = (
++            "{% for image in images %}{{ image }}{% endfor %}"
++            "{% if images %}{{ 'The screenshot shows the current screen.\\n' }}{% endif %}"
++        )
++        return (
++            "{% set letters = '" + self._LETTERS + "' %}"
++            "<|im_start|>user\n" + images + "State:\n" + jinja_str_or_json("state") + "\n\nQuestion: " + jinja_str_or_json("instructions")
++            + "{% if type == 'score' %} Rate along the ordered levels below (lowest first).{% endif %}"
++            "{{ '\\nOptions:\\n' }}"
++            "{% for o in options %}[{{ letters[loop.index0] }}] " + option + "{{ '\\n' }}{% endfor %}"
++            "{{ '\\nAnswer with the letter of the best option only.<|im_end|>\\n<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n' }}"
++        )
++
++    def set_gguf_parameters(self):
++        super().set_gguf_parameters()
++        self.gguf_writer.add_decision_type(gguf.DecisionType.OPENJEV)
++        self.gguf_writer.add_decision_temperature("choice", self._TEMPERATURE)
++        self.gguf_writer.add_decision_temperature("score",  self._TEMPERATURE)
++        self.gguf_writer.add_decision_temperature("noul",   self._TEMPERATURE * self._TEMPERATURE_NOUL)
++
++
+ @ModelBase.register("Qwen3_5MoeForConditionalGeneration", "Qwen3_5MoeForCausalLM")
+ @ModelBase.example("Qwen/Qwen3.5-35B-A3B")
+ class Qwen3_5MoeTextModel(_Qwen35MRopeMixin, _LinearAttentionVReorderBase):
+diff --git a/conversion/qwen3vl.py b/conversion/qwen3vl.py
+index 4fec708..38e85ae 100644
+--- a/conversion/qwen3vl.py
++++ b/conversion/qwen3vl.py
+@@ -13,7 +13,7 @@ from .qwen import Qwen3Model, Qwen3MoeModel
+ from .qwenvl import Qwen25AudioModel
+ 
+ 
+-@ModelBase.register("Qwen3VLForConditionalGeneration", "Qwen3VLMoeForConditionalGeneration", "Qwen3_5ForConditionalGeneration", "Qwen3_5MoeForConditionalGeneration")
++@ModelBase.register("Qwen3VLForConditionalGeneration", "Qwen3VLMoeForConditionalGeneration", "Qwen3_5ForConditionalGeneration", "Qwen3_5MoeForConditionalGeneration", "OpenJevModel")
+ @ModelBase.example("Qwen/Qwen3-VL-4B-Instruct", "Qwen/Qwen3-VL-30B-A3B-Instruct", "Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-35B-A3B")
+ class Qwen3VLVisionModel(MmprojModel):
+     def __init__(self, *args, **kwargs):
+diff --git a/gguf-py/gguf/constants.py b/gguf-py/gguf/constants.py
+index 1331e45..9d9c9e9 100644
+--- a/gguf-py/gguf/constants.py
++++ b/gguf-py/gguf/constants.py
+@@ -297,6 +297,13 @@ class Keys:
+     class ShortConv:
+         L_CACHE = "{arch}.shortconv.l_cache"
+ 
++    class Decision:
++        TYPE               = "{arch}.decision.type"
++        # note: single-use-case keys can be hard-coded in cpp code
++        BLOCK_COUNT        = "{arch}.decision.block_count"
++        MAX_HEAD_TOKENS    = "{arch}.decision.max_head_tokens"
++        TEMPERATURE        = "{arch}.decision.temperature.{name}"  # name: "<type>" or "<type>.<n_opt bucket>"
++
+     class Tokenizer:
+         MODEL                = "tokenizer.ggml.model"
+         PRE                  = "tokenizer.ggml.pre"
+@@ -2416,6 +2423,7 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
+     MODEL_ARCH.MODERN_BERT: [
+         MODEL_TENSOR.TOKEN_EMBD,
+         MODEL_TENSOR.TOKEN_EMBD_NORM,
++        MODEL_TENSOR.TOKEN_TYPES,
+         MODEL_TENSOR.OUTPUT_NORM,
+         MODEL_TENSOR.ATTN_NORM,
+         MODEL_TENSOR.ATTN_OUT,
+@@ -2839,6 +2847,7 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
+         MODEL_TENSOR.TOKEN_EMBD,
+         MODEL_TENSOR.OUTPUT_NORM,
+         MODEL_TENSOR.OUTPUT,
++        MODEL_TENSOR.CLS_OUT,
+         MODEL_TENSOR.ATTN_NORM,
+         MODEL_TENSOR.ATTN_Q,
+         MODEL_TENSOR.ATTN_Q_NORM,
+@@ -5577,6 +5586,13 @@ class GGUFValueType(IntEnum):
+             raise ValueError(f"Unknown type: {type(val)}")
+ 
+ 
++class DecisionType:
++    LAYA    = "laya"     # head blocks + scorer on the hidden state of one marker token per option
++    OPENJEV = "openjev"  # logits of one label token per option
++    LEV     = "lev"      # same as openjev, noul is read from a rating scale
++    KEV     = "kev"      # dot product of the hidden states of the last token and of one end token per option
++
++
+ class VisionProjectorType:
+     GEMMA3 = "gemma3"
+     GEMMA3NV = "gemma3nv"
+diff --git a/gguf-py/gguf/gguf_writer.py b/gguf-py/gguf/gguf_writer.py
+index 75a07e6..0b5bff7 100644
+--- a/gguf-py/gguf/gguf_writer.py
++++ b/gguf-py/gguf/gguf_writer.py
+@@ -1277,6 +1277,18 @@ class GGUFWriter:
+     def add_classifier_output_labels(self, labels: Sequence[str]) -> None:
+         self.add_array(Keys.Classifier.OUTPUT_LABELS.format(arch=self.arch), labels)
+ 
++    def add_decision_type(self, value: str) -> None:
++        self.add_string(Keys.Decision.TYPE.format(arch=self.arch), value)
++
++    def add_decision_block_count(self, value: int) -> None:
++        self.add_uint32(Keys.Decision.BLOCK_COUNT.format(arch=self.arch), value)
++
++    def add_decision_max_head_tokens(self, value: int) -> None:
++        self.add_uint32(Keys.Decision.MAX_HEAD_TOKENS.format(arch=self.arch), value)
++
++    def add_decision_temperature(self, name: str, value: float) -> None:
++        self.add_float32(Keys.Decision.TEMPERATURE.format(arch=self.arch, name=name), value)
++
+     # for vision models
+ 
+     def add_clip_has_vision_encoder(self, value: bool) -> None:
+diff --git a/src/models/qwen35.cpp b/src/models/qwen35.cpp
+index 1fb752e..708bda4 100644
+--- a/src/models/qwen35.cpp
++++ b/src/models/qwen35.cpp
+@@ -47,6 +47,10 @@ void llama_model_qwen35::load_arch_tensors(llama_model_loader & ml) {
+     output_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM, "weight"), { n_embd }, 0);
+     output = create_tensor(tn(LLM_TENSOR_OUTPUT, "weight"), { n_embd, n_vocab }, TENSOR_NOT_REQUIRED);
+ 
++    // optional projection of the embeddings output
++    cls_out   = create_tensor(tn(LLM_TENSOR_CLS_OUT, "weight"), { n_embd, hparams.n_embd_out() }, TENSOR_NOT_REQUIRED);
++    cls_out_b = create_tensor(tn(LLM_TENSOR_CLS_OUT, "bias"),   { hparams.n_embd_out() },         TENSOR_NOT_REQUIRED);
++
+     // if output is NULL, init from the input tok embed
+     if (output == NULL) {
+         output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), { n_embd, n_vocab }, TENSOR_DUPLICATED);
+@@ -283,6 +287,16 @@ llama_model_qwen35::graph::graph(const llama_model & model, const llm_graph_para
+     cb(cur, "result_norm", -1);
+     res->t_embd = cur;
+ 
++    if (model.cls_out) {
++        ggml_tensor * embd = build_lora_mm(model.cls_out, cur);
++        if (model.cls_out_b) {
++            embd = ggml_add(ctx0, embd, model.cls_out_b);
++        }
++        cb(embd, "result_embd_proj", -1);
++        res->t_embd = embd;
++        ggml_build_forward_expand(gf, embd);
++    }
++
+     // LM head
+     cur = build_lora_mm(model.output, cur, model.output_s);
+ 
+diff --git a/tools/server/CMakeLists.txt b/tools/server/CMakeLists.txt
+index 280bd9e..81eefa4 100644
+--- a/tools/server/CMakeLists.txt
++++ b/tools/server/CMakeLists.txt
+@@ -13,6 +13,8 @@ add_library(${TARGET} STATIC
+     server-queue.h
+     server-common.cpp
+     server-common.h
++    server-decision.cpp
++    server-decision.h
+     server-context.cpp
+     server-context.h
+     server-stream.cpp
+diff --git a/tools/server/README.md b/tools/server/README.md
+index 93736c3..5435ec2 100644
+--- a/tools/server/README.md
++++ b/tools/server/README.md
+@@ -1632,6 +1632,140 @@ curl http://localhost:8080/v1/messages/count_tokens \
+ {"input_tokens": 10}
+ ```
+ 
++## TypeSafe-compatible API Endpoints
++
++### POST `/v1/systemone`: TypeSafe-compatible System One API
++
++Answers typed questions about a `state` with a decision model.
++
++Follows the [TypeSafe API](https://docs.typesafe.ai/api), streaming is not supported. Multimodal input is an extension to this API, see the [OpenJev multimodal API](https://jev-skills.github.io/openjev-multimodal/api) for reference.
++
++*Options:*
++
++`state`: The content to evaluate. Can be a string, an object or an array. A value that is not a string is given to the model as JSON text.
++
++`images`: Optional. An array of images, the maximum number may be limited depending on the model. Each one is a data URL (`data:image/...;base64,...`). See the image input section below.
++
++`questions`: An object that maps a question id to a question. Each question has these fields:
++
++- `type`: One of `choice`, `score`, `noul`.
++- `instructions`: The question. Can be a string, an object or an array.
++- `criteria`: The possible answers, the shape depends on `type`:
++  - `choice`: An object that maps each option to its description. The description can be `null`.
++  - `score`: An array of 2 to 10 level descriptions, lowest level first.
++  - `noul`: Optional. An object with the descriptions of `true` and `false`.
++
++The questions of a request are answered independently, an answer does not depend on the other questions.
++
++The number of options of a `choice` question is limited by the model, for example: 52 for openjev, 255 for laya. For laya, long questions and options are truncated to the token budget the model was trained with.
++
++*Image input:*
++
++Image input needs a model that supports it (for example: openjev) and its multimodal projector, see `--mmproj`.
++
++Images can be given in two ways, and both can be used in the same request:
++
++- The `images` field.
++- A `state` made of chat messages, either an array of messages or an object with a `messages` array. An `image_url` part in the `content` of a message is taken as an image, in the same format as chat completions. Only data URLs are accepted.
++
++All the images are placed before the state in the prompt, the ones from `images` first. The image parts are removed from the state.
++
++*Response:*
++
++`answers`: An object that maps each question id to its answer. The fields depend on the question type:
++
++- `choice`:
++  - `choice`: The option with the highest probability.
++  - `probabilities`: The probability of each option, they sum to 1.
++  - `confidence`: A value from 0 to 1, where 0 means all options are equally likely.
++- `score`:
++  - `score`: The expected level index, weighted by probability. It can be between two levels.
++  - `legend`: The description of each level index.
++  - `probabilities`: The probability of each level index, they sum to 1.
++  - `confidence`: A value from 0 to 1.
++- `noul`:
++  - `noul`: The probability that the answer is true.
++
++`usage`: `input_tokens` is the number of prompt tokens of all questions. `output_tokens` is always 0.
++
++The probabilities are scaled with the temperatures stored in the model file. They are not guaranteed to be calibrated for your data.
++
++*Examples:*
++
++```shell
++curl http://127.0.0.1:8080/v1/systemone \
++    -H "Content-Type: application/json" \
++    -d '{
++        "state": "Customer message: I was charged twice for my order last week and nobody has replied.",
++        "questions": {
++            "route": {
++                "type": "choice",
++                "instructions": "Which team should handle this?",
++                "criteria": {"billing": null, "shipping": null, "technical": null}
++            },
++            "angry": {
++                "type": "noul",
++                "instructions": "Is the customer angry?"
++            },
++            "urgency": {
++                "type": "score",
++                "instructions": "How urgent is this?",
++                "criteria": ["can wait", "this week", "today", "right now"]
++            }
++        }
++    }' | jq
++```
++
++Response (values are shortened):
++
++```json
++{
++  "model": "openjev",
++  "answers": {
++    "route": {
++      "type": "choice",
++      "choice": "billing",
++      "probabilities": {"billing": 0.9998, "shipping": 0.0001, "technical": 0.0001},
++      "confidence": 0.9997
++    },
++    "angry": {
++      "type": "noul",
++      "noul": 0.6328
++    },
++    "urgency": {
++      "type": "score",
++      "score": 2.0858,
++      "legend": {"0": "can wait", "1": "this week", "2": "today", "3": "right now"},
++      "probabilities": {"0": 0.0023, "1": 0.116, "2": 0.6753, "3": 0.2064},
++      "confidence": 0.673
++    }
++  },
++  "usage": {
++    "input_tokens": 239,
++    "output_tokens": 0
++  }
++}
++```
++
++Example with an image:
++
++```shell
++curl http://127.0.0.1:8080/v1/systemone \
++    -H "Content-Type: application/json" \
++    -d '{
++        "state": "The document was received by the accounting team this morning.",
++        "images": ["data:image/jpeg;base64,/9j/4AAQSkZJRg..."],
++        "questions": {
++            "has_table": {
++                "type": "noul",
++                "instructions": "Does the image contain a table?"
++            }
++        }
++    }' | jq
++```
++
++An invalid request returns the error `400`. A model that is not a decision model returns the error `501`. A request with images returns the error `501` if the model does not support image input, or if no multimodal projector is loaded.
++
+ ## Server tools
+ 
+ The server exposes a REST API under `/tools` that allows the Web UI to call server tools. This endpoint is intended to be used internally by the Web UI and subject to change or to be removed in the future.
+diff --git a/tools/server/server-common.cpp b/tools/server/server-common.cpp
+index 354a83b..a3992ee 100644
+--- a/tools/server/server-common.cpp
++++ b/tools/server/server-common.cpp
+@@ -1061,7 +1061,7 @@ json oaicompat_completion_params_parse(const json & body) {
+ // - file:// for local files (only allowed if media_path is set)
+ // - data: for base64 encoded data with uri scheme (e.g. data:image/png;base64,...)
+ // - raw base64 encoded data
+-static void handle_media(
++void handle_media(
+         std::vector<raw_buffer> & out_files,
+         const std::string & url,
+         const std::string & media_path,
+diff --git a/tools/server/server-common.h b/tools/server/server-common.h
+index 7ff967e..0e05def 100644
+--- a/tools/server/server-common.h
++++ b/tools/server/server-common.h
+@@ -267,6 +267,14 @@ llama_tokens tokenize_mixed(const llama_vocab * vocab, const json & json_prompt,
+ // if validate_utf8(text) == text.size(), then the whole text is valid utf8
+ size_t validate_utf8(const std::string& text);
+ 
++// load a media file from an URL (http, file, data) or from raw base64 data
++// accept_base64_uri: a data:image/...;base64 URI is accepted
++void handle_media(
++        std::vector<raw_buffer> & out_files,
++        const std::string & url,
++        const std::string & media_path,
++        bool accept_base64_uri);
++
+ // process mtmd prompt, return the server_tokens containing both text tokens and media chunks
+ // if is_placeholder is true, the media chunk will be treated as placeholder for counting tokens; the output tokens are not usable for actual inference (e.g. for submitting a task to server_queue)
+ server_tokens process_mtmd_prompt(mtmd_context * mctx, const std::string & prompt, const std::vector<raw_buffer> & files, bool is_placeholder = false);
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index a069a61..38f35d5 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -1,6 +1,7 @@
+ #include "server-context.h"
+ #include "server-chat.h"
+ #include "server-common.h"
++#include "server-decision.h"
+ #include "server-http.h"
+ #include "server-task.h"
+ #include "server-queue.h"
+@@ -712,6 +713,14 @@ struct server_slot {
+         return res;
+     }
+ 
++    // the other slot continues from the tokens processed so far
++    void copy_prompt_to(server_slot & other) const {
++        mem.seq_rm(other.id,     -1, -1);
++        mem.seq_cp(id, other.id, -1, -1);
++
++        other.prompt = prompt.clone();
++    }
++
+     void copy_state_to(server_slot & other) const {
+         GGML_ASSERT(state == SLOT_STATE_DONE_PROMPT);
+ 
+@@ -835,6 +844,8 @@ public:
+     mtmd_context * mctx = nullptr;
+     const llama_vocab * vocab = nullptr;
+ 
++    server_decision_context decision;
++
+     server_queue    queue_tasks;
+     server_response queue_results;
+ 
+@@ -1121,6 +1132,13 @@ private:
+ 
+         vocab = llama_model_get_vocab(model_tgt);
+ 
++        try {
++            decision.init(model_tgt);
++        } catch (const std::exception & e) {
++            SRV_ERR("failed to init decision model: %s\n", e.what());
++            return false;
++        }
++
+         n_ctx = llama_n_ctx(ctx_tgt);
+ 
+         add_bos_token = llama_vocab_get_add_bos(vocab);
+@@ -2223,6 +2241,68 @@ private:
+         queue_results.send(std::move(res));
+     }
+ 
++    void send_decision(const server_slot & slot, const llama_batch & batch, int32_t i_batch) {
++        auto res = std::make_unique<server_task_result_decision>();
++        res->id       = slot.task->id;
++        res->index    = slot.task->index;
++        res->n_tokens = slot.task->n_tokens();
++
++        const auto & decision = slot.task->decision;
++
++        if (!decision.labels.empty()) {
++            const float * logits = llama_get_logits_ith(ctx_tgt, i_batch);
++            if (logits == nullptr) {
++                send_error(slot, "failed to get logits", ERROR_TYPE_SERVER);
++                return;
++            }
++            const int32_t n_vocab = llama_vocab_n_tokens(vocab);
++            for (const llama_token label : decision.labels) {
++                GGML_ASSERT(label >= 0 && label < n_vocab);
++                res->scores.push_back(logits[label]);
++            }
++        } else {
++            // the outputs of this slot in this batch are the last tokens of the prompt
++            std::vector<int32_t> idx;
++            for (int i = 0; i < batch.n_tokens; ++i) {
++                if (batch.logits[i] && batch.seq_id[i][0] == slot.id) {
++                    idx.push_back(i);
++                }
++            }
++
++            const int32_t pos_first = slot.prompt.n_tokens() - (int32_t) idx.size();
++            auto get_embd = [&](int32_t pos) -> const float * {
++                const int32_t i = pos - pos_first;
++                return i >= 0 && i < (int32_t) idx.size() ? llama_get_embeddings_ith(ctx_tgt, idx[i]) : nullptr;
++            };
++
++            const int32_t n_embd_out = llama_model_n_embd_out(model_tgt);
++            const int32_t n_pointer  = n_embd_out / 2;
++            const float * embd_q = decision.pointer >= 0 ? get_embd(decision.pointer) : nullptr;
++            GGML_ASSERT(decision.column >= 0 && decision.column < n_embd_out);
++
++            for (const int32_t marker : decision.markers) {
++                const float * embd = get_embd(marker);
++                if (embd == nullptr || (decision.pointer >= 0 && embd_q == nullptr)) {
++                    send_error(slot, "failed to get embeddings, the question and its options must fit in one batch", ERROR_TYPE_SERVER);
++                    return;
++                }
++                if (decision.pointer < 0) {
++                    res->scores.push_back(embd[decision.column]);
++                    continue;
++                }
++                float dot = 0.0f;
++                for (int32_t i = 0; i < n_pointer; i++) {
++                    dot += embd_q[i] * embd[n_pointer + i];
++                }
++                res->scores.push_back(dot / sqrtf((float) n_pointer));
++            }
++        }
++
++        SLT_DBG(slot, "%s", "sending decision result\n");
++
++        queue_results.send(std::move(res));
++    }
++
+     void send_rerank(const server_slot & slot, const llama_batch & batch) {
+         auto res = std::make_unique<server_task_result_rerank>();
+         res->id       = slot.task->id;
+@@ -2616,6 +2696,7 @@ private:
+             case SERVER_TASK_TYPE_INFILL:
+             case SERVER_TASK_TYPE_EMBEDDING:
+             case SERVER_TASK_TYPE_RERANK:
++            case SERVER_TASK_TYPE_DECISION:
+                 {
+                     // special case: if input is provided via CLI, tokenize it first
+                     // otherwise, no need to tokenize as it's already done inside the HTTP thread
+@@ -3450,10 +3531,32 @@ private:
+                                 return;
+                             }
+ 
++                            // the outputs of a decision are read from one batch
++                            const int32_t n_decision_first = slot.task->type == SERVER_TASK_TYPE_DECISION ? slot.task->decision.pos_first() : -1;
++                            if (n_decision_first >= 0 && slot.task->n_tokens() - n_decision_first > n_batch) {
++                                send_error(slot,
++                                           string_format("the question and its options (%d tokens) are too large to process. "
++                                                         "increase the batch size (current batch size: %d)",
++                                                         slot.task->n_tokens() - n_decision_first, n_batch),
++                                           ERROR_TYPE_INVALID_REQUEST);
++                                slot.release();
++                                return;
++                            }
++
+                             if (slot.task->params.cache_prompt) {
+                                 // reuse any previously computed tokens that are common with the new prompt
+                                 n_past = slot.prompt.tokens.get_common_prefix(input_tokens);
+ 
++                                // the children start from the shared prefix, do not go past it
++                                if (slot.task->n_tokens_shared > 0) {
++                                    n_past = std::min(n_past, slot.task->n_tokens_shared);
++                                }
++
++                                // the embeddings a decision reads are computed in this request, not taken from the cache
++                                if (n_decision_first >= 0 && !slot.task->decision.markers.empty()) {
++                                    n_past = std::min(n_past, n_decision_first);
++                                }
++
+                                 // if there is an alora invoked, don't cache after the invocation start
+                                 if (slot.alora_invocation_start > 0) {
+                                     SLT_DBG(slot, "only caching to alora invocation start (n_past = %d, alora_invocation_start = %d)\n", n_past, slot.alora_invocation_start);
+@@ -3679,6 +3782,24 @@ private:
+ 
+                     slot.mem.seq_rm(slot.id, p0, -1);
+ 
++                    // shared prompt prefix: once it is processed, the children continue from it with their own prompt
++                    bool wait_shared = false;
++                    if (slot.task->n_tokens_shared > 0) {
++                        const bool is_shared_done = slot.prompt.n_tokens() == slot.task->n_tokens_shared;
++                        for (auto & other : slots) {
++                            if (other.state != SLOT_STATE_WAIT_OTHER || other.task->id_parent != slot.task->id) {
++                                continue;
++                            }
++                            if (is_shared_done) {
++                                SLT_TRC(slot, " - copying shared prompt (%d tokens) to child %d\n", slot.prompt.n_tokens(), other.id);
++                                slot.copy_prompt_to(other);
++                                other.state = SLOT_STATE_STARTED;
++                            } else {
++                                wait_shared = true;
++                            }
++                        }
++                    }
++
+                     // If using an alora, there may be uncached tokens that come
+                     // before the invocation sequence. When this happens, the
+                     // tokens before the invocation sequence need to be
+@@ -3756,6 +3877,8 @@ private:
+                     const auto & spans = slot.task->params.message_spans;
+                     const auto last_user_pos = spans.last_user_message_pos();
+ 
++                    const int32_t n_decision_first = slot.task->type == SERVER_TASK_TYPE_DECISION ? slot.task->decision.pos_first() : -1;
++
+                     // add prompt tokens for processing in the current batch
+                     while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.size() < n_batch) {
+                         // get next token to process
+@@ -3764,6 +3887,16 @@ private:
+                             break; // end of text chunk
+                         }
+ 
++                        // stop at the end of the shared prefix, the children are started from this state
++                        if (wait_shared && slot.prompt.n_tokens() == slot.task->n_tokens_shared) {
++                            break;
++                        }
++
++                        // the outputs of a decision are read from one batch, do not split them
++                        if (slot.prompt.n_tokens() == n_decision_first && batch.size() + slot.task->n_tokens() - n_decision_first > n_batch) {
++                            break;
++                        }
++
+                         // if this is an alora request with pre-invocation
+                         // tokens that are not cached, we need to stop filling
+                         // this batch at those pre-invocation tokens.
+@@ -4048,6 +4181,8 @@ private:
+                     SLT_TRC(slot, " - copying state to child %d\n", child->id);
+ 
+                     GGML_ASSERT(child->state == SLOT_STATE_WAIT_OTHER);
++                    // children with their own prompt are started at the end of the shared prefix
++                    GGML_ASSERT(slot.task->n_tokens_shared == 0);
+ 
+                     slot.copy_state_to(*child);
+                     child->state = SLOT_STATE_DONE_PROMPT;
+@@ -4108,6 +4243,13 @@ private:
+                     return;
+                 }
+ 
++                if (slot.task->type == SERVER_TASK_TYPE_DECISION) {
++                    send_decision(slot, batch_view, slot.i_batch - off);
++                    slot.release();
++                    slot.i_batch = -1;
++                    return;
++                }
++
+                 GGML_ASSERT(slot.task->need_sampling());
+ 
+                 // prompt evaluated for next-token prediction
+@@ -5524,6 +5666,76 @@ void server_routes::init_routes() {
+         return res;
+     };
+ 
++    this->post_systemone = [this](const server_http_req & req) {
++        auto res = create_response();
++        const auto & decision = ctx_server.decision;
++        if (decision.type == COMMON_DECISION_TYPE_NONE) {
++            res->error(format_error_response("This model is not a decision model", ERROR_TYPE_NOT_SUPPORTED));
++            return res;
++        }
++
++        const json body = json::parse(req.body);
++        const auto questions = decision.parse_questions(body);
++
++        std::vector<raw_buffer> files;
++        const json state = decision.parse_state(body, files);
++        if (!files.empty() && (!decision.can_use_images() || !meta->has_inp_image)) {
++            res->error(format_error_response("This server does not support image input for decisions. For a model that supports it, start it with `--mmproj`", ERROR_TYPE_NOT_SUPPORTED));
++            return res;
++        }
++
++        // one task per variant of each question
++        auto & rd = res->rd;
++        {
++            std::vector<server_task> tasks;
++            for (const auto & question : questions) {
++                for (size_t variant = 0; variant < decision.n_variants(question); variant++) {
++                    server_task task = server_task(SERVER_TASK_TYPE_DECISION);
++                    task.id = rd.get_new_id();
++                    decision.fill_task(state, question, variant, files, ctx_server.mctx, task);
++                    tasks.push_back(std::move(task));
++                }
++            }
++            if (decision.can_share_prompt()) {
++                tasks = server_decision_group_tasks(std::move(tasks), params.n_parallel);
++            }
++            rd.post_tasks(std::move(tasks));
++        }
++
++        auto all_results = rd.wait_for_all(req.should_stop);
++
++        if (all_results.is_terminated) {
++            return res; // connection is closed
++        } else if (all_results.error) {
++            res->error(all_results.error->to_json());
++            return res;
++        }
++
++        json answers = json::object();
++        int32_t n_tokens = 0;
++        size_t i_result = 0;
++        for (const auto & question : questions) {
++            std::vector<std::vector<float>> scores;
++            for (size_t variant = 0; variant < decision.n_variants(question); variant++) {
++                auto * result = dynamic_cast<server_task_result_decision *>(all_results.results[i_result++].get());
++                GGML_ASSERT(result != nullptr);
++                scores.push_back(result->scores);
++                n_tokens += result->n_tokens;
++            }
++            answers[question.id] = decision.format_answer(question, scores);
++        }
++
++        res->ok(json{
++            {"model",   meta->model_name},
++            {"answers", answers},
++            {"usage",   {
++                {"input_tokens",  n_tokens},
++                {"output_tokens", 0},
++            }},
++        });
++        return res;
++    };
++
+     this->get_lora_adapters = [this](const server_http_req & req) {
+         auto res = create_response();
+ 
+diff --git a/tools/server/server-context.h b/tools/server/server-context.h
+index 444d2e7..6382d10 100644
+--- a/tools/server/server-context.h
++++ b/tools/server/server-context.h
+@@ -153,6 +153,7 @@ struct server_routes {
+     server_http_context::handler_t post_embeddings;
+     server_http_context::handler_t post_embeddings_oai;
+     server_http_context::handler_t post_rerank;
++    server_http_context::handler_t post_systemone;
+     server_http_context::handler_t get_lora_adapters;
+     server_http_context::handler_t post_lora_adapters;
+ 
+diff --git a/tools/server/server-decision.cpp b/tools/server/server-decision.cpp
+new file mode 100644
+index 0000000..d8eb58d
+--- /dev/null
++++ b/tools/server/server-decision.cpp
+@@ -0,0 +1,680 @@
++#include "server-decision.h"
++
++#include <algorithm>
++#include <cmath>
++#include <regex>
++#include <stdexcept>
++
++static const char * decision_question_type_name(server_decision_question_type type) {
++    switch (type) {
++        case SERVER_DECISION_QUESTION_CHOICE: return "choice";
++        case SERVER_DECISION_QUESTION_SCORE:  return "score";
++        case SERVER_DECISION_QUESTION_NOUL:   return "noul";
++    }
++    return "";
++}
++
++// lev reads noul from a rating scale: 0 = certainly no, 8 = certainly yes
++static const size_t DECISION_LEV_N_RATINGS = 9;
++
++static std::string decision_meta_str(const llama_model * model, const std::string & key) {
++    char buf[256];
++    const int32_t n = llama_model_meta_val_str(model, key.c_str(), buf, sizeof(buf));
++    return n < 0 ? "" : std::string(buf);
++}
++
++//
++// model-specific setup
++//
++
++void server_decision_context::init(const llama_model * model) {
++    *this = server_decision_context(); // the model can be reloaded
++
++    const common_decision_type model_type = common_get_decision_type(model);
++    if (model_type == COMMON_DECISION_TYPE_NONE) {
++        return;
++    }
++
++    const std::string prefix    = decision_meta_str(model, "general.architecture") + ".decision.";
++    const std::string type_name = decision_meta_str(model, prefix + "type");
++
++    vocab = llama_model_get_vocab(model);
++
++    const char * tmpl_src = llama_model_chat_template(model, "systemone");
++    if (tmpl_src == nullptr) {
++        throw std::runtime_error("decision model has no \"systemone\" template");
++    }
++    tmpl = std::make_shared<const common_chat_template>(tmpl_src, "", "");
++
++    const std::string prefix_temp = prefix + "temperature.";
++    for (int32_t i = 0; i < llama_model_meta_count(model); i++) {
++        char key[256];
++        char val[64];
++        if (llama_model_meta_key_by_index(model, i, key, sizeof(key)) < 0 || !string_starts_with(key, prefix_temp)) {
++            continue;
++        }
++        if (llama_model_meta_val_str_by_index(model, i, val, sizeof(val)) < 0) {
++            continue;
++        }
++        const float temp = std::strtof(val, nullptr);
++        if (temp <= 0.0f) {
++            throw std::runtime_error(string_format("invalid decision temperature: %s = %s", key, val));
++        }
++        temperatures[key + prefix_temp.size()] = temp;
++    }
++
++    if (model_type == COMMON_DECISION_TYPE_OPENJEV) {
++        // one letter per option, each must be a single token
++        const std::string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
++        for (const char c : letters) {
++            const auto toks = common_tokenize(vocab, std::string(1, c), false, false);
++            if (toks.size() != 1) {
++                throw std::runtime_error(string_format("decision label '%c' is not a single token", c));
++            }
++            labels.push_back(toks[0]);
++        }
++        n_options_max   = labels.size();
++        noul_true_first = true;
++    } else if (model_type == COMMON_DECISION_TYPE_LEV) {
++        // label codes are A..Z then AA..ZZ, only the ones that are a single token are used
++        std::vector<std::string> codes;
++        for (char a = 'A'; a <= 'Z'; a++) {
++            codes.push_back(std::string(1, a));
++        }
++        for (char a = 'A'; a <= 'Z'; a++) {
++            for (char b = 'A'; b <= 'Z'; b++) {
++                codes.push_back(std::string{a, b});
++            }
++        }
++        for (const auto & code : codes) {
++            const auto toks = common_tokenize(vocab, code, false, false);
++            if (toks.size() == 1 && labels.size() < 255) {
++                labels.push_back(toks[0]);
++                label_texts.push_back(code);
++            }
++        }
++        n_options_max = labels.size();
++    } else if (model_type == COMMON_DECISION_TYPE_KEV) {
++        // the hidden state of an option is read at the token that ends it
++        const auto toks = common_tokenize(vocab, "<|box_end|>", false, true);
++        if (toks.size() != 1) {
++            throw std::runtime_error("decision model has no <|box_end|> token");
++        }
++        token_marker  = toks[0];
++        n_options_max = 255;
++    } else if (model_type == COMMON_DECISION_TYPE_LAYA) {
++        token_marker = llama_vocab_mask(vocab);
++        token_sep    = llama_vocab_sep(vocab);
++        if (token_marker == LLAMA_TOKEN_NULL || token_sep == LLAMA_TOKEN_NULL) {
++            throw std::runtime_error("decision model has no mask or sep token");
++        }
++        text_marker = common_token_to_piece(vocab, token_marker, true);
++
++        const std::string val = decision_meta_str(model, prefix + "max_head_tokens");
++        max_head_tokens = std::strtoul(val.c_str(), nullptr, 10);
++        if (max_head_tokens == 0) {
++            throw std::runtime_error("decision model has no valid max_head_tokens");
++        }
++        n_options_max = 255;
++    } else {
++        throw std::runtime_error("unsupported decision model type: " + type_name);
++    }
++    type = model_type;
++
++    SRV_INF("decision model type: %s\n", type_name.c_str());
++}
++
++//
++// request parsing
++//
++
++std::vector<server_decision_question> server_decision_context::parse_questions(const json & body) const {
++    if (!body.contains("state") || body.at("state").is_null()) {
++        throw std::invalid_argument("\"state\" must be provided");
++    }
++    if (!body.contains("questions") || !body.at("questions").is_object() || body.at("questions").empty()) {
++        throw std::invalid_argument("\"questions\" must be a non-empty object");
++    }
++
++    std::vector<server_decision_question> questions;
++    for (const auto & [id, q] : body.at("questions").items()) {
++        auto err = [&id = id](const std::string & msg) {
++            return std::invalid_argument("questions." + id + ": " + msg);
++        };
++        if (!q.is_object()) {
++            throw err("must be an object");
++        }
++        if (!q.contains("instructions") || q.at("instructions").is_null()) {
++            throw err("\"instructions\" must be provided");
++        }
++
++        server_decision_question question;
++        question.id           = id;
++        question.instructions = q.at("instructions");
++
++        const std::string type_name = json_value(q, "type", std::string());
++        const json        criteria  = q.contains("criteria") ? q.at("criteria") : json();
++
++        if (type_name == "choice") {
++            question.type = SERVER_DECISION_QUESTION_CHOICE;
++            if (!criteria.is_object() || criteria.empty()) {
++                throw err("\"criteria\" must be a non-empty object");
++            }
++            for (const auto & [key, description] : criteria.items()) {
++                question.options.push_back({key, description});
++            }
++        } else if (type_name == "score") {
++            question.type = SERVER_DECISION_QUESTION_SCORE;
++            if (!criteria.is_array() || criteria.size() < 2 || criteria.size() > 10) {
++                throw err("\"criteria\" must be an array of 2 to 10 levels");
++            }
++            for (size_t i = 0; i < criteria.size(); i++) {
++                question.options.push_back({std::to_string(i), criteria.at(i)});
++            }
++        } else if (type_name == "noul") {
++            question.type = SERVER_DECISION_QUESTION_NOUL;
++            if (!criteria.is_null() && !criteria.is_object()) {
++                throw err("\"criteria\" must be an object");
++            }
++            for (const char * key : {"false", "true"}) {
++                question.options.push_back({key, criteria.is_object() && criteria.contains(key) ? criteria.at(key) : json()});
++            }
++            if (noul_true_first) {
++                std::swap(question.options[0], question.options[1]);
++            }
++        } else {
++            throw err("\"type\" must be one of: choice, score, noul");
++        }
++
++        if (question.options.size() > n_options_max) {
++            throw err(string_format("too many options (%zu), this model supports at most %zu", question.options.size(), n_options_max));
++        }
++
++        questions.push_back(std::move(question));
++    }
++    return questions;
++}
++
++//
++// images
++//
++
++static const size_t DECISION_MAX_IMAGES = 8;
++
++static void decision_load_image(const json & url, std::vector<raw_buffer> & files) {
++    if (!url.is_string() || !string_starts_with(url.get<std::string>(), "data:image/")) {
++        throw std::invalid_argument("images must be data URLs (data:image/...;base64,...)");
++    }
++    if (files.size() >= DECISION_MAX_IMAGES) {
++        throw std::invalid_argument(string_format("too many images, the maximum is %zu", DECISION_MAX_IMAGES));
++    }
++    handle_media(files, url.get<std::string>(), "", /*accept_base64_uri*/ true);
++}
++
++json server_decision_context::parse_state(const json & body, std::vector<raw_buffer> & files) const {
++    if (body.contains("images") && !body.at("images").is_null()) {
++        if (!body.at("images").is_array()) {
++            throw std::invalid_argument("\"images\" must be an array");
++        }
++        for (const auto & url : body.at("images")) {
++            decision_load_image(url, files);
++        }
++    }
++
++    const json & state = body.at("state");
++    const bool is_wrapped = state.is_object() && state.contains("messages");
++    const json & messages = is_wrapped ? state.at("messages") : state;
++    if (!messages.is_array()) {
++        return state;
++    }
++
++    // chat messages: take the image parts out of the content
++    json messages_out = json::array();
++    for (const auto & msg : messages) {
++        if (!msg.is_object() || !msg.contains("content") || !msg.at("content").is_array()) {
++            messages_out.push_back(msg);
++            continue;
++        }
++        json content = json::array();
++        for (const auto & part : msg.at("content")) {
++            if (part.is_object() && json_value(part, "type", std::string()) == "image_url" && part.contains("image_url")) {
++                const json & image_url = part.at("image_url");
++                decision_load_image(image_url.is_object() && image_url.contains("url") ? image_url.at("url") : image_url, files);
++            } else {
++                content.push_back(part);
++            }
++        }
++        json msg_out = msg;
++        msg_out["content"] = content;
++        messages_out.push_back(msg_out);
++    }
++
++    if (!is_wrapped) {
++        return messages_out;
++    }
++    json state_out = state;
++    state_out["messages"] = messages_out;
++    return state_out;
++}
++
++//
++// prompt
++//
++
++// replace text in all strings of a JSON value
++static json decision_replace_text(const json & val, const std::string & search, const std::string & replace) {
++    if (val.is_string()) {
++        std::string str = val.get<std::string>();
++        string_replace_all(str, search, replace);
++        return str;
++    }
++    if (val.is_array()) {
++        json out = json::array();
++        for (const auto & item : val) {
++            out.push_back(decision_replace_text(item, search, replace));
++        }
++        return out;
++    }
++    if (val.is_object()) {
++        json out = json::object();
++        for (const auto & [key, item] : val.items()) {
++            out[key] = decision_replace_text(item, search, replace);
++        }
++        return out;
++    }
++    return val;
++}
++
++// sort the keys of all objects of a JSON value
++static json decision_sort_keys(const json & val) {
++    if (val.is_array()) {
++        json out = json::array();
++        for (const auto & item : val) {
++            out.push_back(decision_sort_keys(item));
++        }
++        return out;
++    }
++    if (val.is_object()) {
++        std::map<std::string, json> sorted;
++        for (const auto & [key, item] : val.items()) {
++            sorted[key] = decision_sort_keys(item);
++        }
++        json out = json::object();
++        for (const auto & [key, item] : sorted) {
++            out[key] = item;
++        }
++        return out;
++    }
++    return val;
++}
++
++// kev flattens a JSON value into text, the keys of an object are kept as labels (kev/api.py: render)
++static std::string decision_kev_render(const json & val, int indent = 0) {
++    const std::string pad(2 * indent, ' ');
++    if (val.is_null()) {
++        return "";
++    }
++    if (val.is_string()) {
++        return val.get<std::string>();
++    }
++    if (val.is_boolean()) {
++        return val.get<bool>() ? "True" : "False";
++    }
++    if (val.is_array()) {
++        std::string out;
++        for (const auto & item : val) {
++            const std::string text = decision_kev_render(item, indent + 1);
++            out += (out.empty() ? "" : "\n") + pad + "- " + text.substr(std::min(text.size(), text.find_first_not_of(" \t\n\r")));
++        }
++        return out;
++    }
++    if (val.is_object()) {
++        std::string out;
++        for (const auto & [key, item] : val.items()) {
++            const bool is_nested = item.is_object() || item.is_array();
++            out += (out.empty() ? "" : "\n") + pad + key + (is_nested ? ":\n" : ": ") + decision_kev_render(item, is_nested ? indent + 1 : 0);
++        }
++        return out;
++    }
++    return val.dump();
++}
++
++// kev text input: special tokens written in the text must not be parsed as such
++static std::string decision_kev_text(const json & val) {
++    static const std::regex re_special("<\\|([A-Za-z0-9_]+)\\|>");
++    return std::regex_replace(decision_kev_render(val), re_special, "<\xC2\xA6$1\xC2\xA6>");
++}
++
++size_t server_decision_context::n_variants(const server_decision_question & question) const {
++    // lev shows the options of a choice in 2 orders, to cancel the preference for the first label
++    if (type == COMMON_DECISION_TYPE_LEV && question.type == SERVER_DECISION_QUESTION_CHOICE && question.options.size() > 1) {
++        return 2;
++    }
++    return 1;
++}
++
++size_t server_decision_context::n_outputs(const server_decision_question & question) const {
++    if (type == COMMON_DECISION_TYPE_LEV && question.type == SERVER_DECISION_QUESTION_NOUL) {
++        return DECISION_LEV_N_RATINGS;
++    }
++    return question.options.size();
++}
++
++std::string server_decision_context::render(const json & state, const server_decision_question & question, size_t variant, size_t n_images) const {
++    const size_t n_options = question.options.size();
++
++    // the second variant shows the options in the reverse order
++    json options = json::array();
++    for (size_t i = 0; i < n_options; i++) {
++        const auto & opt = question.options[variant == 0 ? i : n_options - 1 - i];
++        json option = json{
++            {"key",         opt.key},
++            {"description", opt.description},
++        };
++        if (type == COMMON_DECISION_TYPE_KEV) {
++            option["key"] = decision_kev_text(opt.key);
++            if (!opt.description.is_null()) {
++                option["description"] = decision_kev_text(opt.description);
++            }
++        }
++        if (!label_texts.empty()) {
++            option["label"] = label_texts[i];
++        }
++        options.push_back(option);
++    }
++
++    // the template is given raw JSON values, it serializes the ones that are not strings
++    json inp = json{
++        {"id",           question.id},
++        {"type",         decision_question_type_name(question.type)},
++        {"instructions", question.instructions},
++        {"state",        state},
++        {"options",      options},
++    };
++
++    // lev was trained with sorted keys
++    if (type == COMMON_DECISION_TYPE_LEV) {
++        inp = decision_sort_keys(inp);
++    }
++
++    // the kev template only takes text
++    if (type == COMMON_DECISION_TYPE_KEV) {
++        inp["state"]        = decision_kev_text(state);
++        inp["instructions"] = decision_kev_text(question.instructions);
++    }
++
++    // the input must not contain the marker of the options
++    if (!text_marker.empty()) {
++        inp = decision_replace_text(inp, text_marker, " ");
++    }
++
++    // the template puts one media marker per image
++    json images = json::array();
++    if (n_images > 0) {
++        inp = decision_replace_text(inp, get_media_marker(), " ");
++        for (size_t i = 0; i < n_images; i++) {
++            images.push_back(get_media_marker());
++        }
++    }
++    inp["images"] = images;
++
++    jinja::context ctx(tmpl->source());
++    jinja::global_from_json(ctx, inp, false);
++    jinja::runtime runtime(ctx);
++    const jinja::value results = runtime.execute(tmpl->prog);
++    return jinja::runtime::gather_string_parts(results)->as_string().str();
++}
++
++void server_decision_context::fill_task(
++        const json & state,
++        const server_decision_question & question,
++        size_t variant,
++        const std::vector<raw_buffer> & files,
++        mtmd_context * mctx,
++        server_task & task) const {
++    const std::string prompt = render(state, question, variant, files.size());
++
++    if (type == COMMON_DECISION_TYPE_OPENJEV || type == COMMON_DECISION_TYPE_LEV) {
++        // lev reads the ratings of a noul question at its first labels, not at the digits
++        task.decision.labels.assign(labels.begin(), labels.begin() + n_outputs(question));
++        if (!files.empty()) {
++            task.tokens = process_mtmd_prompt(mctx, prompt, files);
++            return;
++        }
++    }
++
++    llama_tokens tokens = common_tokenize(vocab, prompt, false, true);
++    if (type == COMMON_DECISION_TYPE_LAYA) {
++        fill_task_laya(tokens, question, task);
++    }
++    if (type == COMMON_DECISION_TYPE_KEV) {
++        // an option is read at its end token, the question at the last token
++        for (size_t i = 0; i < tokens.size(); i++) {
++            if (tokens[i] == token_marker) {
++                task.decision.markers.push_back(i);
++            }
++        }
++        if (task.decision.markers.size() != question.options.size()) {
++            throw std::runtime_error("unexpected layout of the decision prompt");
++        }
++        task.decision.pointer = tokens.size() - 1;
++    }
++    task.tokens = server_tokens(tokens, false);
++}
++
++// the prompt is: [cls] question [sep] ([marker] option)* [sep] state [sep]
++// options and question are cut to fit max_head_tokens, the same way the model was trained
++void server_decision_context::fill_task_laya(llama_tokens & tokens, const server_decision_question & question, server_task & task) const {
++    const size_t n_options = question.options.size();
++
++    std::vector<size_t> markers;
++    for (size_t i = 0; i < tokens.size(); i++) {
++        if (tokens[i] == token_marker) {
++            markers.push_back(i);
++        }
++    }
++    const auto invalid = std::runtime_error("unexpected layout of the decision prompt");
++    if (markers.size() != n_options || markers[0] < 2 || tokens[markers[0] - 1] != token_sep || tokens.back() != token_sep) {
++        throw invalid;
++    }
++    const size_t head_end = markers[0] - 1;
++    const size_t opts_end = std::find(tokens.begin() + markers.back(), tokens.end(), token_sep) - tokens.begin();
++    if (opts_end + 1 >= tokens.size()) {
++        throw invalid;
++    }
++
++    // marker + text of each option
++    std::vector<llama_tokens> options;
++    size_t n_options_tokens = 0;
++    auto set_max = [&](size_t n_max) {
++        n_options_tokens = 0;
++        for (auto & opt : options) {
++            opt.resize(std::min(opt.size(), n_max));
++            n_options_tokens += opt.size();
++        }
++    };
++    for (size_t i = 0; i < n_options; i++) {
++        const size_t end = i + 1 < n_options ? markers[i + 1] : opts_end;
++        options.emplace_back(tokens.begin() + markers[i], tokens.begin() + end);
++    }
++    set_max(max_option_tokens + 1);
++    if (n_options_tokens + 16 > max_head_tokens) {
++        // too many or too long options, shrink them evenly
++        set_max(std::max((size_t) 4, (max_head_tokens - std::min(max_head_tokens, (size_t) 16)) / n_options));
++    }
++    const size_t n_question_max = std::max((size_t) 8, max_head_tokens - std::min(max_head_tokens, n_options_tokens));
++
++    llama_tokens out;
++    out.push_back(tokens[0]);
++    out.insert(out.end(), tokens.begin() + 1, tokens.begin() + std::min(head_end, 1 + n_question_max));
++    out.push_back(token_sep);
++    for (const auto & opt : options) {
++        task.decision.markers.push_back(out.size());
++        out.insert(out.end(), opt.begin(), opt.end());
++    }
++    out.insert(out.end(), tokens.begin() + opts_end, tokens.end());
++    tokens = std::move(out);
++
++    // the output has one score per question type
++    task.decision.column = question.type;
++}
++
++//
++// answer
++//
++
++float server_decision_context::get_temperature(const server_decision_question & question) const {
++    const size_t n = question.options.size();
++    const std::string type_name = decision_question_type_name(question.type);
++
++    // the temperature can depend on the number of options, the buckets are the ones used to fit it
++    std::string bucket;
++    if (type == COMMON_DECISION_TYPE_LEV) {
++        bucket = n <= 8 ? "small" : n <= 26 ? "mid" : "large";
++    } else {
++        bucket = n <= 2 ? "2" : n <= 5 ? "3_5" : n <= 10 ? "6_10" : "11";
++    }
++
++    for (const auto & name : {type_name + "." + bucket, type_name}) {
++        const auto it = temperatures.find(name);
++        if (it != temperatures.end()) {
++            return it->second;
++        }
++    }
++    return 1.0f;
++}
++
++// confidence formulas are the ones published by TypeSafe
++
++static double decision_confidence_choice(const std::vector<double> & probs) {
++    if (probs.size() < 2) {
++        return 1.0;
++    }
++    const double uniform = 1.0 / probs.size();
++    const double p_max   = *std::max_element(probs.begin(), probs.end());
++    return std::max(0.0, (p_max - uniform) / (1.0 - uniform));
++}
++
++static double decision_confidence_score(const std::vector<double> & probs) {
++    if (probs.size() < 2) {
++        return 1.0;
++    }
++    const size_t n    = probs.size();
++    const size_t mode = std::max_element(probs.begin(), probs.end()) - probs.begin();
++
++    // mean distance to the mode, relative to the one of a uniform distribution around its center
++    double dist         = 0.0;
++    double dist_uniform = 0.0;
++    for (size_t i = 0; i < n; i++) {
++        dist         += probs[i] * std::fabs((double) i - (double) mode);
++        dist_uniform += std::fabs((double) i - (n - 1) / 2.0) / n;
++    }
++    return std::max(0.0, 1.0 - dist / dist_uniform);
++}
++
++json server_decision_context::format_answer(const server_decision_question & question, const std::vector<std::vector<float>> & scores) const {
++    const size_t n = n_outputs(question);
++    if (scores.size() != n_variants(question)) {
++        throw std::runtime_error("decision result does not match the number of variants");
++    }
++
++    // softmax over the outputs of each variant, then the average of the variants
++    const float temperature = get_temperature(question);
++    std::vector<double> probs(n, 0.0);
++    for (size_t v = 0; v < scores.size(); v++) {
++        const auto & s = scores[v];
++        if (s.size() != n) {
++            throw std::runtime_error("decision result does not match the number of options");
++        }
++        const float score_max = *std::max_element(s.begin(), s.end());
++        std::vector<double> p(n);
++        double sum = 0.0;
++        for (size_t i = 0; i < n; i++) {
++            p[i] = std::exp((double) (s[i] - score_max) / temperature);
++            sum += p[i];
++        }
++        for (size_t i = 0; i < n; i++) {
++            // the second variant is in the reverse order
++            probs[v == 0 ? i : n - 1 - i] += p[i] / sum / scores.size();
++        }
++    }
++
++    json answer = json{{"type", decision_question_type_name(question.type)}};
++
++    if (question.type == SERVER_DECISION_QUESTION_NOUL) {
++        if (type == COMMON_DECISION_TYPE_LEV) {
++            double expected = 0.0;
++            for (size_t i = 0; i < n; i++) {
++                expected += probs[i] * i / (n - 1);
++            }
++            answer["noul"] = expected;
++            return answer;
++        }
++        for (size_t i = 0; i < n; i++) {
++            if (question.options[i].key == "true") {
++                answer["noul"] = probs[i];
++            }
++        }
++        return answer;
++    }
++
++    json probabilities = json::object();
++    for (size_t i = 0; i < n; i++) {
++        probabilities[question.options[i].key] = probs[i];
++    }
++
++    if (question.type == SERVER_DECISION_QUESTION_CHOICE) {
++        const size_t best = std::max_element(probs.begin(), probs.end()) - probs.begin();
++        answer["choice"]        = question.options[best].key;
++        answer["probabilities"] = probabilities;
++        answer["confidence"]    = decision_confidence_choice(probs);
++    } else {
++        double expected = 0.0;
++        json legend = json::object();
++        for (size_t i = 0; i < n; i++) {
++            expected += i * probs[i];
++            legend[question.options[i].key] = question.options[i].description;
++        }
++        answer["score"]         = expected;
++        answer["legend"]        = legend;
++        answer["probabilities"] = probabilities;
++        answer["confidence"]    = decision_confidence_score(probs);
++    }
++    return answer;
++}
++
++//
++// shared prompt prefix
++//
++
++std::vector<server_task> server_decision_group_tasks(std::vector<server_task> && tasks, size_t n_slots) {
++    n_slots = std::max(n_slots, (size_t) 1);
++
++    std::vector<server_task> groups;
++    for (size_t i = 0; i < tasks.size(); i += n_slots) {
++        const size_t end = std::min(tasks.size(), i + n_slots);
++        server_task & parent = tasks[i];
++
++        // every task must have at least one token of its own to evaluate
++        size_t n_shared = parent.tokens.size() - 1;
++        for (size_t j = i + 1; j < end; j++) {
++            n_shared = std::min(n_shared, parent.tokens.get_common_prefix(tasks[j].tokens));
++            n_shared = std::min(n_shared, tasks[j].tokens.size() - 1);
++        }
++
++        if (end - i < 2 || n_shared == 0) {
++            for (size_t j = i; j < end; j++) {
++                groups.push_back(std::move(tasks[j]));
++            }
++            continue;
++        }
++
++        parent.n_tokens_shared = n_shared;
++        for (size_t j = i + 1; j < end; j++) {
++            tasks[j].id_parent = parent.id;
++            parent.child_tasks.push_back(std::move(tasks[j]));
++        }
++        groups.push_back(std::move(parent));
++    }
++    return groups;
++}
+diff --git a/tools/server/server-decision.h b/tools/server/server-decision.h
+new file mode 100644
+index 0000000..4150203
+--- /dev/null
++++ b/tools/server/server-decision.h
+@@ -0,0 +1,112 @@
++#pragma once
++
++#include "server-common.h"
++#include "server-task.h"
++
++#include <map>
++#include <memory>
++#include <string>
++#include <vector>
++
++// typed decision models (TypeSafe /v1/systemone API)
++// the model answers each question in one forward pass, no token is generated
++
++enum server_decision_question_type {
++    SERVER_DECISION_QUESTION_CHOICE,
++    SERVER_DECISION_QUESTION_SCORE,
++    SERVER_DECISION_QUESTION_NOUL,
++};
++
++struct server_decision_option {
++    std::string key;
++    json description; // null if not provided
++};
++
++struct server_decision_question {
++    std::string id;
++    server_decision_question_type type;
++    json instructions;
++    std::vector<server_decision_option> options; // in the order of the model outputs
++};
++
++struct server_decision_context {
++    common_decision_type type = COMMON_DECISION_TYPE_NONE;
++
++    // read the "<arch>.decision.*" metadata, type stays NONE if the model has none
++    void init(const llama_model * model);
++
++    // true if the questions of a request start with the same tokens, and the model can continue from them
++    bool can_share_prompt() const {
++        switch (type) {
++            case COMMON_DECISION_TYPE_OPENJEV:
++            case COMMON_DECISION_TYPE_LEV:
++            case COMMON_DECISION_TYPE_KEV:
++                return true;
++            default:
++                return false;
++        }
++    }
++
++    // true if the prompt of the model has a place for images
++    bool can_use_images() const {
++        switch (type) {
++            case COMMON_DECISION_TYPE_OPENJEV:
++                return true;
++            default:
++                return false;
++        }
++    }
++
++    // throw std::invalid_argument on bad input
++    std::vector<server_decision_question> parse_questions(const json & body) const;
++
++    // returns the state without its images, they are appended to files in order
++    // images come from "images" and from the image_url parts of a state made of chat messages
++    json parse_state(const json & body, std::vector<raw_buffer> & files) const;
++
++    // number of prompts that are evaluated to answer this question, each one shows the options in a different order
++    size_t n_variants(const server_decision_question & question) const;
++
++    // set the prompt of one variant of this question, and where to read its result
++    // mctx is only used if there are files
++    void fill_task(
++            const json & state,
++            const server_decision_question & question,
++            size_t variant,
++            const std::vector<raw_buffer> & files,
++            mtmd_context * mctx,
++            server_task & task) const;
++
++    // scores: the raw model outputs of each variant
++    json format_answer(const server_decision_question & question, const std::vector<std::vector<float>> & scores) const;
++
++private:
++    const llama_vocab * vocab = nullptr;
++    std::shared_ptr<const common_chat_template> tmpl; // the "systemone" template
++
++    std::map<std::string, float> temperatures; // "<type>" or "<type>.<n_options bucket>"
++    size_t n_options_max   = 0;
++    bool   noul_true_first = false; // noul options are [true, false] instead of [false, true]
++
++    // OPENJEV, LEV
++    std::vector<llama_token> labels;
++    std::vector<std::string> label_texts; // only if the label of an option is given to the template
++
++    // LAYA, KEV
++    llama_token token_marker      = LLAMA_TOKEN_NULL;
++    llama_token token_sep         = LLAMA_TOKEN_NULL;
++    std::string text_marker;
++    size_t      max_head_tokens   = 0; // question + options
++    size_t      max_option_tokens = 48;
++
++    std::string render(const json & state, const server_decision_question & question, size_t variant, size_t n_images) const;
++    size_t n_outputs(const server_decision_question & question) const;
++    void fill_task_laya(llama_tokens & tokens, const server_decision_question & question, server_task & task) const;
++
++    float get_temperature(const server_decision_question & question) const;
++};
++
++// group the tasks so that the common prefix of their prompts is evaluated only once
++// each group is one parent and its children, it takes at most n_slots slots
++// note: the order of the tasks is preserved
++std::vector<server_task> server_decision_group_tasks(std::vector<server_task> && tasks, size_t n_slots);
+diff --git a/tools/server/server-task.cpp b/tools/server/server-task.cpp
+index 9697ab6..6c64652 100644
+--- a/tools/server/server-task.cpp
++++ b/tools/server/server-task.cpp
+@@ -1503,6 +1503,17 @@ json server_task_result_rerank::to_json() {
+     };
+ }
+ 
++//
++// server_task_result_decision
++//
++json server_task_result_decision::to_json() {
++    return json {
++        {"index",            index},
++        {"scores",           scores},
++        {"tokens_evaluated", n_tokens},
++    };
++}
++
+ //
+ // server_task_result_error
+ //
+diff --git a/tools/server/server-task.h b/tools/server/server-task.h
+index 06fa45b..ddae280 100644
+--- a/tools/server/server-task.h
++++ b/tools/server/server-task.h
+@@ -16,6 +16,7 @@ enum server_task_type {
+     SERVER_TASK_TYPE_COMPLETION,
+     SERVER_TASK_TYPE_EMBEDDING,
+     SERVER_TASK_TYPE_RERANK,
++    SERVER_TASK_TYPE_DECISION,
+     SERVER_TASK_TYPE_INFILL,
+     SERVER_TASK_TYPE_CANCEL,
+     SERVER_TASK_TYPE_CONTROL,
+@@ -152,6 +153,8 @@ struct server_task {
+     // temporary store of child tasks for scheduling
+     // note: accessing to elements is invalid after the task is moved to server_slot
+     std::vector<server_task> child_tasks;
++    // if set on a parent, the children have their own prompt and only share its first n_tokens_shared tokens
++    int32_t n_tokens_shared = 0;
+ 
+     // used by SERVER_TASK_TYPE_INFERENCE
+     task_params   params;
+@@ -176,6 +179,26 @@ struct server_task {
+     // used by SERVER_TASK_TYPE_METRICS
+     bool metrics_reset_bucket = false;
+ 
++    // used by SERVER_TASK_TYPE_DECISION
++    // where to read the model output of each option, exactly one of the two lists is used
++    struct decision {
++        std::vector<llama_token> labels;  // logits of these tokens, at the last prompt token
++        std::vector<int32_t>     markers; // embeddings[column] at these prompt positions
++        int32_t                  column = 0;
++        // if set, embeddings is [q | k], and the output is instead the scaled dot product of q[pointer] and k[marker]
++        int32_t                  pointer = -1;
++
++        // first prompt position that is read, -1 if none
++        int32_t pos_first() const {
++            int32_t pos = pointer;
++            for (const int32_t marker : markers) {
++                pos = pos < 0 ? marker : std::min(pos, marker);
++            }
++            return pos;
++        }
++    };
++    decision decision;
++
+     // used by SERVER_TASK_TYPE_SET_LORA
+     std::map<int, float> set_lora; // mapping adapter ID -> scale
+ 
+@@ -195,6 +218,8 @@ struct server_task {
+             case SERVER_TASK_TYPE_EMBEDDING:
+             case SERVER_TASK_TYPE_RERANK:
+                 return true;
++            case SERVER_TASK_TYPE_DECISION:
++                return !decision.markers.empty();
+             default:
+                 return false;
+         }
+@@ -205,6 +230,8 @@ struct server_task {
+             case SERVER_TASK_TYPE_COMPLETION:
+             case SERVER_TASK_TYPE_INFILL:
+                 return true;
++            case SERVER_TASK_TYPE_DECISION:
++                return !decision.labels.empty();
+             default:
+                 return false;
+         }
+@@ -481,6 +508,14 @@ struct server_task_result_rerank : server_task_result {
+     virtual json to_json() override;
+ };
+ 
++struct server_task_result_decision : server_task_result {
++    std::vector<float> scores; // one raw model output per option
++
++    int32_t n_tokens;
++
++    virtual json to_json() override;
++};
++
+ struct server_task_result_error : server_task_result {
+     error_type err_type = ERROR_TYPE_SERVER;
+     std::string err_msg;
+diff --git a/tools/server/server.cpp b/tools/server/server.cpp
+index bd394bf..d0ad8ed 100644
+--- a/tools/server/server.cpp
++++ b/tools/server/server.cpp
+@@ -215,6 +215,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
+         routes.post_embeddings             = models_routes->proxy_post;
+         routes.post_embeddings_oai         = models_routes->proxy_post;
+         routes.post_rerank                 = models_routes->proxy_post;
++        routes.post_systemone              = models_routes->proxy_post;
+         routes.post_tokenize               = models_routes->proxy_post;
+         routes.post_detokenize             = models_routes->proxy_post;
+         routes.post_apply_template         = models_routes->proxy_post;
+@@ -263,6 +264,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
+     ctx_http.post("/reranking",                ex_wrapper(routes.post_rerank));
+     ctx_http.post("/v1/rerank",                ex_wrapper(routes.post_rerank));
+     ctx_http.post("/v1/reranking",             ex_wrapper(routes.post_rerank));
++    ctx_http.post("/v1/systemone",             ex_wrapper(routes.post_systemone));
+     ctx_http.post("/tokenize",                 ex_wrapper(routes.post_tokenize));
+     ctx_http.post("/detokenize",               ex_wrapper(routes.post_detokenize));
+     ctx_http.post("/apply-template",           ex_wrapper(routes.post_apply_template));

@@ -643,6 +643,111 @@ static void test_utf8_boundary_detection() {
     GGML_ASSERT(common_utf8_is_complete(std::string("hello\xC3\xA9", 7)));    // ASCII + complete 2-byte
 }
 
+static void report(llama_sampler * s, int32_t & n, bool & ex) { common_reasoning_budget_get_report(s, &n, &ex); }
+
+static void test_reasoning_budget_report() {
+    const std::vector<llama_token> start  = {100};
+    const std::vector<llama_token> end    = {101};
+    const std::vector<llama_token> forced = {102, 101};
+    int32_t n = -1; bool ex = true;
+
+    // natural end: tokens after the start tag through the end tag are counted, nothing forced
+    {
+        auto * s = common_reasoning_budget_init(nullptr, {start}, {end}, forced, 5, REASONING_BUDGET_IDLE);
+        for (llama_token t : {100, 50, 51, 101, 52}) { llama_sampler_accept(s, t); }
+        report(s, n, ex);
+        GGML_ASSERT(n == 3 && !ex && "natural end: 3 reasoning tokens, not exhausted");
+        llama_sampler_free(s);
+    }
+    // budget exhausted: the forced message and end tag count as reasoning, exhausted is set
+    {
+        auto * s = common_reasoning_budget_init(nullptr, {start}, {end}, forced, 2, REASONING_BUDGET_IDLE);
+        for (llama_token t : {100, 50, 51, 102, 101, 52}) { llama_sampler_accept(s, t); }
+        GGML_ASSERT(common_reasoning_budget_get_state(s) == REASONING_BUDGET_DONE);
+        report(s, n, ex);
+        GGML_ASSERT(n == 4 && ex && "exhausted: 4 reasoning tokens, exhausted");
+        // a clone carries the report; reset clears it
+        auto * c = llama_sampler_clone(s);
+        report(c, n, ex);
+        GGML_ASSERT(n == 4 && ex);
+        llama_sampler_reset(c);
+        report(c, n, ex);
+        GGML_ASSERT(n == 0 && !ex);
+        llama_sampler_free(c);
+        llama_sampler_free(s);
+    }
+    // manual force is the client's choice, not the budget's: not reported as exhausted
+    {
+        auto * s = common_reasoning_budget_init(nullptr, {start}, {end}, forced, 5, REASONING_BUDGET_IDLE);
+        llama_sampler_accept(s, 100);
+        llama_sampler_accept(s, 50);
+        GGML_ASSERT(common_reasoning_budget_force(s));
+        llama_sampler_accept(s, 102);
+        llama_sampler_accept(s, 101);
+        report(s, n, ex);
+        GGML_ASSERT(n == 3 && !ex && "manual force: not exhausted");
+        llama_sampler_free(s);
+    }
+    // budget 0 forces at once: exhausted, both when armed by the start tag and when promoted at init
+    {
+        auto * s = common_reasoning_budget_init(nullptr, {start}, {end}, forced, 0, REASONING_BUDGET_IDLE);
+        llama_sampler_accept(s, 100);
+        report(s, n, ex);
+        GGML_ASSERT(ex && "budget 0 armed by the start tag: exhausted");
+        llama_sampler_free(s);
+        s = common_reasoning_budget_init(nullptr, {start}, {end}, forced, 0, REASONING_BUDGET_COUNTING);
+        report(s, n, ex);
+        GGML_ASSERT(n == 0 && ex && "budget 0 promoted at init: exhausted");
+        llama_sampler_free(s);
+    }
+    // re-armed blocks accumulate
+    {
+        auto * s = common_reasoning_budget_init(nullptr, {start}, {end}, forced, 5, REASONING_BUDGET_IDLE);
+        for (llama_token t : {100, 50, 101, 60, 100, 51, 52, 101}) { llama_sampler_accept(s, t); }
+        report(s, n, ex);
+        GGML_ASSERT(n == 5 && !ex && "two blocks: 2 + 3 reasoning tokens");
+        llama_sampler_free(s);
+    }
+    // null sampler
+    report(nullptr, n, ex);
+    GGML_ASSERT(n == 0 && !ex);
+    printf("  Test 'budget report' passed\n");
+}
+
+// the report counts the nudge's forced tokens as reasoning (they are inside the block and count against the budget),
+// and a budget that runs out after a nudge is reported as exhausted (ours, on top of bonsai-ada-surgery 0035)
+static void test_reasoning_budget_report_nudge() {
+    const std::vector<llama_tokens> start  = {{100}};
+    const std::vector<llama_tokens> end    = {{101}};
+    const llama_tokens              forced = {102, 101};
+    const int32_t                   budget = 100;
+    int32_t n = -1; bool ex = false;
+
+    common_reasoning_budget_nudge nudge;
+    nudge.tokens          = {200, 201, 202};
+    nudge.at              = 0.8f;
+    nudge.min_room        = 8;
+    nudge.boundary_tokens = {10};
+
+    const auto model = model_stream(400, 7);
+
+    // the nudge fires and the hard stop still follows: budget tokens (nudge included) + the forced message and end tag
+    auto * s = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
+    const auto out = simulate(s, model, 150);
+    GGML_ASSERT(count_subsequence(out, nudge.tokens) == 1);
+    common_reasoning_budget_get_report(s, &n, &ex);
+    GGML_ASSERT(n == budget + 2 && ex && "nudged run: budget + forced tokens, exhausted");
+    llama_sampler_free(s);
+
+    // a natural end with a nudge armed but not reached is not exhausted
+    auto * s2 = common_reasoning_budget_init(nullptr, start, end, forced, budget, REASONING_BUDGET_IDLE, nudge);
+    for (llama_token t : {100, 50, 51, 101}) { llama_sampler_accept(s2, t); }
+    common_reasoning_budget_get_report(s2, &n, &ex);
+    GGML_ASSERT(n == 3 && !ex && "natural end, no nudge: not exhausted");
+    llama_sampler_free(s2);
+    printf("  Test 'budget report with a nudge' passed\n");
+}
+
 int main(void) {
     // Reasoning budget sampler tests
     printf("Testing reasoning budget sampler... ");
@@ -780,8 +885,10 @@ int main(void) {
     test_reasoning_budget_force_manual();
     test_reasoning_budget_end_match();
     test_reasoning_budget_nudge();
+    test_reasoning_budget_report();
+    test_reasoning_budget_report_nudge();
 
-    printf("OK (13 tests passed)\n");
+    printf("OK (15 tests passed)\n");
 
     printf("Testing UTF-8 boundary detection... ");
     test_utf8_boundary_detection();

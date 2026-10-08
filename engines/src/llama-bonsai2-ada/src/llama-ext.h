@@ -101,6 +101,20 @@ LLAMA_API void llama_set_embeddings_nextn(struct llama_context * ctx, bool value
 // chain multiple trained NextN heads. Default 0 (first head).
 LLAMA_API void llama_set_nextn_layer_offset(struct llama_context * ctx, int32_t offset);
 
+// Marks the tokens that a joint decision head (clef) reads: llama_batch.decision_order, one value per token, default 0.
+// Ported from ggml-org/llama.cpp PR 29831 (llama_batch_ext_set_decision_order), which this tree has no llama_batch_ext
+// for: the value rides in llama_batch.decision_order (NULL = none) and in llama_ubatch.decision_order.
+// A run of tokens with the same value is one span, spans must be separated by tokens with value 0.
+// An option belongs to the last question before it.
+enum llama_decision_order {
+    LLAMA_DECISION_ORDER_NONE            = 0, // not read by the head
+    LLAMA_DECISION_ORDER_QUESTION_NOUL   = 1, // text of a question
+    LLAMA_DECISION_ORDER_QUESTION_CHOICE = 2,
+    LLAMA_DECISION_ORDER_QUESTION_SCORE  = 3,
+    LLAMA_DECISION_ORDER_OPTION          = 4, // text of an option
+};
+// The embeddings output has one value per token: row i is the score of option i
+
 // mirrors:
 // LLAMA_API float * llama_get_embeddings(struct llama_context * ctx);
 LLAMA_API float * llama_get_embeddings_nextn(struct llama_context * ctx);

@@ -12,7 +12,7 @@ entry into a new directory; `scripts/deploy_check.py` refuses a deploy whose
 |---|---|---|---|---|
 | `llama-bonsai2` | sudoingX/llama.cpp `bonsai2`, no web UI | `285542d98d37d0f07f491cd206aefa31f1848f33` | `0001-reasoning-budget-nudge.patch`, `0002-cuda-ptq1_0-pdl-sync.patch` (sudoingX/llama.cpp#1's `967d312`) | `shipped` is the 0001+0002 build (`llama-bonsai2-f1ef2064`), NOT YET DEPLOYED: `bonsai` (`server_nudge`) runs the 0001-only build (`llama-bonsai2-eebbaae2`), pinned as `previous` until the switch (below, "The PTQ1_0 PDL race") |
 | `llama-bonsai2-base` | the same base, no patches | `285542d98d37…` | none | `bonsai-q4kv`, `bonsai-q4kv-196k` (`build/`) |
-| `llama-bonsai2-ada` | PrismML-Eng/llama.cpp `prism` + the bonsai-ada-surgery series, CANDIDATE | `adfffbe41b2cabcd51fff326ab045662265062bb` | their 33 (`0001`-`0033`), our nudge (`0034` = llama-bonsai2's 0001), FA-vec skip (`0035` = its 0003), per-sequence draft window (`0036`), tiered-KV tail by pool cells (`0037`); their `0026` replaces our 0002 | nothing yet: `shipped` = `92ffd4db`, the PHASE 2 candidate (below, "bonsai-ada-surgery merge") |
+| `llama-bonsai2-ada` | PrismML-Eng/llama.cpp `prism` + the bonsai-ada-surgery series, CANDIDATE | `adfffbe41b2cabcd51fff326ab045662265062bb` | their 33 (`0001`-`0033`), our nudge (`0034` = llama-bonsai2's 0001), FA-vec skip (`0035` = its 0003), per-sequence draft window (`0036`), tiered-KV tail by pool cells (`0037`), KV placement / rank (`0038`-`0041`), `/decide-batch` (`0042`), his 2026-10-07 `0034`-`0038` as `0043`-`0047`, `/v1/systemone` (`0048`), Clef (`0049`); their `0026` replaces our 0002 | the table is stale on what runs it: see "bonsai-ada-surgery update, and Clef in the Bonsai fork" below and `manifest.yaml` (`shipped` = cand0042 for bonsai-a4000, `previous` 80d2c60d for the rest; the cand0049 candidate is unshipped). Older text: `shipped` = `92ffd4db`, the PHASE 2 candidate (below, "bonsai-ada-surgery merge") |
 | `llama-upstream` | ggml-org/llama.cpp `master`, CANDIDATE for the max tier's Flash-Next (qwen4exp), which no fork of ours can load | `4da6337767f973e2b4d0797e5b323d77d8565e4a` | our nudge (`0001` = llama-bonsai2's 0001) | nothing yet: `shipped` = `llama-upstream-1b446647`; docs/FLASH-NEXT.md |
 | `llama-upstream-mtp` | the same + the Flash-Next MTP draft head | `4da6337767f9…` | `0001` + `0002` (PR #28243's net diff, head `6fcaa16f`) | nothing yet: `shipped` = `llama-upstream-mtp-3534183c`, a PHASE 2 arm |
 | `llama-upstream-moe` | the same + Strata's MoE-offload work, ported (expert streaming ring, GPU expert cache with Strata's profile and adaptive tier, pinned / large-page experts) | `4da6337767f9…` | `0001` nudge, `0002` PR #28414, `0003` PR #27861, `0004`-`0005` Strata ports | nothing yet: `shipped` = `llama-upstream-moe-2c8dbf5f`; "Strata's MoE work, ported" below |
@@ -1356,7 +1356,7 @@ entry's `patch_source`, and what we took from them is in our patch files.
 
 | vendored | base | patches | what runs it |
 |---|---|---|---|
-| `llama-bonsai2-ada` | PrismML-Eng/llama.cpp `adfffbe41b2c` | 41 | `bonsai` |
+| `llama-bonsai2-ada` | PrismML-Eng/llama.cpp `adfffbe41b2c` | 49 | `bonsai` (0001-0042 shipped; 0043-0049 are the unshipped cand0049, below) |
 | `llama-upstream` | ggml-org/llama.cpp `4da6337767f9` | 1 | `flash-next` (config.yaml `server_upstream_moe`) |
 | `llama-upstream-moe` | ggml-org/llama.cpp `4da6337767f9` | 5 | the Flash-Next fragment's arms |
 | `llama-mirai-s` | alesha-pro/llama.cpp-mirai-s `b59ae80f419a` | 1 | config.mirai-s.fragment.yaml |
@@ -1533,6 +1533,160 @@ manifest): on a CPU without AVX2 the `/arch:AVX2` check fails -- that is the
 recorded build, not a broken one. The result is source-reproducible, as
 below; it is not the shipped binary's hash, which only deploy_check
 verifies.
+
+## bonsai-ada-surgery update, and Clef in the Bonsai fork (2026-10-08, CPU only, NOT deployed)
+
+Operator, 2026-10-08, verbatim: "This also got updated again recently, and he also patches the llama.cpp sources, didn't we
+already download a patch llama, why are we downloading a new llama source again?" and "Let's make sure we review the surgery
+patches and fixes that happened recently compare to ours and update our llama and ensure our custom patches still apply."
+Then: ONE engine for Bonsai and a Clef-head decision model ("no separate llama tree").
+
+**The answer to the first question: no new llama source was downloaded or is needed.** professorpalmer's repository is a
+stack of patches on PrismML `adfffbe`, the base this tree already vendors (`engines/src/llama-bonsai2-ada`). His branch
+`bonsai-q8-product` is `adfffbe` + 38 commits and is not behind it (head `1d71dca`, GitHub compare 2026-10-08: ahead 38,
+behind 0). What he added since the bundle we took (`5158a8df`, 2026-09-27) is FIVE patches (his 0034-0038, ~700 lines) plus
+launcher, layer and docs files; his 0001-0033 are the same diffs as the files here (compared against the current bundle: only
+the commit-message trailer differs). The one fetch was his bundle repository (patch files, launcher, docs), into a scratch
+clone. Moving the BASE is a different job and was not done: see "The base" below.
+
+### What changed in bonsai-ada-surgery since `5158a8df`
+
+He squashed the repository's history on 2026-10-05 (the old commits are still fetchable by sha). Read: `main` = `51f3c0b`
+(2026-10-08), tags `bundle-20261003` .. `bundle-20261007-8gb`; `git diff 5158a8d..51f3c0b`.
+
+| group | change | ours already? / conflict / supersedes | what it does for us |
+|---|---|---|---|
+| llama.cpp patch | **0034** JSON schema to grammar: empty `anyOf` / `oneOf` / `type` unions are converted instead of producing an empty rule ("failed to parse grammar", reported from Hermes) | not in our series; applies clean; ours: **0043**, his file byte for byte | fixes a request failure we can hit: Hermes (our main harness) sends such schemas as tool definitions |
+| llama.cpp patch | **0035** reasoning report: `timings.reasoning_n`, `timings.reasoning_budget_exhausted`, `usage.completion_tokens_details.reasoning_tokens`; with `--reasoning-max-tokens-floor` a per-request budget above the server's moves the floor to budget + 4096 | **CONFLICTS** with our 0034 nudge (the same sampler, `common/reasoning-budget.{h,cpp}`, `tests/test-reasoning-budget.cpp`); resolved, both kept: **0044** (the nudge's forced tokens count as reasoning, a budget spent by the nudge reports `exhausted`, + a test). Not a supersession: his patch has no nudge | the proxy counts reasoning tokens with `/tokenize` and finds a force-close by the budget message (AGENTS.md U1); the engine can now say both. The floor half is inert (our launch lines do not pass the floor flag) |
+| llama.cpp patch | **0036** Turing (sm_75) takes the planar PTQ1_0 layout at one column | applies clean (**0045**, byte for byte); a no-op for sm_86 / sm_120 | none (RTX 20 cards) |
+| llama.cpp patch | **0037** `GGML_CUDA_SHARED_POOL=1` (one transient CUDA pool per device/stream) and `LLAMA_MTP_DRAFT_UBATCH=N` | applies clean (**0046**); both OFF unless the variable is set | none on 16 GB cards (12 GB / 8 GB VRAM tricks); valid only when one thread computes on the device |
+| llama.cpp patch | **0038** `GGML_CUDA_FA_PREFILL_F16=N`: prefill-sized attention over a quantized cache of up to N cells converts K/V to f16 in pool memory | applies clean (**0047**); OFF unless set | none on 16 GB cards (his 8 GB preset sets it) |
+| patches 0001-0033 | identical diffs (the commit messages lost the `Co-Authored-By` trailer in his squash; our copies keep theirs) | `LICENSE` identical | none |
+| launcher `start-server.ps1` | see "Settings" below | not applied (we do not use his launcher) | the list for the operator |
+| layer (`layer/*`, `bundle-20261003/04`) | the Bonsai layer: a Python proxy in front of llama-server, API cards for the Python modules a request involves, an API check on written code, a sandboxed CPython-on-WASI `run_python` tool, a "finish sentence" gate | not ours: it is the kind of per-turn injection AGENTS.md "One model, one cache" and "Skills, not rules" rule out | none (his AppWorld 70.8% is the serve WITHOUT the layer, passthrough) |
+| `templates/bonsai-template.jinja` | the chat template his benchmark docs measure with | **differs from the GGUF's template (our `mcp/fixtures/bonsai_chat_template.jinja`, byte-identical to the served one)**: it appends a fixed "Work rules: ..." paragraph to every system message (and adds a system turn when there is none) | do not copy it into a profile; his benchmark numbers include that paragraph |
+| model / tune | the MTP-grafted GGUF is mirrored on Hugging Face (`CaryPalmer/Ternary-Bonsai-2-27B-262k-GGUF`, all 851 original tensors byte-identical to PrismML's file: `bench/gguf_tensor_identity.py`); `build/make_mtp_q4head.ps1` + `requant_mtp.py` make a Q4_0 MTP head for 8 GB cards | our GGUF is already a graft; weights unchanged | none (no new weights, no new quantisation of the trunk) |
+| docs | `docs/8GB.md`, `docs/BENCHMARK.md`; `QUALITY.md` and `Q8_FULL_CONTEXT.md` unchanged | the effort / budget evidence our profile cites is unchanged | none |
+| 2026-10-07 .. 08 | SSE keep-alive comments in his layer (15 s), issue #7 agent-depth probes (decode at 45k / 95k / 138k, MTP on 25-28 tok/s vs off 11.6), Linux build fix | n/a (our proxy has `HEARTBEAT`) | none |
+
+### Rebase: our series on his current version
+
+The base did not move (`adfffbe`), so there is nothing to rebase our 0001-0042 ONTO. `python scripts/build_engine.py update
+llama-bonsai2-ada --to adfffbe...` (the tool's own 3-way `git rebase --onto`, dry run) on the final 49-patch series: **49/49
+`unchanged`**; the same onto the cached PrismML commit `87268f775d74` (2026-09-28, before #221): 49/49 `unchanged`. His five new
+patches were put on top of the series and `git am`'d against the vendored tree (base + 0001-0042):
+
+| file | applies | note |
+|---|---|---|
+| `0043-surgery-0034-json-schema-empty-unions.patch` | clean | his 0034, byte for byte |
+| `0044-surgery-0035-server-reasoning-report.patch` | **conflict, resolved** | `reasoning-budget.cpp` (struct, init, reset), `.h`, `tests/test-reasoning-budget.cpp` vs our 0034 nudge; kept both intents; +1 test for the combination; the other 6 files clean |
+| `0045-surgery-0036-cuda-planar-PTQ1_0-one-column-turing.patch` | clean | byte for byte |
+| `0046-surgery-0037-cuda-shared-pool.patch` | clean | byte for byte |
+| `0047-surgery-0038-cuda-fa-prefill-f16.patch` | clean | byte for byte |
+
+Our numbers 0034-0042 are kept (docs, benches and the shipped builds' `built_with_patches` name them), so his patches carry the
+numbers 0043-0047 with `surgery-NNNN` in the file name. None of our patches was dropped (none is made redundant by his).
+Inert-by-default audit of the five: 0043 changes behaviour only for a schema that failed before; 0044 adds fields to a
+response that ran with a budget sampler; 0045 is sm_75; 0046 and 0047 test one environment variable. **Greedy identity on the GPU
+is the gate, not an assumption** (below).
+
+### Clef: what it is and what was ported
+
+Clef (Cloudflare) is a Qwen3.5 text trunk with a **joint decision head**: all the questions of a request go into ONE prompt, the
+trunk runs without memory (no KV, no recurrent state kept), and the head (routing blocks, then joint blocks of cross/self
+attention; pooled spans of question and option tokens; a prior from the output embeddings; a scorer) returns one score per
+option. ggml-org/llama.cpp PR 29818 (`/v1/systemone`, merged 2026-10-02) and PR 29831 (clef, text only, merged 2026-10-03) are the
+code; **29831 sits on 29844** (the nimble model, merged between them), whose only use to clef is a signature the clef path does not
+need. Both are MIT. Our base predates them by weeks: no `llama_batch_ext`, no `common_batch`, no `mtmd_helper_init_opt`.
+
+| patch | what | from |
+|---|---|---|
+| **0048** `server-systemone-decision-api` | `POST /v1/systemone` (TypeSafe's System One API), `server_decision_context`, the task type and result, the shared prompt prefix between a request's questions, `common_get_decision_type()`, qwen35's optional `cls_out`, the Lev / Kev / OpenJev converters, gguf-py Decision keys, the server README | #29818 minus laya / mmBERT (the modern-bert head, the mmBERT tokenizer, `conversion/bert.py`), the Python server tests, the HOWTO |
+| **0049** `clef-joint-decision-head` | arch `clef` (`src/models/clef.cpp`, stateless Qwen3.5 trunk + head), `LLM_KV_DECISION_*`, 13 decision tensors, `llama_decision_order` and its carrier, `fill_task_joint()`, `conversion/clef.py`, the tensor map, `tests/test-clef.cpp` | #29831 text only; the per-token order rides in `llama_batch.decision_order` (a trailing optional field; `llama_ubatch.decision_order`) because there is no `llama_batch_ext`; `src/llama-kv-cache-dsv4.cpp`'s one-line change is this field's initializer |
+
+Not ported, on purpose: laya, Julia and mmBERT (the modern-bert decision head), nimble (29844), clef's vision input (29969, needs
+29622), `llama_batch_ext`. A Clef server serves `/v1/systemone` only (the PR's own limit: no generation), the whole prompt must fit
+in `--ubatch-size` (a joint head reads the batch; raise `-b` / `-ub` to the prompt, ~380 tokens for three small questions), and
+one clef task per batch. Our own `POST /decide-batch` (0042, jjava's reads of a call) is untouched and serves the same shape of
+work for Bonsai itself; `/v1/systemone` and `/decide-batch` are different routes in one binary.
+
+**Checks (CPU, 2026-10-08)**, all through the real code, none on a GPU:
+- the vendored tree is byte-identical to the tree that was built and tested (3,343 files compared);
+- `python scripts/build_engine.py check llama-bonsai2-ada --derive`: ok; `mcp/test_engines.py` 315/315;
+- `tests/test-clef.cpp` (ctest): a random clef model built in the test (a qwen35 trunk saved by the model saver, the head added),
+  11 checks: finite and reproducible scores, they move with an option's / a question's tokens and with the order, NaN for an
+  unusable order. `test-decide-batch` 140 checks, `test-reasoning-budget` 15 tests (the report ones included),
+  `test-json-schema-to-grammar`, `test-chat`, `test-batch-alloc`, `test-sampling` pass; `test-llama-archs` fails at the
+  `dspark` fixture ("dspark.dspark.block_size") on the base + 0001-0042 too (checked), clef is skipped there;
+- `bench/clef_smoke.py`: a tiny **transformers Qwen3.5 + random joint head** checkpoint converted by `conversion/clef.py` (the
+  real converter), scored by `test-clef` on the CPU, against the transformers trunk + a float32 PyTorch head written from the
+  PR's graph: **max |diff| 2.2e-4** over 5 options (spread 1.34). This proves the converter, the loader, the batch plumbing,
+  the stateless trunk and the head graph compute what the PR's graph says; that the PR's graph is Cloudflare's model is for a
+  trained checkpoint to show;
+- a `llama-server` (CPU) on the converted tiny model: `POST /v1/systemone` with a choice, a noul and a score question answered,
+  usage `input_tokens` 382, the same bytes on a repeat.
+
+### The base (not changed, for the operator)
+
+PrismML `prism` is now `4fbda12` (2026-10-07), 17 commits ahead of `adfffbe`. One of them is **#221** (2026-09-29): "Bonsai 2 27B at
+the full 262k window with the MTP head on 12 GB Ada: #218 + #215 hybrid PTQ1_0 dispatch, in-place q4_0/q8_0 K/V flash attention",
+the integration of the work our 0001-0033 are. `update --to` onto it would turn much of 0001-0033 into empty or conflicting
+patches, and bring #318 (a GDN state gather fix next to our 0006) and #303 (a fused FWHT quantizer): a re-base of that size is
+its own job with its own gate, and was not started (it needs the PrismML tree fetched).
+
+### Settings in his launcher, against our `mcp/tier_models.yaml` bonsai profile (for the operator; nothing was changed)
+
+| his setting (`start-server.ps1` at 51f3c0b) | ours | adopt? |
+|---|---|---|
+| `reasoning_effort` medium, thinking budget 20,480 | `effort: medium`, `user_turn_thinking: 20480` | same |
+| force-close message "Now produce the complete answer." | the operator's longer message (profile `force_close`) | his is unchanged since `5158a8df`; ours is the operator's call |
+| sampling 1.0 / 0.95 / 20 | same | same |
+| `-n` = max(24,576, budget + 4,096) (was a fixed 24,576) | `turn_min_tokens: 24576`, fixed | **yes, as a derived value**: if `user_turn_thinking` is ever raised above 20,480 the floor must follow (budget + 4,096) |
+| `usage.completion_tokens_details.reasoning_tokens` + `timings.reasoning_budget_exhausted` (his 0035) | proxy `/tokenize` count and a message search | **yes after cand0049 is deployed**: read the engine's numbers, drop the tokenizer round trip |
+| `BONSAI_SPEC_TYPE=ngram-mod,draft-mtp` (lookup drafting beside the MTP head) | `--spec-type draft-mtp` only | **worth a gate, no new engine needed** (`ngram-mod` is in our base already): his A/B, one 4070 12 GB, greedy, thinking off, n=4 per workload, ONE run each: whole-file rewrites 114.6 -> 130.7 tok/s (+14%), edit tool calls 111.1 -> 117.0 (+5%), plain prose / code 88.7 -> 89.3 (0); his `receipts/lookup_ab.jsonl`. Ours needs n=3 on a 16 GB card with `--spec-draft-window` and a rank-aware pool |
+| `--fit off` (the launcher sizes VRAM itself) | `config.yaml` sizes `--kv-vram-cells` itself | check the engine log of the next deploy for "failed to fit params"; add `--fit off` only if it appears |
+| `LLAMA_ARG_CHAT_TEMPLATE_KWARGS` through the environment (PowerShell quoting, his issue #1) | `config.yaml` / llama-swap | n/a |
+| 8 GB preset (q4_0 KV, 131k, Q4_0 head, shared pool, f16 prefill), mmproj on the CPU by default, busy-GPU warning, display detection | different cards, vision on the A4000 | no |
+| the layer, the "Work rules" template | see the table above | no |
+
+### GPU gate plan (WRITTEN, NOT RUN) before `cand0049` replaces `cand0042` on `bonsai-a4000` and `80d2c60d` on `bonsai`
+
+The candidate: `C:/Users/jwals/engines/llama-bonsai2-ada-cand0049` (base + 0001-0049, no UI, CUDA sm_86 + sm_120). Deployed stays
+`cand0042` (bonsai-a4000) and `80d2c60d` (bonsai and the rest). Each gate names the harness that exists; a failed gate stops the
+sequence. One GPU consumer at a time (AGENTS.md "Before you claim anything works" 4): each arm in its own window on a spare port.
+
+1. **Identity of the env-off build** (the claim "0043-0047 are inert"): `bench/engine_corruption.py --window` arms `cand0042` and
+   `cand0049` with `bonsai`'s exact argv: greedy x3 prompts x3 reps text identity (rep-to-rep on reps 1..n and arm-to-arm), 16 plain
+   generations (the `!` / `/` runs, repeated punctuation, repeated words), 10 tool-call requests (valid names and JSON). Pass:
+   arm-to-arm greedy text identical on every prompt, 0 corrupt generations, 10/10 valid calls. Also run with `--decide-seqs` on
+   the A4000 arm as deployed.
+2. **KL against the shipped build**: `bench/kv_q4.py`'s `drift` step (teacher-forced top-20 approximate KL, 8 chunks x 4,096 tokens,
+   16 cuts each, q8_0 KV, `bonsai`'s argv) with the two BINARIES as the arms: its arms are KV types today, so this is a small change
+   (an arm = a binary) before it runs; plus a same-binary-twice baseline arm for the noise floor. Pass: mean KL of cand0049 vs
+   cand0042 within the baseline arm's range, top-1 agreement at the baseline's rate.
+3. **Needles**: `bench/kv_q4.py`'s needle step (5 needles at 32K and 128K, thinking off, greedy) on both binaries. Pass: 5/5 per depth.
+4. **MTP acceptance**: `bench/engine_phase2.py` `accept` (draft acceptance through `/v1/chat/completions`) and the
+   `concurrent` arm (a shallow and a deep slot decoding at once). Pass: acceptance within 2 points of cand0042 on the same prompts.
+5. **Decode / prefill tok/s, n=3 per cell**: `bench/engine_phase2.py` `depth` (512 / 8K / 32K / 64K / 128K) and `placement`
+   / `spill`, plus `bench/kv_rank.py --layout v3` for the lane arms on the 5060 Ti and `bench/a4000_fit.py` on the A4000 (fit +
+   decode). Pass: no cell below cand0042's n=3 range (stated before the run, not read off it). The new
+   `llama_batch.decision_order` field and its (empty) copy per ubatch are the only per-token costs this adds to Bonsai.
+6. **`/decide-batch` identity**: `bench/decide_batch_server_smoke.py` against cand0049 on the A4000 (the CPU result was 140 checks,
+   worst |dlogp| 2.4e-4 vs a cold single sequence); on the GPU the same rows within the A4000 numbers of
+   `bench/results/a4000/` and `bench/decider/batch_ab.py`'s identity check. Pass: rows equal to cand0042's within the recorded tolerance.
+7. **The reasoning report**: one request with `reasoning_budget_tokens` small enough to trip, one that ends naturally, one with the
+   nudge on (`nudge_at` 0.6): `timings.reasoning_budget_exhausted` true / false / (true only when the budget itself closed it),
+   `usage.completion_tokens_details.reasoning_tokens` equal to the proxy's `/tokenize` count for the same turn (within 1).
+8. **Clef smoke (needs a trained head)**: `ggml-org/Clef-GGUF` (or `Clef-Flash-GGUF`) is not on this machine and downloading it is
+   the operator's approval. With it: a clef server on the A4000 on a spare port (`-b`/`-ub` >= the prompt, `-np 1`), the PR's
+   example request (the refund / urgent / frustration state) through `POST /v1/systemone`, compared with the PyTorch reference of
+   Cloudflare's own `joint_schema_model.py` on the CPU. Pass: top option equal on every question and probabilities within 1e-2 (the
+   head is float32 either way; the trunk is quantised). Until a trained head exists the CPU smoke above is the evidence. Also, with no download: the
+   tiny model of `bench/clef_smoke.py --work DIR` served by the CUDA build on the A4000 and by the CPU build, the same
+   `/v1/systemone` request to both: the stateless trunk's gated-delta-net layers (patch 0006's fused op with zero states) have
+   only run on the CPU. Pass: probabilities within 1e-3.
+9. **Only then**: `bench/deploy_*` with `cand0049` as `shipped`, `cand0042` kept as `previous`, `python scripts/deploy_check.py
+   --key-file PATH` exit 0.
 
 ## How reproducible this is
 

@@ -1,0 +1,2686 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Justin Walsh <contact.me@thejustinwalsh.com>
+Date: Thu, 8 Oct 2026 00:43:47 -0400
+Subject: [PATCH] clef: Cloudflare's joint decision head on a Qwen3.5 trunk,
+ from ggml-org #29831 (arch, decision order, converter, test)
+
+Ported from ggml-org/llama.cpp PR 29831 (99b95488ca, merged 2026-10-03, MIT), text only, onto the tree of patch 0048.
+
+- arch "clef" (src/models/clef.cpp): the Qwen3.5 trunk evaluated WITHOUT memory (llama_model_clef::create_memory is null: the
+  gated-delta-net layers start from a zero state and keep none, the attention layers are causal over the batch), then the
+  head: routing blocks and joint blocks of cross/self attention over the prompt, pooled spans of question and option
+  tokens, a prior from the output embeddings, a scorer; the embeddings output has one score per option, row i = option i.
+  Tensors, KVs (clef.decision.block_count, routing_block_count, head_count), the head's widths read from the file, the
+  create_tensor() fix for blocks past the model's layers.
+- the order of the tokens: PR 29831 adds llama_batch_ext_set_decision_order(), and this tree has no llama_batch_ext. The value
+  rides in a trailing optional field of llama_batch (decision_order, NULL = none; include/llama.h) and of llama_ubatch,
+  kept by llama_batch_allocr only when some token has one; enum llama_decision_order is in src/llama-ext.h as in the PR.
+  A batch whose order cannot be used (an option before any question, a question without an option) scores NaN, which the
+  server turns into an error. The server renders the order with the batch (server_batch) and never batches a clef task with
+  another.
+- server: fill_task_joint() puts all the questions of a request in ONE prompt (the "systemone" template the converter writes,
+  pieces tokenized one by one as in training), is_joint(), choice options sorted by key, the scores read from the first
+  rows of the embeddings. A server that runs clef serves /v1/systemone only; the prompt must fit in --ubatch-size.
+- conversion/clef.py (ClefModel: the checkpoint's joint_head.safetensors, nn.MultiheadAttention's in_proj split into q/k/v,
+  the learned scalars stored as the values used at inference), gguf-py constants, tensor map, writer methods.
+- tests/test-clef.cpp (ctest): a tiny random clef GGUF built in the test (a qwen35 trunk saved by the model saver plus the
+  head), 11 checks: finite and reproducible scores, they move with an option's or a question's tokens and with the order,
+  NaN for an unusable order. Dump mode (--save, MODEL IN OUT) feeds bench/clef_smoke.py, which converts a tiny
+  transformers Qwen3.5 + head checkpoint with this converter and compares the scores with a PyTorch reference:
+  max |diff| 2.2e-4 on the CPU (float32). test-llama-archs skips the arch (the head tensors are not saved).
+
+Not taken: llama_batch_ext, vision (PR 29969 and the mtmd entries PR 29622 would bring), the nimble model, the dsv4 KV cache
+hunk (a one-line initializer, here for llama_ubatch's new field).
+
+NOT RUN ON A GPU: the ggml graph is backend-neutral (mul_mat, norms, softmax, get_rows, gelu_erf, l2_norm), but the CUDA
+build of the trunk's gated-delta-net layers (patch 0006, the fused op) has only run the QWEN35 memory path. The trunk here
+passes zero states through build_delta_net() and keeps none.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ common/common.cpp                |   5 +-
+ common/common.h                  |   1 +
+ conversion/__init__.py           |   2 +
+ conversion/clef.py               | 150 ++++++++
+ gguf-py/gguf/constants.py        |  87 +++++
+ gguf-py/gguf/gguf_writer.py      |   6 +
+ gguf-py/gguf/tensor_mapping.py   |  76 +++-
+ include/llama.h                  |   1 +
+ src/llama-arch.cpp               |  33 ++
+ src/llama-arch.h                 |  19 +
+ src/llama-batch.cpp              |  23 ++
+ src/llama-batch.h                |   3 +
+ src/llama-context.cpp            |   1 +
+ src/llama-ext.h                  |  14 +
+ src/llama-kv-cache-dsv4.cpp      |   1 +
+ src/llama-model-saver.cpp        |   1 +
+ src/llama-model.cpp              |  14 +-
+ src/models/clef.cpp              | 614 +++++++++++++++++++++++++++++++
+ src/models/models.h              |  93 +++++
+ tests/CMakeLists.txt             |   1 +
+ tests/test-clef.cpp              | 544 +++++++++++++++++++++++++++
+ tests/test-llama-archs.cpp       |   3 +
+ tools/server/README.md           |  10 +-
+ tools/server/server-context.cpp  |  69 +++-
+ tools/server/server-decision.cpp |  99 +++++
+ tools/server/server-decision.h   |  10 +
+ tools/server/server-task.h       |   7 +-
+ 27 files changed, 1869 insertions(+), 18 deletions(-)
+ create mode 100644 conversion/clef.py
+ create mode 100644 src/models/clef.cpp
+ create mode 100644 tests/test-clef.cpp
+
+diff --git a/common/common.cpp b/common/common.cpp
+index 82d9c7f..dbd00c0 100644
+--- a/common/common.cpp
++++ b/common/common.cpp
+@@ -1292,6 +1292,7 @@ static const std::map<common_decision_type, std::string> COMMON_DECISION_TYPE_NA
+     { COMMON_DECISION_TYPE_LEV,     "lev"     },
+     { COMMON_DECISION_TYPE_KEV,     "kev"     },
+     { COMMON_DECISION_TYPE_LAYA,    "laya"    },
++    { COMMON_DECISION_TYPE_CLEF,    "clef"    },
+ };
+ 
+ static common_decision_type common_decision_type_from_string(const std::string & str) {
+@@ -1365,10 +1366,10 @@ common_init_result::common_init_result(common_params & params, bool model_only)
+ 
+     const llama_vocab * vocab = llama_model_get_vocab(model);
+ 
+-    // this decision model returns a score for each token via the embeddings output
++    // these decision models return a score for each token via the embeddings output
+     // TODO: maybe improve this in the future
+     const auto decision_type = common_get_decision_type(model);
+-    if (decision_type == COMMON_DECISION_TYPE_LAYA || decision_type == COMMON_DECISION_TYPE_KEV) {
++    if (decision_type == COMMON_DECISION_TYPE_LAYA || decision_type == COMMON_DECISION_TYPE_KEV || decision_type == COMMON_DECISION_TYPE_CLEF) {
+         params.embedding    = true;
+         params.pooling_type = LLAMA_POOLING_TYPE_NONE;
+ 
+diff --git a/common/common.h b/common/common.h
+index dd2bf5b..b3d019f 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -948,6 +948,7 @@ enum common_decision_type {
+     COMMON_DECISION_TYPE_LEV,     // same as openjev, noul is read from a rating scale
+     COMMON_DECISION_TYPE_KEV,     // dot product of the hidden states of the last token and of one end token per option
+     COMMON_DECISION_TYPE_LAYA,    // score of one marker token per option, read from the embeddings output
++    COMMON_DECISION_TYPE_CLEF,    // all questions in one prompt, score of option i read from the embeddings output at row i
+     COMMON_DECISION_TYPE_UNKNOWN, // a decision model of a type that is not supported
+ };
+ 
+diff --git a/conversion/__init__.py b/conversion/__init__.py
+index 8070355..8953507 100644
+--- a/conversion/__init__.py
++++ b/conversion/__init__.py
+@@ -41,6 +41,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
+     "ChameleonForConditionalGeneration": "chameleon",
+     "ChatGLMForConditionalGeneration": "chatglm",
+     "ChatGLMModel": "chatglm",
++    "ClefModel": "clef",
+     "CodeShellForCausalLM": "codeshell",
+     "CogVLMForCausalLM": "cogvlm",
+     "Cohere2MoeForCausalLM": "command_r",
+@@ -291,6 +292,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
+ 
+ MMPROJ_MODEL_MAP: dict[str, str] = {
+     "AudioFlamingo3ForConditionalGeneration": "ultravox",
++    "ClefModel": "clef",
+     "CogVLMForCausalLM": "cogvlm",
+     "DeepseekOCR2ForCausalLM": "deepseek",
+     "DeepseekOCRForCausalLM": "deepseek",
+diff --git a/conversion/clef.py b/conversion/clef.py
+new file mode 100644
+index 0000000..a6f7243
+--- /dev/null
++++ b/conversion/clef.py
+@@ -0,0 +1,150 @@
++from __future__ import annotations
++
++import json
++import math
++
++from pathlib import Path
++from typing import Any, Iterable, Iterator, TYPE_CHECKING
++
++import torch
++
++if TYPE_CHECKING:
++    from torch import Tensor
++
++from .base import MmprojModel, ModelBase, gguf, logger
++from .qwen import Qwen3_5TextModel
++
++
++def _is_clef_checkpoint(dir_model: Path) -> bool:
++    return (dir_model / "joint_head_config.json").is_file() and (dir_model / "config.json").is_file()
++
++
++@ModelBase.register_hparams_loader(_is_clef_checkpoint)
++def _load_clef_hparams(dir_model: Path) -> dict[str, Any]:
++    logger.info("gguf: detected Clef checkpoint")
++    hparams = ModelBase.load_hparams(dir_model, False, guess=False)
++    hparams["architectures"] = ["ClefModel"]
++    with open(dir_model / "joint_head_config.json", encoding="utf-8") as f:
++        hparams["decision"] = json.load(f)
++    return hparams
++
++
++@ModelBase.register("ClefModel")
++class ClefModel(Qwen3_5TextModel):
++    model_arch = gguf.MODEL_ARCH.CLEF
++    no_mtp = True  # the checkpoint has no MTP head
++
++    # prompt follows joint_schema_model.py of the model repo
++    _SYSTEM_PROMPT = (
++        "Read the complete state and schema. Decide every field jointly. Each answer "
++        "must be exactly one of that field's allowed options."
++    )
++    # torch.nn.LayerNorm default, used by the head
++    _HEAD_NORM_EPS = 1e-5
++
++    def __init__(self, *args, **kwargs):
++        super().__init__(*args, **kwargs)
++        head = self.hparams["decision"]
++        self._n_routing = head["routing_layers"]
++        # the head blocks are named dec.blk.N, routing blocks first
++        self.tensor_map = gguf.get_tensor_name_map(self.model_arch, max(self.block_count, self._n_routing + head["layers"]))
++        self._scales: dict[str, float] = {}
++
++    def set_vocab(self):
++        super().set_vocab()
++        self.gguf_writer.add_chat_template([{"name": "systemone", "template": self._systemone_template()}])
++
++    @classmethod
++    def _systemone_template(cls) -> str:
++        def text(value: str) -> str:
++            return "{{ " + json.dumps(value) + " }}"
++
++        def render(name: str) -> str:
++            # strings are used as is, other values are compact JSON
++            return "{{ " + name + " if " + name + " is string else " + name + " | tojson(separators=[',', ':']) }}"
++
++        # the pieces of the prompt are tokenized one by one, the server gives the text that separates them (sep)
++        # and the text that starts the span of a question or of an option (mark_question, mark_option)
++        # the keys of JSON objects are given in sorted order
++        option = (
++            "{% set d = o.description %}"
++            "{% if q.type == 'noul' and d is none %}"
++            "{% set d = 'The proposition is true or the answer is yes.' if o.key == 'true' else 'The proposition is false or the answer is no.' %}"
++            "{% endif %}"
++            "{{ ({'option_id': o.key} if d is none else {'description': d, 'option_id': o.key}) | tojson(separators=[',', ':']) }}"
++        )
++        return (
++            text(f"<|im_start|>system\n{cls._SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\nSTATE:\n")
++            + "{{ sep }}" + render("state")
++            + "{{ sep }}" + text("\n\nSCHEMA FIELDS:\n")
++            + "{% for q in questions %}"
++            + "{{ sep }}" + text("\nFIELD ") + "{{ loop.index }}" + text("\nID: ") + "{{ q.id }}"
++            + text("\nTYPE: ") + "{{ q.type }}" + text("\nINSTRUCTION: ")
++            + "{{ sep }}{{ mark_question }}" + render("q.instructions")
++            + "{{ sep }}" + text("\nALLOWED OPTIONS:\n")
++            + "{% for o in q.options %}"
++            + "{{ sep }}" + text("OPTION ") + "{{ loop.index }}" + text(": ")
++            + "{{ sep }}{{ mark_option }}" + option
++            + "{{ sep }}" + text("\n")
++            + "{% endfor %}"
++            + "{{ sep }}" + text("END FIELD\n")
++            + "{% endfor %}"
++            + "{{ sep }}" + text("\n<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nJOINT SCHEMA DECISIONS:")
++        )
++
++    def set_gguf_parameters(self):
++        super().set_gguf_parameters()
++        head = self.hparams["decision"]
++        self.gguf_writer.add_decision_type(gguf.DecisionType.CLEF)
++        self.gguf_writer.add_decision_routing_block_count(head["routing_layers"])
++        self.gguf_writer.add_decision_block_count(head["layers"])
++        self.gguf_writer.add_decision_head_count(head["heads"])
++        self.gguf_writer.add_layer_norm_eps(self._HEAD_NORM_EPS)
++
++    def get_tensors(self) -> Iterator[tuple[str, Tensor]]:
++        yield from super().get_tensors()
++        from safetensors.torch import load_file
++        for name, data in load_file(self.dir_model / "joint_head.safetensors").items():
++            yield "joint_head." + name, data
++
++    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
++        if not name.startswith("joint_head."):
++            yield from super().modify_tensors(data_torch, name, bid)
++            return
++
++        parts = name.split(".")
++
++        # learned scalars, stored as the values used at inference
++        if len(parts) == 2 and data_torch.ndim == 0:
++            value = float(data_torch)
++            if parts[1] == "residual_gate":
++                self._scales[parts[1]] = 1.0 / (1.0 + math.exp(-value))
++            else:
++                self._scales[parts[1]] = math.exp(min(value, math.log(100.0)))
++            if len(self._scales) == 3:
++                scales = [self._scales[k] for k in ("prior_logit_scale", "joint_logit_scale", "residual_gate")]
++                yield self.format_tensor_name(gguf.MODEL_TENSOR.DECISION_SCALES, suffix=""), torch.tensor(scales, dtype=torch.float32)
++            return
++
++        # routing blocks come first
++        if parts[1] == "layers":
++            parts[2] = str(int(parts[2]) + self._n_routing)
++        name = ".".join(parts)
++
++        # nn.MultiheadAttention keeps q, k, v in one tensor
++        for suffix in ("weight", "bias"):
++            if name.endswith(".in_proj_" + suffix):
++                prefix = name[:-len("in_proj_" + suffix)]
++                for x, data in zip("qkv", data_torch.chunk(3, dim=0)):
++                    yield self.map_tensor_name(prefix + x + "." + suffix), data
++                return
++
++        yield self.map_tensor_name(name), data_torch
++
++
++@ModelBase.register("ClefModel")
++class ClefVisionModel(MmprojModel):
++    def __init__(self, *args, **kwargs):
++        del args, kwargs
++        raise NotImplementedError(
++            "multimodal input is not supported yet for Clef, requires https://github.com/ggml-org/llama.cpp/pull/29622 to be merged first")
+diff --git a/gguf-py/gguf/constants.py b/gguf-py/gguf/constants.py
+index 9d9c9e9..270a02b 100644
+--- a/gguf-py/gguf/constants.py
++++ b/gguf-py/gguf/constants.py
+@@ -301,6 +301,8 @@ class Keys:
+         TYPE               = "{arch}.decision.type"
+         # note: single-use-case keys can be hard-coded in cpp code
+         BLOCK_COUNT        = "{arch}.decision.block_count"
++        ROUTING_BLOCK_COUNT = "{arch}.decision.routing_block_count"
++        HEAD_COUNT         = "{arch}.decision.head_count"
+         MAX_HEAD_TOKENS    = "{arch}.decision.max_head_tokens"
+         TEMPERATURE        = "{arch}.decision.temperature.{name}"  # name: "<type>" or "<type>.<n_opt bucket>"
+ 
+@@ -512,6 +514,7 @@ class MODEL_ARCH(IntEnum):
+     QWEN3VLMOE       = auto()
+     QWEN35           = auto()
+     QWEN35MOE        = auto()
++    CLEF             = auto()
+     DSPARK           = auto()
+     PHI2             = auto()
+     PHI3             = auto()
+@@ -812,6 +815,7 @@ class MODEL_TENSOR(IntEnum):
+     DEC_ATTN_OUT         = auto()
+     DEC_ATTN_REL_B       = auto()
+     DEC_CROSS_ATTN_NORM  = auto()
++    DEC_CROSS_ATTN_NORM_KV = auto()
+     DEC_CROSS_ATTN_Q     = auto()
+     DEC_CROSS_ATTN_K     = auto()
+     DEC_CROSS_ATTN_V     = auto()
+@@ -836,6 +840,19 @@ class MODEL_TENSOR(IntEnum):
+     CLS                  = auto() # classifier
+     CLS_OUT              = auto() # classifier output projection
+     CLS_NORM             = auto()
++    DECISION_HIDDEN_NORM          = auto()
++    DECISION_PROJ_MEMORY          = auto()
++    DECISION_PROJ_QUESTION        = auto()
++    DECISION_PROJ_OPTION_QUESTION = auto()
++    DECISION_PROJ_GLOBAL          = auto()
++    DECISION_PROJ_OPTION_CONTEXT  = auto()
++    DECISION_PROJ_OPTION_LEXICAL  = auto()
++    DECISION_OPTION_SUMMARY_NORM  = auto()
++    DECISION_FIELD_NORM           = auto()
++    DECISION_OPTION_NORM          = auto()
++    DECISION_SCALES               = auto()
++    DECISION_SCORER               = auto()
++    DECISION_SCORER_OUT           = auto()
+     CONV1D               = auto()
+     CONVNEXT_DW          = auto()
+     CONVNEXT_NORM        = auto()
+@@ -1257,6 +1274,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
+     MODEL_ARCH.QWEN3VLMOE:       "qwen3vlmoe",
+     MODEL_ARCH.QWEN35:           "qwen35",
+     MODEL_ARCH.QWEN35MOE:        "qwen35moe",
++    MODEL_ARCH.CLEF:             "clef",
+     MODEL_ARCH.DSPARK:           "dspark",
+     MODEL_ARCH.PHI2:             "phi2",
+     MODEL_ARCH.PHI3:             "phi3",
+@@ -1556,6 +1574,7 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
+     MODEL_TENSOR.DEC_ATTN_OUT:              "dec.blk.{bid}.attn_o",
+     MODEL_TENSOR.DEC_ATTN_REL_B:            "dec.blk.{bid}.attn_rel_b",
+     MODEL_TENSOR.DEC_CROSS_ATTN_NORM:       "dec.blk.{bid}.cross_attn_norm",
++    MODEL_TENSOR.DEC_CROSS_ATTN_NORM_KV:    "dec.blk.{bid}.cross_attn_norm_kv",
+     MODEL_TENSOR.DEC_CROSS_ATTN_Q:          "dec.blk.{bid}.cross_attn_q",
+     MODEL_TENSOR.DEC_CROSS_ATTN_K:          "dec.blk.{bid}.cross_attn_k",
+     MODEL_TENSOR.DEC_CROSS_ATTN_V:          "dec.blk.{bid}.cross_attn_v",
+@@ -1580,6 +1599,19 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
+     MODEL_TENSOR.CLS:                       "cls",
+     MODEL_TENSOR.CLS_OUT:                   "cls.output",
+     MODEL_TENSOR.CLS_NORM:                  "cls.norm",
++    MODEL_TENSOR.DECISION_HIDDEN_NORM:          "decision.hidden_norm",
++    MODEL_TENSOR.DECISION_PROJ_MEMORY:          "decision.proj_memory",
++    MODEL_TENSOR.DECISION_PROJ_QUESTION:        "decision.proj_question",
++    MODEL_TENSOR.DECISION_PROJ_OPTION_QUESTION: "decision.proj_option_question",
++    MODEL_TENSOR.DECISION_PROJ_GLOBAL:          "decision.proj_global",
++    MODEL_TENSOR.DECISION_PROJ_OPTION_CONTEXT:  "decision.proj_option_context",
++    MODEL_TENSOR.DECISION_PROJ_OPTION_LEXICAL:  "decision.proj_option_lexical",
++    MODEL_TENSOR.DECISION_OPTION_SUMMARY_NORM:  "decision.option_summary_norm",
++    MODEL_TENSOR.DECISION_FIELD_NORM:           "decision.field_norm",
++    MODEL_TENSOR.DECISION_OPTION_NORM:          "decision.option_norm",
++    MODEL_TENSOR.DECISION_SCALES:               "decision.scales",
++    MODEL_TENSOR.DECISION_SCORER:               "decision.scorer",
++    MODEL_TENSOR.DECISION_SCORER_OUT:           "decision.scorer_out",
+     MODEL_TENSOR.CONV1D:                    "conv1d",
+     MODEL_TENSOR.CONVNEXT_DW:               "convnext.{bid}.dw",
+     MODEL_TENSOR.CONVNEXT_NORM:             "convnext.{bid}.norm",
+@@ -2843,6 +2875,60 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
+         MODEL_TENSOR.DSPARK_MARKOV_HEAD_B,
+         MODEL_TENSOR.DSPARK_CONFIDENCE_HEAD,
+     ],
++    MODEL_ARCH.CLEF: [
++        MODEL_TENSOR.TOKEN_EMBD,
++        MODEL_TENSOR.OUTPUT_NORM,
++        MODEL_TENSOR.OUTPUT,
++        MODEL_TENSOR.ATTN_NORM,
++        MODEL_TENSOR.ATTN_Q,
++        MODEL_TENSOR.ATTN_Q_NORM,
++        MODEL_TENSOR.ATTN_K,
++        MODEL_TENSOR.ATTN_K_NORM,
++        MODEL_TENSOR.ATTN_V,
++        MODEL_TENSOR.ATTN_OUT,
++        MODEL_TENSOR.ATTN_POST_NORM,
++        MODEL_TENSOR.ATTN_GATE,
++        MODEL_TENSOR.ATTN_QKV,
++        MODEL_TENSOR.FFN_GATE,
++        MODEL_TENSOR.FFN_DOWN,
++        MODEL_TENSOR.FFN_UP,
++        MODEL_TENSOR.SSM_A,
++        MODEL_TENSOR.SSM_CONV1D,
++        MODEL_TENSOR.SSM_DT,
++        MODEL_TENSOR.SSM_NORM,
++        MODEL_TENSOR.SSM_BETA,
++        MODEL_TENSOR.SSM_ALPHA,
++        MODEL_TENSOR.SSM_OUT,
++        # decision head
++        MODEL_TENSOR.TOKEN_TYPES,
++        MODEL_TENSOR.DEC_ATTN_NORM,
++        MODEL_TENSOR.DEC_ATTN_Q,
++        MODEL_TENSOR.DEC_ATTN_K,
++        MODEL_TENSOR.DEC_ATTN_V,
++        MODEL_TENSOR.DEC_ATTN_OUT,
++        MODEL_TENSOR.DEC_CROSS_ATTN_NORM,
++        MODEL_TENSOR.DEC_CROSS_ATTN_NORM_KV,
++        MODEL_TENSOR.DEC_CROSS_ATTN_Q,
++        MODEL_TENSOR.DEC_CROSS_ATTN_K,
++        MODEL_TENSOR.DEC_CROSS_ATTN_V,
++        MODEL_TENSOR.DEC_CROSS_ATTN_OUT,
++        MODEL_TENSOR.DEC_FFN_NORM,
++        MODEL_TENSOR.DEC_FFN_DOWN,
++        MODEL_TENSOR.DEC_FFN_UP,
++        MODEL_TENSOR.DECISION_HIDDEN_NORM,
++        MODEL_TENSOR.DECISION_PROJ_MEMORY,
++        MODEL_TENSOR.DECISION_PROJ_QUESTION,
++        MODEL_TENSOR.DECISION_PROJ_OPTION_QUESTION,
++        MODEL_TENSOR.DECISION_PROJ_GLOBAL,
++        MODEL_TENSOR.DECISION_PROJ_OPTION_CONTEXT,
++        MODEL_TENSOR.DECISION_PROJ_OPTION_LEXICAL,
++        MODEL_TENSOR.DECISION_OPTION_SUMMARY_NORM,
++        MODEL_TENSOR.DECISION_FIELD_NORM,
++        MODEL_TENSOR.DECISION_OPTION_NORM,
++        MODEL_TENSOR.DECISION_SCALES,
++        MODEL_TENSOR.DECISION_SCORER,
++        MODEL_TENSOR.DECISION_SCORER_OUT,
++    ],
+     MODEL_ARCH.QWEN35MOE: [
+         MODEL_TENSOR.TOKEN_EMBD,
+         MODEL_TENSOR.OUTPUT_NORM,
+@@ -5591,6 +5677,7 @@ class DecisionType:
+     OPENJEV = "openjev"  # logits of one label token per option
+     LEV     = "lev"      # same as openjev, noul is read from a rating scale
+     KEV     = "kev"      # dot product of the hidden states of the last token and of one end token per option
++    CLEF    = "clef"     # joint head over all questions, one score per option
+ 
+ 
+ class VisionProjectorType:
+diff --git a/gguf-py/gguf/gguf_writer.py b/gguf-py/gguf/gguf_writer.py
+index 0b5bff7..41cc2bd 100644
+--- a/gguf-py/gguf/gguf_writer.py
++++ b/gguf-py/gguf/gguf_writer.py
+@@ -1283,6 +1283,12 @@ class GGUFWriter:
+     def add_decision_block_count(self, value: int) -> None:
+         self.add_uint32(Keys.Decision.BLOCK_COUNT.format(arch=self.arch), value)
+ 
++    def add_decision_routing_block_count(self, value: int) -> None:
++        self.add_uint32(Keys.Decision.ROUTING_BLOCK_COUNT.format(arch=self.arch), value)
++
++    def add_decision_head_count(self, value: int) -> None:
++        self.add_uint32(Keys.Decision.HEAD_COUNT.format(arch=self.arch), value)
++
+     def add_decision_max_head_tokens(self, value: int) -> None:
+         self.add_uint32(Keys.Decision.MAX_HEAD_TOKENS.format(arch=self.arch), value)
+ 
+diff --git a/gguf-py/gguf/tensor_mapping.py b/gguf-py/gguf/tensor_mapping.py
+index 7a4c8f0..9259ac7 100644
+--- a/gguf-py/gguf/tensor_mapping.py
++++ b/gguf-py/gguf/tensor_mapping.py
+@@ -48,6 +48,7 @@ class TensorNameMap:
+         # Token type embeddings
+         MODEL_TENSOR.TOKEN_TYPES: (
+             "embeddings.token_type_embeddings",  # bert nomic-bert
++            "joint_head.type_embedding",  # clef
+         ),
+ 
+         # Normalization of token embeddings
+@@ -419,7 +420,7 @@ class TensorNameMap:
+             "layers.{bid}.post_attention_layernorm",                         # qwen3-embedding
+             "model.layers.{bid}.feedforward_layernorm",                      # apertus
+             "model.layers.{bid}.pre_mlp_layernorm",                          # kormo
+-            "layers.{bid}.mlp_norm"                                          # modern-bert
++            "layers.{bid}.mlp_norm",                                         # modern-bert
+         ),
+ 
+         # Pre feed-forward norm
+@@ -1173,22 +1174,27 @@ class TensorNameMap:
+ 
+         MODEL_TENSOR.DEC_ATTN_NORM: (
+             "decoder.block.{bid}.layer.0.layer_norm", # t5
++            "joint_head.layers.{bid}.norm1",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_ATTN_Q: (
+             "decoder.block.{bid}.layer.0.SelfAttention.q", # t5
++            "joint_head.layers.{bid}.self_attn.q",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_ATTN_K: (
+             "decoder.block.{bid}.layer.0.SelfAttention.k", # t5
++            "joint_head.layers.{bid}.self_attn.k",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_ATTN_V: (
+             "decoder.block.{bid}.layer.0.SelfAttention.v", # t5
++            "joint_head.layers.{bid}.self_attn.v",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_ATTN_OUT: (
+             "decoder.block.{bid}.layer.0.SelfAttention.o", # t5
++            "joint_head.layers.{bid}.self_attn.out_proj",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_ATTN_REL_B: (
+@@ -1197,22 +1203,32 @@ class TensorNameMap:
+ 
+         MODEL_TENSOR.DEC_CROSS_ATTN_NORM: (
+             "decoder.block.{bid}.layer.1.layer_norm", # t5
++            "joint_head.layers.{bid}.norm2",  # clef
++            "joint_head.evidence_layers.{bid}.query_norm",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_CROSS_ATTN_Q: (
+             "decoder.block.{bid}.layer.1.EncDecAttention.q", # t5
++            "joint_head.layers.{bid}.multihead_attn.q",  # clef
++            "joint_head.evidence_layers.{bid}.attention.q",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_CROSS_ATTN_K: (
+             "decoder.block.{bid}.layer.1.EncDecAttention.k", # t5
++            "joint_head.layers.{bid}.multihead_attn.k",  # clef
++            "joint_head.evidence_layers.{bid}.attention.k",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_CROSS_ATTN_V: (
+             "decoder.block.{bid}.layer.1.EncDecAttention.v", # t5
++            "joint_head.layers.{bid}.multihead_attn.v",  # clef
++            "joint_head.evidence_layers.{bid}.attention.v",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_CROSS_ATTN_OUT: (
+             "decoder.block.{bid}.layer.1.EncDecAttention.o", # t5
++            "joint_head.layers.{bid}.multihead_attn.out_proj",  # clef
++            "joint_head.evidence_layers.{bid}.attention.out_proj",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_CROSS_ATTN_REL_B: (
+@@ -1221,6 +1237,8 @@ class TensorNameMap:
+ 
+         MODEL_TENSOR.DEC_FFN_NORM: (
+             "decoder.block.{bid}.layer.2.layer_norm", # t5
++            "joint_head.layers.{bid}.norm3",  # clef
++            "joint_head.evidence_layers.{bid}.feedforward_norm",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_FFN_GATE: (
+@@ -1230,16 +1248,72 @@ class TensorNameMap:
+         MODEL_TENSOR.DEC_FFN_UP: (
+             "decoder.block.{bid}.layer.2.DenseReluDense.wi",   # t5
+             "decoder.block.{bid}.layer.2.DenseReluDense.wi_1", # flan-t5
++            "joint_head.layers.{bid}.linear1",  # clef
++            "joint_head.evidence_layers.{bid}.feedforward.0",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_FFN_DOWN: (
+             "decoder.block.{bid}.layer.2.DenseReluDense.wo", # t5
++            "joint_head.layers.{bid}.linear2",  # clef
++            "joint_head.evidence_layers.{bid}.feedforward.3",  # clef
+         ),
+ 
+         MODEL_TENSOR.DEC_OUTPUT_NORM: (
+             "decoder.final_layer_norm", # t5
+         ),
+ 
++        MODEL_TENSOR.DEC_CROSS_ATTN_NORM_KV: (
++            "joint_head.evidence_layers.{bid}.memory_norm",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_HIDDEN_NORM: (
++            "joint_head.hidden_norm",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_PROJ_MEMORY: (
++            "joint_head.memory_projection",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_PROJ_QUESTION: (
++            "joint_head.question_projection",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_PROJ_OPTION_QUESTION: (
++            "joint_head.option_question_projection",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_PROJ_GLOBAL: (
++            "joint_head.global_projection",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_PROJ_OPTION_CONTEXT: (
++            "joint_head.option_context_projection",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_PROJ_OPTION_LEXICAL: (
++            "joint_head.option_lexical_projection",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_OPTION_SUMMARY_NORM: (
++            "joint_head.option_summary_norm",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_FIELD_NORM: (
++            "joint_head.field_norm",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_OPTION_NORM: (
++            "joint_head.option_norm",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_SCORER: (
++            "joint_head.residual_scorer.0",  # clef
++        ),
++
++        MODEL_TENSOR.DECISION_SCORER_OUT: (
++            "joint_head.residual_scorer.3",  # clef
++        ),
++
+         MODEL_TENSOR.ENC_ATTN_NORM: (
+             "encoder.block.{bid}.layer.0.layer_norm", # t5
+         ),
+diff --git a/include/llama.h b/include/llama.h
+index e855952..e8e7977 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -265,6 +265,7 @@ extern "C" {
+         int32_t      *  n_seq_id;
+         llama_seq_id ** seq_id;
+         int8_t       *  logits;   // TODO: rename this to "output"
++        int32_t      *  decision_order; // NULL, or one value per token for a joint decision head (clef), see llama_decision_order in llama-ext.h
+     } llama_batch;
+ 
+     enum llama_model_kv_override_type {
+diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
+index 4c3fcb2..a686c1a 100644
+--- a/src/llama-arch.cpp
++++ b/src/llama-arch.cpp
+@@ -40,6 +40,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+     { LLM_ARCH_QWEN3VLMOE,       "qwen3vlmoe"       },
+     { LLM_ARCH_QWEN35,           "qwen35"           },
+     { LLM_ARCH_QWEN35MOE,        "qwen35moe"        },
++    { LLM_ARCH_CLEF,             "clef"             },
+     { LLM_ARCH_DSPARK,           "dspark"           },
+     { LLM_ARCH_PHI2,             "phi2"             },
+     { LLM_ARCH_PHI3,             "phi3"             },
+@@ -352,6 +353,10 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
+ 
+     { LLM_KV_CLASSIFIER_OUTPUT_LABELS,               "%s.classifier.output_labels"               },
+ 
++    { LLM_KV_DECISION_BLOCK_COUNT,                   "%s.decision.block_count"                   },
++    { LLM_KV_DECISION_ROUTING_BLOCK_COUNT,           "%s.decision.routing_block_count"           },
++    { LLM_KV_DECISION_HEAD_COUNT,                    "%s.decision.head_count"                    },
++
+     { LLM_KV_TARGET_LAYERS,                          "%s.target_layers"                          },
+     { LLM_KV_CONFIDENCE_HEAD,                        "%s.confidence_head"                        },
+     { LLM_KV_LOG_SNR_CONDITIONING,                   "%s.log_snr_conditioning"                   },
+@@ -476,6 +481,19 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
+     { LLM_TENSOR_CLS,                                    "cls" },
+     { LLM_TENSOR_CLS_OUT,                                "cls.output" },
+     { LLM_TENSOR_CLS_NORM,                               "cls.norm" },
++    { LLM_TENSOR_DECISION_HIDDEN_NORM,                   "decision.hidden_norm" },
++    { LLM_TENSOR_DECISION_PROJ_MEMORY,                   "decision.proj_memory" },
++    { LLM_TENSOR_DECISION_PROJ_QUESTION,                 "decision.proj_question" },
++    { LLM_TENSOR_DECISION_PROJ_OPTION_QUESTION,          "decision.proj_option_question" },
++    { LLM_TENSOR_DECISION_PROJ_GLOBAL,                   "decision.proj_global" },
++    { LLM_TENSOR_DECISION_PROJ_OPTION_CONTEXT,           "decision.proj_option_context" },
++    { LLM_TENSOR_DECISION_PROJ_OPTION_LEXICAL,           "decision.proj_option_lexical" },
++    { LLM_TENSOR_DECISION_OPTION_SUMMARY_NORM,           "decision.option_summary_norm" },
++    { LLM_TENSOR_DECISION_FIELD_NORM,                    "decision.field_norm" },
++    { LLM_TENSOR_DECISION_OPTION_NORM,                   "decision.option_norm" },
++    { LLM_TENSOR_DECISION_SCALES,                        "decision.scales" },
++    { LLM_TENSOR_DECISION_SCORER,                        "decision.scorer" },
++    { LLM_TENSOR_DECISION_SCORER_OUT,                    "decision.scorer_out" },
+     { LLM_TENSOR_ENC_OUTPUT_NORM,                        "enc.output_norm" },
+     { LLM_TENSOR_FFN_GATE_INP_SHEXP,                     "blk.%d.ffn_gate_inp_shexp" },
+     { LLM_TENSOR_SSM_A_NOSCAN,                           "blk.%d.ssm_a" },
+@@ -572,6 +590,7 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
+     { LLM_TENSOR_DEC_ATTN_OUT,                           "dec.blk.%d.attn_o" },
+     { LLM_TENSOR_DEC_ATTN_REL_B,                         "dec.blk.%d.attn_rel_b" },
+     { LLM_TENSOR_DEC_CROSS_ATTN_NORM,                    "dec.blk.%d.cross_attn_norm" },
++    { LLM_TENSOR_DEC_CROSS_ATTN_NORM_KV,                 "dec.blk.%d.cross_attn_norm_kv" },
+     { LLM_TENSOR_DEC_CROSS_ATTN_Q,                       "dec.blk.%d.cross_attn_q" },
+     { LLM_TENSOR_DEC_CROSS_ATTN_K,                       "dec.blk.%d.cross_attn_k" },
+     { LLM_TENSOR_DEC_CROSS_ATTN_V,                       "dec.blk.%d.cross_attn_v" },
+@@ -725,6 +744,19 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
+     { LLM_TENSOR_CLS,                      { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }       },
+     { LLM_TENSOR_CLS_OUT,                  { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }       },
+     { LLM_TENSOR_CLS_NORM,                 { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL }           },
++    { LLM_TENSOR_DECISION_HIDDEN_NORM,          { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL }       },
++    { LLM_TENSOR_DECISION_PROJ_MEMORY,          { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
++    { LLM_TENSOR_DECISION_PROJ_QUESTION,        { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
++    { LLM_TENSOR_DECISION_PROJ_OPTION_QUESTION, { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
++    { LLM_TENSOR_DECISION_PROJ_GLOBAL,          { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
++    { LLM_TENSOR_DECISION_PROJ_OPTION_CONTEXT,  { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
++    { LLM_TENSOR_DECISION_PROJ_OPTION_LEXICAL,  { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
++    { LLM_TENSOR_DECISION_OPTION_SUMMARY_NORM,  { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL }       },
++    { LLM_TENSOR_DECISION_FIELD_NORM,           { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL }       },
++    { LLM_TENSOR_DECISION_OPTION_NORM,          { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL }       },
++    { LLM_TENSOR_DECISION_SCALES,               { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL }       },
++    { LLM_TENSOR_DECISION_SCORER,               { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
++    { LLM_TENSOR_DECISION_SCORER_OUT,           { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }   },
+     { LLM_TENSOR_DENSE_2_OUT,              { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }       }, // Dense layer output
+     { LLM_TENSOR_DENSE_3_OUT,              { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL_MAT }       }, // Dense layer output
+     { LLM_TENSOR_OUTPUT_NORM,              { LLM_TENSOR_LAYER_OUTPUT, GGML_OP_MUL }           },
+@@ -878,6 +910,7 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
+     { LLM_TENSOR_FFN_SUB_NORM,             { LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL }        },
+     { LLM_TENSOR_DEC_ATTN_NORM,            { LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL }        },
+     { LLM_TENSOR_DEC_CROSS_ATTN_NORM,      { LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL }        },
++    { LLM_TENSOR_DEC_CROSS_ATTN_NORM_KV,   { LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL }        },
+     { LLM_TENSOR_DEC_FFN_NORM,             { LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL }        },
+     { LLM_TENSOR_ENC_ATTN_NORM,            { LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL }        },
+     { LLM_TENSOR_ENC_FFN_NORM,             { LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL }        },
+diff --git a/src/llama-arch.h b/src/llama-arch.h
+index f292e49..7f7cab5 100644
+--- a/src/llama-arch.h
++++ b/src/llama-arch.h
+@@ -45,6 +45,7 @@ enum llm_arch {
+     LLM_ARCH_QWEN3VLMOE,
+     LLM_ARCH_QWEN35,
+     LLM_ARCH_QWEN35MOE,
++    LLM_ARCH_CLEF,
+     LLM_ARCH_DSPARK,
+     LLM_ARCH_PHI2,
+     LLM_ARCH_PHI3,
+@@ -400,6 +401,10 @@ enum llm_kv {
+ 
+     LLM_KV_CLASSIFIER_OUTPUT_LABELS,
+ 
++    LLM_KV_DECISION_BLOCK_COUNT,
++    LLM_KV_DECISION_ROUTING_BLOCK_COUNT,
++    LLM_KV_DECISION_HEAD_COUNT,
++
+     LLM_KV_TARGET_LAYERS,
+     LLM_KV_CONFIDENCE_HEAD,
+     LLM_KV_LOG_SNR_CONDITIONING,
+@@ -608,6 +613,7 @@ enum llm_tensor {
+     LLM_TENSOR_DEC_ATTN_OUT,
+     LLM_TENSOR_DEC_ATTN_REL_B,
+     LLM_TENSOR_DEC_CROSS_ATTN_NORM,
++    LLM_TENSOR_DEC_CROSS_ATTN_NORM_KV,
+     LLM_TENSOR_DEC_CROSS_ATTN_Q,
+     LLM_TENSOR_DEC_CROSS_ATTN_K,
+     LLM_TENSOR_DEC_CROSS_ATTN_V,
+@@ -632,6 +638,19 @@ enum llm_tensor {
+     LLM_TENSOR_CLS,
+     LLM_TENSOR_CLS_OUT,
+     LLM_TENSOR_CLS_NORM,
++    LLM_TENSOR_DECISION_HIDDEN_NORM,
++    LLM_TENSOR_DECISION_PROJ_MEMORY,
++    LLM_TENSOR_DECISION_PROJ_QUESTION,
++    LLM_TENSOR_DECISION_PROJ_OPTION_QUESTION,
++    LLM_TENSOR_DECISION_PROJ_GLOBAL,
++    LLM_TENSOR_DECISION_PROJ_OPTION_CONTEXT,
++    LLM_TENSOR_DECISION_PROJ_OPTION_LEXICAL,
++    LLM_TENSOR_DECISION_OPTION_SUMMARY_NORM,
++    LLM_TENSOR_DECISION_FIELD_NORM,
++    LLM_TENSOR_DECISION_OPTION_NORM,
++    LLM_TENSOR_DECISION_SCALES,
++    LLM_TENSOR_DECISION_SCORER,
++    LLM_TENSOR_DECISION_SCORER_OUT,
+     LLM_TENSOR_CONV1D,
+     LLM_TENSOR_CONVNEXT_DW,
+     LLM_TENSOR_CONVNEXT_NORM,
+diff --git a/src/llama-batch.cpp b/src/llama-batch.cpp
+index 2b98a55..ee1e5e9 100644
+--- a/src/llama-batch.cpp
++++ b/src/llama-batch.cpp
+@@ -145,6 +145,18 @@ bool llama_batch_allocr::init(
+         }
+     }
+ 
++    // kept only if some token has one
++    if (batch.decision_order) {
++        bool any = false;
++        for (int32_t i = 0; i < batch.n_tokens && !any; ++i) {
++            any = batch.decision_order[i] != 0;
++        }
++        if (any) {
++            decision_order.assign(batch.decision_order, batch.decision_order + batch.n_tokens);
++        }
++    }
++    batch.decision_order = decision_order.empty() ? nullptr : decision_order.data();
++
+     //
+     // compute stats
+     //
+@@ -224,6 +236,7 @@ bool llama_batch_allocr::init(
+             /*.seq_id_unq   =*/ this->seq_id_unq.data(),
+             /*.seq_idx      =*/ this->seq_idx.data(),
+             /*.output       =*/ batch.logits,
++            /*.decision_order =*/ batch.decision_order,
+             /*.data         =*/ {},
+         };
+ 
+@@ -430,6 +443,7 @@ llama_ubatch llama_batch_allocr::ubatch_reserve(uint32_t n_seq_tokens, uint32_t
+         /*.seq_id_unq   =*/ udata->seq_id_unq.data(),
+         /*.seq_idx      =*/ udata->seq_idx.data(),
+         /*.output       =*/ udata->output.data(),
++        /*.decision_order =*/ nullptr,
+         /*.data         =*/ std::move(udata),
+     };
+ 
+@@ -730,6 +744,7 @@ void llama_batch_allocr::clear() {
+     seq_id    .clear();
+     seq_id_unq.clear();
+     output    .clear();
++    decision_order.clear();
+ 
+     for (auto & cur : seq_pos) {
+         cur.clear();
+@@ -763,6 +778,7 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
+     udata->seq_id    .resize(n_tokens);
+     udata->seq_id_unq.resize(0);
+     udata->seq_idx   .resize(LLAMA_MAX_SEQ, -1);
++    udata->decision_order.resize(decision_order.empty() ? 0 : n_tokens);
+     udata->output    .resize(n_tokens);
+ 
+     udata->seq_id_data.reserve(n_tokens);
+@@ -790,6 +806,10 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
+         udata->n_seq_id[i] = batch.n_seq_id[idxs[i]];
+         udata->output[i]   = batch.logits[idxs[i]];
+ 
++        if (!decision_order.empty()) {
++            udata->decision_order[i] = decision_order[idxs[i]];
++        }
++
+         for (int s = 0; s < udata->n_seq_id[i]; ++s) {
+             const llama_seq_id seq_id = batch.seq_id[idxs[i]][s];
+ 
+@@ -831,6 +851,7 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
+         /*.seq_id_unq   =*/ udata->seq_id_unq.data(),
+         /*.seq_idx      =*/ udata->seq_idx.data(),
+         /*.output       =*/ udata->output.data(),
++        /*.decision_order =*/ udata->decision_order.empty() ? nullptr : udata->decision_order.data(),
+         /*.data         =*/ std::move(udata),
+     };
+ 
+@@ -939,6 +960,7 @@ struct llama_batch llama_batch_get_one(
+         /*n_seq_id =*/ nullptr,
+         /*seq_id   =*/ nullptr,
+         /*logits   =*/ nullptr,
++        /*decision_order =*/ nullptr,
+     };
+ }
+ 
+@@ -951,6 +973,7 @@ struct llama_batch llama_batch_init(int32_t n_tokens_alloc, int32_t embd, int32_
+         /*n_seq_id =*/ nullptr,
+         /*seq_id   =*/ nullptr,
+         /*logits   =*/ nullptr,
++        /*decision_order =*/ nullptr,
+     };
+ 
+     if (embd) {
+diff --git a/src/llama-batch.h b/src/llama-batch.h
+index a3d1889..beec5c1 100644
+--- a/src/llama-batch.h
++++ b/src/llama-batch.h
+@@ -50,6 +50,7 @@ struct llama_ubatch {
+     llama_seq_id *  seq_id_unq; // [n_seqs_unq]       | s   | seq_id
+     int32_t      *  seq_idx;    // [LLAMA_MAX_SEQ]    | -   | seq_idx
+     int8_t       *  output;     // [n_tokens]         | i   | -
++    int32_t      *  decision_order; // [n_tokens]     | i   | llama_decision_order, NULL if no token has one
+ 
+     struct data_t {
+         std::vector<llama_token>    token;
+@@ -60,6 +61,7 @@ struct llama_ubatch {
+         std::vector<llama_seq_id>   seq_id_unq;
+         std::vector<int32_t>        seq_idx;
+         std::vector<int8_t>         output;
++        std::vector<int32_t>        decision_order;
+ 
+         std::vector<llama_seq_id> seq_id_data;
+     };
+@@ -145,6 +147,7 @@ private:
+     std::vector<llama_seq_id>   seq_id_unq;
+     std::vector<int32_t>        seq_idx;
+     std::vector<int8_t>         output;
++    std::vector<int32_t>        decision_order; // empty if no token has one
+ 
+     using pos_set_t = std::set<llama_pos>;
+     using seq_cpl_t = std::vector<bool>;
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 4489366..80b545d 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -2583,6 +2583,7 @@ uint32_t llama_context::graph_max_nodes(uint32_t n_tokens) const {
+         model.arch == LLM_ARCH_BAILINGMOE3 ||
+         model.arch == LLM_ARCH_QWEN35 ||
+         model.arch == LLM_ARCH_QWEN35MOE ||
++        model.arch == LLM_ARCH_CLEF ||
+         model.arch == LLM_ARCH_DEEPSEEK4 ||
+         (model.arch == LLM_ARCH_DFLASH && model.hparams.dsv4_hc_mult > 0) ||
+         model.arch == LLM_ARCH_NANBEIGE ||
+diff --git a/src/llama-ext.h b/src/llama-ext.h
+index c6cfc35..cd8bf81 100644
+--- a/src/llama-ext.h
++++ b/src/llama-ext.h
+@@ -101,6 +101,20 @@ LLAMA_API void llama_set_embeddings_nextn(struct llama_context * ctx, bool value
+ // chain multiple trained NextN heads. Default 0 (first head).
+ LLAMA_API void llama_set_nextn_layer_offset(struct llama_context * ctx, int32_t offset);
+ 
++// Marks the tokens that a joint decision head (clef) reads: llama_batch.decision_order, one value per token, default 0.
++// Ported from ggml-org/llama.cpp PR 29831 (llama_batch_ext_set_decision_order), which this tree has no llama_batch_ext
++// for: the value rides in llama_batch.decision_order (NULL = none) and in llama_ubatch.decision_order.
++// A run of tokens with the same value is one span, spans must be separated by tokens with value 0.
++// An option belongs to the last question before it.
++enum llama_decision_order {
++    LLAMA_DECISION_ORDER_NONE            = 0, // not read by the head
++    LLAMA_DECISION_ORDER_QUESTION_NOUL   = 1, // text of a question
++    LLAMA_DECISION_ORDER_QUESTION_CHOICE = 2,
++    LLAMA_DECISION_ORDER_QUESTION_SCORE  = 3,
++    LLAMA_DECISION_ORDER_OPTION          = 4, // text of an option
++};
++// The embeddings output has one value per token: row i is the score of option i
++
+ // mirrors:
+ // LLAMA_API float * llama_get_embeddings(struct llama_context * ctx);
+ LLAMA_API float * llama_get_embeddings_nextn(struct llama_context * ctx);
+diff --git a/src/llama-kv-cache-dsv4.cpp b/src/llama-kv-cache-dsv4.cpp
+index 948d081..4dbcfb8 100644
+--- a/src/llama-kv-cache-dsv4.cpp
++++ b/src/llama-kv-cache-dsv4.cpp
+@@ -164,6 +164,7 @@ static llama_ubatch dsv4_build_raw_write_ubatch(const llama_ubatch & ubatch) {
+         /*.seq_id_unq   =*/ data->seq_id_unq.data(),
+         /*.seq_idx      =*/ data->seq_idx.data(),
+         /*.output       =*/ data->output.data(),
++        /*.decision_order =*/ nullptr,
+         /*.data         =*/ data,
+     };
+ 
+diff --git a/src/llama-model-saver.cpp b/src/llama-model-saver.cpp
+index 9adaa93..14acb14 100644
+--- a/src/llama-model-saver.cpp
++++ b/src/llama-model-saver.cpp
+@@ -27,6 +27,7 @@ bool llama_model_saver_supports_arch(llm_arch arch) {
+         case LLM_ARCH_APERTUS:
+         case LLM_ARCH_MIMO2:
+         case LLM_ARCH_STEP35:
++        case LLM_ARCH_CLEF: // the head tensors are not saved
+         case LLM_ARCH_MUSE_GLIMMER:
+         case LLM_ARCH_MELLUM:
+         case LLM_ARCH_LAGUNA:
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index c607ba4..3042a7c 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -321,6 +321,8 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
+             return new llama_model_qwen35(params);
+         case LLM_ARCH_QWEN35MOE:
+             return new llama_model_qwen35moe(params);
++        case LLM_ARCH_CLEF:
++            return new llama_model_clef(params);
+         case LLM_ARCH_MISTRAL3:
+             return new llama_model_mistral3(params);
+         case LLM_ARCH_EAGLE3:
+@@ -580,7 +582,7 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
+     };
+ 
+     auto get_split_segments = [&](int axis, uint32_t il) -> std::vector<std::pair<int64_t, uint32_t>> {
+-        if (ud->model->arch == LLM_ARCH_QWEN3NEXT || ud->model->arch == LLM_ARCH_QWEN35 || ud->model->arch == LLM_ARCH_QWEN35MOE) {
++        if (ud->model->arch == LLM_ARCH_QWEN3NEXT || ud->model->arch == LLM_ARCH_QWEN35 || ud->model->arch == LLM_ARCH_QWEN35MOE || ud->model->arch == LLM_ARCH_CLEF) {
+             const int64_t head_k_dim = hparams.ssm_d_state;
+             const int64_t head_v_dim = hparams.ssm_d_state;
+             const int64_t n_k_heads  = hparams.ssm_n_group;
+@@ -718,7 +720,7 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
+             if (std::regex_match(tensor_name, pattern_q_weight) || std::regex_match(tensor_name, pattern_q_bias)) {
+                 GGML_ASSERT(segments.size() == 1);
+                 // some models have Q gate tensors, for those cases the granularity needs to be doubled:
+-                if (ud->model->arch == LLM_ARCH_QWEN3NEXT || ud->model->arch == LLM_ARCH_QWEN35 || ud->model->arch == LLM_ARCH_QWEN35MOE) {
++                if (ud->model->arch == LLM_ARCH_QWEN3NEXT || ud->model->arch == LLM_ARCH_QWEN35 || ud->model->arch == LLM_ARCH_QWEN35MOE || ud->model->arch == LLM_ARCH_CLEF) {
+                     return {std::lcm(2*n_embd_q, blck_size_perf)};
+                 }
+                 return {granularity_q};
+@@ -2142,7 +2144,11 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
+ }
+ 
+ ggml_tensor * llama_model_base::create_tensor(llama_model_loader & ml, const LLM_TN_IMPL & tn, const std::initializer_list<int64_t> & ne, int flags) {
+-    const buft_list_t * buft_list_layer = tn.bid == -1 ? nullptr : pimpl->dev_layer.at(tn.bid).buft_list;
++    const buft_list_t * buft_list_layer = nullptr;
++    if (tn.bid != -1) {
++        // blocks that are not model layers (e.g. the blocks of a head) go with the output
++        buft_list_layer = (size_t) tn.bid < pimpl->dev_layer.size() ? pimpl->dev_layer.at(tn.bid).buft_list : pimpl->dev_output.buft_list;
++    }
+     return ml.create_tensor(
+         hparams, &pimpl->cpu_buft_list, pimpl->dev_input.buft_list, pimpl->dev_output.buft_list, buft_list_layer,
+         tn, ne, flags);
+@@ -2548,6 +2554,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+         case LLM_ARCH_LLADA:
+         case LLM_ARCH_LLADA_MOE:
+         case LLM_ARCH_RND1:
++        case LLM_ARCH_CLEF:
+             {
+                 res = nullptr;
+             } break;
+@@ -3245,6 +3252,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+         case LLM_ARCH_QWEN3VLMOE:
+         case LLM_ARCH_QWEN35:
+         case LLM_ARCH_QWEN35MOE:
++        case LLM_ARCH_CLEF:
+         case LLM_ARCH_QWEN3TTS:
+             return LLAMA_ROPE_TYPE_IMROPE;
+         // dspark's own trunk is a plain dense Qwen3-style stack (standard
+diff --git a/src/models/clef.cpp b/src/models/clef.cpp
+new file mode 100644
+index 0000000..0488c77
+--- /dev/null
++++ b/src/models/clef.cpp
+@@ -0,0 +1,614 @@
++#include "models.h"
++
++#include "llama-ext.h"
++
++#include <cmath>
++
++void llama_model_clef::load_arch_hparams(llama_model_loader & ml) {
++    llama_model_qwen35::load_arch_hparams(ml);
++
++    ml.get_key(LLM_KV_DECISION_ROUTING_BLOCK_COUNT, n_layer_routing);
++    ml.get_key(LLM_KV_DECISION_BLOCK_COUNT,         n_layer_joint);
++    ml.get_key(LLM_KV_DECISION_HEAD_COUNT,          n_head_decision);
++
++    if (n_head_decision == 0 || n_layer_routing > LLAMA_MAX_LAYERS || n_layer_joint > LLAMA_MAX_LAYERS) {
++        throw std::runtime_error("invalid size of the decision head");
++    }
++
++    // used by the head
++    ml.get_key(LLM_KV_ATTENTION_LAYERNORM_EPS, hparams.f_norm_eps);
++
++    // the output is one score per token, see llama_batch_ext_set_decision_order()
++    hparams.n_embd_out_impl = 1;
++}
++
++void llama_model_clef::load_arch_tensors(llama_model_loader & ml) {
++    llama_model_qwen35::load_arch_tensors(ml);
++
++    LLAMA_LOAD_LOCALS;
++
++    const auto * w_memory = ml.get_weight(tn(LLM_TENSOR_DECISION_PROJ_MEMORY, "weight").str().c_str());
++    const auto * w_ffn    = ml.get_weight(tn(LLM_TENSOR_DEC_FFN_UP, "weight", 0).str().c_str());
++    if (w_memory == nullptr || w_ffn == nullptr) {
++        throw std::runtime_error("the decision head is missing");
++    }
++    const int64_t n_embd_h = w_memory->tensor->ne[1];
++    const int64_t n_ff_h   = w_ffn->tensor->ne[1];
++
++    if (n_embd_h % n_head_decision != 0) {
++        throw std::runtime_error("invalid width of the decision head");
++    }
++
++    auto load_norm = [&](norm & n, llm_tensor type, int64_t size, int il = -1) {
++        n.w = il < 0 ? create_tensor(tn(type, "weight"), {size}, 0) : create_tensor(tn(type, "weight", il), {size}, 0);
++        n.b = il < 0 ? create_tensor(tn(type, "bias"),   {size}, 0) : create_tensor(tn(type, "bias",   il), {size}, 0);
++    };
++
++    auto load_attn = [&](attn & a, llm_tensor q, llm_tensor k, llm_tensor v, llm_tensor o, int il) {
++        a.wq = create_tensor(tn(q, "weight", il), {n_embd_h, n_embd_h}, 0);
++        a.bq = create_tensor(tn(q, "bias",   il), {n_embd_h}, 0);
++        a.wk = create_tensor(tn(k, "weight", il), {n_embd_h, n_embd_h}, 0);
++        a.bk = create_tensor(tn(k, "bias",   il), {n_embd_h}, 0);
++        a.wv = create_tensor(tn(v, "weight", il), {n_embd_h, n_embd_h}, 0);
++        a.bv = create_tensor(tn(v, "bias",   il), {n_embd_h}, 0);
++        a.wo = create_tensor(tn(o, "weight", il), {n_embd_h, n_embd_h}, 0);
++        a.bo = create_tensor(tn(o, "bias",   il), {n_embd_h}, 0);
++    };
++
++    head_layers.resize(n_layer_routing + n_layer_joint);
++    for (int il = 0; il < (int) head_layers.size(); ++il) {
++        auto & layer = head_layers[il];
++
++        if (il < (int) n_layer_routing) {
++            load_norm(layer.cross_norm_kv, LLM_TENSOR_DEC_CROSS_ATTN_NORM_KV, n_embd_h, il);
++        } else {
++            load_norm(layer.self_norm, LLM_TENSOR_DEC_ATTN_NORM, n_embd_h, il);
++            load_attn(layer.self_attn, LLM_TENSOR_DEC_ATTN_Q, LLM_TENSOR_DEC_ATTN_K, LLM_TENSOR_DEC_ATTN_V, LLM_TENSOR_DEC_ATTN_OUT, il);
++        }
++
++        load_norm(layer.cross_norm, LLM_TENSOR_DEC_CROSS_ATTN_NORM, n_embd_h, il);
++        load_attn(layer.cross_attn, LLM_TENSOR_DEC_CROSS_ATTN_Q, LLM_TENSOR_DEC_CROSS_ATTN_K, LLM_TENSOR_DEC_CROSS_ATTN_V, LLM_TENSOR_DEC_CROSS_ATTN_OUT, il);
++
++        load_norm(layer.ffn_norm, LLM_TENSOR_DEC_FFN_NORM, n_embd_h, il);
++        layer.ffn_up     = create_tensor(tn(LLM_TENSOR_DEC_FFN_UP,   "weight", il), {n_embd_h, n_ff_h}, 0);
++        layer.ffn_up_b   = create_tensor(tn(LLM_TENSOR_DEC_FFN_UP,   "bias",   il), {n_ff_h}, 0);
++        layer.ffn_down   = create_tensor(tn(LLM_TENSOR_DEC_FFN_DOWN, "weight", il), {n_ff_h, n_embd_h}, 0);
++        layer.ffn_down_b = create_tensor(tn(LLM_TENSOR_DEC_FFN_DOWN, "bias",   il), {n_embd_h}, 0);
++    }
++
++    load_norm(hidden_norm,         LLM_TENSOR_DECISION_HIDDEN_NORM,         n_embd);
++    load_norm(option_summary_norm, LLM_TENSOR_DECISION_OPTION_SUMMARY_NORM, n_embd_h);
++    load_norm(field_norm,          LLM_TENSOR_DECISION_FIELD_NORM,          n_embd_h);
++    load_norm(option_norm,         LLM_TENSOR_DECISION_OPTION_NORM,         n_embd_h);
++
++    proj_memory          = create_tensor(tn(LLM_TENSOR_DECISION_PROJ_MEMORY,          "weight"), {n_embd, n_embd_h}, 0);
++    proj_question        = create_tensor(tn(LLM_TENSOR_DECISION_PROJ_QUESTION,        "weight"), {n_embd, n_embd_h}, 0);
++    proj_option_question = create_tensor(tn(LLM_TENSOR_DECISION_PROJ_OPTION_QUESTION, "weight"), {n_embd, n_embd_h}, 0);
++    proj_global          = create_tensor(tn(LLM_TENSOR_DECISION_PROJ_GLOBAL,          "weight"), {n_embd, n_embd_h}, 0);
++    proj_option_context  = create_tensor(tn(LLM_TENSOR_DECISION_PROJ_OPTION_CONTEXT,  "weight"), {n_embd, n_embd_h}, 0);
++    proj_option_lexical  = create_tensor(tn(LLM_TENSOR_DECISION_PROJ_OPTION_LEXICAL,  "weight"), {n_embd, n_embd_h}, 0);
++
++    scales    = create_tensor(tn(LLM_TENSOR_DECISION_SCALES),          {3}, 0);
++    type_embd = create_tensor(tn(LLM_TENSOR_TOKEN_TYPES, "weight"),    {n_embd_h, 3}, 0);
++
++    scorer       = create_tensor(tn(LLM_TENSOR_DECISION_SCORER,     "weight"), {4 * n_embd_h, n_embd_h}, 0);
++    scorer_b     = create_tensor(tn(LLM_TENSOR_DECISION_SCORER,     "bias"),   {n_embd_h}, 0);
++    scorer_out   = create_tensor(tn(LLM_TENSOR_DECISION_SCORER_OUT, "weight"), {n_embd_h, 1}, 0);
++    scorer_out_b = create_tensor(tn(LLM_TENSOR_DECISION_SCORER_OUT, "bias"),   {1}, 0);
++}
++
++std::unique_ptr<llm_graph_context> llama_model_clef::build_arch_graph(const llm_graph_params & params) const {
++    return std::make_unique<graph>(*this, params);
++}
++
++// spans read by the head, [start, end) in ubatch token indices
++struct clef_spans {
++    struct question {
++        int32_t type; // noul, choice, score
++        int32_t start;
++        int32_t end;
++    };
++    struct option {
++        int32_t question;
++        int32_t start;
++        int32_t end;
++    };
++    std::vector<question> questions;
++    std::vector<option>   options;
++    bool valid = false;
++};
++
++// see llama_batch_ext_set_decision_order()
++// if the batch has no usable order, returns one empty question with one empty option
++static clef_spans clef_get_spans(const llama_ubatch & ubatch) {
++    clef_spans res;
++    std::vector<bool> has_option;
++
++    // TODO: support multiple sequences
++    bool ok = ubatch.decision_order != nullptr && ubatch.n_seqs_unq == 1;
++
++    const int32_t n_tokens = ubatch.n_tokens;
++    for (int32_t i = 0; ok && i < n_tokens;) {
++        const int32_t order = ubatch.decision_order[i];
++        int32_t end = i + 1;
++        while (end < n_tokens && ubatch.decision_order[end] == order) {
++            end++;
++        }
++        switch (order) {
++            case LLAMA_DECISION_ORDER_NONE:
++                break;
++            case LLAMA_DECISION_ORDER_QUESTION_NOUL:
++            case LLAMA_DECISION_ORDER_QUESTION_CHOICE:
++            case LLAMA_DECISION_ORDER_QUESTION_SCORE:
++                res.questions.push_back({ order - LLAMA_DECISION_ORDER_QUESTION_NOUL, i, end });
++                has_option.push_back(false);
++                break;
++            case LLAMA_DECISION_ORDER_OPTION:
++                ok = !res.questions.empty();
++                if (ok) {
++                    res.options.push_back({ (int32_t) res.questions.size() - 1, i, end });
++                    has_option.back() = true;
++                }
++                break;
++            default:
++                ok = false;
++        }
++        i = end;
++    }
++
++    // each question needs an option
++    res.valid = ok && !res.questions.empty() && std::find(has_option.begin(), has_option.end(), false) == has_option.end();
++    if (!res.valid) {
++        res.questions.clear();
++        res.options.clear();
++        res.questions.push_back({ 0, 0, 0 });
++        res.options.push_back({ 0, 0, 0 });
++    }
++    return res;
++}
++
++// pooling matrices and indices computed from the spans
++class llama_model_clef::input_decision : public llm_graph_input_i {
++public:
++    input_decision(const llama_ubatch & ubatch) : n_tokens(ubatch.n_tokens) {
++        const auto spans = clef_get_spans(ubatch);
++        n_questions = spans.questions.size();
++        n_options   = spans.options.size();
++    }
++
++    void set_input(const llama_ubatch * ubatch) override {
++        GGML_ASSERT(ubatch->token);
++        ggml_backend_tensor_set(tokens, ubatch->token, 0, n_tokens * sizeof(llama_token));
++
++        const auto spans = clef_get_spans(*ubatch);
++        GGML_ASSERT(spans.questions.size() == n_questions && spans.options.size() == n_options);
++
++        // the scores are NaN if the batch has a decision order that cannot be used
++        const float status_data = spans.valid || ubatch->decision_order == nullptr ? 0.0f : NAN;
++        ggml_backend_tensor_set(status, &status_data, 0, ggml_nbytes(status));
++
++        std::vector<float>   pool_q_data(n_tokens * n_questions, 0.0f);
++        std::vector<int32_t> types(n_questions);
++        for (size_t i = 0; i < n_questions; i++) {
++            const auto & q = spans.questions[i];
++            for (int32_t j = q.start; j < q.end; j++) {
++                pool_q_data[i * n_tokens + j] = 1.0f / (q.end - q.start);
++            }
++            types[i] = q.type;
++        }
++
++        std::vector<float>   pool_o_data(n_tokens * n_options, 0.0f);
++        std::vector<int32_t> owner(n_options);
++        std::vector<float>   mask(n_options * n_questions, -INFINITY);
++        for (size_t i = 0; i < n_options; i++) {
++            const auto & o = spans.options[i];
++            for (int32_t j = o.start; j < o.end; j++) {
++                pool_o_data[i * n_tokens + j] = 1.0f / (o.end - o.start);
++            }
++            owner[i] = o.question;
++            mask[o.question * n_options + i] = 0.0f;
++        }
++
++        ggml_backend_tensor_set(pool_q,          pool_q_data.data(), 0, ggml_nbytes(pool_q));
++        ggml_backend_tensor_set(pool_o,          pool_o_data.data(), 0, ggml_nbytes(pool_o));
++        ggml_backend_tensor_set(question_type,   types.data(),       0, ggml_nbytes(question_type));
++        ggml_backend_tensor_set(option_question, owner.data(),       0, ggml_nbytes(option_question));
++        ggml_backend_tensor_set(option_mask,     mask.data(),        0, ggml_nbytes(option_mask));
++    }
++
++    bool can_reuse(const llm_graph_params & params) override {
++        // the values are computed again in set_input(), only the shapes must match
++        const auto spans = clef_get_spans(params.ubatch);
++        return spans.questions.size() == n_questions && spans.options.size() == n_options;
++    }
++
++    ggml_tensor * tokens          = nullptr; // I32 [n_tokens]
++    ggml_tensor * pool_q          = nullptr; // F32 [n_tokens, n_questions], mean over the span of the question
++    ggml_tensor * pool_o          = nullptr; // F32 [n_tokens, n_options], mean over the span of the option
++    ggml_tensor * question_type   = nullptr; // I32 [n_questions]
++    ggml_tensor * option_question = nullptr; // I32 [n_options]
++    ggml_tensor * option_mask     = nullptr; // F32 [n_options, n_questions], 0 if the option belongs to the question, else -inf
++    ggml_tensor * status          = nullptr; // F32 [1], added to the scores: 0, or NaN on invalid input
++
++    const int64_t n_tokens;
++    size_t n_questions;
++    size_t n_options;
++};
++
++// the backbone is copied from llama_model_qwen35::graph, without the memory module
++llama_model_clef::graph::graph(const llama_model & model_base, const llm_graph_params & params) :
++    llm_build_delta_net_base(params), model(static_cast<const llama_model_clef &>(model_base)) {
++    const int64_t n_embd_head = hparams.n_embd_head_v();
++
++    GGML_ASSERT(n_embd_head == hparams.n_embd_head_k());
++
++    int sections[4];
++    std::copy(std::begin(hparams.rope_sections), std::begin(hparams.rope_sections) + 4, sections);
++
++    ggml_tensor * cur;
++    ggml_tensor * inpL;
++
++    inpL = build_inp_embd(model.tok_embd);
++
++    ggml_tensor * inp_pos = build_inp_pos();
++
++    auto * inp_attn = build_attn_inp_causal();
++
++    auto inp_decision_ptr = std::make_unique<input_decision>(ubatch);
++    auto * inp_decision   = inp_decision_ptr.get();
++    res->add_input(std::move(inp_decision_ptr));
++
++    for (int il = 0; il < n_layer; ++il) {
++        ggml_tensor * inpSA = inpL;
++
++        cur = build_norm(inpL, model.layers[il].attn_norm, nullptr, LLM_NORM_RMS, il);
++        cb(cur, "attn_norm", il);
++
++        if (hparams.is_recr(il)) {
++            cur = build_layer_attn_linear(cur, il);
++        } else {
++            cur = build_layer_attn(inp_attn, cur, inp_pos, sections, il);
++        }
++
++        cur = ggml_add(ctx0, cur, inpSA);
++        cb(cur, "attn_residual", il);
++
++        ggml_tensor * ffn_residual = cur;
++
++        cur = build_norm(cur, model.layers[il].attn_post_norm, nullptr, LLM_NORM_RMS, il);
++        cb(cur, "attn_post_norm", il);
++
++        cur = build_ffn(cur,
++            model.layers[il].ffn_up,   NULL, model.layers[il].ffn_up_s,
++            model.layers[il].ffn_gate, NULL, model.layers[il].ffn_gate_s,
++            model.layers[il].ffn_down, NULL, model.layers[il].ffn_down_s,
++            NULL,
++            LLM_FFN_SILU, LLM_FFN_PAR, il);
++        cb(cur, "ffn_out", il);
++
++        cur = ggml_add(ctx0, cur, ffn_residual);
++        cb(cur, "l_out", il);
++
++        inpL = cur;
++    }
++
++    cur = build_norm(inpL, model.output_norm, nullptr, LLM_NORM_RMS, -1);
++    cb(cur, "result_norm", -1);
++
++    // the head is always evaluated, so that the graph has the same nodes for every batch
++    cur = build_head(cur, inp_decision);
++
++    // row i of the output is the score of option i
++    cur = ggml_pad(ctx0, cur, 0, n_tokens - cur->ne[1], 0, 0);
++    cur = ggml_add(ctx0, cur, inp_decision->status);
++    cb(cur, "result_decision", -1);
++
++    res->t_embd = cur;
++
++    ggml_build_forward_expand(gf, cur);
++}
++
++// same as build_attn_inp_no_cache(), but the mask is causal even if the batch is processed by the encoder path
++llm_graph_input_attn_no_cache * llama_model_clef::graph::build_attn_inp_causal() {
++    llama_cparams cparams_causal = cparams;
++    cparams_causal.causal_attn = true;
++
++    auto inp = std::make_unique<llm_graph_input_attn_no_cache>(hparams, cparams_causal);
++
++    const auto type_mask = cparams.flash_attn ? GGML_TYPE_F16 : GGML_TYPE_F32;
++
++    inp->self_kq_mask = ggml_new_tensor_4d(ctx0, type_mask, n_tokens, n_tokens, 1, 1);
++    ggml_set_input(inp->self_kq_mask);
++    cb(inp->self_kq_mask, "self_kq_mask", -1);
++
++    inp->self_kq_mask_cnv = inp->self_kq_mask;
++
++    return (llm_graph_input_attn_no_cache *) res->add_input(std::move(inp));
++}
++
++ggml_tensor * llama_model_clef::graph::build_layer_attn(
++        llm_graph_input_attn_no_cache * inp,
++        ggml_tensor *                   cur,
++        ggml_tensor *                   inp_pos,
++        int *                           sections,
++        int                             il) {
++    const int64_t n_embd_head = hparams.n_embd_head_v();
++
++    // the Q projection outputs query + gate
++    ggml_tensor * Qcur_full = build_lora_mm(model.layers[il].wq, cur, model.layers[il].wq_s);
++    ggml_tensor * Kcur      = build_lora_mm(model.layers[il].wk, cur, model.layers[il].wk_s);
++    ggml_tensor * Vcur      = build_lora_mm(model.layers[il].wv, cur, model.layers[il].wv_s);
++
++    ggml_tensor * Qcur = ggml_view_3d(ctx0, Qcur_full, n_embd_head, n_head, n_tokens,
++        ggml_element_size(Qcur_full) * n_embd_head * 2,
++        ggml_element_size(Qcur_full) * n_embd_head * 2 * n_head, 0);
++
++    Qcur = build_norm(Qcur, model.layers[il].attn_q_norm, nullptr, LLM_NORM_RMS, il);
++    cb(Qcur, "Qcur_normed", il);
++
++    Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
++    Kcur = build_norm(Kcur, model.layers[il].attn_k_norm, nullptr, LLM_NORM_RMS, il);
++    cb(Kcur, "Kcur_normed", il);
++
++    ggml_tensor * gate = ggml_view_3d(ctx0, Qcur_full, n_embd_head, n_head, n_tokens,
++        ggml_element_size(Qcur_full) * n_embd_head * 2,
++        ggml_element_size(Qcur_full) * n_embd_head * 2 * n_head,
++        ggml_element_size(Qcur_full) * n_embd_head);
++    gate = ggml_cont_2d(ctx0, gate, n_embd_head * n_head, n_tokens);
++
++    Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
++
++    Qcur = ggml_rope_multi(
++            ctx0, Qcur, inp_pos, nullptr,
++            n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
++            ext_factor, attn_factor, beta_fast, beta_slow
++            );
++
++    Kcur = ggml_rope_multi(
++            ctx0, Kcur, inp_pos, nullptr,
++            n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
++            ext_factor, attn_factor, beta_fast, beta_slow
++            );
++
++    const float kq_scale = hparams.f_attention_scale == 0.0f ? 1.0f / sqrtf(float(n_embd_head)) : hparams.f_attention_scale;
++
++    cur = build_attn(inp,
++                nullptr, nullptr, nullptr,
++                Qcur, Kcur, Vcur, nullptr, nullptr, nullptr, kq_scale, il);
++    cb(cur, "attn_pregate", il);
++
++    cur = ggml_mul(ctx0, cur, ggml_sigmoid(ctx0, gate));
++
++    cur = build_lora_mm(model.layers[il].wo, cur, model.layers[il].wo_s);
++    cb(cur, "attn_output", il);
++
++    return cur;
++}
++
++// gated delta net over the whole batch, the conv and recurrent states start from zero and are not kept
++ggml_tensor * llama_model_clef::graph::build_layer_attn_linear(
++        ggml_tensor * cur,
++        int           il) {
++    const auto & layer = model.layers[il];
++
++    const int64_t d_inner     = hparams.ssm_d_inner;
++    const int64_t head_k_dim  = hparams.ssm_d_state;
++    const int64_t num_k_heads = hparams.ssm_n_group;
++    const int64_t num_v_heads = hparams.ssm_dt_rank;
++    const int64_t head_v_dim  = d_inner / num_v_heads;
++    const int64_t n_seqs      = 1;
++
++    ggml_tensor * qkv_mixed = build_lora_mm(layer.wqkv, cur, layer.wqkv_s);
++    qkv_mixed = ggml_reshape_3d(ctx0, qkv_mixed, qkv_mixed->ne[0], n_tokens, n_seqs);
++
++    ggml_tensor * z = build_lora_mm(layer.wqkv_gate, cur, layer.wqkv_gate_s);
++
++    ggml_tensor * beta = build_lora_mm(layer.ssm_beta, cur, layer.ssm_beta_s);
++    beta = ggml_reshape_4d(ctx0, beta, 1, num_v_heads, n_tokens, n_seqs);
++    beta = ggml_sigmoid(ctx0, beta);
++
++    ggml_tensor * alpha = build_lora_mm(layer.ssm_alpha, cur, layer.ssm_alpha_s);
++    alpha = ggml_reshape_3d(ctx0, alpha, num_v_heads, n_tokens, n_seqs);
++
++    ggml_tensor * gate = ggml_softplus(ctx0, ggml_add(ctx0, alpha, layer.ssm_dt));
++    gate = ggml_mul(ctx0, gate, layer.ssm_a);
++    gate = ggml_reshape_4d(ctx0, gate, 1, num_v_heads, n_tokens, n_seqs);
++
++    const int64_t conv_kernel_size = layer.ssm_conv1d->ne[0];
++    const int64_t conv_channels    = d_inner + 2 * num_k_heads * head_k_dim;
++
++    ggml_tensor * conv_states = ggml_fill(ctx0, ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, conv_kernel_size - 1, conv_channels, n_seqs), 0.0f);
++    ggml_tensor * conv_input  = ggml_concat(ctx0, conv_states, ggml_transpose(ctx0, qkv_mixed), 0);
++
++    ggml_tensor * conv_out = ggml_silu(ctx0, ggml_ssm_conv(ctx0, conv_input, layer.ssm_conv1d));
++    cb(conv_out, "conv_output_silu", il);
++
++    const int64_t qkv_dim = head_k_dim * num_k_heads * 2 + head_v_dim * num_v_heads;
++    const int64_t nb1_qkv = ggml_row_size(conv_out->type, qkv_dim);
++
++    ggml_tensor * q_conv = ggml_view_4d(ctx0, conv_out, head_k_dim, num_k_heads, n_tokens, n_seqs,
++            ggml_row_size(conv_out->type, head_k_dim), nb1_qkv, nb1_qkv * n_tokens,
++            0);
++    ggml_tensor * k_conv = ggml_view_4d(ctx0, conv_out, head_k_dim, num_k_heads, n_tokens, n_seqs,
++            ggml_row_size(conv_out->type, head_k_dim), nb1_qkv, nb1_qkv * n_tokens,
++            head_k_dim * num_k_heads * ggml_element_size(conv_out));
++    ggml_tensor * v_conv = ggml_view_4d(ctx0, conv_out, head_v_dim, num_v_heads, n_tokens, n_seqs,
++            ggml_row_size(conv_out->type, head_v_dim), nb1_qkv, nb1_qkv * n_tokens,
++            ggml_row_size(conv_out->type, 2 * head_k_dim * num_k_heads));
++
++    q_conv = ggml_l2_norm(ctx0, q_conv, hparams.f_norm_rms_eps);
++    k_conv = ggml_l2_norm(ctx0, k_conv, hparams.f_norm_rms_eps);
++
++    // note: need explicit repeat only if we are not using the fused GDN
++    if (num_k_heads != num_v_heads && (!cparams.fused_gdn_ar || !cparams.fused_gdn_ch)) {
++        GGML_ASSERT(num_v_heads % num_k_heads == 0);
++        q_conv = ggml_repeat_4d(ctx0, q_conv, head_k_dim, num_v_heads, n_tokens, n_seqs);
++        k_conv = ggml_repeat_4d(ctx0, k_conv, head_k_dim, num_v_heads, n_tokens, n_seqs);
++    }
++
++    ggml_tensor * state = ggml_fill(ctx0, ggml_new_tensor_4d(ctx0, GGML_TYPE_F32, head_v_dim, head_v_dim, num_v_heads, n_seqs), 0.0f);
++
++    ggml_tensor * output = build_delta_net(q_conv, k_conv, v_conv, gate, beta, state, il).first;
++    cb(output, "attn_output", il);
++
++    // gated normalization
++    ggml_tensor * z_4d = ggml_reshape_4d(ctx0, z, head_v_dim, num_v_heads, n_tokens, n_seqs);
++    output = build_norm(output, layer.ssm_norm, nullptr, LLM_NORM_RMS, il);
++    output = ggml_mul(ctx0, output, ggml_silu(ctx0, z_4d));
++
++    output = ggml_reshape_3d(ctx0, output, head_v_dim * num_v_heads, n_tokens, n_seqs);
++
++    cur = build_lora_mm(layer.ssm_out, output, layer.ssm_out_s);
++    cb(cur, "linear_attn_out", il);
++
++    return ggml_reshape_2d(ctx0, cur, n_embd, n_tokens);
++}
++
++ggml_tensor * llama_model_clef::graph::build_head_norm(ggml_tensor * cur, const norm & n) {
++    return build_norm(cur, n.w, n.b, LLM_NORM, -1);
++}
++
++// q: [n_embd_h, n_q], kv: [n_embd_h, n_kv], no mask
++ggml_tensor * llama_model_clef::graph::build_head_attn(ggml_tensor * q, ggml_tensor * kv, const attn & a) {
++    const int64_t n_embd_h = q->ne[0];
++    const int64_t n_head_h = model.n_head_decision;
++    const int64_t d_head   = n_embd_h / n_head_h;
++    const int64_t n_q      = q->ne[1];
++    const int64_t n_kv     = kv->ne[1];
++
++    ggml_tensor * Qcur = ggml_add(ctx0, ggml_mul_mat(ctx0, a.wq, q),  a.bq);
++    ggml_tensor * Kcur = ggml_add(ctx0, ggml_mul_mat(ctx0, a.wk, kv), a.bk);
++    ggml_tensor * Vcur = ggml_add(ctx0, ggml_mul_mat(ctx0, a.wv, kv), a.bv);
++
++    Qcur = ggml_permute(ctx0, ggml_reshape_3d(ctx0, Qcur, d_head, n_head_h, n_q),  0, 2, 1, 3); // [d_head, n_q,  n_head]
++    Kcur = ggml_permute(ctx0, ggml_reshape_3d(ctx0, Kcur, d_head, n_head_h, n_kv), 0, 2, 1, 3); // [d_head, n_kv, n_head]
++    Vcur = ggml_permute(ctx0, ggml_reshape_3d(ctx0, Vcur, d_head, n_head_h, n_kv), 1, 2, 0, 3); // [n_kv, d_head, n_head]
++    Vcur = ggml_cont(ctx0, Vcur);
++
++    ggml_tensor * kq = ggml_mul_mat(ctx0, Kcur, Qcur); // [n_kv, n_q, n_head]
++    kq = ggml_soft_max_ext(ctx0, kq, nullptr, 1.0f / sqrtf(float(d_head)), 0.0f);
++
++    ggml_tensor * cur = ggml_mul_mat(ctx0, Vcur, kq); // [d_head, n_q, n_head]
++    cur = ggml_cont_2d(ctx0, ggml_permute(ctx0, cur, 0, 2, 1, 3), n_embd_h, n_q);
++
++    return ggml_add(ctx0, ggml_mul_mat(ctx0, a.wo, cur), a.bo);
++}
++
++ggml_tensor * llama_model_clef::graph::build_head_ffn(ggml_tensor * cur, const head_layer & layer) {
++    cur = build_head_norm(cur, layer.ffn_norm);
++    cur = ggml_add(ctx0, ggml_mul_mat(ctx0, layer.ffn_up, cur), layer.ffn_up_b);
++    cur = ggml_gelu_erf(ctx0, cur);
++    return ggml_add(ctx0, ggml_mul_mat(ctx0, layer.ffn_down, cur), layer.ffn_down_b);
++}
++
++// ref: JointSchemaHead in joint_schema_model.py of the model repo
++ggml_tensor * llama_model_clef::graph::build_head(ggml_tensor * hidden, input_decision * inp) {
++    const int64_t n_questions = inp->n_questions;
++    const int64_t n_options   = inp->n_options;
++
++    inp->tokens          = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
++    inp->pool_q          = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_tokens, n_questions);
++    inp->pool_o          = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_tokens, n_options);
++    inp->question_type   = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_questions);
++    inp->option_question = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_options);
++    inp->option_mask     = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_options, n_questions);
++    inp->status          = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 1);
++    for (ggml_tensor * t : { inp->tokens, inp->pool_q, inp->pool_o, inp->question_type, inp->option_question, inp->option_mask, inp->status }) {
++        ggml_set_input(t);
++    }
++
++    hidden = build_head_norm(hidden, model.hidden_norm);
++
++    ggml_tensor * memory = ggml_mul_mat(ctx0, model.proj_memory, hidden); // [n_embd_h, n_tokens]
++
++    const int64_t n_embd_h = memory->ne[0];
++
++    // hidden state of the last token
++    ggml_tensor * global = ggml_view_2d(ctx0, hidden, n_embd, 1, hidden->nb[1], (n_tokens - 1) * hidden->nb[1]);
++
++    // mean of the hidden states over each span
++    ggml_tensor * hidden_t = ggml_cont(ctx0, ggml_transpose(ctx0, hidden));
++    ggml_tensor * question = ggml_mul_mat(ctx0, hidden_t, inp->pool_q); // [n_embd, n_questions]
++    ggml_tensor * opt_ctx  = ggml_mul_mat(ctx0, hidden_t, inp->pool_o); // [n_embd, n_options]
++
++    // mean of the output embeddings of the tokens of each option
++    ggml_tensor * lexical = ggml_get_rows(ctx0, model.output, inp->tokens);
++    lexical = ggml_mul_mat(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, lexical)), inp->pool_o); // [n_embd, n_options]
++
++    // one query per option
++    ggml_tensor * options = ggml_mul_mat(ctx0, model.proj_option_context, opt_ctx);
++    options = ggml_add(ctx0, options, ggml_mul_mat(ctx0, model.proj_option_lexical, lexical));
++    options = ggml_add(ctx0, options, ggml_get_rows(ctx0, ggml_mul_mat(ctx0, model.proj_option_question, question), inp->option_question));
++
++    // the options read the prompt
++    for (uint32_t il = 0; il < model.n_layer_routing; ++il) {
++        const auto & layer = model.head_layers[il];
++
++        ggml_tensor * cur = build_head_attn(
++                build_head_norm(options, layer.cross_norm),
++                build_head_norm(memory,  layer.cross_norm_kv),
++                layer.cross_attn);
++        options = ggml_add(ctx0, options, cur);
++        options = ggml_add(ctx0, options, build_head_ffn(options, layer));
++    }
++    cb(options, "decision_options", -1);
++
++    // one vector per question: its text, a summary of its options, the end of the prompt and its type
++    ggml_tensor * fields = ggml_mul_mat(ctx0, model.proj_question, question); // [n_embd_h, n_questions]
++    {
++        // each question weights its own options
++        ggml_tensor * weights = ggml_mul_mat(ctx0, options, fields); // [n_options, n_questions]
++        weights = ggml_scale(ctx0, weights, 1.0f / sqrtf(float(n_embd_h)));
++        weights = ggml_soft_max(ctx0, ggml_add(ctx0, weights, inp->option_mask));
++
++        ggml_tensor * summary = ggml_mul_mat(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, options)), weights);
++
++        fields = ggml_add(ctx0, fields, build_head_norm(summary, model.option_summary_norm));
++        fields = ggml_add(ctx0, fields, ggml_mul_mat(ctx0, model.proj_global, global));
++        fields = ggml_add(ctx0, fields, ggml_get_rows(ctx0, model.type_embd, inp->question_type));
++    }
++
++    // the questions read each other and the prompt
++    for (uint32_t il = model.n_layer_routing; il < model.head_layers.size(); ++il) {
++        const auto & layer = model.head_layers[il];
++
++        ggml_tensor * cur = build_head_norm(fields, layer.self_norm);
++        fields = ggml_add(ctx0, fields, build_head_attn(cur, cur, layer.self_attn));
++
++        cur = build_head_norm(fields, layer.cross_norm);
++        fields = ggml_add(ctx0, fields, build_head_attn(cur, memory, layer.cross_attn));
++
++        fields = ggml_add(ctx0, fields, build_head_ffn(fields, layer));
++    }
++    fields = build_head_norm(fields, model.field_norm);
++    cb(fields, "decision_fields", -1);
++
++    const float eps = 1e-12f;
++
++    // prior: the output embeddings of the option against the question and the end of the prompt
++    ggml_tensor * anchor = ggml_l2_norm(ctx0, ggml_add(ctx0, question, global), eps);
++    anchor = ggml_get_rows(ctx0, anchor, inp->option_question);
++    ggml_tensor * prior = ggml_sum_rows(ctx0, ggml_mul(ctx0, ggml_l2_norm(ctx0, lexical, eps), anchor)); // [1, n_options]
++
++    // joint: each option against the vector of its question
++    options = build_head_norm(options, model.option_norm);
++    ggml_tensor * field = ggml_get_rows(ctx0, fields, inp->option_question); // [n_embd_h, n_options]
++
++    ggml_tensor * cosine = ggml_sum_rows(ctx0, ggml_mul(ctx0, ggml_l2_norm(ctx0, field, eps), ggml_l2_norm(ctx0, options, eps)));
++
++    ggml_tensor * features = ggml_concat(ctx0, field, options, 0);
++    features = ggml_concat(ctx0, features, ggml_mul(ctx0, field, options), 0);
++    features = ggml_concat(ctx0, features, ggml_abs(ctx0, ggml_sub(ctx0, field, options)), 0);
++
++    ggml_tensor * residual = ggml_add(ctx0, ggml_mul_mat(ctx0, model.scorer, features), model.scorer_b);
++    residual = ggml_gelu_erf(ctx0, residual);
++    residual = ggml_add(ctx0, ggml_mul_mat(ctx0, model.scorer_out, residual), model.scorer_out_b); // [1, n_options]
++
++    auto scale = [&](int i) {
++        return ggml_view_1d(ctx0, model.scales, 1, i * ggml_element_size(model.scales));
++    };
++
++    ggml_tensor * joint = ggml_add(ctx0, ggml_mul(ctx0, cosine, scale(1)), residual);
++
++    return ggml_add(ctx0, ggml_mul(ctx0, prior, scale(0)), ggml_mul(ctx0, joint, scale(2)));
++}
+diff --git a/src/models/models.h b/src/models/models.h
+index a821330..08afc48 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -2308,6 +2308,99 @@ struct llama_model_qwen35 : public llama_model_base {
+ };
+ 
+ 
++// Qwen3.5 backbone evaluated without memory, with a joint decision head on top of its hidden states
++struct llama_model_clef : public llama_model_qwen35 {
++    llama_model_clef(const struct llama_model_params & params) : llama_model_qwen35(params) {}
++    void load_arch_hparams(llama_model_loader & ml) override;
++    void load_arch_tensors(llama_model_loader & ml) override;
++
++    struct attn {
++        ggml_tensor * wq = nullptr;
++        ggml_tensor * bq = nullptr;
++        ggml_tensor * wk = nullptr;
++        ggml_tensor * bk = nullptr;
++        ggml_tensor * wv = nullptr;
++        ggml_tensor * bv = nullptr;
++        ggml_tensor * wo = nullptr;
++        ggml_tensor * bo = nullptr;
++    };
++
++    struct norm {
++        ggml_tensor * w = nullptr;
++        ggml_tensor * b = nullptr;
++    };
++
++    // the first n_layer_routing blocks have no self attention
++    struct head_layer {
++        norm self_norm;
++        attn self_attn;
++        norm cross_norm;
++        norm cross_norm_kv; // routing blocks only
++        attn cross_attn;
++        norm ffn_norm;
++        ggml_tensor * ffn_up     = nullptr;
++        ggml_tensor * ffn_up_b   = nullptr;
++        ggml_tensor * ffn_down   = nullptr;
++        ggml_tensor * ffn_down_b = nullptr;
++    };
++
++    uint32_t n_layer_routing = 0;
++    uint32_t n_layer_joint   = 0;
++    uint32_t n_head_decision = 0;
++
++    std::vector<head_layer> head_layers; // routing blocks, then joint blocks
++
++    norm hidden_norm;
++    norm option_summary_norm;
++    norm field_norm;
++    norm option_norm;
++
++    ggml_tensor * proj_memory          = nullptr;
++    ggml_tensor * proj_question        = nullptr;
++    ggml_tensor * proj_option_question = nullptr;
++    ggml_tensor * proj_global          = nullptr;
++    ggml_tensor * proj_option_context  = nullptr;
++    ggml_tensor * proj_option_lexical  = nullptr;
++    ggml_tensor * scales               = nullptr; // prior scale, joint scale, residual gate
++    ggml_tensor * scorer               = nullptr;
++    ggml_tensor * scorer_b             = nullptr;
++    ggml_tensor * scorer_out           = nullptr;
++    ggml_tensor * scorer_out_b         = nullptr;
++
++    class input_decision;
++
++    struct graph : public llm_build_delta_net_base {
++        graph(const llama_model & model, const llm_graph_params & params);
++    private:
++        llm_graph_input_attn_no_cache * build_attn_inp_causal();
++
++        ggml_tensor * build_layer_attn(
++        llm_graph_input_attn_no_cache * inp_attn,
++                    ggml_tensor * cur,
++                    ggml_tensor * inp_pos,
++                            int * sections,
++                            int   il);
++
++        ggml_tensor * build_layer_attn_linear(
++                    ggml_tensor * cur,
++                            int   il);
++
++        // hidden: [n_embd, n_tokens], returns one score per option: [1, n_options]
++        ggml_tensor * build_head(
++                    ggml_tensor * hidden,
++                 input_decision * inp);
++
++        ggml_tensor * build_head_norm(ggml_tensor * cur, const norm & n);
++        ggml_tensor * build_head_attn(ggml_tensor * q, ggml_tensor * kv, const attn & a);
++        ggml_tensor * build_head_ffn (ggml_tensor * cur, const head_layer & layer);
++
++        const llama_model_clef & model;
++    };
++
++    std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;
++};
++
++
+ struct llama_model_qwen35moe : public llama_model_base {
+     llama_model_qwen35moe(const struct llama_model_params & params) : llama_model_base(params) {}
+     void load_arch_hparams(llama_model_loader & ml) override;
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 8098fd4..c1b64c8 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -221,6 +221,7 @@ if (NOT WIN32 OR NOT BUILD_SHARED_LIBS)
+ 
+     llama_build_and_test(test-llama-archs.cpp)
+     llama_build_and_test(test-decide-batch.cpp)
++    llama_build_and_test(test-clef.cpp)
+ 
+     set(MODEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/test-models/")
+     file(MAKE_DIRECTORY "${MODEL_DIR}")
+diff --git a/tests/test-clef.cpp b/tests/test-clef.cpp
+new file mode 100644
+index 0000000..606128d
+--- /dev/null
++++ b/tests/test-clef.cpp
+@@ -0,0 +1,544 @@
++// The clef decision head (src/models/clef.cpp) on a tiny random model, CPU backend.
++//
++//   test-clef                       the self-contained checks below (ctest)
++//   test-clef --save PATH           write the fixture model (random weights, the clef layout the converter writes)
++//   test-clef MODEL.gguf IN OUT     dump mode: IN has one "token order" pair per line, OUT gets one score per line
++//                                   (the first n_options rows of the embeddings output), for the comparison with a
++//                                   PyTorch reference of the head (bench/clef_smoke.py in the Yamadori repository)
++//
++// What the port promises (ggml-org/llama.cpp PRs 29818 + 29831, on a tree that has no llama_batch_ext: the per-token
++// order rides in llama_batch.decision_order):
++//   - a batch with spans yields one finite score per option, in the first rows of the embeddings output
++//   - the scores are reproducible, and move when an option's tokens or a question's tokens change
++//   - a batch whose order cannot be used (an option before any question, a question without an option) yields NaN,
++//     which the server reports as an error rather than an answer
++//   - the order is split with the batch: the same prompt decoded as ONE ubatch gives the same rows whatever n_batch is
++//     (a clef batch is a single ubatch, so n_ubatch must hold the whole prompt)
++
++#include "common.h"
++#include "log.h"
++#include "ggml-backend.h"
++#include "ggml.h"
++#include "gguf.h"
++#include "ggml-cpp.h"
++#include "llama.h"
++#include "llama-cpp.h"
++
++#include "../src/llama-arch.h"
++#include "../src/llama-ext.h"
++#include "../src/llama-model-saver.h"
++
++#include <cinttypes>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <map>
++#include <random>
++#include <sstream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++static int n_checks = 0;
++static int n_failed = 0;
++
++#define CHECK(cond, ...) do { \
++    n_checks++; \
++    if (!(cond)) { \
++        n_failed++; \
++        fprintf(stderr, "FAIL %s:%d: %s -- ", __FILE__, __LINE__, #cond); \
++        fprintf(stderr, __VA_ARGS__); \
++        fprintf(stderr, "\n"); \
++    } \
++} while (0)
++
++static constexpr uint32_t N_VOCAB = 128;
++
++// the sizes of the fixture, the head too
++static constexpr uint32_t N_EMBD     = 64;
++static constexpr uint32_t N_EMBD_H   = 32; // width of the head
++static constexpr uint32_t N_FF_H     = 64;
++static constexpr uint32_t N_HEAD_DEC = 2;
++
++static void set_tensor_data(struct ggml_tensor * tensor, void * userdata) {
++    size_t seed = *(const size_t *) userdata;
++    std::hash<std::string> hasher;
++    seed ^= hasher(tensor->name);
++    std::mt19937 gen(seed);
++    // norm weights near 1 and projections of std 0.1, as test-decide-batch: every layer matters to the output
++    const bool is_norm = strstr(tensor->name, "norm") != nullptr;
++    const bool is_bias = strstr(tensor->name, "bias") != nullptr;
++    std::normal_distribution<float> dis(is_norm && !is_bias ? 1.0f : 0.0f, is_norm ? 0.05f : 0.1f);
++
++    const int64_t ne = ggml_nelements(tensor);
++    if (tensor->type == GGML_TYPE_F32) {
++        std::vector<float> tmp(ne);
++        for (int64_t i = 0; i < ne; i++) {
++            tmp[i] = dis(gen);
++        }
++        // decision.scales: prior scale, joint scale, residual gate (the values used at inference)
++        if (strcmp(tensor->name, "decision.scales") == 0) {
++            tmp[0] = 3.0f; tmp[1] = 5.0f; tmp[2] = 0.5f;
++        }
++        ggml_backend_tensor_set(tensor, tmp.data(), 0, ggml_nbytes(tensor));
++    } else if (tensor->type == GGML_TYPE_F16) {
++        std::vector<ggml_fp16_t> tmp(ne);
++        for (int64_t i = 0; i < ne; i++) {
++            tmp[i] = ggml_fp32_to_fp16(dis(gen));
++        }
++        ggml_backend_tensor_set(tensor, tmp.data(), 0, ggml_nbytes(tensor));
++    } else {
++        GGML_ABORT("fatal error");
++    }
++}
++
++// the KVs of a four layer hybrid qwen35 trunk (linear, attention, linear, attention) under the arch's own names, and for
++// clef the head of one routing and one joint block
++static gguf_context_ptr get_gguf_ctx(const llm_arch arch) {
++    gguf_context_ptr ret(gguf_init_empty());
++    llama_model_saver ms(arch, ret.get());
++    const uint32_t n_ctx = 512;
++
++    const uint32_t n_vocab = N_VOCAB;
++    const uint32_t n_embd  = N_EMBD;
++    const uint32_t n_head  = 2;
++    const uint32_t n_ff    = 128;
++    const uint32_t n_layer = 4;
++    const uint32_t n_embd_head = n_embd / n_head;
++
++    ms.add_kv(LLM_KV_GENERAL_ARCHITECTURE,      llm_arch_name(arch));
++    ms.add_kv(LLM_KV_VOCAB_SIZE,                n_vocab);
++    ms.add_kv(LLM_KV_CONTEXT_LENGTH,            n_ctx);
++    ms.add_kv(LLM_KV_EMBEDDING_LENGTH,          n_embd);
++    ms.add_kv(LLM_KV_BLOCK_COUNT,               n_layer);
++    ms.add_kv(LLM_KV_FEED_FORWARD_LENGTH,       n_ff);
++    ms.add_kv(LLM_KV_FULL_ATTENTION_INTERVAL,   uint32_t(2));
++    ms.add_kv(LLM_KV_ATTENTION_HEAD_COUNT,      n_head);
++    ms.add_kv(LLM_KV_ATTENTION_HEAD_COUNT_KV,   n_head);
++    ms.add_kv(LLM_KV_ATTENTION_LAYERNORM_EPS,          1e-5f);
++    ms.add_kv(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,      1e-6f);
++    ms.add_kv(LLM_KV_ROPE_DIMENSION_SECTIONS, std::vector<uint32_t>({n_embd_head/8, n_embd_head/8, n_embd_head/8, n_embd_head/8}));
++    ms.add_kv(LLM_KV_SSM_INNER_SIZE,            uint32_t(n_embd));
++    ms.add_kv(LLM_KV_SSM_CONV_KERNEL,           uint32_t(4));
++    ms.add_kv(LLM_KV_SSM_STATE_SIZE,            uint32_t(n_embd / n_head));
++    ms.add_kv(LLM_KV_SSM_TIME_STEP_RANK,        n_head);
++    ms.add_kv(LLM_KV_SSM_GROUP_COUNT,           n_head);
++
++    if (arch == LLM_ARCH_CLEF) {
++        ms.add_kv(LLM_KV_DECISION_BLOCK_COUNT,         uint32_t(1));
++        ms.add_kv(LLM_KV_DECISION_ROUTING_BLOCK_COUNT, uint32_t(1));
++        ms.add_kv(LLM_KV_DECISION_HEAD_COUNT,          N_HEAD_DEC);
++    }
++
++    // a toy SPM vocabulary, as test-decide-batch: token ids are all the test sends
++    {
++        std::vector<std::string> pieces;
++        std::vector<float>       scores;
++        std::vector<int32_t>     types;
++        pieces.push_back("<unk>"); scores.push_back(0.0f); types.push_back(2);
++        pieces.push_back("<s>");   scores.push_back(0.0f); types.push_back(3);
++        pieces.push_back("</s>");  scores.push_back(0.0f); types.push_back(3);
++        for (uint32_t i = 3; i < n_vocab; i++) {
++            pieces.push_back("w" + std::to_string(i));
++            scores.push_back(-(float) i);
++            types.push_back(1);
++        }
++        ms.add_kv(LLM_KV_TOKENIZER_MODEL,    "llama");
++        ms.add_kv(LLM_KV_TOKENIZER_LIST,     pieces);
++        ms.add_kv(LLM_KV_TOKENIZER_SCORES,   scores);
++        ms.add_kv(LLM_KV_TOKENIZER_TOKEN_TYPE, types);
++        ms.add_kv(LLM_KV_TOKENIZER_UNK_ID,   uint32_t(0));
++        ms.add_kv(LLM_KV_TOKENIZER_BOS_ID,   uint32_t(1));
++        ms.add_kv(LLM_KV_TOKENIZER_EOS_ID,   uint32_t(2));
++        ms.add_kv(LLM_KV_TOKENIZER_ADD_BOS,  false);
++        ms.add_kv(LLM_KV_TOKENIZER_ADD_EOS,  false);
++    }
++    return ret;
++}
++
++// A model made from user data has no tensor listing, and llama_model_clef reads the width of its head from the
++// listing (as the converter wrote it), so the fixture is a file: the trunk is a random qwen35 saved by the model saver
++// (every tensor name and shape the loader wants, with data), the head is added here, the KVs are clef's.
++static bool silent_progress(float, void *) { return true; }
++
++static void fill_random(ggml_tensor * t, std::mt19937 & gen, bool is_norm_weight) {
++    std::normal_distribution<float> dis(is_norm_weight ? 1.0f : 0.0f, is_norm_weight ? 0.05f : 0.1f);
++    float * d = (float *) t->data;
++    for (int64_t i = 0; i < ggml_nelements(t); i++) {
++        d[i] = dis(gen);
++    }
++}
++
++
++static void build_clef_file(const std::string & path, size_t seed) {
++    // the trunk
++    const std::string path_q = path + ".qwen35";
++    {
++        gguf_context_ptr gq = get_gguf_ctx(LLM_ARCH_QWEN35);
++        llama_model_params mp = llama_model_default_params();
++        mp.progress_callback = silent_progress;
++        std::vector<ggml_backend_dev_t> devs = { nullptr };
++        mp.devices = devs.data();
++        size_t tmp = seed;
++        llama_model_ptr mq(llama_model_init_from_user(gq.get(), set_tensor_data, &tmp, mp));
++        if (!mq) {
++            throw std::runtime_error("failed to create the qwen35 trunk");
++        }
++        llama_model_save_to_file(mq.get(), path_q.c_str());
++    }
++    ggml_context * ctx_trunk = nullptr;
++    gguf_init_params ip = { /*.no_alloc =*/ false, /*.ctx =*/ &ctx_trunk };
++    gguf_context_ptr src(gguf_init_from_file(path_q.c_str(), ip));
++    ggml_context_ptr ctx_trunk_ptr(ctx_trunk);
++    if (!src) {
++        throw std::runtime_error("failed to read the saved trunk");
++    }
++
++    gguf_context_ptr dst = get_gguf_ctx(LLM_ARCH_CLEF);
++    for (ggml_tensor * t = ggml_get_first_tensor(ctx_trunk); t; t = ggml_get_next_tensor(ctx_trunk, t)) {
++        // the saver also wrote the optional tensors the loader made up for the user data (cls.output, the per-tensor
++        // scales, the attention biases): a converted checkpoint has none of them, and the fixture should not either
++        const std::string name = t->name;
++        const auto ends_with = [&](const char * suf) { return name.size() >= strlen(suf) && name.compare(name.size() - strlen(suf), strlen(suf), suf) == 0; };
++        if (name == "GGUF tensor data binary blob" || name.rfind("cls.output", 0) == 0 || ends_with(".scale") || ends_with(".input_scale") || (ends_with(".bias") && !ends_with("ssm_dt.bias"))) {
++            continue;
++        }
++        gguf_add_tensor(dst.get(), t);
++        gguf_set_tensor_data(dst.get(), t->name, t->data);
++    }
++
++    // the head
++    ggml_init_params gp = { /*.mem_size =*/ 64u*1024*1024, /*.mem_buffer =*/ nullptr, /*.no_alloc =*/ false };
++    ggml_context_ptr ctx_head(ggml_init(gp));
++    std::mt19937 gen((uint32_t) seed + 1);
++    LLM_TN tn(LLM_ARCH_CLEF);
++    auto add = [&](const std::string & name, int64_t ne0, int64_t ne1, bool norm_weight = false) {
++        ggml_tensor * t = ne1 > 0 ? ggml_new_tensor_2d(ctx_head.get(), GGML_TYPE_F32, ne0, ne1) : ggml_new_tensor_1d(ctx_head.get(), GGML_TYPE_F32, ne0);
++        ggml_set_name(t, name.c_str());
++        fill_random(t, gen, norm_weight);
++        gguf_add_tensor(dst.get(), t);
++        gguf_set_tensor_data(dst.get(), t->name, t->data);
++        return t;
++    };
++    auto add_norm = [&](llm_tensor type, int64_t n, int bid) {
++        add((bid < 0 ? tn(type, "weight") : tn(type, "weight", bid)).str(), n, 0, true);
++        add((bid < 0 ? tn(type, "bias")   : tn(type, "bias",   bid)).str(), n, 0);
++    };
++    auto add_linear = [&](llm_tensor type, int64_t n_in, int64_t n_out, int bid, bool bias = true) {
++        add((bid < 0 ? tn(type, "weight") : tn(type, "weight", bid)).str(), n_in, n_out);
++        if (bias) {
++            add((bid < 0 ? tn(type, "bias") : tn(type, "bias", bid)).str(), n_out, 0);
++        }
++    };
++    auto add_attn = [&](llm_tensor q, llm_tensor k, llm_tensor v, llm_tensor o, int bid) {
++        for (llm_tensor type : { q, k, v, o }) {
++            add_linear(type, N_EMBD_H, N_EMBD_H, bid);
++        }
++    };
++    for (int il = 0; il < 2; il++) { // block 0 routes, block 1 is joint
++        if (il == 0) {
++            add_norm(LLM_TENSOR_DEC_CROSS_ATTN_NORM_KV, N_EMBD_H, il);
++        } else {
++            add_norm(LLM_TENSOR_DEC_ATTN_NORM, N_EMBD_H, il);
++            add_attn(LLM_TENSOR_DEC_ATTN_Q, LLM_TENSOR_DEC_ATTN_K, LLM_TENSOR_DEC_ATTN_V, LLM_TENSOR_DEC_ATTN_OUT, il);
++        }
++        add_norm(LLM_TENSOR_DEC_CROSS_ATTN_NORM, N_EMBD_H, il);
++        add_attn(LLM_TENSOR_DEC_CROSS_ATTN_Q, LLM_TENSOR_DEC_CROSS_ATTN_K, LLM_TENSOR_DEC_CROSS_ATTN_V, LLM_TENSOR_DEC_CROSS_ATTN_OUT, il);
++        add_norm(LLM_TENSOR_DEC_FFN_NORM, N_EMBD_H, il);
++        add_linear(LLM_TENSOR_DEC_FFN_UP,   N_EMBD_H, N_FF_H,   il);
++        add_linear(LLM_TENSOR_DEC_FFN_DOWN, N_FF_H,   N_EMBD_H, il);
++    }
++    add_norm(LLM_TENSOR_DECISION_HIDDEN_NORM,         N_EMBD,   -1);
++    add_norm(LLM_TENSOR_DECISION_OPTION_SUMMARY_NORM, N_EMBD_H, -1);
++    add_norm(LLM_TENSOR_DECISION_FIELD_NORM,          N_EMBD_H, -1);
++    add_norm(LLM_TENSOR_DECISION_OPTION_NORM,         N_EMBD_H, -1);
++    for (llm_tensor type : { LLM_TENSOR_DECISION_PROJ_MEMORY, LLM_TENSOR_DECISION_PROJ_QUESTION, LLM_TENSOR_DECISION_PROJ_OPTION_QUESTION,
++                             LLM_TENSOR_DECISION_PROJ_GLOBAL, LLM_TENSOR_DECISION_PROJ_OPTION_CONTEXT, LLM_TENSOR_DECISION_PROJ_OPTION_LEXICAL }) {
++        add_linear(type, N_EMBD, N_EMBD_H, -1, false);
++    }
++    {
++        // prior scale, joint scale, residual gate: the values used at inference
++        ggml_tensor * t = add(tn(LLM_TENSOR_DECISION_SCALES).str(), 3, 0);
++        float * d = (float *) t->data;
++        d[0] = 3.0f; d[1] = 5.0f; d[2] = 0.5f;
++        gguf_set_tensor_data(dst.get(), t->name, t->data);
++    }
++    add(tn(LLM_TENSOR_TOKEN_TYPES, "weight").str(), N_EMBD_H, 3);
++    add_linear(LLM_TENSOR_DECISION_SCORER,     4 * N_EMBD_H, N_EMBD_H, -1);
++    add_linear(LLM_TENSOR_DECISION_SCORER_OUT, N_EMBD_H,     1,        -1);
++
++    if (!gguf_write_to_file(dst.get(), path.c_str(), false)) {
++        throw std::runtime_error("failed to write " + path);
++    }
++    std::remove(path_q.c_str());
++}
++
++
++struct entry {
++    llama_token token;
++    int32_t     order;
++};
++using prompt_t = std::vector<entry>;
++
++// the prompt shape of a clef request: text, [question] text, [option] text, [option] text, ... (two questions)
++static prompt_t make_prompt(std::mt19937 & gen) {
++    std::uniform_int_distribution<int> d(3, N_VOCAB - 1);
++    prompt_t p;
++    auto run = [&](int32_t order, size_t n) {
++        for (size_t i = 0; i < n; i++) {
++            p.push_back({ (llama_token) d(gen), order });
++        }
++    };
++    run(LLAMA_DECISION_ORDER_NONE, 9);
++    run(LLAMA_DECISION_ORDER_QUESTION_NOUL, 5);
++    run(LLAMA_DECISION_ORDER_NONE, 2);
++    run(LLAMA_DECISION_ORDER_OPTION, 3);
++    run(LLAMA_DECISION_ORDER_NONE, 1);
++    run(LLAMA_DECISION_ORDER_OPTION, 2);
++    run(LLAMA_DECISION_ORDER_NONE, 3);
++    run(LLAMA_DECISION_ORDER_QUESTION_CHOICE, 4);
++    run(LLAMA_DECISION_ORDER_NONE, 2);
++    run(LLAMA_DECISION_ORDER_OPTION, 2);
++    run(LLAMA_DECISION_ORDER_NONE, 1);
++    run(LLAMA_DECISION_ORDER_OPTION, 4);
++    run(LLAMA_DECISION_ORDER_NONE, 1);
++    run(LLAMA_DECISION_ORDER_OPTION, 1);
++    run(LLAMA_DECISION_ORDER_NONE, 6);
++    return p;
++}
++
++static size_t n_options_of(const prompt_t & p) {
++    size_t n = 0;
++    for (size_t i = 0; i < p.size(); i++) {
++        if (p[i].order == LLAMA_DECISION_ORDER_OPTION && (i == 0 || p[i - 1].order != LLAMA_DECISION_ORDER_OPTION)) {
++            n++;
++        }
++    }
++    return n;
++}
++
++struct runner {
++    llama_model * model;
++
++    llama_context_ptr make_ctx(uint32_t n_batch, uint32_t n_ubatch) const {
++        llama_context_params cp = llama_context_default_params();
++        cp.n_ctx           = 512;
++        cp.n_batch         = n_batch;
++        cp.n_ubatch        = n_ubatch;
++        cp.n_seq_max       = 1;
++        cp.embeddings      = true;
++        cp.pooling_type    = LLAMA_POOLING_TYPE_NONE;
++        cp.n_threads       = 4;
++        cp.n_threads_batch = 4;
++        llama_context_ptr c(llama_init_from_model(model, cp));
++        if (!c) {
++            throw std::runtime_error("failed to create the context");
++        }
++        return c;
++    }
++
++    // the first n_scores rows of the embeddings output, with the order passed (or not)
++    std::vector<float> scores(llama_context * ctx, const prompt_t & p, size_t n_scores, bool with_order = true) const {
++        llama_memory_t mem = llama_get_memory(ctx);
++        if (mem) {
++            llama_memory_clear(mem, true);
++        }
++        llama_batch batch = llama_batch_init((int32_t) p.size(), 0, 1);
++        std::vector<int32_t> order(p.size());
++        for (size_t i = 0; i < p.size(); i++) {
++            common_batch_add(batch, p[i].token, (llama_pos) i, { 0 }, true);
++            order[i] = p[i].order;
++        }
++        batch.decision_order = with_order ? order.data() : nullptr;
++        const int ret = llama_decode(ctx, batch);
++        batch.decision_order = nullptr;
++        llama_batch_free(batch);
++        if (ret != 0) {
++            throw std::runtime_error("decode failed: " + std::to_string(ret));
++        }
++        std::vector<float> out;
++        for (size_t i = 0; i < n_scores; i++) {
++            const float * e = llama_get_embeddings_ith(ctx, (int32_t) i);
++            out.push_back(e ? e[0] : NAN);
++        }
++        return out;
++    }
++};
++
++static bool all_finite(const std::vector<float> & v) {
++    for (float x : v) {
++        if (!std::isfinite(x)) {
++            return false;
++        }
++    }
++    return !v.empty();
++}
++
++static double max_abs_diff(const std::vector<float> & a, const std::vector<float> & b) {
++    double d = 0.0;
++    for (size_t i = 0; i < a.size() && i < b.size(); i++) {
++        d = std::max(d, (double) std::fabs(a[i] - b[i]));
++    }
++    return d;
++}
++
++static llama_model_ptr load_model(const std::string & path) {
++    llama_model_params mp = llama_model_default_params();
++    mp.progress_callback = silent_progress;
++    std::vector<ggml_backend_dev_t> devs = { nullptr };   // CPU only
++    mp.devices = devs.data();
++    mp.n_gpu_layers = 0;
++    return llama_model_ptr(llama_model_load_from_file(path.c_str(), mp));
++}
++
++int main(int argc, char ** argv) {
++    common_init();
++    llama_log_set([](ggml_log_level level, const char * text, void *) {
++        if (level >= GGML_LOG_LEVEL_ERROR) {
++            fputs(text, stderr);
++        }
++    }, nullptr);
++
++    try {
++        // --save PATH: write the fixture model, for the comparison with a PyTorch reference (bench/clef_smoke.py)
++        if (argc == 3 && strcmp(argv[1], "--save") == 0) {
++            build_clef_file(argv[2], 20261008);
++            printf("saved %s\n", argv[2]);
++            return 0;
++        }
++
++        // ---- dump mode
++        if (argc == 4) {
++            auto model = load_model(argv[1]);
++            if (!model) {
++                fprintf(stderr, "failed to load %s\n", argv[1]);
++                return 1;
++            }
++            prompt_t p;
++            {
++                std::ifstream in(argv[2]);
++                long t, o;
++                while (in >> t >> o) {
++                    p.push_back({ (llama_token) t, (int32_t) o });
++                }
++            }
++            runner r{ model.get() };
++            auto ctx = r.make_ctx((uint32_t) p.size(), (uint32_t) p.size());
++            const auto s = r.scores(ctx.get(), p, n_options_of(p));
++            std::ofstream out(argv[3]);
++            out.precision(9);
++            for (float x : s) {
++                out << x << "\n";
++            }
++            printf("wrote %zu scores to %s\n", s.size(), argv[3]);
++            return 0;
++        }
++
++        const std::string path_model = (std::filesystem::temp_directory_path() / "test-clef-tiny.gguf").string();
++        build_clef_file(path_model, 20261008);
++        auto model = load_model(path_model);
++        std::remove(path_model.c_str());
++        if (!model) {
++            fprintf(stderr, "failed to load the clef fixture\n");
++            return 1;
++        }
++        runner r{ model.get() };
++        std::mt19937 gen(20261008);
++
++        const prompt_t p = make_prompt(gen);
++        const size_t   n_opt = n_options_of(p);
++        CHECK(n_opt == 5, "the fixture prompt has %zu options", n_opt);
++
++        auto ctx = r.make_ctx((uint32_t) p.size(), (uint32_t) p.size());
++
++        // ---- 1. one finite score per option, reproducible
++        const auto s1 = r.scores(ctx.get(), p, n_opt);
++        const auto s2 = r.scores(ctx.get(), p, n_opt);
++        CHECK(all_finite(s1) && s1.size() == n_opt, "scores are not finite");
++        CHECK(max_abs_diff(s1, s2) == 0.0, "a repeat differs by %.3e", max_abs_diff(s1, s2));
++        double spread = 0.0;
++        for (size_t i = 1; i < s1.size(); i++) {
++            spread = std::max(spread, (double) std::fabs(s1[i] - s1[0]));
++        }
++        printf("  scores: ");
++        for (float x : s1) printf("%+.4f ", x);
++        printf("\n");
++        CHECK(spread > 1e-4, "the options all score alike (%.3e): the head does not see them", spread);
++
++        // ---- 2. the scores move with the text of an option, and with the text of a question
++        {
++            prompt_t q = p;
++            for (auto & e : q) {
++                if (e.order == LLAMA_DECISION_ORDER_OPTION) {
++                    e.token = 3 + (e.token + 17) % (N_VOCAB - 3);
++                    break; // the first option only
++                }
++            }
++            const auto s = r.scores(ctx.get(), q, n_opt);
++            CHECK(all_finite(s) && max_abs_diff(s, s1) > 1e-4, "another first option leaves the scores as they were (%.3e)", max_abs_diff(s, s1));
++
++            prompt_t u = p;
++            for (auto & e : u) {
++                if (e.order == LLAMA_DECISION_ORDER_QUESTION_CHOICE) {
++                    e.token = 3 + (e.token + 29) % (N_VOCAB - 3);
++                }
++            }
++            const auto su = r.scores(ctx.get(), u, n_opt);
++            CHECK(all_finite(su) && max_abs_diff(su, s1) > 1e-4, "another question leaves the scores as they were (%.3e)", max_abs_diff(su, s1));
++        }
++
++        // ---- 3. the order is what the head reads: the same tokens with the spans moved score differently
++        {
++            prompt_t q = p;
++            // the second question becomes ordinary text
++            for (auto & e : q) {
++                if (e.order == LLAMA_DECISION_ORDER_QUESTION_CHOICE) {
++                    e.order = LLAMA_DECISION_ORDER_NONE;
++                }
++            }
++            // its three options now belong to the first question
++            const auto s = r.scores(ctx.get(), q, n_opt);
++            CHECK(all_finite(s) && max_abs_diff(s, s1) > 1e-4, "the question order does not matter (%.3e)", max_abs_diff(s, s1));
++        }
++
++        // ---- 4. an order that cannot be used is NaN, not a score
++        {
++            prompt_t q = p;
++            for (auto & e : q) {
++                e.order = e.order == LLAMA_DECISION_ORDER_OPTION ? LLAMA_DECISION_ORDER_OPTION : LLAMA_DECISION_ORDER_NONE;
++            }
++            const auto s = r.scores(ctx.get(), q, 1); // options with no question
++            CHECK(s.size() == 1 && std::isnan(s[0]), "options without a question gave %f", s.empty() ? 0.0 : (double) s[0]);
++
++            prompt_t w = p;
++            for (auto & e : w) {
++                if (e.order == LLAMA_DECISION_ORDER_OPTION) {
++                    e.order = LLAMA_DECISION_ORDER_NONE;
++                }
++            }
++            const auto sw = r.scores(ctx.get(), w, 1); // questions with no option
++            CHECK(sw.size() == 1 && std::isnan(sw[0]), "questions without an option gave %f", sw.empty() ? 0.0 : (double) sw[0]);
++        }
++
++        // ---- 5. no order at all: the head still runs (a batch that is not a decision), one score, finite
++        {
++            const auto s = r.scores(ctx.get(), p, 1, /*with_order=*/false);
++            CHECK(s.size() == 1 && std::isfinite(s[0]), "no order: %f", s.empty() ? 0.0 : (double) s[0]);
++        }
++
++        // ---- 6. a larger n_batch and n_ubatch (the same single ubatch) gives the same rows
++        {
++            auto ctx2 = r.make_ctx(256, 256);
++            const auto s = r.scores(ctx2.get(), p, n_opt);
++            CHECK(all_finite(s) && max_abs_diff(s, s1) < 5e-4, "n_batch 256: rows differ by %.3e", max_abs_diff(s, s1));
++        }
++
++        printf("test-clef: %d checks, %d failed\n", n_checks, n_failed);
++        return n_failed == 0 ? 0 : 1;
++    } catch (const std::exception & e) {
++        fprintf(stderr, "test-clef: %s\n", e.what());
++        return 1;
++    }
++}
+diff --git a/tests/test-llama-archs.cpp b/tests/test-llama-archs.cpp
+index b8fd66c..415aa61 100644
+--- a/tests/test-llama-archs.cpp
++++ b/tests/test-llama-archs.cpp
+@@ -502,6 +502,9 @@ static bool arch_supported(const llm_arch arch) {
+     if (arch == LLM_ARCH_PLM) {
+         return false; // TODO tensor shapes
+     }
++    if (arch == LLM_ARCH_CLEF) {
++        return false; // TODO decision head tensors
++    }
+     if (arch == LLM_ARCH_DEEPSEEK2OCR) {
+         return false;
+     }
+diff --git a/tools/server/README.md b/tools/server/README.md
+index 5435ec2..8b3dba1 100644
+--- a/tools/server/README.md
++++ b/tools/server/README.md
+@@ -1638,6 +1638,8 @@ curl http://localhost:8080/v1/messages/count_tokens \
+ 
+ Answers typed questions about a `state` with a decision model.
+ 
++In the Yamadori fork (bonsai2-ada) the decision models are the qwen35 ones (openjev, lev, kev: `general.architecture` qwen35) and clef (`clef`); the laya and mmBERT models of ggml-org's PR 29818 are not ported (they need the modern-bert head).
++
+ Follows the [TypeSafe API](https://docs.typesafe.ai/api), streaming is not supported. Multimodal input is an extension to this API, see the [OpenJev multimodal API](https://jev-skills.github.io/openjev-multimodal/api) for reference.
+ 
+ *Options:*
+@@ -1655,13 +1657,15 @@ Follows the [TypeSafe API](https://docs.typesafe.ai/api), streaming is not suppo
+   - `score`: An array of 2 to 10 level descriptions, lowest level first.
+   - `noul`: Optional. An object with the descriptions of `true` and `false`.
+ 
+-The questions of a request are answered independently, an answer does not depend on the other questions.
++The questions of a request are answered independently, an answer does not depend on the other questions. The exception is clef: it reads all the questions in one prompt and decides them jointly.
++
++The number of options of a `choice` question is limited by the model, for example: 52 for openjev, 255 for laya and clef. For laya, long questions and options are truncated to the token budget the model was trained with.
+ 
+-The number of options of a `choice` question is limited by the model, for example: 52 for openjev, 255 for laya. For laya, long questions and options are truncated to the token budget the model was trained with.
++For laya and clef, the whole prompt is evaluated in one batch: it must fit in `--ubatch-size`. A server that runs clef only serves this endpoint, text generation is not available.
+ 
+ *Image input:*
+ 
+-Image input needs a model that supports it (for example: openjev) and its multimodal projector, see `--mmproj`.
++Image input needs a model that supports it (for example: openjev) and its multimodal projector, see `--mmproj`. Image input is not supported yet for clef.
+ 
+ Images can be given in two ways, and both can be used in the same request:
+ 
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 38f35d5..aa7ccbf 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -76,6 +76,7 @@ struct server_batch {
+         llama_pos pos;
+         bool output;
+         bool is_prompt; // for stats tracking
++        int32_t decision_order = 0; // see llama_decision_order in llama-ext.h
+     };
+     std::vector<token> tokens;
+     int32_t n_tokens_alloc = 0;
+@@ -92,6 +93,9 @@ struct server_batch {
+     float  alora_scale       = -1.0f;
+     size_t alora_disabled_id = 0;
+ 
++    // llama_batch.decision_order of the rendered batch, set only if some token has an order
++    std::vector<int32_t> decision_order;
++
+     server_batch() {
+         batch.pos = nullptr; // sentinel: uninitialized batch
+     }
+@@ -141,6 +145,8 @@ struct server_batch {
+         alora_disabled_id = 0;
+         batch_rendered    = false;
+         has_embd          = false;
++        decision_order.clear();
++        batch.decision_order = nullptr;
+         if (batch.token == nullptr) {
+             batch.token = tokens_ptr;
+             batch.embd  = nullptr;
+@@ -156,6 +162,11 @@ struct server_batch {
+         tokens[idx].output = output;
+     }
+ 
++    void set_decision_order(int32_t idx, int32_t order) {
++        GGML_ASSERT(idx >= 0 && idx < (int32_t)tokens.size());
++        tokens[idx].decision_order = order;
++    }
++
+     void render() {
+         GGML_ASSERT(!batch_rendered);
+         GGML_ASSERT(batch.pos != nullptr);
+@@ -168,6 +179,13 @@ struct server_batch {
+             batch.token = nullptr; // will be restored on clear()
+             batch.embd  = embd.data();
+         }
++        if (std::any_of(tokens.begin(), tokens.end(), [](const token & t) { return t.decision_order != 0; })) {
++            decision_order.resize(tokens.size());
++            for (size_t i = 0; i < tokens.size(); i++) {
++                decision_order[i] = tokens[i].decision_order;
++            }
++            batch.decision_order = decision_order.data();
++        }
+         batch_rendered = true;
+     }
+ 
+@@ -188,6 +206,7 @@ struct server_batch {
+             batch.n_seq_id + off,
+             batch.seq_id   + off,
+             batch.logits   + off,
++            batch.decision_order ? batch.decision_order + off : nullptr,
+         };
+ 
+         return view;
+@@ -411,6 +430,11 @@ struct server_slot {
+     bool can_batch_with(server_slot & other_slot) const {
+         GGML_ASSERT(task);
+ 
++        // a joint decision head reads the whole batch
++        if (!task->decision.order.empty() || !other_slot.task->decision.order.empty()) {
++            return false;
++        }
++
+         return task->type == other_slot.task->type
+             && inp_embd.size() == other_slot.inp_embd.size()
+             && are_lora_equal(lora, other_slot.lora);
+@@ -2269,6 +2293,16 @@ private:
+                 }
+             }
+ 
++            // joint head (decision model): the scores are the first rows
++            for (int32_t i = 0; i < decision.n_scores; i++) {
++                const float * embd = i < (int32_t) idx.size() ? llama_get_embeddings_ith(ctx_tgt, idx[i]) : nullptr;
++                if (embd == nullptr) {
++                    send_error(slot, "failed to get embeddings", ERROR_TYPE_SERVER);
++                    return;
++                }
++                res->scores.push_back(embd[0]);
++            }
++
+             const int32_t pos_first = slot.prompt.n_tokens() - (int32_t) idx.size();
+             auto get_embd = [&](int32_t pos) -> const float * {
+                 const int32_t i = pos - pos_first;
+@@ -3913,6 +3947,9 @@ private:
+                             /* pos       = */ slot.prompt.tokens.pos_next(),
+                             /* output    = */ slot.need_embd(),
+                             /* is_prompt = */ true);
++                        if (!slot.task->decision.order.empty()) {
++                            batch.set_decision_order(batch.size() - 1, slot.task->decision.order[slot.prompt.n_tokens()]);
++                        }
+                         slot.prompt.tokens.push_back(cur_tok);
+ 
+                         // break at the last user message, or at user messages at least min step past the last checkpoint
+@@ -5684,16 +5721,23 @@ void server_routes::init_routes() {
+             return res;
+         }
+ 
+-        // one task per variant of each question
++        // one task per variant of each question, or one task for all the questions
+         auto & rd = res->rd;
+         {
+             std::vector<server_task> tasks;
+-            for (const auto & question : questions) {
+-                for (size_t variant = 0; variant < decision.n_variants(question); variant++) {
+-                    server_task task = server_task(SERVER_TASK_TYPE_DECISION);
+-                    task.id = rd.get_new_id();
+-                    decision.fill_task(state, question, variant, files, ctx_server.mctx, task);
+-                    tasks.push_back(std::move(task));
++            if (decision.is_joint()) {
++                server_task task = server_task(SERVER_TASK_TYPE_DECISION);
++                task.id = rd.get_new_id();
++                decision.fill_task_joint(state, questions, task);
++                tasks.push_back(std::move(task));
++            } else {
++                for (const auto & question : questions) {
++                    for (size_t variant = 0; variant < decision.n_variants(question); variant++) {
++                        server_task task = server_task(SERVER_TASK_TYPE_DECISION);
++                        task.id = rd.get_new_id();
++                        decision.fill_task(state, question, variant, files, ctx_server.mctx, task);
++                        tasks.push_back(std::move(task));
++                    }
+                 }
+             }
+             if (decision.can_share_prompt()) {
+@@ -5714,9 +5758,18 @@ void server_routes::init_routes() {
+         json answers = json::object();
+         int32_t n_tokens = 0;
+         size_t i_result = 0;
++        size_t i_score  = 0;
+         for (const auto & question : questions) {
+             std::vector<std::vector<float>> scores;
+-            for (size_t variant = 0; variant < decision.n_variants(question); variant++) {
++            if (decision.is_joint()) {
++                // one result with the scores of all the questions, in order
++                auto * result = dynamic_cast<server_task_result_decision *>(all_results.results[0].get());
++                GGML_ASSERT(result != nullptr && i_score + question.options.size() <= result->scores.size());
++                scores.emplace_back(result->scores.begin() + i_score, result->scores.begin() + i_score + question.options.size());
++                i_score += question.options.size();
++                n_tokens = result->n_tokens;
++            }
++            for (size_t variant = 0; !decision.is_joint() && variant < decision.n_variants(question); variant++) {
+                 auto * result = dynamic_cast<server_task_result_decision *>(all_results.results[i_result++].get());
+                 GGML_ASSERT(result != nullptr);
+                 scores.push_back(result->scores);
+diff --git a/tools/server/server-decision.cpp b/tools/server/server-decision.cpp
+index d8eb58d..7097d94 100644
+--- a/tools/server/server-decision.cpp
++++ b/tools/server/server-decision.cpp
+@@ -1,5 +1,7 @@
+ #include "server-decision.h"
+ 
++#include "../../src/llama-ext.h" // staging API: llama_decision_order
++
+ #include <algorithm>
+ #include <cmath>
+ #include <regex>
+@@ -116,6 +118,10 @@ void server_decision_context::init(const llama_model * model) {
+             throw std::runtime_error("decision model has no valid max_head_tokens");
+         }
+         n_options_max = 255;
++    } else if (model_type == COMMON_DECISION_TYPE_CLEF) {
++        n_options_max   = 255;
++        noul_true_first = true;
++        choice_sorted   = true;
+     } else {
+         throw std::runtime_error("unsupported decision model type: " + type_name);
+     }
+@@ -163,6 +169,11 @@ std::vector<server_decision_question> server_decision_context::parse_questions(c
+             for (const auto & [key, description] : criteria.items()) {
+                 question.options.push_back({key, description});
+             }
++            if (choice_sorted) {
++                std::sort(question.options.begin(), question.options.end(), [](const auto & a, const auto & b) {
++                    return a.key < b.key;
++                });
++            }
+         } else if (type_name == "score") {
+             question.type = SERVER_DECISION_QUESTION_SCORE;
+             if (!criteria.is_array() || criteria.size() < 2 || criteria.size() > 10) {
+@@ -519,6 +530,90 @@ void server_decision_context::fill_task_laya(llama_tokens & tokens, const server
+     task.decision.column = question.type;
+ }
+ 
++//
++// joint prompt (clef)
++//
++
++// given to the template: text between the pieces of the prompt, and at the start of the span of a question or of an option
++static const std::string CLEF_MARKER        = "<<clef:";
++static const std::string CLEF_SEP           = "<<clef:sep>>";
++static const std::string CLEF_MARK_QUESTION = "<<clef:question>>";
++static const std::string CLEF_MARK_OPTION   = "<<clef:option>>";
++
++void server_decision_context::fill_task_joint(const json & state, const std::vector<server_decision_question> & questions, server_task & task) const {
++    json inp_questions = json::array();
++    for (const auto & question : questions) {
++        json options = json::array();
++        for (const auto & opt : question.options) {
++            options.push_back(json{
++                {"key",         opt.key},
++                {"description", opt.description},
++            });
++        }
++        inp_questions.push_back(json{
++            {"id",           question.id},
++            {"type",         decision_question_type_name(question.type)},
++            {"instructions", question.instructions},
++            {"options",      options},
++        });
++    }
++
++    // the template is given raw JSON values with sorted keys, and no marker in the input
++    json inp = json{
++        {"state",     state},
++        {"questions", inp_questions},
++    };
++    inp = decision_replace_text(decision_sort_keys(inp), CLEF_MARKER, "<<clef ");
++    inp["sep"]           = CLEF_SEP;
++    inp["mark_question"] = CLEF_MARK_QUESTION;
++    inp["mark_option"]   = CLEF_MARK_OPTION;
++
++    jinja::context ctx(tmpl->source());
++    jinja::global_from_json(ctx, inp, false);
++    jinja::runtime runtime(ctx);
++    const jinja::value results = runtime.execute(tmpl->prog);
++    const std::string prompt   = jinja::runtime::gather_string_parts(results)->as_string().str();
++
++    // the model was trained with the pieces tokenized one by one
++    llama_tokens tokens;
++    size_t i_question = 0;
++    for (std::string piece : string_split(prompt, CLEF_SEP)) {
++        int32_t order = LLAMA_DECISION_ORDER_NONE;
++        if (string_starts_with(piece, CLEF_MARK_QUESTION)) {
++            piece = piece.substr(CLEF_MARK_QUESTION.size());
++            if (i_question >= questions.size()) {
++                throw std::runtime_error("unexpected layout of the decision prompt");
++            }
++            switch (questions[i_question++].type) {
++                case SERVER_DECISION_QUESTION_NOUL:   order = LLAMA_DECISION_ORDER_QUESTION_NOUL;   break;
++                case SERVER_DECISION_QUESTION_CHOICE: order = LLAMA_DECISION_ORDER_QUESTION_CHOICE; break;
++                case SERVER_DECISION_QUESTION_SCORE:  order = LLAMA_DECISION_ORDER_QUESTION_SCORE;  break;
++            }
++        } else if (string_starts_with(piece, CLEF_MARK_OPTION)) {
++            piece = piece.substr(CLEF_MARK_OPTION.size());
++            order = LLAMA_DECISION_ORDER_OPTION;
++            task.decision.n_scores++;
++        }
++
++        const llama_tokens piece_tokens = common_tokenize(vocab, piece, false, true);
++        if (order != LLAMA_DECISION_ORDER_NONE && piece_tokens.empty()) {
++            throw std::invalid_argument("the instructions and the options of a question must not be empty");
++        }
++        tokens.insert(tokens.end(), piece_tokens.begin(), piece_tokens.end());
++        task.decision.order.resize(tokens.size(), order);
++    }
++
++    size_t n_options = 0;
++    for (const auto & question : questions) {
++        n_options += question.options.size();
++    }
++    if (i_question != questions.size() || (size_t) task.decision.n_scores != n_options) {
++        throw std::runtime_error("unexpected layout of the decision prompt");
++    }
++
++    task.tokens = server_tokens(tokens, false);
++}
++
+ //
+ // answer
+ //
+@@ -586,6 +681,10 @@ json server_decision_context::format_answer(const server_decision_question & que
+         if (s.size() != n) {
+             throw std::runtime_error("decision result does not match the number of options");
+         }
++        // a joint head returns NaN if it could not use the decision order
++        if (std::any_of(s.begin(), s.end(), [](float v) { return std::isnan(v); })) {
++            throw std::runtime_error("the model could not evaluate the decision");
++        }
+         const float score_max = *std::max_element(s.begin(), s.end());
+         std::vector<double> p(n);
+         double sum = 0.0;
+diff --git a/tools/server/server-decision.h b/tools/server/server-decision.h
+index 4150203..eed672e 100644
+--- a/tools/server/server-decision.h
++++ b/tools/server/server-decision.h
+@@ -47,7 +47,13 @@ struct server_decision_context {
+         }
+     }
+ 
++    // true if all the questions of a request go in one prompt, see fill_task_joint()
++    bool is_joint() const {
++        return type == COMMON_DECISION_TYPE_CLEF;
++    }
++
+     // true if the prompt of the model has a place for images
++    // TODO: clef needs token and embedding entries in the same batch, see https://github.com/ggml-org/llama.cpp/pull/29622
+     bool can_use_images() const {
+         switch (type) {
+             case COMMON_DECISION_TYPE_OPENJEV:
+@@ -77,6 +83,9 @@ struct server_decision_context {
+             mtmd_context * mctx,
+             server_task & task) const;
+ 
++    // set the prompt of all the questions, the result has the scores of all their options, in order
++    void fill_task_joint(const json & state, const std::vector<server_decision_question> & questions, server_task & task) const;
++
+     // scores: the raw model outputs of each variant
+     json format_answer(const server_decision_question & question, const std::vector<std::vector<float>> & scores) const;
+ 
+@@ -87,6 +96,7 @@ private:
+     std::map<std::string, float> temperatures; // "<type>" or "<type>.<n_options bucket>"
+     size_t n_options_max   = 0;
+     bool   noul_true_first = false; // noul options are [true, false] instead of [false, true]
++    bool   choice_sorted   = false; // choice options are in the order of their keys
+ 
+     // OPENJEV, LEV
+     std::vector<llama_token> labels;
+diff --git a/tools/server/server-task.h b/tools/server/server-task.h
+index ddae280..194cffa 100644
+--- a/tools/server/server-task.h
++++ b/tools/server/server-task.h
+@@ -196,6 +196,11 @@ struct server_task {
+             }
+             return pos;
+         }
++
++        // for a joint head: one value per prompt token, see llama_batch_ext_set_decision_order()
++        // the scores are the first n_scores rows of the embeddings
++        std::vector<int32_t> order;
++        int32_t              n_scores = 0;
+     };
+     decision decision;
+ 
+@@ -219,7 +224,7 @@ struct server_task {
+             case SERVER_TASK_TYPE_RERANK:
+                 return true;
+             case SERVER_TASK_TYPE_DECISION:
+-                return !decision.markers.empty();
++                return !decision.markers.empty() || !decision.order.empty();
+             default:
+                 return false;
+         }

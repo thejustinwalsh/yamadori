@@ -265,6 +265,7 @@ extern "C" {
         int32_t      *  n_seq_id;
         llama_seq_id ** seq_id;
         int8_t       *  logits;   // TODO: rename this to "output"
+        int32_t      *  decision_order; // NULL, or one value per token for a joint decision head (clef), see llama_decision_order in llama-ext.h
     } llama_batch;
 
     enum llama_model_kv_override_type {

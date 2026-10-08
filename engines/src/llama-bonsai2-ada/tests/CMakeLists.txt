@@ -221,6 +221,7 @@ if (NOT WIN32 OR NOT BUILD_SHARED_LIBS)
 
     llama_build_and_test(test-llama-archs.cpp)
     llama_build_and_test(test-decide-batch.cpp)
+    llama_build_and_test(test-clef.cpp)
 
     set(MODEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/test-models/")
     file(MAKE_DIRECTORY "${MODEL_DIR}")

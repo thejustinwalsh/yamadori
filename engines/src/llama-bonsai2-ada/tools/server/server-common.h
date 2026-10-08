@@ -267,6 +267,14 @@ llama_tokens tokenize_mixed(const llama_vocab * vocab, const json & json_prompt,
 // if validate_utf8(text) == text.size(), then the whole text is valid utf8
 size_t validate_utf8(const std::string& text);
 
+// load a media file from an URL (http, file, data) or from raw base64 data
+// accept_base64_uri: a data:image/...;base64 URI is accepted
+void handle_media(
+        std::vector<raw_buffer> & out_files,
+        const std::string & url,
+        const std::string & media_path,
+        bool accept_base64_uri);
+
 // process mtmd prompt, return the server_tokens containing both text tokens and media chunks
 // if is_placeholder is true, the media chunk will be treated as placeholder for counting tokens; the output tokens are not usable for actual inference (e.g. for submitting a task to server_queue)
 server_tokens process_mtmd_prompt(mtmd_context * mctx, const std::string & prompt, const std::vector<raw_buffer> & files, bool is_placeholder = false);
@@ -356,6 +364,11 @@ struct server_slot_stats {
     uint64_t n_draft_tokens      = 0;
     uint64_t n_draft_accepted    = 0;
     uint64_t n_draft_verif_steps = 0;
+
+    // reasoning budget report (only when the request ran with a budget sampler)
+    bool     reasoning_tracked          = false;
+    uint64_t n_reasoning                = 0;
+    bool     reasoning_budget_exhausted = false;
 
     // these are absolute timestamps (in us)
     // note: must be signed - they are subtracted before the later ones are set

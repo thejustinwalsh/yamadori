@@ -145,6 +145,18 @@ bool llama_batch_allocr::init(
         }
     }
 
+    // kept only if some token has one
+    if (batch.decision_order) {
+        bool any = false;
+        for (int32_t i = 0; i < batch.n_tokens && !any; ++i) {
+            any = batch.decision_order[i] != 0;
+        }
+        if (any) {
+            decision_order.assign(batch.decision_order, batch.decision_order + batch.n_tokens);
+        }
+    }
+    batch.decision_order = decision_order.empty() ? nullptr : decision_order.data();
+
     //
     // compute stats
     //
@@ -224,6 +236,7 @@ bool llama_batch_allocr::init(
             /*.seq_id_unq   =*/ this->seq_id_unq.data(),
             /*.seq_idx      =*/ this->seq_idx.data(),
             /*.output       =*/ batch.logits,
+            /*.decision_order =*/ batch.decision_order,
             /*.data         =*/ {},
         };
 
@@ -430,6 +443,7 @@ llama_ubatch llama_batch_allocr::ubatch_reserve(uint32_t n_seq_tokens, uint32_t 
         /*.seq_id_unq   =*/ udata->seq_id_unq.data(),
         /*.seq_idx      =*/ udata->seq_idx.data(),
         /*.output       =*/ udata->output.data(),
+        /*.decision_order =*/ nullptr,
         /*.data         =*/ std::move(udata),
     };
 
@@ -730,6 +744,7 @@ void llama_batch_allocr::clear() {
     seq_id    .clear();
     seq_id_unq.clear();
     output    .clear();
+    decision_order.clear();
 
     for (auto & cur : seq_pos) {
         cur.clear();
@@ -763,6 +778,7 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
     udata->seq_id    .resize(n_tokens);
     udata->seq_id_unq.resize(0);
     udata->seq_idx   .resize(LLAMA_MAX_SEQ, -1);
+    udata->decision_order.resize(decision_order.empty() ? 0 : n_tokens);
     udata->output    .resize(n_tokens);
 
     udata->seq_id_data.reserve(n_tokens);
@@ -789,6 +805,10 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
 
         udata->n_seq_id[i] = batch.n_seq_id[idxs[i]];
         udata->output[i]   = batch.logits[idxs[i]];
+
+        if (!decision_order.empty()) {
+            udata->decision_order[i] = decision_order[idxs[i]];
+        }
 
         for (int s = 0; s < udata->n_seq_id[i]; ++s) {
             const llama_seq_id seq_id = batch.seq_id[idxs[i]][s];
@@ -831,6 +851,7 @@ llama_ubatch llama_batch_allocr::ubatch_add(const std::vector<int32_t> & idxs, u
         /*.seq_id_unq   =*/ udata->seq_id_unq.data(),
         /*.seq_idx      =*/ udata->seq_idx.data(),
         /*.output       =*/ udata->output.data(),
+        /*.decision_order =*/ udata->decision_order.empty() ? nullptr : udata->decision_order.data(),
         /*.data         =*/ std::move(udata),
     };
 
@@ -939,6 +960,7 @@ struct llama_batch llama_batch_get_one(
         /*n_seq_id =*/ nullptr,
         /*seq_id   =*/ nullptr,
         /*logits   =*/ nullptr,
+        /*decision_order =*/ nullptr,
     };
 }
 
@@ -951,6 +973,7 @@ struct llama_batch llama_batch_init(int32_t n_tokens_alloc, int32_t embd, int32_
         /*n_seq_id =*/ nullptr,
         /*seq_id   =*/ nullptr,
         /*logits   =*/ nullptr,
+        /*decision_order =*/ nullptr,
     };
 
     if (embd) {

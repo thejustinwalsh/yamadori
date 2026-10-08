@@ -74,6 +74,10 @@ struct common_reasoning_budget_ctx {
     int32_t      nudge_min_room;        // budget that must remain after the nudge
     bool         nudge_spent;           // fired or abandoned in this generation
     size_t       nudge_pos;             // next position in nudge_tokens to force
+
+    // reporting (whole response, across re-armed blocks; bonsai-ada-surgery 0035)
+    int32_t n_reasoning = 0;  // tokens accepted inside reasoning blocks, end sequence, forced and nudge tokens included
+    bool    exhausted   = false; // the budget ran out and the end sequence was forced at least once
 };
 
 // a nudge boundary: the piece contains a newline (with a vocab), else a listed
@@ -95,6 +99,11 @@ static const char * common_reasoning_budget_name(const struct llama_sampler * /*
 static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_token token) {
     auto * ctx = (common_reasoning_budget_ctx *) smpl->ctx;
 
+    if (ctx->state == REASONING_BUDGET_COUNTING || ctx->state == REASONING_BUDGET_WAITING_UTF8 ||
+        ctx->state == REASONING_BUDGET_FORCING || ctx->state == REASONING_BUDGET_NUDGING) {
+        ctx->n_reasoning++;
+    }
+
     switch (ctx->state) {
         case REASONING_BUDGET_IDLE:
         {
@@ -106,6 +115,7 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
                 if (ctx->remaining <= 0) {
                     ctx->state = REASONING_BUDGET_FORCING;
                     ctx->force_pos = 0;
+                    ctx->exhausted = true;
                     COM_TRC("%s", "budget=0, forcing immediately\n");
                 }
             }
@@ -139,6 +149,7 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
             } else if (ctx->state == REASONING_BUDGET_COUNTING) {
                 ctx->remaining--;
                 if (ctx->remaining <= 0) {
+                    ctx->exhausted = true;
                     if (utf8_complete) {
                         ctx->state = REASONING_BUDGET_FORCING;
                         ctx->force_pos = 0;
@@ -176,6 +187,7 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
                 if (ctx->remaining <= 0) {
                     ctx->state = REASONING_BUDGET_FORCING;
                     ctx->force_pos = 0;
+                    ctx->exhausted = true;
                     COM_TRC("%s", "nudge complete, budget exhausted, forcing end sequence\n");
                 } else {
                     ctx->state = REASONING_BUDGET_COUNTING;
@@ -209,6 +221,7 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
                 if (ctx->remaining <= 0) {
                     ctx->state = REASONING_BUDGET_FORCING;
                     ctx->force_pos = 0;
+                    ctx->exhausted = true;
                     COM_TRC("%s", "budget=0, forcing immediately\n");
                 }
             }
@@ -253,6 +266,8 @@ static void common_reasoning_budget_reset(struct llama_sampler * smpl) {
     ctx->end_match = -1;
     ctx->nudge_spent = false;
     ctx->nudge_pos = 0;
+    ctx->n_reasoning = 0;
+    ctx->exhausted = false;
 }
 
 static struct llama_sampler * common_reasoning_budget_init_state(
@@ -300,7 +315,8 @@ static struct llama_sampler * common_reasoning_budget_init_state(
         common_reasoning_budget_state     initial_state,
         const common_reasoning_budget_nudge & nudge) {
     // promote COUNTING with budget <= 0 to FORCING
-    if (initial_state == REASONING_BUDGET_COUNTING && budget <= 0) {
+    const bool exhausted_at_init = initial_state == REASONING_BUDGET_COUNTING && budget <= 0;
+    if (exhausted_at_init) {
         initial_state = REASONING_BUDGET_FORCING;
     }
 
@@ -338,6 +354,8 @@ static struct llama_sampler * common_reasoning_budget_init_state(
             /* .nudge_min_room        = */ nudge_min_room,
             /* .nudge_spent           = */ false,
             /* .nudge_pos             = */ 0,
+            /* .n_reasoning           = */ 0,
+            /* .exhausted             = */ exhausted_at_init,
         }
     );
 }
@@ -371,6 +389,16 @@ const llama_tokens * common_reasoning_budget_get_end_match(const struct llama_sa
     }
 
     return &ctx->end_matcher.seqs[ctx->end_match];
+}
+
+void common_reasoning_budget_get_report(const struct llama_sampler * smpl, int32_t * n_reasoning, bool * exhausted) {
+    const auto * ctx = smpl ? (const common_reasoning_budget_ctx *) smpl->ctx : nullptr;
+    if (n_reasoning) {
+        *n_reasoning = ctx ? ctx->n_reasoning : 0;
+    }
+    if (exhausted) {
+        *exhausted = ctx ? ctx->exhausted : false;
+    }
 }
 
 bool common_reasoning_budget_force(struct llama_sampler * smpl) {

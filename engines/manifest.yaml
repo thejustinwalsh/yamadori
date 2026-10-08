@@ -385,7 +385,12 @@ engines:
       # (tree hash equal, checked 2026-09-27). Their 0001-0005 are sudoingX's
       # #218 commits e148e857c..e724b07ff, identical (git range-diff `=`).
       bundle: https://github.com/professorpalmer/bonsai-ada-surgery
+      # 5158a8df was the bundle's `main` when 0001-0033 were taken (2026-09-27). He squashed the repository's history on
+      # 2026-10-05 (the old commits are still fetchable by sha from GitHub) and added patches 0034-0038 on 2026-10-07; the
+      # bundle at 51f3c0b (2026-10-08) is read for 0043-0047 (his 0034-0038). His 0001-0033 are the same diffs as the
+      # files here (only the commit-message trailer differs). The base is still adfffbe.
       bundle_commit: 5158a8df3bc4c8b9375ed521021eb6118feda78d
+      bundle_commit_2026_10_08: 51f3c0b3ec2ce0f62fe6d4b12400dcad94dd921b
       bundle_path: patches/
       series_repo: https://github.com/professorpalmer/llama.cpp-ada-ternary
       series_branch: bonsai-q8-product
@@ -576,6 +581,50 @@ engines:
         # The mechanism is ggml-org/llama.cpp's own for its decision models (server_decision_group_tasks,
         # PR #29818 / #29831, MIT). Tests: tests/test-decide-batch.cpp (CPU, tiny hybrid qwen35) in this entry's
         # `tests`, and bench/decide_batch_server_smoke.py (a real llama-server on the CPU). NOT RUN ON A GPU.
+      - file: 0043-surgery-0034-json-schema-empty-unions.patch
+        sha256: 730e1a9bf8144326505aaa3e6c3fe858f8ba2e8a013946a57652fbcca8023902
+        commit: 2cb7a4ed6841d7409bb67da6d3e437722faea161
+        # bonsai-ada-surgery 0034 (Cary Palmer, MIT), the file byte for byte (renamed: our 0034-0042 keep their numbers, which
+        # docs, benches and shipped builds name). Empty anyOf / oneOf / type unions in a JSON schema are converted instead of
+        # failing the request ("failed to parse grammar"); agent frameworks send them. On by default, only for schemas that failed.
+      - file: 0044-surgery-0035-server-reasoning-report.patch
+        sha256: e07fc975889084ca2ee8f63e63495c569a8de1ae44e25a3f0cad42092f8e2974
+        # bonsai-ada-surgery 0035 (Cary Palmer, MIT) RESOLVED against our 0034 nudge (a conflict in common/reasoning-budget.{h,cpp}
+        # and tests/test-reasoning-budget.cpp; both kept: the NUDGING state's forced tokens count as reasoning, a budget spent by
+        # the nudge sets `exhausted`, + one test for the combination). The final response carries timings.reasoning_n,
+        # timings.reasoning_budget_exhausted and usage.completion_tokens_details.reasoning_tokens (streaming and not), only
+        # when the request ran with a budget sampler. The server-side floor part (--reasoning-max-tokens-floor) is off in our
+        # launch lines, so the output cap is unchanged; the report is NEW output the proxy has not read yet (the proxy counts
+        # reasoning tokens with /tokenize today).
+      - file: 0045-surgery-0036-cuda-planar-PTQ1_0-one-column-turing.patch
+        sha256: 143c7f66bcfdfbba4c2e644af9be560547437124979795a1ead866ca8c9a8005
+        commit: 8c03a5f5c391cb0292ba32ba3b80730f4d2625e5
+        # bonsai-ada-surgery 0036, byte for byte. sm_75 only (Turing takes the planar layout at one column): a no-op on our
+        # sm_86 / sm_120 builds.
+      - file: 0046-surgery-0037-cuda-shared-pool.patch
+        sha256: 465762b126bc2593e02830a8c6e2fa38ac4b97cbc6f2d864ef82e88d07d074f4
+        commit: 214f96e1165f15ed39537072f398c2cbf33cfdb4
+        # bonsai-ada-surgery 0037, byte for byte. GGML_CUDA_SHARED_POOL=1 (one transient CUDA pool per device/stream) and
+        # LLAMA_MTP_DRAFT_UBATCH=N; both OFF unless the variable is set. Inert in our launch lines.
+      - file: 0047-surgery-0038-cuda-fa-prefill-f16.patch
+        sha256: 29dcb9bcd5ffe6f7b56677fe9b97ef44bc035698dcc3b9037b5e223fa8235d35
+        commit: 1d71dca1071972f3863d94889016cb56468123e0
+        # bonsai-ada-surgery 0038, byte for byte (his branch bonsai-q8-product head, 2026-10-08). GGML_CUDA_FA_PREFILL_F16=N:
+        # prefill-sized attention over a quantized cache of up to N cells converts K/V to f16 in pool memory (8 GB cards);
+        # OFF unless set. Inert in our launch lines.
+      - file: 0048-server-systemone-decision-api.patch
+        sha256: 0b35efb841ce95b75af3fcaec9bd755eae1319f91a7053d28c3dca7bde88f24d
+        # OURS (2026-10-08), UNSHIPPED. ggml-org/llama.cpp PR 29818 (a4cb4c61fd, MIT) ported: POST /v1/systemone, the System One
+        # decision API (openjev, lev, kev: qwen35-arch models with "<arch>.decision.*" metadata, one forward pass per question,
+        # nothing generated), the converters, the shared prompt prefix between a request's questions. Not taken: laya / mmBERT
+        # (modern-bert head), nimble (PR 29844), the Python server tests. docs/ENGINES.md "Clef in the Bonsai fork".
+      - file: 0049-clef-joint-decision-head.patch
+        sha256: d6717874a5c4f4179c9b5adb748a7787424248c7a5a98f7f72a9e149ef266b98
+        # OURS (2026-10-08), UNSHIPPED. ggml-org/llama.cpp PR 29831 (99b95488ca, MIT) ported, text only: arch "clef" (Qwen3.5
+        # trunk evaluated without memory + Cloudflare's joint decision head), conversion/clef.py, fill_task_joint() on the
+        # same /v1/systemone route. This tree has no llama_batch_ext: the per-token decision order rides in
+        # llama_batch.decision_order (a trailing optional field) and llama_ubatch.decision_order. Tests: tests/test-clef.cpp
+        # (ctest, CPU) and bench/clef_smoke.py (converter + PyTorch reference, max |diff| 2.2e-4). NOT RUN ON A GPU.
     vendor:
       # Written by `python scripts/build_engine.py vendor llama-bonsai2-ada`;
       # `check` verifies the tree against it offline. Do not edit.
@@ -584,13 +633,13 @@ engines:
       repo: https://github.com/PrismML-Eng/llama.cpp
       commit: adfffbe41b2cabcd51fff326ab045662265062bb
       upstream_tree: f701dae3247ff1ba55db24d1fd83dff0cd2edff8
-      patches: 42
-      patches_digest: dc344fbde7710c8bc675bd60680c06c6d0a767b6491fbd9cc315be9f3e6dc331
-      patched_tree: 2f9da6ed2ddc9bc45db51817c23d0d7fcfff0796
+      patches: 49
+      patches_digest: fa859ece38470a16f9a1d8348d57579ecdbe4e435b9fba3fdca54e952254bad2
+      patched_tree: e074c2cba1eac976edfdb809b614940747550141
       base_tree: 339bad835c77c724415bf4ef471bebd288d9d104
-      tree: 003c0cb2b1f0b05ea2aa9408b102529696ab3123
-      files: 3337
-      bytes: 50879926
+      tree: 590bf59935f9949328e84ca0054fc2bcde10f586
+      files: 3343
+      bytes: 51048583
       excluded_files: 230
       excluded_bytes: 116854999
       executable_files: 123
@@ -641,14 +690,31 @@ engines:
     targets: [llama-server]
     post_build_copies: *cuda_dlls
     tests:
-      # As llama-bonsai2: 0034's own tests, plus 0042's (test-decide-batch: a tiny hybrid qwen35 on the CPU), in a static CPU tree.
+      # As llama-bonsai2: 0034's own tests, plus 0042's (test-decide-batch: a tiny hybrid qwen35 on the CPU), 0043's
+      # (test-json-schema-to-grammar) and 0049's (test-clef: a tiny random clef model on the CPU), in a static CPU tree.
+      # test-reasoning-budget also runs 0044's report tests. (test-llama-archs is NOT here: it fails at the dspark fixture
+      # ("dspark.dspark.block_size") on the base + 0001-0042 too, checked 2026-10-08.)
       configure_extra:
         - -DGGML_CUDA=OFF
         - -DBUILD_SHARED_LIBS=OFF
         - -DLLAMA_BUILD_TESTS=ON
-      targets: [test-reasoning-budget, test-chat, test-decide-batch]
-      ctest_regex: ^(test-reasoning-budget|test-chat|test-decide-batch)$
+      targets: [test-reasoning-budget, test-chat, test-decide-batch, test-json-schema-to-grammar, test-clef]
+      ctest_regex: ^(test-reasoning-budget|test-chat|test-decide-batch|test-json-schema-to-grammar|test-clef)$
     output: bin/llama-server.exe
+    # CANDIDATE, UNSHIPPED (2026-10-08; docs/ENGINES.md "bonsai-ada-surgery update, and Clef in the Bonsai fork"): base + 0001-0033 +
+    # 0034-0042 + 0043-0049, built 2026-10-08 00:46-00:55 by `python scripts/build_engine.py build llama-bonsai2-ada --jobs 12
+    # --out C:/Users/jwals/engines/llama-bonsai2-ada-cand0049` (CPU/compile only, no GPU, nothing deployed or restarted). 34 build checks
+    # passed (CMakeCache options identical to the original's, `cache_diff_vs_original` empty, `/arch:AVX2`, build-info.cpp pin, CUDA
+    # DLLs identical to cand0042's), engine tests 5/5 in the static CPU tree (test-reasoning-budget, test-chat,
+    # test-json-schema-to-grammar, test-decide-batch, test-clef). llama-server.exe sha256
+    # 8b692da652eb96846308d826947b5ad1ce56651b0c01039ed589b96b9ebdd99f (10,240 B); llama.dll 89f1f699ffc42b22232b87c0755434f29f704a45fa1dc41c57d058e21400cd2a;
+    # llama-common.dll 3201493a5ec95c315b1f873ef9f7bdd41e7cca69fba88546eeed417f1114892f; llama-server-impl.dll
+    # d28cfcc53706428ae7b97760c07d8031375d1162d234bbc07382cbc20c6e4e81; ggml-cuda.dll 9cadcc173a38233eb4f5b7f6db609d1284f4a50f8602f5301174ce2818c571e8
+    # (111,811,584 B); ggml-base.dll 6f1bd5f3c4790fe71ffc15d7b451b6f8c5ae7898a6bf9ad65cda1570d881ac1d; ggml-cpu.dll
+    # a15e0986b1a5187b178594ad7295266becb0ad800501be05ac286bc20e6ab2a5; ggml.dll 6e50c8c013acdc538e8061e80190f4cb90fb0c554314c1249690b70146fa6dd8;
+    # mtmd.dll 4809884984a92f5cb72e13fb1f9e8731e268c907187c138e593ea5d55685c0e9. `shipped` below is still cand0042 (bonsai-a4000 only)
+    # and `previous` 80d2c60d (bonsai and the rest). NOT RUN ON A GPU: the gate plan is in docs/ENGINES.md. Replacing a `shipped`
+    # block with these hashes (and keeping cand0042 as `previous`) is the deploy step, after the gates.
     shipped:
       # Built 2026-10-07 02:26 by scripts/build_engine.py from this entry (base + 0001-0033 + 0034-0042, NO web UI) into
       # C:/Users/jwals/engines/llama-bonsai2-ada-cand0042. Every check passed (34, CMakeCache identical to the original's, engine tests
