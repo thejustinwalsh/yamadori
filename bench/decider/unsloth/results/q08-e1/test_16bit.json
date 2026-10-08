@@ -1,0 +1,38 @@
+{
+ "ckpt": "C:/Users/jwals/llama-stack/index/decider_train/runs/q08-e1/merged",
+ "bits": 16,
+ "weights_vram_gb": 1.834,
+ "typed_decisions": {
+  "accuracy": 0.609,
+  "ece": 0.0855,
+  "loss": 1.2106,
+  "record_accuracy": 0.17,
+  "decisions": 2000,
+  "records": 400,
+  "ms_per_record_batched": 56.8,
+  "skipped": 0
+ },
+ "banking77": {
+  "accuracy": 0.74,
+  "ece": 0.1002,
+  "loss": 0.9987,
+  "record_accuracy": 0.74,
+  "decisions": 500,
+  "records": 500,
+  "ms_per_record_batched": 111.3,
+  "skipped": 0
+ },
+ "clinc150": {
+  "accuracy": 0.742,
+  "ece": 0.0814,
+  "loss": 0.9126,
+  "record_accuracy": 0.742,
+  "decisions": 500,
+  "records": 500,
+  "ms_per_record_batched": 198.5,
+  "skipped": 0
+ },
+ "pooled_accuracy": 0.653,
+ "pooled_decisions": 3000,
+ "peak_vram_gb": 5.32
+}

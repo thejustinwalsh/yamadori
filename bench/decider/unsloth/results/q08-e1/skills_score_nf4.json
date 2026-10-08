@@ -1,0 +1,244 @@
+{
+ "rows": 1372,
+ "cases": 201,
+ "all": {
+  "model": {
+   "relevance (lv>=1 vs OFF)": {
+    "auroc": 0.719,
+    "n_pos": 1140,
+    "n_neg": 232,
+    "ci95_by_case": [
+     0.658,
+     0.774
+    ]
+   },
+   "need (NEEDED vs rest)": {
+    "auroc": 0.598,
+    "n_pos": 209,
+    "n_neg": 1163,
+    "ci95_by_case": [
+     0.564,
+     0.637
+    ]
+   },
+   "need vs AREA (lv 3 vs 1)": {
+    "auroc": 0.557,
+    "n_pos": 209,
+    "n_neg": 877,
+    "ci95_by_case": [
+     0.522,
+     0.596
+    ]
+   },
+   "need vs OFF (lv 3 vs 0)": {
+    "auroc": 0.789,
+    "n_pos": 209,
+    "n_neg": 232,
+    "ci95_by_case": [
+     0.733,
+     0.84
+    ]
+   }
+  },
+  "jjava": {
+   "relevance (lv>=1 vs OFF)": {
+    "auroc": 0.902,
+    "n_pos": 1140,
+    "n_neg": 232,
+    "ci95_by_case": [
+     0.87,
+     0.935
+    ]
+   },
+   "need (NEEDED vs rest)": {
+    "auroc": 0.693,
+    "n_pos": 209,
+    "n_neg": 1163,
+    "ci95_by_case": [
+     0.646,
+     0.74
+    ]
+   },
+   "need vs AREA (lv 3 vs 1)": {
+    "auroc": 0.638,
+    "n_pos": 209,
+    "n_neg": 877,
+    "ci95_by_case": [
+     0.594,
+     0.687
+    ]
+   },
+   "need vs OFF (lv 3 vs 0)": {
+    "auroc": 0.926,
+    "n_pos": 209,
+    "n_neg": 232,
+    "ci95_by_case": [
+     0.885,
+     0.96
+    ]
+   }
+  },
+  "n": 1372,
+  "needed": 209
+ },
+ "steps": {
+  "model": {
+   "relevance (lv>=1 vs OFF)": {
+    "auroc": 0.661,
+    "n_pos": 796,
+    "n_neg": 216,
+    "ci95_by_case": [
+     0.601,
+     0.713
+    ]
+   },
+   "need (NEEDED vs rest)": {
+    "auroc": 0.599,
+    "n_pos": 116,
+    "n_neg": 896,
+    "ci95_by_case": [
+     0.549,
+     0.653
+    ]
+   },
+   "need vs AREA (lv 3 vs 1)": {
+    "auroc": 0.571,
+    "n_pos": 116,
+    "n_neg": 632,
+    "ci95_by_case": [
+     0.516,
+     0.626
+    ]
+   },
+   "need vs OFF (lv 3 vs 0)": {
+    "auroc": 0.731,
+    "n_pos": 116,
+    "n_neg": 216,
+    "ci95_by_case": [
+     0.656,
+     0.788
+    ]
+   }
+  },
+  "jjava": {
+   "relevance (lv>=1 vs OFF)": {
+    "auroc": 0.924,
+    "n_pos": 796,
+    "n_neg": 216,
+    "ci95_by_case": [
+     0.892,
+     0.949
+    ]
+   },
+   "need (NEEDED vs rest)": {
+    "auroc": 0.806,
+    "n_pos": 116,
+    "n_neg": 896,
+    "ci95_by_case": [
+     0.769,
+     0.844
+    ]
+   },
+   "need vs AREA (lv 3 vs 1)": {
+    "auroc": 0.751,
+    "n_pos": 116,
+    "n_neg": 632,
+    "ci95_by_case": [
+     0.714,
+     0.792
+    ]
+   },
+   "need vs OFF (lv 3 vs 0)": {
+    "auroc": 0.985,
+    "n_pos": 116,
+    "n_neg": 216,
+    "ci95_by_case": [
+     0.969,
+     0.996
+    ]
+   }
+  },
+  "n": 1012,
+  "needed": 116
+ },
+ "user": {
+  "model": {
+   "relevance (lv>=1 vs OFF)": {
+    "auroc": 0.945,
+    "n_pos": 344,
+    "n_neg": 16,
+    "ci95_by_case": [
+     0.887,
+     0.989
+    ]
+   },
+   "need (NEEDED vs rest)": {
+    "auroc": 0.476,
+    "n_pos": 93,
+    "n_neg": 267,
+    "ci95_by_case": [
+     0.415,
+     0.555
+    ]
+   },
+   "need vs AREA (lv 3 vs 1)": {
+    "auroc": 0.448,
+    "n_pos": 93,
+    "n_neg": 245,
+    "ci95_by_case": [
+     0.398,
+     0.518
+    ]
+   },
+   "need vs OFF (lv 3 vs 0)": {
+    "auroc": 0.981,
+    "n_pos": 93,
+    "n_neg": 16,
+    "ci95_by_case": [
+     0.919,
+     1.0
+    ]
+   }
+  },
+  "jjava": {
+   "relevance (lv>=1 vs OFF)": {
+    "auroc": 0.955,
+    "n_pos": 344,
+    "n_neg": 16,
+    "ci95_by_case": [
+     0.874,
+     1.0
+    ]
+   },
+   "need (NEEDED vs rest)": {
+    "auroc": 0.58,
+    "n_pos": 93,
+    "n_neg": 267,
+    "ci95_by_case": [
+     0.525,
+     0.658
+    ]
+   },
+   "need vs AREA (lv 3 vs 1)": {
+    "auroc": 0.557,
+    "n_pos": 93,
+    "n_neg": 245,
+    "ci95_by_case": [
+     0.506,
+     0.623
+    ]
+   },
+   "need vs OFF (lv 3 vs 0)": {
+    "auroc": 1.0,
+    "n_pos": 93,
+    "n_neg": 16,
+    "ci95_by_case": [
+     1.0,
+     1.0
+    ]
+   }
+  },
+  "n": 360,
+  "needed": 93
+ }
+}
