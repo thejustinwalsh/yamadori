@@ -48,7 +48,12 @@ import urllib.request
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     ".."))
-PY = r"C:/Users/jwals/textgen/installer_files/env/python.exe"
+# The stack interpreter: YAMADORI_PYTHON (stack.env / the environment), else the repo's .venv, else the
+# textgen env under the home directory (the original install), else the one running this script.
+PY = (os.environ.get("YAMADORI_PYTHON")
+      or next((c for c in (os.path.join(ROOT, ".venv", "Scripts", "python.exe"),
+                           os.path.expanduser("~/textgen/installer_files/env/python.exe"))
+               if os.path.exists(c)), ""))
 if not os.path.exists(PY):
     PY = sys.executable
 

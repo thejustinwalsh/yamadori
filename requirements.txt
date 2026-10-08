@@ -1,0 +1,21 @@
+# The Python packages Yamadori's own code imports (mcp/ and scripts/), pinned to the versions in requirements.lock.txt
+# (the author's whole environment, 188 lines, torch and all). scripts/install.ps1 installs THIS file into .venv.
+# mcp/test_install_docs.py keeps it honest: every third-party import in mcp/ and scripts/ must be a package named
+# here, and every pin here must equal the lock's. Transitive dependencies (anyio, h11, click, ...) are left to pip.
+#
+# Python 3.13 is the version the lock was frozen on; 3.12 is expected to work and has not been run.
+numpy==2.2.6
+pillow==12.3.0
+fastapi==0.112.4
+starlette==0.38.6
+pydantic==2.11.0
+uvicorn==0.53.0
+websockets==11.0.3
+PyYAML==6.0.3
+psutil==7.2.2
+markdown-it-py==4.2.0
+tree-sitter==0.26.0
+tree-sitter-language-pack==1.20.0
+Jinja2==3.1.6
+httpx==0.28.1
+ruff==0.16.8

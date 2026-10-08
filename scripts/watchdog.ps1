@@ -69,7 +69,24 @@ $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $log = Join-Path $root 'logs\watchdog.log'
 $stamp = Join-Path $root 'logs\.last-restart'
-$py = 'C:\Users\jwals\textgen\installer_files\env\python.exe'
+# LOCAL SETTINGS (2026-10-07), the same as scripts\start-stack.bat reads: stack.env (gitignored, written by
+# scripts\install.ps1) holds KEY=VALUE lines; a variable already in the environment wins over the file, the file over
+# the defaults below, so a machine with no stack.env behaves exactly as before.
+$stackEnv = Join-Path $root 'stack.env'
+if (Test-Path $stackEnv) {
+    foreach ($l in Get-Content $stackEnv) {
+        if ($l -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$' -and -not [Environment]::GetEnvironmentVariable($Matches[1], 'Process')) {
+            [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
+        }
+    }
+}
+$py = $env:YAMADORI_PYTHON
+if (-not $py) {
+    $venvPy = Join-Path $root '.venv\Scripts\python.exe'
+    $py = if (Test-Path $venvPy) { $venvPy } else { Join-Path $env:USERPROFILE 'textgen\installer_files\env\python.exe' }
+}
+$searxngDir = if ($env:YAMADORI_SEARXNG_DIR) { $env:YAMADORI_SEARXNG_DIR } else { Join-Path $env:USERPROFILE 'searxng' }
+$publicBase = if ($env:YAMADORI_PUBLIC_BASE) { $env:YAMADORI_PUBLIC_BASE } else { 'https://ai.thejustinwalsh.me' }
 New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
 
 # The services, and how each one comes back.
@@ -99,7 +116,7 @@ $Services = @(
        # start-stack.bat's `set` lines never reach a watchdog restart, which
        # inherits the watchdog's own environment. docs/IMAGEGEN.md.
        Env = @{ YAMADORI_IMAGEGEN_URL = 'http://127.0.0.1:11434'
-                YAMADORI_PUBLIC_BASE  = 'https://ai.thejustinwalsh.me'
+                YAMADORI_PUBLIC_BASE  = $publicBase
                 # Turbo default (operator, 2026-09-23); see start-stack.bat.
                 YAMADORI_IMAGEGEN_DEFAULT = 'turbo'
                 # SearXNG, the searxng entry below; docs/SEARCH.md.
@@ -120,9 +137,9 @@ $Services = @(
     # SearXNG web search (docs/SEARCH.md). Its own venv and source tree outside
     # the repo; the config path is the only thing it needs from the environment.
     @{ Name = 'searxng';    Url = 'http://127.0.0.1:8888/healthz';  Kind = 'process'
-       Exe = 'C:\Users\jwals\searxng\.venv\Scripts\python.exe'; Args = @('-m', 'searx.webapp')
+       Exe = (Join-Path $searxngDir '.venv\Scripts\python.exe'); Args = @('-m', 'searx.webapp')
        Log = "$root\logs\searxng.log"; Match = 'searx\.webapp'
-       Env = @{ SEARXNG_SETTINGS_PATH = 'C:\Users\jwals\searxng\etc\settings.yml' } }
+       Env = @{ SEARXNG_SETTINGS_PATH = (Join-Path $searxngDir 'etc\settings.yml') } }
     # The job worker has no port: it claims rows from index/jobs.sqlite3. Alive
     # means its process exists. A worker that is alive but stuck is not this
     # script's business -- jobs.reclaim() hands a stale job to the next worker.
@@ -136,6 +153,10 @@ $Services = @(
        # tier models (bench/deploy_tier_models.py)
        EnvTier = @{ YAMADORI_TIER_MODELS = 'mcp\tier_models.yaml' } }
 )
+
+# SearXNG is optional (nothing in the proxy searches the web since 2026-09-29): a machine without its venv is not
+# watched for it, instead of logging DOWN every five minutes forever.
+$Services = @($Services | Where-Object { $_.Name -ne 'searxng' -or (Test-Path $_.Exe) })
 
 function Write-Log([string]$msg) {
     $line = "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
@@ -357,7 +378,7 @@ function Restart-Service($svc) {
 
 # Docker Engine in WSL (2026-10-06, docs\DOCKER-WSL.md): keep the one hidden keep-alive that holds the Ubuntu distro up
 # (WSL stops a distro seconds after its last session) and the engine reachable. Idempotent; logs to logs\wsl-engine.log.
-if (Test-Path (Join-Path $PSScriptRoot 'wsl_engine.ps1')) {
+if ($env:YAMADORI_WSL_ENGINE -ne '0' -and (Test-Path (Join-Path $PSScriptRoot 'wsl_engine.ps1'))) {
     & (Join-Path $PSScriptRoot 'wsl_engine.ps1') -Quiet -WaitSec 30
 }
 

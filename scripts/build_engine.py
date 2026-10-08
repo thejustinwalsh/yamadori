@@ -218,10 +218,33 @@ def describe(entry: str) -> dict:
 # manifest and config
 # --------------------------------------------------------------------------
 
+def _deep_merge(base: dict, over: dict) -> dict:
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
 def load_yaml(path: str) -> dict:
     import yaml
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        data = yaml.safe_load(f) or {}
+    # MACHINE-LOCAL TOOLCHAIN (2026-10-07): engines/manifest.local.yaml (gitignored; absent = no change) is merged
+    # over `defaults` and `toolchains` ONLY, so a machine whose Visual Studio, CUDA and Git live elsewhere can say
+    # where (docs/INSTALL.md has an example). The engines, their sources and their recorded hashes are never
+    # overridden. The toolchain's recorded VERSIONS (msvc toolset, Windows SDK) are still checked by a build: a
+    # different toolchain fails those checks until its versions are stated here, and its binaries are then a
+    # rebuild with that toolchain, not the recorded one (docs/ENGINES.md: source-reproducible, not bit-for-bit).
+    local = os.path.join(os.path.dirname(os.path.abspath(path)), "manifest.local.yaml")
+    if os.path.basename(path) == "manifest.yaml" and os.path.exists(local):
+        with open(local, encoding="utf-8") as f:
+            over = yaml.safe_load(f) or {}
+        for key in ("defaults", "toolchains"):
+            if isinstance(over.get(key), dict):
+                _deep_merge(data.setdefault(key, {}), over[key])
+    return data
 
 
 def norm(path: str) -> str:
@@ -446,12 +469,21 @@ class Builder:
     def say(self, msg: str) -> None:
         self.log(f"  {msg}")
 
-    def check(self, ok: bool, what: str, detail: str = "") -> None:
+    # PORTABLE (2026-10-07, `--portable`): a machine whose MSVC toolset, Windows SDK, CUDA DLLs or CPU differ from the
+    # recorded toolchain cannot pass the checks that prove a rebuild's IDENTITY with the shipped one (`identity=True`
+    # below). With portable set those are reported as WARN and the build goes on; every check that proves the SOURCE
+    # and the CONFIGURATION (the vendored tree, the patches, the CMake flags and cache) still fails the build. The
+    # result is a build of the recorded source with this machine's toolchain, not the recorded binary.
+    portable = False
+
+    def check(self, ok: bool, what: str, detail: str = "", identity: bool = False) -> None:
+        waived = (not ok) and identity and self.portable
         self.report["checks"].append({"ok": ok, "check": what,
-                                      "detail": detail})
-        self.say(("ok    " if ok else "FAIL  ") + what
-                 + (f"  ({detail})" if detail else ""))
-        if not ok:
+                                      "detail": detail, **({"portable_waived": True} if waived else {})})
+        self.say(("ok    " if ok else "WARN  " if waived else "FAIL  ") + what
+                 + (f"  ({detail})" if detail else "")
+                 + ("  [portable: toolchain identity not enforced]" if waived else ""))
+        if not ok and not waived:
             raise BuildError(f"{what}: {detail}")
 
     def run(self, cmd: list[str], cwd: str | None = None,
@@ -612,23 +644,23 @@ class Builder:
             env["GIT_CEILING_DIRECTORIES"] = self.out
         self.check(env.get("VCToolsVersion") == self.tc["msvc"]["toolset"],
                    "vcvars64 selects the recorded MSVC toolset",
-                   env.get("VCToolsVersion", "vcvars failed"))
+                   env.get("VCToolsVersion", "vcvars failed"), identity=True)
         want_sdk = self.tc.get("windows_sdk")
         if want_sdk:
             self.check(env.get("WindowsSDKVersion", "").strip("\\") == want_sdk,
                        "vcvars64 selects the recorded Windows SDK",
-                       env.get("WindowsSDKVersion", ""))
+                       env.get("WindowsSDKVersion", ""), identity=True)
         for tool, d in (self.e.get("path_tools") or {}).items():
             found = shutil.which(tool, path=env["PATH"])
             if d:
-                self.check(bool(found), f"{tool} is on PATH, as it was", found or "")
+                self.check(bool(found), f"{tool} is on PATH, as it was", found or "", identity=True)
             else:
                 self.check(not found, f"{tool} is NOT on PATH, as it was not",
-                           found or "")
+                           found or "", identity=True)
         for tool in self.e.get("absent_tools") or []:
             found = shutil.which(tool, path=env["PATH"])
             self.check(not found, f"{tool} is NOT on PATH, as it was not",
-                       found or "")
+                       found or "", identity=True)
         return env
 
     def configure(self, env: dict, bld: str, flags: list[str]) -> None:
@@ -665,7 +697,7 @@ class Builder:
         self.report["cache_diff_vs_original"] = diff
         self.check(not diff, f"all {len(old)} CMakeCache options equal the "
                    f"original's ({tree})",
-                   "; ".join(f"{k}: {a!r} -> {b!r}" for k, (a, b) in diff.items()))
+                   "; ".join(f"{k}: {a!r} -> {b!r}" for k, (a, b) in diff.items()), identity=True)
 
     def check_log(self, bld: str) -> None:
         """Lines the original's configure printed that decide what is built
@@ -687,9 +719,9 @@ class Builder:
                                          nat.get("object", "ggml-cpu.c.obj"))
         self.check(nat["arch"] in flags.split(),
                    f"GGML_NATIVE resolved to {nat['arch']} on this machine",
-                   " ".join(f for f in flags.split() if f.startswith("/arch")))
+                   " ".join(f for f in flags.split() if f.startswith("/arch")), identity=True)
         for d in nat.get("defines") or []:
-            self.check(d in defines.split(), f"native define {d}")
+            self.check(d in defines.split(), f"native define {d}", identity=True)
 
     def check_generated(self, bld: str, stage: str) -> None:
         for rel, want in (self.e.get("expect_generated") or {}).items():
@@ -719,13 +751,17 @@ class Builder:
         cuda = self.tc["cuda"]["root"]
         for c in self.e.get("post_build_copies") or []:
             src = c["from"].replace("cuda:", cuda.rstrip("/\\") + "/", 1)
+            if self.portable and not os.path.exists(src):
+                self.say(f"WARN  {os.path.basename(src)} is not in this CUDA toolkit (portable: not copied; "
+                         "the server needs its CUDA runtime DLLs on PATH: YAMADORI_CUDA_BIN)")
+                continue
             self.check(sha256_file(src) == c["sha256"],
-                       f"{os.path.basename(src)} source is the recorded file")
+                       f"{os.path.basename(src)} source is the recorded file", identity=True)
             dst = os.path.join(self.bld, c.get("to", "bin"),
                                os.path.basename(src))
             shutil.copyfile(src, dst)
             self.check(sha256_file(dst) == c["sha256"],
-                       f"copied {os.path.basename(src)}")
+                       f"copied {os.path.basename(src)}", identity=True)
 
     def tests(self, env: dict) -> None:
         t = self.e.get("tests")
@@ -900,6 +936,10 @@ def main(argv: list[str]) -> int:
                     help="hash the binaries config.yaml points at (or this "
                          "engine's shipped files) against the manifest")
     ap.add_argument("--no-tests", action="store_true")
+    ap.add_argument("--portable", action="store_true",
+                    help="warn instead of failing where the recorded toolchain's identity (MSVC toolset, Windows "
+                         "SDK, CUDA DLL hashes, native CPU flags) differs on this machine; the source and "
+                         "configuration checks still fail the build (docs/INSTALL.md)")
     ap.add_argument("--manifest", default=MANIFEST)
     ap.add_argument("--config", default=CONFIG)
     ap.add_argument("--describe", metavar="EXE",
@@ -969,8 +1009,10 @@ def main(argv: list[str]) -> int:
         if e.get("kind") == "release":
             report = fetch_release(manifest, args.engine, out)
         else:
-            report = Builder(manifest, args.engine, out, args.jobs,
-                             run_tests=not args.no_tests).go()
+            b = Builder(manifest, args.engine, out, args.jobs,
+                        run_tests=not args.no_tests)
+            b.portable = args.portable
+            report = b.go()
     except BuildError as err:
         print(f"\n  BUILD FAILED: {err}")
         return 1

@@ -15,14 +15,24 @@ REM worker and SearXNG, then runs the proxy in the foreground.
 
 cd /D "%~dp0\.."
 
+REM LOCAL SETTINGS (2026-10-07). scripts\install.ps1 writes stack.env (gitignored) beside this repo's config.yaml:
+REM KEY=VALUE lines, `#` comments. A variable already in the environment wins over the file, and the file over
+REM the defaults below, so a machine with no stack.env runs exactly as it always has. Keys read here:
+REM   YAMADORI_PYTHON      the stack interpreter (default: .venv\Scripts\python.exe in the repo if it exists, else
+REM                        %USERPROFILE%\textgen\installer_files\env\python.exe)
+REM   YAMADORI_CUDA_BIN    the CUDA runtime DLL directory the engines load (default: the textgen cudabuild env)
+REM   YAMADORI_PUBLIC_BASE the URL clients reach this stack at (signed /media links use it)
+REM   YAMADORI_SEARXNG_DIR the SearXNG checkout (venv + etc\settings.yml); default %USERPROFILE%\searxng
+if exist "stack.env" for /f "usebackq eol=# tokens=1,* delims==" %%A in ("stack.env") do if not defined %%A set "%%A=%%B"
+
 set "SWAP=%CD%\bin\llama-swap.exe"
 set "CFG=%CD%\config.yaml"
 
 REM CUDA runtime DLLs for the self-built llama-server live in the isolated
 REM conda env created for the toolchain. Without them ggml-cuda.dll fails to
 REM load and llama-server exits silently with status 0.
-set "CUDA_BIN=C:\Users\jwals\textgen\installer_files\cudabuild\Library\bin"
-set "PATH=%CUDA_BIN%;%PATH%"
+if not defined YAMADORI_CUDA_BIN set "YAMADORI_CUDA_BIN=%USERPROFILE%\textgen\installer_files\cudabuild\Library\bin"
+set "PATH=%YAMADORI_CUDA_BIN%;%PATH%"
 
 REM Pin device order so CUDA0/CUDA1 in config.yaml mean what they say.
 REM CUDA defaults to fastest-first, which reverses these two cards.
@@ -36,7 +46,8 @@ if not exist "logs" mkdir "logs"
 REM Docker Engine in the Ubuntu WSL distro (2026-10-06, docs\DOCKER-WSL.md): the MCP host's PackageLens, the npm
 REM resolver and the type check run containers there. WSL stops the distro seconds after its last session, so this
 REM starts the one hidden keep-alive and waits (60 s at most) for the engine; a failure is logged, never fatal.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\wsl_engine.ps1" -Quiet
+REM YAMADORI_WSL_ENGINE=0 (stack.env) skips this on a machine whose Docker is not the WSL engine, or that has none.
+if not "%YAMADORI_WSL_ENGINE%"=="0" powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\wsl_engine.ps1" -Quiet
 
 REM Code-intelligence HTTP API (port 1235). Same tools as the MCP server,
 REM different transport: MCP is for agents, this is for your own software.
@@ -44,7 +55,9 @@ REM Every route but /health needs an account key (Authorization: Bearer, the
 REM :1234 keys) and refuses a browser Origin it does not list: docs\TOOLS-API.md.
 REM Started detached so llama-swap stays this script's foreground process
 REM and the Scheduled Task keeps tracking the stack's lifetime correctly.
-set "PY=C:\Users\jwals\textgen\installer_files\env\python.exe"
+if not defined YAMADORI_PYTHON if exist "%CD%\.venv\Scripts\python.exe" set "YAMADORI_PYTHON=%CD%\.venv\Scripts\python.exe"
+if not defined YAMADORI_PYTHON set "YAMADORI_PYTHON=%USERPROFILE%\textgen\installer_files\env\python.exe"
+set "PY=%YAMADORI_PYTHON%"
 REM tier models (bench/deploy_tier_models.py)
 set "YAMADORI_TIER_MODELS=mcp\tier_models.yaml"
 REM max mode (bench/deploy_flash_next.py)
@@ -79,11 +92,12 @@ REM extract, index). Without it a submitted dataset sits in `queued` forever.
 start "" /B "%PY%" "%CD%\mcp\worker.py" >> "logs\worker.log" 2>&1
 
 REM SearXNG web search (loopback 8888, docs/SEARCH.md). Its own venv and
-REM source tree in C:\Users\jwals\searxng, outside the repo; the settings file
-REM there holds its secret key. Skipped if that venv is missing.
-set "SEARXNG_PY=C:\Users\jwals\searxng\.venv\Scripts\python.exe"
+REM source tree outside the repo (YAMADORI_SEARXNG_DIR, default %USERPROFILE%\searxng); the settings file
+REM there holds its secret key. Skipped if that venv is missing (nothing in the proxy needs it any more).
+if not defined YAMADORI_SEARXNG_DIR set "YAMADORI_SEARXNG_DIR=%USERPROFILE%\searxng"
+set "SEARXNG_PY=%YAMADORI_SEARXNG_DIR%\.venv\Scripts\python.exe"
 if exist "%SEARXNG_PY%" (
-  set "SEARXNG_SETTINGS_PATH=C:\Users\jwals\searxng\etc\settings.yml"
+  set "SEARXNG_SETTINGS_PATH=%YAMADORI_SEARXNG_DIR%\etc\settings.yml"
   start "" /B "%SEARXNG_PY%" -m searx.webapp >> "logs\searxng.log" 2>&1
 )
 
@@ -109,7 +123,7 @@ set "YAMADORI_PROXY_PORT=1234"
 REM Image generation (docs/IMAGEGEN.md): llama-swap starts `imagegen` on
 REM demand; signed /media links use the public name, not 127.0.0.1.
 set "YAMADORI_IMAGEGEN_URL=http://127.0.0.1:11434"
-set "YAMADORI_PUBLIC_BASE=https://ai.thejustinwalsh.me"
+if not defined YAMADORI_PUBLIC_BASE set "YAMADORI_PUBLIC_BASE=https://ai.thejustinwalsh.me"
 REM Turbo is the default image model (operator, 2026-09-23): 23.6 s vs ~108 s
 REM per 1024x1024 (n=1 vs n=10). Quality vs base not yet compared
 REM (bench/imagegen/compare_turbo.py). Users can pick base on /settings.

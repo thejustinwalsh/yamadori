@@ -116,7 +116,7 @@ NODE_TYPES = os.environ.get("YAMADORI_NODE_TYPES") or os.path.join(
 # removed, 2026-09-29.
 WORDS_TOKENIZER = os.environ.get("YAMADORI_CLM_TOKENIZER") or os.path.join(
     os.environ.get("YAMADORI_MODELS_DIR",
-                   "C:/Users/jwals/textgen/user_data/models"),
+                   os.path.expanduser("~/textgen/user_data/models")),
     "Qwen3-8B", "tokenizer.json")
 # The prose corpus for "a plain English word" (see the module docstring).
 PROSE_GLOBS = (

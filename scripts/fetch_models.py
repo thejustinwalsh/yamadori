@@ -3,6 +3,7 @@
 
     python scripts/fetch_models.py list
     python scripts/fetch_models.py fetch ID --dest DIR [--dry-run]
+    python scripts/fetch_models.py fetch ID --models-dir DIR [--dry-run]   # DIR/<the manifest's own subpath>
     python scripts/fetch_models.py fetch --repo R --revision SHA --filename F
                                          --dest DIR [--sha256 HEX] [--dry-run]
     python scripts/fetch_models.py check-remote [ID ...]
@@ -147,12 +148,26 @@ def cmd_list(m: dict) -> int:
     return 0
 
 
+def _dest_file(art: dict, a: argparse.Namespace) -> str:
+    """--dest puts the file flat in DIR under its local name; --models-dir puts it where the manifest's `path` says
+    (`${models}/qwen-image-2.1/vae/x.safetensors` -> DIR/qwen-image-2.1/vae/x.safetensors), which is what config.yaml
+    expects when its `models` macro is DIR (scripts/install.ps1 uses this)."""
+    if a.models_dir:
+        path = str(art["path"])
+        if not path.startswith("${models}/"):
+            raise SystemExit(f"{art['id']}: its path {path!r} is not under ${{models}}; use --dest")
+        return os.path.join(a.models_dir, *path[len("${models}/"):].split("/"))
+    return os.path.join(a.dest, os.path.basename(str(art["path"])))
+
+
 def cmd_fetch(m: dict, a: argparse.Namespace) -> int:
     if a.repo:
         if not (a.revision and a.filename):
             raise SystemExit("--repo needs --revision and --filename")
         info = remote_info(a.repo, a.revision, a.filename)
         want = a.sha256 or info["sha256"]
+        if not a.dest:
+            raise SystemExit("--repo needs --dest")
         dest = os.path.join(a.dest, os.path.basename(a.filename))
         url = resolve_url(a.repo, info["revision"], a.filename)
         print(f"{a.repo}@{info['revision']} {a.filename}: {info['size']:,} bytes, "
@@ -173,7 +188,7 @@ def cmd_fetch(m: dict, a: argparse.Namespace) -> int:
             print("Rebuild it with this recipe (docs/MODELS.md):")
             print(json.dumps(rec, indent=1))
         return 2
-    dest = os.path.join(a.dest, os.path.basename(str(art["path"])))
+    dest = _dest_file(art, a)
     url = resolve_url(prov["repo"], prov["revision"], prov["filename"])
     print(f"{art['id']}: {prov['repo']}@{prov['revision']} {prov['filename']} "
           f"({int(art['size']):,} bytes, sha256 {art['sha256']})")
@@ -218,7 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list")
     f = sub.add_parser("fetch")
     f.add_argument("id", nargs="?")
-    f.add_argument("--dest", required=True)
+    f.add_argument("--dest")
+    f.add_argument("--models-dir")
     f.add_argument("--dry-run", action="store_true")
     f.add_argument("--repo")
     f.add_argument("--revision")
@@ -236,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "fetch":
         if not a.id and not a.repo:
             raise SystemExit("fetch needs an artifact id or --repo/--revision/--filename")
+        if bool(a.dest) == bool(a.models_dir):
+            raise SystemExit("fetch needs exactly one of --dest DIR and --models-dir DIR")
         return cmd_fetch(m, a)
     if a.cmd == "check-remote":
         return cmd_check_remote(m, a.ids)

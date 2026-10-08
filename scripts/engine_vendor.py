@@ -961,7 +961,7 @@ class VendoredBuilder(be.Builder):
         self.report["cache_diff_vs_original"] = diff
         self.check(not diff, f"all {len(old)} CMakeCache options equal the "
                    f"original's, bar the build-info overrides ({tree})",
-                   "; ".join(f"{k}: {a!r} -> {b!r}" for k, (a, b) in diff.items()))
+                   "; ".join(f"{k}: {a!r} -> {b!r}" for k, (a, b) in diff.items()), identity=True)
 
 
 # --------------------------------------------------------------------------
@@ -1154,6 +1154,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--out")
     ap.add_argument("--no-tests", action="store_true")
+    ap.add_argument("--portable", action="store_true",
+                    help="build: warn instead of failing where the recorded toolchain's identity differs on this "
+                         "machine (MSVC toolset, Windows SDK, CUDA DLL hashes, native CPU flags); the vendored "
+                         "source, the patches and the CMake flags are still checked (docs/INSTALL.md)")
     ap.add_argument("--configure-only", action="store_true",
                     help="build: stop after configure and its checks")
     ap.add_argument("--inputs", help="build: directory holding download "
@@ -1243,6 +1247,7 @@ def main(argv: list[str]) -> int:
                             run_tests=not a.no_tests, src_root=a.src_root,
                             inputs_dir=a.inputs)
         b.configure_only = a.configure_only
+        b.portable = a.portable
         report = b.go()
         import json
         with open(os.path.join(outdir, "build-report.json"), "w",

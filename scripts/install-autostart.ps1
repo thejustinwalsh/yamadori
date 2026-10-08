@@ -11,21 +11,32 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$Uninstall
+    [switch]$Uninstall,
+    # Print what would be registered or removed; change nothing.
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
-$root = 'C:\Users\jwals\llama-stack'
+# The repository this script sits in (was a fixed path until 2026-10-07).
+$root = Split-Path -Parent $PSScriptRoot
 $vbs = Join-Path $root 'scripts\start-stack-hidden.vbs'
 $me = "$env:USERDOMAIN\$env:USERNAME"
 
 if ($Uninstall) {
+    if ($DryRun) { Write-Host 'DRY RUN: would remove the llama-stack task'; return }
     Unregister-ScheduledTask -TaskName 'llama-stack' -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host 'llama-stack task removed'
     return
 }
 
 if (-not (Test-Path $vbs)) { throw "launcher missing: $vbs" }
+
+if ($DryRun) {
+    Write-Host "DRY RUN: would register 'llama-stack' (at logon, +30 s: wscript $vbs, working directory $root)"
+    Write-Host "DRY RUN: would register 'llama-stack-watchdog' (every 5 minutes: scripts\watchdog.ps1)"
+    Write-Host 'DRY RUN: would disable the text-generation-webui task if it exists'
+    return
+}
 
 # The old stack must not also grab port 1234 at logon.
 $old = Get-ScheduledTask -TaskName 'text-generation-webui' -ErrorAction SilentlyContinue

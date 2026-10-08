@@ -127,7 +127,9 @@ import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-_MAIN_DEFAULT = r"C:/Users/jwals/textgen/installer_files/env/python.exe"
+_MAIN_DEFAULT = next((c for c in (os.path.join(ROOT, ".venv", "Scripts", "python.exe"),
+                                  os.path.expanduser("~/textgen/installer_files/env/python.exe"))
+                      if os.path.exists(c)), sys.executable)
 
 
 def _interpreter(env_name: str, default: str) -> str:

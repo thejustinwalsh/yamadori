@@ -17,8 +17,6 @@ index/
 # Models live in textgen/user_data/models; far too large to track.
 *.gguf
 
-# Upstream reference, fetched by setup
-config.example.yaml
 
 # Secrets -- never commit
 caddy/.env
@@ -27,9 +25,12 @@ caddy/data/
 caddy/config/
 .venv-laya/
 
-# Live config carries machine-specific paths; config.template.yaml is the
-# committed one.
+# Live config carries machine-specific paths and GPU UUIDs; config.example.yaml is the committed
+# one (scripts/make_config.py renders it). stack.env holds this machine's interpreter / CUDA / URL
+# settings (scripts/install.ps1 writes it; start-stack.bat and watchdog.ps1 read it).
 config.yaml
+stack.env
+engines/manifest.local.yaml
 
 # Account registry and keys -- never commit
 index/accounts/
