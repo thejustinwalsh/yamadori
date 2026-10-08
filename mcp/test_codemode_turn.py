@@ -20,7 +20,7 @@ GATED HERE:
   4. THE CAPS INSIDE A SCRIPT: craft.recall obeys the per-request cap of 3 and the do-not-repeat line, and counts
      in x_yamadori.craft; the request's inner server calls are bounded by tool_turn_limit across its scripts;
      compose calls past the tool-turn limit land with the client's tools kept.
-  5. jjava (yama_decide_*) through the Jev API's entry; images drawn inside a script are shown by the proxy.
+  5. jjava (yama_classify_*) through the Jev API's entry; images drawn inside a script are shown by the proxy.
   6. THE WIRES: Responses, blocking and streamed; streamed == blocking.
 """
 from __future__ import annotations
@@ -445,12 +445,12 @@ def test_decide_and_images():
     try:
         fresh()
         c = CM("jj")
-        script = ("const n = await tools.yama_decide_noul({state: 'koota is an ECS', question: 'about ECS?'});"
-                  "const ch = await tools.yama_decide_choice({state: 'x', question: 'which?', options: "
+        script = ("const n = await tools.yama_classify_yes_no({state: 'koota is an ECS', question: 'about ECS?'});"
+                  "const ch = await tools.yama_classify_choice({state: 'x', question: 'which?', options: "
                   "{a: 'one', b: 'two'}});"
-                  "const sc = await tools.yama_decide_score({state: 'x', question: 'how much?', levels: "
+                  "const sc = await tools.yama_classify_score({state: 'x', question: 'how much?', levels: "
                   "['none', 'some', 'lots']});"
-                  "const bad = await tools.yama_decide_noul({state: 'refuse', question: 'q?'});"
+                  "const bad = await tools.yama_classify_yes_no({state: 'refuse', question: 'q?'});"
                   "const img = await tools.yama_generate_image({prompt: 'a cat'});"
                   "return JSON.stringify([n.data, ch.data.choice, sc.data.score, bad.error.code, bad.error.retryable,"
                   " bad.error.next, img.ok, img.data.url, img.text.includes('already shown')])")
@@ -461,7 +461,7 @@ def test_decide_and_images():
         res = json.loads(line) if line else [out]
         check(res[0] == {"p_true": 0.93} and res[1] == "b" and res[2] == 2 and res[3] == "JJAVA_529"
               and res[4] is True and "7 s" in res[5] and res[6] is True and res[7].endswith("cat.png"),
-              "yama_decide_noul / choice / score go through the Jev API's entry; a refusal is a result with its "
+              "yama_classify_yes_no / choice / score go through the Jev API's entry; a refusal is a result with its "
               "retry; yama_generate_image works inside a script", json.dumps(res))
         body, account, route = seen[0]
         check(body["model"] == "jjava-latest" and body["questions"]["q"] == {"type": "noul", "instructions":
@@ -477,14 +477,68 @@ def test_decide_and_images():
         check(shown.count("![a cat]") == 1 and res[8] is True,
               "…and the script's result says the picture is already shown", out[-300:])
         cm = t["x"]["codemode"]
-        check("decide" not in json.dumps(cm["names"]).replace("yama_decide", "") and set(
-            n for n in cm["names"] if n.startswith("yama_decide")) == set(C.DECIDE_NAMES),
+        check("decide" not in json.dumps(cm["names"]).replace("yama_classify", "") and set(
+            n for n in cm["names"] if n.startswith("yama_classify")) == set(C.DECIDE_NAMES),
               "the decide functions are in the toolbox (the decider is on)")
         check(any(i.get("emitted") for i in t["x"]["images"]), "x_yamadori.images records when it was shown",
               json.dumps(t["x"]["images"]))
     finally:
         proxy.run_our_tool = stub
         (jev_api.enabled, jev_api.systemone, images.configured, images.run_tool, vision.enabled) = real
+
+
+def test_store_image_and_the_output_cap_in_a_turn():
+    """store/load carry across a conversation's scripts; image() is shown by the proxy; the result may be longer
+    than the 6,000-character breaker of the other tools (OUTPUT_CAP)."""
+    import base64
+    import io
+    from PIL import Image
+    import images
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (30, 90, 200)).save(buf, format="PNG")
+    durl = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    saved_base = images.public_base
+    images.public_base = lambda *a, **k: "http://x"
+    try:
+        fresh()
+        c = CM("si")
+        s1 = ("store('seen', ['koota', 'zustand']); image(%s); return 'a'.repeat(12000)" % json.dumps(durl))
+        t1 = c.turn([T.reply("", calls=[compose(s1, "s1")]), T.reply("Done.")], user="Store a list, show a picture.")
+        out1 = hop(t1, 1, "s1")
+        check("Script completed" in out1 and len(out1) > 12000 and "[image 1 shown to the user]" in out1
+              and "output cut" not in out1,
+              "a 12,000-character result comes back whole (the cap is 30,000, not 6,000) and says the image is shown",
+              f"{len(out1)} {out1[:120]!r}")
+        shown = (t1["m"].get("content") or "")
+        check("![image 1](http://x/media/" in shown, "image(v) is SHOWN to the user by the proxy as a picture link",
+              shown[:200])
+        rec = t1["x"]["codemode"]
+        check(rec.get("runs") == 1 and rec.get("images") == 1 and rec.get("stored") == 1,
+              "x_yamadori.codemode records the image and the store write", json.dumps(rec)[:300])
+        c.tool_result("s1", out1)
+        s2 = "return JSON.stringify(load('seen'))"
+        t2 = c.turn([T.reply("", calls=[compose(s2, "s2")]), T.reply("Fine.")], user="What did you store?")
+        out2 = hop(t2, 1, "s2")
+        check('["koota","zustand"]' in out2, "load() in a later script of the same conversation reads it", out2[:200])
+    finally:
+        images.public_base = saved_base
+
+
+def test_a_hidden_hop_keeps_its_argument_order():
+    """A hop whose calls' arguments are NOT in sorted key order (the model wrote `query` before `ecosystem`),
+    then a TEXT answer: the next request must extend the slot. It did not (2026-10-08, live: reused 5178 of
+    15089): prepare sorted the replayed hop's arguments, the slot held the model's order."""
+    for label, feats in (("toolbox on", {}), ("toolbox off", {"codemode": False})):
+        fresh()
+        c = CM("ord" + label[-2:], features=feats)
+        t1 = c.turn([T.reply("", reasoning="Look it up.", calls=[
+            T.call("yama_find_package", {"query": "pmndrs math", "ecosystem": "npm"}, "m1"),
+            T.call("yama_list_package_versions", {"package": "math", "ecosystem": "npm"}, "m2")]),
+            T.reply("The latest is 0.1.0.", reasoning="Answer.")], user="Which version of math is latest?")
+        t2 = c.turn([T.reply("ok")], user="Thanks. Say ok.")
+        check(T._extends(t1, t2, f"[hop then text, {label}]"),
+              f"{label}: after two lookups in one hop and a text answer, the next request EXTENDS the slot "
+              "(a hidden hop's arguments keep the model's order)")
 
 
 # ================================================================ 6. the wires
@@ -528,7 +582,9 @@ def test_over_responses():
 
 def main() -> int:
     for fn in (test_the_offer, test_one_hidden_hop, test_only_mode_session, test_failures,
-               test_the_caps_inside_a_script, test_decide_and_images, test_over_responses):
+               test_the_caps_inside_a_script, test_decide_and_images,
+               test_store_image_and_the_output_cap_in_a_turn, test_a_hidden_hop_keeps_its_argument_order,
+               test_over_responses):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

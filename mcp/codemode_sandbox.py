@@ -117,6 +117,19 @@ BOOT = r"""
   g.setTimeout = (f, ms, ...a) => { const t = ++tseq; timers.set(t, true);
     g.sleep(ms).then(() => { if (timers.delete(t)) f(...a); }); return t; };
   g.clearTimeout = (t) => { timers.delete(t); };
+  // store / load / save: small JSON kept across this conversation's scripts; a script that fails keeps none of its writes.
+  g.store = (key, value) => {
+    const s = JSON.stringify(value === undefined ? null : value);
+    const r = rpc("store", { key: String(key), value: s });
+    if (!r || r.ok !== true) throw new Error("store: " + ((r && r.error) || "refused"));
+  };
+  g.save = g.store;
+  g.load = (key) => { const r = rpc("load", { key: String(key) }); return r === null || r === undefined ? undefined : JSON.parse(r); };
+  // image(v): shown to the user by the server. A base64 data URL, { image_url }, or an image block.
+  g.image = (v) => {
+    if (v === undefined || v === null) throw new Error("image: nothing to show");
+    send({ op: "image", v });
+  };
   g.text = (v) => { send({ op: "out", kind: "text", v: fmt(v) }); };
   const log = (...a) => { send({ op: "out", kind: "console", v: a.map(fmt).join(" ") }); };
   g.console = Object.freeze({ log, info: log, warn: log, error: log, debug: log });

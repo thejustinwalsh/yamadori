@@ -117,8 +117,8 @@ def test_the_registry_is_one_source_per_tool():
     tb = toolbox()
     names = tb.names()
     check(names == ["yama_find_package", "yama_list_package_versions", "yama_read_package_readme",
-                    "yama_resolve_packages", skill_prompts.CRAFT_TOOL_NAME, "yama_decide_noul",
-                    "yama_decide_choice", "yama_decide_score", images.TOOL_NAME, vision.TOOL_NAME],
+                    "yama_resolve_packages", skill_prompts.CRAFT_TOOL_NAME, "yama_classify_yes_no",
+                    "yama_classify_choice", "yama_classify_score", images.TOOL_NAME, vision.TOOL_NAME],
           "every function keeps its yama_* name: MCP servers, craft, decide, images", json.dumps(names))
     mcp_defs = {t["name"]: mcp_config.definition(t)["function"]
                 for s in mcp_config.servers() for t in s["tools"]}
@@ -131,9 +131,9 @@ def test_the_registry_is_one_source_per_tool():
           and tb.by_name[images.TOOL_NAME]["description"] == images.MAIN_TOOL["function"]["description"]
           and tb.by_name[vision.TOOL_NAME]["description"] == vision.TOOL["function"]["description"],
           "craft, image and vision functions carry the tools' own descriptions")
-    check([tb.by_name[n]["ns"] for n in names] == ["packages"] * 4 + ["craft", "decide", "decide", "decide",
+    check([tb.by_name[n]["ns"] for n in names] == ["packages"] * 4 + ["craft", "classify", "classify", "classify",
                                                                       "images", "images"],
-          "namespaces group: packages (the config row's `namespace`), craft, decide, images")
+          "namespaces group: packages (the config row's `namespace`), craft, classify, images")
     check(all(tb.by_name[n]["question"] and tb.by_name[n].get("bound_s") for n in names),
           "every function has the question it answers and a bound of its own")
     check(tb.by_name["yama_find_package"]["question"].startswith("which package is this")
@@ -141,7 +141,7 @@ def test_the_registry_is_one_source_per_tool():
           and "A server tool" not in tb.by_name["yama_find_package"]["when"],
           "the question and the trigger conditions are read out of the description",
           tb.by_name["yama_find_package"]["when"][:120])
-    check("yama_decide_noul" not in toolbox(decider=False).names(),
+    check("yama_classify_yes_no" not in toolbox(decider=False).names(),
           "the decide functions are in the toolbox only where the decider is on")
     only = C.build_toolbox(["yama_find_package"], decider=False)
     check(only.names() == ["yama_find_package"], "a tool withheld for a client tool is not in the toolbox")
@@ -213,10 +213,10 @@ def test_discovery():
           and tb.namespaces_info("nope")["ok"] is False,
           "namespaces(name): that group's functions; an unknown one lists the groups")
     out = go("const n = tools.namespaces(); const a = tools.all(); const s = tools.search('readme');"
-             "const e = tools.search('zzzz'); const dd = tools.describe('yama_decide_noul');"
+             "const e = tools.search('zzzz'); const dd = tools.describe('yama_classify_yes_no');"
              "return {n: n.map(x => x.name), all: a.length, top: s[0].name, hint: e.hint, ok: dd.ok}")
     got = json.loads(out["items"][0]) if out["items"] else {}
-    check(out["ok"] and got.get("n") == ["packages", "craft", "decide", "images"] and got.get("all") == 10
+    check(out["ok"] and got.get("n") == ["packages", "craft", "classify", "images"] and got.get("all") == 10
           and got.get("top") == "yama_read_package_readme" and "tools.namespaces()" in got.get("hint", "")
           and got.get("ok") is True,
           "all four discovery calls, from inside the sandbox", json.dumps(out["items"])[:300])
@@ -315,10 +315,10 @@ def test_composition():
                 raises, timeout_s=10, max_calls=5)
     check(out["items"] == ["TOOL_RAISED"] and boom.calls == [],
           "a bridge that raises becomes a TOOL_RAISED result", json.dumps(out["items"]))
-    big = go("return 'x'.repeat(20000) + '\\nend'")
+    big = go("return 'x'.repeat(40000) + '\\nend'")
     t = C.format_result(big)
-    check(len(t) <= 6000 and "[output cut at 6000 of " in t and "print less" in t,
-          "output beyond the hidden hop's cap (repeats.RESULT_CAP) is cut with the way to print less", str(len(t)))
+    check(len(t) <= 30000 and "[output cut at 30000 of " in t and "print less" in t,
+          "output beyond the script output cap (OUTPUT_CAP, 30,000) is cut with the way to print less", str(len(t)))
 
 
 # ================================================================== 4. limits
@@ -361,12 +361,12 @@ def test_the_limits():
         out = go("for (let i = 0; i < 100; i++) text('y'.repeat(1000))")
     finally:
         C.MAX_OUTPUT_CHARS = saved
-    check(out["reason"] == "output_limit" and out["output_chars"] <= 6000, "…and more characters than the limit",
+    check(out["reason"] == "output_limit" and out["output_chars"] <= 30000, "…and more characters than the limit",
           str(out["output_chars"]))
     out = go("return 'z'.repeat(5 * 1000 * 1000)")
     t = C.format_result(out)
-    check(out["ok"] and len(t) <= 6000 and "[output cut at 6000 of " in t,
-          "a huge output is collected whole (under Pi's 16 MiB) and CUT at the hidden hop's cap", str(len(t)))
+    check(out["ok"] and len(t) <= 30000 and "[output cut at 30000 of " in t,
+          "a huge output is collected whole (under Pi's 16 MiB) and CUT at the output cap", str(len(t)))
     out = go("await new Promise(() => {})")
     check(out["reason"] == "never_settles" and "Next: every await must be a tools.* call" in C.format_result(out),
           "a promise nothing can settle fails at once (Pi's rule), with the next step", out["reason"])
@@ -575,17 +575,17 @@ def test_the_tool_definition():
           "the example searches and calls in one run")
     check(rec["tokens"] <= rec["budget_tokens"] == 3000 and rec["left_out"] == [] and len(rec["declared"]) == 10,
           "everything fits Pi's 3,000-token budget here and is declared", json.dumps(rec)[:300])
-    d2, rec2 = C.tool_definition(tb, rank_query="Draw a picture of a cat and show it", budget_tokens=1300)
-    check(rec2["tokens"] <= 1300 and rec2["left_out"] and "yama_generate_image" in rec2["declared"]
+    d2, rec2 = C.tool_definition(tb, rank_query="Draw a picture of a cat and show it", budget_tokens=1700)
+    check(rec2["tokens"] <= 1700 and rec2["left_out"] and "yama_generate_image" in rec2["declared"]
           and "// Not declared here, found with tools.search / tools.describe: " in d2["function"]["description"]
           and all(n in d2["function"]["description"] for n in rec2["left_out"]),
           "a tight budget declares the most relevant functions for the conversation and NAMES the rest",
           json.dumps(rec2)[:400])
-    d3, rec3 = C.tool_definition(tb, rank_query="Which versions of koota exist", budget_tokens=1300)
+    d3, rec3 = C.tool_definition(tb, rank_query="Which versions of koota exist", budget_tokens=1700)
     check("yama_list_package_versions" in rec3["declared"] and rec3["declared"] != rec2["declared"],
           "…which functions are declared follows the conversation (BM25 of its first message)",
           json.dumps([rec2["declared"], rec3["declared"]]))
-    again, _ = C.tool_definition(tb, rank_query="Which versions of koota exist", budget_tokens=1300)
+    again, _ = C.tool_definition(tb, rank_query="Which versions of koota exist", budget_tokens=1700)
     check(json.dumps(again) == json.dumps(d3), "the definition is byte-stable for the same inputs")
     covered = [mcp_config.definition(t) for s in mcp_config.servers() for t in s["tools"]]
     b = C.budget_for(covered, "x" * 250)
@@ -623,7 +623,7 @@ def test_the_derivations():
           and C.MAX_OUTPUT_CHARS == 16777216 and C.MAX_OUTPUT_CALLS == 100000,
           "Pi's documented limits: 256 MB, four at once, search limit 8, 16,777,216 characters, 100,000 calls")
     import repeats
-    check(repeats.RESULT_CAP == 6000, "the returned output cap is the hidden hop's own breaker, 6,000")
+    check(C.OUTPUT_CAP == 30000 == 10000 * 3 and repeats.RESULT_CAP == 6000,"the script output cap is Pi's 10,000 tokens at ~3 characters a token (30,000); other tools' breaker stays 6,000")
     import tiers
     sw = C.switch({})
     check(sw["on"] is False and sw["source"] == "tier" and sw["mode"] == "on" and not tiers.OFF_BY_DEFAULT,
@@ -709,11 +709,64 @@ def test_the_probe_reads_what_the_proxy_records():
           "the arms' features; the relay can add the header for Hermes")
 
 
+# ============================================================ 7. store, load, image (operator, 2026-10-08)
+def test_store_load_and_image():
+    kv: dict = {}
+    out = go("store('plan', {a: [1, 2, 3], b: 'x'}); save('n', 5); return JSON.stringify([load('plan'), load('n'), "
+             "load('nope')])", store=kv)
+    check(out["ok"] and out["items"] == ["[{\"a\":[1,2,3],\"b\":\"x\"},5,null]"] and set(kv) == {"plan", "n"},
+          "store/save and load: JSON in, JSON out, a missing key is undefined; a successful script commits",
+          json.dumps([out["items"], list(kv)]))
+    out = go("return JSON.stringify([load('plan'), load('n')])", store=kv)
+    check(out["ok"] and out["items"] == ["[{\"a\":[1,2,3],\"b\":\"x\"},5]"],
+          "…and the next script (the next call) reads them", json.dumps(out["items"]))
+    out = go("store('lost', 1); throw new Error('boom')", store=kv)
+    check(not out["ok"] and "lost" not in kv, "a script that fails keeps none of its writes", json.dumps(list(kv)))
+    out = go("store('k', 'x'.repeat(%d)); return 'unreached'" % (C.STORE_VALUE_CHARS + 1), store=kv)
+    check(not out["ok"] and "most one value holds" in json.dumps(out["error"]),
+          "a value past 262,144 characters throws with the limit named", json.dumps(out["error"])[:200])
+    big: dict = {f"k{i}": "y" * 200_000 for i in range(5)}
+    out = go("store('more', 'z'.repeat(100000)); return 'ok'", store=big)
+    check(not out["ok"] and "most it holds" in json.dumps(out["error"]),
+          "the store as a whole is limited to 1,048,576 characters", json.dumps(out["error"])[:200])
+    a, b = C.store_for("conv-a"), C.store_for("conv-b")
+    a["x"] = "1"
+    check(b == {} and C.store_for("conv-a") is a and C.store_for("") == {} and C.store_for("") is not C.store_for(""),
+          "each conversation has its own store; a side call (no key) has a throwaway one")
+    # image(): a data URL / { image_url } / an image block; remote URLs are refused
+    import base64
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (4, 3), (200, 10, 10)).save(buf, format="PNG")
+    png = buf.getvalue()
+    durl = "data:image/png;base64," + base64.b64encode(png).decode()
+    got, why = C.image_bytes(durl)
+    check(got == png and not why, "image_bytes: a base64 PNG data URL")
+    check(C.image_bytes({"image_url": durl})[0] == png and C.image_bytes({"image_url": {"url": durl}})[0] == png
+          and C.image_bytes({"type": "image", "data": base64.b64encode(png).decode(), "mimeType": "image/png"})[0] == png,
+          "…an { image_url } (a string or { url }) and an image block")
+    jb = io.BytesIO()
+    Image.new("RGB", (4, 3), (10, 200, 10)).save(jb, format="JPEG")
+    conv, why = C.image_bytes("data:image/jpeg;base64," + base64.b64encode(jb.getvalue()).decode())
+    check(conv and conv.startswith(b"\x89PNG") and not why, "…a JPEG becomes a PNG")
+    check(C.image_bytes("https://example.com/a.png")[0] is None and "remote URLs are not fetched" in
+          C.image_bytes("https://example.com/a.png")[1], "a remote URL is refused (no network in the sandbox)")
+    check(C.image_bytes("data:image/png;base64,AAAA")[0] is None, "bytes that are not an image are refused")
+    out = go("image(%s); image('https://x/y.png'); text('after'); return 1" % json.dumps(durl))
+    check(out["ok"] and len(out["images"]) == 2 and out["items"][0] == "after",
+          "image() hands each value to the host (the host decides what to show); output goes on",
+          json.dumps([len(out["images"]), out["items"]]))
+    out = go("image(undefined)")
+    check(not out["ok"] and "nothing to show" in json.dumps(out["error"]), "image() of nothing throws")
+
+
 def main() -> int:
     for fn in (test_the_registry_is_one_source_per_tool,
                test_a_server_added_through_the_configuration_is_discoverable,
                test_discovery, test_composition, test_the_limits, test_escapes,
-               test_the_tool_definition, test_the_derivations, test_the_probe_reads_what_the_proxy_records):
+               test_the_tool_definition, test_the_derivations, test_the_probe_reads_what_the_proxy_records,
+               test_store_load_and_image):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

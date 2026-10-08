@@ -1481,7 +1481,7 @@ chat and Responses), `mcp/test_harness_decisions.py` (fixtures `pi/chat/codemode
   `tools.namespaces(name?)`, `tools.all()`, and one Promise-returning function per server tool **under the tool's own
   `yama_*` name**: `tools.yama_find_package(...)`, `yama_list_package_versions`, `yama_read_package_readme`,
   `yama_resolve_packages`, `yama_recall_craft`, `yama_generate_image`, `yama_describe_image`, and jjava's
-  `yama_decide_noul` / `yama_decide_choice` / `yama_decide_score` (through `jev_api.systemone`). Namespaces group
+  `yama_classify_yes_no` / `yama_classify_choice` / `yama_classify_score` (through `jev_api.systemone`). Namespaces group
   (`packages`, `craft`, `decide`, `images`, one per enabled MCP server in `mcp_config`: a server added through the
   dashboard is discoverable with no prompt change). Each function's declaration and description are READ FROM THE
   TOOL'S OWN DEFINITION (one source). Every function resolves to `{ok, text, data?, error?{code, reason, retryable,

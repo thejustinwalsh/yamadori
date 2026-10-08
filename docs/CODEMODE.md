@@ -27,7 +27,7 @@ Source of the design: https://pi.dev/docs/latest/codemode (read 2026-10-07). Wha
 | discovery INSIDE the script: `searchTools(query, {limit?, namespace?})` (BM25, default limit 8), `describeTool(name)`, `describeNamespace()`, `ALL_TOOLS` | `tools.search(query, {limit?, namespace?})` (BM25 over each function's name + description + trigger text; no embedder, deterministic; limit 8; a `hint` property when nothing matches), `tools.describe(name)` (full or short name; an unknown one returns the nearest and the next step), `tools.namespaces(name?)`, `tools.all()`. A script may search and call in one run, and the description's example does |
 | `tools.<name>(args)`, promises, parallel | `tools.yama_<verb>_<object>(args)` returns a Promise; the callable name IS the tool's own `yama_*` name, the arguments are the tool's own; every pending call runs in parallel, **at most four at once** (Pi: "At most four such calls run at once per script; more calls wait for a free slot"). Namespaces only GROUP (`tools.namespaces()`, `tools.search(q, {namespace})`, the declarations' headings); they are not part of the call |
 | QuickJS sandbox, 256 MB, no Node, fs, network or timers | QuickJS compiled to WASI, run under wasmtime in-process: a linear-memory maximum of 256 MiB for the whole sandbox (Pi's), no files / network / environment, the real clock, an epoch interrupt for time. See "The runner" |
-| `text()`, `image()`, `console.*`, `return`, `exit()`, `store/load`, `models.classify/generateImages` | `text()`, `console.*`, `return`, `exit()`. No `image()` (an image made by `yama_generate_image` inside a script is shown to the user by the proxy, as the direct tool's is), no `store/load` (one call, one script); jjava and the image tools are ordinary functions (`yama_decide_*`, `yama_generate_image`) |
+| `text()`, `image()`, `console.*`, `return`, `exit()`, `store/load`, `models.classify/generateImages` | `text()`, `console.*`, `return`, `exit()`. No `image()` (an image made by `yama_generate_image` inside a script is shown to the user by the proxy, as the direct tool's is), no `store/load` (one call, one script); jjava and the image tools are ordinary functions (`yama_classify_*`, `yama_generate_image`) |
 | result starts `Script completed` / `Script failed`, wall time, `==> text N/M <==` headers, one `<console_output>` block | the same shapes |
 | `max_output_tokens` (10000), `timeout_ms` (unset) | output cap = the hidden hop's own size cap, `repeats.RESULT_CAP` 6,000 characters; `timeout_ms` argument, can only lower the derived ceiling |
 | config `codemode.mode` | switch `codemode` + `codemode_mode`: `on` (the individual lookups stay offered) or `only` (the ones it replaces are hidden and reached only through the toolbox) |
@@ -52,7 +52,7 @@ declare const tools: {
   yama_find_package(args: { query: string; ecosystem: "npm" | "pypi" | ...; }): Promise<ToolResult>;
   ...
 };
-// Not declared here, found with tools.search / tools.describe: yama_decide_choice, ...
+// Not declared here, found with tools.search / tools.describe: yama_classify_choice, ...
 ```
 
 Plus ONE system line where it is offered, positive and procedural (THE TOOL RECIPE rule 4; unmeasured wording): "To get
@@ -74,7 +74,7 @@ from a script.
 |---|---|---|
 | one per enabled MCP server (`packages` for PackageLens: the config row's `namespace`, else its `id`; `namespace_description`) | `yama_find_package`, `yama_list_package_versions`, `yama_read_package_readme`, `yama_resolve_packages` -- every tool the server's config row lists | `mcp_host.run_tool`; a server added through the dashboard (`mcp_config`) shows up in `tools.namespaces()` and `tools.search` with no prompt change, its description and parameters read from its config row |
 | `craft` | `yama_recall_craft({name_or_topic})` | the craft tool, where the craft offer holds (the per-request cap of 3 and the do-not-repeat line apply to every call) |
-| `decide` | `yama_decide_noul`, `yama_decide_choice`, `yama_decide_score` ({state, question, ...}; one per question type of jjava, each with the arguments its type needs) | jjava through the Jev API's own entry (`jev_api.systemone`, route `/codemode/decide`: its limits, its queue, batched when `YAMADORI_DECIDER_BATCH` is on), where the decider is on |
+| `decide` | `yama_classify_yes_no`, `yama_classify_choice`, `yama_classify_score` ({state, question, ...}; one per question type of jjava, each with the arguments its type needs) | jjava through the Jev API's own entry (`jev_api.systemone`, route `/codemode/decide`: its limits, its queue, batched when `YAMADORI_DECIDER_BATCH` is on), where the decider is on |
 | `images` | `yama_generate_image`, `yama_describe_image` | the image tools, where those are offered |
 
 Every function resolves to one `ToolResult`: `{ok, text, data?, error?}`. **A function never throws**: a failure is
@@ -252,3 +252,28 @@ toolbox without being told to and writes working scripts; it rarely searches (th
 functions). n=2 cannot show a benefit beyond "no worse"; `on` costs ~1.6K prompt tokens. Operator, 2026-10-08: "turn codemode on if
 it has been tested" -> **mode `on` is the default at medium and up** (`YAMADORI_CODEMODE=0` / `{"codemode": false}` turns it off);
 **`only` stays opt-in** (it looped to the cap in 1 of 2 trials). A bigger Pi run and the Hermes arm are still to do.
+
+## Classify, store / load, image(), the output cap (operator, 2026-10-08)
+
+Operator: "please add classify and image, load and save, classify is a better name for what jjava offers imo. We don't need save to
+file, but we should increase output limit." This supersedes the rows above that say no `image()` / `store` / `load` and name
+`yama_decide_*`.
+
+- **classify**: jjava's three functions are `yama_classify_yes_no`, `yama_classify_choice`, `yama_classify_score`, namespace
+  `classify` (they were `yama_decide_noul` / `_choice` / `_score`, namespace `decide`). Same arguments, same Jev entry.
+- **store(key, value) / load(key)** (`save` is an alias of `store`): JSON kept per CONVERSATION (the conversation key), read by its
+  later scripts. Pi's limits: 262,144 characters a value, 1,048,576 in all; a script that fails keeps none of its writes. In
+  memory (`codemode.store_for`, the 256 most recently used conversations): a proxy restart forgets it. Unmeasured: whether the
+  model uses it.
+- **image(value)**: a base64 data URL, `{ image_url }` or an image block; stored in the media store (any raster format becomes a
+  PNG) and SHOWN to the user by the proxy, as a drawn picture is; the output gets `[image N shown to the user]`. Remote URLs are
+  refused (Pi's rule; the sandbox has no network). At most 8 a script, 12 MiB each.
+- **The output cap** is `codemode.OUTPUT_CAP` = 30,000 characters (Pi's default of 10,000 tokens at the repo's ~3 characters a
+  token), for this tool only; every other tool result keeps `repeats.RESULT_CAP` 6,000. No temp file.
+- `x_yamadori.codemode` adds `images`, `stored`, `loaded`.
+- Also 2026-10-08: the sandbox clock is real, with `sleep(ms)` and `setTimeout`.
+
+**A hidden hop's arguments keep the model's order** (`proxy.sort_call_arguments`, 2026-10-08): prepare sorted every tool call's
+argument keys, our own hidden hops' included, so the request after "lookups, then a text answer" diverged at the hop (live deploy
+check: reused 5,178 of 15,089). Calls of `OUR_NAMES` are no longer sorted. `mcp/test_codemode_turn.py`
+`test_a_hidden_hop_keeps_its_argument_order`.

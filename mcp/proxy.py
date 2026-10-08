@@ -1197,6 +1197,9 @@ def _codemode_record(payload: dict) -> dict | None:
                 failed=any(r.get("failed") for r in runs),
                 reasons=[r.get("reason") for r in runs],
                 heads=[r.get("script_head") for r in runs],
+                images=sum(int(r.get("images") or 0) for r in runs),
+                stored=sum(int(r.get("stored") or 0) for r in runs),
+                loaded=sum(int(r.get("loaded") or 0) for r in runs),
                 instantiate_ms=[r.get("instantiate_ms") for r in runs],
                 searches=sum(int(r.get("searches") or 0) for r in runs),
                 describes=sum(int(r.get("describes") or 0) for r in runs),
@@ -1228,11 +1231,11 @@ def _tool_result_of(text: str, data=None) -> dict:
     return out
 
 
-_DECIDE_TYPE = {"yama_decide_noul": "noul", "yama_decide_choice": "choice", "yama_decide_score": "score"}
+_DECIDE_TYPE = {"yama_classify_yes_no": "noul", "yama_classify_choice": "choice", "yama_classify_score": "score"}
 
 
 def _compose_decide(name: str, args: dict, account: str) -> dict:
-    """yama_decide_*: one typed question to jjava through the Jev API's own entry (its limits, its queue, batched
+    """yama_classify_*: one typed question to jjava through the Jev API's own entry (its limits, its queue, batched
     reads when YAMADORI_DECIDER_BATCH is on). A ToolResult."""
     import jev_api
     kind = _DECIDE_TYPE[name]
@@ -1248,12 +1251,12 @@ def _compose_decide(name: str, args: dict, account: str) -> dict:
         if isinstance(opts, list):
             opts = {str(o): str(o) for o in opts}
         if not isinstance(opts, dict) or not opts:
-            return codemode.error_result("BAD_ARGUMENTS", "yama_decide_choice needs `options`: { key: meaning }.",
+            return codemode.error_result("BAD_ARGUMENTS", "yama_classify_choice needs `options`: { key: meaning }.",
                                          False, "call it with at least one option.")
         q["criteria"] = opts
     elif kind == "score":
         if not isinstance(args.get("levels"), list):
-            return codemode.error_result("BAD_ARGUMENTS", "yama_decide_score needs `levels`: 2 to 10 strings.",
+            return codemode.error_result("BAD_ARGUMENTS", "yama_classify_score needs `levels`: 2 to 10 strings.",
                                          False, "call it with the levels, lowest first.")
         q["criteria"] = args["levels"]
     body = {"state": state_text, "model": "jjava-latest", "questions": {"q": q}}
@@ -1274,6 +1277,33 @@ def _compose_decide(name: str, args: dict, account: str) -> dict:
         f"JJAVA_{status}", f"jjava did not answer ({status}): {str(detail)[:240]}", retryable,
         (f"call it again in about {retry} s." if retry else
          ("call it again." if retryable else "fix the arguments named and call it again.")))
+
+
+def _compose_show_images(out: dict, state: dict) -> None:
+    """image(v) calls of a script: each is stored in the media store and queued for the loop to SHOW to the user,
+    as a drawn picture is; the script's output gets a line saying so (or why not)."""
+    shown = 0
+    for i, v in enumerate(out.get("images") or [], 1):
+        png, why = codemode.image_bytes(v)
+        base = state.get("_public_base") or images.public_base()
+        if png is None or not base:
+            out["items"].append(f"[image {i} not shown: {why or 'this server does not know the address clients reach it on'}]")
+            continue
+        try:
+            sha = images.store(png, {"source": "codemode", "prompt": "image from a script"})
+        except Exception as e:                                   # noqa: BLE001
+            out["items"].append(f"[image {i} not shown: {type(e).__name__}]")
+            continue
+        url = images.signed_url(sha, base)
+        state.setdefault("_compose_images", []).append((f"![image {i}]({url})", url, {"ok": True}))
+        try:                                                     # what it holds may now be looked at
+            vision.note_generated(json.dumps({"tool": images.TOOL_NAME, "ok": True, "url": url}),
+                                  state.setdefault("_attached", vision.empty()))
+        except Exception:                                        # noqa: BLE001
+            pass
+        out["items"].append(f"[image {i} shown to the user]")
+        shown += 1
+    out["images_shown"] = shown
 
 
 def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_key: str) -> str:
@@ -1358,8 +1388,9 @@ def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_k
             return res
 
     out = codemode.run(script, tb, bridge, timeout_s=timeout_s, max_calls=max_calls,
-                       cancelled=cancel.cancelled)
+                       cancelled=cancel.cancelled, store=codemode.store_for(state.get("_key") or ""))
     state["_compose_calls"] = used + int(out.get("dispatched") or 0)
+    _compose_show_images(out, state)
     # The final output, screened again when fetched text went through it (the script may have recombined it).
     quarantined = None
     if external["n"] and (out["items"] or out["console"]):
@@ -1391,7 +1422,8 @@ def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_k
         "reason": out["reason"], "searches": out["searches"], "describes": out["describes"],
         "discovery": out["discovery"], "script_chars": len(script), "instantiate_ms": out.get("instantiate_ms"),
         "script_head": " ".join(script.split())[:120], "timeout_s": round(timeout_s, 1),
-        "max_calls": max_calls, "dispatched": out.get("dispatched")})
+        "max_calls": max_calls, "dispatched": out.get("dispatched"),
+        "images": out.get("images_shown", 0), "stored": out.get("stored", 0), "loaded": out.get("loaded", 0)})
     return text
 
 
@@ -2042,7 +2074,14 @@ def _args_sorted(raw):
 def sort_call_arguments(messages: list) -> list:
     """The messages with every assistant tool call's arguments in sorted key
     order (see ONE ORDER FOR TOOL-CALL ARGUMENTS). Messages that need no
-    change are the same objects."""
+    change are the same objects.
+
+    A HIDDEN HOP'S CALL KEEPS THE MODEL'S ORDER (2026-10-08): a call of one of
+    OUR tools (`yama_*`, OUR_NAMES) never reaches a client, so no client
+    re-serialises it; the slot holds it as the model wrote it and the ledger
+    replays it verbatim. Sorting it made the request after a hop-then-text
+    turn diverge at the hop (live: reused 5178 of 15089 after two package
+    lookups; mcp/test_codemode_turn.py `test_a_hidden_hop_keeps_its_argument_order`)."""
     out = []
     for m in messages or []:
         calls = m.get("tool_calls") if isinstance(m, dict) else None
@@ -2050,6 +2089,9 @@ def sort_call_arguments(messages: list) -> list:
             new = []
             for c in calls:
                 fn = c.get("function") if isinstance(c, dict) else None
+                if isinstance(fn, dict) and fn.get("name") in OUR_NAMES:
+                    new.append(c)
+                    continue
                 if isinstance(fn, dict) and "arguments" in fn:
                     a = _args_sorted(fn["arguments"])
                     if a != fn["arguments"] or (
@@ -5669,7 +5711,9 @@ def _run_turn(body: dict, streamed: bool):
                 section = state.get("_compose_section") or ""
                 state["_compose_section"] = ""
             tmsg = {"role": "tool", "tool_call_id": c["id"],
-                    "content": repeats.cap_tool_result(res, fn, args)
+                    "content": repeats.cap_tool_result(
+                        res, fn, args,
+                        limit=codemode.OUTPUT_CAP if fn == codemode.TOOL_NAME else repeats.RESULT_CAP)
                     + section}
             convo.append(tmsg)
             hops_added.append(tmsg)

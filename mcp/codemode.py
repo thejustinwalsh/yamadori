@@ -29,6 +29,7 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,6 +57,74 @@ MAX_OUTPUT_CHARS = 16_777_216
 MAX_OUTPUT_CALLS = 100_000
 SEARCH_LIMIT = 8
 INLINE_BUDGET_CEILING_TOKENS = 3000
+# What a script's result may add to the conversation: Pi's default output limit is 10,000 tokens ("longer output is
+# truncated"); at the repo's ~3 characters a token (tokens_of) that is 30,000 characters. Operator, 2026-10-08:
+# "we should increase output limit" (it was repeats.RESULT_CAP, 6,000, the breaker of every other tool result).
+OUTPUT_CAP = 30_000
+# Pi's store(): "262,144 characters max per value and 1,048,576 total", writes persist only if the script succeeds.
+STORE_VALUE_CHARS = 262_144
+STORE_TOTAL_CHARS = 1_048_576
+STORE_CONVERSATIONS = 256                     # conversations whose store is kept in memory (least recently used out)
+MAX_IMAGES = 8                                # image() calls shown per script
+MAX_IMAGE_BYTES = 12 * 1024 * 1024
+
+_STORES: "OrderedDict[str, dict]" = OrderedDict()
+_STORES_LOCK = threading.Lock()
+
+
+def store_for(key: str) -> dict:
+    """The conversation's store: {name: JSON text}. In memory (a restart forgets it), least recently used
+    conversation out past STORE_CONVERSATIONS; an empty key (a side call) gets a throwaway dict."""
+    if not key:
+        return {}
+    with _STORES_LOCK:
+        s = _STORES.get(key)
+        if s is None:
+            s = _STORES[key] = {}
+            while len(_STORES) > STORE_CONVERSATIONS:
+                _STORES.popitem(last=False)
+        else:
+            _STORES.move_to_end(key)
+        return s
+
+
+def image_bytes(v) -> tuple[bytes | None, str]:
+    """(PNG bytes, "") for an image() argument -- a base64 data URL, an { image_url } (a string or { url }) or an
+    image block { type: "image", data | source: { data } } -- else (None, why). Remote URLs are not fetched (Pi's
+    rule, and the sandbox has no network). Any raster format Pillow reads becomes a PNG."""
+    import base64
+    import io
+    url = None
+    if isinstance(v, str):
+        url = v
+    elif isinstance(v, dict):
+        iu = v.get("image_url")
+        url = iu.get("url") if isinstance(iu, dict) else iu
+        if not url:
+            src = v.get("source") if isinstance(v.get("source"), dict) else v
+            data = src.get("data")
+            if isinstance(data, str):
+                url = data if data.startswith("data:") else f"data:{src.get('mimeType') or src.get('media_type') or 'image/png'};base64,{data}"
+    m = re.match(r"^data:([\w./+-]*);base64,(.*)$", url or "", re.S)
+    if not m:
+        return None, "image() takes a base64 data URL, { image_url } or an image block; remote URLs are not fetched"
+    try:
+        raw = base64.b64decode(m.group(2), validate=False)
+    except (ValueError, TypeError):
+        return None, "the image data is not valid base64"
+    if not raw or len(raw) > MAX_IMAGE_BYTES:
+        return None, f"the image is empty or larger than {MAX_IMAGE_BYTES // (1024 * 1024)} MiB"
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return raw, ""
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(raw))
+        im.load()
+        out = io.BytesIO()
+        im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB").save(out, format="PNG")
+        return out.getvalue(), ""
+    except Exception:                                            # noqa: BLE001
+        return None, "the bytes are not an image the server can read"
 # The decider's own per-read timeout (decider_bonsai.read/ask_one `timeout: float = 120`; test_codemode checks it
 # against the signature): one typed question is one read; craft's question path makes two (the choice and the gate).
 DECIDER_READ_S = 120.0
@@ -348,17 +417,24 @@ BUILTIN_DECLARATIONS = (
     "  /** Every function: { name, namespace, description }. */\n"
     "  all(): { name: string; namespace: string; description: string }[];")
 
+GLOBAL_DECLARATIONS = (
+    "declare function text(value: any): void;                       // add an output item\n"
+    "declare function image(value: string | { image_url: string }): void;  // base64 data URL; shown to the user\n"
+    "declare function store(key: string, value: any): void;         // small JSON, kept for this conversation's next scripts (also save)\n"
+    "declare function load(key: string): any;                        // undefined when absent\n"
+    "declare function sleep(ms: number): Promise<void>;")
+
 SERVER_TOOL_SENTENCE = ("A server tool: it runs on the Yamadori server and does not touch your workspace.")
 
 DECIDE_NAMESPACE = {
-    "description": ("jjava, the server's decision model: reads a text and answers one typed question about it "
-                    "(yes/no, one of several options, a score), with probabilities. Use it to classify or filter "
-                    "many items in code."),
+    "description": ("Classify a text with jjava, the server's decision model: it reads the text and answers one typed "
+                    "question about it (yes/no, one of several options, a score), with probabilities. Use it to "
+                    "classify, filter or rank many items in code."),
 }
 DECIDE_STATE = {"type": "string", "description": "The text to read: the item the question is about."}
 DECIDE_TOOLS = [
     {"type": "function", "function": {
-        "name": "yama_decide_noul",
+        "name": "yama_classify_yes_no",
         "description": ("Answers 'is this true of this text?': jjava reads a text and returns the probability that "
                         "a yes/no question about it is yes. Call it to check, filter or sort many items in code "
                         "-- one call per item, in parallel -- instead of reading them all yourself: is this README "
@@ -370,7 +446,7 @@ DECIDE_TOOLS = [
                          "properties": {"true": {"type": "string"}, "false": {"type": "string"}}}},
             "required": ["state", "question"]}}},
     {"type": "function", "function": {
-        "name": "yama_decide_choice",
+        "name": "yama_classify_choice",
         "description": ("Answers 'which of these options fits this text?': jjava reads a text and returns its "
                         "probability for each option you list, and the best one. Call it to sort items into "
                         "categories in code, one call per item, in parallel. " + SERVER_TOOL_SENTENCE),
@@ -380,7 +456,7 @@ DECIDE_TOOLS = [
             "options": {"type": "object", "description": ("The options: { key: what it means }. Up to 255.")}},
             "required": ["state", "question", "options"]}}},
     {"type": "function", "function": {
-        "name": "yama_decide_score",
+        "name": "yama_classify_score",
         "description": ("Answers 'how much does this text have of something?': jjava reads a text and returns a "
                         "score on the ordered scale you give, 0 for the first level up, with the probability of "
                         "each level. Call it to rank items in code, one call per item, in parallel. "
@@ -432,8 +508,8 @@ def build_toolbox(names: list[str], decider: bool = False) -> Toolbox:
                                        "of work."}
     if decider:
         for d in DECIDE_TOOLS:
-            fns.append(_fn(d, "decide", "decide", DECIDE_BOUND_S, False))
-        nss["decide"] = dict(DECIDE_NAMESPACE)
+            fns.append(_fn(d, "classify", "decide", DECIDE_BOUND_S, False))
+        nss["classify"] = dict(DECIDE_NAMESPACE)
     if images.TOOL_NAME in want:
         fns.append(_fn(images.MAIN_TOOL, "images", "images", images.timeout(), False))
     if vision.TOOL_NAME in want:
@@ -456,7 +532,8 @@ _HEAD = (
     "or when you do not know which server function answers your question: tools.search(\"what you need\") ranks "
     "them and tools.describe(name) shows one in full. Calls return Promises and run in parallel, four at a time: use "
     "await and Promise.all. Output is what you return, text(value) and console.log write, cut at {cap} characters, "
-    "so print only what you need. The sandbox has no network, files or timers; bash, read and write are your "
+    "so print only what you need. store(key, value) and load(key) keep small JSON for your next scripts; "
+    "image(dataUrl) shows a picture to the user. The sandbox has no network or files; bash, read and write are your "
     "client's tools and cannot be called from it. " + SERVER_TOOL_SENTENCE)
 
 
@@ -480,8 +557,7 @@ def tool_definition(tb: Toolbox, *, rank_query: str = "", budget_tokens: int | N
     the whole definition, so the toolbox stays size-neutral beside the tools it covers -- and a line naming what is
     left out. Decided ONCE per conversation and stored rendered (the prefix never changes)."""
     if cap_chars is None:
-        import repeats
-        cap_chars = repeats.RESULT_CAP
+        cap_chars = OUTPUT_CAP
     budget = int(budget_tokens if budget_tokens is not None else INLINE_BUDGET_CEILING_TOKENS)
     sc = tb.scores(rank_query) if rank_query else {}
     order = {f["name"]: i for i, f in enumerate(tb.fns)}
@@ -507,7 +583,7 @@ def tool_definition(tb: Toolbox, *, rank_query: str = "", budget_tokens: int | N
         out_names = [n for n in tb.names() if n not in declared]
         tail = (f"\n// Not declared here, found with tools.search / tools.describe: {', '.join(out_names)}"
                 if out_names else "")
-        decls = (f"{TOOL_RESULT_TYPE}\ndeclare const tools: {{\n{BUILTIN_DECLARATIONS}\n"
+        decls = (f"{TOOL_RESULT_TYPE}\n{GLOBAL_DECLARATIONS}\ndeclare const tools: {{\n{BUILTIN_DECLARATIONS}\n"
                  + "\n".join(lines) + f"\n}};{tail}")
         shown = [tb.by_name[n] for n in declared]
         return (_HEAD.replace("{cap}", str(cap_chars)) + "\n\nServer functions (TypeScript; call tools.<name>(args); "
@@ -567,7 +643,8 @@ def _args_of(tb: Toolbox, name: str, args) -> dict:
 
 
 def run(script: str, tb: Toolbox, call, *, timeout_s: float, max_calls: int,
-        memory_bytes: int = MEMORY_BYTES, concurrency: int = CONCURRENCY, cancelled=None) -> dict:
+        memory_bytes: int = MEMORY_BYTES, concurrency: int = CONCURRENCY, cancelled=None,
+        store: dict | None = None) -> dict:
     """Run `script` in the sandbox (QuickJS on WASI under wasmtime, mcp/codemode_sandbox.py). `call(name, args, seq)
     -> ToolResult dict` runs ONE server function in a worker thread (the proxy's bridge; `seq` is the order the
     script ISSUED it in, 1-based); it is called only for names in `tb`, at most `max_calls` times, four at a time.
@@ -580,7 +657,9 @@ def run(script: str, tb: Toolbox, call, *, timeout_s: float, max_calls: int,
     t0 = time.monotonic()
     out = {"ok": False, "reason": "crashed", "error": None, "items": [], "console": [], "wall_ms": 0, "calls": [],
            "discovery": [], "searches": 0, "describes": 0, "output_chars": 0, "dispatched": 0,
-           "instantiate_ms": None}
+           "instantiate_ms": None, "images": [], "stored": 0, "loaded": 0}
+    writes: dict = {}                                            # store() in this run; committed only on success
+    committed = store if store is not None else {}
     pool = ThreadPoolExecutor(max_workers=max(int(concurrency), 1), thread_name_prefix="compose-call")
     allowed = set(tb.names())
     st = {"n_calls": 0, "done": None, "kill": None}
@@ -618,8 +697,30 @@ def run(script: str, tb: Toolbox, call, *, timeout_s: float, max_calls: int,
                 st["kill"] = "output_limit"
                 raise S.Killed("output_limit")
             (out["items"] if kind == "text" else out["console"]).append(v)
+        elif op == "image":
+            if len(out["images"]) < MAX_IMAGES:
+                out["images"].append(msg.get("v"))
+            out["output_chars"] += 1
         elif op == "q":
             kind, a = msg.get("kind"), msg.get("a") or {}
+            if kind == "store":
+                k, v = str(a.get("key") or "")[:200], a.get("value")
+                if not k or not isinstance(v, str):
+                    return [{"op": "r", "v": {"ok": False, "error": "store(key, value) needs a key"}}]
+                if len(v) > STORE_VALUE_CHARS:
+                    return [{"op": "r", "v": {"ok": False, "error": f"the value is {len(v)} characters; the most "
+                                                                    f"one value holds is {STORE_VALUE_CHARS}"}}]
+                total = sum(len(x) for kk, x in {**committed, **writes, k: v}.items())
+                if total > STORE_TOTAL_CHARS:
+                    return [{"op": "r", "v": {"ok": False, "error": f"the store would hold {total} characters; the "
+                                                                    f"most it holds is {STORE_TOTAL_CHARS}"}}]
+                writes[k] = v
+                out["stored"] += 1
+                return [{"op": "r", "v": {"ok": True}}]
+            if kind == "load":
+                k = str(a.get("key") or "")
+                out["loaded"] += 1
+                return [{"op": "r", "v": writes.get(k, committed.get(k))}]
             if kind == "search":
                 v = tb.search(a.get("query"), a.get("opts"))
                 out["searches"] += 1
@@ -676,6 +777,8 @@ def run(script: str, tb: Toolbox, call, *, timeout_s: float, max_calls: int,
         out["dispatched"] = st["n_calls"]
     out["instantiate_ms"] = res.get("instantiate_ms")
     done = st["done"]
+    if done is not None and done.get("ok") and writes:
+        committed.update(writes)                                 # a failed script's store() calls are discarded
     if st["kill"] or res.get("how") == "killed":
         why = st["kill"] or res.get("reason")
         out["reason"] = why
@@ -733,8 +836,7 @@ def format_result(out: dict, cap: int | None = None) -> str:
     when there are several), one <console_output> block, partial output on a failure -- cut to `cap` characters
     (the hidden hop's breaker) with a line that says how to print less."""
     if cap is None:
-        import repeats
-        cap = repeats.RESULT_CAP
+        cap = OUTPUT_CAP
     secs = out["wall_ms"] / 1000.0
     wall = f"{secs:.1f} s"
     if out["ok"]:
