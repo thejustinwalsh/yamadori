@@ -609,6 +609,20 @@ on the JevBench public items as a whole, ~3x for a many-question call on a small
 (waits for "GPU go"). Engine patch `0042-server-decide-batch.patch` (unshipped), `mcp/decider_batch.py` behind
 `YAMADORI_DECIDER_BATCH` (default off).
 
+## 11. A trained decision head instead of the letter read (pointer, 2026-10-07)
+
+Operator, 2026-10-07: "We don't need clef, too big, I'd rather have the smaller model, download the unsloth 2b, but my point
+was can we do this with one of our models. I think a part of jjava for me was we can use a model we already have in our stack,
+but for someone with tighter memory it would be nice to fit say bonsai and a smaller decider on the same card." And: "Add this
+to the knowledge base and ensure we are following this training guide or close to it."
+
+Unsloth's guide trains a Clef-style head (Cloudflare's design: a small head scoring every option of every question jointly
+from the backbone's hidden states) on a LoRA-tuned Qwen3.5 0.8B/2B. docs/research/DECIDER-RESEARCH.md Part 5 has the guide
+(method, data, the page's numbers and where it contradicts itself, export, serving), Cloudflare Clef, Liquid d1-omni-600M, and
+a side-by-side with this decider. jjava's difference: no training, no extra memory, any served model reads; a trained head adds
+learned calibration and a one-pass joint score. Our runs of the guide's recipe, the serving check in our engine, and the
+frozen-Bonsai head test are in `bench/decider/unsloth/` (README.md indexes them).
+
 ## Sources
 
 **TypeSafe documentation** (docs.typesafe.ai, read 2026-09-29; vendor):

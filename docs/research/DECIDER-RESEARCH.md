@@ -421,6 +421,95 @@ Each change names its evidence and how to measure it on our data. None is measur
 
 ---
 
+# Part 5. Trained decision heads: Unsloth's guide, Cloudflare Clef, Liquid d1 (added 2026-10-07)
+
+Operator, 2026-10-07 (verbatim): "We don't need clef, too big, I'd rather have the smaller model, download the unsloth 2b, but my point was can we do this with one of our models. I think a part of jjava for me was we can use a model we already have in our stack, but for someone with tighter memory it would be nice to fit say bonsai and a smaller decider on the same card." And: "Add this to the knowledge base and ensure we are following this training guide or close to it."
+
+Approved downloads (same message): Unsloth (pip, in its own pinned venv, not the `irm | iex` installer; versions in `locks/unsloth.lock.txt`), the Qwen3.5-2B base model, and the datasets the guide uses. Anything else: ask. Licences never block (operator, 2026-10-07).
+
+Reading labels as in "How to read the citations" above. [R] here also covers files read from a pip-installed package (`unsloth 2026.10.2`) and raw model/dataset cards fetched as text. Results of OUR runs of this recipe are in `bench/decider/unsloth/` (RESULT files); this part records what the sources say.
+
+## 5.1 The Unsloth guide, read raw [R, vendor]
+
+Page: <https://unsloth.ai/docs/basics/train-your-own-decision-model-with-unsloth> (raw HTML text read 2026-10-07; the page says "Last updated 7 hours ago", so it moves). Announcement: x.com/UnslothAI/status/2107868866361930236 (script-rendered; not read). The fetch tool's summary of this page left out the per-source columns and the "r=64, one epoch" statement and gave only the code's r=16 / 2-epoch recipe; the figures below are from the raw text.
+
+**Method.** A Clef head: "Unsloth puts your input in one prompt, followed by every question and its options. The LLM reads it once. A small head, the same design as Cloudflare's Clef, looks at the LLM's output over each question and option and scores every option, deciding all the questions together. It never writes text." The backbone is LoRA-tuned; the head is new (random init) for a plain LLM.
+
+**Reported results** (the page's two tables; "Test sets were decontaminated against the training data"):
+
+| model | typed-decisions | BANKING77 | CLINC150 | holdout acc (3,000 rows) | VRAM | time |
+|---|---|---|---|---|---|---|
+| Qwen3.5-0.8B | 36% -> 73% | 7% -> 74% | 19% -> 76% | 78% | 4 GB | 42 min |
+| Qwen3.5-2B | 33% -> 78% | 1% -> 58% | 1% -> 62% | 81% | 8 GB | 40 min |
+| Llama 3.2 3B | | | | 79% | 4.1 GB | 30 min |
+| Gemma 4 E4B | | | | 77% | 14.4 GB | 49 min |
+| Laya (fine-tuned) | | | | 77% | 2.5 GB | 10 min |
+
+The operator's summary matches the first table. The page does not say which GPU produced the times (it names an L4 for a 60-step run of Qwen3.5-4B: 76% in 10 minutes), the training-set size, or the number of rows per source.
+
+**Data.** "We used a mix of 12 sources, plus typed-decisions: ag_news, arc, banking77, boolq, clinc150, commonsense_qa, mmlu, mnli, prompt_injections, snli, sst5 and wanli. The test set contained 3,000 rows: 2000 from typed-decisions, 500 from BANKING77 and 500 from CLINC150." The mixture builder ships in the package: `unsloth.models.decision_datasets` (`SOURCES`, `build_decision_mixture`, `augment_row`, `Decontaminator`) [R, unsloth 2026.10.2]. It converts each source to `{state, questions, gold}` (intent -> a `choice`, NLI -> a 3-way `choice`, boolq and prompt_injections -> a `noul`, sst5 -> a 5-level `score`, MCQ -> a `choice`), then AUGMENTS the schema per row (question ids renamed 30%, options renamed to letters/codes 30%, instructions paraphrased 40% or dropped 10%, a derived yes/no question added 50%, the state flattened to text 30%, fields shuffled, at most 24 options). MMLU trains on `auxiliary_train` only; Decision Index benchmarks (`bfcl`, `when2call`) are refused as training sources; `xlam` is in `SOURCES` but is not one of the guide's 12. The mix's row count is not stated.
+
+**typed-decisions** (LocalLLaMA/typed-decisions, Apache-2.0) [R]: synthetic, four workflows (agent-trace review, customer service, invoice processing, security incidents), each case = one state + FIVE typed questions; train 1,200 cases (300 per workflow), test 400 cases = 2,000 decisions. Gold is the MEAN of three samples from a teacher "of roughly 4B-class capability", so a score measures agreement with that teacher: the dataset card's references are Prior (label frequencies, input ignored) 0.470, perfect factor recovery 0.704, **teacher self-agreement 0.735**, uniform 0.308. Models fine-tuned on `train` self-report 0.77-0.80 there; "scores well above 0.735 mean a model is learning the teacher's quirks". Inference: the guide's "typed-decisions 33% -> 78%" starts below the Prior (0.47) and ends 4 points above the teacher's own consistency, so most of the gain on that column is learning the dataset's label frequencies and the teacher's habits; it is not evidence of general decision skill.
+
+**Recipe, and where the page disagrees with itself.**
+- Prose: "fine-tuned LLMs with a Clef head using LoRA (r=64) for just one epoch".
+- Studio steps: "To match our results, set epochs to 2, LoRA rank to 16 and learning rate to 2e-4."
+- Code: `r = 16, lora_alpha = 16, lora_dropout = 0`, `load_in_4bit = True`, `max_seq_length = 2048`, batch 8 x accumulation 4, 2 epochs, lr 2e-4 cosine, warmup 10, weight decay 0.01, seed 3407, `FastDecisionModel.split_holdout` for calibration rows. Head lr 1e-4 by default (`head_learning_rate`).
+- In the package: `FastDecisionModel.get_peft_model` defaults to r = 64, alpha = 64 (the table's r=64 is the library default); Studio passes a head lr of 3e-4 for a plain LLM (`FRESH_HEAD_LEARNING_RATE`, "the from-LM recipe's head rate") and the library's own default is 1e-4 [R, `studio/backend/core/training/decision_trainer.py`]. Our run therefore follows the TABLE (r=64, alpha=64, 1 epoch, then 2) and states each departure.
+- Head: `default_head_config`: width 1024 when the backbone's hidden size >= 3072, else 512; 2 routing layers + 4 decoder layers, heads = width/64, feedforward 4 x width. Cloudflare's released heads are width 1024 / 2 + 4 / 16 heads / ff 4096 for hidden 5120 (Clef) and 4096 (Clef-Flash) [R, `joint_head_config.json`].
+- Loss: soft cross-entropy over each question's options, optional label smoothing / Brier / ordinal terms (off by default for a plain-LLM head); calibration afterwards = per-type temperatures fitted on the held-out rows (`FastDecisionModel.calibrate`).
+- Export: `model.save_pretrained(dir)` (LoRA adapters + head), `model.save_pretrained_merged(dir)` (16-bit merged), `push_to_hub`; GGUF through `unsloth.models.decision_gguf` (quantisations q8_0, f16, bf16, q6_k, q5_k_m, q4_k_m) which calls llama.cpp's Clef converter at tag `b11443` and then writes the calibration temperatures into the GGUF [R, unsloth 2026.10.2].
+- Serve: Unsloth Studio, `UNSLOTH_SYSTEMONE_MODEL=/path/to/merged unsloth studio -H 0.0.0.0 -p 8888`, then Settings -> API -> Decision API; requests naming `laya`, `default` or `jev-latest` go to the model. "The model needs a GPU and loads on the first request".
+- Inference reads up to 16,384 tokens; training cuts to `max_seq_length` keeping the questions and options.
+
+## 5.2 Cloudflare Clef [R model cards and converter; H blog summary, vendor]
+
+- **Clef** (27B, post-trained from Qwen3.8-27B, 12 safetensors shards, 27.36 GB listed by the Hub API) and **Clef-Flash** (9B, from Qwen3.5-9B, 9.41 GB); Apache-2.0; created on the Hub 2026-09-30; both multimodal (text, JSON, images, video); announcement blog.cloudflare.com/clef-decision-models [R model cards].
+- Mechanism [R model card]: the backbone's final hidden states -> a "joint schema head" (a small transformer; routing layers that pull evidence from the state to each question, then decoder layers) -> one logit per allowed option per question, softmax per question, ONE forward pass, no text generated; API-compatible with Jev/SystemOne.
+- Training, from the blog through the fetch tool's summariser [H]: label-smoothed cross-entropy plus a Brier loss; rank-256 low-rank adapters; "Reinforcement Learning for Calibrated Decisions (RLCD)" as a secondary objective with partial credit for adjacent ordinal choices; the summary also said the backbone was "frozen", which contradicts the adapters it names and is not relied on. Latency (median) 38.8 ms Clef-Flash, 209.3 ms Clef, 524.1 ms Jev [H, vendor].
+- Cloudflare's 27B Clef shares its base (Qwen3.8-27B) with our Bonsai 2 27B. Clef itself is 27B at 16-bit (about 54 GB); the operator ruled it out ("too big").
+- **llama.cpp**: PR ggml-org/llama.cpp#29831 "model: add support for clef decision model (text-only)", merged 2026-10-03 as 99b9548; it follows #29818 "add /v1/systemone API (models: laya, julia-1, lev, openjev, kev)", merged 2026-10-02. 24 files: `conversion/clef.py` (a `ClefModel(Qwen3_5TextModel)` converter that reads `joint_head_config.json` and `joint_head.safetensors`), a Clef graph (`src/models/clef.cpp`, 616 lines), a new `llama_batch_ext_set_decision_order(batch, idx, order)` call marking question (kinds 1/2/3 = noul/choice/score) and option (4) token spans, and `tools/server/server-decision.cpp`. Known limits from the PR: no vision (waits for #29622), single sequence per batch. Pre-quantised: `ggml-org/Clef-GGUF`, `ggml-org/Clef-Flash-GGUF`.
+- Decision Index 0.2.1 context: the Decision Index harness's board has no Clef entrant in the file our 860-row run used (`bench/decider/decision_index/RESULT-strat860.md`); Cloudflare publishes its own board (clef-evals.workers-ai-mle.workers.dev, not read).
+
+## 5.3 Liquid AI d1-omni-600M [R, model card, vendor; read 2026-10-07; not downloaded]
+
+https://huggingface.co/LiquidAI/d1-omni-600M. Created on the Hub 2026-10-05 (Hub API `createdAt`); licence `lfm1.0` (card: `license: other`). The coordinator's note gave "released ~Nov 2025"; the card does not support it: its citation is dated 2026 ("Open d1: Edge decision models for text, vision, and audio") and Nov 2025 is the LFM2 technical report (arXiv 2511.23404) it also cites.
+
+| item | card |
+|---|---|
+| size | 587M: a 381M shared trunk + decision head, a 94M vision encoder (SigLIP2 tower from LFM2.5-VL-450M), a 112M audio encoder (17-layer FastConformer); base LFM2.5-Encoder-350M |
+| input | text/JSON, images (tiled, several), up to 30 s of 16 kHz speech; one modality set per request (images or audio, not both) |
+| output | zero output tokens; `noul`, `choice`, `score` (2-10 levels); `system_one()`, `system_one_batch()`, `probabilities()` |
+| context | 16,384 tokens (text, image and audio positions together); with images the state and question text is cut to 896 tokens, as trained |
+| precision | trained fp32; fp16 gave the same top answer on every text (243), image (214) and audio (416) row checked; bf16 changed 0.8% of text and 1.7% of audio rows |
+| calibration | text answers use per-type temperatures stored in `config.json`; image and audio answers are the raw softmax |
+| format | `model.safetensors` + `trust_remote_code` Python (`modeling_d1.py`, `encoder.py`, `vision.py`, `audio.py`, `prompt.py`); no GGUF, nothing in llama.cpp |
+| speed | "We don't report inference numbers ... early research release" |
+| Decision Index 0.2.1 | **15.95** (scored by Liquid with the official scorer, "not leaderboard submissions"); Knowledge 8.3, Language 12.9, Retrieval 35.0, Tools 15.1, Arts 6.8; sibling **d1-3B 48.57** (Knowledge 23.8, Language 56.4, Retrieval 52.8, Tools 74.5, Arts 36.3) |
+| Liquid's own suite (decisions from public benchmarks) | SQuAD 2.0 74.0, Civil Comments 95.8, MASSIVE intent 86.1, PubMedQA 61.3, BoolQ 77.7, XNLI 74.7, PAWS-X 79.5; mean 78.4 (d1-3B 82.9, Decider 4B 81.1, Decider 2B 77.1); Fast Decisions dev 76.9. HelpSteer2 left out for possible training overlap |
+
+Reading: a small ENCODER decider with multimodal decisions in one pass (images and speech are decisions jjava cannot make, since jjava reads text through a text-only engine path, though `bonsai-vision` can describe an image first), weak on the general index (15.95 against 40-50 for the 4B-12B text deciders and 28.97 for Decider 2B), with d1-3B the stronger sibling; not servable by llama.cpp today. On the typed-decisions card a different Liquid model, `d1:free` through Liquid's API, scores 0.742 zero-shot (rank 2, behind meraGPT Decider 1's 0.768 and ahead of Jev 1.13.0's 0.727) [R, dataset card, self-reported by the dataset's authors with Liquid's API]; that is not the open d1-omni-600M.
+
+## 5.4 OUR approach, for contrast
+
+| | jjava (ours) | a trained Clef-style head (Unsloth, Cloudflare) |
+|---|---|---|
+| read | the next-token probabilities of the letters A..Z of an UNMODIFIED served model, thinking off, on a cached state (`mcp/decider_bonsai.py`) | one forward pass of the backbone, then a small trained head scores every option of every question jointly from hidden states pooled over the question and option spans |
+| training | none | LoRA on the backbone (optional) + a new head, on thousands to hundreds of thousands of labelled decisions |
+| calibration | per-model letter bias / temperature, two option orders averaged, thresholds tuned on our labels (`bench/decider/tune.py`) | learned (soft-label cross-entropy, Brier) and a fitted temperature per question type on held-out decisions |
+| extra memory | none: the model that serves the conversation reads | a second model (or a head on the first) |
+| any served model | yes: Bonsai, Flash-Next, Mirai S, `bonsai-a4000` | one trained checkpoint per backbone; the head is tied to that backbone's hidden states |
+| batching | `/decide-batch` (engine patch 0042: every question of a call in one pass; built, unshipped) | the schema's questions are one sequence by design |
+| measured here | JevBench public items (231), `bonsai-a4000`: Intelligence 80.46 (tiers easy 1.000 / standard 0.944 / hard 0.739), hard-tier ECE 0.056, against Jev 1.13.0's 82.25 on the same items, McNemar p 0.84 (`bench/decider/results/jevbench/bonsai-a4000-20261006-193326/summary.json`); Decision Index 0.2.1 860-row subset (not the board's index): mean skill over 37 benchmarks 41.0 against Jev 55.9 (`bench/decider/decision_index/RESULT-strat860.md`; knowledge/reasoning benchmarks far behind, tools 72); skill injection (JJAVA section 9): NEEDED against OFF AUROC 0.924, but NEEDED against AREA 0.631 and the top-belief item is the needed one 30% of the time (a random item 31%), stage 2 AUROC 0.687 | not yet measured on our sets (Part 5.5 and `bench/decider/unsloth/`) |
+
+**What a trained head adds** (stated plainly): learned, calibrated scoring of the options as one distribution per question; one pass for all questions; the ability to learn a task the base model's letter read cannot express (here: NEED against RELEVANCE, if labelled data separates them); a small model can do it (0.8B-2B). **What jjava keeps**: no training and no labelled-data requirement to start; no extra memory; any served model, so the model that already holds the conversation decides; reads the model's whole-context understanding at 27B scale. **The evidence on whether training helps a strong frozen reader** is mixed and already in Part 4: reflex rejected four LoRA mixes and jqv found a head plus LoRA helped at 1.7B and "not at 14B/32B" (3.2 and 4.3). The operator's question for Bonsai (a head on a FROZEN ternary Bonsai; no LoRA possible) is Phase 4 of the work recorded in `bench/decider/unsloth/`.
+
+## 5.5 Where our own runs are recorded
+
+`bench/decider/unsloth/README.md` indexes the scripts and RESULT files: the guide's recipe on Qwen3.5-2B and its test split; our sets (JevBench's 231 public items; the skill-injection labels, relevance and need questions); serving feasibility in OUR engine (llama-bonsai2-ada) and the VRAM beside Bonsai; and the frozen-Bonsai head feasibility test. CONTAMINATION, binding on every number from those runs: the guide's mix trains on the train splits of BANKING77, CLINC150, MMLU (`auxiliary_train`), ARC and others, so Decision Index results for those benchmarks from a model trained on that mix are in-distribution and are never reported without saying so, and no test row is ever trained on.
+
+---
+
 ## Our data, as it stands (read-only, 2026-09-29)
 
 - `logs/decider_disagreements.jsonl`: 260 rows when last read, 2026-09-27 to 09-29 (it grows while the stack serves).
