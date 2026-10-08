@@ -972,6 +972,22 @@ artifacts:
       licence: apache-2.0
       notes: "operator-approved download 2026-10-07 (the guide's model_name pattern unsloth/Qwen3.5-<size>; the post-trained Qwen3.5-2B, not the -Base repo); includes the vision tower. sha256 = the HF LFS sha256. Datasets and their revisions: bench/decider/unsloth/data_manifest.json"
 
+  - id: qwen3-5-0-8b-decision-base
+    role: "the PRIMARY base for the Unsloth decision-model recipe (operator, 2026-10-07: \"the 0.8b is what I was after\"): a fresh Clef head + LoRA over it; input to bench/decider/unsloth/train_decision.py. Not served"
+    status: input
+    path: "${models}/hf-unsloth/hub/models--unsloth--Qwen3.5-0.8B/snapshots/23c69c53358a07516b5827588b3fdb12ae78fd65/model.safetensors-00001-of-00001.safetensors"
+    size: 1746942600
+    sha256: 04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696
+    provenance:
+      status: pinned
+      repo: unsloth/Qwen3.5-0.8B
+      revision: 23c69c53358a07516b5827588b3fdb12ae78fd65
+      revision_basis: download
+      filename: model.safetensors-00001-of-00001.safetensors
+      checked: "2026-10-07"
+      licence: apache-2.0
+      notes: "operator-approved download 2026-10-07 (same family as qwen3-5-2b-decision-base); includes the vision tower"
+
 runtimes:
   - id: stack-python
     role: "the stack's interpreter: proxy, tools API, worker, every script and test"
