@@ -524,6 +524,32 @@ def test_store_image_and_the_output_cap_in_a_turn():
         images.public_base = saved_base
 
 
+def test_the_store_survives_a_compaction():
+    """store() in a script, an in-place compaction, the client keeps only the summary: load() still reads the
+    value (the store hangs off the conversation key, which the summary's session line carries)."""
+    fresh()
+    c = CM("cmp")
+    t1 = c.turn([T.reply("", calls=[compose("store('plan', {step: 3}); return 'stored'", "p1")]),
+                 T.reply("", reasoning="Write.", calls=[T.call("write_file", H.PKG, "w1")])],
+                user="Remember the plan, then write the file.")
+    c.tool_result("w1", "wrote package.json")
+    ts = c.turn([T.reply("The user asked to remember a plan; step 3 was stored and package.json written.")],
+                user="Your task is to create a detailed summary of the conversation so far.")
+    summary = ts["m"].get("content") or ""
+    check((ts["x"].get("utility_kind") == "compaction" or ts["x"].get("compaction")) and summary,
+          "the summarise turn is served as a compaction", json.dumps(ts["x"].get("compaction"))[:200])
+    # the client keeps the system message and the summary only
+    c.msgs = [c.msgs[0], {"role": "user", "content": "[CONTEXT COMPACTION] Summary of the earlier conversation:\n"
+                          + summary}]
+    c.ids = {}
+    t2 = c.turn([T.reply("", calls=[compose("return JSON.stringify(load('plan'))", "p2")]), T.reply("Step 3.")],
+                user="What was the plan?")
+    out = hop(t2, 1, "p2")
+    ses = t2["x"].get("session") or {}
+    check('{"step":3}' in out, "load() after the compaction reads what was stored before it "
+          f"(session source: {ses.get('source')})", out[:200] + " | " + json.dumps(ses)[:200])
+
+
 def test_a_hidden_hop_keeps_its_argument_order():
     """A hop whose calls' arguments are NOT in sorted key order (the model wrote `query` before `ecosystem`),
     then a TEXT answer: the next request must extend the slot. It did not (2026-10-08, live: reused 5178 of
@@ -583,7 +609,8 @@ def test_over_responses():
 def main() -> int:
     for fn in (test_the_offer, test_one_hidden_hop, test_only_mode_session, test_failures,
                test_the_caps_inside_a_script, test_decide_and_images,
-               test_store_image_and_the_output_cap_in_a_turn, test_a_hidden_hop_keeps_its_argument_order,
+               test_store_image_and_the_output_cap_in_a_turn, test_the_store_survives_a_compaction,
+               test_a_hidden_hop_keeps_its_argument_order,
                test_over_responses):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
