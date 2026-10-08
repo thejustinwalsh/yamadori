@@ -14,7 +14,7 @@ a local HTTP server: a good file lands, a bad one stays `.part`, an existing
 different file is never overwritten.
 
 Also, on the REAL tracked files (no hashing): the manifest has no schema
-problems, and every model file config.template.yaml passes to a server is
+problems, and every model file config.example.yaml passes to a server is
 recorded in it -- so the public manifest cannot drift from the public config.
 """
 from __future__ import annotations
@@ -352,20 +352,30 @@ def test_runtimes() -> None:
 
 
 def test_real_manifest() -> None:
-    print("the tracked manifest vs config.template.yaml (no hashing)")
+    print("the tracked manifest vs config.example.yaml (no hashing)")
     m = va.load_manifest(va.MANIFEST, None)
     sp = va.schema_problems(m)
     check(sp == [], "models/manifest.yaml has no schema problems", "; ".join(map(str, sp)))
-    tmpl = os.path.join(ROOT, "config.template.yaml")
+    # config.example.yaml's machine-specific values are @@PLACEHOLDERS@@ (scripts/make_config.py); render it with dummy
+    # ones into a temp file (config.template.yaml was replaced by it, 2026-10-07).
+    import tempfile
+    import make_config as mc
+    with open(os.path.join(ROOT, "config.example.yaml"), encoding="utf-8") as f:
+        text = f.read()
+    dummy = {n: "x" for n in mc.placeholders_in(text)}
+    dummy.update({"MODELS_DIR": "/MODELS", "MAIN_MODEL": mc.DEFAULT_MAIN_MODEL})
+    tmpdir = tempfile.mkdtemp()
+    tmpl = os.path.join(tmpdir, "config.yaml")
+    with open(tmpl, "w", encoding="utf-8", newline="\n") as f:
+        f.write(mc.render(text, dummy))
     cfg = yaml.safe_load(open(tmpl, encoding="utf-8"))
-    # The template's macros are "<ABSOLUTE PATH ...>" placeholders.
     over = {"models": "/MODELS", "server": "srv", "server_mtp": "srv"}
     macros = va.config_macros(cfg, tmpl, over)
     recorded = {va.norm(va.resolve(str(a["path"]), macros)) for a in m["artifacts"]}
     refs = va.config_files(tmpl, over)
     missing = sorted({p for _, _, p in refs if va.norm(os.path.normpath(p)) not in recorded})
     check(len(refs) >= 10 and not missing,
-          f"all {len(refs)} model-file arguments in config.template.yaml are recorded",
+          f"all {len(refs)} model-file arguments in config.example.yaml are recorded",
           "; ".join(missing))
     pinned = [a for a in m["artifacts"] if a["provenance"]["status"] == "pinned"]
     check(all(a["provenance"].get("checked") and a["provenance"].get("revision_basis")
