@@ -60,6 +60,7 @@ def main() -> int:
     ap.add_argument("--skip-baseline", action="store_true")
     ap.add_argument("--no-save", action="store_true")
     ap.add_argument("--seed", type=int, default=3407)
+    ap.add_argument("--mem-gb", type=float, default=0, help="cap this process's CUDA memory (leave room for resident servers)")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -68,6 +69,8 @@ def main() -> int:
     from unsloth import DecisionTrainer, FastDecisionModel, is_bfloat16_supported
     from transformers import TrainingArguments
 
+    if a.mem_gb and torch.cuda.is_available():
+        torch.cuda.set_per_process_memory_fraction(min(1.0, a.mem_gb * 1024**3 / torch.cuda.get_device_properties(0).total_memory))
     t0 = time.time()
     res = {"args": vars(a), "device": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]}
     model, tok = FastDecisionModel.from_pretrained(
