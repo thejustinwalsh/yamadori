@@ -955,6 +955,23 @@ artifacts:
       licence: "Apache-2.0 (Qwen/Qwen3.8-27B)"
       notes: "streamed sha256 = HF LFS sha256 = X-Linked-ETag. Converted by alesha-pro from Qwen/Qwen3.8-27B with the stock convert_hf_to_gguf.py --mmproj (their card); not compared with a Qwen-published mmproj"
 
+  # ------------------------------------------------ decision-model training (bench/decider/unsloth)
+  - id: qwen3-5-2b-decision-base
+    role: "the base model the Unsloth decision-model recipe is trained on (a fresh Clef head + LoRA over it); input to bench/decider/unsloth/train_decision.py. Not served"
+    status: input
+    path: "${models}/hf-unsloth/hub/models--unsloth--Qwen3.5-2B/snapshots/fffbc0d8711cf87df6d1f97938c5e50ef94aadc7/model.safetensors-00001-of-00001.safetensors"
+    size: 4548221488
+    sha256: aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+    provenance:
+      status: pinned
+      repo: unsloth/Qwen3.5-2B
+      revision: fffbc0d8711cf87df6d1f97938c5e50ef94aadc7
+      revision_basis: download
+      filename: model.safetensors-00001-of-00001.safetensors
+      checked: "2026-10-07"
+      licence: apache-2.0
+      notes: "operator-approved download 2026-10-07 (the guide's model_name pattern unsloth/Qwen3.5-<size>; the post-trained Qwen3.5-2B, not the -Base repo); includes the vision tower. sha256 = the HF LFS sha256. Datasets and their revisions: bench/decider/unsloth/data_manifest.json"
+
 runtimes:
   - id: stack-python
     role: "the stack's interpreter: proxy, tools API, worker, every script and test"
@@ -972,6 +989,14 @@ runtimes:
     check: lock
     interpreter: "C:/Users/jwals/llama-stack/.venv-laya/Scripts/python.exe"
     lock: locks/laya.lock.txt
+    freeze: pip
+
+  - id: unsloth-train-python
+    role: ".venv-unsloth: Unsloth 2026.10.2 + torch 2.11.0+cu128, the decision-model training venv (bench/decider/unsloth). Lock installed from PyPI by pip, operator-approved 2026-10-07; torch from download.pytorch.org/whl/cu128"
+    check: lock
+    severity: warn
+    interpreter: "C:/Users/jwals/llama-stack/.venv-unsloth/Scripts/python.exe"
+    lock: locks/unsloth.lock.txt
     freeze: pip
 
   - id: web-dashboard

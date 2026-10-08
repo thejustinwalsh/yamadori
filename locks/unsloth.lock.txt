@@ -1,7 +1,9 @@
-# Lock for runtime `unsloth-train` (the decision-model training venv) -- written 2026-10-07
+# Lock for runtime `unsloth-train-python` -- written by hand in the verify_artifacts format; checked by verify().
 # interpreter: C:/Users/jwals/llama-stack/.venv-unsloth/Scripts/python.exe
-# python: Python 3.13.15 (the stack interpreter's base, conda-forge 3.13.15)
-# method: pip freeze. Install order: torch==2.11.0 + torchvision==0.26.0 from https://download.pytorch.org/whl/cu128 (PyPI's torch on Windows is CPU-only and pip upgraded to it), then pip install unsloth==2026.10.2, then torch again from the cu128 index.
+# python: 3.13.15 | packaged by conda-forge | (main, Sep  2 2026, 21:52:43) [MSC v.1944 64 bit (AMD64)]
+# method: pip freeze
+# written: 2026-10-07
+# install order: pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128 ; pip install unsloth==2026.10.2 (pulls a CPU torch from PyPI) ; the first command again (PyPI's Windows torch is CPU-only)
 accelerate==1.15.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.4
@@ -87,3 +89,4 @@ xformers==0.0.35
 xxhash==4.0.1
 yarl==1.25.1
 zipp==4.1.1
+pip==26.2.1
