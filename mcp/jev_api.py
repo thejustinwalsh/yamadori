@@ -204,8 +204,9 @@ def _enter_lane(n_questions: int, rec: dict) -> None:
             rec["queue"] = {"admitted": False, "ahead_s": round(ahead, 2), "own_s": round(est, 2),
                             "waiting": len(_waiting), "retry_after_s": ra}
             raise JevError(429, f"The decider lane is busy: {len(_waiting) + 1} call(s) ahead, about {ahead:.1f} s "
-                                f"of work; waiting would outlast the client's {CLIENT_TIMEOUT_S:.0f} s timeout. "
-                                f"Retry in about {ra} s.",
+                                f"of work, and this call's own {n_questions} question(s) take about {est:.1f} s "
+                                f"(the recent per-question time); together that would outlast the client's "
+                                f"{CLIENT_TIMEOUT_S:.0f} s timeout. Retry in about {ra} s.",
                            {"Retry-After": str(ra)}, code="lane_busy")
         ticket = {"id": uuid.uuid4().hex, "est_s": est}
         _waiting.append(ticket)
