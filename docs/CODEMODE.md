@@ -241,3 +241,14 @@ bench/mcp/codemode_probe.py --trials N --steps S`). The reader is checked offlin
 * A native engine's catchable RangeError on deep recursion (wasmtime's stack trap ends the run instead).
 * `image()` output and `store/load` are not provided.
 * The full text of a script is in the corpus tool_call rows; `x_yamadori.codemode.heads` keeps its first 120 characters.
+
+## The probe and the default (2026-10-08)
+
+`bench/mcp/codemode_probe.py`, Pi 0.87.1, Bonsai at medium, the pagoda prompt's first 8 requests, tag `codemode2`, **n=2 trials per
+arm** (rows in `bench/mcp/results/codemode_probe.jsonl`): `off` (today's tools) 18.5 mean hops, 0 cap hits, our additions 3,008
+tokens; `on` 14.0 hops, 0 cap hits, 5 scripts across the trials, 0 failed, 4,622 tokens; `only` 23.5 hops, 1 of 2 trials hit the
+tool-turn cap (29 hops, 364K characters of tool results), 26 scripts, 1 failed, searched in 1 trial with no hit. The model calls the
+toolbox without being told to and writes working scripts; it rarely searches (the declarations in the description name the
+functions). n=2 cannot show a benefit beyond "no worse"; `on` costs ~1.6K prompt tokens. Operator, 2026-10-08: "turn codemode on if
+it has been tested" -> **mode `on` is the default at medium and up** (`YAMADORI_CODEMODE=0` / `{"codemode": false}` turns it off);
+**`only` stays opt-in** (it looped to the cap in 1 of 2 trials). A bigger Pi run and the Hermes arm are still to do.

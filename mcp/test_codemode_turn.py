@@ -93,14 +93,14 @@ def first(tag: str, user: str = "Build a voxel scene with pmndrs math.", cls=CM,
 # ================================================================== 1. offer
 def test_the_offer():
     fresh()
-    off = H.Conv("off", features={"skills": False})
+    off = H.Conv("off", features={"skills": False, "codemode": False})
     t = off.turn([T.reply("Ok.")], user="Build a voxel scene with pmndrs math.")
     g = t["gens"][0]
     cm = t["x"].get("codemode")
     check(C.TOOL_NAME not in names_of(g) and C.SYSTEM_LINE.strip() not in H.system_of(g)
-          and cm and cm["offered"] is False and cm["switch"]["on"] is False and cm["switch"]["source"] == "default"
+          and cm and cm["offered"] is False and cm["switch"]["on"] is False and cm["switch"]["source"] == "header"
           and "switch codemode off" in (cm.get("why") or ""),
-          "OFF BY DEFAULT: no tool, no line; the record says the switch is off and why", json.dumps(cm)[:300])
+          "switched off (header): no tool, no line; the record says the switch is off and why", json.dumps(cm)[:300])
     c, t = first("on")
     g = t["gens"][0]
     names = names_of(g)

@@ -44,6 +44,7 @@ sys.path.insert(0, HERE)
 import offline_stores  # noqa: E402  (every store a temp path BEFORE anything else is imported)
 
 _TMP = offline_stores.isolate("yamadori_test_codemode_")
+os.environ.pop("YAMADORI_CODEMODE", None)       # this suite tests the default (run_tests.py and isolate() pin it off)
 os.environ["YAMADORI_MCP_SERVERS"] = os.path.join(_TMP, "mcp", "servers.json")
 os.environ.setdefault("YAMADORI_GPU_ROOM", "0")
 
@@ -625,12 +626,13 @@ def test_the_derivations():
     check(repeats.RESULT_CAP == 6000, "the returned output cap is the hidden hop's own breaker, 6,000")
     import tiers
     sw = C.switch({})
-    check(sw["on"] is False and sw["mode"] == "on" and "codemode" in tiers.OFF_BY_DEFAULT,
-          "the switch is off by default; the mode is `on`", json.dumps(sw))
-    os.environ["YAMADORI_CODEMODE"] = "1"
+    check(sw["on"] is False and sw["source"] == "tier" and sw["mode"] == "on" and not tiers.OFF_BY_DEFAULT,
+          "the switch is on by default where the tier has the MCP tools (none here); the mode is `on`", json.dumps(sw))
+    check(C.switch({"mcp_tools": True})["on"] is True and C.switch({"mcp_tools": False})["on"] is False,
+          "on by default at medium and up (the tier's MCP tools), off below")
+    os.environ["YAMADORI_CODEMODE"] = "0"
     try:
-        check(C.switch({"mcp_tools": True})["on"] is True and C.switch({"mcp_tools": False})["on"] is False,
-              "YAMADORI_CODEMODE=1 turns it on where the tier has the MCP tools (medium and up)")
+        check(C.switch({"mcp_tools": True})["on"] is False, "YAMADORI_CODEMODE=0 turns it off")
     finally:
         del os.environ["YAMADORI_CODEMODE"]
     f = tiers.from_header('{"codemode": true, "codemode_mode": "only"}')

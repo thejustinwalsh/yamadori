@@ -555,6 +555,9 @@ def main(argv: list[str]) -> int:
     # be able to unload a real model. mcp/test_gpu_room.py turns it back on
     # against its own fake stack.
     offline_env["YAMADORI_GPU_ROOM"] = "0"
+    # The server toolbox is ON by default (2026-10-08): its tool and system line would change every request an
+    # offline suite counts. Pinned off; mcp/test_codemode*.py and test_tiers.py gate the toolbox themselves.
+    offline_env["YAMADORI_CODEMODE"] = "0"
     # THE OFFLINE GUARD (scripts/offline_guard/sitecustomize.py, 2026-09-27):
     # every Python process an offline suite runs refuses a connect to a port
     # the stack serves on, and records it; the suite then FAILS, whatever its

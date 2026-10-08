@@ -314,11 +314,17 @@ def prepared(fx: dict, chat: dict, effort: str | None = None,
         feats = json.loads(hdr.get("x-yamadori-features") or "{}")
         body["_features"] = json.dumps(dict(feats, skills=True))
     if ((fx.get("expect") or {}).get("tools") or {}).get("codemode"):
-        # The server toolbox is off by default (tiers.OFF_BY_DEFAULT, until its probe passes); the fixtures that
-        # check its overlap with a harness's own code mode force it on, in mode `only` (the mode that hides tools)
+        # The server toolbox is on by default (operator 2026-10-08); the fixtures that check its overlap with a
+        # harness's own code mode force it on, in mode `only` (the mode that hides tools)
         feats = json.loads(hdr.get("x-yamadori-features") or "{}")
         body["_features"] = json.dumps(dict(json.loads(body.get("_features") or "{}"), **feats, codemode=True,
                                             codemode_mode="only"))
+    else:
+        # Every other fixture decides something else (roles, routes, sessions ...): the toolbox's tool and system line
+        # would be one more thing in each request, so it is pinned off here (test_codemode_turn.py gates the toolbox)
+        feats = json.loads(hdr.get("x-yamadori-features") or "{}")
+        body["_features"] = json.dumps(dict(json.loads(body.get("_features") or "{}"), **{"codemode": False},
+                                            **{k: v for k, v in feats.items() if k != "codemode"}))
     skill_select._STICKY.clear()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

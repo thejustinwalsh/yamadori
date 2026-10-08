@@ -89,4 +89,7 @@ def isolate(prefix: str = "yamadori_offline_", *, keep: tuple = ()) -> str:
     # No container either: the PROVE stage's type check (mcp/typecheck.py)
     # starts one per check; an offline suite records "not run" instead.
     os.environ.setdefault("YAMADORI_SKILL_TYPECHECK", "0")
+    # The server toolbox is on by default; a suite that counts tools or system text runs without it
+    # (mcp/test_codemode*.py clear this and test the toolbox itself).
+    os.environ.setdefault("YAMADORI_CODEMODE", "0")
     return tmp

@@ -154,7 +154,12 @@ def cmd_records(a) -> int:
         for it in items:
             by.setdefault(it["case"], []).append(it)
         from eval_skills import REL, NEED
-        for case, its in by.items():
+        cases = sorted(by)
+        random.Random(11).shuffle(cases)
+        if a.n_cases:
+            cases = cases[: a.n_cases]
+        for case in cases:
+            its = by[case]
             qs, gold = {}, {}
             for it in its:
                 for nm, text, truth in (("rel", REL, it["level"] >= 1), ("need", NEED, it["level"] == 3)):
@@ -195,27 +200,32 @@ def post_embed(server: str, ids: list[int], timeout=600):
 
 
 def cmd_extract(a) -> int:
+    """Two client threads against the single-slot server: while one parses the (huge, ~100 KB per token) JSON the other's request is
+    already prefilling."""
     import numpy as np
+    from concurrent.futures import ThreadPoolExecutor
+    load_ref()      # the pickled records are clef_ref dataclasses
     recs = pickle.load(open(DATA / f"bonsai_records_{a.set}.pkl", "rb"))
     out = STATES / a.set
     out.mkdir(parents=True, exist_ok=True)
+    todo = [r for r in recs if "record" in r and not (out / (r["id"].replace(":", "_") + ".npy")).exists()]
     t0 = time.time()
-    n = 0
-    for r in recs:
-        if "record" not in r:
-            continue
-        f = out / (r["id"].replace(":", "_") + ".npy")
-        if f.exists():
-            continue
+    done = [0, 0]
+
+    def one(r):
         ids = list(r["record"].input_ids)
         h = post_embed(a.server, ids)
         if h.shape != (len(ids), HIDDEN):
             raise SystemExit(f"{r['id']}: got {h.shape}, want {(len(ids), HIDDEN)} (is the server --embeddings --pooling none?)")
-        np.save(f, h.astype(np.float16))
-        n += 1
-        if n % 25 == 0:
-            print(n, "records", round(time.time() - t0), "s", flush=True)
-    print("extracted", n, "in", round(time.time() - t0), "s ->", out)
+        np.save(out / (r["id"].replace(":", "_") + ".npy"), h.astype(np.float16))
+        done[0] += 1
+        done[1] += len(ids)
+        if done[0] % 25 == 0:
+            print(done[0], "of", len(todo), "records", done[1], "tokens", round(time.time() - t0), "s", round(done[1] / (time.time() - t0)), "tok/s", flush=True)
+
+    with ThreadPoolExecutor(2) as ex:
+        list(ex.map(one, todo))
+    print("extracted", done[0], "records,", done[1], "tokens in", round(time.time() - t0), "s ->", out)
     return 0
 
 
@@ -229,7 +239,6 @@ def lm_head_rows(token_ids: set[int]):
     (n_cols, n_rows), ttype, off = tensors["output.weight"]
     assert ttype == X.PTQ1_0 and n_cols == HIDDEN
     ids = sorted(token_ids)
-    mat = np.zeros((n_rows, 0), dtype=np.float16)
     out = {}
     per_row = n_cols // X.BLOCK_WEIGHTS * X.BLOCK_BYTES
     mm = np.memmap(GGUF, dtype=np.uint8, mode="r", offset=start + off, shape=(n_rows * per_row,))
@@ -299,6 +308,7 @@ def forward(head, ref, batch, sets_dir, lex, dev, synthetic=False):
 
 
 def load_sets(names):
+    load_ref()
     recs = []
     dirs = {}
     for s in names:
@@ -384,7 +394,48 @@ def cmd_eval(a) -> int:
     for x in out:
         by.setdefault(x["source"], []).append(int(max(range(len(x["p"])), key=x["p"].__getitem__) == x["label"]))
     print({s: (round(sum(v) / len(v), 4), len(v)) for s, v in by.items()})
+    post_eval(a, out)
     return 0
+
+
+def post_eval(a, out) -> None:
+    """JevBench items scored by JevBench's own code; skills as pred rows for skills_score.py."""
+    if "jevbench" in a.sets:
+        sys.path.insert(0, str(HERE))
+        import eval_jevbench as EJ
+        sys.path.insert(0, EJ.CLONE)
+        from jevbench import scoring, tasks
+        by_id = {}
+        for fn in ("easy.jsonl", "original.jsonl", "hard.jsonl"):
+            for t in tasks.load_jsonl(os.path.join(EJ.CLONE, "datasets", "public", fn)):
+                by_id[t.id] = t
+        recs = []
+        for x in out:
+            if x["set"] != "jevbench":
+                continue
+            t = by_id[x["meta"]["task_id"]]
+            if t.question["type"] == "noul":
+                pt = dict(zip(x["options"], x["p"]))["true"]
+                probs = {"yes": pt, "no": 1 - pt}
+            else:
+                probs = dict(zip(x["options"], x["p"]))
+            sc = scoring.score_task(probs, t)
+            recs.append({"task_id": t.id, "tier": x["meta"]["tier"], "family": t.family, "type": t.question["type"], "group": t.group,
+                         "n_labels": len(t.labels), "ok": True, "latency_s": None, "valid": sc["valid"], "strict_valid": sc.get("strict_valid"),
+                         "correct": sc["correct"], "predicted": sc.get("predicted"), "ordinal_ev": sc.get("ordinal_ev"), "probs": sc.get("probs")})
+        d = Path(a.head) / "jevbench"
+        d.mkdir(exist_ok=True)
+        (d / "items.jsonl").write_text(chr(10).join(json.dumps(r) for r in recs), encoding="utf-8")
+        print("jevbench items", len(recs), "-> summarize with eval_jevbench.py --summarize", d)
+    if "skills" in a.sets:
+        pred = {}
+        for x in out:
+            if x["set"] != "skills":
+                continue
+            nm, key = x["q"].split(":", 1)
+            pred.setdefault(key, {"case": x["meta"]["case"], "key": key})[{"rel": "relevance", "need": "need"}[nm]] = dict(zip(x["options"], x["p"]))["true"]
+        (Path(a.head) / "skills_pred.jsonl").write_text(chr(10).join(json.dumps(v) for v in pred.values()), encoding="utf-8")
+        print("skills pred rows", len(pred))
 
 
 def cmd_selftest(a) -> int:
@@ -401,6 +452,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("records"); p.add_argument("--set", required=True)
     p.add_argument("--n", type=int, default=3000); p.add_argument("--n-typed", type=int, default=400)
+    p.add_argument("--n-cases", type=int, default=0, help="skills: only this many cases (seeded shuffle)")
     p.add_argument("--n-banking", type=int, default=150); p.add_argument("--n-clinc", type=int, default=60)
     p = sub.add_parser("extract"); p.add_argument("--set", required=True); p.add_argument("--server", default="http://127.0.0.1:10031")
     p = sub.add_parser("train"); p.add_argument("--sets", nargs="+", required=True); p.add_argument("--epochs", type=int, default=3)

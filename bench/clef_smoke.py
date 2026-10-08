@@ -253,7 +253,7 @@ def main() -> int:
     ck.mkdir(exist_ok=True)
     try:
         info = make_trunk(ck, Path(args.tokenizer_from), args.seed)
-        head = make_head(ck, N_EMBD, args.seed + 1)
+        make_head(ck, N_EMBD, args.seed + 1)
 
         gguf_path = work / "tiny-clef.gguf"
         env = dict(os.environ, PYTHONPATH=str(src / "gguf-py"))

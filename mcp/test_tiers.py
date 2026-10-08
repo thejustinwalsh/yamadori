@@ -701,9 +701,9 @@ def test_the_tier_rows_after_the_removal():
                                     "slot_release", "idle_clear",
                                     "restore_reasoning", "mcp_tools", "preread",
                                     "preread_overlap", "package_skills", "codemode"}
-          and tiers.OFF_BY_DEFAULT == frozenset({"codemode"}),
+          and tiers.OFF_BY_DEFAULT == frozenset(),
           "the switches left; the package skills channel is ON by default (operator 2026-10-06) "
-          "until its probe passes; the server toolbox (codemode) is OFF until its probe passes",
+          "and so is the server toolbox (codemode, operator 2026-10-08, mode on)",
           str(sorted(tiers.BEHAVIOURS)))
     check(tiers.from_header('{"auto_triggers": false, "deep_tool_hop": true, '
                             '"seed_frame": false, "verify_directive": false}')

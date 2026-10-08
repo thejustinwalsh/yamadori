@@ -1284,10 +1284,10 @@ BEHAVIOURS = {
     #                   one tool `yama_compose_tools` -- the model finds the
     #                   server's tools (tools.search / describe / namespaces
     #                   / all) and calls several together from a QuickJS
-    #                   script. OFF BY DEFAULT until its probe passes (THE
-    #                   TOOL RECIPE rule 7; bench/mcp/codemode_probe.py):
-    #                   YAMADORI_CODEMODE=1 or the header {"codemode": true}
-    #                   turns it on; allowed where the tier's `mcp_tools`
+    #                   script. ON BY DEFAULT since 2026-10-08 (probe
+    #                   bench/mcp/codemode_probe.py, THE TOOL RECIPE rule 7):
+    #                   YAMADORI_CODEMODE=0 or the header {"codemode": false}
+    #                   turns it off; allowed where the tier's `mcp_tools`
     #                   flag is set (medium and up), a header forces it at
     #                   any tier. The mode is `codemode_mode` (on | only;
     #                   header or YAMADORI_CODEMODE_MODE): `only` hides the
@@ -1306,10 +1306,11 @@ BEHAVIOURS = {
     "preread_overlap": ("YAMADORI_PREREAD_OVERLAP", None),
 }
 # The switches that are OFF unless their variable (=1) or a header turns
-# them on; every other switch is on unless switched off. `codemode` only
-# (package_skills was turned on, operator 2026-10-06; THE TOOL RECIPE rule 7:
-# the toolbox ships only after its probe).
-OFF_BY_DEFAULT: frozenset = frozenset({"codemode"})
+# them on; every other switch is on unless switched off. None today:
+# package_skills was turned on (operator 2026-10-06) and so was `codemode`
+# (operator 2026-10-08, mode `on` only, after bench/mcp/codemode_probe.py: Pi,
+# tag codemode2, n=2 trials per arm; `only` stays opt-in, see docs/CODEMODE.md).
+OFF_BY_DEFAULT: frozenset = frozenset()
 
 
 def _env_on(var: str, default: bool = True) -> bool:

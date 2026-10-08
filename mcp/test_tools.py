@@ -1250,6 +1250,10 @@ def test_every_tool_has_a_test():
     about the tools it had before.
     """
     surface = {t["name"] for t in cs.ALL_TOOLS}
+    # yama_compose_tools is not run by run_our_tool: the turn loop runs it (proxy.run_compose_tools, a sandbox
+    # script). Its suites are mcp/test_codemode.py (the sandbox and the toolbox) and mcp/test_codemode_turn.py
+    # (the hop, chat and Responses), which run it for real.
+    _exercised_ours.add("yama_compose_tools")
     missing = sorted(surface - _exercised)
     check(not missing, "every tool on the tools API (code_search.ALL_TOOLS) "
           "has at least one test case", "untested: " + ", ".join(missing))
@@ -1269,10 +1273,11 @@ def test_every_tool_has_a_test():
     # (yama_find_package, yama_list_package_versions,
     # yama_read_package_readme, yama_resolve_packages; the old names are
     # legacy, not OUR_NAMES).
-    check(len(proxy.OUR_NAMES) == 7
+    # 8 since 2026-10-07: yama_compose_tools (the server toolbox, docs/CODEMODE.md).
+    check(len(proxy.OUR_NAMES) == 8
           and {"yama_generate_image", "yama_describe_image",
                "yama_recall_craft", "yama_find_package",
-               "yama_resolve_packages"} <= proxy.OUR_NAMES
+               "yama_resolve_packages", "yama_compose_tools"} <= proxy.OUR_NAMES
           and not surface & proxy.OUR_NAMES
           and not {"yama_think_deeply", "yama_plan", "yama_package_versions",
                    "find_in_knowledge_base"} & proxy.OUR_NAMES

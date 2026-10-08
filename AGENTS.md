@@ -634,7 +634,7 @@ surface row "main, where the MCP host serves"), `preread` and
 expert-file pre-read, "Flash-Next's first prompt" below), and `package_skills`
 (`YAMADORI_PACKAGE_SKILLS`, **OFF by default** until its probe passes; its
 rendering `package_skills_mode`: "The package skills channel" below). `codemode`
-(`YAMADORI_CODEMODE`, **OFF by default** until its probe passes; its mode `codemode_mode`: "The server toolbox" below). Removed with the features
+(`YAMADORI_CODEMODE`, **ON by default** since 2026-10-08, mode `on`; its mode `codemode_mode`: "The server toolbox" below). Removed with the features
 they switched: `step_thinking`, `fixup_project_only`, `plan_tools`,
 `plan_budget` (2026-09-27, docs/CONSTANTS-AUDIT.md); `seed_frame`,
 `helped_needs_change`, `plan_prompt`, `deep_tool_hop`,
@@ -1462,7 +1462,7 @@ in the section itself; every rule is deterministic.
   changes the tool list's text for every conversation that is offered the craft
   tool, which with the `skills` flag off today is none.
 
-## The server toolbox: `yama_compose_tools` (operator, 2026-10-07; built offline; **OFF until its probe passes**)
+## The server toolbox: `yama_compose_tools` (operator, 2026-10-07; **ON by default since 2026-10-08, mode `on`**)
 
 The operator, verbatim: "pi now has codemode https://pi.dev/docs/latest/codemode we could easily structure our proxy
 to allow the server to facilitate this feature built into the proxy. It even gives an api for image gen, jjava etc...
@@ -1486,7 +1486,7 @@ chat and Responses), `mcp/test_harness_decisions.py` (fixtures `pi/chat/codemode
   dashboard is discoverable with no prompt change). Each function's declaration and description are READ FROM THE
   TOOL'S OWN DEFINITION (one source). Every function resolves to `{ok, text, data?, error?{code, reason, retryable,
   next}}` and never throws. The client's tools (bash, read, write) are NOT callable; the description says so.
-- **Offer**: switch `codemode` (`tiers.BEHAVIOURS`, `YAMADORI_CODEMODE`, **in `tiers.OFF_BY_DEFAULT`**; allowed where
+- **Offer**: switch `codemode` (`tiers.BEHAVIOURS`, `YAMADORI_CODEMODE`, ON unless switched off; allowed where
   the tier's `mcp_tools` flag is set, a header forces it) and `codemode_mode` (`on`: the individual lookups stay;
   `only`: the MCP lookups it replaces, and the craft tool unless the craft index or the package skills channel names
   it, are hidden and reached through the toolbox). Decided on the conversation's FIRST request and KEPT RENDERED (the
