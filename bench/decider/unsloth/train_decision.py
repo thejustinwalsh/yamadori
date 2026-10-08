@@ -137,14 +137,17 @@ def main() -> int:
     res["steps_per_epoch"] = steps_per_epoch
     res["peak_vram_gb"] = round(torch.cuda.max_memory_allocated() / 1e9, 2) if torch.cuda.is_available() else None
     res["log_history"] = [h for h in trainer.state.log_history if "loss" in h][::max(1, res["steps"] // 60)]
+    (out / "result.json").write_text(json.dumps(res, indent=1), encoding="utf-8")      # partial: training is never lost
     cal = FastDecisionModel.calibrate(model, tok, cal_items, batch_size=a.eval_batch)
     res["calibration_heldout"] = {k: (round(v, 4) if isinstance(v, float) else v) for k, v in cal.items() if not isinstance(v, (list, dict))}
     res["temperature"] = model.decision_config.get("temperature")
-    FastDecisionModel.for_inference(model)
-    res["test_after"] = score("after")
-    if not a.no_save:
+    if not a.no_save:      # SAVE BEFORE THE TEST SPLIT: the 2026-10-07 run lost 47 minutes of training to an OOM in the final eval
         model.save_pretrained(str(out / "adapters"))
         model.save_pretrained_merged(str(out / "merged"), tok)
+        print("saved", out, flush=True)
+    (out / "result.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    FastDecisionModel.for_inference(model)
+    res["test_after"] = score("after")
     res["wall_seconds"] = round(time.time() - t0, 1)
     (out / "result.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
     print("DONE", out / "result.json", flush=True)
