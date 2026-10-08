@@ -1658,9 +1658,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
     int32_t     block_size    = 0;
     llama_token mask_token_id = 0;
 
+    bool                      prompt_lookup = false;
+    std::vector<llama_tokens> lookup_prompts;
     bool    is_dflash2     = false;
     bool    is_mrope       = false;
     int32_t selector_top_k = 0;
+    int32_t selector_beam_width = 1;
 
     // draft-dspark: the draft carries a Markov head. Comes from the model, not the
     // requested type. The DSpark path also truncates on confidence, and for
@@ -1723,6 +1726,27 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
 
         selector_top_k = llama_model_dflash_selector_top_k(model_dft);
         is_dflash2     = selector_top_k > 0;
+        // a lookup hit skips the noise-block forward and leaves the draft context untouched, so it is
+        // valid for DFlash1 and DFlash2 alike; DSpark drafts through its Markov head and stays excluded
+        const char * lookup_env = std::getenv("LLAMA_DFLASH_LOOKUP");
+        if (!lookup_env) {
+            lookup_env = std::getenv("LLAMA_DFLASH2_LOOKUP");
+            if (lookup_env) {
+                LOG_WRN("%s: LLAMA_DFLASH2_LOOKUP is deprecated, use LLAMA_DFLASH_LOOKUP\n", __func__);
+            }
+        }
+        prompt_lookup = !is_dspark && lookup_env && std::strcmp(lookup_env, "1") == 0;
+        if (prompt_lookup) {
+            lookup_prompts.resize(n_seq);
+        }
+        if (is_dflash2) {
+            if (const char * value = getenv("LLAMA_DFLASH2_BEAM_WIDTH")) {
+                const int width = std::atoi(value);
+                if (width >= 2 && width <= 4) {
+                    selector_beam_width = width;
+                }
+            }
+        }
         mask_token_id = llama_vocab_mask(llama_model_get_vocab(model_dft));
 
         // without a mask token every masked slot is drafted as token id -1: runs, accepts nothing,
@@ -1813,6 +1837,9 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             return;
         }
 
+        if (prompt_lookup) {
+            lookup_prompts[seq_id] = prompt;
+        }
         const int32_t N = (int32_t) prompt.size();
         if (N <= 0) {
             return;
@@ -1965,6 +1992,16 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 continue;
             }
 
+            if (prompt_lookup && dp.prompt) {
+                const int limit = dp.n_max > 0 ? std::min(params.n_max, dp.n_max) : params.n_max;
+                auto      found = common_prompt_lookup_draft(lookup_prompts[seq_id], *dp.prompt, dp.id_last, limit);
+                if (!found.empty() && found.size() >= (size_t) params.n_min) {
+                    *dp.result = std::move(found);
+                    LOG_DBG("DFlash prompt lookup: seq=%d tokens=%zu, neural draft skipped\n", seq_id,
+                            dp.result->size());
+                    continue;
+                }
+            }
             common_sampler_reset(smpls[seq_id].get());
 
             const int32_t n = (int32_t) dp.n_past;
@@ -2007,13 +2044,79 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 const float * lattice = llama_get_embeddings_nextn(ctx_dft);
                 GGML_ASSERT(lattice && "DFlash2 selector produced no lattice");
 
+                if (selector_beam_width > 1) {
+                    struct beam_path {
+                        float                score;
+                        std::vector<int32_t> slots;
+                    };
+
+                    std::vector<beam_path> beams = {
+                        { 0.0f, {} }
+                    };
+                    for (int32_t i = 1; i < n_block_tokens; ++i) {
+                        const float *          row = lattice + (size_t) (beg + i) * n_embd_dec;
+                        std::vector<beam_path> expanded;
+                        expanded.reserve(beams.size() * selector_top_k);
+                        for (const auto & beam : beams) {
+                            const int32_t predecessor = beam.slots.empty() ? 0 : beam.slots.back();
+                            const float * scores      = row + selector_top_k + (size_t) predecessor * selector_top_k;
+                            const float   max_score   = *std::max_element(scores, scores + selector_top_k);
+                            float         sum         = 0.0f;
+                            for (int32_t slot = 0; slot < selector_top_k; ++slot) {
+                                sum += std::exp(scores[slot] - max_score);
+                            }
+                            const float log_norm = max_score + std::log(sum);
+                            for (int32_t slot = 0; slot < selector_top_k; ++slot) {
+                                beam_path path = beam;
+                                path.score += scores[slot] - log_norm;
+                                path.slots.push_back(slot);
+                                expanded.push_back(std::move(path));
+                            }
+                        }
+                        std::partial_sort(
+                            expanded.begin(), expanded.begin() + std::min<size_t>(selector_beam_width, expanded.size()),
+                            expanded.end(), [](const beam_path & a, const beam_path & b) {
+                                const float as =
+                                    std::isnan(a.score) ? -std::numeric_limits<float>::infinity() : a.score;
+                                const float bs =
+                                    std::isnan(b.score) ? -std::numeric_limits<float>::infinity() : b.score;
+                                if (as != bs) {
+                                    return as > bs;
+                                }
+                                return a.slots < b.slots;
+                            });
+                        expanded.resize(std::min<size_t>(selector_beam_width, expanded.size()));
+                        beams = std::move(expanded);
+                    }
+                    int32_t predecessor = 0;
+                    for (size_t step = 0; step < beams.front().slots.size(); ++step) {
+                        const float * row    = lattice + (size_t) (beg + step + 1) * n_embd_dec;
+                        const float * scores = row + selector_top_k + (size_t) predecessor * selector_top_k;
+                        const int32_t slot   = beams.front().slots[step];
+                        if (params.p_min > 0.0f) {
+                            float sum = 0.0f;
+                            for (int32_t k = 0; k < selector_top_k; ++k) {
+                                sum += std::exp(scores[k] - scores[slot]);
+                            }
+                            if (1.0f / sum < params.p_min) {
+                                break;
+                            }
+                        }
+                        result.push_back((llama_token) row[slot]);
+                        predecessor = slot;
+                    }
+                    if (result.size() < (size_t) params.n_min) {
+                        result.clear();
+                    }
+                    continue;
+                }
+
                 int32_t predecessor = 0;
                 for (int32_t i = 1; i < n_block_tokens; ++i) {
-                    const float * row = lattice + (size_t) (beg + i) * n_embd_dec;
+                    const float * row    = lattice + (size_t) (beg + i) * n_embd_dec;
                     const float * scores = row + selector_top_k + (size_t) predecessor * selector_top_k;
 
-                    predecessor = (int32_t) std::distance(scores,
-                            std::max_element(scores, scores + selector_top_k));
+                    predecessor = (int32_t) std::distance(scores, std::max_element(scores, scores + selector_top_k));
                     if (params.p_min > 0.0f) {
                         // softmax(scores) at the argmax, i.e. 1 / sum(exp(s_k - s_max))
                         float sum = 0.0f;

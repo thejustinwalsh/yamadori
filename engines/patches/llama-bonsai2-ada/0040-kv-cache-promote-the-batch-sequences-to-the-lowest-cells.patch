@@ -50,7 +50,7 @@ logs whether they are byte-identical. Measurements: docs/ENGINES.md
 "KV placement" (bench/kv_placement.py).
 ---
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index 207b0cf8..8dde2b2d 100644
+index 207b0cf..8dde2b2 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -1968,6 +1968,17 @@ int llama_context::decode(const llama_batch & batch_inp) {
@@ -72,7 +72,7 @@ index 207b0cf8..8dde2b2d 100644
      memory_update(false);
  
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index c2a8ef12..7cd36fa8 100644
+index c2a8ef1..7cd36fa 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
 @@ -406,9 +406,26 @@ llama_kv_cache::llama_kv_cache(
@@ -476,7 +476,7 @@ index c2a8ef12..7cd36fa8 100644
      }
  }
 diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
-index 9acc4dc6..e6dc4398 100644
+index 9acc4dc..e6dc439 100644
 --- a/src/llama-kv-cache.h
 +++ b/src/llama-kv-cache.h
 @@ -147,6 +147,8 @@ public:
@@ -543,7 +543,7 @@ index 9acc4dc6..e6dc4398 100644
      uint32_t n_line = 0;
  
 diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
-index 5c85c0be..85186c8c 100644
+index 5c85c0b..85186c8 100644
 --- a/src/llama-memory-hybrid.cpp
 +++ b/src/llama-memory-hybrid.cpp
 @@ -186,6 +186,10 @@ uint32_t llama_memory_hybrid::seq_span_p1(llama_seq_id seq_id) const {
@@ -558,7 +558,7 @@ index 5c85c0be..85186c8c 100644
      // the recurrent part has no KV cells: only the attention cache spans a tiered buffer
      return mem_attn->cells_used_max_p1();
 diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
-index ccb7de77..deb5407c 100644
+index ccb7de7..deb5407 100644
 --- a/src/llama-memory-hybrid.h
 +++ b/src/llama-memory-hybrid.h
 @@ -74,6 +74,8 @@ public:
@@ -571,7 +571,7 @@ index ccb7de77..deb5407c 100644
  
      // state write/load
 diff --git a/src/llama-memory.h b/src/llama-memory.h
-index e1fcac0f..4eed4f54 100644
+index e1fcac0..4eed4f5 100644
 --- a/src/llama-memory.h
 +++ b/src/llama-memory.h
 @@ -124,6 +124,9 @@ struct llama_memory_i {

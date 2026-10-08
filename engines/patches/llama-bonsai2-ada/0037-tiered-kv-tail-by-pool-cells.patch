@@ -17,7 +17,7 @@ drafts the tail size while that exceeds --kv-vram-cells. Tail drafting
 only; nothing about what is stored or computed changes.
 ---
 diff --git a/include/llama.h b/include/llama.h
-index 555ff32dc..f228f449a 100644
+index 555ff32..f228f44 100644
 --- a/include/llama.h
 +++ b/include/llama.h
 @@ -813,6 +813,10 @@ extern "C" {
@@ -32,7 +32,7 @@ index 555ff32dc..f228f449a 100644
      LLAMA_API bool llama_memory_can_shift(llama_memory_t mem);
  
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index 6daf5c674..0d79c1e5d 100644
+index 6daf5c6..0d79c1e 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -4320,6 +4320,14 @@ llama_pos llama_memory_seq_pos_max(
@@ -51,7 +51,7 @@ index 6daf5c674..0d79c1e5d 100644
      if (!mem) {
          return false;
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index 723737acb..108d9533b 100644
+index 723737a..108d953 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
 @@ -715,6 +715,21 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
@@ -77,7 +77,7 @@ index 723737acb..108d9533b 100644
      std::map<ggml_backend_buffer_type_t, size_t> ret;
      for (const auto & [ctx, buf] : ctxs_bufs) {
 diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
-index ee66e5c1f..9fc63d11a 100644
+index ee66e5c..9fc63d1 100644
 --- a/src/llama-kv-cache.h
 +++ b/src/llama-kv-cache.h
 @@ -143,6 +143,8 @@ public:
@@ -90,7 +90,7 @@ index ee66e5c1f..9fc63d11a 100644
  
      // state write/load
 diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
-index a0fe07e6b..57b303dfc 100644
+index a0fe07e..57b303d 100644
 --- a/src/llama-memory-hybrid.cpp
 +++ b/src/llama-memory-hybrid.cpp
 @@ -181,6 +181,11 @@ llama_pos llama_memory_hybrid::seq_pos_max(llama_seq_id seq_id) const {
@@ -106,7 +106,7 @@ index a0fe07e6b..57b303dfc 100644
      std::map<ggml_backend_buffer_type_t, size_t> mb = mem_attn->memory_breakdown();
      for (const auto & buft_size : mem_recr->memory_breakdown()) {
 diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
-index 52ea297ab..e3042dcb3 100644
+index 52ea297..e3042dc 100644
 --- a/src/llama-memory-hybrid.h
 +++ b/src/llama-memory-hybrid.h
 @@ -70,6 +70,8 @@ public:
@@ -119,7 +119,7 @@ index 52ea297ab..e3042dcb3 100644
  
      // state write/load
 diff --git a/src/llama-memory.h b/src/llama-memory.h
-index db8253966..16f2c5d5b 100644
+index db82539..16f2c5d 100644
 --- a/src/llama-memory.h
 +++ b/src/llama-memory.h
 @@ -116,6 +116,10 @@ struct llama_memory_i {
@@ -134,7 +134,7 @@ index db8253966..16f2c5d5b 100644
  
      //
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index f1c158864..ce2505e28 100644
+index f1c1588..ce2505e 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
 @@ -463,8 +463,12 @@ struct server_slot {

@@ -23,7 +23,7 @@ masked, which this start would skip). LLAMA_KV_PLACE_LOW=0 restores the
 head search.
 ---
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index 203035da..c2a8ef12 100644
+index 203035d..c2a8ef1 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
 @@ -402,8 +402,13 @@ llama_kv_cache::llama_kv_cache(
@@ -61,7 +61,7 @@ index 203035da..c2a8ef12 100644
              LLAMA_LOG_ERROR("%s: n_tokens = %d > size = %u\n", __func__, n_tokens, cells.size());
              return { };
 diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
-index 5331d38a..9acc4dc6 100644
+index 5331d38..9acc4dc 100644
 --- a/src/llama-kv-cache.h
 +++ b/src/llama-kv-cache.h
 @@ -290,6 +290,9 @@ private:
@@ -75,7 +75,7 @@ index 5331d38a..9acc4dc6 100644
      uint32_t n_line = 0;
  
 diff --git a/src/llama-kv-cells.h b/src/llama-kv-cells.h
-index af5e685a..b92aed71 100644
+index af5e685..b92aed7 100644
 --- a/src/llama-kv-cells.h
 +++ b/src/llama-kv-cells.h
 @@ -123,6 +123,18 @@ public:

@@ -18,7 +18,7 @@ Reported-by: Milor123 (professorpalmer/bonsai-ada-surgery#3)
  3 files changed, 118 insertions(+)
 
 diff --git a/common/json-schema-to-grammar.cpp b/common/json-schema-to-grammar.cpp
-index 0aee51b26..dc7a01744 100644
+index 0aee51b..dc7a017 100644
 --- a/common/json-schema-to-grammar.cpp
 +++ b/common/json-schema-to-grammar.cpp
 @@ -908,6 +908,16 @@ public:
@@ -39,7 +39,7 @@ index 0aee51b26..dc7a01744 100644
          std::string schema_format = schema.contains("format") ? schema["format"].get<std::string>() : "";
          std::string rule_name = is_reserved_name(name) ? name + "-" : name.empty() ? "root" : name;
 diff --git a/examples/json_schema_to_grammar.py b/examples/json_schema_to_grammar.py
-index 83abd259d..7a8c74635 100755
+index 83abd25..7a8c746 100755
 --- a/examples/json_schema_to_grammar.py
 +++ b/examples/json_schema_to_grammar.py
 @@ -566,6 +566,11 @@ class SchemaConverter:
@@ -55,7 +55,7 @@ index 83abd259d..7a8c74635 100755
          schema_format = schema.get('format')
          rule_name = name + '-' if name in RESERVED_NAMES else name or 'root'
 diff --git a/tests/test-json-schema-to-grammar.cpp b/tests/test-json-schema-to-grammar.cpp
-index 214dbe199..ef1242aaa 100755
+index 214dbe1..ef1242a 100755
 --- a/tests/test-json-schema-to-grammar.cpp
 +++ b/tests/test-json-schema-to-grammar.cpp
 @@ -1214,6 +1214,109 @@ static void test_all(const std::string & lang, std::function<void(const TestCase

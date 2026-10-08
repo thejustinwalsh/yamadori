@@ -34,7 +34,7 @@ LLAMA_KV_SPAN_BY_SEQ=0 restores the pool bound. The find_slot debug line
 (LLAMA_KV_CACHE_DEBUG=1) prints each sequence's cells and span.
 ---
 diff --git a/include/llama.h b/include/llama.h
-index f228f449..4c36bae1 100644
+index f228f44..4c36bae 100644
 --- a/include/llama.h
 +++ b/include/llama.h
 @@ -817,6 +817,11 @@ extern "C" {
@@ -50,7 +50,7 @@ index f228f449..4c36bae1 100644
      LLAMA_API bool llama_memory_can_shift(llama_memory_t mem);
  
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index 0d79c1e5..207b0cf8 100644
+index 0d79c1e..207b0cf 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -4320,6 +4320,14 @@ llama_pos llama_memory_seq_pos_max(
@@ -69,7 +69,7 @@ index 0d79c1e5..207b0cf8 100644
      if (!mem) {
          return 0;
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index 108d9533..203035da 100644
+index 108d953..203035d 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
 @@ -168,6 +168,7 @@ llama_kv_cache::llama_kv_cache(
@@ -167,7 +167,7 @@ index 108d9533..203035da 100644
      return true;
  }
 diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
-index 9fc63d11..5331d38a 100644
+index 9fc63d1..5331d38 100644
 --- a/src/llama-kv-cache.h
 +++ b/src/llama-kv-cache.h
 @@ -145,6 +145,8 @@ public:
@@ -204,7 +204,7 @@ index 9fc63d11..5331d38a 100644
      const llama_swa_type swa_type = LLAMA_SWA_TYPE_NONE;
  
 diff --git a/src/llama-kv-cells.h b/src/llama-kv-cells.h
-index fddd31a0..af5e685a 100644
+index fddd31a..af5e685 100644
 --- a/src/llama-kv-cells.h
 +++ b/src/llama-kv-cells.h
 @@ -3,6 +3,7 @@
@@ -474,7 +474,7 @@ index fddd31a0..af5e685a 100644
          }
      }
 diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
-index 57b303df..5c85c0be 100644
+index 57b303d..5c85c0b 100644
 --- a/src/llama-memory-hybrid.cpp
 +++ b/src/llama-memory-hybrid.cpp
 @@ -181,6 +181,11 @@ llama_pos llama_memory_hybrid::seq_pos_max(llama_seq_id seq_id) const {
@@ -490,7 +490,7 @@ index 57b303df..5c85c0be 100644
      // the recurrent part has no KV cells: only the attention cache spans a tiered buffer
      return mem_attn->cells_used_max_p1();
 diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
-index e3042dcb..ccb7de77 100644
+index e3042dc..ccb7de7 100644
 --- a/src/llama-memory-hybrid.h
 +++ b/src/llama-memory-hybrid.h
 @@ -72,6 +72,8 @@ public:
@@ -503,7 +503,7 @@ index e3042dcb..ccb7de77 100644
  
      // state write/load
 diff --git a/src/llama-memory.h b/src/llama-memory.h
-index 16f2c5d5..e1fcac0f 100644
+index 16f2c5d..e1fcac0 100644
 --- a/src/llama-memory.h
 +++ b/src/llama-memory.h
 @@ -120,6 +120,10 @@ struct llama_memory_i {
@@ -518,7 +518,7 @@ index 16f2c5d5..e1fcac0f 100644
  
      //
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index ce2505e2..6bbff6c8 100644
+index ce2505e..6bbff6c 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
 @@ -464,11 +464,10 @@ struct server_slot {

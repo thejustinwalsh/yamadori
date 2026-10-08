@@ -366,7 +366,7 @@ engines:
     kind: source
     upstream: https://github.com/PrismML-Eng/llama.cpp
     branch: prism
-    base_commit: adfffbe41b2cabcd51fff326ab045662265062bb
+    base_commit: 4fbda1292562cc1f23904d5867fb79603737547a
     clone:
       # Blob-less full history, as llama-bonsai2: llama.cpp embeds
       # `rev-list --count HEAD` (10743 here, the tag's number) and the short
@@ -397,107 +397,26 @@ engines:
       series_head: c8b8993a6211db9edc4df9de9e1f8b1915d183df
       licence: MIT (Copyright (c) 2026 Cary Palmer; engines/patches/llama-bonsai2-ada/LICENSE.bonsai-ada-surgery). Patches 0001-0005 are sudoingX's.
     patches:
-      - file: 0001-Add-planar-transposed-activation-layout-for-the-PTQ1.patch
-        sha256: df8170976535c39823eeadf2e71132617d2d1480fd32bc8d6e595c422bb737fc
-        commit: 24c7f90889bc8ed1eae0187198e3cd17a5683441
-      - file: 0002-Add-dedicated-PTQ1_0-mat-vec-kernel-with-full-lane-u.patch
-        sha256: c894b4b9b1b5ee519144cff8984a17eb0aa1e6c237d810512fc7cd44a711b693
-        commit: 118445b08f6a4531b9be9e590f11ce1e8d9548b2
-      - file: 0003-Test-add-Bonsai-2-projection-shapes-to-the-mul_mat-p.patch
-        sha256: 097a558ea9c8caf7490364349c9004f3f2cc21f28ea3b3ab586779cf368754b5
-        commit: 423418ea6e0ed81aa1e8eb9a704624551c0bc06c
-      - file: 0004-Add-GGML_CUDA_BATCH_INVARIANT-for-batch-invariant-sm.patch
-        sha256: a48e9aa99771baf84e5c2c76afaa948e3d92af4baf2d4714592b1af60cb7ccb3
-        commit: cee4fa6b0da04ee34c1e4b7b88833c72a5875797
-      - file: 0005-Fix-use-the-mat-vec-kernel-for-bf16-matrices-under-6.patch
-        sha256: 9b3ce292646769ebaaa8c88c030db84e86d8745c4ae20f658878b536330b7b63
-        commit: 9e2449be657280becdc6912ac839d60aff7e4b19
-      - file: 0006-cuda-fold-the-recurrent-state-gather-into-the-GATED_.patch
-        sha256: b86d7c04117aa046afc7b0186af0a9db48bf5728515714cc388ee432c72ae273
-        commit: 06ae2d6d5839e08a2d114e62f8622b7b74d4a1e0
-      - file: 0007-cuda-PTQ1_0-decode-on-consumer-Ampere-Ada-SoA-q8-act.patch
-        sha256: a2c8ee04585aa56d07b41931e06cf0d43e1dcbebcc3ee42c63c1e94469cf4d86
-        commit: 5f9bed66627e0b7087a7ab42f71e6672b6c23d35
-      - file: 0008-cuda-PTQ1_0-hybrid-dispatch-template-y_soa-MMQ-from-.patch
-        sha256: ace395dce452f1f217dc55424873f3d91205fb63502d6d59c8749515066444d9
-        commit: 156b9f38b3191d1a9dca687e5cc3e90eea52e735
-      - file: 0009-cuda-flash-attention-MMA-reads-q4_0-q8_0-K-V-in-plac.patch
-        sha256: 85c26e6a49afecf8969834a7750fe4b6d0e25509c691f4f6069bc27bb5850685
-        commit: a5c11f57d258dddeecfbd5abec43476a0da556a0
-      - file: 0010-cuda-PTQ1_0-multi-column-mat-vec-raw-digits-with-exa.patch
-        sha256: ff15092d5c4ccbe550c57d909a6954ab926ff94ff020a1d642496dd086f77fdd
-        commit: 9ce36a0d62064c8d6ab569ee5afd4728ed5c27f1
-      - file: 0011-qwen35-MTP-graph-publishes-only-the-output-rows-of-h.patch
-        sha256: ef612c6698ed55410cb548997f9efdda4827943373052e94ba2fc5521e58a0d3
-        commit: dc7b4f00d5f750cdc88bb9296d2a9d3a8c7dbed7
-      - file: 0012-speculative-draft-mtp-decodes-the-catch-up-rows-toge.patch
-        sha256: 17d75ce9fe8255d09fb4e7ba504599e59148155e487ec83e7303a57eb79255ed
-        commit: 8662c8c0d280f8244c24c82ef9b0a28e3102dc3d
-      - file: 0013-cuda-Hadamard-transform-quantizes-its-own-output-whe.patch
-        sha256: 269cf3ba114f681ba74dd299d7fef6c4576099afb500e690c15c022f1e123772
-        commit: 275ef5554165b917f0fa9a43dee3d331d3f64e82
-      - file: 0014-sampling-reject-out-of-vocab-token-ids-from-the-back.patch
-        sha256: 05b9ae6f55f2bf957ff5eaafde512a759b7a6e623a4f3df77f3ce3a76ef80e3d
-        commit: 19646bf7d8af932f34d54c7d1c0d4e617c7b07c9
-      - file: 0015-speculative-draft-mtp-drops-stale-deferred-rows-when.patch
-        sha256: c3e67077dc21010459f867998d5afa6b44207ac962f2247dd8ba05205ccd01dd
-        commit: 865b539a5c12ecf5f02652cc1d27cde37fa370cc
-      - file: 0016-cuda-release-the-FWHT-q8-held-pool-blocks-LIFO-and-b.patch
-        sha256: d87c11dcba1165163eba20f53a1e617d8e36b0644284c451eeb422390f75f26f
-        commit: ea92f2b6e227629d4910c0d3b6a17791f96ac854
-      - file: 0017-server-spec-draft-depth-max-stops-drafting-once-the-.patch
-        sha256: 58a32aa040a79e735787ff540b47f6d1d6088bb8e728f40006cef3d4e1cfc2ec
-        commit: 42d4b94c494e5f458e30db567bba9db2b43afdfc
-      - file: 0018-cuda-restrict-off-PTQ1_0-kernel-params-Ampere-uses-t.patch
-        sha256: f173f45d423a956ccd7bf64326c21edd33f8566ebe8e4afd828f8ed93c30f209
-        commit: b2439ea686cd087c063f3f370801185430e95e74
-      - file: 0019-cuda-address-Copilot-review-on-native-q4-q8-FA-MTP-c.patch
-        sha256: a969fbc16c32f11c2f65ff154505f49625196d88660d3272c834b7704f99ed9c
-        commit: 5c2ba59972e45f4c7b7864958bebb18228b37a5d
-      - file: 0020-cuda-share-the-PTQ1_0-mat-vec-smem-budget-between-gu.patch
-        sha256: 1f5b8934f702849a7e1e6cb5835e5b3c47ec6246ad6f93d3646dfb765ec7c272
-        commit: 8736068011bd5a6ce036e17b76a1da18279d542f
-      - file: 0021-spec-flush-MTP-catch-up-when-it-plus-anchors-would-o.patch
-        sha256: eb9157c4412977e9f29572c2a6c49a06faa52494dc77bb4ea2665acbe4965919
-        commit: 5421dac4668a762f64e5fcded89485d29caad1b6
-      - file: 0022-cuda-restore-the-scalar-PTQ1_0-vec-dot-on-MUSA.patch
-        sha256: aae43db701f4ab216c942c44367b04143fcfcaa27f2a8440852631f3e5fe4d21
-        commit: 24df81eedaa464ee79e622029e42835525285b9c
-      - file: 0023-spec-keep-MTP-catch-up-across-a-failed-draft-decode.patch
-        sha256: 017948846e01f3404a311c755f5fb360cf35abdb8486f3d2418bcddaf15f6565
-        commit: 8ee1aad69ede4efe980a68db975537b246c482d6
-      - file: 0024-cuda-define-the-PTQ1_0-layout-helper-after-ggml_cuda.patch
-        sha256: 21307d0dc37ce670912e38a11eb45237f27ea3c272c5227eafb4d6f402a3fbfd
-        commit: 12cfd4b32e43e7e822fc71dbf175d0ea37b26800
-      - file: 0025-cuda-land-remaining-221-review-notes-pass-q8-layout-.patch
-        sha256: e939d500c33d6cfb74cb3e4c191b4ee3941887bc7477ead260be7e1c6c491450
-        commit: cb9dd03e31bb303394768e21ac1dd036cb575021
-      - file: 0026-cuda-wait-on-the-PDL-dependency-in-the-PTQ1_0-planar.patch
-        sha256: ff77007251f0d763bf30805708d3b26f91de82b964da31d5e8eba56d517b62ff
-        commit: fea3a8f7afc2e7f38533427e8b657b9eb51d8ff3
-      - file: 0027-cuda-restore-warp-reduce-epilogue-under-BATCH_INVARI.patch
-        sha256: 32a0a8ccf41f10162c3be173240047d18e42bd7dd6b928b35aea6a1bc7f7b138
-        commit: 8ecc788d518725f99b2e6c65f18ef66ddadf6293
       - file: 0028-llama-cuda-tiered-KV-cache-kv-vram-cells-VRAM-head-p.patch
-        sha256: b6af9e3ba8382247dd379cd54110c2b75548e377fbb295f234ed1f7e168e9958
+        sha256: 0a6b2f9f7068c74e44bb986e7acd891e362a2beb2d79d9a5eaf8dff50300bee2
         commit: 1f19305d125194b90a46f830c4626c3c1f882323
       - file: 0029-cuda-quantized-KV-GQA-decode-on-the-in-place-MMA-fla.patch
-        sha256: 6fadfb87e7630c4a6680fcf5f61624365c502a175b462a9426f1206d197bec56
+        sha256: 7ab4b7ad2b09da12c8486c2c9677dc6f747a0a8425aaf9e8c227bbbe6bad9ec5
         commit: a20f9a6e07aa3af4d6b173d49d3e64ae9cc749f8
       - file: 0030-cuda-BATCH_INVARIANT-occupancy-independent-FA-KV-spl.patch
-        sha256: b9a486de7955db4091d330df7048b5c9be74736e0e10c4295fe5c9fccdcbc4ba
+        sha256: c991241d3d10865aeefb337fad3220c3ad545b897aca8df3242bdd14cb5f8c35
         commit: efe20ad51af0f2f7ab41205a8e554940463b3fc6
       - file: 0031-speculative-spec-draft-window-and-spec-draft-n-max-t.patch
-        sha256: eb2328a62d915f2ccdd44a6e511df59b90b10495ba7ef5b297269e2a743204e6
+        sha256: 50c0fc3439971abc5185e942cfbff1c7bf4c485d2d9f381f8bbcde6c80271247
         commit: 414ec9b801a84ed91e56a6b627c2836c88629542
       - file: 0032-server-reasoning-effort-allow-fallback-and-reasoning.patch
-        sha256: 9cf6d551ca047ba07a5c71b9cf0b00709bf03aa09fe709f309c6e1423dd0e955
+        sha256: 5668f9803dfbdfaacfeaf8f602230184c82194a85094b5151f402501518c03dc
         commit: d8fa9565ab85f83ab6efc8c25d26e51a86236156
       - file: 0033-cuda-GGML_CUDA_OP_TIMING-1-per-node-GPU-time-breakdo.patch
-        sha256: 90dd2102ce57d76c289a0ac8d057db9fc55309ae99dfa14431e07fcc7c0ef878
+        sha256: 7660371ffd9e882b715344a412920b9b20a9b81048ab971c83f2c480e88d84c4
         commit: c8b8993a6211db9edc4df9de9e1f8b1915d183df
       - file: 0034-reasoning-budget-nudge.patch
-        sha256: 08dbca5a7fa8bcd0583de6383972920354b0aea0fe2d5f12acd95ab08ef646a0
+        sha256: addd7270441ce3edaec320666d63386690291134887043be34cb2bc8c5ec078d
         # OURS: llama-bonsai2's 0001-reasoning-budget-nudge.patch, the same
         # bytes. Applies to the series with offsets only (8 files, +513/-22);
         # the series' own common/sampling.cpp change (0014, an out-of-vocab
@@ -513,7 +432,7 @@ engines:
         # in one binary. The MMA kernel still reads masked KV tiles
         # (docs/ENGINES.md "bonsai-ada-surgery merge").
       - file: 0036-spec-draft-window-per-sequence.patch
-        sha256: dbafd79b9e391ffa268e53ee70c063c9b7ef222b1522bc59f7fb2bf48f996312
+        sha256: 0e66fa06db5d9762176eb61644ab5c7bba8cfd77b0873e0d326600a896d85d85
         # OURS (2026-09-27). The series' 0031 trims the draft context of EVERY
         # slot by the batch's lowest position minus --spec-draft-window: with
         # 4 slots a deep conversation's batch erases a shallow one's recent
@@ -522,7 +441,7 @@ engines:
         # not touched (seq ids read from batch_view.seq_id only). Identical to
         # 0031 with one slot; no effect without --spec-draft-window.
       - file: 0037-tiered-kv-tail-by-pool-cells.patch
-        sha256: b94b3b8fad4e42a6dbfd0fa776ca7f4f21e4be23aebfd771f96f5c8c4c965c51
+        sha256: 754365b7286dbf88681c3ebcf2e10f1d1a86abaffed935d775170727554ae5bf
         # OURS (2026-09-27). 0031 drafts --spec-draft-n-max-tail once a
         # slot's POSITION reaches --kv-vram-cells; 0028's line is on pool
         # CELLS. With the unified 4-slot pool every slot's attention spans
@@ -532,7 +451,7 @@ engines:
         # pads). Draft size only; storage and arithmetic unchanged.
         # (0038 re-keys it on the slot's own span.)
       - file: 0038-kv-cache-attention-spans-the-batch-sequences.patch
-        sha256: 985cb8c6d6f09894a73fd033596fc812db1b507289967fbf342556230d7afdd1
+        sha256: eccd3ff27a1566e945a4a7feed38ca3ae534ec5cbe03c6684f5bd31e1951d991
         # OURS (2026-09-28, pagoda-h6; docs/ENGINES.md "KV placement"). An
         # attention op spanned the POOL's highest used cell, so an idle
         # sequence parked high made every sequence stage the tiered cache's
@@ -542,13 +461,13 @@ engines:
         # llama_memory_seq_span_p1(); the server's tail draft keys on the
         # slot's span. LLAMA_KV_SPAN_BY_SEQ=0 = the pool bound.
       - file: 0039-kv-cache-new-cells-go-to-the-lowest-free-cells.patch
-        sha256: 41bc361fc764dfa429e5fd9e9aafe2122c5d9d8cecaa4c4c1a5824900c4bf572
+        sha256: 3550963de4e007cfa52ba06a37b8e77d0fc6f091fe1b3971e93e88612c8fc177
         # OURS (2026-09-28). A sequence grows in place (the cell after its
         # own highest cell), else find_slot starts at the lowest empty cell
         # (a hint, amortised O(1)) instead of the head; not for SWA caches.
         # LLAMA_KV_PLACE_LOW=0 = the head search.
       - file: 0040-kv-cache-promote-the-batch-sequences-to-the-lowest-cells.patch
-        sha256: 2b6078cb02e3ee30e82e643642bd6a14fde4ec95123f28253cf255ce7a0a0a45
+        sha256: 664b38bf037a492b16fe5aedb9294955e2ca4e15ff42593a3ed8b841a11f72b3
         # OURS (2026-09-28). Tiered caches only: before a batch whose span
         # would pass the VRAM line, the cells of its sequences move to the
         # lowest cells of the pool and idle sequences' cells move to the
@@ -559,7 +478,7 @@ engines:
         # ENGINES.md "KV placement" (bench/kv_placement.py).
         # LLAMA_KV_PROMOTE=0 = off; LLAMA_KV_PROMOTE_VERIFY=1 = byte check.
       - file: 0041-kv-cache-a-slot-rank-decides-whose-cells-hold-the-vram-line.patch
-        sha256: 565a04a3ec429a9039ed12b7558b808e6b197205aba7ba1ae6392d3b8a56ba74
+        sha256: ead4313027129c902df2a5dee44d9050ddcfc6e144fb8343437f95e2d4435b8e
         # OURS (2026-09-28, operator: 3 slots, "the first conversation never
         # spills"; docs/ENGINES.md "KV rank"). 0040's plan by RANK: each
         # sequence has a rank (request field `kv_rank`, and `kv_ranks` for
@@ -582,7 +501,7 @@ engines:
         # PR #29818 / #29831, MIT). Tests: tests/test-decide-batch.cpp (CPU, tiny hybrid qwen35) in this entry's
         # `tests`, and bench/decide_batch_server_smoke.py (a real llama-server on the CPU). NOT RUN ON A GPU.
       - file: 0043-surgery-0034-json-schema-empty-unions.patch
-        sha256: 730e1a9bf8144326505aaa3e6c3fe858f8ba2e8a013946a57652fbcca8023902
+        sha256: 2447316423c24ee0e54673c08a2ad445fc338204b08976e804723c71b6501acc
         commit: 2cb7a4ed6841d7409bb67da6d3e437722faea161
         # bonsai-ada-surgery 0034 (Cary Palmer, MIT), the file byte for byte (renamed: our 0034-0042 keep their numbers, which
         # docs, benches and shipped builds name). Empty anyOf / oneOf / type unions in a JSON schema are converted instead of
@@ -597,29 +516,29 @@ engines:
         # launch lines, so the output cap is unchanged; the report is NEW output the proxy has not read yet (the proxy counts
         # reasoning tokens with /tokenize today).
       - file: 0045-surgery-0036-cuda-planar-PTQ1_0-one-column-turing.patch
-        sha256: 143c7f66bcfdfbba4c2e644af9be560547437124979795a1ead866ca8c9a8005
+        sha256: ad034ec567efb9824e5bab8ee883bb8558cc603f44bd9b6846a3c49b71d9bfd3
         commit: 8c03a5f5c391cb0292ba32ba3b80730f4d2625e5
         # bonsai-ada-surgery 0036, byte for byte. sm_75 only (Turing takes the planar layout at one column): a no-op on our
         # sm_86 / sm_120 builds.
       - file: 0046-surgery-0037-cuda-shared-pool.patch
-        sha256: 465762b126bc2593e02830a8c6e2fa38ac4b97cbc6f2d864ef82e88d07d074f4
+        sha256: dd16a0aa5781bbd5e74e731a96669ea11d7fe3538c646e3441dd3c8ab4502f3d
         commit: 214f96e1165f15ed39537072f398c2cbf33cfdb4
         # bonsai-ada-surgery 0037, byte for byte. GGML_CUDA_SHARED_POOL=1 (one transient CUDA pool per device/stream) and
         # LLAMA_MTP_DRAFT_UBATCH=N; both OFF unless the variable is set. Inert in our launch lines.
       - file: 0047-surgery-0038-cuda-fa-prefill-f16.patch
-        sha256: 29dcb9bcd5ffe6f7b56677fe9b97ef44bc035698dcc3b9037b5e223fa8235d35
+        sha256: dfce1291b6b370c51558634ff542458a91a67a360ed77afd1a51b42d12523072
         commit: 1d71dca1071972f3863d94889016cb56468123e0
         # bonsai-ada-surgery 0038, byte for byte (his branch bonsai-q8-product head, 2026-10-08). GGML_CUDA_FA_PREFILL_F16=N:
         # prefill-sized attention over a quantized cache of up to N cells converts K/V to f16 in pool memory (8 GB cards);
         # OFF unless set. Inert in our launch lines.
       - file: 0048-server-systemone-decision-api.patch
-        sha256: 0b35efb841ce95b75af3fcaec9bd755eae1319f91a7053d28c3dca7bde88f24d
+        sha256: c4c751340da63ebab32566999a248cf8f9bf5f8f4f5ad51403fe28623daba2ff
         # OURS (2026-10-08), UNSHIPPED. ggml-org/llama.cpp PR 29818 (a4cb4c61fd, MIT) ported: POST /v1/systemone, the System One
         # decision API (openjev, lev, kev: qwen35-arch models with "<arch>.decision.*" metadata, one forward pass per question,
         # nothing generated), the converters, the shared prompt prefix between a request's questions. Not taken: laya / mmBERT
         # (modern-bert head), nimble (PR 29844), the Python server tests. docs/ENGINES.md "Clef in the Bonsai fork".
       - file: 0049-clef-joint-decision-head.patch
-        sha256: d6717874a5c4f4179c9b5adb748a7787424248c7a5a98f7f72a9e149ef266b98
+        sha256: 1af3dd77026de699e2ad4e757e960a0fe340b475c6ebe8a5ac4cbbb4a4081d9e
         # OURS (2026-10-08), UNSHIPPED. ggml-org/llama.cpp PR 29831 (99b95488ca, MIT) ported, text only: arch "clef" (Qwen3.5
         # trunk evaluated without memory + Cloudflare's joint decision head), conversion/clef.py, fill_task_joint() on the
         # same /v1/systemone route. This tree has no llama_batch_ext: the per-token decision order rides in
@@ -631,15 +550,15 @@ engines:
       rule: llama.cpp
       path: engines/src/llama-bonsai2-ada
       repo: https://github.com/PrismML-Eng/llama.cpp
-      commit: adfffbe41b2cabcd51fff326ab045662265062bb
-      upstream_tree: f701dae3247ff1ba55db24d1fd83dff0cd2edff8
-      patches: 49
-      patches_digest: fa859ece38470a16f9a1d8348d57579ecdbe4e435b9fba3fdca54e952254bad2
-      patched_tree: e074c2cba1eac976edfdb809b614940747550141
-      base_tree: 339bad835c77c724415bf4ef471bebd288d9d104
-      tree: 590bf59935f9949328e84ca0054fc2bcde10f586
-      files: 3343
-      bytes: 51048583
+      commit: 4fbda1292562cc1f23904d5867fb79603737547a
+      upstream_tree: b2d2cac74010eb63fcf015a7ceb0876f01680a98
+      patches: 22
+      patches_digest: 9c904c332c4308dff41269c727384f6307c26853f79b5f51cea68964e8e82fe0
+      patched_tree: c771247d2eeae04d9e255c8dd083580fe0c3aae5
+      base_tree: 356492227625809890974aec8588ecc264c21661
+      tree: 0286ff9e7e4b7b77db1f303afc361e0a13590437
+      files: 3345
+      bytes: 51137035
       excluded_files: 230
       excluded_bytes: 116854999
       executable_files: 123
@@ -656,9 +575,9 @@ engines:
       - vendor/hash/sha256/LICENSE
       - vendor/hash/xxhash/LICENSE
       build_info:
-        number: 10743
-        commit: adfffbe41
-        source: the shipped build's common/build-info.cpp
+        number: 10760
+        commit: 4fbda1292
+        source: git rev-list --count of the base (commits-only fetch)
     inputs: {}
     toolchain: msvc-cuda128
     path_tools: {}
@@ -679,11 +598,11 @@ engines:
       GGML_NATIVE: "ON"
       BUILD_SHARED_LIBS: "ON"
     native_cpu: *native
-    # Pinned from the first build (51d64e6f, 2026-09-27): number 10743,
-    # commit "adfffbe41", MSVC 19.36.32543.0.
+    # Re-pinned 2026-10-08 for the base 4fbda1292: number 10760, commit "4fbda1292", MSVC 19.36.32543.0 (was number
+    # 10743, "adfffbe41": 0b14858b...).
     expect_generated:
       common/build-info.cpp:
-        sha256: 0b14858b7619523ab33ade2094fd2f447f061765649dc1878cef7326151d61d0
+        sha256: 9860c2c9c4e2edc210459ac418ba4a516b806de7442b4f8e0e521bc1321517a7
         stage: configure
     expect_generated_lacks:
       tools/ui/ui.h: LLAMA_UI_HAS_ASSETS   # no UI embedded

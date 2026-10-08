@@ -14,10 +14,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 56 insertions(+)
 
 diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
-index 29082fa68..81cad7c44 100644
+index af15fa4..d82ef31 100644
 --- a/ggml/src/ggml-cuda/ggml-cuda.cu
 +++ b/ggml/src/ggml-cuda/ggml-cuda.cu
-@@ -4823,8 +4823,20 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
+@@ -4839,8 +4839,20 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
              cuda_ctx->gdn_gathers().reset();
              cuda_ctx->fwht_q8().reset();
  
@@ -38,7 +38,7 @@ index 29082fa68..81cad7c44 100644
                  if (is_concurrent_event_active) {
                      GGML_ASSERT(concurrent_event);
  
-@@ -5022,6 +5034,50 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
+@@ -5038,6 +5050,50 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                      try_launch_concurrent_event(node);
                 }
              }

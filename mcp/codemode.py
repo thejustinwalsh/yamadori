@@ -586,6 +586,11 @@ def run(script: str, tb: Toolbox, call, *, timeout_s: float, max_calls: int,
     st = {"n_calls": 0, "done": None, "kill": None}
     lock = threading.Lock()
     sbx: dict = {}
+    timers: list = []                                            # sleep() timers, cancelled when the run ends
+
+    def r_deadline():
+        r = sbx.get("run")
+        return r.deadline if r is not None else None
 
     def run_one(seq: int, cid: int, name: str, args) -> None:
         t1 = time.monotonic()
@@ -631,6 +636,15 @@ def run(script: str, tb: Toolbox, call, *, timeout_s: float, max_calls: int,
                 v = tb.all()
             del out["discovery"][:-40]
             return [{"op": "r", "v": v}]
+        elif op == "sleep":
+            cid = msg.get("id")
+            if isinstance(cid, int):
+                left = max(r_deadline() - time.monotonic(), 0) if r_deadline else 0
+                t = threading.Timer(min(float(msg.get("ms") or 0) / 1000.0, left),
+                                    lambda: sbx["run"].inbox.put({"op": "result", "id": cid, "value": None}))
+                t.daemon = True
+                timers.append(t)
+                t.start()
         elif op == "call":
             cid, name = msg.get("id"), msg.get("name")
             if name not in allowed or not isinstance(cid, int):
@@ -656,6 +670,8 @@ def run(script: str, tb: Toolbox, call, *, timeout_s: float, max_calls: int,
         res = {"how": "trap", "reason": f"{type(e).__name__}: {str(e)[:200]}"}
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+        for t in timers:
+            t.cancel()
         out["wall_ms"] = round((time.monotonic() - t0) * 1000)
         out["dispatched"] = st["n_calls"]
     out["instantiate_ms"] = res.get("instantiate_ms")

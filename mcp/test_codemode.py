@@ -20,9 +20,9 @@ GATED HERE:
   4. THE LIMITS: timeout (wasmtime's epoch interrupt, the output so far kept), a memory bomb and one allocation
      past the 256 MiB linear-memory maximum, runaway recursion, the output limit, a huge output cut, a promise
      nothing can settle, a syntax error.
-  5. ESCAPES: no require, process, fetch, timers, print, std, os, WebAssembly; the module's own os / std reach no
+  5. ESCAPES: no require, process, fetch, setInterval, print, std, os, WebAssembly; the module's own os / std reach no
      file, directory or environment variable (the shim grants none); a forged protocol line is refused by the host;
-     the module imports exactly the shim's 23 functions and is the recorded sha256; a deterministic clock; two
+     the module imports exactly the shim's 23 functions and is the recorded sha256; a real clock; two
      runs at once share no epoch.
   6. THE TOOL DEFINITION: trigger-condition description, the declarations under the budget (most relevant first,
      the rest named), byte-stable, the budget rule (what the covered tools cost, Pi's 3,000 at most).
@@ -382,7 +382,7 @@ def test_the_limits():
 
 # ================================================================== 5. escapes
 def test_escapes():
-    probes = ["require", "process", "fetch", "setTimeout", "setInterval", "setImmediate", "print", "std", "os",
+    probes = ["require", "process", "fetch", "setInterval", "setImmediate", "print", "std", "os",
               "WebAssembly", "XMLHttpRequest", "Buffer", "module", "exports", "__dirname", "scriptArgs", "execArgv",
               "argv0", "navigator", "window", "self", "document", "importScripts", "Deno", "Bun", "structuredClone",
               "Intl", "TextEncoder", "TextDecoder", "URL", "WebSocket", "Worker", "gc"]
@@ -454,16 +454,33 @@ def test_escapes():
     check(out["items"] == ["function"] or out["items"] == ["undefined"],
           "…and a defined property is at worst an unknown name (answered by the NO_SUCH_FUNCTION rule)",
           json.dumps(out["items"]))
-    # DETERMINISM: the clock is a counter, Math.random is seeded from it
+    # THE CLOCK IS REAL (operator, 2026-10-08): the host's time, a real sleep, Math.random seeded from it
+    import time as _t
+    t_before = _t.time() * 1000
     a = go("return [Date.now(), Math.random(), Math.random()].join(',')")
+    t_after = _t.time() * 1000
+    stamp = float(a["items"][0].split(",")[0]) if a["ok"] else 0
+    check(a["ok"] and t_before - 5 <= stamp <= t_after + 5,
+          "Date.now() is the host's wall clock", json.dumps([t_before, stamp, t_after]))
     b = go("return [Date.now(), Math.random(), Math.random()].join(',')")
-    check(a["ok"] and a["items"] == b["items"],
-          "the sandbox is deterministic: the same script reads the same Date.now() and Math.random() every run",
-          json.dumps([a["items"], b["items"]]))
-    out = go("const os = await import('qjs:os'); const t0 = os.now(); os.sleep(5000); return os.now() - t0")
-    check(out["ok"] and out["wall_ms"] < 2000,
-          "os.sleep() does not wait: the shim's poll never sleeps (a script cannot waste wall time or learn it)",
-          json.dumps([out["items"], out["wall_ms"]]))
+    check(b["ok"] and a["items"][0].split(",")[1:] != b["items"][0].split(",")[1:],
+          "Math.random() differs between runs (seeded from the real clock)", json.dumps([a["items"], b["items"]]))
+    out = go("const t0 = Date.now(); await new Promise(r => setTimeout(r, 300)); return Date.now() - t0")
+    check(out["ok"] and 280 <= float(out["items"][0]) <= 1500,
+          "setTimeout waits its time (a real timer)", json.dumps([out["items"], out["wall_ms"]]))
+    out = go("const os = await import('qjs:os'); const t0 = os.now(); os.sleep(250); return os.now() - t0")
+    check(out["ok"] and 230_000 <= float(out["items"][0]) <= 1_500_000,
+          "os.sleep() waits its time (os.now() is microseconds)", json.dumps([out["items"], out["wall_ms"]]))
+    out = go("const t0 = Date.now(); const [a, b] = await Promise.all([sleep(300), sleep(300)]);"
+             "return Date.now() - t0")
+    check(out["ok"] and 280 <= float(out["items"][0]) <= 550,
+          "sleep(ms) is a real wait, and two run together (300 ms, not 600)", json.dumps([out["items"], out["wall_ms"]]))
+    out = go("let n = 0; const t = setTimeout(() => { n += 100 }, 200); setTimeout(() => { n += 1 }, 50);"
+             "clearTimeout(t); await sleep(400); return n")
+    check(out["ok"] and out["items"] == ["1"], "setTimeout / clearTimeout work", json.dumps(out["items"]))
+    out = go("const os = await import('qjs:os'); os.sleep(60000); return 'late'", timeout_s=1.5)
+    check(not out["ok"] and out["wall_ms"] < 8000,
+          "…and a long sleep is cut at the run's wall limit", json.dumps([out["items"], out["wall_ms"], out.get("reason")]))
     # the shim records what the module asked for and was refused
     import codemode_sandbox as S
     seen: dict = {}

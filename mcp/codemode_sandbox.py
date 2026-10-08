@@ -9,8 +9,10 @@ A WebAssembly module can touch nothing the host does not hand it, so the sandbox
   * NO WASI from wasmtime. This file implements the module's 23 `wasi_snapshot_preview1` imports itself, as a shim
     that grants nothing: no preopened directory (`fd_prestat_get` and every `path_*` refuse), no environment, no
     arguments but ours, no sockets (WASI preview1 has none), no files (`fd_read` answers only fd 0, `fd_write` only
-    fds 1 and 2: both are IN-MEMORY pipes to the host), `poll_oneoff` never sleeps, and the clock is a counter
-    (deterministic: the same script reads the same `Date.now()` and `Math.random()` every time).
+    fds 1 and 2: both are IN-MEMORY pipes to the host). The clock is REAL (operator, 2026-10-08: "why do we fake
+    this, this should be reliable"): realtime, monotonic and cpu clocks read the host's, `poll_oneoff` sleeps for a
+    timer (bounded by the run's wall limit and cancel), so `Date.now()`, `setTimeout` and a script that polls work
+    as in any JS runtime; `Math.random()` is QuickJS's own, seeded from the clock.
   * A hard linear-memory maximum: `Store.set_limits(memory_size=256 MiB)` (Pi's figure) for the WHOLE sandbox. A
     memory bomb is QuickJS's own "out of memory" InternalError.
   * An interrupt: wasmtime epoch interruption, ticked by a thread of the run's own; the deadline is the wall limit
@@ -108,6 +110,13 @@ BOOT = r"""
     return () => Promise.resolve(failed("NO_SUCH_FUNCTION", "tools." + k + " is not a function of this toolbox.",
       "tools.search(\"what you need\") ranks the functions by what they answer; tools.all() lists every one."));
   } });
+  // Time: a real wait, settled by the host (so the script's other calls keep running meanwhile).
+  g.sleep = (ms) => new Promise((resolve) => { const id = ++seq; pending.set(id, resolve);
+    send({ op: "sleep", id, ms: Math.max(0, Number(ms) || 0) }); });
+  const timers = new Map(); let tseq = 0;
+  g.setTimeout = (f, ms, ...a) => { const t = ++tseq; timers.set(t, true);
+    g.sleep(ms).then(() => { if (timers.delete(t)) f(...a); }); return t; };
+  g.clearTimeout = (t) => { timers.delete(t); };
   g.text = (v) => { send({ op: "out", kind: "text", v: fmt(v) }); };
   const log = (...a) => { send({ op: "out", kind: "console", v: a.map(fmt).join(" ") }); };
   g.console = Object.freeze({ log, info: log, warn: log, error: log, debug: log });
@@ -270,7 +279,6 @@ class Run:
         self.stderr = bytearray()
         self.deadline = time.monotonic() + self.timeout_s
         self.killed: str | None = None
-        self.clock = 1_700_000_000_000_000_000          # a fixed instant (ns): the sandbox's whole world of time
         self.denied: set = set()
 
     # -- the host side of stdin
@@ -333,9 +341,15 @@ class Run:
             m.write(caller, struct.pack("<I", 0), pb)
             return 0
 
+        def now_ns(cid):
+            # WASI clock ids: 0 realtime, 1 monotonic, 2 process cputime, 3 thread cputime
+            return (time.time_ns() if cid == 0 else time.monotonic_ns() if cid == 1
+                    else time.process_time_ns() if cid == 2 else time.thread_time_ns())
+
         def clock_time_get(caller, cid, prec, ptr):
-            run.clock += 1_000_000               # +1 ms per read: monotonic, and the same every run
-            mem(caller).write(caller, struct.pack("<Q", run.clock), ptr)
+            if cid > 3:
+                return 28                        # EINVAL
+            mem(caller).write(caller, struct.pack("<Q", now_ns(cid)), ptr)
             return 0
 
         def fd_write(caller, fd, iovs, n, pw):
@@ -395,21 +409,38 @@ class Run:
             raise Exited(code)
 
         def poll_oneoff(caller, inp, outp, nsub, pn):
-            """Never sleeps: a clock subscription advances the counter by its timeout and fires; an fd
-            subscription (stdin) fires. The module's event loop therefore never waits on the world."""
+            """A real wait. An fd subscription (stdin) fires at once (the host feeds it); with clock subscriptions
+            only, it sleeps until the earliest is due, in slices of TICK_S so the run's deadline and cancel are seen,
+            and reports every subscription then due. The wall limit bounds it like any other work."""
             run._check()
             m = mem(caller)
+            subs = []                            # (userdata, tag, due_ns on the monotonic clock, or None)
             for i in range(nsub):
                 sub = m.read(caller, inp + 48 * i, inp + 48 * i + 48)
                 ud, tag = struct.unpack("<QB", sub[:9])
-                if tag == 0:                     # clock: timeout u64 @24, flags u16 @40 (bit 0: absolute)
+                due = None
+                if tag == 0:                     # clock: id u32 @16, timeout u64 @24, flags u16 @40 (bit 0: absolute)
+                    cid = struct.unpack("<I", sub[16:20])[0]
                     timeout = struct.unpack("<Q", sub[24:32])[0]
                     flags = struct.unpack("<H", sub[40:42])[0]
-                    if not flags & 1:
-                        run.clock += int(timeout)
+                    if flags & 1:                # absolute on its own clock: convert to the monotonic one
+                        timeout = max(0, timeout - now_ns(cid))
+                    due = time.monotonic_ns() + int(timeout)
+                subs.append((ud, tag, due))
+            if not any(tag != 0 for _, tag, _ in subs):
+                wake = min(d for _, _, d in subs if d is not None)
+                while True:
+                    left = (wake - time.monotonic_ns()) / 1e9
+                    if left <= 0:
+                        break
+                    time.sleep(min(left, TICK_S))
+                    run._check()
+            now = time.monotonic_ns()
+            fired = [(ud, tag) for ud, tag, due in subs if due is None or due <= now]
+            for k, (ud, tag) in enumerate(fired):
                 ev = struct.pack("<QHBxxxxx", ud, 0, tag).ljust(32, b"\0")
-                m.write(caller, ev, outp + 32 * i)
-            m.write(caller, struct.pack("<I", nsub), pn)
+                m.write(caller, ev, outp + 32 * k)
+            m.write(caller, struct.pack("<I", len(fired)), pn)
             return 0
 
         table = {

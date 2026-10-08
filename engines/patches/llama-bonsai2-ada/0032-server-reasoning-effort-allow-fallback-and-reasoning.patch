@@ -24,7 +24,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  5 files changed, 75 insertions(+), 1 deletion(-)
 
 diff --git a/common/arg.cpp b/common/arg.cpp
-index 08979aa92..128130f0d 100644
+index 08979aa..128130f 100644
 --- a/common/arg.cpp
 +++ b/common/arg.cpp
 @@ -3713,6 +3713,33 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
@@ -62,7 +62,7 @@ index 08979aa92..128130f0d 100644
          {"--reasoning-preserve"},
          {"--no-reasoning-preserve"},
 diff --git a/common/common.h b/common/common.h
-index 17a5189a8..506456ec8 100644
+index 17a5189..506456e 100644
 --- a/common/common.h
 +++ b/common/common.h
 @@ -656,6 +656,12 @@ struct common_params {
@@ -79,7 +79,7 @@ index 17a5189a8..506456ec8 100644
      int sleep_idle_seconds = -1;   // if >0, server will sleep after this many seconds of idle time
  
 diff --git a/tools/server/server-common.cpp b/tools/server/server-common.cpp
-index b5e052a9e..48466405e 100644
+index b5e052a..4846640 100644
 --- a/tools/server/server-common.cpp
 +++ b/tools/server/server-common.cpp
 @@ -1321,6 +1321,26 @@ json oaicompat_chat_params_parse(
@@ -132,7 +132,7 @@ index b5e052a9e..48466405e 100644
  }
  
 diff --git a/tools/server/server-common.h b/tools/server/server-common.h
-index a624ae6a0..9f697ce25 100644
+index a624ae6..9f697ce 100644
 --- a/tools/server/server-common.h
 +++ b/tools/server/server-common.h
 @@ -310,6 +310,9 @@ struct server_chat_params {
@@ -146,7 +146,7 @@ index a624ae6a0..9f697ce25 100644
  
  // used by /completions endpoint
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 5ee7316bb..5e3420509 100644
+index 5ee7316..5e34205 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
 @@ -1463,7 +1463,10 @@ private:

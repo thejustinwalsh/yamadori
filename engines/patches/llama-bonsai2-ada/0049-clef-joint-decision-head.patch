@@ -69,6 +69,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 conversion/clef.py
  create mode 100644 src/models/clef.cpp
  create mode 100644 tests/test-clef.cpp
+ create mode 100644 conversion/clef.py
+ create mode 100644 src/models/clef.cpp
+ create mode 100644 tests/test-clef.cpp
 
 diff --git a/common/common.cpp b/common/common.cpp
 index 82d9c7f..dbd00c0 100644

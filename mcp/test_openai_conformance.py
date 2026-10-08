@@ -672,6 +672,19 @@ def test_usage_details_fall_back_and_stay_honest():
           and "absent" in (rec.get("reasoning_tokens") or ""),
           "reasoning_tokens is ABSENT (never guessed) when the tokenizer "
           "does not answer, and x_yamadori says why", json.dumps(rec)[:200])
+    # an engine that counts its own reasoning (our 0044): its number is used, the tokenizer is not asked
+    gens2 = [{"usage": {"prompt_tokens": 500, "completion_tokens": 20,
+                        "completion_tokens_details": {"reasoning_tokens": 7}},
+              "reasoning": "some words here", "which": "hop 0"}]
+    asked = []
+    proxy._count_text_tokens = lambda model, text: asked.append(text) or 3
+    try:
+        u, rec = proxy._usage_of(gens2, {}, 1, {})
+    finally:
+        proxy._count_text_tokens = real
+    check(u["completion_tokens_details"] == {"reasoning_tokens": 7} and rec["reasoning_tokens"] == "engine"
+          and not asked, "the engine's own reasoning count is used and the tokenizer is not asked",
+          json.dumps([u, rec.get("reasoning_tokens"), asked]))
 
 
 def test_the_streamed_usage_chunk():

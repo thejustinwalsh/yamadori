@@ -28,7 +28,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  4 files changed, 95 insertions(+), 7 deletions(-)
 
 diff --git a/common/arg.cpp b/common/arg.cpp
-index d611bb28c..08979aa92 100644
+index d611bb2..08979aa 100644
 --- a/common/arg.cpp
 +++ b/common/arg.cpp
 @@ -4140,6 +4140,28 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
@@ -61,7 +61,7 @@ index d611bb28c..08979aa92 100644
      add_opt(common_arg(
          {"--spec-draft-p-split", "--draft-p-split"}, "P",
 diff --git a/common/common.h b/common/common.h
-index bbbb76e6f..17a5189a8 100644
+index bbbb76e..17a5189 100644
 --- a/common/common.h
 +++ b/common/common.h
 @@ -329,12 +329,22 @@ struct common_params_speculative_draft {
@@ -92,10 +92,10 @@ index bbbb76e6f..17a5189a8 100644
  
      common_params_model mparams;
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index 6c6c1fbd5..2a6de502a 100644
+index 2d73e48..ccd0211 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
-@@ -2688,7 +2688,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -2791,7 +2791,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
  
                  result.push_back(id);
  
@@ -105,7 +105,7 @@ index 6c6c1fbd5..2a6de502a 100644
                      drafting[seq_id] = false;
                      n_drafting--;
                      continue;
-@@ -3440,8 +3441,26 @@ common_speculative_init_result::common_speculative_init_result(
+@@ -3543,8 +3544,26 @@ common_speculative_init_result::common_speculative_init_result(
          cparams.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
      }
  
@@ -134,7 +134,7 @@ index 6c6c1fbd5..2a6de502a 100644
      // n_rs_seq stays as common_context_params_to_llama set it: the draft context needs the same rollback window as the target, with n_rs_seq == 0 its seq_rm fails silently on partial acceptance and keeps stale positions
      cparams.ctx_other = ctx_tgt;
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 988d9f365..5ee7316bb 100644
+index 988d9f3..5ee7316 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
 @@ -207,6 +207,9 @@ struct server_slot {

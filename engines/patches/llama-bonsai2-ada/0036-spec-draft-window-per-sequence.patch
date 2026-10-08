@@ -15,7 +15,7 @@ batch_view.seq_id, and each with a bound from that sequence's own rows.
 With one slot the result is the same as before.
 ---
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 5e3420509..f1c158864 100644
+index 5e34205..f1c1588 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
 @@ -3702,15 +3702,28 @@ private:

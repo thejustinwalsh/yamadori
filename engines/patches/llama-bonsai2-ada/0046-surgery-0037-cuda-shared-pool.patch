@@ -12,10 +12,10 @@ Subject: [PATCH] cuda: GGML_CUDA_SHARED_POOL=1 shares one transient pool per
  3 files changed, 47 insertions(+)
 
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index 2a6de502a..38e511c09 100644
+index ccd0211..f262a64 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
-@@ -3462,6 +3462,20 @@ common_speculative_init_result::common_speculative_init_result(
+@@ -3565,6 +3565,20 @@ common_speculative_init_result::common_speculative_init_result(
          }
      }
  
@@ -37,7 +37,7 @@ index 2a6de502a..38e511c09 100644
      cparams.ctx_other = ctx_tgt;
  
 diff --git a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
-index aba0c5914..f0b8c5547 100644
+index aba0c59..f0b8c55 100644
 --- a/ggml/src/ggml-cuda/common.cuh
 +++ b/ggml/src/ggml-cuda/common.cuh
 @@ -1621,6 +1621,10 @@ struct ggml_cuda_fwht_q8_context {
@@ -62,7 +62,7 @@ index aba0c5914..f0b8c5547 100644
              pools[device][curr_stream_no] = new_pool_for_device(device, curr_stream_no);
          }
 diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
-index 81cad7c44..0ee31291d 100644
+index d82ef31..b40bc7c 100644
 --- a/ggml/src/ggml-cuda/ggml-cuda.cu
 +++ b/ggml/src/ggml-cuda/ggml-cuda.cu
 @@ -694,6 +694,32 @@ std::unique_ptr<ggml_cuda_pool> ggml_backend_cuda_context::new_pool_for_device(i

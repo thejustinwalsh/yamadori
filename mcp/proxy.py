@@ -5992,7 +5992,9 @@ def _run_turn(body: dict, streamed: bool):
 #   prompt_tokens_details.cached_tokens     prompt tokens reused from the
 #                      slot's cache (llama-server's own usage field, else
 #                      its timings' cache_n: slots.cache_record).
-#   completion_tokens_details.reasoning_tokens   llama-server does not report
+#   completion_tokens_details.reasoning_tokens   the engine's own count when
+#                      it reports one (our 0044, bonsai-ada-surgery 0035:
+#                      rec "engine"); stock llama-server does not report
 #                      it (server-task.cpp usage_json_oaicompat), so the
 #                      reasoning the generation wrote is counted with the
 #                      model's own tokenizer (/tokenize; a prefill's echoed
@@ -6045,7 +6047,13 @@ def _usage_of(gens: list[dict], spent: dict, n_calls: int,
     pre = (final.get("prefill_reasoning") or "").strip()
     if pre and text.lstrip().startswith(pre):
         text = text.lstrip()[len(pre):]
-    if not text.strip():
+    engine_n = (u.get("completion_tokens_details") or {}).get("reasoning_tokens")
+    if isinstance(engine_n, int) and not isinstance(engine_n, bool) and engine_n >= 0:
+        # The engine counts the reasoning it generated (bonsai-ada-surgery 0035, our 0044): no tokenizer round trip.
+        usage["completion_tokens_details"] = {
+            "reasoning_tokens": min(engine_n, completion) if completion else engine_n}
+        rec["reasoning_tokens"] = "engine"
+    elif not text.strip():
         usage["completion_tokens_details"] = {"reasoning_tokens": 0}
         rec["reasoning_tokens"] = "none written"
     else:

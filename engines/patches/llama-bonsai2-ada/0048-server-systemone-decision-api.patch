@@ -56,6 +56,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 conversion/lev.py
  create mode 100644 tools/server/server-decision.cpp
  create mode 100644 tools/server/server-decision.h
+ create mode 100644 conversion/lev.py
+ create mode 100644 tools/server/server-decision.cpp
+ create mode 100644 tools/server/server-decision.h
 
 diff --git a/common/common.cpp b/common/common.cpp
 index 498522c..82d9c7f 100644
@@ -604,7 +607,7 @@ index 75a07e6..0b5bff7 100644
  
      def add_clip_has_vision_encoder(self, value: bool) -> None:
 diff --git a/src/models/qwen35.cpp b/src/models/qwen35.cpp
-index 1fb752e..708bda4 100644
+index 48a2cd1..f95c0ac 100644
 --- a/src/models/qwen35.cpp
 +++ b/src/models/qwen35.cpp
 @@ -47,6 +47,10 @@ void llama_model_qwen35::load_arch_tensors(llama_model_loader & ml) {
@@ -618,7 +621,7 @@ index 1fb752e..708bda4 100644
      // if output is NULL, init from the input tok embed
      if (output == NULL) {
          output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), { n_embd, n_vocab }, TENSOR_DUPLICATED);
-@@ -283,6 +287,16 @@ llama_model_qwen35::graph::graph(const llama_model & model, const llm_graph_para
+@@ -288,6 +292,16 @@ llama_model_qwen35::graph::graph(const llama_model & model, const llm_graph_para
      cb(cur, "result_norm", -1);
      res->t_embd = cur;
  

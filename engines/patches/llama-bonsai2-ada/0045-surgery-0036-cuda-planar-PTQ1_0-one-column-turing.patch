@@ -10,7 +10,7 @@ One-column PTQ1_0 decode kept the Ada SOA_ISUM layout on sm_75. The planar PT ke
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
-index 7e133e3d6..aba0c5914 100644
+index 7e133e3..aba0c59 100644
 --- a/ggml/src/ggml-cuda/common.cuh
 +++ b/ggml/src/ggml-cuda/common.cuh
 @@ -1283,7 +1283,8 @@ int ggml_cuda_get_device();

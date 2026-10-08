@@ -18,7 +18,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 17 insertions(+)
 
 diff --git a/ggml/src/ggml-cuda/fattn.cu b/ggml/src/ggml-cuda/fattn.cu
-index cef901f9f..e099ec374 100644
+index cef901f..e099ec3 100644
 --- a/ggml/src/ggml-cuda/fattn.cu
 +++ b/ggml/src/ggml-cuda/fattn.cu
 @@ -475,6 +475,23 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const

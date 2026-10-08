@@ -44,7 +44,7 @@ rank waits for; placement keeps the higher rank's own cells in VRAM, and
 it runs at full speed alone. docs/ENGINES.md "KV rank".
 ---
 diff --git a/include/llama.h b/include/llama.h
-index 4c36bae1..e8559529 100644
+index 4c36bae..e855952 100644
 --- a/include/llama.h
 +++ b/include/llama.h
 @@ -822,6 +822,14 @@ extern "C" {
@@ -63,7 +63,7 @@ index 4c36bae1..e8559529 100644
      LLAMA_API bool llama_memory_can_shift(llama_memory_t mem);
  
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index 8dde2b2d..44893664 100644
+index 8dde2b2..4489366 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -4339,6 +4339,14 @@ uint32_t llama_memory_seq_span_p1(llama_memory_t mem, llama_seq_id seq_id) {
@@ -82,7 +82,7 @@ index 8dde2b2d..44893664 100644
      if (!mem) {
          return 0;
 diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
-index 7cd36fa8..d9ec691b 100644
+index 7cd36fa..d9ec691 100644
 --- a/src/llama-kv-cache.cpp
 +++ b/src/llama-kv-cache.cpp
 @@ -11,6 +11,7 @@
@@ -446,7 +446,7 @@ index 7cd36fa8..d9ec691b 100644
  
  llama_kv_cache::slot_info llama_kv_cache::find_slot(const llama_ubatch & ubatch, bool cont) const {
 diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
-index e6dc4398..42c9a703 100644
+index e6dc439..42c9a70 100644
 --- a/src/llama-kv-cache.h
 +++ b/src/llama-kv-cache.h
 @@ -149,6 +149,8 @@ public:
@@ -477,7 +477,7 @@ index e6dc4398..42c9a703 100644
          // cells to exchange; the first of each pair is in use, the second is empty or in use
          std::vector<std::pair<uint32_t, uint32_t>> pairs;
 diff --git a/src/llama-memory-hybrid.cpp b/src/llama-memory-hybrid.cpp
-index 85186c8c..ecc566ee 100644
+index 85186c8..ecc566e 100644
 --- a/src/llama-memory-hybrid.cpp
 +++ b/src/llama-memory-hybrid.cpp
 @@ -190,6 +190,11 @@ void llama_memory_hybrid::set_next_batch(const std::vector<llama_seq_id> & seq_i
@@ -493,7 +493,7 @@ index 85186c8c..ecc566ee 100644
      // the recurrent part has no KV cells: only the attention cache spans a tiered buffer
      return mem_attn->cells_used_max_p1();
 diff --git a/src/llama-memory-hybrid.h b/src/llama-memory-hybrid.h
-index deb5407c..8a3685fc 100644
+index deb5407..8a3685f 100644
 --- a/src/llama-memory-hybrid.h
 +++ b/src/llama-memory-hybrid.h
 @@ -76,6 +76,8 @@ public:
@@ -506,7 +506,7 @@ index deb5407c..8a3685fc 100644
  
      // state write/load
 diff --git a/src/llama-memory.h b/src/llama-memory.h
-index 4eed4f54..1c2de7e9 100644
+index 4eed4f5..1c2de7e 100644
 --- a/src/llama-memory.h
 +++ b/src/llama-memory.h
 @@ -127,6 +127,9 @@ struct llama_memory_i {
@@ -520,7 +520,7 @@ index 4eed4f54..1c2de7e9 100644
  
      //
 diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
-index 6bbff6c8..71fc89af 100644
+index 6bbff6c..71fc89a 100644
 --- a/tools/server/server-context.cpp
 +++ b/tools/server/server-context.cpp
 @@ -518,12 +518,27 @@ struct server_slot {
@@ -582,7 +582,7 @@ index 6bbff6c8..71fc89af 100644
          { "model_ftype",                 meta.model_ftype },
          { "model_path",                  meta.model_path },
 diff --git a/tools/server/server-schema.cpp b/tools/server/server-schema.cpp
-index 990cd8ff..e72d510f 100644
+index 990cd8f..e72d510 100644
 --- a/tools/server/server-schema.cpp
 +++ b/tools/server/server-schema.cpp
 @@ -64,6 +64,19 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
@@ -606,7 +606,7 @@ index 990cd8ff..e72d510f 100644
          ->set_hard_limits(0, INT32_MAX)
          ->set_desc("Min chunk size to attempt reusing from the cache via KV shifting. See --cache-reuse arg"));
 diff --git a/tools/server/server-task.cpp b/tools/server/server-task.cpp
-index 0d3beb31..dcb9963f 100644
+index 0d3beb3..dcb9963 100644
 --- a/tools/server/server-task.cpp
 +++ b/tools/server/server-task.cpp
 @@ -69,6 +69,8 @@ json task_params::to_json(bool only_metrics) const {
@@ -628,7 +628,7 @@ index 0d3beb31..dcb9963f 100644
          {"stream",                    stream},
          {"logit_bias",                format_logit_bias(sampling.logit_bias)},
 diff --git a/tools/server/server-task.h b/tools/server/server-task.h
-index 9c99143f..3ab8bf3c 100644
+index 9c99143..3ab8bf3 100644
 --- a/tools/server/server-task.h
 +++ b/tools/server/server-task.h
 @@ -64,6 +64,9 @@ struct task_params {
