@@ -241,12 +241,34 @@ def test_a_slow_call_times_out_and_a_broken_server_is_not_offered():
           and "exited" in (bsrv.status()["why"] or ""),
           "a server that exits before `initialize` is `failed`, with why",
           json.dumps(bsrv.status()))
+    s0 = bsrv.starts
     defs, why = mcp_host.offer()
     names = [d["function"]["name"] for d in defs]
     check("yama_broken_find" not in names and "yama_find_package" in names
           and "start failed" in json.dumps(why),
           "a failed server's tools are not offered to a new conversation; "
           "the others are", json.dumps({"names": names, "why": why}))
+    end = time.time() + 20
+    while time.time() < end and (bsrv.starts == s0 or bsrv.state == "starting"):
+        time.sleep(0.05)
+    check(bsrv.starts == s0 + 1 and "restarting in the background" in json.dumps(why),
+          "…and a retryable failure is started again in the background, so the next conversation can have it",
+          json.dumps({"starts": [s0, bsrv.starts], "why": why}))
+    # Docker not answering is retryable; an image that is not there is not
+    saved = (mcp_host.local_image_id, mcp_host.docker_answers)
+    try:
+        mcp_host.local_image_id = lambda image: None
+        for answers, want in ((False, True), (True, False)):
+            mcp_host.docker_answers = lambda a=answers: a
+            try:
+                mcp_host.check_image({"image": "x:1", "id": "x"})
+                got = None
+            except mcp_host.McpError as e:
+                got = e.retryable
+            check(got is want, f"docker {'answers' if answers else 'does not answer'} and the image is missing: "
+                               f"retryable {want}", str(got))
+    finally:
+        mcp_host.local_image_id, mcp_host.docker_answers = saved
     out = mcp_host.run_tool("yama_broken_find", {"query": "x",
                                                  "ecosystem": "npm"}, c)
     check(json.loads(out).get("error") == "MCP_SERVER_DOWN",
@@ -817,6 +839,8 @@ def test_the_container_command():
           "models/manifest.yaml records the image id (runtimes: "
           "mcp-packagelens)", str(rec))
     real = mcp_host.local_image_id
+    real_answers = mcp_host.docker_answers
+    mcp_host.docker_answers = lambda: True       # Docker is up here; the image is what is judged
     try:
         verdicts = []
         for got in (rec, "sha256:" + "0" * 64, None):
@@ -828,6 +852,7 @@ def test_the_container_command():
                 verdicts.append(str(e))
     finally:
         mcp_host.local_image_id = real
+        mcp_host.docker_answers = real_answers
     check(verdicts[0] == "ok" and "record the rebuild" in verdicts[1]
           and "not in the local store" in verdicts[2]
           and "mcp_host.py build packagelens" in verdicts[2],

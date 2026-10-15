@@ -339,16 +339,30 @@ def local_image_id(image: str) -> str | None:
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
+def docker_answers() -> bool:
+    """The Docker engine answers (`docker version` reaches the server)."""
+    try:
+        r = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"], capture_output=True,
+                           text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
 def check_image(spec: dict) -> None:
     """A docker server starts only from the image on record: built (never
     pulled at run time) and, when its row names a manifest entry, the very
     image recorded there."""
     got = local_image_id(spec["image"])
     if got is None:
+        if not docker_answers():
+            # (2026-10-15: after a Windows Update reboot the proxy started before the WSL engine; the server was
+            # marked failed, not retryable, and never offered again until a restart.) Docker coming up fixes it.
+            raise McpError("MCP_SERVER_DOWN", "Docker does not answer (the engine may still be starting); the "
+                           "next new conversation tries again", retryable=True)
         raise McpError("MCP_SERVER_DOWN",
-                       f"image {spec['image']} is not in the local store "
-                       f"(or Docker does not answer): python mcp/mcp_host.py "
-                       f"build {spec['id']}", retryable=False)
+                       f"image {spec['image']} is not in the local store: "
+                       f"python mcp/mcp_host.py build {spec['id']}", retryable=False)
     rid = spec.get("manifest_id")
     want = recorded_image_id(rid) if rid else None
     if rid and want != got:
@@ -577,6 +591,11 @@ def offer() -> tuple[list[dict], dict]:
         st = srv.status() if srv else {"state": "off"}
         if st["state"] == "failed":
             why[spec["id"]] = f"not offered: its start failed ({st.get('why')})"
+            if srv is not None and srv.retryable:
+                # A retryable failure (Docker not up yet, a crash) is tried again in the background, one start at
+                # a time (Server.start's lock), so the NEXT new conversation gets the tools; this one is decided now.
+                threading.Thread(target=srv.start, daemon=True, name=f"mcp-restart-{spec['id']}").start()
+                why[spec["id"]] += "; restarting in the background"
             continue
         have = set(st.get("upstream_tools") or [])
         for t in spec.get("tools") or []:
