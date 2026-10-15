@@ -68,19 +68,125 @@ STORE_CONVERSATIONS = 256                     # conversations whose store is kep
 MAX_IMAGES = 8                                # image() calls shown per script
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
-_STORES: "OrderedDict[str, dict]" = OrderedDict()
+_STORES: "OrderedDict[str, _Store]" = OrderedDict()
 _STORES_LOCK = threading.Lock()
+_DB_LOCK = threading.Lock()
+_SCHEMA_DONE: set = set()
+_last_prune = 0.0
+
+# DURABLE (a restart keeps a conversation's store). Sqlite, the response store's pattern (mcp/response_store.py):
+# path YAMADORI_CODEMODE_STORE_DB (read at each use), default index/codemode_store.sqlite3; keyed by the
+# conversation key (session_id.conversation_key: account, source, id -- never the messages). Pi's limits are
+# unchanged. Eviction is the ledger's (nebari.LEDGER_*): whole conversations, least recently used first, past
+# LEDGER_TOTAL_BYTES in all, and any conversation unused for LEDGER_MAX_AGE goes regardless; at most once a minute.
+
+
+def db_path() -> str:
+    return os.environ.get("YAMADORI_CODEMODE_STORE_DB") or os.path.join(HERE, "..", "index", "codemode_store.sqlite3")
+
+
+def _db():
+    import sqlite3
+    path = os.path.abspath(db_path())
+    done = path in _SCHEMA_DONE and os.path.exists(path)
+    if not done:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    con = sqlite3.connect(path, timeout=30)
+    if not done:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("CREATE TABLE IF NOT EXISTS entries(conv TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, "
+                    "PRIMARY KEY (conv, k))")
+        con.execute("CREATE TABLE IF NOT EXISTS convs(conv TEXT PRIMARY KEY, last_seen REAL NOT NULL, "
+                    "bytes INTEGER NOT NULL)")
+        con.commit()
+        _SCHEMA_DONE.add(path)
+    return con
+
+
+class _Store(dict):
+    """One conversation's store {name: JSON text}, written through to sqlite. `run` commits a successful script's
+    writes with `update` (a failed script never calls it), so a durable write happens exactly when the in-memory
+    one does. A database that cannot be written leaves the in-memory store working (the toolbox never fails for it)."""
+
+    def __init__(self, key: str):
+        super().__init__()
+        self.key = key
+        try:
+            with _DB_LOCK:
+                con = _db()
+                try:
+                    super().update(dict(con.execute("SELECT k, v FROM entries WHERE conv=?", (key,)).fetchall()))
+                    con.execute("INSERT INTO convs(conv, last_seen, bytes) VALUES(?,?,?) ON CONFLICT(conv) DO "
+                                "UPDATE SET last_seen=excluded.last_seen", (key, time.time(), sum(map(len, self.values()))))
+                    con.commit()
+                finally:
+                    con.close()
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    def update(self, *a, **kw):
+        writes = dict(*a, **kw)
+        super().update(writes)
+        if not writes:
+            return
+        try:
+            with _DB_LOCK:
+                con = _db()
+                try:
+                    con.executemany("INSERT INTO entries(conv, k, v) VALUES(?,?,?) ON CONFLICT(conv, k) DO UPDATE "
+                                    "SET v=excluded.v", [(self.key, k, v) for k, v in writes.items()])
+                    con.execute("INSERT INTO convs(conv, last_seen, bytes) VALUES(?,?,?) ON CONFLICT(conv) DO "
+                                "UPDATE SET last_seen=excluded.last_seen, bytes=excluded.bytes",
+                                (self.key, time.time(), sum(len(x) for x in self.values())))
+                    con.commit()
+                finally:
+                    con.close()
+            prune()
+        except Exception:                                        # noqa: BLE001
+            pass
+
+
+def prune(now: float | None = None, force: bool = False) -> dict:
+    """The ledger's eviction: conversations unused for nebari.LEDGER_MAX_AGE, then (least recently used first) until
+    the total is within nebari.LEDGER_TOTAL_BYTES. At most once a minute unless `force`. Returns {removed, total}."""
+    global _last_prune
+    import nebari
+    t = time.time() if now is None else now
+    if not force and t - _last_prune < nebari.LEDGER_PRUNE_EVERY:
+        return {"removed": [], "total": None}
+    _last_prune = t
+    removed: list = []
+    with _DB_LOCK:
+        con = _db()
+        try:
+            rows = con.execute("SELECT conv, last_seen, bytes FROM convs ORDER BY last_seen").fetchall()
+            total = sum(r[2] for r in rows)
+            for conv, seen, nbytes in rows:
+                if t - seen > nebari.LEDGER_MAX_AGE or total > nebari.LEDGER_TOTAL_BYTES:
+                    removed.append(conv)
+                    total -= nbytes
+            for conv in removed:
+                con.execute("DELETE FROM entries WHERE conv=?", (conv,))
+                con.execute("DELETE FROM convs WHERE conv=?", (conv,))
+            con.commit()
+        finally:
+            con.close()
+    with _STORES_LOCK:
+        for conv in removed:
+            _STORES.pop(conv, None)
+    return {"removed": removed, "total": total}
 
 
 def store_for(key: str) -> dict:
-    """The conversation's store: {name: JSON text}. In memory (a restart forgets it), least recently used
-    conversation out past STORE_CONVERSATIONS; an empty key (a side call) gets a throwaway dict."""
+    """The conversation's store: {name: JSON text}. Durable (sqlite, above); a hot cache of the
+    STORE_CONVERSATIONS least recently used conversations sits in front of it; an empty key (a side call) gets a
+    throwaway dict."""
     if not key:
         return {}
     with _STORES_LOCK:
         s = _STORES.get(key)
         if s is None:
-            s = _STORES[key] = {}
+            s = _STORES[key] = _Store(key)
             while len(_STORES) > STORE_CONVERSATIONS:
                 _STORES.popitem(last=False)
         else:

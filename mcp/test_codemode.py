@@ -761,12 +761,70 @@ def test_store_load_and_image():
     check(not out["ok"] and "nothing to show" in json.dumps(out["error"]), "image() of nothing throws")
 
 
+# ============================================================ 8. the store is durable (sqlite)
+def test_the_store_is_durable():
+    import sqlite3
+    import nebari
+    db = os.environ["YAMADORI_CODEMODE_STORE_DB"]
+    check(C.db_path() == db and db.startswith(_TMP), "the store's database is the suite's temp path (offline_stores)")
+    C._STORES.clear()
+    s = C.store_for("durable-1")
+    out = go("store('plan', {a: 1}); save('n', 5); return 'ok'", store=s)
+    check(out["ok"] and s["n"] == "5", "a successful script commits through the conversation's store")
+    C._STORES.clear()                                            # a restart: the in-memory cache is gone
+    s2 = C.store_for("durable-1")
+    check(s2 is not s and dict(s2) == {"plan": "{\"a\":1}", "n": "5"},
+          "…and a cleared cache (a restart) loads the same data back", json.dumps(dict(s2)))
+    out = go("return JSON.stringify([load('plan'), load('n')])", store=s2)
+    check(out["ok"] and out["items"] == ["[{\"a\":1},5]"], "…and the next script reads it with load()", json.dumps(out["items"]))
+    out = go("store('lost', 1); store('plan', 'changed'); throw new Error('boom')", store=s2)
+    C._STORES.clear()
+    s3 = C.store_for("durable-1")
+    check(not out["ok"] and "lost" not in s3 and s3["plan"] == "{\"a\":1}",
+          "a failed script writes nothing to the database", json.dumps(dict(s3)))
+    other = C.store_for("durable-2")
+    check(other == {}, "another conversation's store is empty (per-conversation isolation)")
+    go("store('only_b', 'b'); return 1", store=other)
+    C._STORES.clear()
+    check("only_b" not in C.store_for("durable-1") and C.store_for("durable-2") == {"only_b": '"b"'},
+          "…and stays its own after a restart")
+    t1, t2 = C.store_for(""), C.store_for("")
+    go("store('x', 1); return 1", store=t1)
+    con = sqlite3.connect(db)
+    convs = {r[0] for r in con.execute("SELECT conv FROM convs")}
+    con.close()
+    check(t1 is not t2 and t2 == {} and "" not in convs, "an empty key stays a throwaway dict, never written")
+    # pruning: the ledger's age and total size, least recently used first
+    import time as _t
+    con = sqlite3.connect(db)
+    con.execute("UPDATE convs SET last_seen=? WHERE conv='durable-2'", (_t.time() - nebari.LEDGER_MAX_AGE - 10,))
+    con.commit()
+    con.close()
+    r = C.prune(force=True)
+    check(r["removed"] == ["durable-2"] and "durable-2" not in C._STORES, "an old conversation is pruned (age)", json.dumps(r))
+    C._STORES.clear()
+    check(C.store_for("durable-2") == {} and C.store_for("durable-1")["n"] == "5",
+          "…its data goes, the others stay")
+    old_total = nebari.LEDGER_TOTAL_BYTES
+    try:
+        nebari.LEDGER_TOTAL_BYTES = 10
+        C.store_for("durable-3").update({"k": "z" * 50})
+        con = sqlite3.connect(db)
+        con.execute("UPDATE convs SET last_seen=? WHERE conv='durable-1'", (_t.time() - 100,))
+        con.commit()
+        con.close()
+        r = C.prune(force=True)
+    finally:
+        nebari.LEDGER_TOTAL_BYTES = old_total
+    check(r["removed"][:1] == ["durable-1"], "past the total size the least recently used goes first", json.dumps(r))
+
+
 def main() -> int:
     for fn in (test_the_registry_is_one_source_per_tool,
                test_a_server_added_through_the_configuration_is_discoverable,
                test_discovery, test_composition, test_the_limits, test_escapes,
                test_the_tool_definition, test_the_derivations, test_the_probe_reads_what_the_proxy_records,
-               test_store_load_and_image):
+               test_store_load_and_image, test_the_store_is_durable):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:
