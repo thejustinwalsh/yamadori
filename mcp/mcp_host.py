@@ -339,6 +339,37 @@ def local_image_id(image: str) -> str | None:
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
+_ENGINE_LOCK = threading.Lock()
+# scripts/wsl_engine.ps1 waits up to its own -WaitSec (60) for the engine; the process gets that plus room to start.
+ENGINE_SCRIPT_TIMEOUT_S = 90.0
+
+
+def ensure_docker() -> tuple[bool, str]:
+    """(answers, how): Docker answers, or it is brought up the stack's own way -- scripts/wsl_engine.ps1 (the WSL
+    keep-alive start-stack.bat and the watchdog run; idempotent) -- and asked again. One bring-up at a time.
+    Operator, 2026-10-15: "Our stack ... needs to be able to health check and launch packagelens by itself when it
+    needs it ... A request for it should ensure it works." YAMADORI_WSL_ENGINE=0 (a machine whose Docker is not the
+    WSL engine) skips the bring-up."""
+    if docker_answers():
+        return True, "answers"
+    script = os.path.join(os.path.dirname(HERE), "scripts", "wsl_engine.ps1")
+    if os.name != "nt" or os.environ.get("YAMADORI_WSL_ENGINE") == "0" or not os.path.exists(script):
+        return False, "Docker does not answer and this machine has no WSL engine to start"
+    with _ENGINE_LOCK:
+        if docker_answers():
+            return True, "answers (another caller brought it up)"
+        t0 = time.time()
+        try:
+            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Quiet"],
+                           capture_output=True, timeout=ENGINE_SCRIPT_TIMEOUT_S)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return False, f"starting the WSL engine failed: {type(e).__name__}"
+        ok = docker_answers()
+        print(f"  mcp: Docker did not answer; scripts/wsl_engine.ps1 ran {time.time() - t0:.1f}s -> "
+              f"{'answers' if ok else 'still down'}", flush=True)
+        return ok, ("started by scripts/wsl_engine.ps1" if ok else "scripts/wsl_engine.ps1 ran; Docker still down")
+
+
 def docker_answers() -> bool:
     """The Docker engine answers (`docker version` reaches the server)."""
     try:
@@ -349,10 +380,14 @@ def docker_answers() -> bool:
     return r.returncode == 0 and bool(r.stdout.strip())
 
 
-def check_image(spec: dict) -> None:
+def check_container_image(spec: dict) -> None:
     """A docker server starts only from the image on record: built (never
     pulled at run time) and, when its row names a manifest entry, the very
     image recorded there."""
+    up, how = ensure_docker()
+    if not up:
+        raise McpError("MCP_SERVER_DOWN", f"Docker does not answer: {how}; the next request tries again",
+                       retryable=True)
     got = local_image_id(spec["image"])
     if got is None:
         if not docker_answers():
@@ -428,7 +463,7 @@ class Server:
     def _start(self) -> None:
         spec = self.spec
         if spec.get("runtime") == "docker":
-            check_image(spec)
+            check_container_image(spec)
             sn = _sandbox_net()
             name = container_name(self.id, self.tag)
             subprocess.run(["docker", "rm", "-f", name], capture_output=True,
@@ -589,13 +624,18 @@ def offer() -> tuple[list[dict], dict]:
     for spec in mcp_config.servers(enabled_only=True):
         srv = get(spec["id"])
         st = srv.status() if srv else {"state": "off"}
+        healed = ""
+        if srv is not None and st["state"] in ("failed", "exited", "stopped") and srv.retryable:
+            # A REQUEST ENSURES IT WORKS (operator, 2026-10-15): a server that is not running is started now --
+            # Docker brought up first when it does not answer (ensure_docker) -- before this conversation's offer
+            # is decided. The wait runs inside the turn, so the client hears heartbeats. A refused image
+            # (retryable False) is not fixed by trying again and stays out.
+            ok = srv.start()
+            st = srv.status()
+            healed = "started on this request" if ok else "a start on this request failed"
+            print(f"  mcp {spec['id']}: {healed}", flush=True)
         if st["state"] == "failed":
-            why[spec["id"]] = f"not offered: its start failed ({st.get('why')})"
-            if srv is not None and srv.retryable:
-                # A retryable failure (Docker not up yet, a crash) is tried again in the background, one start at
-                # a time (Server.start's lock), so the NEXT new conversation gets the tools; this one is decided now.
-                threading.Thread(target=srv.start, daemon=True, name=f"mcp-restart-{spec['id']}").start()
-                why[spec["id"]] += "; restarting in the background"
+            why[spec["id"]] = f"not offered: its start failed ({st.get('why')})" + (f"; {healed}" if healed else "")
             continue
         have = set(st.get("upstream_tools") or [])
         for t in spec.get("tools") or []:
@@ -603,7 +643,7 @@ def offer() -> tuple[list[dict], dict]:
             if have and not t.get("runner") and t["upstream"] not in have:
                 continue
             tools.append(mcp_config.definition(t))
-        why[spec["id"]] = st["state"]
+        why[spec["id"]] = st["state"] + (f" ({healed})" if healed else "")
     return tools, {"servers": why}
 
 

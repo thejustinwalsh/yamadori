@@ -170,7 +170,7 @@ PACKAGELENS = {
     "recipe": "mcp_servers/packagelens",
     "pinned": "models/manifest.yaml runtimes: mcp-packagelens",
     # The proxy starts it only when the local image id is the one recorded
-    # there (mcp_host.check_image).
+    # there (mcp_host.check_container_image).
     "manifest_id": "mcp-packagelens",
     "network": "egress",
     "call_timeout_s": PL_CALL_TIMEOUT_S,

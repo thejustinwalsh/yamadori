@@ -248,27 +248,43 @@ def test_a_slow_call_times_out_and_a_broken_server_is_not_offered():
           and "start failed" in json.dumps(why),
           "a failed server's tools are not offered to a new conversation; "
           "the others are", json.dumps({"names": names, "why": why}))
-    end = time.time() + 20
-    while time.time() < end and (bsrv.starts == s0 or bsrv.state == "starting"):
-        time.sleep(0.05)
-    check(bsrv.starts == s0 + 1 and "restarting in the background" in json.dumps(why),
-          "…and a retryable failure is started again in the background, so the next conversation can have it",
+    check(bsrv.starts == s0 + 1 and "a start on this request failed" in json.dumps(why),
+          "…a retryable failure is started again ON THE REQUEST that asks for the offer (it still fails here)",
           json.dumps({"starts": [s0, bsrv.starts], "why": why}))
-    # Docker not answering is retryable; an image that is not there is not
-    saved = (mcp_host.local_image_id, mcp_host.docker_answers)
+    # Docker not answering (and not brought up) is retryable; an image that is not there is not
+    saved = (mcp_host.local_image_id, mcp_host.docker_answers, mcp_host.ensure_docker)
     try:
         mcp_host.local_image_id = lambda image: None
         for answers, want in ((False, True), (True, False)):
             mcp_host.docker_answers = lambda a=answers: a
+            mcp_host.ensure_docker = lambda a=answers: (a, "test")
             try:
-                mcp_host.check_image({"image": "x:1", "id": "x"})
+                mcp_host.check_container_image({"image": "x:1", "id": "x"})
                 got = None
             except mcp_host.McpError as e:
                 got = e.retryable
             check(got is want, f"docker {'answers' if answers else 'does not answer'} and the image is missing: "
                                f"retryable {want}", str(got))
+        # ensure_docker brings the engine up the stack's own way when Docker does not answer
+        mcp_host.ensure_docker = saved[2]
+        ran: list = []
+        real_run = mcp_host.subprocess.run
+        state = {"up": False}
+        mcp_host.docker_answers = lambda: state["up"]
+
+        def fake_run(argv, **kw):
+            ran.append(argv)
+            state["up"] = True
+            return real_run(["cmd", "/c", "exit 0"], capture_output=True)
+        mcp_host.subprocess.run = fake_run
+        try:
+            ok, how = mcp_host.ensure_docker()
+        finally:
+            mcp_host.subprocess.run = real_run
+        check(ok and ran and ran[0][-2].endswith("wsl_engine.ps1") and "started by" in how,
+              "ensure_docker: Docker down -> scripts/wsl_engine.ps1 runs -> Docker answers", json.dumps([ok, how]))
     finally:
-        mcp_host.local_image_id, mcp_host.docker_answers = saved
+        mcp_host.local_image_id, mcp_host.docker_answers, mcp_host.ensure_docker = saved
     out = mcp_host.run_tool("yama_broken_find", {"query": "x",
                                                  "ecosystem": "npm"}, c)
     check(json.loads(out).get("error") == "MCP_SERVER_DOWN",
@@ -846,7 +862,7 @@ def test_the_container_command():
         for got in (rec, "sha256:" + "0" * 64, None):
             mcp_host.local_image_id = lambda image, g=got: g
             try:
-                mcp_host.check_image(spec)
+                mcp_host.check_container_image(spec)
                 verdicts.append("ok")
             except mcp_host.McpError as e:
                 verdicts.append(str(e))
