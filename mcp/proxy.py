@@ -4453,6 +4453,9 @@ def _x_yamadori(payload: dict, *, hops: int) -> dict:
         # budget record (tiers.compaction_budget) and the harness whose form
         # it is (mcp/compaction.py).
         "utility_kind": payload.get("_utility_kind"),
+        # a compaction whose first generation wrote no summary and was asked
+        # again ({hop, finish, reasoning_chars}); absent otherwise
+        "compaction_retry": payload.get("_compaction_retry"),
         "compaction": payload.get("_compaction"),
         # How the client's instruction messages were mapped
         # (system_roles.one_system: {merged, developer_as_user}); None when
@@ -5465,6 +5468,7 @@ def _run_turn(body: dict, streamed: bool):
     # IMAGE_REGENERATIONS the turn lands. x_yamadori.image_guard.
     img_rec: dict | None = None
     img_land = False
+    compaction_retry: dict | None = None
     hop = -1
     while True:
         hop += 1
@@ -5588,6 +5592,24 @@ def _run_turn(body: dict, streamed: bool):
             else:
                 yield from out.content(held)
             held = ""
+        # A COMPACTION THAT WROTE NO SUMMARY IS ASKED AGAIN, ONCE (operator,
+        # 2026-10-15: "repair compaction from our own cache"): deploy check
+        # 2026-10-08, the flattened compaction came back as only its session
+        # line (finish stop, empty content), and a harness stores that as the
+        # conversation's whole history. The same request goes up again on the
+        # same slot, whose cache holds the prompt (only decode is paid);
+        # nothing was sent as content yet (an empty answer flushes nothing).
+        if (payload.get("_utility_kind") == "compaction" and not calls
+                and img is None and not (msg.get("content") or "").strip()
+                and not live and not compaction_retry):
+            compaction_retry = {"hop": hop, "finish": (d.get("choices") or [{}])[0]
+                                .get("finish_reason"),
+                                "reasoning_chars": len(msg.get("reasoning_content") or "")}
+            payload["_compaction_retry"] = compaction_retry
+            print(f"  compaction: the summary came back empty (finish "
+                  f"{compaction_retry['finish']}); asking again on the same slot", flush=True)
+            hop -= 1
+            continue
         # The landing is the last generation whatever it asked for: a call
         # made there is not run (nothing would read its result).
         if (not calls and img is None) or last:

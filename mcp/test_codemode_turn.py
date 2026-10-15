@@ -550,6 +550,30 @@ def test_the_store_survives_a_compaction():
           f"(session source: {ses.get('source')})", out[:200] + " | " + json.dumps(ses)[:200])
 
 
+def test_an_empty_compaction_summary_is_asked_again():
+    """(proxy, 2026-10-15) A compaction whose generation wrote no summary is asked again, once, on the same slot;
+    the client gets the second one; a second empty answer is delivered as it is."""
+    for label, script, want in (
+            ("empty, then a summary", [T.reply("", reasoning="Hmm."), T.reply("The plan was step 3.")],
+             "The plan was step 3."),
+            ("empty twice", [T.reply(""), T.reply("")], "")):
+        fresh()
+        c = CM("cr" + label[:3], features={"codemode": False})
+        c.turn([T.reply("Noted.")], user="Remember the plan: step 3.")
+        t = c.turn(script, user="Your task is to create a detailed summary of the conversation so far.")
+        content = (t["m"].get("content") or "")
+        body = content.split("\n\n", 1)[1] if content.startswith("yamadori session") else content
+        rec = t["x"].get("compaction_retry") or {}
+        check(body.strip() == want and rec.get("hop") == 0 and len(t["gens"]) == 2,
+              f"{label}: asked again once (2 generations); the client gets {want!r}",
+              json.dumps([content[:120], rec, len(t["gens"])]))
+    fresh()
+    c = CM("crn", features={"codemode": False})
+    t = c.turn([T.reply("")], user="Say nothing.")
+    check(not t["x"].get("compaction_retry") and len(t["gens"]) == 1,
+          "an empty answer to an ordinary turn is NOT retried (only a compaction is)")
+
+
 def test_a_hidden_hop_keeps_its_argument_order():
     """A hop whose calls' arguments are NOT in sorted key order (the model wrote `query` before `ecosystem`),
     then a TEXT answer: the next request must extend the slot. It did not (2026-10-08, live: reused 5178 of
@@ -610,7 +634,7 @@ def main() -> int:
     for fn in (test_the_offer, test_one_hidden_hop, test_only_mode_session, test_failures,
                test_the_caps_inside_a_script, test_decide_and_images,
                test_store_image_and_the_output_cap_in_a_turn, test_the_store_survives_a_compaction,
-               test_a_hidden_hop_keeps_its_argument_order,
+               test_an_empty_compaction_summary_is_asked_again, test_a_hidden_hop_keeps_its_argument_order,
                test_over_responses):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
