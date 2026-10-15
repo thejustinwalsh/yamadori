@@ -529,7 +529,7 @@ def test_the_store_survives_a_compaction():
     value (the store hangs off the conversation key, which the summary's session line carries)."""
     fresh()
     c = CM("cmp")
-    t1 = c.turn([T.reply("", calls=[compose("store('plan', {step: 3}); return 'stored'", "p1")]),
+    c.turn([T.reply("", calls=[compose("store('plan', {step: 3}); return 'stored'", "p1")]),
                  T.reply("", reasoning="Write.", calls=[T.call("write_file", H.PKG, "w1")])],
                 user="Remember the plan, then write the file.")
     c.tool_result("w1", "wrote package.json")
