@@ -559,6 +559,12 @@ def build_vocabulary(h: dict[str, list[str]]) -> dict:
     platform = platform_names(h)
     english = prose_words(h) | tokenizer_words()
     symbols: dict[str, str] = {}
+    # Unique names dropped ONLY because a platform interface declares a
+    # member of that name (`query`: Permissions.query, url.parse's query):
+    # they detect nothing alone, but `receiver.name(` where the receiver is
+    # a name the SAME package exports reads as that package (detect(),
+    # RECEIVER MEMBERS).
+    receiver_members: dict[str, str] = {}
     # Unique names that are plain English words: they detect only in a
     # code-like context (an import, `<Canvas`, `Fn(`, `.name`, a fence,
     # written code, an error line), never in prose.
@@ -577,6 +583,7 @@ def build_vocabulary(h: dict[str, list[str]]) -> dict:
             continue
         if n in platform:
             per[p]["dropped_platform"] += 1
+            receiver_members[n] = p
         elif is_english(n, english):
             per[p]["dropped_english"] += 1
             code_only[n] = p
@@ -584,6 +591,7 @@ def build_vocabulary(h: dict[str, list[str]]) -> dict:
             symbols[n] = p
             per[p]["unique"] += 1
     return {"symbols": symbols, "code_symbols": {**symbols, **code_only},
+            "receiver_members": receiver_members,
             "per_package": per,
             "packages": sorted(p for p in names
                                if not p.startswith("(ref) ")),
@@ -968,6 +976,39 @@ def _extensions() -> set[str]:
     return _EXT
 
 
+# RECEIVER MEMBERS (coordinator, 2026-10-15; daily eval pkg-query-nothing:
+# "world.query(Position, Velocity) returns nothing" found no koota once the
+# TypeScript lib and @types/node were visible, because `query` is also a
+# platform member -- Permissions.query, url.parse's `query` -- and the
+# platform drop is by name). A platform-only unique member still says which
+# package when its RECEIVER is a name that package exports: `world.query(` is
+# koota's (koota exports `world`), `arr.slice(` or `location.href` are not
+# (the receiver is nobody's). The check is structural, no threshold.
+_RECV_CALL = re.compile(r"(?<![\w$.])([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(")
+_NAMES_CACHE: dict = {}
+
+
+def _names_of(pkg: str) -> set[str]:
+    dirs = held().get(pkg, [])
+    key = (pkg, tuple(dirs))
+    if key not in _NAMES_CACHE:
+        _NAMES_CACHE[key] = package_names(dirs) if dirs else set()
+    return _NAMES_CACHE[key]
+
+
+def receiver_members_in(where: str, text: str, table: dict) -> list[tuple]:
+    """[(package, "recv.name")] for each `recv.name(` in `text` whose name is
+    a platform-only member unique to a package that also exports `recv`."""
+    if not table or where == "config":
+        return []
+    out = []
+    for r, m in _RECV_CALL.findall(text):
+        pkg = table.get(m)
+        if pkg and r in _names_of(pkg):
+            out.append((pkg, f"{r}.{m}"))
+    return out
+
+
 def detect(messages: list[dict]) -> dict[str, dict]:
     """{package: {"why": [{how, what, where}], "version": str | None,
     "events": [ASKED | ERROR]}} for every held package in play at this
@@ -1014,6 +1055,9 @@ def detect(messages: list[dict]) -> dict[str, dict]:
                 pkg = package_of_specifier(name)
                 if pkg:
                     add(pkg, "pin", tok, where)
+        for pkg, what in receiver_members_in(
+                where, text, v.get("receiver_members") or {}):
+            add(pkg, "symbol", what, where, weak=where == "tool")
         for sym, code_like in _symbols_in(where, text):
             if sym in declared:
                 continue

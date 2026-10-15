@@ -1904,7 +1904,12 @@ def ruled_out(text: str) -> set[str]:
     if prose.strip() and _VANILLA.search(prose):
         asked = asked_terms(text)
         for tid in _LAYERS:
-            if tid not in asked:
+            # A layer a named term IS (React Three Fiber is React:
+            # IMPLIES_FOR_GATES) is named too: the request that quotes a
+            # vanilla spec and then asks for "r3f v10" (the Octopus
+            # prompt, daily eval op-sentence-octopus) wants React.
+            if tid not in asked and not any(
+                    i in asked for i in IMPLIES_FOR_GATES.get(tid, ())):
                 out.add(tid)
     return out
 

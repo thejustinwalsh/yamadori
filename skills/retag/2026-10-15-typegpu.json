@@ -1,0 +1,56 @@
+{
+ "note": "TypeGPU skills filed under their framework (operator, 2026-10-15: \"reclassify TypeGPU to the right tag\"). The nine typegpu-migration-0-12-* / typegpu-pipelines-* skills and the README buffer-schema skill (d.arrayOf, TypeGPU's own API) were filed under TypeScript alone, so a request about d.arrayOf(d.vec3f, n) injected them as area `typescript` and the daily eval's pkg-vec3f-array (MUST inject from area typegpu) failed. They are TypeGPU's: framework `typegpu`; the language stays TypeScript. Found by bench/skills/test_daily_eval.py. The typegpu-three-* and web-gpu-typegpu-* skills already carry the tag. Applied by mcp/skill_offline.py --retag as operator edits (screen -> classify -> tests -> validate -> arm), items untouched.",
+ "author": "operator:retag",
+ "edits": {
+  "typegpu-migration-0-12-buffer-bindings-1": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-migration-0-12-import-pattern-2": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-migration-0-12-shader-values-3": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-migration-0-12-wgsl-expressions-4": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-pipelines-command-encoders-1": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-pipelines-guarded-compute-pipeline-2": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-pipelines-indirect-execution-3": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-pipelines-pipeline-unwrap-4": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "typegpu-pipelines-state-precedence-5": {
+   "frameworks": [
+    "typegpu"
+   ]
+  },
+  "github-com-readme-md-buffer-schema-definition": {
+   "frameworks": [
+    "typegpu"
+   ]
+  }
+ }
+}

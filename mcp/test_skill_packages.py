@@ -116,6 +116,16 @@ def test_detection():
           got.get("@react-three/fiber"))
     check(got.get(SP.TSL, {}).get("why", [{}])[0].get("how") == "implied",
           "[detect] TSL is in play by implication", got.get(SP.TSL))
+    check(ev("world.query(Position, Velocity) returns nothing") ==
+          {"koota": ["symbol:world.query"]},
+          "[detect] a platform-only member (query: Permissions.query) with a "
+          "receiver the same package exports (world) is that package's",
+          ev("world.query(Position, Velocity) returns nothing"))
+    check(ev("arr.slice(0, 2) and navigator.permissions.query(x) are "
+             "wrong") == {},
+          "[detect] the same member on a receiver nobody exports is "
+          "nobody's", ev("arr.slice(0, 2) and navigator.permissions.query(x)"
+                         " are wrong"))
     check(ev("Rewrite it without koota, using plain arrays.") == {},
           "[detect] a negated name puts nothing in play",
           ev("Rewrite it without koota, using plain arrays."))

@@ -149,6 +149,11 @@ def test_negation() -> None:
                         "to it.")
     check("react" not in named, "[negation] a layer the request plainly "
           "asks for is not ruled out", named)
+    octo = C.ruled_out("build a game with vanilla JavaScript and canvas.\n\n"
+                       "Build it with r3f (react-three-fiber) v10 and Koota.")
+    check("react" not in octo and "r3f" not in octo,
+          "[negation] a vanilla spec followed by an ask for R3F does not rule "
+          "out React (R3F is React)", octo)
     far = verdict(R3F_ANY, "A memoised function is not hitting the cache "
                   "despite being called with the same arguments, in my "
                   "React Three Fiber scene." + RT)
