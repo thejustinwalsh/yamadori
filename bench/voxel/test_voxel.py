@@ -978,9 +978,15 @@ def test_read_build_and_script():
           and 'echo skip > "$OUT/tsc.rc"' in text and 'cp -r . "$OUT/dist"' in text,
           "serve_app.sh: `npm` mode (tsc only with a tsconfig.json) and `js build` (the "
           "project is the page) for a layout the model chose")
-    bash = shutil.which("bash")
+    # Prefer Git Bash: C:\Windows\System32\bash.exe is WSL's launcher, which strips the
+    # backslashes of a Windows path (found 2026-10-15). The script is also passed by bare
+    # name from its own directory, so no bash has a Windows path to misread.
+    bash = next((c for c in (r"C:\Program Files\Git\bin\bash.exe",
+                             r"C:\Program Files (x86)\Git\bin\bash.exe")
+                 if os.path.isfile(c)), None) or shutil.which("bash")
     if bash:
-        r = subprocess.run([bash, "-n", sh], capture_output=True, text=True)
+        r = subprocess.run([bash, "-n", os.path.basename(sh)], capture_output=True, text=True,
+                           cwd=os.path.dirname(os.path.abspath(sh)))
         check(r.returncode == 0, "serve_app.sh parses (bash -n)", r.stderr[-300:])
 
 

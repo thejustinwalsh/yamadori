@@ -213,10 +213,18 @@ def main() -> int:
 
     # --- WITH THE CLONE: JevBench's own items, scoring and composite
     clone = J.DEFAULT_CLONE
-    have = os.path.isdir(os.path.join(clone, "jevbench"))
+    # The clone is present only when the modules the adapter imports are (a directory left by a
+    # cleanup, with the package folder but not its files, is "no clone": found 2026-10-15).
+    need = ("composite_v13.py", "metrics.py", "scoring.py", "tasks.py")
+    missing = [f for f in need if not os.path.isfile(os.path.join(clone, "jevbench", f))]
+    have = not missing
     if not have:
-        print(f"  (no JevBench clone at {clone}: the clone checks are not "
-              "added)")
+        print(f"  NOT APPLICABLE: no usable JevBench clone at {clone} (missing "
+              f"jevbench/{', jevbench/'.join(missing)}); the [clone] checks are not added. "
+              f"Remedy: set YAMADORI_JEVBENCH_DIR to a clone at commit {J.PINNED_COMMIT}: "
+              "git clone https://github.com/fstandhartinger/jevbench <dir> && "
+              f"git -C <dir> checkout {J.PINNED_COMMIT} (or `git restore .` inside an existing "
+              "clone whose working tree was deleted).")
     else:
         st = J.clone_state(clone)
         check("[clone] the commit is recorded and pinned; the public files' "

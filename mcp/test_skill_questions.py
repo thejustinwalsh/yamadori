@@ -46,6 +46,12 @@ for _k, _v in (("YAMADORI_CORPUS_DB", "corpus.sqlite3"),
                ("YAMADORI_NEBARI_DB", "nebari.sqlite3"),
                ("RINGS_DB", "rings.sqlite3"),
                ("CODE_INDEX_DB", "code.sqlite3"),
+               # held packages (index/packages/*.sqlite3, and the package source tree skill_packages reads for the vocabulary) feed the domain gate and the
+               # skill classification: this suite must not read the live ones (found 2026-10-15: with
+               # koota@0.6.6 indexed, the error step carried a second craft body and a router table).
+               ("YAMADORI_PKG_DIR", "packages"),
+               ("YAMADORI_PKG_REGISTRY_DIR", "registry"),
+               ("YAMADORI_PACKAGES_SRC", "packages_src"),
                ("YAMADORI_SLOTS_STATE", "slots_state.json"),
                ("CONCEPT_SEED_LAST", "seed_last.json")):
     os.environ[_k] = os.path.join(_TMP, _v)

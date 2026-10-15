@@ -42,6 +42,31 @@ _TMP = offline_stores.isolate("yamadori_test_package_only_")
 os.environ["YAMADORI_SKILL_CACHE_SECONDS"] = "0"
 os.environ.setdefault("YAMADORI_GPU_ROOM", "0")
 
+# The embedder is faked: skill_select.trigger_index(force=True) embeds every armed skill's trigger text
+# through code_search -> llama-swap :11434, which an offline suite must never reach (found 2026-10-15:
+# the offline guard failed test_the_channels on every run in the runner's environment).
+import hashlib  # noqa: E402
+import types  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+
+def _embed(texts, is_query=False):
+    out = []
+    for t in texts:
+        v = np.zeros(64, dtype=np.float32)
+        for w in str(t).lower().split():
+            v[int(hashlib.md5(w.encode()).hexdigest(), 16) % 64] += 1
+        n = float(np.linalg.norm(v))
+        out.append(v / n if n else np.ones(64, dtype=np.float32) / 8)
+        # a zero vector would trip trigger_index's norm check
+    return np.vstack(out)
+
+
+_fake_cs = types.ModuleType("code_search")
+_fake_cs.embed = _embed
+sys.modules["code_search"] = _fake_cs
+
 import budget  # noqa: E402
 import package_skills as PS  # noqa: E402
 import skill_classify as C  # noqa: E402
