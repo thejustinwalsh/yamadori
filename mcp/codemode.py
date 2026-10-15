@@ -43,6 +43,8 @@ TOOL_NAME = "yama_compose_tools"
 HARNESS_TOOLS = ("codemode",)
 HARNESS_OVERLAP_WHY = "the client brings its own code mode"
 SWITCH = "codemode"
+FETCH_SWITCH = "codemode_fetch"   # yama_fetch / fetch() in the sandbox (mcp/fetch_guard.py); OFF by default
+FETCH_NAME = "yama_fetch"
 MODES = ("on", "only")
 DEFAULT_MODE = "on"
 MODE_ENV = "YAMADORI_CODEMODE_MODE"
@@ -504,7 +506,9 @@ def switch(tier: dict | None) -> dict:
     import tiers
     on, src = tiers.behaviour_source(tier, SWITCH)
     mode, msrc = mode_source(tier)
-    return {"on": bool(on), "source": src, "mode": mode, "mode_source": msrc}
+    fon, fsrc = tiers.behaviour_source(tier, FETCH_SWITCH)
+    return {"on": bool(on), "source": src, "mode": mode, "mode_source": msrc,
+            "fetch": bool(on and fon), "fetch_source": fsrc}
 
 
 # ------------------------------------------------------------- the tools ---
@@ -529,6 +533,10 @@ GLOBAL_DECLARATIONS = (
     "declare function store(key: string, value: any): void;         // small JSON, kept for this conversation's next scripts (also save)\n"
     "declare function load(key: string): any;                        // undefined when absent\n"
     "declare function sleep(ms: number): Promise<void>;")
+FETCH_DECLARATION = (
+    "\ndeclare function fetch(url: string, init?: { method?: \"GET\" }): Promise<{ status: number; ok: boolean; "
+    "headers: { get(name: string): string | null }; text(): Promise<string>; json(): Promise<any> }>;"
+    "   // GET only, via tools.yama_fetch")
 
 SERVER_TOOL_SENTENCE = ("A server tool: it runs on the Yamadori server and does not touch your workspace.")
 
@@ -585,7 +593,7 @@ def _fn(defn: dict, ns: str, kind: str, bound_s: float | None, external: bool) -
             "bound_s": bound_s, "external": bool(external)}
 
 
-def build_toolbox(names: list[str], decider: bool = False) -> Toolbox:
+def build_toolbox(names: list[str], decider: bool = False, fetch: bool = False) -> Toolbox:
     """The toolbox for a conversation: one function per tool of ours it was OFFERED (`names`: yama_* names; a name
     withheld for a client tool is not in it), each read from the tool's own definition -- the one source of its
     description and parameters -- plus the decide functions where jjava is on. Order: MCP servers (config order),
@@ -616,6 +624,13 @@ def build_toolbox(names: list[str], decider: bool = False) -> Toolbox:
         for d in DECIDE_TOOLS:
             fns.append(_fn(d, "classify", "decide", DECIDE_BOUND_S, False))
         nss["classify"] = dict(DECIDE_NAMESPACE)
+    if fetch:
+        import fetch_guard
+        import pinned_fetch
+        fns.append(_fn(fetch_guard.TOOL, fetch_guard.NAMESPACE, "web", pinned_fetch.FETCH_DEADLINE + 5, True))
+        nss[fetch_guard.NAMESPACE] = {"description": (
+            "GET a public web API or page and read its JSON or text in code. GET only; the URL is checked for "
+            "leaks before it leaves, the host against the operator's blocklist.")}
     if images.TOOL_NAME in want:
         fns.append(_fn(images.MAIN_TOOL, "images", "images", images.timeout(), False))
     if vision.TOOL_NAME in want:
@@ -641,6 +656,11 @@ _HEAD = (
     "so print only what you need. store(key, value) and load(key) keep small JSON for your next scripts; "
     "image(dataUrl) shows a picture to the user. The sandbox has no network or files; bash, read and write are your "
     "client's tools and cannot be called from it. " + SERVER_TOOL_SENTENCE)
+_NO_NETWORK = ("The sandbox has no network or files; bash, read and write are your "
+               "client's tools and cannot be called from it.")
+_WITH_FETCH = ("The sandbox has no network or files of its own; the web is tools.yama_fetch({url}) or fetch(url) "
+               "(GET only; the URL is checked for leaks); bash, read and write are your client's tools and "
+               "cannot be called from it.")
 
 
 def _example(tb: Toolbox, shown: list[dict]) -> str:
@@ -666,6 +686,7 @@ def tool_definition(tb: Toolbox, *, rank_query: str = "", budget_tokens: int | N
         cap_chars = OUTPUT_CAP
     budget = int(budget_tokens if budget_tokens is not None else INLINE_BUDGET_CEILING_TOKENS)
     sc = tb.scores(rank_query) if rank_query else {}
+    web = FETCH_NAME in tb.by_name
     order = {f["name"]: i for i, f in enumerate(tb.fns)}
     ranked = sorted(tb.names(), key=lambda n: (-sc.get(n, 0.0), order[n]))
     schema = {"type": "object", "properties": {
@@ -689,10 +710,11 @@ def tool_definition(tb: Toolbox, *, rank_query: str = "", budget_tokens: int | N
         out_names = [n for n in tb.names() if n not in declared]
         tail = (f"\n// Not declared here, found with tools.search / tools.describe: {', '.join(out_names)}"
                 if out_names else "")
-        decls = (f"{TOOL_RESULT_TYPE}\n{GLOBAL_DECLARATIONS}\ndeclare const tools: {{\n{BUILTIN_DECLARATIONS}\n"
+        decls = (f"{TOOL_RESULT_TYPE}\n{GLOBAL_DECLARATIONS}{FETCH_DECLARATION if web else ''}\ndeclare const tools: {{\n{BUILTIN_DECLARATIONS}\n"
                  + "\n".join(lines) + f"\n}};{tail}")
         shown = [tb.by_name[n] for n in declared]
-        return (_HEAD.replace("{cap}", str(cap_chars)) + "\n\nServer functions (TypeScript; call tools.<name>(args); "
+        head = _HEAD.replace(_NO_NETWORK, _WITH_FETCH) if web else _HEAD
+        return (head.replace("{cap}", str(cap_chars)) + "\n\nServer functions (TypeScript; call tools.<name>(args); "
                 "each resolves to a ToolResult and never throws):\n```ts\n" + decls + "\n```\nExample:\n```js\n"
                 + _example(tb, shown or tb.fns[:2]) + "\n```")
 

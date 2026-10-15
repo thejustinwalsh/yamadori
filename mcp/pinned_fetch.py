@@ -169,7 +169,7 @@ def _send(conn: http.client.HTTPConnection, method: str, path: str,
     conn.endheaders()
 
 
-def _get(url: str, deadline: float, accept: str | None = None) -> dict:
+def _get(url: str, deadline: float, accept: str | None = None, host_check=None) -> dict:
     """GET `url`, every hop pinned and re-validated. A redirect's Location
     is followed as the server sent it (its query included) and checked like
     the first hop. Returns {status, headers, body, url, cut}. Raises
@@ -181,6 +181,8 @@ def _get(url: str, deadline: float, accept: str | None = None) -> dict:
                           f"a redirect led to {url[:120]!r}, not http(s)")
         if p.username or p.password:
             raise Refused("REFUSED_ADDRESS", "a URL with credentials in it")
+        if host_check is not None:
+            host_check(p.hostname)      # the caller's per-hop policy (the toolbox's blocklist), redirects included
         ip = _pin(p.hostname)
         left = deadline - time.time()
         if left <= 0:
@@ -241,7 +243,8 @@ def _refuse_ext(url: str) -> None:
 
 
 def fetch_named_file(url: str, deadline: float | None = None,
-                     accept: str | None = None) -> tuple[bytes, dict]:
+                     accept: str | None = None,
+                     host_check=None) -> tuple[bytes, dict]:
     """ONE NAMED DOCUMENT the proxy itself asks for -- not a page the model
     picked: THE FETCH above (every hop pinned and `ip.is_global`, GET only,
     exactly REQUEST_HEADERS, no cookie, the byte cap) and the same answer
@@ -254,10 +257,14 @@ def fetch_named_file(url: str, deadline: float | None = None,
     anyway (the coordinator checked it, 2026-09-29). `accept`: one of
     NAMED_ACCEPT, sent in place of ACCEPT, and the answer may be that type.
     Used by mcp_host (the README fallback and the versions' peer
-    dependencies, 2026-09-29). A seam: tests replace it."""
+    dependencies, 2026-09-29). `host_check(hostname)`: called before every
+    hop (redirects included), may raise Refused (the toolbox's blocklist,
+    mcp/fetch_guard.py). A seam: tests replace it."""
     _refuse_ext(url)
+    # (host_check goes down only when given, so a stand-in for _get keeps its old signature)
+    more = {"host_check": host_check} if host_check is not None else {}
     return _checked(_get(url, deadline or time.time() + FETCH_DEADLINE,
-                         accept), url, (accept,) if accept else ())
+                         accept, **more), url, (accept,) if accept else ())
 
 
 def _checked(got: dict, url: str, extra_types: tuple = ()

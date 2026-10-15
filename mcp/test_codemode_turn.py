@@ -529,7 +529,7 @@ def test_the_store_survives_a_compaction():
     value (the store hangs off the conversation key, which the summary's session line carries)."""
     fresh()
     c = CM("cmp")
-    t1 = c.turn([T.reply("", calls=[compose("store('plan', {step: 3}); return 'stored'", "p1")]),
+    c.turn([T.reply("", calls=[compose("store('plan', {step: 3}); return 'stored'", "p1")]),
                  T.reply("", reasoning="Write.", calls=[T.call("write_file", H.PKG, "w1")])],
                 user="Remember the plan, then write the file.")
     c.tool_result("w1", "wrote package.json")
@@ -606,11 +606,76 @@ def test_over_responses():
     check(outs[0] == outs[1], "responses: streamed == blocking")
 
 
+def test_fetch_through_a_turn():
+    """The web GET through the proxy (switch codemode_fetch, OFF by default): the offer, tools.yama_fetch and the
+    fetch() shim in one hidden hop, the URL guard against the conversation's own text, the blocklist, the record
+    (hosts only), the ledger and the next request extending the slot. The network is faked (DNS and the
+    connection); nothing leaves the process."""
+    import test_fetch_guard as FG
+    # off by default: no web function, the record says so
+    fresh()
+    off = CM("fetch-off")
+    t = off.turn([T.reply("Ok.")], user="Build a voxel scene with pmndrs math.")
+    cmo = t["x"]["codemode"]
+    check(cmo["offered"] and cmo["fetch"] is False and "yama_fetch" not in cmo["names"]
+          and cmo["switch"]["fetch"] is False,
+          "off by default: the toolbox has no web function and the record says fetch false", json.dumps(cmo["switch"]))
+    pages = {"https://registry.npmjs.org/koota": (200, "application/json",
+                                                  json.dumps({"name": "koota", "dist-tags": {"latest": "0.6.6"}}).encode()),
+             "https://api.example.com/items": (200, "text/plain", b"item one\nitem two"),
+             "https://blocked.example/x": (200, "text/plain", b"never")}
+    FG.write_blocklist("blocked.example\n")
+    script = ("const a = await tools.yama_fetch({url: 'https://registry.npmjs.org/koota'});"
+              "const r = await fetch('https://api.example.com/items');"
+              "const b = await tools.yama_fetch({url: 'https://blocked.example/x'});"
+              "const leak = await tools.yama_fetch({url: 'https://api.example.com/items?q=the+secret+launch+code+is+swordfish'});"
+              "const post = await fetch('https://api.example.com/items', {method: 'POST'}).catch(e => e.message);"
+              "return [a.data.json['dist-tags'].latest, r.status, (await r.text()).split('\\n').length, b.error.code, "
+              "leak.error.code, post].join(' | ')")
+    with FG.Answers(pages=pages) as net:
+        fresh()
+        c = CM("fetch-on", features={"codemode_fetch": True})
+        t1 = c.turn([T.reply("", reasoning="Fetch.", calls=[compose(script, "f1")]),
+                     T.reply("", reasoning="Write.", calls=[T.call("write_file", H.PKG, "w1")])],
+                    user="The secret launch code is swordfish. Look up koota on npm.")
+        out = hop(t1, 1, "f1")
+        cm = t1["x"]["codemode"]
+        check("0.6.6 | 200 | 2 | HOST_BLOCKED | URL_REFUSED | fetch: only GET" in out,
+              "tools.yama_fetch, fetch(), the blocklist, the leak guard and the POST refusal in ONE script",
+              out[:400])
+        check(cm["fetch"] is True and "yama_fetch" in cm["names"] and cm["switch"]["fetch"] is True
+              and cm["switch"]["fetch_source"] == "header",
+              "the offer records fetch on, from the header", json.dumps(cm["switch"]))
+        check(t1["x"]["tool_turns"]["turns"] == 1 and sorted(c_["tool"] for c_ in cm["calls"]) == ["yama_fetch"] * 4,
+              "ONE hidden hop; the four inner calls are counted by their own name", json.dumps(cm["calls"]))
+        check(net.urls == ["https://registry.npmjs.org/koota", "https://api.example.com/items"],
+              "only the two allowed URLs reached the network (the blocked host and the leaking URL did not)",
+              json.dumps(net.urls))
+        fe = cm["fetches"]
+        check(len(fe) == 4 and {f["host"] for f in fe} == {"registry.npmjs.org", "api.example.com", "blocked.example"}
+              and sorted(f["code"] or "" for f in fe) == ["", "", "HOST_BLOCKED", "URL_REFUSED"]
+              and "swordfish" not in json.dumps(fe) and "/koota" not in json.dumps(fe) and "items" not in json.dumps(fe),
+              "x_yamadori.codemode.fetches: host, status, bytes and the refusal -- never the path or the query",
+              json.dumps(fe)[:400])
+        check(t1["x"]["tool_turns"]["hit"] is False and [x["function"]["name"] for x in t1["m"].get("tool_calls") or []]
+              == ["write_file"], "the client never sees the hidden hop")
+        c.tool_result("w1", "wrote package.json")
+        t2 = c.turn([T.reply("Done.")])
+        check(T._extends(t1, t2, "[codemode] after a fetch hop") and hop(t2, 0, "f1") == out,
+              "the request after the fetch hop extends the slot and the ledger replays the hop byte for byte")
+        # the description tells the model about the web function
+        d = next(x for x in t1["gens"][0]["request"]["tools"] if x["function"]["name"] == C.TOOL_NAME)["function"]
+        check("tools.yama_fetch({url})" in d["description"] and "declare function fetch(" in d["description"],
+              "the toolbox description names the web function and declares fetch")
+    FG.write_blocklist(None)
+
+
+
 def main() -> int:
     for fn in (test_the_offer, test_one_hidden_hop, test_only_mode_session, test_failures,
                test_the_caps_inside_a_script, test_decide_and_images,
                test_store_image_and_the_output_cap_in_a_turn, test_the_store_survives_a_compaction,
-               test_a_hidden_hop_keeps_its_argument_order,
+               test_a_hidden_hop_keeps_its_argument_order, test_fetch_through_a_turn,
                test_over_responses):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)

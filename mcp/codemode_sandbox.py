@@ -110,6 +110,32 @@ BOOT = r"""
     return () => Promise.resolve(failed("NO_SUCH_FUNCTION", "tools." + k + " is not a function of this toolbox.",
       "tools.search(\"what you need\") ranks the functions by what they answer; tools.all() lists every one."));
   } });
+  // fetch(url, init): only where the host offers yama_fetch (switch codemode_fetch); the same call as
+  // tools.yama_fetch (mcp/fetch_guard.py), a minimal Response. GET only. An HTTP error status is a Response with
+  // that status (as fetch does); a refusal or a network failure rejects with a TypeError that says why.
+  if (init.names.includes("yama_fetch")) {
+    const SECRET_HEADERS = ["authorization", "proxy-authorization", "cookie", "x-api-key"];
+    g.fetch = async (input, opts) => {
+      const o = opts === undefined || opts === null ? {} : opts;
+      const m = String(o.method === undefined ? "GET" : o.method).toUpperCase();
+      if (m !== "GET") throw new TypeError("fetch: only GET is supported here (got " + m + "); the server sends no request body");
+      if (o.body !== undefined && o.body !== null) throw new TypeError("fetch: a request body is not sent (GET only)");
+      if (o.headers && typeof o.headers === "object") {
+        for (const k of Object.keys(o.headers)) if (SECRET_HEADERS.includes(k.toLowerCase()))
+          throw new TypeError("fetch: " + k + " is not sent; the server adds no credentials to a request");
+      }
+      const url = typeof input === "string" ? input : (input && input.url !== undefined ? String(input.url) : String(input));
+      const r = await call("yama_fetch", { url });
+      const d = r && r.data;
+      if (!d || typeof d.status !== "number")
+        throw new TypeError("fetch failed: " + (r && r.error ? r.error.reason + " " + r.error.next : "no response"));
+      const body = d.body === undefined || d.body === null ? "" : String(d.body);
+      const hdrs = { "content-type": d.content_type || "" };
+      return { status: d.status, ok: d.status >= 200 && d.status < 300, statusText: "", url: d.url || url,
+        headers: { get: (n) => { const v = hdrs[String(n).toLowerCase()]; return v ? v : null; } },
+        text: async () => body, json: async () => JSON.parse(body) };
+    };
+  }
   // Time: a real wait, settled by the host (so the script's other calls keep running meanwhile).
   g.sleep = (ms) => new Promise((resolve) => { const id = ++seq; pending.set(id, resolve);
     send({ op: "sleep", id, ms: Math.max(0, Number(ms) || 0) }); });
