@@ -46,6 +46,11 @@ import tarfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import docker_context  # noqa: E402
+
+docker_context.pin()          # the stack's docker is the WSL engine (mcp/docker_context.py)
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))

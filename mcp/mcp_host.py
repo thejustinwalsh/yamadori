@@ -339,6 +339,11 @@ def local_image_id(image: str) -> str | None:
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
+import docker_context  # noqa: E402
+
+# The stack's docker is the WSL engine, whatever the user's current context says (mcp/docker_context.py).
+PINNED_DOCKER_CONTEXT = docker_context.pin()
+
 _ENGINE_LOCK = threading.Lock()
 # scripts/wsl_engine.ps1 waits up to its own -WaitSec (60) for the engine; the process gets that plus room to start.
 ENGINE_SCRIPT_TIMEOUT_S = 90.0
