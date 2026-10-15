@@ -634,7 +634,7 @@ surface row "main, where the MCP host serves"), `preread` and
 expert-file pre-read, "Flash-Next's first prompt" below), and `package_skills`
 (`YAMADORI_PACKAGE_SKILLS`, **OFF by default** until its probe passes; its
 rendering `package_skills_mode`: "The package skills channel" below). `codemode`
-(`YAMADORI_CODEMODE`, **ON by default** since 2026-10-08, mode `on`; its mode `codemode_mode`: "The server toolbox" below). Removed with the features
+(`YAMADORI_CODEMODE`, **ON by default** since 2026-10-08, mode `on`; its mode `codemode_mode`: "The server toolbox" below), `codemode_fetch` (`YAMADORI_CODEMODE_FETCH`, **OFF by default**, 2026-10-15: `yama_fetch` / a `fetch()` shim in the toolbox sandbox, GET only behind `mcp/fetch_guard.py`'s URL guard and host blocklist; docs/CODEMODE.md "Fetch in the sandbox"; the toolbox's store is durable in sqlite, `YAMADORI_CODEMODE_STORE_DB`). Removed with the features
 they switched: `step_thinking`, `fixup_project_only`, `plan_tools`,
 `plan_budget` (2026-09-27, docs/CONSTANTS-AUDIT.md); `seed_frame`,
 `helped_needs_change`, `plan_prompt`, `deep_tool_hop`,

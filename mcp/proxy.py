@@ -1107,7 +1107,7 @@ def _codemode_apply(tier: dict, st: dict, continuing: bool, tools: list,
     record: x_yamadori.codemode before the turn's runs). Mode `only` hides the lookups the toolbox replaces
     (they stay runnable by name: `ours` keeps them)."""
     sw = codemode.switch(tier)
-    rec: dict = {"switch": {k: sw.get(k) for k in ("on", "source", "mode", "mode_source")},
+    rec: dict = {"switch": {k: sw.get(k) for k in ("on", "source", "mode", "mode_source", "fetch", "fetch_source")},
                  "offered": False}
     got = st.get("codemode")
     if isinstance(got, dict) and "on" in got:
@@ -1132,7 +1132,7 @@ def _codemode_apply(tier: dict, st: dict, continuing: bool, tools: list,
     tools = list(tools) + [json.loads(dec["definition"])]
     ours = set(ours) | {codemode.TOOL_NAME}
     rec.update(offered=True, mode=dec.get("mode"), names=list(dec.get("names") or []), hidden=hidden,
-               decider=bool(dec.get("decider")),
+               decider=bool(dec.get("decider")), fetch=bool(dec.get("fetch")),
                **{k: (dec.get("record") or {}).get(k) for k in
                   ("budget_tokens", "tokens", "declared", "left_out")})
     return tools, ours, rec
@@ -1162,7 +1162,8 @@ def _codemode_decide(sw: dict, tools: list, ours: set, client_tools: list | None
             return {"on": False, "why": f"the sandbox is not available: {how}"}
         import codemode_sandbox
         codemode_sandbox.warm()          # compile the WASI module in the background: the first script pays nothing
-        tb = codemode.build_toolbox(names, decider=decider)
+        fetch = bool(sw.get("fetch"))
+        tb = codemode.build_toolbox(names, decider=decider, fetch=fetch)
         if not tb.fns:
             return {"on": False, "why": "no server function is offered on this request"}
         # What `only` hides: the MCP-backed lookups, and the craft tool unless something else calls it by name
@@ -1175,7 +1176,7 @@ def _codemode_decide(sw: dict, tools: list, ours: set, client_tools: list | None
         first = next((message_text.text_of(m, "") for m in raw
                       if isinstance(m, dict) and m.get("role") == "user"), "")
         defn, drec = codemode.tool_definition(tb, rank_query=first[:2000], budget_tokens=budget)
-        return {"on": True, "mode": sw["mode"], "names": tb.names(), "decider": decider,
+        return {"on": True, "mode": sw["mode"], "names": tb.names(), "decider": decider, "fetch": fetch,
                 "hidden": covered if sw["mode"] == "only" else [], "definition": json.dumps(defn),
                 "record": drec,
                 "why": f"{len(tb.fns)} functions, mode {sw['mode']}"}
@@ -1201,6 +1202,7 @@ def _codemode_record(payload: dict) -> dict | None:
                 stored=sum(int(r.get("stored") or 0) for r in runs),
                 loaded=sum(int(r.get("loaded") or 0) for r in runs),
                 instantiate_ms=[r.get("instantiate_ms") for r in runs],
+                fetches=[f for r in runs for f in r.get("fetches") or []][:40],
                 searches=sum(int(r.get("searches") or 0) for r in runs),
                 describes=sum(int(r.get("describes") or 0) for r in runs),
                 discovery=[d for r in runs for d in r.get("discovery") or []][:40])
@@ -1322,7 +1324,8 @@ def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_k
                                           "action": "call it with {\"script\": \"return await tools.all()\"}",
                                           "effect": "the script runs"}])
     cm = payload.get("_codemode") or {}
-    tb = codemode.build_toolbox(list(cm.get("names") or []), decider=bool(cm.get("decider")))
+    tb = codemode.build_toolbox(list(cm.get("names") or []), decider=bool(cm.get("decider")),
+                                fetch=bool(cm.get("fetch")))
     if not tb.fns:
         return cs.error_result(tool, "NO_TOOLBOX", "No server function is available to this conversation now.",
                                False, remedies=[{"fixable_by": "operator",
@@ -1344,6 +1347,10 @@ def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_k
     state["_craft_msgs"] = list(convo)
     state["_craft_model"] = payload.get("model")
     external = {"n": 0}
+    fetches: list = []
+    # The conversation's own text (user words, answers, tool results; not the system prompt) for the URL guard.
+    convo_text = "\n".join(message_text.text_of(m, "\n") for m in convo
+                           if isinstance(m, dict) and m.get("role") not in ("system", "developer"))
 
     def bridge(name: str, a: dict, seq: int) -> dict:
         f = tb.by_name[name]
@@ -1358,6 +1365,13 @@ def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_k
                     issued[seq] = (name, a, rec)
                     external["n"] += 1
                 res = _tool_result_of(text, {"names": rec.get("names") or []} if rec.get("names") else None)
+            elif kind == "web":
+                import fetch_guard
+                res, frec = fetch_guard.fetch(a, convo_text)
+                text = res.get("text") or ""
+                with lock:
+                    fetches.append(frec)
+                    external["n"] += 1
             elif kind == "decide":
                 text, res = "", _compose_decide(name, a, account)
             elif kind == "craft":
@@ -1423,6 +1437,7 @@ def run_compose_tools(args: dict, state: dict, payload: dict, convo: list, hop_k
         "discovery": out["discovery"], "script_chars": len(script), "instantiate_ms": out.get("instantiate_ms"),
         "script_head": " ".join(script.split())[:120], "timeout_s": round(timeout_s, 1),
         "max_calls": max_calls, "dispatched": out.get("dispatched"),
+        "fetches": fetches[:40],
         "images": out.get("images_shown", 0), "stored": out.get("stored", 0), "loaded": out.get("loaded", 0)})
     return text
 

@@ -626,7 +626,7 @@ def test_the_derivations():
     check(C.OUTPUT_CAP == 30000 == 10000 * 3 and repeats.RESULT_CAP == 6000,"the script output cap is Pi's 10,000 tokens at ~3 characters a token (30,000); other tools' breaker stays 6,000")
     import tiers
     sw = C.switch({})
-    check(sw["on"] is False and sw["source"] == "tier" and sw["mode"] == "on" and not tiers.OFF_BY_DEFAULT,
+    check(sw["on"] is False and sw["source"] == "tier" and sw["mode"] == "on" and tiers.OFF_BY_DEFAULT == frozenset({"codemode_fetch"}),
           "the switch is on by default where the tier has the MCP tools (none here); the mode is `on`", json.dumps(sw))
     check(C.switch({"mcp_tools": True})["on"] is True and C.switch({"mcp_tools": False})["on"] is False,
           "on by default at medium and up (the tier's MCP tools), off below")
@@ -761,12 +761,175 @@ def test_store_load_and_image():
     check(not out["ok"] and "nothing to show" in json.dumps(out["error"]), "image() of nothing throws")
 
 
+# ============================================================ 8. the store is durable (sqlite)
+def test_the_store_is_durable():
+    import sqlite3
+    import nebari
+    db = os.environ["YAMADORI_CODEMODE_STORE_DB"]
+    check(C.db_path() == db and db.startswith(_TMP), "the store's database is the suite's temp path (offline_stores)")
+    C._STORES.clear()
+    s = C.store_for("durable-1")
+    out = go("store('plan', {a: 1}); save('n', 5); return 'ok'", store=s)
+    check(out["ok"] and s["n"] == "5", "a successful script commits through the conversation's store")
+    C._STORES.clear()                                            # a restart: the in-memory cache is gone
+    s2 = C.store_for("durable-1")
+    check(s2 is not s and dict(s2) == {"plan": "{\"a\":1}", "n": "5"},
+          "…and a cleared cache (a restart) loads the same data back", json.dumps(dict(s2)))
+    out = go("return JSON.stringify([load('plan'), load('n')])", store=s2)
+    check(out["ok"] and out["items"] == ["[{\"a\":1},5]"], "…and the next script reads it with load()", json.dumps(out["items"]))
+    out = go("store('lost', 1); store('plan', 'changed'); throw new Error('boom')", store=s2)
+    C._STORES.clear()
+    s3 = C.store_for("durable-1")
+    check(not out["ok"] and "lost" not in s3 and s3["plan"] == "{\"a\":1}",
+          "a failed script writes nothing to the database", json.dumps(dict(s3)))
+    other = C.store_for("durable-2")
+    check(other == {}, "another conversation's store is empty (per-conversation isolation)")
+    go("store('only_b', 'b'); return 1", store=other)
+    C._STORES.clear()
+    check("only_b" not in C.store_for("durable-1") and C.store_for("durable-2") == {"only_b": '"b"'},
+          "…and stays its own after a restart")
+    t1, t2 = C.store_for(""), C.store_for("")
+    go("store('x', 1); return 1", store=t1)
+    con = sqlite3.connect(db)
+    convs = {r[0] for r in con.execute("SELECT conv FROM convs")}
+    con.close()
+    check(t1 is not t2 and t2 == {} and "" not in convs, "an empty key stays a throwaway dict, never written")
+    # pruning: the ledger's age and total size, least recently used first
+    import time as _t
+    con = sqlite3.connect(db)
+    con.execute("UPDATE convs SET last_seen=? WHERE conv='durable-2'", (_t.time() - nebari.LEDGER_MAX_AGE - 10,))
+    con.commit()
+    con.close()
+    r = C.prune(force=True)
+    check(r["removed"] == ["durable-2"] and "durable-2" not in C._STORES, "an old conversation is pruned (age)", json.dumps(r))
+    C._STORES.clear()
+    check(C.store_for("durable-2") == {} and C.store_for("durable-1")["n"] == "5",
+          "…its data goes, the others stay")
+    old_total = nebari.LEDGER_TOTAL_BYTES
+    try:
+        nebari.LEDGER_TOTAL_BYTES = 10
+        C.store_for("durable-3").update({"k": "z" * 50})
+        con = sqlite3.connect(db)
+        con.execute("UPDATE convs SET last_seen=? WHERE conv='durable-1'", (_t.time() - 100,))
+        con.commit()
+        con.close()
+        r = C.prune(force=True)
+    finally:
+        nebari.LEDGER_TOTAL_BYTES = old_total
+    check(r["removed"][:1] == ["durable-1"], "past the total size the least recently used goes first", json.dumps(r))
+
+
+# ============================================================ 9. fetch in the sandbox (operator, 2026-10-08)
+class FetchFake:
+    """The bridge for yama_fetch: answers like mcp/fetch_guard.fetch does (a status result, or an error)."""
+
+    def __init__(self):
+        self.calls: list = []
+
+    def __call__(self, name: str, args: dict, seq: int) -> dict:
+        self.calls.append((name, dict(args)))
+        url = args.get("url") or ""
+        if "refused" in url:
+            return C.error_result("URL_REFUSED", "The URL was not fetched: it carries something shaped like a key or token.",
+                                  True, "fetch again with a shorter, word-like URL.")
+        if "missing" in url:
+            r = C.error_result("FETCH_REFUSED", "GET answered HTTP 404", False, "read data.status.")
+            r["data"] = {"status": 404, "body": "", "content_type": None}
+            return r
+        body = json.dumps({"name": "koota", "n": [1, 2, 3]}) if "json" in url else "plain words"
+        ct = "application/json" if "json" in url else "text/plain"
+        data = {"status": 200, "content_type": ct, "url": url, "bytes": len(body), "cut": False, "body": body}
+        if "json" in url:
+            data["json"] = json.loads(body)
+        return {"ok": True, "text": "SOURCE: x\n" + body, "data": data}
+
+
+def test_fetch_in_the_sandbox():
+    import fetch_guard
+    plain = toolbox()
+    check("yama_fetch" not in plain.names() and "web" not in plain.namespaces,
+          "without the switch the toolbox has no web function")
+    out = go("return typeof fetch")
+    check(out["ok"] and out["items"] == ["undefined"], "…and no fetch global", json.dumps(out["items"]))
+    tb = C.build_toolbox(tool_names(), decider=True, fetch=True)
+    f = tb.by_name["yama_fetch"]
+    check(f["ns"] == "web" and f["kind"] == "web" and f["description"] == fetch_guard.TOOL["function"]["description"]
+          and f["description"].startswith("Answers 'what does this web API or page return?'")
+          and tb.namespaces["web"]["description"] and f["bound_s"] > 30,
+          "with the switch: yama_fetch in the `web` namespace, read from the tool's own definition (one source)")
+    hits = tb.search("fetch json from a web api")
+    check(hits and hits[0]["name"] == "yama_fetch", "tools.search finds it", json.dumps([h["name"] for h in hits[:3]]))
+    fk = FetchFake()
+    out = go("const r = await tools.yama_fetch({url: 'https://x.example/json'}); return JSON.stringify([r.ok, r.data.status, "
+             "r.data.json.n.length, r.data.body.length > 5])", tb=tb, fake=fk)
+    check(out["ok"] and out["items"] == ["[true,200,3,true]"] and fk.calls == [("yama_fetch", {"url": "https://x.example/json"})],
+          "tools.yama_fetch({url}) is one bridged call and returns {ok, text, data{status, json, body}}",
+          json.dumps([out["items"], out["error"]]))
+    out = go("const r = await tools.yama_fetch('https://x.example/json'); return r.ok", tb=tb, fake=FetchFake())
+    check(out["ok"] and out["items"] == ["true"], "a bare string is the url")
+    fk = FetchFake()
+    out = go("const r = await fetch('https://x.example/json'); const j = await r.json(); "
+             "return JSON.stringify([r.status, r.ok, r.headers.get('Content-Type'), r.headers.get('x-none'), j.name, "
+             "(await r.text()).length > 3])", tb=tb, fake=fk)
+    check(out["ok"] and out["items"] == ['[200,true,"application/json",null,"koota",true]']
+          and fk.calls == [("yama_fetch", {"url": "https://x.example/json"})],
+          "fetch(url) is routed to the same host call and returns a minimal Response (status, ok, headers.get, json, text)",
+          json.dumps([out["items"], out["error"]]))
+    out = go("const r = await fetch({url: 'https://x.example/plain'}); return await r.text()", tb=tb, fake=FetchFake())
+    check(out["ok"] and out["items"] == ["plain words"], "fetch(Request-like {url}) works; text() returns the body")
+    out = go("const r = await fetch('https://x.example/missing'); return JSON.stringify([r.status, r.ok, await r.text()])",
+             tb=tb, fake=FetchFake())
+    check(out["ok"] and out["items"] == ['[404,false,""]'], "an HTTP error is a Response with its status, as fetch does",
+          json.dumps([out["items"], out["error"]]))
+    out = go("try { await fetch('https://x.example/refused'); return 'no throw' } catch (e) { return e.name + ': ' + e.message }",
+             tb=tb, fake=FetchFake())
+    check(out["ok"] and out["items"][0].startswith("TypeError: fetch failed:") and "key or token" in out["items"][0]
+          and "shorter" in out["items"][0],
+          "a refusal rejects with a TypeError that says why and what next", json.dumps(out["items"]))
+    for label, script in (("POST", "await fetch('https://x.example/a', {method: 'POST'})"),
+                          ("a body", "await fetch('https://x.example/a', {body: 'x'})"),
+                          ("lower-case post", "await fetch('https://x.example/a', {method: 'post', body: '{}'})"),
+                          ("an Authorization header", "await fetch('https://x.example/a', {headers: {Authorization: 'Bearer x'}})")):
+        fk = FetchFake()
+        out = go("try { " + script + "; return 'sent' } catch (e) { return e.name + ': ' + e.message }", tb=tb, fake=fk)
+        check(out["ok"] and out["items"][0].startswith("TypeError: fetch:") and fk.calls == [],
+              f"{label} throws a clear error and nothing is sent", json.dumps(out["items"]))
+    fk = FetchFake()
+    out = go("const r = await fetch('https://x.example/plain', {headers: {Accept: 'application/json'}}); return r.status",
+             tb=tb, fake=fk)
+    check(out["ok"] and out["items"] == ["200"], "a harmless header is ignored (nothing of the script's is sent)")
+    out = go("const rs = await Promise.all([1,2,3].map(i => fetch('https://x.example/plain?i=' + i))); return rs.length",
+             tb=tb, fake=FetchFake())
+    check(out["ok"] and out["items"] == ["3"], "fetches run in parallel like any other call")
+    defn, rec = C.tool_definition(tb, rank_query="fetch a json api", budget_tokens=3000)
+    d = defn["function"]["description"]
+    check("tools.yama_fetch({url})" in d and "declare function fetch(" in d and "GET only" in d
+          and C._NO_NETWORK not in d and "yama_fetch" in rec["declared"],
+          "the toolbox description declares fetch and says the sandbox's web is yama_fetch (GET only, checked)")
+    d0, _ = C.tool_definition(plain, rank_query="", budget_tokens=3000)
+    check(C._NO_NETWORK in d0["function"]["description"] and "declare function fetch(" not in d0["function"]["description"],
+          "…and without the switch the description still says there is no network")
+    import tiers
+    sw = C.switch({"mcp_tools": True})
+    check(sw["on"] and sw["fetch"] is False and sw["fetch_source"] == "default", "the web GET is off by default", json.dumps(sw))
+    f = tiers.from_header('{"codemode_fetch": true}')
+    sw = C.switch(dict({"mcp_tools": True}, **f, overridden=sorted(f)))
+    check(sw["fetch"] is True and sw["fetch_source"] == "header", "the header turns it on", json.dumps(sw))
+    os.environ["YAMADORI_CODEMODE_FETCH"] = "1"
+    try:
+        check(C.switch({"mcp_tools": True})["fetch"] is True and C.switch({"mcp_tools": False})["fetch"] is False,
+              "YAMADORI_CODEMODE_FETCH=1 turns it on where the tier has the MCP tools")
+    finally:
+        del os.environ["YAMADORI_CODEMODE_FETCH"]
+
+
 def main() -> int:
     for fn in (test_the_registry_is_one_source_per_tool,
                test_a_server_added_through_the_configuration_is_discoverable,
                test_discovery, test_composition, test_the_limits, test_escapes,
                test_the_tool_definition, test_the_derivations, test_the_probe_reads_what_the_proxy_records,
-               test_store_load_and_image):
+               test_store_load_and_image, test_the_store_is_durable,
+               test_fetch_in_the_sandbox):
         print(f"\n--- {fn.__name__} ---")
         n0 = len(_results)
         try:

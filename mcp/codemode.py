@@ -43,6 +43,8 @@ TOOL_NAME = "yama_compose_tools"
 HARNESS_TOOLS = ("codemode",)
 HARNESS_OVERLAP_WHY = "the client brings its own code mode"
 SWITCH = "codemode"
+FETCH_SWITCH = "codemode_fetch"   # yama_fetch / fetch() in the sandbox (mcp/fetch_guard.py); OFF by default
+FETCH_NAME = "yama_fetch"
 MODES = ("on", "only")
 DEFAULT_MODE = "on"
 MODE_ENV = "YAMADORI_CODEMODE_MODE"
@@ -68,19 +70,125 @@ STORE_CONVERSATIONS = 256                     # conversations whose store is kep
 MAX_IMAGES = 8                                # image() calls shown per script
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
-_STORES: "OrderedDict[str, dict]" = OrderedDict()
+_STORES: "OrderedDict[str, _Store]" = OrderedDict()
 _STORES_LOCK = threading.Lock()
+_DB_LOCK = threading.Lock()
+_SCHEMA_DONE: set = set()
+_last_prune = 0.0
+
+# DURABLE (a restart keeps a conversation's store). Sqlite, the response store's pattern (mcp/response_store.py):
+# path YAMADORI_CODEMODE_STORE_DB (read at each use), default index/codemode_store.sqlite3; keyed by the
+# conversation key (session_id.conversation_key: account, source, id -- never the messages). Pi's limits are
+# unchanged. Eviction is the ledger's (nebari.LEDGER_*): whole conversations, least recently used first, past
+# LEDGER_TOTAL_BYTES in all, and any conversation unused for LEDGER_MAX_AGE goes regardless; at most once a minute.
+
+
+def db_path() -> str:
+    return os.environ.get("YAMADORI_CODEMODE_STORE_DB") or os.path.join(HERE, "..", "index", "codemode_store.sqlite3")
+
+
+def _db():
+    import sqlite3
+    path = os.path.abspath(db_path())
+    done = path in _SCHEMA_DONE and os.path.exists(path)
+    if not done:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    con = sqlite3.connect(path, timeout=30)
+    if not done:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("CREATE TABLE IF NOT EXISTS entries(conv TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, "
+                    "PRIMARY KEY (conv, k))")
+        con.execute("CREATE TABLE IF NOT EXISTS convs(conv TEXT PRIMARY KEY, last_seen REAL NOT NULL, "
+                    "bytes INTEGER NOT NULL)")
+        con.commit()
+        _SCHEMA_DONE.add(path)
+    return con
+
+
+class _Store(dict):
+    """One conversation's store {name: JSON text}, written through to sqlite. `run` commits a successful script's
+    writes with `update` (a failed script never calls it), so a durable write happens exactly when the in-memory
+    one does. A database that cannot be written leaves the in-memory store working (the toolbox never fails for it)."""
+
+    def __init__(self, key: str):
+        super().__init__()
+        self.key = key
+        try:
+            with _DB_LOCK:
+                con = _db()
+                try:
+                    super().update(dict(con.execute("SELECT k, v FROM entries WHERE conv=?", (key,)).fetchall()))
+                    con.execute("INSERT INTO convs(conv, last_seen, bytes) VALUES(?,?,?) ON CONFLICT(conv) DO "
+                                "UPDATE SET last_seen=excluded.last_seen", (key, time.time(), sum(map(len, self.values()))))
+                    con.commit()
+                finally:
+                    con.close()
+        except Exception:                                        # noqa: BLE001
+            pass
+
+    def update(self, *a, **kw):
+        writes = dict(*a, **kw)
+        super().update(writes)
+        if not writes:
+            return
+        try:
+            with _DB_LOCK:
+                con = _db()
+                try:
+                    con.executemany("INSERT INTO entries(conv, k, v) VALUES(?,?,?) ON CONFLICT(conv, k) DO UPDATE "
+                                    "SET v=excluded.v", [(self.key, k, v) for k, v in writes.items()])
+                    con.execute("INSERT INTO convs(conv, last_seen, bytes) VALUES(?,?,?) ON CONFLICT(conv) DO "
+                                "UPDATE SET last_seen=excluded.last_seen, bytes=excluded.bytes",
+                                (self.key, time.time(), sum(len(x) for x in self.values())))
+                    con.commit()
+                finally:
+                    con.close()
+            prune()
+        except Exception:                                        # noqa: BLE001
+            pass
+
+
+def prune(now: float | None = None, force: bool = False) -> dict:
+    """The ledger's eviction: conversations unused for nebari.LEDGER_MAX_AGE, then (least recently used first) until
+    the total is within nebari.LEDGER_TOTAL_BYTES. At most once a minute unless `force`. Returns {removed, total}."""
+    global _last_prune
+    import nebari
+    t = time.time() if now is None else now
+    if not force and t - _last_prune < nebari.LEDGER_PRUNE_EVERY:
+        return {"removed": [], "total": None}
+    _last_prune = t
+    removed: list = []
+    with _DB_LOCK:
+        con = _db()
+        try:
+            rows = con.execute("SELECT conv, last_seen, bytes FROM convs ORDER BY last_seen").fetchall()
+            total = sum(r[2] for r in rows)
+            for conv, seen, nbytes in rows:
+                if t - seen > nebari.LEDGER_MAX_AGE or total > nebari.LEDGER_TOTAL_BYTES:
+                    removed.append(conv)
+                    total -= nbytes
+            for conv in removed:
+                con.execute("DELETE FROM entries WHERE conv=?", (conv,))
+                con.execute("DELETE FROM convs WHERE conv=?", (conv,))
+            con.commit()
+        finally:
+            con.close()
+    with _STORES_LOCK:
+        for conv in removed:
+            _STORES.pop(conv, None)
+    return {"removed": removed, "total": total}
 
 
 def store_for(key: str) -> dict:
-    """The conversation's store: {name: JSON text}. In memory (a restart forgets it), least recently used
-    conversation out past STORE_CONVERSATIONS; an empty key (a side call) gets a throwaway dict."""
+    """The conversation's store: {name: JSON text}. Durable (sqlite, above); a hot cache of the
+    STORE_CONVERSATIONS least recently used conversations sits in front of it; an empty key (a side call) gets a
+    throwaway dict."""
     if not key:
         return {}
     with _STORES_LOCK:
         s = _STORES.get(key)
         if s is None:
-            s = _STORES[key] = {}
+            s = _STORES[key] = _Store(key)
             while len(_STORES) > STORE_CONVERSATIONS:
                 _STORES.popitem(last=False)
         else:
@@ -398,7 +506,9 @@ def switch(tier: dict | None) -> dict:
     import tiers
     on, src = tiers.behaviour_source(tier, SWITCH)
     mode, msrc = mode_source(tier)
-    return {"on": bool(on), "source": src, "mode": mode, "mode_source": msrc}
+    fon, fsrc = tiers.behaviour_source(tier, FETCH_SWITCH)
+    return {"on": bool(on), "source": src, "mode": mode, "mode_source": msrc,
+            "fetch": bool(on and fon), "fetch_source": fsrc}
 
 
 # ------------------------------------------------------------- the tools ---
@@ -423,6 +533,10 @@ GLOBAL_DECLARATIONS = (
     "declare function store(key: string, value: any): void;         // small JSON, kept for this conversation's next scripts (also save)\n"
     "declare function load(key: string): any;                        // undefined when absent\n"
     "declare function sleep(ms: number): Promise<void>;")
+FETCH_DECLARATION = (
+    "\ndeclare function fetch(url: string, init?: { method?: \"GET\" }): Promise<{ status: number; ok: boolean; "
+    "headers: { get(name: string): string | null }; text(): Promise<string>; json(): Promise<any> }>;"
+    "   // GET only, via tools.yama_fetch")
 
 SERVER_TOOL_SENTENCE = ("A server tool: it runs on the Yamadori server and does not touch your workspace.")
 
@@ -479,7 +593,7 @@ def _fn(defn: dict, ns: str, kind: str, bound_s: float | None, external: bool) -
             "bound_s": bound_s, "external": bool(external)}
 
 
-def build_toolbox(names: list[str], decider: bool = False) -> Toolbox:
+def build_toolbox(names: list[str], decider: bool = False, fetch: bool = False) -> Toolbox:
     """The toolbox for a conversation: one function per tool of ours it was OFFERED (`names`: yama_* names; a name
     withheld for a client tool is not in it), each read from the tool's own definition -- the one source of its
     description and parameters -- plus the decide functions where jjava is on. Order: MCP servers (config order),
@@ -510,6 +624,13 @@ def build_toolbox(names: list[str], decider: bool = False) -> Toolbox:
         for d in DECIDE_TOOLS:
             fns.append(_fn(d, "classify", "decide", DECIDE_BOUND_S, False))
         nss["classify"] = dict(DECIDE_NAMESPACE)
+    if fetch:
+        import fetch_guard
+        import pinned_fetch
+        fns.append(_fn(fetch_guard.TOOL, fetch_guard.NAMESPACE, "web", pinned_fetch.FETCH_DEADLINE + 5, True))
+        nss[fetch_guard.NAMESPACE] = {"description": (
+            "GET a public web API or page and read its JSON or text in code. GET only; the URL is checked for "
+            "leaks before it leaves, the host against the operator's blocklist.")}
     if images.TOOL_NAME in want:
         fns.append(_fn(images.MAIN_TOOL, "images", "images", images.timeout(), False))
     if vision.TOOL_NAME in want:
@@ -535,6 +656,11 @@ _HEAD = (
     "so print only what you need. store(key, value) and load(key) keep small JSON for your next scripts; "
     "image(dataUrl) shows a picture to the user. The sandbox has no network or files; bash, read and write are your "
     "client's tools and cannot be called from it. " + SERVER_TOOL_SENTENCE)
+_NO_NETWORK = ("The sandbox has no network or files; bash, read and write are your "
+               "client's tools and cannot be called from it.")
+_WITH_FETCH = ("The sandbox has no network or files of its own; the web is tools.yama_fetch({url}) or fetch(url) "
+               "(GET only; the URL is checked for leaks); bash, read and write are your client's tools and "
+               "cannot be called from it.")
 
 
 def _example(tb: Toolbox, shown: list[dict]) -> str:
@@ -560,6 +686,7 @@ def tool_definition(tb: Toolbox, *, rank_query: str = "", budget_tokens: int | N
         cap_chars = OUTPUT_CAP
     budget = int(budget_tokens if budget_tokens is not None else INLINE_BUDGET_CEILING_TOKENS)
     sc = tb.scores(rank_query) if rank_query else {}
+    web = FETCH_NAME in tb.by_name
     order = {f["name"]: i for i, f in enumerate(tb.fns)}
     ranked = sorted(tb.names(), key=lambda n: (-sc.get(n, 0.0), order[n]))
     schema = {"type": "object", "properties": {
@@ -583,10 +710,11 @@ def tool_definition(tb: Toolbox, *, rank_query: str = "", budget_tokens: int | N
         out_names = [n for n in tb.names() if n not in declared]
         tail = (f"\n// Not declared here, found with tools.search / tools.describe: {', '.join(out_names)}"
                 if out_names else "")
-        decls = (f"{TOOL_RESULT_TYPE}\n{GLOBAL_DECLARATIONS}\ndeclare const tools: {{\n{BUILTIN_DECLARATIONS}\n"
+        decls = (f"{TOOL_RESULT_TYPE}\n{GLOBAL_DECLARATIONS}{FETCH_DECLARATION if web else ''}\ndeclare const tools: {{\n{BUILTIN_DECLARATIONS}\n"
                  + "\n".join(lines) + f"\n}};{tail}")
         shown = [tb.by_name[n] for n in declared]
-        return (_HEAD.replace("{cap}", str(cap_chars)) + "\n\nServer functions (TypeScript; call tools.<name>(args); "
+        head = _HEAD.replace(_NO_NETWORK, _WITH_FETCH) if web else _HEAD
+        return (head.replace("{cap}", str(cap_chars)) + "\n\nServer functions (TypeScript; call tools.<name>(args); "
                 "each resolves to a ToolResult and never throws):\n```ts\n" + decls + "\n```\nExample:\n```js\n"
                 + _example(tb, shown or tb.fns[:2]) + "\n```")
 

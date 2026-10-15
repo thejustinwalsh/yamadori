@@ -700,10 +700,12 @@ def test_the_tier_rows_after_the_removal():
     check(set(tiers.BEHAVIOURS) == {"work_log_reinject", "step_nudge",
                                     "slot_release", "idle_clear",
                                     "restore_reasoning", "mcp_tools", "preread",
-                                    "preread_overlap", "package_skills", "codemode"}
-          and tiers.OFF_BY_DEFAULT == frozenset(),
+                                    "preread_overlap", "package_skills", "codemode",
+                                    "codemode_fetch"}
+          and tiers.OFF_BY_DEFAULT == frozenset({"codemode_fetch"}),
           "the switches left; the package skills channel is ON by default (operator 2026-10-06) "
-          "and so is the server toolbox (codemode, operator 2026-10-08, mode on)",
+          "and so is the server toolbox (codemode, operator 2026-10-08, mode on); its web GET "
+          "(codemode_fetch) is OFF until its probe passes",
           str(sorted(tiers.BEHAVIOURS)))
     check(tiers.from_header('{"auto_triggers": false, "deep_tool_hop": true, '
                             '"seed_frame": false, "verify_directive": false}')

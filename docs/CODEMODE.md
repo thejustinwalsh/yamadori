@@ -262,9 +262,8 @@ file, but we should increase output limit." This supersedes the rows above that 
 - **classify**: jjava's three functions are `yama_classify_yes_no`, `yama_classify_choice`, `yama_classify_score`, namespace
   `classify` (they were `yama_decide_noul` / `_choice` / `_score`, namespace `decide`). Same arguments, same Jev entry.
 - **store(key, value) / load(key)** (`save` is an alias of `store`): JSON kept per CONVERSATION (the conversation key), read by its
-  later scripts. Pi's limits: 262,144 characters a value, 1,048,576 in all; a script that fails keeps none of its writes. In
-  memory (`codemode.store_for`, the 256 most recently used conversations): a proxy restart forgets it. Unmeasured: whether the
-  model uses it.
+  later scripts. Pi's limits: 262,144 characters a value, 1,048,576 in all; a script that fails keeps none of its writes. Durable
+  since 2026-10-15 ("The durable store" below). Unmeasured: whether the model uses it.
 - **image(value)**: a base64 data URL, `{ image_url }` or an image block; stored in the media store (any raster format becomes a
   PNG) and SHOWN to the user by the proxy, as a drawn picture is; the output gets `[image N shown to the user]`. Remote URLs are
   refused (Pi's rule; the sandbox has no network). At most 8 a script, 12 MiB each.
@@ -277,3 +276,52 @@ file, but we should increase output limit." This supersedes the rows above that 
 argument keys, our own hidden hops' included, so the request after "lookups, then a text answer" diverged at the hop (live deploy
 check: reused 5,178 of 15,089). Calls of `OUR_NAMES` are no longer sorted. `mcp/test_codemode_turn.py`
 `test_a_hidden_hop_keeps_its_argument_order`.
+
+## The durable store (2026-10-15)
+
+`codemode.store_for(key)` kept each conversation's `store()` / `load()` data in memory only, lost on a restart. It is now written
+through to sqlite (`mcp/codemode.py`, the response store's pattern): `YAMADORI_CODEMODE_STORE_DB`, default
+`index/codemode_store.sqlite3` (read at each use; `offline_stores.STORES` points it at a temp path), tables `entries(conv, k, v)` and
+`convs(conv, last_seen, bytes)`, keyed by the conversation key (`session_id.conversation_key`; never the messages). Pi's limits are
+unchanged (262,144 characters a value, 1,048,576 a conversation). Writes are committed exactly when `codemode.run` commits them: a
+script that fails writes nothing to the database. An empty key (a side call) stays a throwaway dict, never written. The 256-conversation
+in-memory cache stays in front as a hot cache. Pruning is the ledger's (`nebari.LEDGER_TOTAL_BYTES` 2 GB in all, whole conversations
+least recently used first, and `nebari.LEDGER_MAX_AGE` 30 days regardless), at most once a minute (`nebari.LEDGER_PRUNE_EVERY`), on the
+write path. A database that cannot be opened leaves the in-memory store working. Tests: `mcp/test_codemode.py`
+`test_the_store_is_durable` (a cleared cache reloads it, conversations isolated, a failed script writes nothing, pruning by age and size).
+
+## Fetch in the sandbox (operator, 2026-10-08; built 2026-10-15; **OFF by default, not probed**)
+
+Operator: "the more useful server equivalent is an api calling tool, json parsing"; "wiring fetch up through an internal tool that
+makes sure data isn't leaking"; "expose tools.fetch and describe it can use it, but could also wire regular fetch if it tries it
+naturally." `mcp/fetch_guard.py` (module docstring: every rule).
+
+- **The switch** `codemode_fetch` (`tiers.BEHAVIOURS`, `tiers.OFF_BY_DEFAULT`; `YAMADORI_CODEMODE_FETCH=1` or the header
+  `{"codemode_fetch": true}`; allowed where `mcp_tools` is, and only with `codemode` on). Decided on the conversation's first request
+  and kept with the toolbox decision (`x_yamadori.codemode.fetch`, `.switch.fetch` / `.fetch_source`). Off, the toolbox has no web
+  function and no `fetch` global (the escape test still holds).
+- **The function** `yama_fetch` (namespace `web`): `tools.yama_fetch({url, accept?})`, and a global `fetch(url, init)` shim in the sandbox
+  BOOT script (defined only when the toolbox holds `yama_fetch`) routed to the same host call. The shim returns a minimal Response
+  (`status`, `ok`, `url`, `headers.get(name)`, `text()`, `json()`); an HTTP error status is a Response with that status (as `fetch`
+  does), a refusal or network failure rejects with a `TypeError` that says why and what next. GET only: another method or a `body` throws; an
+  `Authorization` / `Cookie` / `X-Api-Key` header throws (the server sends none); other headers are ignored. `accept` takes only
+  `pinned_fetch.NAMED_ACCEPT` (npm's abbreviated packument). The description follows THE TOOL RECIPE ("Answers 'what does this web API or
+  page return?' ..."; says GET only and that the URL is checked; ends with the server-tool sentence), and the toolbox description
+  declares `fetch` and names `tools.yama_fetch` where the web function is present. UNMEASURED WORDING.
+- **The URL guard**, ported from docs/SEARCH.md "The guard" (2,048 characters; 200-character query; no secret-shaped value; no
+  high-entropy path segment or query value; no code in the query; no 24-character run of the conversation's text with that doc's two
+  exceptions). There is no search provenance here: a URL the conversation itself contains may have any path, any other URL's path is
+  capped at 256 characters, and the query is never stripped (an API call needs it). The conversation text is the user's words, answers and
+  tool results (not the system prompt), passed through the bridge from the request's messages.
+- **The host blocklist**: a local file, `YAMADORI_WEB_BLOCKLIST`, default `index/web_blocklist.txt`; one host per line, `#` comments, a
+  hosts-file line or a URL reads as its host, absent = empty; a host or its parent domain on it is refused, on every redirect hop too
+  (`pinned_fetch.fetch_named_file(host_check=)`). Nothing downloads a list; the operator keeps the file.
+- **The fetch** is `pinned_fetch.fetch_named_file` (every hop resolved once and `ip.is_global`, fixed headers, byte cap, deadline,
+  text / markdown / HTML / JSON). The result is screened with `skill_screen.screen_fetched` and framed as data; `{ok, text, data {status,
+  content_type, url, bytes, cut, body, json?}}`. One inner call toward the request's call budget; the proxy's final-output screen runs as
+  for the MCP lookups. The web function's bound is the fetch deadline + 5 s (the script ceiling is the slowest function's bound).
+- **Record**: `x_yamadori.codemode.fetches[]` {host, status, bytes, refused, code, ms} -- the host only, never the path or query.
+- **Tests**: `mcp/test_fetch_guard.py` (guard, blocklist incl. parent domain and redirect, private / loopback / CGNAT / link-local
+  addresses, the call, GET-only headers), `mcp/test_codemode.py` `test_fetch_in_the_sandbox` (the shim and `tools.yama_fetch` over a fake
+  bridge, POST refused), `mcp/test_codemode_turn.py` `test_fetch_through_a_turn` (one hidden hop, the ledger, the record; network faked).
+  **No live run and no probe**: the model's use of it is unmeasured (THE TOOL RECIPE rule 7); turning it on is the operator's decision.

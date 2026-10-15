@@ -1293,6 +1293,17 @@ BEHAVIOURS = {
     #                   header or YAMADORI_CODEMODE_MODE): `only` hides the
     #                   individual lookups it replaces.
     "codemode": ("YAMADORI_CODEMODE", "mcp_tools"),
+    #   codemode_fetch  the toolbox's WEB GET (operator, 2026-10-08: "the more
+    #                   useful server equivalent is an api calling tool, json
+    #                   parsing"; mcp/fetch_guard.py, docs/CODEMODE.md "Fetch
+    #                   in the sandbox"): tools.yama_fetch and a fetch(url)
+    #                   shim in the sandbox, GET only, the URL guarded against
+    #                   leaks, a local host blocklist. OFF BY DEFAULT until
+    #                   its probe passes (THE TOOL RECIPE rule 7):
+    #                   YAMADORI_CODEMODE_FETCH=1 or the header
+    #                   {"codemode_fetch": true}; only where `codemode` is on
+    #                   (decided on the conversation's first request, kept).
+    "codemode_fetch": ("YAMADORI_CODEMODE_FETCH", "mcp_tools"),
     #   preread         THE EXPERT FILE'S PRE-READ (mcp/preread.py; AGENTS.md
     #                   "Flash-Next's first prompt"): a model whose tier-table
     #                   row says `preread` has its llama-server's mmapped
@@ -1306,11 +1317,12 @@ BEHAVIOURS = {
     "preread_overlap": ("YAMADORI_PREREAD_OVERLAP", None),
 }
 # The switches that are OFF unless their variable (=1) or a header turns
-# them on; every other switch is on unless switched off. None today:
-# package_skills was turned on (operator 2026-10-06) and so was `codemode`
-# (operator 2026-10-08, mode `on` only, after bench/mcp/codemode_probe.py: Pi,
-# tag codemode2, n=2 trials per arm; `only` stays opt-in, see docs/CODEMODE.md).
-OFF_BY_DEFAULT: frozenset = frozenset()
+# them on; every other switch is on unless switched off. Only
+# `codemode_fetch` today: package_skills was turned on (operator 2026-10-06)
+# and so was `codemode` (operator 2026-10-08, mode `on` only, after
+# bench/mcp/codemode_probe.py: Pi, tag codemode2, n=2 trials per arm; `only`
+# stays opt-in, see docs/CODEMODE.md).
+OFF_BY_DEFAULT: frozenset = frozenset({"codemode_fetch"})
 
 
 def _env_on(var: str, default: bool = True) -> bool:
